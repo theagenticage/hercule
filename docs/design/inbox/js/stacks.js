@@ -32,14 +32,18 @@
     var spare = depth - fixed - least, shown = n, folded = 0;
     while (spare < 0 && shown > Math.max(1, firstCard + 1)) { shown--; folded++; spare += items[shown].tab ? items[shown].tab : items[shown].one; }
     // First decide who gets two lines, oldest first. Then what depth is left is shared out, so the stack ends at its foot.
+    // A card with news goes first: its second line is the reason it matters.
     var levels = [], twos = 0;
-    for (i = 0; i < shown; i++) {
-      var c = items[i];
-      if (c.tab || i === firstCard) { levels.push(null); continue; }
-      var grow = c.two - c.one, isTwo = spare >= grow;
-      if (isTwo) { spare -= grow; twos++; }
-      levels.push(isTwo ? 'two' : 'one');
-    }
+    var giveTwo = function (j) {
+      var c = items[j], grow = c.two - c.one;
+      if (spare < grow) return;
+      spare -= grow;
+      twos++;
+      levels[j] = 'two';
+    };
+    for (i = 0; i < shown; i++) levels[i] = items[i].tab || i === firstCard ? null : 'one';
+    for (i = 0; i < shown; i++) if (levels[i] === 'one' && items[i].speaks) giveTwo(i);
+    for (i = 0; i < shown; i++) if (levels[i] === 'one' && !items[i].speaks) giveTwo(i);
     var extra = twos ? spare / twos : 0;
     y = 0;
     for (i = 0; i < shown; i++) {

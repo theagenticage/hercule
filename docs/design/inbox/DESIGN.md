@@ -137,7 +137,14 @@ Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bo
 | Fact form | `delta`, `count`, `word`, `date`, `money`, `bars` |
 | Reason tone | `plain`, `you`, `good`, `bad` |
 
-Customization can grow later by adding to these sets. A kind never gets a branch of its own.
+### Room to grow
+
+Customization grows by adding to these sets, never by a kind drawing itself. The card has no branch on a kind's id, and it should stay that way. The next hooks, if a real plugin ever needs them:
+
+- A new fact form, such as `duration` or `avatars`, added to the core and open to every kind.
+- A `lead` field, for a kind whose person matters more than its title, such as a call from a customer.
+- More stock, if a seventh kind cannot be told apart. Each new stock must still read as paper in all six themes.
+- A plugin may declare `stream`, so like things fold on their own, as dependency updates do here.
 
 ## The moves
 

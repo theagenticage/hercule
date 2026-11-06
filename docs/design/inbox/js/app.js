@@ -17,8 +17,8 @@ window.App = (function () {
     return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
-  var HEAD = 36;       // a stack's heading, with the space under it
-  var BETWEEN = 16;    // the space between two stacks of one column
+  var HEAD = 34;       // a stack's heading, with the space under it
+  var BETWEEN = 14;    // the space between two stacks of one column
   var FOOT = 26;       // the line under a stack that counts what settled
 
   var state = { scene: 'morning', now: W.NOW, entities: [], clusters: [], dim: null, open: null, page: 'inbox', offline: false, stale: null };
@@ -218,7 +218,9 @@ window.App = (function () {
           }
           if (el.parentNode !== host) host.appendChild(el);
           var m = Stacks.METRICS[K[e.kind].density];
+          var line = Card.describeLine(e, STACKS[n].usual);
           it.el = el; it.full = measureWhole(el, e); it.two = m.two; it.one = m.one; it.gap = m.gap; it.most = m.most;
+          it.speaks = !e.task && line.tone !== 'usual' && line.tone !== 'plain';
         });
         tabs.forEach(function (t) { if (!kept[t.dataset.tab]) t.remove(); });
         var wanted = {};

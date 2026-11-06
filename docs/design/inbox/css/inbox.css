@@ -39,7 +39,7 @@
   padding: 0 32px 14px;
 }
 
-.col { display: flex; flex-direction: column; min-height: 0; gap: 16px; }
+.col { display: flex; flex-direction: column; min-height: 0; gap: 14px; }
 .stack-wrap { display: flex; flex-direction: column; min-height: 0; flex: none; }
 .stack-h {
   position: relative;
@@ -48,7 +48,7 @@
   gap: 8px;
   height: 26px;
   flex: none;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   color: var(--muted);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
