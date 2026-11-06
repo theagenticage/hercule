@@ -90,8 +90,8 @@ window.Pointer = (function () {
   /** Tells a card how wide its actions are, so its title can end before them. */
   function measureActs(el) {
     var acts = el.querySelector('.c-acts');
-    // The actions overflow a box of no width, so their width is the sum of the buttons, and 8px of air before them.
-    if (acts) el.style.setProperty('--acts-w', [].reduce.call(acts.children, function (sum, b) { return sum + b.offsetWidth + 2; }, 8) + 'px');
+    // The actions overflow a box of no width, so their width is the sum of the buttons and their gaps, and 6px of air before them.
+    if (acts) el.style.setProperty('--acts-w', [].reduce.call(acts.children, function (sum, b) { return sum + b.offsetWidth + 2; }, 4) + 'px');
   }
 
   /** Takes away a card's new mark, once the person has seen what landed on it. */

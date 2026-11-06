@@ -108,6 +108,7 @@ window.Open = (function () {
     inner.style.transform = 'translate(' + (to.left - left) + 'px,' + (to.top - top) + 'px)';
     motion.parts.forEach(function (p) {
       p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
+      if (p.waits) p.el.style.opacity = Math.max(0, Math.min(1, (t - 0.2) / 0.25));
     });
     // What is not the same object arrives once the title and the line have nearly landed, so nothing prints over them.
     if (!motion.closing && !motion.restShown && t > 0.8) {
@@ -216,6 +217,9 @@ window.Open = (function () {
       b.style.transformOrigin = '0 0';
       parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
     });
+    // A title that wraps in the sheet starts over the line under it, so that line waits until the title has made room.
+    var title = source.querySelector('.c-title, .pl-title'), sheetTitle = inner.querySelector('.o-title');
+    if (title && sheetTitle && sheetTitle.offsetHeight > title.offsetHeight * 1.4) parts.filter(function (p) { return p.el.classList.contains('o-signal'); }).forEach(function (p) { p.waits = true; });
     return parts;
   }
 

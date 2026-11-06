@@ -248,6 +248,60 @@ await check("a carry raises the rail", async () => {
   return p;
 });
 
+await check("the second click of a double click never starts a run", async () => {
+  const p = await open("");
+  const a = await point(p, "pr-3318");
+  await p.mouse.move(a.x, a.y); await p.waitForTimeout(30);
+  await p.mouse.click(a.x, a.y); await p.waitForTimeout(180); await p.mouse.click(a.x, a.y); await p.waitForTimeout(700);
+  assert(!(await p.evaluate(() => App.findEntity("pr-3318").task)), "a double click handed the card on");
+  return p;
+});
+await check("an undo during the fade to the sunrise keeps the card", async () => {
+  const p = await open("scene=light");
+  await p.evaluate(() => { App.state.clusters.length = 0; App.drawNoticed(); App.state.entities.slice(1).forEach((e) => { e.settled = true; e.task = { by: "you" }; }); App.layOut(true); });
+  await p.evaluate(() => Keys.focus(App.state.entities[0].id));
+  await p.keyboard.press("e"); await p.waitForTimeout(400); await p.keyboard.press("Control+z"); await p.waitForTimeout(900);
+  assert(!(await p.evaluate(() => !!document.querySelector(".zero"))), "the sunrise covers a card that came back");
+  return p;
+});
+await check("fast moves and fast undos leave every card visible", async () => {
+  const p = await open("");
+  await p.evaluate(() => Keys.focus("pr-6204"));
+  for (let i = 0; i < 5; i++) { await p.keyboard.press("t"); await p.waitForTimeout(140); }
+  await p.waitForTimeout(1500);
+  for (let i = 0; i < 5; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(500); }
+  await p.waitForTimeout(600);
+  const hidden = await p.evaluate(() => [].filter.call(document.querySelectorAll(".stack .card"), (c) => c._plan && c.style.display !== "none" && getComputedStyle(c).opacity !== "1").map((c) => c.dataset.id));
+  assert(!hidden.length, `invisible: ${hidden}`);
+  return p;
+});
+await check("a card stepping up to lead after an undo stands whole", async () => {
+  const p = await open("");
+  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6209"))); await p.waitForTimeout(700);
+  await p.keyboard.press("Control+z"); await p.waitForTimeout(800);
+  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6204"))); await p.waitForTimeout(900);
+  const [height, full] = await p.evaluate(() => { const c = App.els()["pr-6209"]; return [c.getBoundingClientRect().height, c._full]; });
+  assert(height >= full, `the lead is ${height}px, not ${full}px`);
+  return p;
+});
+await check("taking a card again during an undo keeps who holds it", async () => {
+  const p = await open("");
+  await p.evaluate(() => Keys.focus("pr-6204"));
+  await p.keyboard.press("t"); await p.waitForTimeout(200); await p.keyboard.press("Control+z"); await p.waitForTimeout(200); await p.keyboard.press("t"); await p.waitForTimeout(1200);
+  const holders = await p.evaluate(() => App.els()["pr-6204"].querySelectorAll(".card-holder").length);
+  assert(holders === 1, `${holders} holders drawn`);
+  return p;
+});
+await check("the same arrival never lands twice", async () => {
+  const p = await open("");
+  await hover(p, "pr-6204");
+  const e = `({ id: "pr-9000", kind: "github/pull-request", concern: "reviewRequested", title: "New", since: World.hoursAgo(0.02), fields: { number: 9000, repo: "storefront-web", author: "ines-carvalho", state: "running", diff: [1, 1], files: 1 }, signals: [World.signal("reviewRequested", 0.02, "ines-carvalho")], task: null, project: "storefront-web" })`;
+  await p.evaluate((e) => { App.arrive(eval(e)); App.arrive(eval(e)); }, e);
+  await p.mouse.move(120, 700, { steps: 3 }); await p.waitForTimeout(800);
+  assert((await p.evaluate(() => App.state.entities.filter((x) => x.id === "pr-9000").length)) === 1, "the card landed twice");
+  return p;
+});
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("\nall good");
