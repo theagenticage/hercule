@@ -1,7 +1,8 @@
 /* The window and the page. */
 .app { grid-template-columns: 272px minmax(0, 1fr); }
 .side { width: 272px; height: 100vh; }
-.side-grow { flex: 1; }
+.side-scroll { overflow: visible; }
+.side-row { min-height: 38px; }
 
 .main {
   height: 100vh;
@@ -15,23 +16,21 @@
   gap: 14px;
   height: 56px;
   flex: none;
-  padding: 0 28px 0 14px;
+  padding: 0 32px 0 14px;
 }
-.ib-sum { color: var(--muted); font-size: var(--t-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ib-sum b { color: var(--ink); font-weight: var(--w-medium); }
 .ib-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .ib-sources { display: flex; gap: 2px; }
 .ib-src { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); }
 .ib-src:hover { background: var(--hover); }
 .ib-src.is-on { background: var(--selected); box-shadow: inset 0 -2px 0 var(--ink); }
-.ib-help { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-left: 4px; border-radius: var(--r-sm); color: var(--faint); font-size: var(--t-13); font-weight: var(--w-medium); }
+.ib-help { display: inline-grid; place-items: center; width: 28px; height: 28px; margin: 0 -8px 0 4px; border-radius: var(--r-sm); color: var(--faint); font-size: var(--t-13); font-weight: var(--w-medium); }
 .ib-help:hover { background: var(--hover); color: var(--ink); }
 .ib-fix { margin-left: 4px; text-decoration: underline; color: inherit; font: inherit; }
 .ptab.is-on { box-shadow: inset 0 0 0 1px var(--rim); }
 
 .ib-page {
   display: grid;
-  grid-template-columns: 1.1fr 1.1fr 1fr;
+  grid-template-columns: 1fr 1fr 1.08fr;
   grid-template-rows: auto minmax(0, 1fr);
   column-gap: 24px;
   flex: 1;
@@ -44,15 +43,17 @@
 .stack-h {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
-  height: 26px;
+  height: 34px;
   flex: none;
   margin: 0 0 8px;
+  padding-bottom: 5px;
   color: var(--muted);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
   letter-spacing: 0.09em;
+  line-height: 15px;
   text-transform: uppercase;
 }
 .stack-h::after {
@@ -64,16 +65,16 @@
   height: 1px;
   background: color-mix(in oklab, var(--brass) 68%, transparent);
 }
-/* The counts of the stacks are the one place the Deco face speaks on this page, as it does on Work's stages. */
+/* The counts of the stacks are where the Deco face speaks on this page, as it does on Work's stages, and larger, because the Inbox has no sentence. */
 .stack-n {
   display: inline-block;
   min-width: 1ch;
   font-family: var(--font-deco);
   font-feature-settings: normal;
-  font-size: 16px;
+  font-size: 26px;
   font-weight: 400;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 26px;
   color: var(--numeral);
 }
 .stack { position: relative; flex: 1; min-height: 0; }
@@ -119,7 +120,6 @@
 
 .nav-new { flex: none; width: 6px; height: 6px; margin-right: -2px; border-radius: 50%; background: var(--you-ink); }
 .nav-new[hidden] { display: none; }
-.ib-sum[hidden] { display: none; }
 .ib-end[hidden] { display: none; }
 .nav-row { position: relative; }
 

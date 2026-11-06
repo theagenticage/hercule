@@ -57,7 +57,7 @@ window.Open = (function () {
   function drawOpenPlaque(c) {
     var flows = K['hercule/cluster'].workflows.noticed;
     return '<div class="o-head o-head--plaque">' +
-      '<div class="c-mark">' + Crew.logo(22, { mono: true }) + '</div>' +
+      '<div class="c-mark">' + Crew.logo(24, { mono: true }) + '</div>' +
       '<h2 class="o-title">' + Card.esc(c.title) + '</h2>' +
       '<button class="icon-btn icon-btn--sm o-close" data-close title="Close (Esc)">' + Crew.icon('close', 13) + '</button>' +
       '<div class="o-meta"><span>Noticed by Hercule</span><i>·</i><span>' + Card.esc(c.figures) + '</span></div></div>' +

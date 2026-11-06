@@ -4,7 +4,7 @@ The language is shared with Work: `MOTION.md` and `SHARED.md` on `prototype/over
 
 ## What the Inbox adds to the shared principles
 
-1. **The Inbox is still at rest.** The only thing that moves on its own is a working colleague's paws. Everything else moves because something happened.
+1. **The Inbox is still at rest.** Nothing moves on its own. Everything moves because something happened.
 2. **Nothing moves under the pointer by itself.** The card you are on responds, and its neighbours do not. A new card waits until the pointer leaves its stack. Only your own move changes what is under the pointer.
 3. **The cause shows first.** A signal is seen arriving before the card reacts to it. A Task is seen leaving for Work.
 4. **A card keeps its place through every change of state.** Hand-off, signal and peek all happen where the card lies.
@@ -56,16 +56,15 @@ One click, one chain: hand, weight, flight, receipt. The cause always comes befo
 | Time | Part | Motion |
 |---|---|---|
 | 0 | The count | The sidebar's digit rolls by 4px, 260ms: the card has left your hands |
-| 0 | The colleague | The head rises 26px from behind the top edge on `hand`, while the card still stands |
-| 130ms | The paws | Come up onto the edge on `hand`, then type six strokes and rest |
+| 0 | The colleague | The wait goes, and the colleague comes up 26px into its place on `hand`, at work, while the card still stands |
 | 170ms | The card | Only now gives up its weight: it sinks 1.5px on `hand`, and its stock and shadow go flat over `--m-base`. The sheet itself survives, so the change is a real transition |
 | 170ms | The sentence | Rolls to "Agent review has it" |
 | 170ms | The mark | The card's own mark lifts off and flies along an arc to Overview's icon, 420 to 760ms by distance, shrinking to 55%. A dimmer mark stays behind |
 | On arrival | Overview | Its icon dips 1.5px on `hand`, and a wash of the accent fades over 640ms: something received it |
 
-Taking it on yourself is the same with a marigold tab in place of the head.
+Taking it on yourself is the same with your monogram in place of the colleague.
 
-**Undo plays it backwards.** The mark flies home from Overview, the card stands up, the sentence rolls back, the colleague sinks on `travel`, and the count ticks on arrival.
+**Undo plays it backwards.** The mark flies home from Overview, the card stands up, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks on arrival.
 
 **From the open card,** the card folds home first, and the chain starts as it lands, so the move plays on the card where it lies.
 
@@ -113,7 +112,7 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 
 ### The empty Inbox
 
-When the last card leaves: the horizon draws outward over 700ms, the numeral rises through it from below, clipped by the horizon, over 1400ms on `cubic-bezier(.3,0,.2,1)`, the rays draw from the middle outward from 420ms, 26ms apart, and the words fade up at 900ms. It plays once. If the last card was handed on, the page waits 1.5 seconds for the chain to play out, and then settles.
+When the last card leaves: the horizon draws outward over 700ms, Hercule's head rises through it from below, cut off by the horizon, over 1400ms on `cubic-bezier(.3,0,.2,1)`, the rays draw from the middle outward from 420ms, 26ms apart, and the words fade up at 900ms. It plays once. If the last card was handed on, the page waits 1.5 seconds for the chain to play out, and then settles.
 
 ### Loading
 
@@ -130,4 +129,3 @@ Movement becomes a short fade, in the same order, so the cause is still told.
 | Opening | The card appears at once, and the veil fades |
 | Carrying | The ghost follows the pointer with no lean, and the rail only fades |
 | The sunrise | Drawn at once |
-| Paws | Still |

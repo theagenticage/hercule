@@ -56,7 +56,7 @@
     var e = World.buildEntities().filter(function (x) { return x.id === 'pr-6238'; })[0];
     var card = Frames.drawLooseCard(e);
     host.appendChild(card);
-    var pins = [['.c-mark', 0, 10], ['.c-title', 0.12, 0], ['.c-pace', 0.5, 0], ['.c-line .person', 0.5, 0], ['.c-roll', 0.6, 0], ['.c-more', 0.5, 0], ['.c-status', 0.5, 0], ['.c-id', 0.3, 0], ['.c-facts', 0.3, 0]];
+    var pins = [['.c-mark', 0, 10], ['.c-title', 0.12, 0], ['.c-pace', 0.5, 0], ['.c-roll', 0.3, 0], ['.c-more', 0.5, 0], ['.c-status', 0.5, 0], ['.c-id', 0.3, 0], ['.c-facts', 0.3, 0]];
     var base = card.getBoundingClientRect();
     var zoom = base.width / card.offsetWidth;
     pins.forEach(function (p, i) {

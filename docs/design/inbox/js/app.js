@@ -17,14 +17,14 @@ window.App = (function () {
     return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
-  var HEAD = 34;       // a stack's heading, with the space under it
+  var HEAD = 42;       // a stack's heading, with the space under it
   var BETWEEN = 14;    // the space between two stacks of one column
   var FOOT = 26;       // the line under a stack that counts what settled
 
   var state = { scene: 'morning', now: W.NOW, entities: [], clusters: [], dim: null, open: null, page: 'inbox', offline: false, stale: null };
   var els = {};        // card elements by entity id
   var measured = {};   // whole heights by entity id, for the current width
-  var page, sum, hasDrawn = false;
+  var page, hasDrawn = false;
   var waiting = [];    // new cards held back while the pointer is in their stack
 
   function readStack(e) { return K[e.kind].stacks[e.concern]; }
@@ -59,10 +59,10 @@ window.App = (function () {
   function readGroup(e) { return e.fields[K[e.kind].group] || e.project || 'Elsewhere'; }
 
   /**
-   * Returns the items a stack draws, for its depth: its cards, tabs before groups in a stack that groups, and piles where
-   * the stack holds more than its depth can show. The oldest stay out, because they have waited longest.
+   * Returns the items a stack draws at this depth. On the clock: the oldest few that wait, then a pile of the rest. Cards someone
+   * holds keep their place and do not count. On the shelf: projects with their strips, and past what fits the largest fold first.
    */
-  function buildItems(name, lying, depth) {
+  function buildItems(name, lying, depth, sharesColumn) {
     var open = Stacks.METRICS.open, tight = Stacks.METRICS.tight;
     if (name === 'shelf') {
       var groups = {}, order = [], items = [];
@@ -71,33 +71,39 @@ window.App = (function () {
         if (!groups[g]) { groups[g] = []; order.push(g); }
         groups[g].push(e);
       });
-      // The shelf can fall back on one-line strips. Past that the largest project folds first, then the next, until the rest fit.
-      var need = function (g) { return 28 + groups[g].length * tight.one; };
+      var need = function (g) { return Stacks.TAB + groups[g].length * tight.strip; };
       var total = order.reduce(function (a, g) { return a + need(g); }, 0);
       var folded = {};
       order.slice().sort(function (a, b) { return groups[b].length - groups[a].length; }).forEach(function (g) {
         if (total <= depth || groups[g].length < 2) return;
         folded[g] = true;
-        total += 62 + 8 - need(g);
+        total += Stacks.PILE - need(g);
       });
       order.forEach(function (g) {
         var list = groups[g];
         if (folded[g]) { items.push(buildPile('fold-' + g, g, list, list[0].title)); return; }
-        items.push({ tab: 28, label: g, count: list.length });
+        items.push({ tab: Stacks.TAB, label: g, count: list.length });
         list.forEach(function (e) { items.push({ e: e }); });
       });
       return items;
     }
     var stream = foldStreams(lying);
-    var kept = Stacks.countKept(stream.length, depth, open, 104);
-    if (kept >= stream.length) return stream.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
-    var head = stream.slice(0, Math.max(1, kept - 1));
-    var rest = [].concat.apply([], stream.slice(head.length).map(function (e) { return e.members || [e]; }));
-    if (!rest.length) return head.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
+    var budget = 1 + Stacks.countStrips(depth, sharesColumn, 106);
+    var head = [], rest = [], waitingShown = 0;
+    stream.forEach(function (e) {
+      if (e.task) { head.push(e); return; }
+      if (waitingShown < budget) { head.push(e); waitingShown++; } else rest.push(e);
+    });
+    // A pile of one is only a card in disguise.
+    if (rest.length === 1) { head.push(rest.pop()); }
+    var out = head.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
+    if (!rest.length) return out;
+    var flat = [].concat.apply([], rest.map(function (e) { return e.members || [e]; }));
     var byGroup = {};
-    rest.forEach(function (e) { var g = readGroup(e); byGroup[g] = (byGroup[g] || 0) + 1; });
+    flat.forEach(function (e) { var g = readGroup(e); byGroup[g] = (byGroup[g] || 0) + 1; });
     var most = Object.keys(byGroup).sort(function (a, b) { return byGroup[b] - byGroup[a]; })[0];
-    return head.map(function (e) { return e.pile ? { pile: e } : { e: e }; }).concat(buildPile('fold-' + name, rest.length + ' newer', rest, 'Most in ' + most));
+    out.push(buildPile('fold-' + name, 'more ' + STACKS[name].title.toLowerCase(), flat, 'Most in ' + most));
+    return out;
   }
 
   /** Returns the whole height of a card at the current column width. */
@@ -113,18 +119,6 @@ window.App = (function () {
     return whole;
   }
 
-  function saySummary() {
-    var waiting = state.entities.filter(function (e) { return !e.settled && !e.task && !e.leaving && K[e.kind].pace === 'fast' && e.concern !== 'opened' && e.concern !== 'assigned'; }).sort(function (a, b) { return a.since - b.since; });
-    var first = waiting[0];
-    var who = first && (first.fields.author || first.fields.from);
-    var words = ['', 'one thing', 'two things', 'three things', 'four things'];
-    var n = state.clusters.length;
-    var parts = [];
-    if (first && who && who !== 'you') parts.push('<b>' + W.PEOPLE[who].short + '</b> has waited longest.');
-    if (n) parts.push('Hercule noticed ' + (words[n] || n + ' things') + '.');
-    return parts.join(' ');
-  }
-
   /** Returns how many cards are past the patience their kind declares. It is the number the sidebar shows. */
   function countOverdue() {
     var over = state.entities.filter(function (e) {
@@ -133,8 +127,15 @@ window.App = (function () {
     return over + state.clusters.length;
   }
 
+  /** Changes a figure or a line with a small roll, in the direction it moved, so a change on the page can be seen to happen. */
+  function rollText(el, html, down) {
+    if (el.innerHTML === html) return;
+    var had = el.innerHTML !== '';
+    el.innerHTML = html;
+    if (had) Motion.animate(el, [{ transform: 'translateY(' + (down ? -5 : 5) + 'px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.22,.9,.24,1)' });
+  }
+
   function drawBar() {
-    sum.innerHTML = saySummary();
     var seen = {};
     state.entities.forEach(function (e) { if (!e.settled) seen[K[e.kind].plugin.mark] = K[e.kind].plugin; });
     var marks = Object.keys(seen);
@@ -152,7 +153,7 @@ window.App = (function () {
       COLUMNS.map(function (names) {
         return '<div class="col">' + names.map(function (n) {
           return '<section class="stack-wrap" data-wrap="' + n + '" aria-label="' + STACKS[n].title + '">' +
-            '<h2 class="stack-h"><span>' + STACKS[n].title + '</span><span class="stack-n" data-count="' + n + '"></span></h2>' +
+            '<h2 class="stack-h"><span class="stack-n" data-count="' + n + '"></span><span>' + STACKS[n].title + '</span></h2>' +
             '<div class="stack" data-stack="' + n + '" role="list" aria-label="' + STACKS[n].title + '"></div>' +
             '<button class="stack-foot" data-foot="' + n + '" hidden></button></section>';
         }).join('') + '</div>';
@@ -162,7 +163,7 @@ window.App = (function () {
   function drawNoticed() {
     var host = document.getElementById('noticed');
     host.setAttribute('aria-label', 'Hercule noticed');
-    host.innerHTML = '<div class="plate-crest" title="Hercule noticed">' + Crew.logo(24, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
+    host.innerHTML = '<div class="plate-crest" title="Hercule noticed">' + Crew.logo(30, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
   }
@@ -172,7 +173,7 @@ window.App = (function () {
    * is on screen, so a change that comes in the middle of another simply bends the path.
    */
   function layOut(still, stagger) {
-    if (state.mode !== 'stacks') return;
+    if (state.mode !== 'stacks' || document.getElementById('main').classList.contains('is-loading')) return;
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
     Motion.flip([].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving), .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand', stagger: stagger });
   }
@@ -185,7 +186,7 @@ window.App = (function () {
       var built = names.map(function (n) {
         var host = page.querySelector('[data-stack="' + n + '"]');
         var parts = readStackEntities(n);
-        var items = buildItems(n, parts.lying, names.length === 1 ? depth : Math.floor(depth / 2));
+        var items = buildItems(n, parts.lying, depth, names.length > 1);
         var kept = {};
         host.parentNode.dataset.slow = n === 'shelf';
         var tabs = [].slice.call(host.querySelectorAll('.tab'));
@@ -202,12 +203,12 @@ window.App = (function () {
             var pe = els[it.pile.id];
             if (!pe) { pe = els[it.pile.id] = drawStreamPile(it.pile); host.appendChild(pe); }
             pe.querySelector('.c-title').textContent = it.pile.title;
-            pe.querySelector('.pile-n').textContent = /newer$/.test(it.pile.title) ? '' : it.pile.members.length;
+            pe.querySelector('.pile-n').textContent = it.pile.members.length;
             pe.dataset.depth = it.pile.members.length > 40 ? 3 : it.pile.members.length > 8 ? 2 : 1;
-            pe.setAttribute('aria-label', it.pile.title + ', ' + it.pile.members.length + ' cards');
+            pe.setAttribute('aria-label', it.pile.members.length + ' ' + it.pile.title);
             pe.querySelector('.c-roll').textContent = it.pile.note;
             pe._members = it.pile.members;
-            it.el = pe; it.full = 62; it.two = 62; it.one = 62; it.gap = 8; it.most = 62; it.isPile = true;
+            it.el = pe; it.full = Stacks.PILE; it.strip = Stacks.PILE; it.gap = 8; it.isPile = true;
             return;
           }
           var e = it.e, el = els[e.id];
@@ -219,8 +220,9 @@ window.App = (function () {
           if (el.parentNode !== host) host.appendChild(el);
           var m = Stacks.METRICS[K[e.kind].density];
           var line = Card.describeLine(e, STACKS[n].usual);
-          it.el = el; it.full = measureWhole(el, e); it.two = m.two; it.one = m.one; it.gap = m.gap; it.most = m.most;
-          it.speaks = !e.task && line.tone !== 'usual' && line.tone !== 'plain';
+          it.el = el; it.full = measureWhole(el, e); it.gap = m.gap;
+          // On the shelf a strip is one line, unless something has happened.
+          it.strip = m.news && (line.tone === 'usual') ? m.strip : m.news || m.strip;
         });
         tabs.forEach(function (t) { if (!kept[t.dataset.tab]) t.remove(); });
         var wanted = {};
@@ -229,18 +231,20 @@ window.App = (function () {
           var id = c.dataset.id || c.dataset.pile;
           if (!wanted[id]) { c.style.display = 'none'; c._plan = null; }
         });
+        // A stack asks for the height of its cards as strips, and whole if they are few.
+        var hasLead = n !== 'shelf';
         var whole = items.reduce(function (a, m) { return a + (m.tab ? m.tab : m.full + m.gap); }, 0);
-        var firstCard = n === 'shelf' ? -1 : items[0] && items[0].tab ? 1 : 0;
-        var least = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.one); }, 0);
-        var comfy = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.two); }, 0);
+        var strips = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : hasLead && j === 0 ? m.full + 12 : m.strip); }, 0);
+        var hasPile = items.some(function (m) { return m.isPile; });
+        var fewEnough = !hasPile && items.filter(function (m) { return !m.tab; }).length <= (hasLead ? 3 : 4);
         var footNeeded = parts.settled.length && n !== names[names.length - 1] ? FOOT : 0;
-        return { name: n, host: host, items: items, parts: parts, whole: whole + footNeeded, comfy: comfy + footNeeded, least: least + footNeeded, foot: footNeeded };
+        return { name: n, host: host, items: items, parts: parts, hasLead: hasLead, asks: (fewEnough ? whole : strips) + footNeeded, foot: footNeeded };
       });
       var depths = Stacks.shareDepth(built, depth);
       var leftover = depth - depths.reduce(function (a, b) { return a + b; }, 0);
       built.forEach(function (b, bi) {
         var d = depths[bi] - b.foot;
-        var plan = Stacks.layOut(b.items, d, b.name === 'shelf');
+        var plan = Stacks.layOut(b.items, d, b.hasLead);
         // A stack that is not the last of its column closes up on what follows; the last takes what is left.
         var isLast = bi === built.length - 1;
         var used = plan.used;
@@ -265,6 +269,7 @@ window.App = (function () {
           el.style.top = p.y + 'px';
           if (it.tab) return;
           el._rest = p.level === 'full' ? it.full : Math.min(it.full, runEnd - p.y);
+          if (it.pile) el._rest = p.show;
           el._full = it.full;
           if (!el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
           el.classList.toggle('is-whole', p.level === 'full');
@@ -272,7 +277,8 @@ window.App = (function () {
           el.classList.toggle('is-run-end', !!endOfRun);
         });
         var lying = b.parts.lying.length;
-        page.querySelector('[data-count="' + b.name + '"]').textContent = lying || '';
+        var count = page.querySelector('[data-count="' + b.name + '"]');
+        rollText(count, String(lying || ''), lying < Number(count.textContent));
         drawFoot(b, plan);
         drawEmpty(b, lying);
       });
@@ -304,7 +310,7 @@ window.App = (function () {
     el.dataset.pile = pile.id;
     el.tabIndex = -1;
     el.setAttribute('role', 'listitem');
-    el.innerHTML = '<span class="pile-back"></span><span class="pile-back"></span><i class="card-stock"></i><div class="c-mark">' + Card.drawMark(K[pile.kind].plugin, K[pile.kind].density === 'tight' ? 17 : 20) + '</div><h3 class="c-title"></h3><div class="c-pace"><span class="pile-n"></span></div><div class="c-line"><span class="c-roll"></span></div>';
+    el.innerHTML = '<i class="pile-sheet" style="--n:3"></i><i class="pile-sheet" style="--n:2"></i><i class="pile-sheet" style="--n:1"></i><i class="card-stock"></i><div class="c-mark"><span class="pile-n"></span></div><h3 class="c-title"></h3><div class="c-line"><span class="c-roll"></span></div>';
     return el;
   }
 
@@ -444,13 +450,11 @@ window.App = (function () {
     var n = document.getElementById('notice');
     n.hidden = !state.notice;
     n.innerHTML = state.notice || '';
-    sum.hidden = !!state.notice;
     if (state.notice) Landing.announce(n.textContent);
   }
 
   function start() {
     page = document.getElementById('page');
-    sum = document.getElementById('sum');
     var timer;
     window.addEventListener('resize', function () {
       clearTimeout(timer);

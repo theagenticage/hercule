@@ -92,17 +92,11 @@
 }
 .c-line.tone-usual { color: var(--recede); }
 .card.is-whole .c-line.tone-usual, .card.is-peek .c-line.tone-usual { color: var(--muted); }
-.c-line.tone-bad { color: var(--fail-ink); }
-.c-line.tone-good { color: var(--ok); }
-.c-line.tone-you { color: var(--you-ink); }
-.c-who { display: none; }
-.card.is-whole .c-who, .card.is-peek .c-who { display: contents; }
 .c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
 .c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 16px; margin-top: 3px; display: flex; align-items: center; }
 /* The usual state of a kind says nothing at rest. */
 .c-status.is-norm { display: none; }
-.card.is-whole .c-status.is-norm,
 .card.is-peek .c-status.is-norm { display: flex; }
 
 .shape { display: inline-grid; place-items: center; }
@@ -208,9 +202,10 @@
 }
 .c-act:hover { background: var(--hover); color: var(--ink); }
 .c-act:active { transform: scale(0.94); }
-.c-act--hand { gap: 5px; padding: 0 7px 0 4px; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); white-space: nowrap; }
 .c-act--hand .cr + .cr { margin-left: -13px; }
-.c-act--take { gap: 5px; padding: 0 7px 0 4px; margin-right: 6px; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); }
+/* A move says its name only when the pointer is on it. At rest the actions stay small, at the far right, so a click on a title can never hit one. */
+.c-act-word { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); opacity: 0; transition: max-width var(--m-base) var(--m-ease), opacity var(--m-quick) var(--m-ease), margin var(--m-base) var(--m-ease); }
+.c-act:hover .c-act-word, .c-act:focus-visible .c-act-word { max-width: 160px; margin: 0 5px 0 4px; opacity: 1; }
 .c-act--go { padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
@@ -224,7 +219,7 @@
 .stack .card.is-whole.is-hover .c-title::before,
 .stack .card.is-whole.is-focus .c-title::before { content: ""; float: right; width: var(--acts-w, 90px); height: 18px; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
-.stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); }
+.stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
 .card.is-peek .c-acts { z-index: 4; }
 .stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
 .stack .card.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
@@ -232,82 +227,89 @@
 .card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.5; }
 
 /* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
-.stack .card[data-height="flat"] > .card-stock { box-shadow: var(--h-flat); background: var(--stock-flat); }
+.stack .card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
 .card[data-height="flat"] .c-title { color: color-mix(in oklab, var(--ink) 74%, var(--muted)); }
 .card[data-height="flat"] .mark { opacity: 0.6; }
 .card[data-height="flat"] .c-line { color: var(--muted); }
+.card[data-height="flat"] .c-pace { display: none; }
 
-/* In a stack the paws type a few strokes and rest: the Inbox is still at rest. */
-.stack .card-paws[data-pose="working"] i { animation-iteration-count: 6; }
+/* Who holds a card now stands where the wait was. */
+.c-holder { grid-column: 3; grid-row: 1; justify-self: end; align-self: start; width: 26px; height: 26px; margin-top: -4px; overflow: hidden; }
+.c-holder-in { display: block; line-height: 0; }
+.c-holder .person { margin: 3px 0 0 6px; }
 
-/* In a stack the head stands at the left, over the empty gutter of the card behind it, so it covers no words. */
-.stack .card .card-holder { right: auto; left: 8px; }
-.stack .card .card-paws { right: auto; left: 12px; }
+/* The shelf lies flat. A slow thing is filed, not waiting: a row of words on the desk until the pointer stands it up. */
+.stack-wrap[data-slow="true"] .card:not(.is-whole):not(.is-pile):not(.is-peek):not(.is-focus):not(.is-hover) > .card-stock { background: transparent; box-shadow: none; }
+.stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus):not(.is-hover) .c-title { color: color-mix(in oklab, var(--ink) 78%, var(--muted)); font-weight: var(--w-regular); }
+.c-key { color: var(--recede); font: var(--type-meta); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.card.pace-slow .c-pace { display: inline-flex; align-items: center; gap: 6px; }
+.card.is-whole.pace-slow .c-key, .card.is-peek.pace-slow .c-key { display: none; }
+.card.pace-slow .shape svg { width: 14px; height: 14px; }
 
-/* The shelf is quieter than the clock: the same cards, a step back. */
-.stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus) .c-title { color: color-mix(in oklab, var(--ink) 72%, var(--muted)); }
+.noticed, .open--plaque { --focus: var(--plate-ink); }
 
-.noticed, .open--plaque { --focus: var(--lacquer-ink); }
-
-/* The plate: one lacquer band across the page, Hercule's own. What it noticed sits on it in segments. */
+/* The plate: one band across the page, Hercule's own. It is the one object opposite the page: lacquer on a light desk, and
+   brass-bright on a dark one. What Hercule noticed runs along it like a line of engraving. */
 .noticed {
   grid-column: 1 / -1;
   position: relative;
   display: flex;
   align-items: stretch;
-  height: 60px;
-  margin-bottom: 22px;
+  gap: 8px;
+  height: 58px;
+  margin-bottom: 20px;
+  padding-right: 8px;
   border-radius: var(--card-r);
-  background: linear-gradient(180deg, color-mix(in oklab, var(--lacquer-lit) 62%, transparent), transparent 70%), var(--lacquer);
-  box-shadow: inset 0 0 0 1px var(--lacquer-rim), var(--lacquer-shadow);
-  color: var(--lacquer-ink);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--plate-lit) 62%, transparent), transparent 70%), var(--plate);
+  box-shadow: inset 0 0 0 1px var(--plate-rim), var(--plate-shadow);
+  color: var(--plate-ink);
 }
 .noticed[hidden] { display: none; }
-.plate-crest { flex: none; display: grid; place-items: center; width: 52px; color: var(--lacquer-sub); }
-.plate-crest { color: var(--lacquer-ink); }
-.plate-crest .logo g { fill: var(--lacquer); }
+.plate-crest { flex: none; display: grid; place-items: center; width: 58px; color: var(--plate-ink); }
+.plate-crest .logo g { fill: var(--plate); }
 .plaque {
   position: relative;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  column-gap: 12px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
   align-content: center;
-  padding: 0 14px;
-  color: var(--lacquer-ink);
+  padding: 0 28px 0 12px;
+  border-radius: 9px;
+  margin: 5px 0;
+  color: var(--plate-ink);
   cursor: default;
   outline: none;
   transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
-.plaque::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 1px; background: var(--lacquer-rim); }
-.plaque:last-child { border-radius: 0 var(--card-r) var(--card-r) 0; }
-.plaque.is-hover { background: color-mix(in oklab, white 6%, transparent); }
-.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 26px; height: 24px; color: var(--lacquer-ink); }
+.plaque.is-hover { background: color-mix(in oklab, var(--plate-ink) 8%, transparent); }
+.plaque.is-hover .pl-why { color: var(--plate-ink); }
+.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 22px; height: 20px; color: var(--plate-ink); }
 .pl-mark { display: block; line-height: 0; }
-.pl-badge { position: absolute; right: -2px; bottom: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--lacquer); box-shadow: 0 0 0 1px var(--lacquer-rim); }
+.pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--plate); box-shadow: 0 0 0 1px var(--plate-rim); }
 .pl-title {
   margin: 0;
   font: var(--type-card);
-  font-size: var(--t-14);
-  line-height: 20px;
   letter-spacing: -0.003em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.plaque:first-of-type .pl-title { font-size: var(--t-14); line-height: 20px; }
 .pl-why {
-  color: var(--lacquer-sub);
+  color: var(--plate-sub);
   font: var(--type-summary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.plaque .pl-acts { top: 50%; right: 10px; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--lacquer) 14px); }
+.plaque .pl-acts { top: 50%; right: 6px; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--plate) 14px); }
 .plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
-.plaque .c-act { color: var(--lacquer-sub); }
-.plaque .c-act:hover { background: color-mix(in oklab, white 12%, transparent); color: var(--lacquer-ink); }
-.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--lacquer-ink); border-radius: 6px; }
+.plaque .c-act { color: var(--plate-sub); }
+.plaque .c-act-word { color: var(--plate-ink); }
+.plaque .c-act:hover { background: color-mix(in oklab, var(--plate-ink) 12%, transparent); color: var(--plate-ink); }
+.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--plate-ink); border-radius: 6px; }
 
 /* The lift: a sheet rising towards the pointer, on the same spring as its scale. */
 .card-stock::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-carry); box-shadow: var(--h-carry); opacity: var(--lift, 0); pointer-events: none; }

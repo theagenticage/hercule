@@ -51,13 +51,13 @@ window.Moves = (function () {
     Pointer.setHover(null);
     Pointer.unpeek();
     Nav.setCount('inbox', App.countOverdue());
-    el.insertAdjacentHTML('afterbegin', Card.drawHolder(e));
-    var who = el.querySelector('.card-holder'), paws = el.querySelector('.card-paws');
+    // The wait gives way, and whoever takes the card comes up into its place.
+    var wait = el.querySelector('.c-pace');
+    if (wait) wait.style.visibility = 'hidden';
+    el.insertAdjacentHTML('beforeend', Card.drawHolder(e));
+    var who = el.querySelector('.c-holder-in');
     var reduced = Motion.isReduced();
-    if (!reduced) {
-      Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
-      if (paws) Motion.body(paws).set({ o: 0, y: 3 }).to({ o: 1, y: 0 }, 'hand', { delay: 130 });
-    }
+    if (!reduced) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
     setTimeout(function () {
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
@@ -144,15 +144,14 @@ window.Moves = (function () {
     var el = App.els()[e.id];
     var stand = function () {
       if (!el) return;
-      var who = el.querySelector('.card-holder'), paws = el.querySelector('.card-paws');
+      var who = el.querySelector('.c-holder');
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
-      if (paws) paws.remove();
       if (who) who.remove();
       App.redrawCard(e);
       if (who) {
-        el.insertBefore(who, el.firstChild);
-        Motion.body(who).to({ y: 26 }, 'travel', { done: function () { who.remove(); } });
+        el.appendChild(who);
+        Motion.body(who.firstChild).to({ y: 26 }, 'travel', { done: function () { who.remove(); } });
       }
       if (old) Landing.rollLine(el, old);
       Nav.setCount('inbox', App.countOverdue());

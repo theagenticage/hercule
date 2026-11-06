@@ -112,36 +112,35 @@
     var kind = K.KINDS[e.kind], f = e.fields;
     var line = describeLine(e, ctx.usual);
     var status = kind.status && kind.status[f.state];
-    // The reason already says it in words and colour, so the shape does not say it again at rest.
-    var isSaid = status && line.tone === 'bad' && status.tone === 'bad';
+    var shape = status && !status.norm ? drawShape(status) : '';
     var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
+    // A slow kind has no clock. Its key takes the place of the wait, with its status beside it when the status has news.
+    if (kind.pace === 'slow' && !e.task) pace = shape + '<span class="c-key">' + esc(fill(kind.identifier, f)) + '</span>';
     var flows = readWorkflows(e);
     var hand = flows.length
       ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
-        flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 20 }); }).join('') + '<span>' + esc(flows.length === 1 ? flows[0].name : 'Hand to…') + '</span></button>'
+        '<span class="c-act-word">' + esc(flows.length === 1 ? flows[0].name : 'Hand to…') + '</span>' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 20 }); }).join('') + '</button>'
       : '';
     var acts = e.task
       ? '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
       : hand +
-        '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 18) + '<span>Take</span></button>' +
+        '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + '<span class="c-act-word">Take it</span>' + drawPerson('you', 18) + '</button>' +
         '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
     return '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
       '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '"' + (pace ? ' aria-label="Waiting ' + sayWaitInWords(e.since, ctx.now) + '"' : '') + '>' + pace + '</div>' +
-      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
-      '<div class="c-status' + (status && (status.norm || isSaid) ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
+      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + '<span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
+      '<div class="c-status' + (status && status.norm ? ' is-norm' : '') + '">' + (status && kind.pace !== 'slow' ? drawShape(status) : '') + '</div>' +
       '<div class="c-foot' + (line.isIdentity ? ' c-foot--facts' : '') + '">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
       '<div class="c-hit"></div>' +
       '<div class="c-acts">' + acts + '</div>';
   }
 
-  /** Returns what stands behind the card's top edge: who holds it now, by the rule Work's cards follow. */
+  /** Returns who holds the card now, for the place the wait had: once someone has it, the wait stops mattering to you. */
   function drawHolder(e) {
     if (!e.task) return '';
-    if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab" data-need="quick"></i></span>';
-    var hue = Crew.lookFor(e.task.by).hue;
-    return '<span class="card-holder"><span class="card-head" data-pose="working">' + Crew.peek(e.task.by, { pose: 'working', size: 30, crop: 34 }) + '</span></span>' +
-      '<span class="card-paws" data-pose="working" style="--hue:var(--hue-' + hue + ')"><i></i><i></i></span>';
+    var who = e.task.by === 'you' ? drawPerson('you', 20) : Crew.face(e.task.by, { pose: 'working', size: 26 });
+    return '<span class="c-holder" title="' + esc(e.task.by === 'you' ? 'You have it' : e.task.by + ' has it') + '"><span class="c-holder-in">' + who + '</span></span>';
   }
 
   /** Returns the class list of a card for its kind and its state. */
@@ -164,10 +163,10 @@
    */
   function redrawBody(el, e, ctx) {
     [].slice.call(el.children).forEach(function (c) {
-      if (!c.matches('.card-stock, .card-holder, .card-paws')) c.remove();
+      if (!c.matches('.card-stock, .c-holder')) c.remove();
     });
     el.insertAdjacentHTML('beforeend', drawCardBody(e, ctx));
-    if (!e.task) [].forEach.call(el.querySelectorAll('.card-holder, .card-paws'), function (c) { c.remove(); });
+    if (!e.task) [].forEach.call(el.querySelectorAll('.c-holder'), function (c) { c.remove(); });
     if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
   }
 
@@ -186,8 +185,8 @@
 
   /** Returns the marks of what a plaque combines: the first in full, any second as a badge on its corner. */
   function drawSources(sources) {
-    var first = '<span class="pl-mark">' + Crew.brand(sources[0], 22) + '</span>';
-    return first + (sources[1] ? '<span class="pl-badge">' + Crew.brand(sources[1], 10) + '</span>' : '');
+    var first = '<span class="pl-mark">' + Crew.brand(sources[0], 18) + '</span>';
+    return first + (sources[1] ? '<span class="pl-badge">' + Crew.brand(sources[1], 9) + '</span>' : '');
   }
 
   /** Returns the HTML of a plaque: one thing Hercule noticed, on the lacquer plate. */

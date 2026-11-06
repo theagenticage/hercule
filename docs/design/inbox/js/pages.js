@@ -21,12 +21,15 @@ window.Pages = (function () {
     { id: 'in-6258', mark: 'github', title: 'Stop sending duplicate order emails', ref: '#6258', n: 2, last: '7h', state: 'inbox' },
   ];
 
+  var MARKS = {};
+  Object.keys(K).forEach(function (id) { MARKS[K[id].plugin.mark] = K[id].plugin; });
+
   function drawRow(r) {
     var said = { noticed: 'Noticed', inbox: 'In your Inbox', quiet: '' }[r.state];
     return '<li class="in-row' + (r.state === 'quiet' ? ' is-quiet' : '') + '" data-row="' + r.id + '">' +
-      '<span class="in-mark">' + Crew.brand(r.mark, 16) + '</span>' +
+      '<span class="in-mark">' + Card.drawMark(MARKS[r.mark], 16) + '</span>' +
       '<span class="in-t"><b>' + Card.esc(r.title) + '</b><small>' + Card.esc(r.ref) + '</small></span>' +
-      '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise to Inbox</button>' : '<span class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</span>') +
+      '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise</button>' : '<span class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</span>') +
       '<span class="in-n">' + r.n + '</span><span>' + r.last + '</span></span>' +
       (r.signals ? '<ol class="in-signals">' + r.signals.map(function (s) { return '<li>' + Card.esc(s) + '</li>'; }).join('') + '</ol>' : '') +
       '</li>';
@@ -37,7 +40,7 @@ window.Pages = (function () {
     page.dataset.mode = 'intake';
     page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214 signals</b> about 61 things. Nine rose to your Inbox.</h2>' +
       '<p class="in-sub">Everything that arrived, one line per thing, with how many signals it sent.</p>' +
-      '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul></div>';
+      '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul><div class="in-more">49 more things, all quiet</div></div>';
   }
 
   function setView(name) {
@@ -64,7 +67,6 @@ window.Pages = (function () {
       ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
       : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake <small>214</small></button>';
     document.querySelector('.ib-end').hidden = name !== 'inbox';
-    document.getElementById('sum').hidden = name !== 'inbox';
   }
 
   /** Raises a row of Intake to the Inbox: the row lifts, a token flies to the Cards tab, and a card waits there. */

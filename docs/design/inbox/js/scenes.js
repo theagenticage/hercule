@@ -62,7 +62,7 @@ window.Scenes = (function () {
     for (var i = 0; i < n; i++) {
       var a = Math.PI * (i / (n - 1));
       var long = i % 2 === 0;
-      var r0 = 142, r1 = long ? 240 : 196;
+      var r0 = 136, r1 = long ? 236 : 192;
       var x0 = cx - Math.cos(a) * r0, y0 = cy - Math.sin(a) * r0, x1 = cx - Math.cos(a) * r1, y1 = cy - Math.sin(a) * r1;
       var d = Math.abs(i - (n - 1) / 2);
       out += '<line class="ray" style="--d:' + (d * 26) + 'ms" x1="' + x0.toFixed(1) + '" y1="' + y0.toFixed(1) + '" x2="' + x1.toFixed(1) + '" y2="' + y1.toFixed(1) + '"/>';
@@ -77,8 +77,8 @@ window.Scenes = (function () {
     var line = handed || mine
       ? [handed ? handed + ' with agents' : '', mine ? mine + ' with you' : ''].filter(Boolean).join(' · ') + '. Their Tasks are on Work.'
       : 'Anything from outside that concerns you will land here.';
-    page.innerHTML = '<div class="zero"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250.5" x2="660" y2="250.5"/></svg>' +
-      '<div class="zero-n" aria-hidden="true">0</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
+    page.innerHTML = '<div class="zero"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg>' +
+      '<div class="zero-n" aria-hidden="true">' + Crew.logo(92, { mono: true }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
   }
 
   function showZero() {
@@ -91,9 +91,9 @@ window.Scenes = (function () {
     var connect = function (mark, name, hue, line) {
       return '<div class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 22) + '<div><b>' + name + '</b><small>' + line + '</small></div><button class="btn btn--sm">Connect</button></div>';
     };
-    var next = '<i class="fr-next" style="display:block"></i><i class="fr-next" style="display:block"></i><i class="fr-next" style="display:block"></i>';
-    var head = function (t) { return '<h2 class="stack-h"><span>' + t + '</span></h2>'; };
-    page.innerHTML = '<div class="noticed"><div class="plate-crest">' + Crew.logo(24, { mono: true }) + '</div><div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
+    var next = '<i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i>';
+    var head = function (t) { return '<h2 class="stack-h"><span class="stack-n">0</span><span>' + t + '</span></h2>'; };
+    page.innerHTML = '<div class="noticed"><div class="plate-crest">' + Crew.logo(30, { mono: true }) + '</div><div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('On the shelf') + connect('linear', 'Linear', 277, 'Issues assigned to you') + next + '</section></div>';

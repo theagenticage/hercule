@@ -15,7 +15,12 @@ window.Pointer = (function () {
     var whole = el.offsetHeight + 10;
     var room = innerHeight - el.getBoundingClientRect().top - 8;
     el.style.height = was;
-    return Math.min(whole, room);
+    // A peek ends on the edge of a strip, so no strip is cut in half under it.
+    var edge = Infinity;
+    [].forEach.call(el.parentNode.children, function (c) {
+      if (c._plan && c !== el && c._plan.y >= el._plan.y + whole && c._plan.y < edge) edge = c._plan.y;
+    });
+    return Math.min(edge === Infinity ? whole : edge - el._plan.y, room);
   }
 
   /** Hides the second line of the strip a peek ends on, so no sliver of a hidden card shows under it. */
@@ -61,7 +66,7 @@ window.Pointer = (function () {
   /** Tells a card how wide its actions are, so its title can end before them. */
   function measureActs(el) {
     var acts = el.querySelector('.c-acts');
-    if (acts) el.style.setProperty('--acts-w', acts.offsetWidth - 4 + 'px');
+    if (acts) el.style.setProperty('--acts-w', acts.offsetWidth + 'px');
   }
 
   /** Takes away a card's new mark, once the person has seen what landed on it. */

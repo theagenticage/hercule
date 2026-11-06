@@ -25,31 +25,32 @@
   --recede: oklch(0.545 0.012 165);
 
   /* What dims the page behind an open card. In the light themes it is paper, so nothing turns grey. */
-  --veil: color-mix(in oklab, var(--desk) 66%, transparent);
+  --veil: color-mix(in oklab, var(--desk) 80%, transparent);
 
   /* A wait, measured against the patience of its kind. */
-  --wait-fresh: var(--faint);
-  --wait-recent: var(--muted);
-  --wait-due: var(--ink);
+  --wait-fresh: var(--recede);
+  --wait-recent: var(--faint);
+  --wait-due: var(--muted);
   --wait-over: var(--you-ink);
 
-  /* Lacquer: Hercule's own material, for what Hercule noticed. Used for nothing else. */
-  --lacquer: oklch(0.255 0.024 165);
-  --lacquer-lit: oklch(0.31 0.03 165);
-  --lacquer-ink: oklch(0.965 0.012 90);
-  --lacquer-sub: oklch(0.82 0.022 110);
-  --lacquer-rim: oklch(0.72 0.085 85 / 0.5);
-  --lacquer-shadow: 0 1px 2px oklch(0.2 0.03 165 / 0.2), 0 12px 28px -14px oklch(0.2 0.03 165 / 0.5);
+  /* The plate: Hercule's own material, for what Hercule noticed, and used for nothing else. It is the one object opposite the
+     page: green-black lacquer on a light desk, polished brass on a dark one. */
+  --plate: oklch(0.255 0.024 165);
+  --plate-lit: oklch(0.31 0.03 165);
+  --plate-ink: oklch(0.965 0.012 90);
+  --plate-sub: oklch(0.82 0.022 110);
+  --plate-rim: oklch(0.72 0.085 85 / 0.5);
+  --plate-shadow: 0 1px 2px oklch(0.2 0.03 165 / 0.2), 0 12px 28px -14px oklch(0.2 0.03 165 / 0.5);
 }
 
 [data-theme="styles"] {
   --recede: oklch(0.54 0.03 60);
-  --lacquer: oklch(0.28 0.036 48);
-  --lacquer-lit: oklch(0.335 0.042 48);
-  --lacquer-ink: oklch(0.965 0.02 85);
-  --lacquer-sub: oklch(0.83 0.035 75);
-  --lacquer-rim: oklch(0.72 0.09 80 / 0.55);
-  --lacquer-shadow: 0 1px 2px oklch(0.25 0.04 45 / 0.22), 0 12px 28px -14px oklch(0.25 0.05 45 / 0.5);
+  --plate: oklch(0.28 0.036 48);
+  --plate-lit: oklch(0.335 0.042 48);
+  --plate-ink: oklch(0.965 0.02 85);
+  --plate-sub: oklch(0.83 0.035 75);
+  --plate-rim: oklch(0.72 0.09 80 / 0.55);
+  --plate-shadow: 0 1px 2px oklch(0.25 0.04 45 / 0.22), 0 12px 28px -14px oklch(0.25 0.05 45 / 0.5);
   --mark-l: 0.43;
 }
 
@@ -68,39 +69,39 @@
 }
 
 [data-theme="orient-express"] {
-  --lacquer: oklch(0.285 0.04 165);
-  --lacquer-lit: oklch(0.34 0.05 165);
-  --lacquer-ink: oklch(0.96 0.014 90);
-  --lacquer-sub: oklch(0.83 0.03 120);
-  --lacquer-rim: oklch(0.74 0.09 82 / 0.55);
-  --lacquer-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 14px 30px -14px oklch(0 0 0 / 0.7);
+  --plate: oklch(0.76 0.085 84);
+  --plate-lit: oklch(0.84 0.08 86);
+  --plate-ink: oklch(0.2 0.03 60);
+  --plate-sub: oklch(0.33 0.05 65);
+  --plate-rim: oklch(0.86 0.07 88 / 0.8);
+  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="nile"] {
   --recede: oklch(0.7 0.018 130);
-  --lacquer: oklch(0.3 0.04 175);
-  --lacquer-lit: oklch(0.355 0.045 175);
-  --lacquer-ink: oklch(0.965 0.025 95);
-  --lacquer-sub: oklch(0.85 0.04 100);
-  --lacquer-rim: oklch(0.76 0.09 90 / 0.55);
-  --lacquer-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 14px 30px -14px oklch(0 0 0 / 0.7);
+  --plate: oklch(0.78 0.08 96);
+  --plate-lit: oklch(0.85 0.075 98);
+  --plate-ink: oklch(0.21 0.03 120);
+  --plate-sub: oklch(0.34 0.05 115);
+  --plate-rim: oklch(0.87 0.065 98 / 0.8);
+  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="end-house"] {
   --recede: oklch(0.7 0.02 10);
-  --lacquer: oklch(0.3 0.052 355);
-  --lacquer-lit: oklch(0.355 0.06 355);
-  --lacquer-ink: oklch(0.965 0.016 60);
-  --lacquer-sub: oklch(0.85 0.04 20);
-  --lacquer-rim: oklch(0.75 0.09 80 / 0.55);
-  --lacquer-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 14px 30px -14px oklch(0 0 0 / 0.7);
+  --plate: oklch(0.76 0.075 62);
+  --plate-lit: oklch(0.83 0.07 66);
+  --plate-ink: oklch(0.21 0.035 350);
+  --plate-sub: oklch(0.34 0.055 20);
+  --plate-rim: oklch(0.85 0.06 70 / 0.8);
+  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="blue-train"] {
   --recede: oklch(0.76 0.014 250);
-  --lacquer: oklch(0.29 0.055 252);
-  --lacquer-lit: oklch(0.345 0.062 252);
-  --lacquer-ink: oklch(0.965 0.01 250);
-  --lacquer-sub: oklch(0.86 0.03 245);
-  --lacquer-rim: oklch(0.74 0.085 85 / 0.5);
-  --lacquer-shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 14px 30px -14px oklch(0 0 0 / 0.6);
+  --plate: oklch(0.76 0.075 86);
+  --plate-lit: oklch(0.83 0.07 88);
+  --plate-ink: oklch(0.22 0.03 250);
+  --plate-sub: oklch(0.34 0.04 240);
+  --plate-rim: oklch(0.85 0.06 90 / 0.8);
+  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 
 /* With reduced motion the durations collapse, so no CSS movement is left behind. JS moves have their own designed fades. */

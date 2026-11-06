@@ -20,13 +20,13 @@ window.Tray = (function () {
     var flows = open.length ? Card.readWorkflows(open[0]) : [];
     var bulk = open.length > 1 ? (flows[0] ? '<button class="btn btn--sm" data-all="hand">' + Crew.face(flows[0].name, { pose: 'idle', size: 18 }) + 'Hand all ' + open.length + ' to ' + Card.esc(flows[0].name) + '</button>' : '') + '<button class="btn btn--sm btn--quiet" data-all="dismiss">Dismiss all</button>' : '';
     var find = members.length > 12 ? '<input class="tray-find" data-find placeholder="Find…" aria-label="Find in these cards">' : '';
-    host.innerHTML = '<div class="tray-h"><h2>' + Card.esc(drawTitle(el)) + ' <small>' + members.length + '</small></h2>' + find + '<span class="tray-all">' + bulk + '</span><button class="icon-btn icon-btn--sm" data-close aria-label="Close" title="Close (Esc)">' + Crew.icon('close', 13) + '</button></div>' +
+    host.innerHTML = '<div class="tray-h"><h2>' + Card.esc(drawTitle(el)) + (/^\d/.test(drawTitle(el)) ? '' : ' <small>' + members.length + '</small>') + '</h2>' + find + '<span class="tray-all">' + bulk + '</span><button class="icon-btn icon-btn--sm" data-close aria-label="Close" title="Close (Esc)">' + Crew.icon('close', 13) + '</button></div>' +
       '<div class="tray-grid" role="list">' + members.map(function (e) {
         return '<div class="tray-cell" role="listitem" data-open="' + e.id + '"></div>';
       }).join('') + '</div>';
     [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell, i) {
       var e = members[i];
-      var card = Card.createCard(e, { now: App.state.now, usual: null });
+      var card = Card.createCard(e, { now: App.state.now, usual: App.STACKS[App.readStack(e)].usual });
       card.classList.add('is-whole');
       card.dataset.level = 'full';
       card.removeAttribute('role');
@@ -86,8 +86,15 @@ window.Tray = (function () {
       var all = ev.target.closest('[data-all]');
       if (all) {
         var open = current.filter(function (e) { return !e.task; });
-        if (all.dataset.all === 'hand') Moves.handAll(open, Card.readWorkflows(open[0])[0].name);
-        else Moves.dismissAll(open);
+        if (all.dataset.all !== 'hand') { Moves.dismissAll(open); return; }
+        // Many runs at once deserve a second press, because each one spends real work.
+        if (open.length > 10 && !all.dataset.sure) {
+          all.dataset.sure = '1';
+          all.classList.add('btn--accent');
+          all.lastChild.textContent = 'Start ' + open.length + ' runs';
+          return;
+        }
+        Moves.handAll(open, Card.readWorkflows(open[0])[0].name);
         return;
       }
       var act = ev.target.closest('[data-act]');
