@@ -130,7 +130,7 @@ Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bo
 
 | Field | Fixed set |
 |---|---|
-| Shape | `ring` open, `dashed` not real yet, `quarter` `half` `most` under way, `fork` a proposed change, `join` merged, `check` finished, `cross` failed or refused, `alert` burning |
+| Shape | `ring` open, `dashed` not real yet, `quarter` `half` `most` under way, `fork` a proposed change, `join` merged, `check` finished, `cross` failed or refused, `hold` waits for a change, `alert` burning |
 | Tone | `quiet`, `active`, `you`, `good`, `bad` |
 | Stock | `bond`, `ledger` (a cool grey), `manila`, `sage`. `lacquer` is Hercule's alone |
 | Density | `open`, `tight` |

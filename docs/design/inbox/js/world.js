@@ -151,7 +151,7 @@
     var n = 7000;
     for (var i = 0; i < 118; i++) {
       var who = names[i % names.length];
-      list.push(pr(n + i, i % 3 ? 'storefront-web' : 'platform-core', verbs[i % verbs.length] + ' ' + things[(i * 7) % things.length], who, 3 + i * 1.3, i % 9 === 0 ? 'failing' : 'passing', i % 9 === 0 ? { signals: [signal('reviewRequested', 3 + i * 1.3, who), signal('checksFailed', 2 + i)] } : undefined));
+      list.push(pr(n + i, i % 3 ? 'storefront-web' : 'platform-core', verbs[i % verbs.length] + ' ' + things[(i * 7) % things.length], who, 3 + (117 - i) * (117 - i) * 0.035, i % 9 === 0 ? 'failing' : 'passing', i % 9 === 0 ? { signals: [signal('reviewRequested', 3 + (117 - i) * (117 - i) * 0.035, who), signal('checksFailed', 2 + i)] } : undefined));
     }
     for (var d = 0; d < 26; d++) {
       var bump = pr(8000 + d, 'storefront-web', 'Bump ' + ['eslint', 'vite', 'react', 'effect', 'zod-free-schema', 'typescript', 'vitest'][d % 7] + ' to the next minor', 'theo-brandt', 40 + d, 'passing');

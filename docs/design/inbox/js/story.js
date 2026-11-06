@@ -73,7 +73,7 @@
   }
 
   function drawShapes() {
-    var words = { ring: 'Open, not started', dashed: 'Not real yet: draft, backlog, triage', quarter: 'Started', half: 'Half way', most: 'Nearly there', fork: 'A proposed change', join: 'Merged', check: 'Finished well', cross: 'Failed or refused', alert: 'Burning' };
+    var words = { ring: 'Open, not started', dashed: 'Not real yet: draft, backlog, triage', quarter: 'Started', half: 'Half way', most: 'Nearly there', fork: 'A proposed change', join: 'Merged', check: 'Finished well', cross: 'Failed or refused', hold: 'Waits for a change', alert: 'Burning' };
     document.getElementById('shapes').innerHTML = Object.keys(Kinds.SHAPES).map(function (k) {
       return '<div>' + Card.drawShape({ shape: k, tone: 'quiet', word: k }, 18) + '<span>' + words[k] + '</span></div>';
     }).join('');

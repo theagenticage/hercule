@@ -30,7 +30,8 @@ window.Motion = (function () {
 
   function loop(now) {
     frame = 0;
-    var dt = Math.min(0.034, (now - last) / 1000 || 0.016);
+    // The first frame's timestamp can fall before the moment the clock woke, so dt can come out negative.
+    var dt = Math.max(0, Math.min(0.034, (now - last) / 1000 || 0.016));
     last = now;
     advance(dt * speed);
     if (active.size && !manual) frame = requestAnimationFrame(loop);
