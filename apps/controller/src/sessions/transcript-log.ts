@@ -23,7 +23,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseStoredEvent, type SubagentId } from "@hercule/protocol";
+import { parseStoredEvent, type HarnessEvent, type SubagentId } from "@hercule/protocol";
 import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
 import { buildAgentClause } from "./repository";
@@ -70,14 +70,30 @@ export const readTranscriptHead = (
   );
 
 /**
+ * Returns `event` without its `raw`, the vendor's untouched payload, which
+ * makes up most of a transcript's bytes and which no client draws. Only the
+ * event's own `raw` goes: an `unknown` event keeps its `payload` whole, `raw`
+ * included, because that payload is the event this build could not read.
+ * The stored event keeps its `raw`; only what a read sends leaves it out.
+ */
+export const omitRawPayload = (event: HarnessEvent): HarnessEvent => {
+  if (!("raw" in event)) return event;
+  const copy = { ...event };
+  delete copy.raw;
+  return copy;
+};
+
+/**
  * Returns up to `limit` rows of an agent's transcript after a position, oldest
- * first. Each comes with `bytes`, the size in bytes of its stored JSON text. A
- * live subscription uses it to limit the memory it holds for a client that
- * reads slowly, without encoding the row again. The size is
- * `length(CAST(event AS BLOB))`, which counts bytes in every SQLite version
- * (`octet_length` needs SQLite 3.43, and the SQLite that Bun links on macOS can
- * be older). An event of a type this build does not know comes back as an
- * `unknown` event (see `parseStoredEvent`).
+ * first, each without its `raw` (see `omitRawPayload`): the live topics never
+ * send it. Each comes with `bytes`, the size in bytes of its stored JSON text.
+ * A live subscription uses it to limit the memory it holds for a client that
+ * reads slowly, without encoding the row again. The stored text still holds
+ * `raw`, so `bytes` is more than the row costs: the limit errs on the safe
+ * side. The size is `length(CAST(event AS BLOB))`, which counts bytes in every
+ * SQLite version (`octet_length` needs SQLite 3.43, and the SQLite that Bun
+ * links on macOS can be older). An event of a type this build does not know
+ * comes back as an `unknown` event (see `parseStoredEvent`).
  */
 export const readTranscriptRowsAfter = (
   sql: SqlClient.SqlClient,
@@ -106,7 +122,7 @@ export const readTranscriptRowsAfter = (
         row: {
           position: row.position,
           at: row.at,
-          event: parseStoredEvent(row.event),
+          event: omitRawPayload(parseStoredEvent(row.event)),
         },
         bytes: row.bytes,
       })),

@@ -4434,6 +4434,7 @@ export const CLI = {
       { args: ["1f3a9c2e"] },
       { args: ["1f3a9c2e", "--subagent", "agent-a1b2c3d4"] },
       { args: ["1f3a9c2e", "--after", "1234"] },
+      { args: ["1f3a9c2e", "--raw", "true", "--json"] },
     ],
     fields: {
       id: {
@@ -4450,6 +4451,10 @@ export const CLI = {
       after: {
         flag: "after",
         help: "A position. Only the rows after it are read, so a caller that holds the rows up to a position reads just the newer ones. A position past the newest row reads nothing. A cursor is valid only for the same --after.",
+      },
+      includeRaw: {
+        flag: "raw",
+        help: "true also returns each event's raw, the harness's untouched payload, for debugging an adapter; see it with --json. Without it, raw is left out.",
       },
     },
   },

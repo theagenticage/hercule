@@ -469,7 +469,7 @@ On a native-steering harness, one operation that stores and claims the row does 
 
 ## 6. Normalized event taxonomy
 
-Normalization happens at the runner, closest to the vendor protocol. Every event carries the base fields; every event may carry `raw` (the untouched vendor payload tagged with its source, e.g. `claude.sdk.message`, `codex.app-server.notification`, `pi.session.event`). Enums are open for consumers: unknown kinds render generically, never crash.
+Normalization happens at the runner, closest to the vendor protocol. Every event carries the base fields; every event may carry `raw` (the untouched vendor payload tagged with its source, e.g. `claude.sdk.message`, `codex.app-server.notification`, `pi.session.event`). *(Amended 2026-11-06, [#1038](https://github.com/theagenticage/hercule/issues/1038).)* The controller stores `raw` with the event, but the transcript reads leave it out unless asked for it ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) `transcript.read`). Enums are open for consumers: unknown kinds render generically, never crash.
 
 ```ts
 interface HarnessEventBase {

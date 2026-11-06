@@ -162,16 +162,40 @@ export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 export const MAX_UPLOAD_BODY_BYTES = Math.max(MAX_ATTACHMENT_BYTES, MAX_SKILL_BYTES);
 
 /**
- * The listener options that enforce the limits, on request bodies and on
- * socket frames. Bun does not apply `maxRequestBodySize` to WebSocket frames,
- * so without the `websocket` option an unauthenticated connection could send
- * the controller a frame many times the documented size. A frame never
- * carries an image, so sockets are held to `MAX_FRAME_BYTES`, which the
- * runner also reads, so it never sends an event too large for one frame.
- * Bun closes a socket whose frame is larger.
+ * How long, in seconds, Bun lets an HTTP connection go without sending or
+ * receiving a byte before it closes it: 255, the most Bun allows. Bun's
+ * default is 10. The timeout covers two cases:
+ *
+ * - **A kept-alive connection between requests.** This is the one the value is
+ *   chosen for. Chromium, and so the desktop app, keeps an idle connection for
+ *   minutes and sends its next request on it. With the default, the controller
+ *   had already closed it, so after any pause of ten seconds the next read
+ *   first paid for a new TCP connection: one extra round trip, which over a
+ *   remote link takes about as long as the read itself (#1038).
+ * - **A request in flight that has gone quiet,** such as an upload whose
+ *   client stopped sending. Such a request now holds its connection for up to
+ *   255 seconds instead of 10. A graceful stop of the listener waits for it,
+ *   but the controller's drain deadline (`DRAIN_DEADLINE_MS` in `../index.ts`)
+ *   still ends the process ten seconds after a stop signal.
+ *
+ * Bun's graceful stop does not wait for a kept-alive connection that is idle,
+ * so the first case never delays a shutdown. WebSocket connections have their
+ * own timeout and heartbeat and are not affected.
  */
-export const bodyLimits = {
+export const HTTP_IDLE_TIMEOUT_SECONDS = 255;
+
+/**
+ * The listener's options: the limits on request bodies and on socket frames,
+ * and the idle timeout (`HTTP_IDLE_TIMEOUT_SECONDS`). Bun does not apply
+ * `maxRequestBodySize` to WebSocket frames, so without the `websocket` option
+ * an unauthenticated connection could send the controller a frame many times
+ * the documented size. A frame never carries an image, so sockets are held to
+ * `MAX_FRAME_BYTES`, which the runner also reads, so it never sends an event
+ * too large for one frame. Bun closes a socket whose frame is larger.
+ */
+export const listenerOptions = {
   maxRequestBodySize: MAX_UPLOAD_BODY_BYTES,
+  idleTimeout: HTTP_IDLE_TIMEOUT_SECONDS,
   websocket: { maxPayloadLength: MAX_FRAME_BYTES },
 } as const;
 
@@ -218,9 +242,10 @@ const refuseUnreadBody = (status: 411 | 413): HttpServerResponse.HttpServerRespo
  * Both refusals close the connection. The body was never read, so the
  * connection cannot be trusted for another request. Bun also keeps such a
  * connection counted as busy once a large unread body has arrived: a graceful
- * `server.stop()` then waits for it until Bun's idle timeout, about 10
- * seconds, ends it. Closing the connection is what HTTP asks of a server that
- * answers without reading the body (RFC 9112, section 9.6).
+ * `server.stop()` then waits for it until Bun's idle timeout
+ * (`HTTP_IDLE_TIMEOUT_SECONDS`) ends it. Closing the connection is what HTTP
+ * asks of a server that answers without reading the body (RFC 9112, section
+ * 9.6).
  *
  * It sits inside `withCors`, so the desktop app can read the refusal.
  */

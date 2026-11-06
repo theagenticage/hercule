@@ -28,7 +28,7 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bracketIpv6 } from "@hercule/home";
 import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
-import { bodyLimits, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
+import { listenerOptions, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
 import { LOCAL_RUNNER } from "./runners";
 
 export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
@@ -191,7 +191,7 @@ export async function run(argv: readonly string[]): Promise<void> {
                 BunHttpServer.layer({
                   hostname: bootstrap.bindHost,
                   port: bootstrap.bindPort,
-                  ...bodyLimits,
+                  ...listenerOptions,
                 }),
               ),
             ),

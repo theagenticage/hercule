@@ -36,7 +36,7 @@ const controllerCode = `
   import { nowIso, withTransaction } from ${JSON.stringify(join(controllerRoot, "db/index.ts"))};
   import { providerAccountRepository } from ${JSON.stringify(join(controllerRoot, "provider-accounts/index.ts"))};
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
-  import { operationLayers, bodyLimits, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
+  import { operationLayers, listenerOptions, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
   await Effect.runPromise(bootWith({
     argv: [], env: process.env,
     masterKeyBackend: "file", plugins: [anthropic, claudeCode]
@@ -58,7 +58,7 @@ const controllerCode = `
     console.log("proof controller listening on port " + address.port);
     yield* Effect.never;
   }).pipe(Effect.provide(operationLayers),
-    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits })))));
+    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...listenerOptions })))));
 `;
 
 const assertProcessGone = (pid: number): void => {
