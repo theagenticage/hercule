@@ -41,7 +41,7 @@
 .c-roll { position: relative; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .c-roll.tone-bad { color: var(--fail-ink); }
 .c-roll.tone-good { color: var(--ok); }
-.c-roll.tone-you { color: var(--ink); }
+.c-roll.tone-attention { color: var(--ink); }
 .c-where { flex: 0 1000 auto; min-width: 0; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-where::before { content: "·"; margin-right: 5px; }
 .c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
@@ -123,6 +123,10 @@
 .p-news { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .p-news.tone-bad { color: var(--fail-ink); }
 .p-news.tone-good { color: var(--ok); }
+.is-leaving-copy, .is-leaving-copy * { pointer-events: none; }
+.p-id { flex: 0 1000 auto; min-width: 0; color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.p-id::before { content: "·"; margin-right: 6px; }
+.bundle.is-carried .tucked { opacity: 0.35; }
 .part .c-pace { grid-column: 3; grid-row: 1; }
 .part .c-acts { top: 0; right: 4px; }
 .part.is-hover .c-acts, .part.is-focus .c-acts { opacity: 1; pointer-events: auto; }
@@ -144,7 +148,7 @@
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
 .shape.tone-active { color: var(--accent-ink); }
-.shape.tone-you { color: var(--you-ink); }
+.shape.tone-attention { color: var(--attention-ink); }
 .shape.tone-good { color: var(--ok); }
 .shape.tone-bad { color: var(--fail-ink); }
 

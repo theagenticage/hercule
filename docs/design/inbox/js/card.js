@@ -76,7 +76,7 @@
 
   function drawFacts(kind, fields) {
     return kind.facts.filter(function (f) { return fields[f.field]; }).map(function (f) {
-      return '<span class="fact">' + FORMS[f.form](fields[f.field], f) + '</span>';
+      return '<span class="fact">' + (FORMS[f.form] || FORMS.word)(fields[f.field], f) + '</span>';
     }).join('');
   }
 
@@ -124,6 +124,12 @@
     return status ? '<span class="c-status">' + drawShape(status, size || 15) + '<span>' + esc(status.word) + '</span></span>' : '';
   }
 
+  /** Returns the short name of a thing, for a line that points at it. */
+  function sayReference(e) {
+    var kind = K.KINDS[e.kind];
+    return kind.reference === 'title' ? e.title : fill(kind.identifier, e.fields);
+  }
+
   /** Returns whether a thing belongs to the person rather than to a colleague. */
   function isMine(e) {
     var kind = K.KINDS[e.kind];
@@ -159,7 +165,7 @@
     var kind = K.KINDS[e.kind], f = e.fields, parts = [];
     var near = Relations.readParents(e).filter(function (p) { return p !== ctx.place && (p.kind === kind.home || p.kind === kind.section); });
     near.forEach(function (p) { parts.push(esc(p.title) + (p.fields.target ? ', ' + esc(p.fields.target) : '')); });
-    kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).forEach(function (x) { parts.push(FORMS[x.form](f[x.field], x)); });
+    kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).forEach(function (x) { parts.push((FORMS[x.form] || FORMS.word)(f[x.field], x)); });
     var line = describeLine(e);
     var latest = e.signals[e.signals.length - 1];
     var news = line.text ? '<span class="c-news tone-' + line.tone + '">' + esc(line.text) + (latest && !e.task ? ' <small>' + sayWait(latest.at, ctx.now) + '</small>' : '') + '</span>' : '';
@@ -187,9 +193,10 @@
     var e = part.e, kind = K.KINDS[e.kind], line = describeLine(e);
     var status = kind.status && kind.status[e.fields.state];
     var title = esc(Relations.sayClaim(part.link.claim));
+    var where = (Relations.readHomes(e)[0] || {}).title;
     var mark = '<span class="p-mark">' + drawMark(kind.plugin, 14) + '</span>';
     var fresh = e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '';
-    if (!e.concern || e.task) {
+    if (!part.rides || !e.concern || e.task || e.settled) {
       return '<div class="part part--quiet" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark + '<span class="p-title">' + esc(e.title) + '</span><span class="p-said">' + fresh + (e.task ? esc(line.text) : (status ? esc(status.word) : '')) + '</span></div>';
     }
     // The ask comes first. What has happened since follows, with its shape beside its words.
@@ -198,7 +205,7 @@
     var news = line.text && line.text !== said ? '<span class="p-news tone-' + line.tone + '">' + (status && !status.norm ? drawShape(status, 12) : '') + esc(line.text) + '</span>' : '';
     return '<div class="part is-asking" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark +
       '<span class="p-title">' + esc(e.title) + '</span>' + drawWait(e, ctx.now) +
-      '<span class="p-line">' + fresh + '<span class="p-said">' + esc(said) + '</span>' + news + '</span>' +
+      '<span class="p-line">' + fresh + '<span class="p-said">' + esc(said) + '</span>' + news + '<span class="p-id">' + esc(fill(kind.identifier, e.fields)) + (where ? ' ' + esc(where) : '') + '</span></span>' +
       '<span class="c-acts">' + drawActs(e) + '</span></div>';
   }
 
@@ -276,7 +283,7 @@
   }
 
   window.Card = {
-    createCard: createCard, drawContext: drawContext, drawPart: drawPart, drawStatus: drawStatus, isMine: isMine, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, sayReference: sayReference, drawContext: drawContext, drawPart: drawPart, drawStatus: drawStatus, isMine: isMine, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();

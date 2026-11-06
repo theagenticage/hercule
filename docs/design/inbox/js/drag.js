@@ -17,6 +17,9 @@ window.Drag = (function () {
       '<button class="rail-t rail-t--plain" data-target="dismiss"><i class="rail-x">' + Crew.icon('close', 18) + '</i><span>Dismiss</span></button>';
   }
 
+  /** Dims what rides on a card while it is carried, so the rows are not left floating. */
+  function markBundle(card, on) { if (card.parentNode.classList.contains('bundle')) card.parentNode.classList.toggle('is-carried', on); }
+
   function begin(ev) {
     var card = pressed.card;
     entity = App.findEntity(card.dataset.id);
@@ -32,6 +35,7 @@ window.Drag = (function () {
     last = r.left;
     Motion.body(ghost).set({ x: r.left, y: r.top, s: 1 });
     source.classList.add('is-lifted');
+    markBundle(source, true);
     document.documentElement.dataset.dragging = '1';
     drawRail(entity);
     rail.hidden = false;
@@ -99,6 +103,7 @@ window.Drag = (function () {
     ghost = null; source = null; entity = null; active = null; pressed = null; onto = null;
     if (target) target.classList.remove('is-link-target');
     var chosen = t && !cancel;
+    markBundle(s, false);
     if (t) t.el.classList.remove('is-near');
     // The rail stays long enough for the card to be seen to arrive, and only then goes.
     setTimeout(function () { rail.classList.remove('is-on'); }, chosen ? 340 : 0);
@@ -175,6 +180,7 @@ window.Drag = (function () {
       if (cancelled) { cancelled = false; swallowClick(); }
       pressed = null;
     });
+    document.addEventListener('pointercancel', function () { if (ghost) finish(true); });
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); cancelled = true; } }, true);
   }
 

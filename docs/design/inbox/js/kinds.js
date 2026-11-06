@@ -19,7 +19,7 @@
   };
 
   // The fixed set of tones. Each maps to one reserved colour of the design system.
-  var TONES = ['quiet', 'active', 'you', 'good', 'bad'];
+  var TONES = ['quiet', 'active', 'attention', 'good', 'bad'];
 
   var AGENT_REVIEW = { name: 'Agent review', says: 'Writes a review for you to send.' };
   var REPAIR = { name: 'Repair the build', says: 'Finds why checks failed and pushes a fix.' };
@@ -43,7 +43,7 @@
         passing: { shape: 'fork', tone: 'good', word: 'Open, checks passed', norm: true },
         running: { shape: 'fork', tone: 'quiet', word: 'Open, checks running' },
         failing: { shape: 'cross', tone: 'bad', word: 'Checks failed' },
-        changes: { shape: 'hold', tone: 'you', word: 'Changes requested' },
+        changes: { shape: 'hold', tone: 'attention', word: 'Changes requested' },
         approved: { shape: 'check', tone: 'good', word: 'Approved' },
         draft: { shape: 'dashed', tone: 'quiet', word: 'Draft' },
         merged: { shape: 'join', tone: 'quiet', word: 'Merged' },
@@ -55,7 +55,7 @@
       reasons: {
         reviewRequested: { say: '{person} asked for your review', tone: 'plain' },
         reReview: { say: '{person} asked again', tone: 'plain' },
-        changesRequested: { say: '{person} requested changes', tone: 'you' },
+        changesRequested: { say: '{person} requested changes', tone: 'attention' },
         checksFailed: { say: 'Checks failed', tone: 'bad' },
         checksPassed: { say: 'Checks passed', tone: 'plain' },
         mentioned: { say: '{person} mentioned you', tone: 'plain' },
@@ -107,6 +107,7 @@
     'gmail/thread': {
       card: 'compact',
       noun: 'Mail thread',
+      reference: 'title',
       plugin: { name: 'Gmail', mark: 'gmail', hue: 25 },
       pace: 'fast',
       patience: 48,
@@ -117,7 +118,7 @@
       status: null,
       facts: [{ field: 'deadline', form: 'date' }],
       reasons: {
-        asked: { say: '{person} asks you to decide', tone: 'you' },
+        asked: { say: '{person} asks you to decide', tone: 'attention' },
         replied: { say: '{person} replied', tone: 'plain' },
       },
       workflows: { addressed: [REPLY] },
@@ -126,6 +127,7 @@
     'slack/thread': {
       card: 'compact',
       noun: 'Slack thread',
+      reference: 'title',
       plugin: { name: 'Slack', mark: 'slack', hue: 330, solid: true },
       pace: 'fast',
       patience: 8,
@@ -214,7 +216,7 @@
   }
   var HEALTH = {
     onTrack: { shape: 'check', tone: 'good', word: 'On track' },
-    atRisk: { shape: 'hold', tone: 'you', word: 'At risk' },
+    atRisk: { shape: 'hold', tone: 'attention', word: 'At risk' },
     offTrack: { shape: 'cross', tone: 'bad', word: 'Off track' },
   };
   var UPDATES = { update: { say: '{person} posted an update', tone: 'plain' }, target: { say: 'Target moved to {value}', tone: 'plain' }, health: { say: 'Marked {value}', tone: 'plain' } };
@@ -231,6 +233,9 @@
 
   // A mark an invented plugin declares: four bollard-and-rope strokes on the 24-unit brand grid.
   window.CREW_BRANDS.quayside = 'M2 15.5C5 15.5 5 18 8 18s3-2.5 6-2.5 3 2.5 6 2.5c.8 0 1.4-.2 2-.4V21c-.6.2-1.2.4-2 .4-3 0-3-2.5-6-2.5s-3 2.5-6 2.5-3-2.5-6-2.5v-3.4ZM7 3h10v2.6l-3.4 3v3.9H10.4V8.6L7 5.6V3Z';
+
+  // A table may leave out what has a usual value, so a slightly different table still draws.
+  Object.keys(KINDS).forEach(function (id) { if (!KINDS[id].card) KINDS[id].card = 'rich'; });
 
   window.Kinds = { SHAPES: SHAPES, TONES: TONES, KINDS: KINDS };
 })();

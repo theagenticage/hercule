@@ -21,7 +21,7 @@ const point = (p, id, where = "title") => p.evaluate(([id, where]) => {
   return where === "title" ? { x: r.left + 90, y: r.top + 14 } : { x: r.right - 22, y: r.top + 18 };
 }, [id, where]);
 const hover = async (p, id) => { const a = await point(p, id); await p.mouse.move(a.x, a.y, { steps: 3 }); };
-const count = (p) => p.evaluate(() => App.state.entities.length);
+const count = (p) => p.evaluate(() => App.readLying().length);
 const has = (p, id) => p.evaluate((id) => !!App.findEntity(id), id);
 async function check(name, fn) {
   let page;
@@ -74,6 +74,7 @@ await check("only direct links join: a chain never pulls in the neighbourhood", 
   const p = await open("");
   const n = await p.evaluate(() => Relations.buildBundles(App.readLying()).filter((b) => b.lead.id === "ln-OPS-41")[0].parts.length);
   assert(n === 2, `${n} parts`);
+  assert(await p.evaluate(() => !!document.querySelector('#work .card[data-id="se-1"]')), "a linked lasting thing left its own place");
   return p;
 });
 await check("a thing in two places shows under both and counts once", async () => {
@@ -94,6 +95,39 @@ await check("every grouping draws, and the sidebar's number never moves", async 
   const options = await p.evaluate(() => App.readGroupings().map((g) => g[0]));
   for (const o of options) { await p.click('[data-tool="group"]'); await p.click(`[data-group="${o}"]`); await p.waitForTimeout(250); }
   assert((await p.evaluate(() => App.countOverdue())) === before, "a grouping changed the count");
+  return p;
+});
+await check("the live feed runs on, and a dismissed thing stays gone", async () => {
+  const p = await open("");
+  await p.evaluate(() => { App.state.isLive = true; for (let i = 0; i < 14; i++) Live.next(); });
+  await p.waitForTimeout(900);
+  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6209"))); await p.waitForTimeout(400);
+  await p.evaluate(() => Landing.land(App.findEntity("pr-6209"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(400);
+  assert(!(await p.evaluate(() => !!document.querySelector('#page [data-id="pr-6209"]'))), "a signal brought a dismissed card back");
+  return p;
+});
+await check("a place has no moves, and links undo exactly", async () => {
+  const p = await open("");
+  await p.evaluate(() => Open.show("prj-depot", document.querySelector('.b-open[data-id="prj-depot"]'), true)); await p.waitForTimeout(500);
+  await p.keyboard.press("e"); await p.keyboard.press("t"); await p.waitForTimeout(200);
+  assert(await p.evaluate(() => !App.findEntity("prj-depot").task && !App.findEntity("prj-depot").dismissed), "a place took a move");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(400);
+  const base = await p.evaluate(() => JSON.stringify(Relations.readLinks(App.findEntity("ln-OPS-47")).map((l) => [l.otherId, l.claim.type])));
+  await p.evaluate(() => Moves.link(App.findEntity("ln-OPS-47"), App.findEntity("pr-6263"))); await p.waitForTimeout(300);
+  await p.evaluate(() => Moves.unlink(App.findEntity("ln-OPS-47"), "pr-6263")); await p.waitForTimeout(300);
+  await p.evaluate(() => Moves.link(App.findEntity("ln-OPS-47"), App.findEntity("pr-6263"))); await p.waitForTimeout(300);
+  for (let i = 0; i < 3; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(250); }
+  const after = await p.evaluate(() => JSON.stringify(Relations.readLinks(App.findEntity("ln-OPS-47")).map((l) => [l.otherId, l.claim.type])));
+  assert(base === after, `${base} became ${after}`);
+  return p;
+});
+await check("a move on a scrolled page keeps the scroll", async () => {
+  const p = await open("");
+  await p.evaluate(() => { document.getElementById("page").scrollTop = 900; }); await p.waitForTimeout(200);
+  const y = await p.evaluate(() => { const r = [...document.querySelectorAll(".card--rich")].filter((c) => { const b = c.getBoundingClientRect(); return b.top > 120 && b.bottom < 800; })[0]; const q = r.getBoundingClientRect(); return { x: q.left + 300, y: q.top + 12, id: r.dataset.id }; });
+  await p.mouse.move(y.x, y.y); await p.waitForTimeout(120);
+  await p.evaluate((id) => Moves.perform("take", id), y.id); await p.waitForTimeout(500);
+  assert((await p.evaluate(() => document.getElementById("page").scrollTop)) > 800, "the page jumped");
   return p;
 });
 await check("a click on a title never makes a move", async () => {

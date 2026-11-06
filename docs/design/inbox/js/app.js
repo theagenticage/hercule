@@ -11,20 +11,14 @@ window.App = (function () {
   var page;
   var waiting = [];    // new cards held back while the pointer is in their part of the page
 
-  function findEntity(id) { return state.entities.filter(function (e) { return e.id === id; })[0] || state.clusters.filter(function (c) { return c.id === id; })[0] || Relations.find(id); }
+  function findEntity(id) { return state.clusters.filter(function (c) { return c.id === id; })[0] || Relations.find(id); }
   function isRich(e) { return K[e.kind].card === 'rich'; }
 
   /** Returns what the page shows: everything that concerns the person and has not settled. */
-  function readLying() { return state.entities.filter(function (e) { return e.concern && !e.settled; }); }
+  function readLying() { return state.entities.filter(function (e) { return e.concern && !e.settled && !e.dismissed; }); }
 
   /** Returns how many things wait on the clock. It is the number the sidebar shows. */
-  function countOverdue() { return state.entities.filter(function (e) { return e.concern && !e.settled && !e.task && K[e.kind].pace === 'fast'; }).length; }
-
-  /** Returns how many things still wait on the person, in the narrow column or noticed by Hercule. The wide side has no end. */
-  function countOnClock() {
-    var bundles = Relations.buildBundles(readLying());
-    return waiting.length + bundles.filter(function (b) { return !isRich(b.lead) && !b.lead.task; }).length + state.clusters.filter(function (c) { return !c.task; }).length;
-  }
+  function countOverdue() { return readLying().filter(function (e) { return !e.task && K[e.kind].pace === 'fast'; }).length; }
 
   /** Returns how many things are left anywhere on the page. */
   function countLeft() { return waiting.length + readLying().filter(function (e) { return !e.task; }).length + state.clusters.filter(function (c) { return !c.task; }).length; }
@@ -43,15 +37,17 @@ window.App = (function () {
     sheet.innerHTML = parts.map(function (p) { return Card.drawPart(p, { now: state.now }); }).join('');
   }
 
-  /** Writes the references found in text as a quiet hint under a card. A hint never joins anything by itself. */
-  function drawHint(e, host) {
-    var old = host.querySelector(':scope > .hint');
-    if (old) old.remove();
-    var hints = Relations.readHints(e);
-    if (!hints.length) return;
-    var other = hints[0].other, kind = K[other.kind];
-    var word = Relations.isMentioner(hints[0], e) ? 'Mentions ' : 'Mentioned in ';
-    host.insertAdjacentHTML('beforeend', '<button class="hint" data-hint="' + e.id + '" data-other="' + other.id + '" tabindex="-1" title="' + Card.esc(Relations.sayClaim(hints[0].claim)) + '">' + Crew.icon('link', 12) + '<span>' + word + Card.esc(Card.fill(kind.identifier, other.fields)) + '</span><b>Link them</b></button>');
+  /** Writes the quiet lines under a thing: references found in text, which join nothing by themselves, and peers it does not ride on. */
+  function drawHint(bundle, host) {
+    var e = bundle.lead;
+    [].forEach.call(host.querySelectorAll(':scope > .hint'), function (x) { x.remove(); });
+    Relations.readHints(e).forEach(function (h) {
+      var word = Relations.isMentioner(h, e) ? 'Mentions ' : 'Mentioned in ';
+      host.insertAdjacentHTML('beforeend', '<button class="hint" data-hint="' + e.id + '" data-other="' + h.other.id + '" tabindex="-1" title="' + Card.esc(Relations.sayClaim(h.claim)) + '">' + Crew.icon('link', 12) + '<span>' + word + Card.esc(Card.sayReference(h.other)) + '</span><b>Link them</b></button>');
+    });
+    (bundle.peers || []).forEach(function (l) {
+      host.insertAdjacentHTML('beforeend', '<button class="hint" data-peer="' + l.other.id + '" tabindex="-1" title="' + Card.esc(Relations.sayClaim(l.claim)) + '">' + Crew.icon('link', 12) + '<span>Linked to ' + Card.esc(Card.sayReference(l.other)) + '</span></button>');
+    });
   }
 
   /** Returns the wrapper of a card and what rides on it. */
@@ -66,16 +62,16 @@ window.App = (function () {
     host.className = 'bundle';
     if (card.parentNode !== host) host.appendChild(card);
     drawParts(card, bundle.parts, host);
-    drawHint(bundle.lead, host);
+    drawHint(bundle, host);
     return host;
   }
 
   /** Returns whether a bundle passes the filters. A bundle shows when its lead or a part does, so a thing is never torn from what it rides on. */
   function passesFilters(b) {
-    var things = [b.lead].concat(b.parts.filter(function (p) { return p.e; }).map(function (p) { return p.e; }));
+    var things = [b.lead].concat(b.parts.filter(function (p) { return p.rides; }).map(function (p) { return p.e; }));
     return state.filters.every(function (f) {
       return things.some(function (e) {
-        if (f.facet === 'owner') return Card.isMine(e) === (f.value === 'mine');
+        if (f.facet === 'owner') return Card.isMine(e) === (f.value === 'mine') && !!e.concern;
         return Relations.readAncestors(e).some(function (p) { return p.id === f.value; });
       });
     });
@@ -83,18 +79,11 @@ window.App = (function () {
 
   /** Returns the groupings the wide side offers: the usual homes, every kind of place above what lies there, and status. */
   function readGroupings() {
-    var kinds = {}, homes = {};
-    var list = readLying().filter(isRich);
-    list.forEach(function (e) {
-      homes[K[K[e.kind].home].noun] = true;
-      Relations.readAncestors(e).forEach(function (p) { kinds[p.kind] = true; });
+    var nouns = {};
+    readLying().filter(isRich).forEach(function (e) {
+      Relations.readAncestors(e).forEach(function (p) { nouns[K[p.kind].noun] = true; });
     });
-    var out = [['home', 'Place']];
-    Object.keys(kinds).forEach(function (id) {
-      if (Object.keys(homes).indexOf(K[id].noun) < 0) out.push([id, K[id].noun]);
-    });
-    out.push(['status', 'Status']);
-    return out;
+    return [['home', 'Place']].concat(Object.keys(nouns).map(function (n) { return [n, n]; })).concat([['status', 'Status']]);
   }
 
   /** Returns the places a thing shows under for the grouping in use. It shows under each of them, and is still counted once. */
@@ -104,7 +93,7 @@ window.App = (function () {
       var status = K[e.kind].status && K[e.kind].status[e.fields.state];
       return [{ id: 'status-' + (status ? status.word : 'none'), title: status ? status.word : 'No status', isPlain: true, rank: status ? Object.keys(K[e.kind].status).indexOf(e.fields.state) : 99 }];
     }
-    return Relations.readAncestors(e).filter(function (p) { return p.kind === state.grouping; });
+    return Relations.readAncestors(e).filter(function (p) { return K[p.kind].noun === state.grouping; });
   }
 
   /** Returns how far along the source says a place is. Nothing is worked out from the cards on this page. */
@@ -129,12 +118,13 @@ window.App = (function () {
     if (place.rank !== undefined) return place.rank;
     var kind = K[place.kind], status = kind.status && kind.status[place.fields.state];
     var trouble = { bad: 0, you: 1 }[status && status.tone];
-    return (trouble === undefined ? 2 : trouble) * 1000 + (place.fields.target ? parseInt(place.fields.target, 10) + (/Dec/.test(place.fields.target) ? 30 : 0) : 500);
+    var days = place.fields.targetAt ? Math.round((place.fields.targetAt - state.now) / 864e5) : 500;
+    return (trouble === undefined ? 2 : trouble) * 1000 + days;
   }
 
   /** Orders the work of a block: what has a part asking first, then by how far along it is. */
   function rankWork(b) {
-    var asks = b.parts.some(function (p) { return p.e && p.e.concern && !p.e.task; }) ? 0 : 1;
+    var asks = b.parts.some(function (p) { return p.rides && p.e.concern && !p.e.task; }) ? 0 : 1;
     var kind = K[b.lead.kind], states = kind.status ? Object.keys(kind.status) : [];
     return asks * 100 - states.indexOf(b.lead.fields.state);
   }
@@ -145,7 +135,7 @@ window.App = (function () {
     var byPlace = {}, order = [];
     bundles.forEach(function (b) {
       var places = readPlaces(b.lead);
-      if (!places.length) places = [{ id: 'elsewhere', title: 'Not in any ' + (K[state.grouping] ? K[state.grouping].noun.toLowerCase() : 'place'), isPlain: true, rank: 90000 }];
+      if (!places.length) places = [{ id: 'elsewhere', title: state.grouping === 'home' ? 'Elsewhere' : 'Not in any ' + state.grouping.toLowerCase(), isPlain: true, rank: 90000 }];
       places.forEach(function (p, i) {
         if (!byPlace[p.id]) { byPlace[p.id] = { place: p, work: [] }; order.push(p.id); }
         byPlace[p.id].work.push({ b: b, also: places.filter(function (x) { return x !== p; }), echo: i > 0 ? 1 : 0 });
@@ -170,7 +160,7 @@ window.App = (function () {
       if (!grid) { grid = document.createElement('div'); grid.className = 'b-work'; block.appendChild(grid); }
       entry.work.sort(function (a, c) { return (a.echo - c.echo) || rankWork(a.b) - rankWork(c.b); }).forEach(function (w) {
         // The same thing under a second place is a plain pointer, so it is never two cards to act on.
-        if (w.echo) { grid.insertAdjacentHTML('beforeend', '<button class="echo" data-id="' + w.b.lead.id + '" tabindex="-1"><span></span><span class="echo-t">' + Card.esc(w.b.lead.title) + '</span><small>Also in ' + Card.esc(w.also[0].title) + '</small></button>'); return; }
+        if (w.echo) { grid.insertAdjacentHTML('beforeend', '<button class="echo" data-id="' + w.b.lead.id + '" tabindex="-1"><span class="c-rail">' + Card.drawStatus(w.b.lead, 15) + '</span><span class="echo-t">' + Card.esc(w.b.lead.title) + '</span><small>Also in ' + Card.esc(w.also[0].title) + '</small></button>'); return; }
         grid.appendChild(readBundle(w.b, entry.place));
       });
       host.appendChild(block);
@@ -203,7 +193,7 @@ window.App = (function () {
   /** Draws the things that settled, inside a disclosure at the foot of the column. They open in place. */
   function drawParked() {
     var host = page.querySelector('#parked');
-    var list = state.entities.filter(function (e) { return e.concern && e.settled; });
+    var list = state.entities.filter(function (e) { return e.concern && e.settled && !e.dismissed && !(e.task && e.task.by === 'you'); });
     host.hidden = !list.length;
     host.querySelector('[data-parked]').innerHTML = '<i class="chev"></i><span>With someone else</span><small>' + list.length + '</small>';
     host.querySelector('[data-parked]').setAttribute('aria-expanded', state.showParked);
@@ -215,6 +205,9 @@ window.App = (function () {
 
   /** Draws both sides from state, and removes what no longer lies on the page. */
   function placeCards() {
+    // A grouping whose level has emptied gives way to the usual one, so the control never reads blank.
+    if (!readGroupings().some(function (g) { return g[0] === state.grouping; })) state.grouping = 'home';
+    var scroller = page, top = scroller.scrollTop;
     var bundles = Relations.buildBundles(readLying()).filter(passesFilters);
     var work = bundles.filter(function (b) { return isRich(b.lead); });
     var requests = bundles.filter(function (b) { return !isRich(b.lead); });
@@ -239,6 +232,9 @@ window.App = (function () {
     page.dataset.by = state.grouping;
     var entry = page.querySelector('.plaque, .card');
     if (entry) entry.tabIndex = 0;
+    // Redrawing a sheet can drop the focus inside it, and a browser then scrolls to the top. Neither may show.
+    scroller.scrollTop = top;
+    Keys.remark();
   }
 
   /** Raises a small sunrise in the column once no request is left, so finishing them is marked even though lasting work never ends. */
@@ -288,7 +284,7 @@ window.App = (function () {
     if (still) { placeCards(); return; }
     var moving = [].slice.call(page.querySelectorAll('.bundle, .block, .sec, .parked'));
     Motion.flip(moving, placeCards, { spring: 'hand', stagger: stagger });
-    [].forEach.call(page.querySelectorAll('.bundle'), function (b) { if (moving.indexOf(b) < 0 && !Motion.isReduced()) Motion.body(b).set({ o: 0, y: 8 }).to({ o: 1, y: 0 }, 'hand'); });
+    [].forEach.call(page.querySelectorAll('.bundle, .block'), function (b) { if (moving.indexOf(b) < 0 && !Motion.isReduced()) Motion.body(b).set({ o: 0, y: 8 }).to({ o: 1, y: 0 }, 'hand'); });
   }
 
   /** Redraws a card in place, and what rides on it. */
@@ -331,14 +327,31 @@ window.App = (function () {
     return true;
   }
 
-  /** Brings a new thing onto the page. It waits at the column's heading while the pointer is there. */
+  /** Brings a new thing onto the page. While the pointer rests on a card it waits, so nothing moves under the hand. */
   function arrive(e) {
-    if (findEntity(e.id) || waiting.some(function (x) { return x.id === e.id; })) return false;
-    if (state.mode !== 'cards') { state.entities.push(e); Relations.note(e); return true; }
-    state.entities.push(e);
+    if (state.entities.indexOf(e) >= 0 || state.entities.some(function (x) { return x.id === e.id; }) || waiting.some(function (x) { return x.id === e.id; })) return false;
     Relations.note(e);
+    if (state.mode === 'zero') {
+      state.entities.push(e);
+      redraw();
+      Motion.animate(page, [{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: 'ease-out' });
+      return true;
+    }
+    if (state.mode !== 'cards') { state.entities.push(e); return true; }
+    if (Pointer.readHover()) { waiting.push(e); return false; }
+    state.entities.push(e);
     layOut();
     return true;
+  }
+
+  /** Lets in what waited for the pointer, once it has left the cards. */
+  function releaseArrivals() {
+    if (!waiting.length || state.mode !== 'cards') return;
+    var came = waiting;
+    waiting = [];
+    state.entities = state.entities.concat(came);
+    layOut();
+    came.forEach(function (e) { if (els[e.id]) Landing.settleArrival(els[e.id]); });
   }
 
   /** Loads a scene. */
@@ -375,6 +388,7 @@ window.App = (function () {
 
   function start() {
     page = document.getElementById('page');
+    window.addEventListener('resize', function () { Open.fit(); });
     document.addEventListener('change', function (ev) {
       if (ev.target.matches('[data-order]')) { state.order = ev.target.value; layOut(); }
     });
@@ -385,8 +399,8 @@ window.App = (function () {
   }
 
   return {
-    state: state, readGroupings: readGroupings, els: function () { return els; }, findEntity: findEntity, isRich: isRich, readLying: readLying, countOverdue: countOverdue, countOnClock: countOnClock, countLeft: countLeft,
-    layOut: layOut, redraw: redraw, redrawCard: redrawCard, drawNoticed: drawNoticed, reflowNoticed: reflowNoticed, checkZero: checkZero, arrive: arrive, load: load, settle: settle, drawNotice: drawNotice,
+    state: state, readGroupings: readGroupings, els: function () { return els; }, findEntity: findEntity, isRich: isRich, readLying: readLying, countOverdue: countOverdue, countLeft: countLeft,
+    releaseArrivals: releaseArrivals, layOut: layOut, redraw: redraw, redrawCard: redrawCard, drawNoticed: drawNoticed, reflowNoticed: reflowNoticed, checkZero: checkZero, arrive: arrive, load: load, settle: settle, drawNotice: drawNotice,
     forgetEl: function (id) { delete els[id]; }, start: start,
   };
 })();

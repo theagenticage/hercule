@@ -34,6 +34,8 @@ window.Live = (function () {
     if (step.arrive) {
       var e = step.arrive();
       if (App.findEntity(e.id)) return false;
+      Relations.note(e);
+      Relations.addClaim({ from: e.id, rel: 'part-of', to: 'repo-' + e.fields.repo, claim: { type: 'source' } });
       // Something new while you are elsewhere: one small dot on the Inbox row, and nothing louder.
       if (away) { App.state.entities.push(e); Nav.setNew(true); Nav.setCount('inbox', App.countOverdue()); Landing.announce('New in your Inbox: ' + e.title); return true; }
       if (!App.arrive(e)) return true;
@@ -41,7 +43,7 @@ window.Live = (function () {
       return true;
     }
     var target = App.findEntity(step.to);
-    if (!target || target.settled) return next();
+    if (!target || target.settled || target.dismissed) return next();
     Landing.land(target, step.s());
     return true;
   }

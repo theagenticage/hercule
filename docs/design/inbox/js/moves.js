@@ -9,7 +9,7 @@ window.Moves = (function () {
     return {
       order: App.state.entities.slice(),
       clusters: App.state.clusters.slice(),
-      touched: touched.map(function (e) { return { e: e, task: e.task, settled: e.settled }; }),
+      touched: touched.map(function (e) { return { e: e, task: e.task, settled: e.settled, dismissed: e.dismissed }; }),
     };
   }
 
@@ -18,7 +18,7 @@ window.Moves = (function () {
     var since = App.state.entities.filter(function (e) { return snap.order.indexOf(e) < 0; });
     App.state.entities = snap.order.concat(since);
     App.state.clusters = snap.clusters.concat(App.state.clusters.filter(function (c) { return snap.clusters.indexOf(c) < 0; }));
-    snap.touched.forEach(function (t) { t.e.task = t.task; t.e.settled = t.settled; });
+    snap.touched.forEach(function (t) { t.e.task = t.task; t.e.settled = t.settled; t.e.dismissed = t.dismissed; });
   }
 
   /** Finds the sidebar row a Task flies to. */
@@ -39,7 +39,7 @@ window.Moves = (function () {
     var row = readWorkRow();
     if (!row) return Promise.resolve();
     if (Motion.isReduced()) { receive(row); return Promise.resolve(); }
-    var mark = el.querySelector('.c-mark .mark, .pl-mark') || el.closest('.block, .bundle').querySelector('.mark');
+    var mark = el.querySelector('.c-mark .mark, .pl-mark') || (el.closest('.block') || el).querySelector('.mark');
     var target = row.querySelector('.ic').getBoundingClientRect();
     // With the sidebar hidden, Overview has no place on screen to fly to.
     if (!target.width) return Promise.resolve();
@@ -95,7 +95,6 @@ window.Moves = (function () {
     el = document.querySelector('.plaque[data-id="' + e.id + '"]');
     flyToWork(el);
     showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, by === 'you' ? 'Undo' : 'Undo, stop the run');
-    App.drawBar();
     noteLast();
   }
 
@@ -116,9 +115,10 @@ window.Moves = (function () {
     var el = App.els()[e.id];
     var order = Keys.readAfter(e.id);
     var wasHover = el && el.classList.contains('is-hover');
-    var index = App.state.entities.indexOf(e);
+    var bundle = Relations.buildBundles(App.readLying()).filter(function (b) { return b.lead === e; })[0];
+    var freed = bundle ? bundle.parts.filter(function (p) { return p.rides; }).map(function (p) { return Card.sayReference(p.e); }) : [];
     history.push({ type: 'dismiss', e: e, snap: takeSnapshot([e]) });
-    App.state.entities.splice(index, 1);
+    e.dismissed = true;
     if (el) {
       Pointer.forget(el);
       // A copy steps aside where the card lay, and the page closes up at once, so the next card's close is under the pointer.
@@ -133,30 +133,30 @@ window.Moves = (function () {
       App.forgetEl(e.id);
       host.remove();
     }
-    App.layOut(false, function (c) { return 0; });
+    App.layOut(false);
     if (wasHover) { var next = order.map(function (id) { return App.els()[id]; }).filter(Boolean)[0]; Pointer.handOver(next); }
-    showToast('Dismissed', 'Undo', 'Dismissed: ' + e.title);
+    // What rode on it does not vanish with it, so the line says where it went.
+    showToast(freed.length ? 'Dismissed. ' + freed.join(', ') + ' stands alone now' : 'Dismissed', 'Undo', 'Dismissed: ' + e.title);
     if (!App.countLeft()) setTimeout(function () { if (!App.countLeft()) App.checkZero(); }, 320);
   }
 
   /** Links two things by hand. What rides on what follows from the link, and Undo takes it back. */
   function link(a, b) {
-    var relation = Relations.linkByHand(a, b);
-    history.push({ type: 'link', relation: relation });
+    history.push({ type: 'link', undo: Relations.linkByHand(a, b) });
     App.layOut();
     if (Open.isOpen()) Open.refresh();
     showToast('Linked', 'Undo', 'Linked ' + a.title + ' and ' + b.title);
   }
 
-  /** Takes a person's link back. The source is not told, because the person never told it. */
+  /** Takes a person's link back, or says a hint is wrong. The source is not told, because the person never told it. */
   function unlink(e, otherId) {
     var l = Relations.readLinks(e).filter(function (x) { return x.otherId === otherId; })[0];
-    if (!l) return;
-    Relations.drop(l.relation);
-    history.push({ type: 'link', relation: l.relation });
+    var claim = l && (l.byPerson || (l.claim.type === 'text' ? l.relation : null));
+    if (!claim) return;
+    history.push({ type: 'link', undo: Relations.drop(claim) });
     App.layOut();
     Open.refresh();
-    showToast('Link removed', 'Undo');
+    showToast(l.claim.type === 'text' ? 'Hint ignored' : 'Link removed', 'Undo');
   }
 
   /** Brings a card into view and lights it, for a pointer that says where something really lies. */
@@ -202,7 +202,7 @@ window.Moves = (function () {
       Nav.hold(false);
       App.layOut();
     };
-    var row = readWorkRow(), mark = el && (el.querySelector('.c-mark .mark') || el.closest('.block, .bundle').querySelector('.mark'));
+    var row = readWorkRow(), mark = el && (el.querySelector('.c-mark .mark') || (el.closest('.block') || el).querySelector('.mark'));
     var from = row && row.querySelector('.ic').getBoundingClientRect();
     if (!el || !row || !mark || !from.width || Motion.isReduced()) { stand(); return; }
     Motion.fly('<span class="token">' + mark.outerHTML + '</span>', from, mark.getBoundingClientRect(), { ms: 240, grow: true }).then(stand);
@@ -215,7 +215,7 @@ window.Moves = (function () {
   function undo() {
     var u = history.pop();
     if (!u) return;
-    if (u.type === 'link') { Relations.restore(u.relation); App.layOut(); if (Open.isOpen()) Open.refresh(); if (history.length) showToast('Undone', 'Undo'); else hideToast(); return; }
+    if (u.type === 'link') { u.undo(); App.layOut(); if (Open.isOpen()) Open.refresh(); if (history.length) showToast('Undone', 'Undo'); else hideToast(); return; }
     if (Open.isOpen()) Open.hide(true);
     var wasElsewhere = Pages.current() !== 'inbox' || App.state.mode !== 'cards';
     restoreSnapshot(u.snap);
@@ -247,6 +247,7 @@ window.Moves = (function () {
 
   /** Returns why a move cannot be made on this thing, or nothing when it can. */
   function refuse(act, e) {
+    if (K[e.kind].pace === 'context') return 'A place gives context. Its work has the moves.';
     if (act === 'go') return e.task ? '' : 'No Task yet. Hand it on or take it first.';
     if (e.task) return (e.task.by === 'you' ? 'You already have this.' : e.task.by + ' already has this.') + ' G goes to its Task.';
     if (act === 'hand' && !Card.readWorkflows(e).length) return 'No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet';

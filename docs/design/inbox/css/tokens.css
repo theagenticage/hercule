@@ -15,7 +15,10 @@
   --veil: color-mix(in oklab, var(--desk) 72%, transparent);
 
   /* A wait, measured against the patience of its kind. */
-  --wait-fresh: var(--recede);
+  /* A status that wants watching. Plugins reach this, and never the colour kept for the person. */
+  --attention-ink: var(--you-ink);
+
+  --wait-fresh: var(--faint);
   --wait-recent: var(--faint);
   --wait-due: var(--muted);
   --wait-over: var(--ink);

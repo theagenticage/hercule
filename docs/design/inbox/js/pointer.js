@@ -36,7 +36,7 @@ window.Pointer = (function () {
     if (el === hover) return;
     if (hover) hover.classList.remove('is-hover');
     hover = el;
-    if (!el) { Keys.setCurrent(null, 'pointer'); return; }
+    if (!el) { Keys.setCurrent(null, 'pointer'); App.releaseArrivals(); return; }
     if (el.classList.contains('is-source')) return;
     el.classList.add('is-hover');
     measureActs(el);
@@ -89,8 +89,8 @@ window.Pointer = (function () {
       }
       var hint = ev.target.closest('[data-hint]');
       if (hint) { Moves.link(App.findEntity(hint.dataset.hint), App.findEntity(hint.dataset.other)); return; }
-      var echo = ev.target.closest('.echo');
-      if (echo) { Moves.reveal(echo.dataset.id); return; }
+      var peer = ev.target.closest('[data-peer]');
+      if (peer) { Open.show(peer.dataset.peer, peer); return; }
       var act = ev.target.closest('[data-act]');
       var card = ev.target.closest('.part[data-id], .card[data-id], .plaque');
       if (act && card) {
@@ -102,7 +102,7 @@ window.Pointer = (function () {
         Moves.perform(act.dataset.act, card.dataset.id, act);
         return;
       }
-      var opens = ev.target.closest('.part[data-id], .b-open[data-id]') || card;
+      var opens = ev.target.closest('.part[data-id], .b-open[data-id], .echo[data-id]') || card;
       if (opens) Open.show(opens.dataset.id, opens);
     });
   }

@@ -38,7 +38,7 @@ window.Landing = (function () {
     e.fresh = true;
     if (s.state) e.fields.state = s.state;
     App.redrawCard(e);
-    if (Open.current() === e.id) Open.refresh();
+    if (Open.isOpen()) Open.refresh();
     if (old) rollLine(el, old);
     el.dataset.landed = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     el.classList.remove('is-landed');
@@ -53,6 +53,8 @@ window.Landing = (function () {
    * it rides on, and only then does it react. Nothing changes place, not even a part that now asks more than its lead.
    */
   function land(e, s) {
+    // Something dismissed keeps its history, and stays out of sight.
+    if (e.dismissed) { e.signals.push(s); return; }
     var el = App.els()[e.id];
     announce(K[e.kind].noun + ' ' + Card.fill(K[e.kind].identifier, e.fields) + ': ' + Card.sayReason(K[e.kind], s).text);
     var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
@@ -68,8 +70,8 @@ window.Landing = (function () {
     e.signals.push(s);
     e.fresh = true;
     if (s.state) e.fields.state = s.state;
-    if (Open.current() === e.id) Open.refresh();
     App.layOut(true);
+    if (Open.isOpen()) Open.refresh();
     var row = document.querySelector('.part[data-id="' + e.id + '"]');
     if (!row) return;
     row.dataset.landed = tone;

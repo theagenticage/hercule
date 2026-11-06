@@ -51,8 +51,6 @@
 .o-signal.is-latest .o-dot { background: var(--ink); }
 .o-signal.tone-bad.is-latest { color: var(--fail-ink); }
 .o-signal.tone-bad.is-latest .o-dot { background: var(--fail-ink); }
-.o-signal.tone-you.is-latest { color: var(--you-ink); }
-.o-signal.tone-you.is-latest .o-dot { background: var(--you-ink); }
 .o-signal.tone-good.is-latest { color: var(--ok); }
 .o-signal.tone-good.is-latest .o-dot { background: var(--ok); }
 
@@ -225,6 +223,10 @@ button.o-link-go:hover { background: var(--hover); }
 .o-found[hidden] { display: none; }
 .o-place { color: var(--ink); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--ink) 25%, transparent); text-underline-offset: 2px; }
 .o-text small { color: var(--faint); font: var(--type-meta); }
+.o-back { display: flex; align-items: center; gap: 6px; max-width: 100%; margin: -4px 16px 6px 42px; color: var(--muted); font: var(--type-summary); text-align: left; }
+.o-back .ic { flex: none; transform: rotate(180deg); }
+.o-back span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.o-back:hover { color: var(--ink); }
 .o-inner { margin-top: 4px; }
 .o-inner-go { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 26px; padding: 0 4px; border-radius: var(--r-xs); font: var(--type-summary); text-align: left; }
 .o-inner-go:hover { background: var(--hover); }

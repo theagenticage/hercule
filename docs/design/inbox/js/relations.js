@@ -12,7 +12,7 @@ window.Relations = (function () {
     claims = relations;
   }
 
-  /** Adds or forgets an entity that arrived or left after the scene was loaded. */
+  /** Adds an entity that arrived after the scene was loaded. */
   function note(e) { things[e.id] = e; }
 
   function find(id) { return things[id]; }
@@ -35,24 +35,41 @@ window.Relations = (function () {
     return out;
   }
 
-  /** Returns the things directly under a context that concern the person. */
+  /** Returns the things under a place that concern the person, at any depth. */
   function readChildren(context) {
     return Object.keys(things).map(function (id) { return things[id]; }).filter(function (e) {
-      return e.concern && readAncestors(e).indexOf(context) >= 0;
+      return e.concern && !e.dismissed && readAncestors(e).indexOf(context) >= 0;
     });
   }
 
-  /** Returns the places a thing is usually shown under: its parents of the kind its own table names as home. A thing can have several. */
+  /** Returns the places a thing is usually shown under: everything above it of a kind its table names as home. A thing can have several. */
   function readHomes(e) {
-    var home = K[e.kind].home;
-    return readParents(e).filter(function (p) { return p.kind === home; });
+    var homes = [].concat(K[e.kind].home || []);
+    return readAncestors(e).filter(function (p) { return homes.indexOf(p.kind) >= 0; });
   }
 
-  /** Returns the link a claim makes from one end, with the other end. The other end may be something the person cannot see. */
+  /**
+   * Returns the links of a thing, one for each other end, however many claims there are. The firmest claim speaks for the pair: a
+   * source, then a person, then a reference in text. The other end is missing only when the claim says it is hidden from the person.
+   */
   function readLinks(e) {
-    return claims.filter(function (c) { return c.rel === 'linked' && (c.from === e.id || c.to === e.id) && !c.dropped; }).map(function (c) {
-      var other = c.from === e.id ? c.to : c.from;
-      return { claim: c.claim, relation: c, other: things[other] || null, otherId: other };
+    var byOther = {}, order = [], strength = { source: 3, person: 2, text: 1 };
+    claims.forEach(function (c) {
+      if (c.rel !== 'linked' || c.dropped || (c.from !== e.id && c.to !== e.id)) return;
+      var otherId = c.from === e.id ? c.to : c.from;
+      var other = things[otherId] || null;
+      if (other && other.dismissed) return;
+      if (!other && !c.claim.hidden) return;
+      if (!byOther[otherId]) { byOther[otherId] = { other: other, otherId: otherId, claims: [] }; order.push(otherId); }
+      byOther[otherId].claims.push(c);
+    });
+    return order.map(function (id) {
+      var l = byOther[id];
+      var best = l.claims.slice().sort(function (a, b) { return strength[b.claim.type] - strength[a.claim.type]; })[0];
+      l.relation = best;
+      l.claim = best.claim;
+      l.byPerson = l.claims.filter(function (c) { return c.claim.type === 'person'; })[0] || null;
+      return l;
     });
   }
 
@@ -75,7 +92,7 @@ window.Relations = (function () {
 
   /** Returns a sentence saying who claims a link. */
   function sayClaim(claim) {
-    if (claim.type === 'person') return World.PEOPLE[claim.by].short.replace('You', World.PEOPLE.you.name) + ' linked this';
+    if (claim.type === 'person') return (claim.by === 'you' ? World.PEOPLE.you.name : (World.PEOPLE[claim.by] || { short: claim.by }).short) + ' linked this';
     if (claim.type === 'text') return 'Found in ' + claim.evidence;
     return claim.by + ' reports this';
   }
@@ -87,25 +104,28 @@ window.Relations = (function () {
     return (/^[aeiou]/i.test(kind.plugin.name) ? 'An ' : 'A ') + kind.plugin.name + ' ' + word + ' you cannot open';
   }
 
-  /** Links two things by hand. A hint between them turns into a person's claim. */
+  /** Links two things by hand. A hint between them turns into a person's claim. Returns what undoes it. */
   function linkByHand(a, b) {
-    var hint = claims.filter(function (c) { return c.rel === 'linked' && c.claim.type === 'text' && ((c.from === a.id && c.to === b.id) || (c.from === b.id && c.to === a.id)); })[0];
     var claim = { type: 'person', by: 'you', at: World.NOW };
-    if (hint) { hint.was = hint.claim; hint.claim = claim; return hint; }
-    var made = { from: a.id, rel: 'linked', to: b.id, claim: claim, byHand: true };
+    var hint = claims.filter(function (c) { return c.rel === 'linked' && !c.dropped && c.claim.type === 'text' && ((c.from === a.id && c.to === b.id) || (c.from === b.id && c.to === a.id)); })[0];
+    if (hint) {
+      var was = hint.claim;
+      hint.claim = claim;
+      return function () { hint.claim = was; };
+    }
+    var made = { from: a.id, rel: 'linked', to: b.id, claim: claim };
     claims.push(made);
-    return made;
+    return function () { claims.splice(claims.indexOf(made), 1); };
   }
 
-  /** Takes a link back. Dropping a claim hides it here, and the source is not told. */
-  function drop(relation) { relation.dropped = true; }
-
-  /** Puts a claim back as it stood before a person changed it. */
-  function restore(relation) {
-    relation.dropped = false;
-    if (relation.was) { relation.claim = relation.was; relation.was = null; }
-    else if (relation.byHand) claims.splice(claims.indexOf(relation), 1);
+  /** Takes a claim back here. The source is not told. Returns what undoes it. */
+  function drop(relation) {
+    relation.dropped = true;
+    return function () { relation.dropped = false; };
   }
+
+  /** Records a claim that arrived after the scene was loaded. */
+  function addClaim(claim) { claims.push(claim); }
 
   /** Returns how much of its patience a thing has used, so the most pressing part of a group can lead. */
   function readPressure(e) {
@@ -114,27 +134,25 @@ window.Relations = (function () {
   }
 
   /**
-   * Returns the bundles of the page: each is a lead and the parts directly linked to it by a firm claim. What deserves the most room
-   * leads, so a transient thing rides on the lasting thing it belongs to, and among equals the most pressing leads. Only direct links
-   * join, so a chain of links never pulls in the whole neighbourhood.
+   * Returns the bundles of the page. Each lasting thing is a lead, always under its own places, so a peer link never pulls it out of
+   * them. A small thing with a firm link rides on the lasting thing it is linked to, and only one: on any other it shows as a quiet
+   * row. Two lasting things linked to each other stay two rows, each showing the other quietly. Only direct links join.
    */
   function buildBundles(list) {
-    var placed = {}, out = [];
-    var rank = function (e) { return (K[e.kind].card === 'rich' ? 1000 : 0) + (K[e.kind].pace === 'slow' ? 1000 : 0) + readPressure(e); };
-    list.slice().sort(function (a, b) { return rank(b) - rank(a); }).forEach(function (e) {
-      if (placed[e.id]) return;
-      placed[e.id] = true;
-      var parts = [];
-      readConfirmed(e).forEach(function (l) {
-        if (!l.other) { parts.push({ restricted: true, link: l }); return; }
-        if (placed[l.other.id] || l.other.settled) return;
-        placed[l.other.id] = true;
-        parts.push({ e: l.other, link: l });
-      });
-      out.push({ lead: e, parts: parts });
+    var rich = function (e) { return K[e.kind].card === 'rich'; };
+    var taken = {}, leads = list.filter(rich), out = {};
+    leads.slice().sort(function (a, b) { return readPressure(b) - readPressure(a); }).forEach(function (lead) {
+      out[lead.id] = { lead: lead, parts: readConfirmed(lead).map(function (l) {
+        if (!l.other) return { restricted: true, link: l };
+        var rides = !rich(l.other) && !taken[l.other.id] && list.indexOf(l.other) >= 0;
+        if (rides) taken[l.other.id] = true;
+        return { e: l.other, link: l, rides: rides };
+      }) };
     });
-    return out;
+    return list.filter(function (e) { return !taken[e.id]; }).map(function (e) {
+      return out[e.id] || { lead: e, parts: [], peers: readConfirmed(e).filter(function (l) { return l.other; }) };
+    });
   }
 
-  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isMentioner: isMentioner, readChildPlaces: readChildPlaces, isConfirmed: isConfirmed, sayClaim: sayClaim, sayRestricted: sayRestricted, linkByHand: linkByHand, drop: drop, restore: restore, buildBundles: buildBundles };
+  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isMentioner: isMentioner, readChildPlaces: readChildPlaces, isConfirmed: isConfirmed, sayClaim: sayClaim, sayRestricted: sayRestricted, linkByHand: linkByHand, drop: drop, addClaim: addClaim, buildBundles: buildBundles };
 })();

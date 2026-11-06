@@ -1,22 +1,26 @@
 // The keyboard. There is one current card, shared with the pointer, and every key acts on it. Every move moves on to the next
 // card that still waits, so a stack can be worked through with one hand. Arrows move through the page the way it is laid out.
 window.Keys = (function () {
-  var current = null, usingKeys = false, marked = null;
+  var current = null, usingKeys = false, marked = null, cameFrom = null;
 
   /** Returns everything that can hold the current mark, in the order the eye reads the page. */
   function readTargets() {
-    return [].filter.call(document.querySelectorAll('#page .plaque, #page .card[data-id], #page .part[data-id]'), function (el) { return el.offsetParent !== null && !el.classList.contains('is-leaving'); });
+    return [].filter.call(document.querySelectorAll('#page .plaque, #page .b-open[data-id], #page .card[data-id], #page .part[data-id]'), function (el) { return el.offsetParent !== null; });
   }
 
   /** Returns the whole page in reading order, as ids. */
   function readFlat() { return readTargets().map(function (el) { return el.dataset.id; }); }
 
-  function readEl(id) { return document.querySelector('#page .plaque[data-id="' + id + '"], #page .card[data-id="' + id + '"], #page .part[data-id="' + id + '"]'); }
+  function readEl(id) { return document.querySelector('#page .plaque[data-id="' + id + '"], #page .b-open[data-id="' + id + '"], #page .card[data-id="' + id + '"], #page .part[data-id="' + id + '"]'); }
 
   /** Returns what still waits after this card, in reading order, nearest first. It is read before a move, because a move can take the card off the page. */
   function readWaitingOrder(id) {
-    var flat = readFlat(), i = flat.indexOf(id);
-    return flat.slice(i + 1).concat(flat.slice(0, Math.max(0, i)).reverse()).filter(function (x) { var e = App.findEntity(x); return e && !e.task; });
+    // The next thing lies on the same side of the page, and what rides on this thing goes with it.
+    var el = readEl(id), own = el && el.parentNode.querySelectorAll ? [].map.call(el.parentNode.querySelectorAll('.part[data-id]'), function (p) { return p.dataset.id; }) : [];
+    var side = el && el.closest('.ib-wide, .ib-narrow');
+    var targets = readTargets().filter(function (t) { return !side || t.closest('.ib-wide, .ib-narrow') === side; }).map(function (t) { return t.dataset.id; });
+    var i = targets.indexOf(id);
+    return targets.slice(i + 1).concat(targets.slice(0, Math.max(0, i)).reverse()).filter(function (x) { var e = App.findEntity(x); return e && e.concern !== null && !e.task && own.indexOf(x) < 0; });
   }
 
   /** Returns the thing to move on to after a move. */
@@ -56,22 +60,33 @@ window.Keys = (function () {
     else if (r.bottom > box.bottom) page.scrollTop += r.bottom - box.bottom + 56;
   }
 
-  /** Moves the current mark to the nearest thing in a direction, by where things lie on screen, so the keys follow the page's own shape. */
+  /**
+   * Moves the current mark by where things lie on screen. Up and down stay on their side of the page. Left and right cross to the other
+   * side at the nearest height, and the opposite key always comes straight back.
+   */
   function move(dx, dy) {
     var all = readTargets();
     var el = current && readEl(current);
     if (!el) { if (all[0]) focus(all[0].dataset.id); return; }
+    if (cameFrom && cameFrom.dx === -dx && cameFrom.dy === -dy && readEl(cameFrom.id)) { var back = cameFrom.id; cameFrom = null; focus(back); return; }
+    var side = el.closest('.ib-wide, .ib-narrow');
     var me = el.getBoundingClientRect(), mx = me.left + me.width / 2, my = me.top + me.height / 2;
     var best = null, score = Infinity;
     all.forEach(function (c) {
       if (c === el) return;
       var r = c.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      var sameSide = c.closest('.ib-wide, .ib-narrow') === side;
+      if (dy && !sameSide) return;
       var along = dx ? (x - mx) * dx : (y - my) * dy, across = dx ? Math.abs(y - my) : Math.abs(x - mx);
       if (along <= 4) return;
-      var s = along + across * 2.5;
+      if (dx && sameSide && !(c.classList.contains('plaque') && el.classList.contains('plaque'))) return;
+      var s = dx ? across * 3 + along * 0.1 : along + across * 0.2;
       if (s < score) { score = s; best = c; }
     });
-    if (best) focus(best.dataset.id);
+    if (!best) return;
+    var from = current;
+    focus(best.dataset.id);
+    cameFrom = { id: from, dx: dx, dy: dy };
   }
 
   function walk(step) {
@@ -124,7 +139,7 @@ window.Keys = (function () {
     if (Pages.current() === 'intake') { Pages.onKey(ev); return; }
     if (Pages.current() !== 'inbox') return;
     // The letters act on a card, so only with focus on a card, or nowhere in particular.
-    var isFree = ev.target === document.body || ev.target.id === 'main' || ev.target.closest('.card, .plaque');
+    var isFree = ev.target === document.body || ev.target.id === 'main' || ev.target.closest('.card, .plaque, .part, .b-open');
     if ('hteg'.indexOf(k) >= 0 && !isFree) return;
     // A real control keeps its own keys.
     if ((k === 'Enter' || k === ' ') && ev.target.closest('button, a, [role="menuitem"]')) return;
@@ -171,11 +186,12 @@ window.Keys = (function () {
     var flat = readFlat(), i = flat.indexOf(id);
     if (k === 'j' || k === 'k') {
       ev.preventDefault();
-      var to = flat[i + (k === 'j' ? 1 : -1)];
+      var to = i >= 0 ? flat[i + (k === 'j' ? 1 : -1)] : null;
       if (to) { Open.walk(to); noteWalk(to); }
       return;
     }
     var e = App.findEntity(id), flows = Card.readWorkflows(e), n = Number(k);
+    if (e.concern === null) return;
     var name = k === 't' ? 'take' : k === 'e' ? 'dismiss' : k === 'g' ? 'go' : (k === 'h' || n >= 1) ? 'hand' : null;
     if (!name) return;
     ev.preventDefault();
@@ -201,7 +217,7 @@ window.Keys = (function () {
     });
     document.addEventListener('keydown', onKey);
     document.getElementById('page').addEventListener('focusin', function (ev) {
-      var c = ev.target.closest('.card, .plaque, .part');
+      var c = ev.target.closest('.card, .plaque, .part, .b-open');
       var id = c && c.dataset.id;
       if (usingKeyboardFocus && id && id !== current) focus(id);
     });
@@ -210,6 +226,15 @@ window.Keys = (function () {
     document.addEventListener('keydown', function () { usingKeyboardFocus = true; }, true);
   }
   var usingKeyboardFocus = false;
+
+  /** Puts the ring back after a redraw replaced the thing that held it. */
+  function remark() {
+    if (!usingKeys || !marked) return;
+    var el = readEl(marked);
+    if (!el) return;
+    el.classList.add('is-focus');
+    if (document.activeElement === document.body) el.focus({ preventScroll: true });
+  }
 
   /** Forgets the current card, when the page it lay on has gone. */
   function clear() { current = null; marked = null; usingKeys = false; }
@@ -222,7 +247,7 @@ window.Keys = (function () {
     usingKeyboardFocus = was;
   }
 
-  return { start: start, readAfter: readWaitingOrder, focus: focus, focusQuietly: focusQuietly, clear: clear, setCurrent: setCurrent, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
+  return { start: start, remark: remark, readAfter: readWaitingOrder, focus: focus, focusQuietly: focusQuietly, clear: clear, setCurrent: setCurrent, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
 })();
 
 // The sheet of keys, on ?.

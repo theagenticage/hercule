@@ -55,10 +55,17 @@
     };
   }
 
+  /** Returns when a target falls, for sorting. A month earlier in the year than today falls next year. */
+  function readTargetDate(text) {
+    var d = new Date(text + ' ' + NOW.getFullYear());
+    if (d < NOW && NOW - d > 1000 * 3600 * 24 * 60) d.setFullYear(d.getFullYear() + 1);
+    return d.getTime();
+  }
+
   /** Returns a thing that gives context. Progress is here only when the source reports it: the page never works it out from what it can see. */
   function context(id, kind, title, extra) {
     extra = extra || {};
-    return { id: id, kind: kind, concern: null, title: title, since: hoursAgo(extra.age || 2000), fields: { state: extra.state || null, target: extra.target || null }, progress: extra.progress || null, signals: extra.signals || [], task: null, about: extra.about || null };
+    return { id: id, kind: kind, concern: null, title: title, since: hoursAgo(extra.age || 2000), fields: { state: extra.state || null, target: extra.target || null, targetAt: extra.target ? readTargetDate(extra.target) : null }, progress: extra.progress || null, signals: extra.signals || [], task: null, about: extra.about || null };
   }
 
   /** Returns the things that give context, and records how they sit in each other. */

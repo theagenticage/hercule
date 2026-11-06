@@ -4,8 +4,10 @@ window.Open = (function () {
   var K = Kinds.KINDS, W = World;
   var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
   var motion = null, progress = null, generation = 0;
+  var trail = [];       // what the person walked through inside the sheet, so the way back is one click
+  var linkedAt = 0;     // when a link was made here, so the second click of a double click cannot undo it
   var REST = '.o-meta, .o-note, .o-parts, .o-facts, .o-places, .o-progress, .o-links, .o-ledger, .o-row';
-  var OLDER = '.o-signal:not(.is-latest)';
+  var OLDER = '.o-signal';
 
   function saySince(d, now) {
     var h = (now - d) / 36e5;
@@ -56,7 +58,7 @@ window.Open = (function () {
     var kind = K[l.other.kind], status = kind.status && kind.status[l.other.fields.state];
     return '<li class="o-link"><button class="o-link-go" data-walk="' + l.other.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(l.other.title) + '</span>' +
       (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small>' +
-      (l.claim.type === 'person' ? '<button class="o-unlink" data-unlink="' + l.otherId + '" title="Remove this link. The source is not told.">' + Crew.icon('close', 12) + '</button>' : '') + '</li>';
+      (l.byPerson ? '<button class="o-unlink" data-unlink="' + l.otherId + '" title="Remove this link. The source is not told.">' + Crew.icon('close', 12) + '</button>' : '') + '</li>';
   }
 
   /** Returns what this thing links to, the hints found in text, and the way to link something by hand. */
@@ -64,7 +66,7 @@ window.Open = (function () {
     var firm = Relations.readConfirmed(e), hints = Relations.readHints(e);
     return '<section class="o-sec o-links"><h3 class="o-h">Linked</h3>' + (firm.length ? '<ul>' + firm.map(drawLinkRow).join('') + '</ul>' : '') +
       (hints.length ? '<ul class="o-hints">' + hints.map(function (h) {
-        return '<li class="o-link o-link--hint"><span class="o-link-go">' + Crew.icon('link', 13) + '<span class="o-link-t">' + Card.esc(h.other.title) + '</span></span><small class="o-why">' + Card.esc(Relations.sayClaim(h.claim)) + '</small><button class="btn btn--sm" data-confirm="' + h.otherId + '">Link</button></li>';
+        return '<li class="o-link o-link--hint"><button class="o-link-go" data-walk="' + h.otherId + '">' + Crew.icon('link', 13) + '<span class="o-link-t">' + Card.esc(h.other.title) + '</span></button><small class="o-why">' + Card.esc(Relations.sayClaim(h.claim)) + '</small><button class="btn btn--sm" data-confirm="' + h.otherId + '">Link</button><button class="o-unlink" data-unlink="' + h.otherId + '" title="Not related">' + Crew.icon('close', 12) + '</button></li>';
       }).join('') + '</ul>' : '') +
       '<div class="o-add"><input class="o-find" data-find placeholder="Link something: search by title or number" aria-label="Link something"><ul class="o-found" data-found hidden></ul></div></section>';
   }
@@ -105,13 +107,19 @@ window.Open = (function () {
       '</div>';
   }
 
+  /** Returns the way back to the thing walked from, when there is one. */
+  function drawBack() {
+    var from = trail.length && App.findEntity(trail[trail.length - 1]);
+    return from ? '<button class="o-back" data-back>' + Crew.icon('arrow', 12) + '<span>' + Card.esc(from.title) + '</span></button>' : '';
+  }
+
   function drawOpen(e) {
     var now = App.state.now, kind = K[e.kind], f = e.fields;
     var status = kind.status && kind.status[f.state];
     var who = kind.person && W.PEOPLE[f[kind.person]];
     var id = Card.fill(kind.identifier, f);
     var isPlace = !e.concern && kind.pace === 'context';
-    return '<div class="o-head">' +
+    return drawBack() + '<div class="o-head">' +
       '<div class="c-mark">' + Card.drawMark(kind.plugin) + '</div>' +
       '<h2 class="o-title">' + Card.esc(e.title) + '</h2>' +
       '<button class="icon-btn icon-btn--sm o-close" data-close title="Close (Esc)">' + Crew.icon('close', 13) + '</button>' +
@@ -175,18 +183,17 @@ window.Open = (function () {
     inner.style.transform = 'translate(' + (to.left - left) + 'px,' + (to.top - top) + 'px)';
     motion.parts.forEach(function (p) {
       p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
-      if (p.waits) p.el.style.opacity = Math.max(0, Math.min(1, (t - 0.2) / 0.25));
     });
     // What is not the same object arrives once the title and the line have nearly landed, so nothing prints over them.
     if (!motion.closing && !motion.restShown && t > 0.8) {
       motion.restShown = true;
       [].forEach.call(inner.querySelectorAll(REST), function (el, i) {
         el.style.opacity = '';
-        el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+        if (!Motion.isReduced()) el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
       });
       [].forEach.call(inner.querySelectorAll(OLDER), function (el) {
         el.style.opacity = '';
-        el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+        if (!Motion.isReduced()) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
       });
     }
     // Near home the card itself comes back under the sheet, so the last frames dissolve into it rather than cut.
@@ -227,6 +234,7 @@ window.Open = (function () {
       return;
     }
     if (openId || motion) finish();
+    trail = [];
     Pointer.setHover(null);
     if (anchor && anchor.dataset.id) Pointer.clearFresh(anchor);
     var plaque = e.kind === 'hercule/cluster';
@@ -274,7 +282,7 @@ window.Open = (function () {
   /** Returns the parts of the sheet that are the same objects as parts of the card: the title, the mark and the latest line. */
   function measureParts(source) {
     var parts = [];
-    [['.c-title, .pl-title, .p-title, .b-title', '.o-title'], ['.c-mark, .pl-marks, .p-mark, .b-mark', '.c-mark'], ['.c-context, .c-under', '.o-signal.is-latest']].forEach(function (pair) {
+    [['.c-title, .pl-title, .p-title, .b-title', '.o-title'], ['.c-mark, .pl-marks, .p-mark, .b-mark', '.c-mark']].forEach(function (pair) {
       var a = source.querySelector(pair[0]), b = inner.querySelector(pair[1]);
       if (!a || !b || !a.getClientRects().length) return;
       b.style.transform = '';
@@ -283,9 +291,6 @@ window.Open = (function () {
       b.style.transformOrigin = '0 0';
       parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
     });
-    // A title that wraps in the sheet starts over the line under it, so that line waits until the title has made room.
-    var title = source.querySelector('.c-title, .pl-title, .p-title, .b-title'), sheetTitle = inner.querySelector('.o-title');
-    if (title && sheetTitle && sheetTitle.offsetHeight > title.offsetHeight * 1.4) parts.filter(function (p) { return p.el.classList.contains('o-signal'); }).forEach(function (p) { p.waits = true; });
     return parts;
   }
 
@@ -349,7 +354,8 @@ window.Open = (function () {
    */
   function hide(instant, then) {
     if (!openId) return;
-    var src = sourceEl, id = openId, wasKeyed = keyed;
+    var src = sourceEl, id = trail.length ? trail[0] : openId, wasKeyed = keyed;
+    trail = [];
     openId = null;
     App.state.open = null;
     hideVeil();
@@ -402,6 +408,16 @@ window.Open = (function () {
     host.focus({ preventScroll: true });
   }
 
+  /** Keeps an open sheet on screen when the window changes size. */
+  function fit() {
+    if (!openId || !motion) return;
+    var main = document.getElementById('main').getBoundingClientRect();
+    motion.to.left = Math.max(main.left + 16, Math.min(motion.to.left, main.right - motion.to.width - 16));
+    motion.to.top = Math.max(main.top + 12, Math.min(motion.to.top, innerHeight - motion.to.height - 16));
+    host.style.left = motion.to.left + 'px';
+    host.style.top = motion.to.top + 'px';
+  }
+
   function isOpen() { return !!openId; }
   function current() { return openId; }
 
@@ -420,9 +436,9 @@ window.Open = (function () {
   function drawFound(input) {
     var words = input.value.trim().toLowerCase(), list = host.querySelector('[data-found]');
     var e = App.findEntity(openId);
-    var linked = Relations.readLinks(e).map(function (l) { return l.otherId; });
+    var linked = Relations.readLinks(e).filter(function (l) { return l.claim.type !== 'text'; }).map(function (l) { return l.otherId; });
     var found = !words ? [] : App.state.entities.filter(function (x) {
-      return x !== e && linked.indexOf(x.id) < 0 && (x.title + ' ' + Card.fill(K[x.kind].identifier, x.fields)).toLowerCase().indexOf(words) >= 0;
+      return x !== e && !x.dismissed && x.concern && linked.indexOf(x.id) < 0 && (x.title + ' ' + Card.fill(K[x.kind].identifier, x.fields)).toLowerCase().indexOf(words) >= 0;
     }).slice(0, 5);
     list.hidden = !found.length;
     list.innerHTML = found.map(function (x) {
@@ -436,18 +452,20 @@ window.Open = (function () {
     scrim.addEventListener('click', function () { if (openId && !host.classList.contains('is-arming')) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
+      if (ev.target.closest('[data-back]')) { var last = trail.pop(); walk(last); return; }
       var to = ev.target.closest('[data-walk]');
-      if (to) { walk(to.dataset.walk); return; }
+      if (to) { trail.push(openId); walk(to.dataset.walk); return; }
       var e = App.findEntity(openId);
       var yes = ev.target.closest('[data-confirm], [data-pick]');
-      if (yes) { Moves.link(e, App.findEntity(yes.dataset.confirm || yes.dataset.pick)); return; }
+      if (yes) { linkedAt = performance.now(); Moves.link(e, App.findEntity(yes.dataset.confirm || yes.dataset.pick)); return; }
       var off = ev.target.closest('[data-unlink]');
-      if (off) { Moves.unlink(e, off.dataset.unlink); return; }
+      if (off && performance.now() - linkedAt > 400) { Moves.unlink(e, off.dataset.unlink); return; }
+      if (off) return;
       var b = ev.target.closest('[data-act]');
       if (b) act(b);
     });
     host.addEventListener('input', function (ev) { if (ev.target.matches('[data-find]')) drawFound(ev.target); });
   }
 
-  return { show: show, hide: hide, walk: walk, refresh: refresh, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
+  return { show: show, fit: fit, hide: hide, walk: walk, refresh: refresh, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
 })();

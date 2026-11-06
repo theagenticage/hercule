@@ -85,7 +85,9 @@ window.Pages = (function () {
     Motion.fly('<span class="token">' + Crew.brand(r.mark, 14) + '</span>', from, to).then(function () {
       Motion.animate(document.querySelector('[data-view="cards"]'), [{ background: 'color-mix(in oklab, var(--accent) 22%, transparent)' }, { background: 'transparent' }], { duration: 700, easing: 'ease-out' });
     });
-    App.state.entities.push(Scenes.raisedEntity(r));
+    var raisedThing = Scenes.raisedEntity(r);
+    App.state.entities.push(raisedThing);
+    Relations.note(raisedThing);
     row.querySelector('.in-raise').outerHTML = '<i></i>';
     row.querySelector('.in-t').insertAdjacentHTML('beforeend', '<em class="in-state">In your Inbox</em>');
     row.focus({ preventScroll: true });
