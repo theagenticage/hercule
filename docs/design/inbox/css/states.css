@@ -35,7 +35,7 @@
 @keyframes fade-up { from { transform: translateY(6px); opacity: 0; } }
 
 /* First run: the page itself, with the first cards inviting you to connect. No dialog. */
-.fr-card { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; width: 100%; min-height: 84px; padding: 12px; border-radius: var(--card-r); background: var(--stock); box-shadow: var(--h-stand); text-align: left; transition: box-shadow var(--m-quick) var(--m-ease); }
+.fr-card { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; width: 100%; min-height: 84px; padding: 12px; border-radius: var(--card-r); background: var(--stock); box-shadow: var(--h-rest); text-align: left; transition: box-shadow var(--m-quick) var(--m-ease); }
 .fr-card:hover { box-shadow: var(--h-hover); }
 .fr-go { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: var(--type-summary); }
 .fr-card:hover .fr-go { color: var(--ink); }

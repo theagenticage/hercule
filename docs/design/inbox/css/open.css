@@ -205,11 +205,12 @@
 .o-link-go { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; min-height: 28px; padding: 0 4px; border-radius: var(--r-xs); text-align: left; color: inherit; }
 button.o-link-go:hover { background: var(--hover); }
 .o-link-t { min-width: 0; flex: 1; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.o-link-s { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); }
+.o-link-s { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); transition: opacity var(--m-quick); }
 .o-link small { flex: none; color: var(--faint); font: var(--type-meta); }
 /* Who claims a link stays quiet until the row is reached for. */
 .o-claim { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 6px; border-radius: var(--r-xs); background: var(--stock); opacity: 0; pointer-events: none; transition: opacity var(--m-quick); }
 .o-link:hover .o-claim, .o-link:focus-within .o-claim { opacity: 1; }
+.o-link:has(.o-claim):hover .o-link-s, .o-link:has(.o-claim):focus-within .o-link-s { opacity: 0; }
 .o-link--closed { padding: 0 4px; color: var(--faint); }
 .o-link--closed .o-link-t { color: var(--faint); }
 .o-link--hint .o-link-t { color: var(--muted); }

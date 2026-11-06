@@ -45,7 +45,7 @@ section.ch { margin-top: 88px; }
 .card--loose .c-acts { display: none; }
 
 .swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.sw { height: 88px; padding: 10px 12px; border-radius: var(--card-r); box-shadow: var(--h-stand); font: var(--type-summary); color: var(--ink); }
+.sw { height: 88px; padding: 10px 12px; border-radius: var(--card-r); box-shadow: var(--h-rest); font: var(--type-summary); color: var(--ink); }
 .sw b { display: block; font-weight: var(--w-medium); }
 .sw small { color: var(--muted); font: var(--type-meta); }
 .shapes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px 12px; padding: 16px 18px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim); }
@@ -60,5 +60,5 @@ table.st-t { width: 100%; border-collapse: collapse; font-size: var(--t-13); lin
 .st-t td { padding: 7px 12px 7px 0; vertical-align: top; border-bottom: 1px solid var(--divider); }
 .st-t td:first-child { color: var(--ink); white-space: nowrap; }
 @media (max-width: 900px) { .row--3, .row--2, .anat, .k-grid, .gal { grid-template-columns: minmax(0, 1fr); } .swatches, .shapes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.k-card .card--rich { background: var(--stock); border-radius: var(--card-r); box-shadow: var(--h-stand); }
+.k-card .card--rich { background: var(--stock); border-radius: var(--card-r); box-shadow: var(--h-rest); }
 .card--loose { min-height: 0; }

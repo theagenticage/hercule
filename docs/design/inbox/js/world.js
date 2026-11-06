@@ -104,7 +104,7 @@
     link('ln-SHOP-371', 'pr-6238', { type: 'source', by: 'Linear', at: hoursAgo(60) });
     link('ln-SHOP-371', 'se-1', { type: 'person', by: 'you', at: hoursAgo(13) });
     link('ln-SHOP-380', 'pr-6118', { type: 'source', by: 'Linear', at: hoursAgo(470) });
-    link('ln-SHOP-380', 'restricted-1', { type: 'source', by: 'Linear', at: hoursAgo(200) });
+    link('ln-SHOP-380', 'restricted-1', { type: 'source', by: 'Linear', at: hoursAgo(200), hidden: 'sentry/issue' });
     link('pr-6263', 'ln-OPS-47', { type: 'text', by: 'GitHub', evidence: 'the description of #6263', at: hoursAgo(40) });
     link('pr-6126', 'ln-SHOP-318', { type: 'text', by: 'GitHub', evidence: 'a comment on #6126', at: hoursAgo(28) });
     link('ln-PLAT-131', 'pr-3299', { type: 'source', by: 'Linear', at: hoursAgo(300) });

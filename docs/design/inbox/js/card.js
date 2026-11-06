@@ -182,8 +182,7 @@
   /** Returns a thing that rides on a row. A part that asks something says what it asks and has its moves. Anything else is one quiet line. */
   function drawPart(part, ctx) {
     if (part.restricted) {
-      var source = readPluginByName(part.link.claim.by);
-      return '<div class="part part--closed" title="' + esc(Relations.sayClaim(part.link.claim)) + '"><span class="p-mark">' + drawMark(source, 14) + '</span><span class="p-title">You cannot open this</span></div>';
+      return '<div class="part part--closed" title="' + esc(Relations.sayClaim(part.link.claim)) + '"><span class="p-mark">' + Crew.icon('lock', 13) + '</span><span class="p-title">' + esc(Relations.sayRestricted(part.link.claim)) + '</span></div>';
     }
     var e = part.e, kind = K.KINDS[e.kind], line = describeLine(e);
     var status = kind.status && kind.status[e.fields.state];
@@ -247,12 +246,6 @@
     el.setAttribute('aria-label', sayCard(e));
     el.innerHTML = drawHolder(e) + (K.KINDS[e.kind].card === 'compact' ? '<i class="card-stock"></i>' : '') + drawCardBody(e, ctx);
     return el;
-  }
-
-  /** Returns the plugin of a name, for a claim that says who reported something. */
-  function readPluginByName(name) {
-    var id = Object.keys(K.KINDS).filter(function (k) { return K.KINDS[k].plugin.name === name; })[0];
-    return id ? K.KINDS[id].plugin : { name: name, mark: 'link', hue: null };
   }
 
   /** Returns the plugin that owns a mark. */

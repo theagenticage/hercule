@@ -33,20 +33,14 @@ window.Open = (function () {
     }).join('') + '</ol>';
   }
 
-  /** Returns where a thing sits: every place above it, by the name its kind gives that level. A thing can have several of each, and all are named. */
+  /** Returns where a thing sits: every place above it, on every path, each once, with its level and how it stands. */
   function drawPlaces(e) {
-    var byNoun = {}, order = [];
-    Relations.readAncestors(e).forEach(function (p) {
-      var noun = K[p.kind].noun;
-      if (!byNoun[noun]) { byNoun[noun] = []; order.push(noun); }
-      byNoun[noun].push(p);
-    });
-    if (!order.length) return '';
-    return '<dl class="o-places">' + order.map(function (noun) {
-      return '<dt>' + Card.esc(noun) + '</dt><dd>' + byNoun[noun].map(function (p) {
-        return '<button class="o-place" data-walk="' + p.id + '">' + Card.esc(p.title) + '</button>' + (p.fields.target ? '<small>' + Card.esc(p.fields.target) + '</small>' : '');
-      }).join('<i>·</i>') + '</dd>';
-    }).join('') + '</dl>';
+    var above = Relations.readAncestors(e);
+    if (!above.length) return '';
+    return '<section class="o-sec o-links"><h3 class="o-h">Part of</h3><ul>' + above.map(function (p) {
+      var kind = K[p.kind], status = kind.status && kind.status[p.fields.state];
+      return '<li class="o-link"><button class="o-link-go" data-walk="' + p.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(p.title) + '</span><span class="o-link-s">' + Card.esc(kind.noun) + (status ? ' · ' + Card.esc(status.word) : '') + (p.fields.target ? ' · ' + Card.esc(p.fields.target) : '') + '</span></button></li>';
+    }).join('') + '</ul></section>';
   }
 
   /** Returns how far along the source says this place is, when it says. */
@@ -58,7 +52,7 @@ window.Open = (function () {
 
   /** Returns one linked thing as a row. Who claims the link stays quiet until the row is reached for. */
   function drawLinkRow(l) {
-    if (!l.other) return '<li class="o-link o-link--closed">' + Crew.icon('lock', 13) + '<span class="o-link-t">You cannot open this</span><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small></li>';
+    if (!l.other) return '<li class="o-link o-link--closed">' + Crew.icon('lock', 13) + '<span class="o-link-t">' + Card.esc(Relations.sayRestricted(l.claim)) + '</span><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small></li>';
     var kind = K[l.other.kind], status = kind.status && kind.status[l.other.fields.state];
     return '<li class="o-link"><button class="o-link-go" data-walk="' + l.other.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(l.other.title) + '</span>' +
       (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small>' +
@@ -125,9 +119,9 @@ window.Open = (function () {
       '</div>' +
       (e.about ? '<p class="o-note">' + Card.esc(e.about) + '</p>' : '') +
       '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + Card.drawFacts(kind, f) + '<button class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</button></div>' +
-      drawReported(e) + drawPlaces(e) +
+      drawReported(e) +
       (e.signals.length ? '<section class="o-sec">' + drawSignals(e, now) + '</section>' : '') +
-      (isPlace ? drawConcerns(e) : drawLinks(e)) +
+      (isPlace ? drawConcerns(e) : '') + drawPlaces(e) + (isPlace ? '' : drawLinks(e)) +
       (isPlace ? '' : drawLedger(e));
   }
 

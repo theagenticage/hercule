@@ -75,9 +75,16 @@ window.Relations = (function () {
 
   /** Returns a sentence saying who claims a link. */
   function sayClaim(claim) {
-    if (claim.type === 'person') return (claim.by === 'you' ? 'You' : World.PEOPLE[claim.by].short) + ' linked these';
+    if (claim.type === 'person') return World.PEOPLE[claim.by].short.replace('You', World.PEOPLE.you.name) + ' linked this';
     if (claim.type === 'text') return 'Found in ' + claim.evidence;
-    return 'Reported by ' + claim.by;
+    return claim.by + ' reports this';
+  }
+
+  /** Returns how to name something the person cannot open. The source says what kind of thing it is, and nothing more. */
+  function sayRestricted(claim) {
+    var kind = K[claim.hidden];
+    var word = kind.noun.toLowerCase();
+    return (/^[aeiou]/i.test(kind.plugin.name) ? 'An ' : 'A ') + kind.plugin.name + ' ' + word + ' you cannot open';
   }
 
   /** Links two things by hand. A hint between them turns into a person's claim. */
@@ -129,5 +136,5 @@ window.Relations = (function () {
     return out;
   }
 
-  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isMentioner: isMentioner, readChildPlaces: readChildPlaces, isConfirmed: isConfirmed, sayClaim: sayClaim, linkByHand: linkByHand, drop: drop, restore: restore, buildBundles: buildBundles };
+  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isMentioner: isMentioner, readChildPlaces: readChildPlaces, isConfirmed: isConfirmed, sayClaim: sayClaim, sayRestricted: sayRestricted, linkByHand: linkByHand, drop: drop, restore: restore, buildBundles: buildBundles };
 })();

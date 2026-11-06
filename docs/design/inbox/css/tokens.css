@@ -4,25 +4,12 @@
 
 :root,
 [data-theme] {
-  /* Stock with a trace of hue. A kind picks one, so sorted cards can be told apart at a glance, the way coloured cards
-     are in a card file. Each is --stock with a little colour, so a theme keeps its character. */
-  --stock-manila: color-mix(in oklab, var(--stock) 93%, oklch(0.8 0.11 85));
-  --stock-ledger: color-mix(in oklab, var(--stock) 95%, oklch(0.76 0.025 240));
-  --stock-sage: color-mix(in oklab, var(--stock) 94%, oklch(0.78 0.07 150));
-
-  /* A card lying over the one behind it. Its shadow falls up onto that card, because --h-stand falls down and would be
-     hidden by the card in front. */
-  --h-stack-shade: oklch(0.3 0.03 70 / 0.1);
-  --h-stack: inset 0 0 0 1px var(--stock-rim), 0 -1px 0 color-mix(in oklab, var(--ink) 7%, transparent);
 
   /* The mark of a kind, in the hue its plugin declares. --mark-l and --mark-c belong to the theme, so no plugin's hue can
      be louder than a name, or unreadable, in any theme. */
   --mark-ink: color-mix(in oklab, var(--ink) 84%, transparent);
   --mark-l: 0.45;
   --mark-c: 0.17;
-
-  /* Words that step back further than --faint, for what a heading has already said. */
-  --recede: oklch(0.53 0.012 165);
 
   /* What dims the page behind an open card. In the light themes it is paper, so nothing turns grey. */
   --veil: color-mix(in oklab, var(--desk) 72%, transparent);
@@ -33,11 +20,9 @@
   --wait-due: var(--muted);
   --wait-over: var(--ink);
 
-
 }
 
 [data-theme="styles"] {
-  --recede: oklch(0.53 0.03 60);
   --mark-l: 0.43;
 }
 
@@ -45,27 +30,18 @@
 [data-theme="nile"],
 [data-theme="end-house"],
 [data-theme="blue-train"] {
-  --stock-manila: color-mix(in oklab, var(--stock) 91%, oklch(0.62 0.11 85));
-  --stock-ledger: color-mix(in oklab, var(--stock) 92%, oklch(0.62 0.05 245));
-  --stock-sage: color-mix(in oklab, var(--stock) 91%, oklch(0.6 0.08 150));
-  --h-stack-shade: oklch(0 0 0 / 0.34);
-  --h-stack: inset 0 1px 0 color-mix(in oklab, white 11%, transparent), inset 0 0 0 1px var(--stock-rim), 0 -1px 0 oklch(0 0 0 / 0.5), 0 -7px 12px -6px oklch(0 0 0 / 0.55);
   --mark-l: 0.8;
   --mark-c: 0.14;
-  --recede: oklch(0.74 0.016 70);
   --veil: var(--scrim);
 }
 
 [data-theme="orient-express"] {
 }
 [data-theme="nile"] {
-  --recede: oklch(0.75 0.018 130);
 }
 [data-theme="end-house"] {
-  --recede: oklch(0.75 0.02 10);
 }
 [data-theme="blue-train"] {
-  --recede: oklch(0.8 0.014 250);
 }
 
 /* In the dark themes the stock is lighter than --faint was set for, so words on a card take a step more ink. */
