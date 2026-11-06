@@ -129,7 +129,7 @@ window.Store = (function () {
     // The cards already showing stay. What does not fit waits in a pile on the row after them, so
     // an arrival can never swallow the card you are looking at.
     var room = Math.max(0, MOST_ROWS - piles.length - held.length);
-    if (loose.length > room) {
+    if (loose.length > room + 1) {
       var over = loose.slice(room);
       over.forEach(function (t) { used[t.id] = true; });
       cards = cards.filter(function (t) { return !used[t.id]; });
