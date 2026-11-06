@@ -31,7 +31,7 @@ window.Shell = (function () {
         waiting.map(function (w) { return waitingRow(w[0], w[1], w[2]); }).join("") + "</section>" : "") +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
       navRow("overview", "Overview", "office", selected) +
-      navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<span class="count">' + opts.inboxCount + "</span>" : "") +
+      navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<b class="count count--plain">' + opts.inboxCount + "</b>" : "") +
       navRow("workflows", "Workflows", "workflows", selected) +
       navRow("discussions", "Discussions", "discussions", selected) +
       navRow("wiki", "Wiki", "wiki", selected) +

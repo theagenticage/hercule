@@ -85,7 +85,9 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 ## Settled with the Inbox session
 
 - Intake leaves the sidebar and sits behind the Inbox, as the Office sits behind the Overview: `Inbox | Intake` in the pill. The sidebar reads Overview, Inbox, Workflows, Discussions, Wiki.
-- On Work a provenance mark is secondary: 11px, `--faint`. In the Inbox it is the identity: 20px, in ink, or in a hue the plugin declares through theme-owned tokens.
+- Marks. On Work a mark is secondary: 11px, `--faint`. In the Inbox a mark is the identity: 20px, in ink at 84%, or in a plugin's hue through the theme-owned `--mark-l` and `--mark-c`. Solid marks are drawn at 90% size, so a heavy logo and a line logo look the same size.
+- The Inbox's sidebar count is a plain grey number, not marigold: it counts what has outlasted its patience plus what Hercule noticed, and a count that is always marigold nags. If something is new since the last visit, one 6px marigold dot stands before the number. Waiting on you keeps its marigold, because that really is addressed to you now.
+- In an Inbox stack a colleague's head stands at the card's left, over the gutter of the card behind it. On Work it stays at the right.
 - `--h-stack`, the stock variants and `--lacquer-*` stay in the Inbox's own tokens. Work takes lacquer from there if it ever needs "Hercule's own".
 - The Inbox keeps the page sentence on the pill's row at 14px, because that page never scrolls. Same voice, different size.
 - The user is Noa, in both drawings.
