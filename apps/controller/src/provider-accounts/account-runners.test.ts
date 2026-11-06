@@ -158,7 +158,7 @@ describe("ProviderAccountRunners.list", () => {
           const before = yield* listRunners(account.id);
           yield* withTransaction(
             sql,
-            accounts.setIdentityIfUnset(account.id, "me@example.com", undefined, EARLIER),
+            accounts.setIdentityIfUnset(account.id, "me@example.com", undefined, EARLIER, EARLIER),
           );
           return { available: [before, yield* listRunners(account.id)], same, unnamed };
         }),

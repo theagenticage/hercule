@@ -29,7 +29,11 @@ export interface StoredProviderAccount {
    * probe that reports another person is stored as unauthenticated.
    */
   readonly identity: string | null;
-  /** The plan the account is on. Set the same way as `identity`. */
+  /**
+   * The plan the account is on, as the newest matching probe reported it
+   * (null when that probe reported none). Set with `identity` by the first
+   * probe, then refreshed by every later one (`refreshPlanLabel`).
+   */
   readonly planLabel: string | null;
   /** The qualified id of the harness a session uses when it names none. */
   readonly defaultHarnessId: string;
@@ -343,14 +347,15 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Clears the account's identity and plan label, so the next `ok` probe
-     * that reports an identity sets them again. Used when the account gets a
-     * new credential, which may belong to someone else. Does nothing when the
-     * account does not exist.
+     * Clears the account's identity, plan label and the time the plan was
+     * probed, so the next `ok` probe that reports an identity sets them again.
+     * Used when the account gets a new credential, which may belong to someone
+     * else. Does nothing when the account does not exist.
      */
     clearIdentity: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE provider_accounts SET identity = NULL, plan_label = NULL, updated_at = ${at}
+        UPDATE provider_accounts
+        SET identity = NULL, plan_label = NULL, plan_label_probed_at = NULL, updated_at = ${at}
         WHERE id = ${uuidFromString(id)}
       `),
 
@@ -570,20 +575,49 @@ const make = Effect.gen(function* () {
 
     /**
      * Sets the account's identity and plan label, only when the account has no
-     * identity yet. It is one statement, so when two first sign-ins race, the
-     * second one changes nothing. The caller reads the account afterwards to
-     * learn which identity won.
+     * identity yet, and records `probedAt` as the time of the probe that set the
+     * plan. It is one statement, so when two first sign-ins race, the second one
+     * changes nothing. The caller reads the account afterwards to learn which
+     * identity won.
      */
     setIdentityIfUnset: (
       id: string,
       identity: string,
       planLabel: string | undefined,
       at: string,
+      probedAt: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE provider_accounts
-        SET identity = ${identity}, plan_label = ${planLabel ?? null}, updated_at = ${at}
+        SET identity = ${identity}, plan_label = ${planLabel ?? null},
+            plan_label_probed_at = ${probedAt}, updated_at = ${at}
         WHERE id = ${uuidFromString(id)} AND identity IS NULL
+      `),
+
+    /**
+     * Sets the account's plan label to what a probe reported (`undefined`
+     * clears it), only when the probe was sent after the probe that set the
+     * stored plan. An account whose plan has no probe time counts as older
+     * than every probe. It is one statement, so the comparison and the write
+     * cannot be separated by another probe's write.
+     *
+     * Snapshots are only ordered per harness and runner, so the answers of
+     * two runners can arrive out of order, and the time decides which one is
+     * the newest. The account's `updated_at` changes only when the plan does.
+     */
+    refreshPlanLabel: (
+      id: string,
+      planLabel: string | undefined,
+      probedAt: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE provider_accounts
+        SET plan_label = ${planLabel ?? null},
+            plan_label_probed_at = ${probedAt},
+            updated_at = CASE WHEN plan_label IS ${planLabel ?? null} THEN updated_at ELSE ${at} END
+        WHERE id = ${uuidFromString(id)}
+          AND (plan_label_probed_at IS NULL OR julianday(plan_label_probed_at) < julianday(${probedAt}))
       `),
 
     /**

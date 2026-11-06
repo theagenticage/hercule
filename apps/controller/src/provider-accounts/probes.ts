@@ -287,6 +287,9 @@ const make = Effect.gen(function* () {
      *
      * One account is one person. An `ok` result that carries an identity sets
      * the account's identity and plan label when the account has none yet.
+     * Every later `ok` result that carries the account's identity sets the
+     * plan label to the one it reports, or clears it when it reports none,
+     * unless a probe sent later already set the plan (`refreshPlanLabel`).
      * When the identity differs from the account's, the snapshot is stored as
      * `unauthenticated` with a message that says who is signed in and who the
      * account is, so placement never uses that runner. The identity write and
@@ -347,12 +350,24 @@ const make = Effect.gen(function* () {
               reported,
               result.auth.planLabel,
               yield* nowIso,
+              sentAt,
             );
             accountIdentity = Option.getOrNull(
               Option.map(yield* accounts.one(providerAccountId), (winner) => winner.identity),
             );
           }
           const judged = judgeIdentity(result, accountIdentity);
+          if (judged.auth.status === "ok" && reported !== undefined) {
+            // `judged` is still `ok` only when the reported person is the
+            // account's person. Plans change and labels improve, so the
+            // newest such probe decides the plan, including "no plan".
+            yield* accounts.refreshPlanLabel(
+              providerAccountId,
+              judged.auth.planLabel,
+              sentAt,
+              yield* nowIso,
+            );
+          }
           yield* accounts.recordSnapshot(providerAccountId, harnessId, runnerId, judged, sentAt);
           if (
             stamp.readUsage &&

@@ -9,7 +9,7 @@ import { Effect, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ProbeResult } from "@hercule/protocol";
-import { withTransaction } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { ProviderAccountProbes, type ProbeOutcome } from "./probes";
 import { providerAccountRepository } from "./repository";
 import {
@@ -329,6 +329,295 @@ describe("recording a probe", () => {
     );
 
     expect(account.identity).toBeNull();
+  });
+});
+
+/** A probe stamp for a probe sent `seconds` after `SENT_AT`. */
+const stampAfter = (seconds: number, credentialGeneration = 0) => ({
+  sentAt: new Date(Date.parse(SENT_AT) + seconds * 1000).toISOString(),
+  credentialGeneration,
+  readUsage: false,
+});
+
+/** Reads the time of the probe that set the account's plan, which no account read returns. */
+const readPlanProbedAt = (accountId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ plan_label_probed_at: string | null }>`
+      SELECT plan_label_probed_at FROM provider_accounts WHERE id = ${uuidFromString(accountId)}
+    `;
+    return rows[0]?.plan_label_probed_at ?? null;
+  });
+
+describe("the account's plan", () => {
+  it("is refreshed by a later probe that reports the same person, whatever the letter case", async () => {
+    const plans = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "self_serve_business_prolite"),
+          STAMP,
+        );
+        const first = (yield* readAccount(account.id)).planLabel;
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("A@Work.com", "Business Premium"),
+          stampAfter(10),
+        );
+        return { first, second: (yield* readAccount(account.id)).planLabel };
+      }),
+    );
+
+    expect(plans).toEqual({ first: "self_serve_business_prolite", second: "Business Premium" });
+  });
+
+  it("is not overwritten by an older probe that another runner answers late", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const laptop = yield* addRunner("laptop");
+        const desktop = yield* addRunner("desktop");
+        yield* probes.recordProbe(
+          laptop,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Pro"),
+          STAMP,
+        );
+        yield* probes.recordProbe(
+          laptop,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          stampAfter(20),
+        );
+        // The desktop's probe was sent between the two, and answers last.
+        const late = yield* probes.recordProbe(
+          desktop,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Pro"),
+          stampAfter(10),
+        );
+        return {
+          late: requireStored(late),
+          plan: (yield* readAccount(account.id)).planLabel,
+        };
+      }),
+    );
+
+    expect(outcome.late.auth.status).toBe("ok");
+    expect(outcome.plan).toBe("Max");
+  });
+
+  it("is cleared by a later probe that reports the same person and no plan", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          STAMP,
+        );
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com"),
+          stampAfter(10),
+        );
+        return yield* readAccount(account.id);
+      }),
+    );
+
+    expect(outcome).toMatchObject({ identity: "a@work.com", planLabel: null });
+  });
+
+  it("is set by a probe after the upgrade, for an account whose plan has no probe time", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const sql = yield* SqlClient.SqlClient;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        // An account stored by a build that did not keep the probe time.
+        yield* withTransaction(
+          sql,
+          sql`
+            UPDATE provider_accounts
+            SET identity = 'a@work.com', plan_label = 'self_serve_business_prolite'
+            WHERE id = ${uuidFromString(account.id)}
+          `,
+        );
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Business Premium"),
+          STAMP,
+        );
+        return {
+          plan: (yield* readAccount(account.id)).planLabel,
+          probedAt: yield* readPlanProbedAt(account.id),
+        };
+      }),
+    );
+
+    expect(outcome).toEqual({ plan: "Business Premium", probedAt: SENT_AT });
+  });
+
+  it("is untouched by a probe that reports someone else", async () => {
+    const plan = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          STAMP,
+        );
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("b@home.com", "Free"),
+          stampAfter(10),
+        );
+        return (yield* readAccount(account.id)).planLabel;
+      }),
+    );
+
+    expect(plan).toBe("Max");
+  });
+
+  it("is untouched by a probe that is not ok, or reports no identity", async () => {
+    const plan = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          STAMP,
+        );
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          { ...SIGNED_IN, auth: { status: "unauthenticated", identity: "a@work.com" } },
+          stampAfter(10),
+        );
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          { ...SIGNED_IN, auth: { status: "ok" } },
+          stampAfter(20),
+        );
+        return (yield* readAccount(account.id)).planLabel;
+      }),
+    );
+
+    expect(plan).toBe("Max");
+  });
+
+  it("is untouched by a superseded answer: one older than the stored snapshot, or one sent with an old credential", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          stampAfter(10),
+        );
+        const older = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Pro"),
+          STAMP,
+        );
+        yield* withTransaction(sql, accounts.advanceCredentialGeneration(account.id, SENT_AT));
+        const oldCredential = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Free"),
+          stampAfter(30, 0),
+        );
+        return { older, oldCredential, plan: (yield* readAccount(account.id)).planLabel };
+      }),
+    );
+
+    expect(outcome.older).toEqual({ _tag: "superseded" });
+    expect(outcome.oldCredential).toEqual({ _tag: "superseded" });
+    expect(outcome.plan).toBe("Max");
+  });
+
+  it("starts again with a new credential: the probe time is cleared with the identity", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        const otherRunner = yield* addRunner("desktop");
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com", "Max"),
+          stampAfter(100),
+        );
+        const before = yield* readPlanProbedAt(account.id);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* accounts.clearIdentity(account.id, SENT_AT);
+            yield* accounts.advanceCredentialGeneration(account.id, SENT_AT);
+          }),
+        );
+        const cleared = yield* readPlanProbedAt(account.id);
+        // The new credential's first probe was sent before the old plan's time.
+        yield* probes.recordProbe(
+          otherRunner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("b@home.com", "Pro"),
+          stampAfter(50, 1),
+        );
+        return { before, cleared, account: yield* readAccount(account.id) };
+      }),
+    );
+
+    expect(outcome.before).not.toBeNull();
+    expect(outcome.cleared).toBeNull();
+    expect(outcome.account).toMatchObject({ identity: "b@home.com", planLabel: "Pro" });
   });
 });
 

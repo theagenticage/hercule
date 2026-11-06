@@ -254,7 +254,7 @@ describe("a catalog read", () => {
         const account = yield* addKeyAccount();
         yield* withTransaction(
           sql,
-          accounts.setIdentityIfUnset(account.id, "owner@example.com", "Max", sentAt(0)),
+          accounts.setIdentityIfUnset(account.id, "owner@example.com", "Max", sentAt(0), sentAt(0)),
         );
         const runner = yield* addRunner("laptop");
         yield* recordRead(runner, account.id, signedInWith(model("a")), 1);
