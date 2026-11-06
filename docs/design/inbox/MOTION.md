@@ -27,8 +27,8 @@ There is no peek any more: every card is whole. The heading stays because other 
 
 | Part | Trigger | Motion |
 |---|---|---|
-| Actions | Pointer enters a card or an asking row | Fade in over `--m-quick`. On a rich card they take the identifier's place on the head line. On a compact card and a row they take the line below the sentence or replace it, and the words step back |
-| Height | The same | The sheet's shadow goes to `--h-hover` over `--m-quick`. Nothing moves |
+| Actions | Pointer enters a row, a request or an asking linked row | Fade in over `--m-quick`, at the end of a line. On a row they lie over the end of the first line on a soft fade, so no height changes. On a request and a linked row the words end with an ellipsis before them |
+| Surface | The same | A row takes a faint fill. A request rises from its outline to the stock with `--h-hover`, over `--m-quick`. Nothing moves |
 | Who claims a link | Pointer on a link row in the details | The claim fades in over `--m-quick` |
 
 ### A signal landing
@@ -53,15 +53,15 @@ One click, one chain: hand, weight, flight, receipt. The cause always comes befo
 | Time | Part | Motion |
 |---|---|---|
 | 0 | The count | The sidebar's digit rolls by 4px, 260ms: the card has left your hands |
-| 0 | The colleague | The wait goes, and the colleague rises 26px on `hand` while the card still stands, over its top edge, with its paws coming onto the edge at 30ms |
-| 170ms | The card | Only now gives up its weight: one impulse of 110 on `hand` sinks it 1.5px, and the same impulse of 150 dips the colleague, who recovers. The shadow goes flat over `--m-quick`, the stock over `--m-long`. The sheet survives the redraw, so the change is a real transition |
+| 0 | The colleague | The wait goes, and the colleague rises 22px on `hand` into its place at the end of the first line. Rows have no free edge, so this is the same on a row and on a request |
+| 170ms | The colleague | Takes the weight: an impulse of 150 on `hand` dips it, and it recovers |
 | 170ms | The sentence | Rolls to "Agent review has it" |
 | 170ms | The mark | The card's own mark lifts off and flies along an arc to Overview's icon, 420 to 760ms by distance, shrinking to 55%. A dimmer mark stays behind |
 | On arrival | Overview | The mark stays solid until contact. Then the icon takes the same small knock, and a wash of the accent fades over 640ms: something received it |
 
-Taking it on yourself is the same with the marigold tab.
+Taking it on yourself is the same with your monogram.
 
-**Undo plays it backwards.** The mark flies home from Overview in 240ms, growing back to its size, so the page answers at once. On arrival the card stands up with an upward impulse, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks.
+**Undo plays it backwards.** The mark flies home from Overview in 240ms, growing back to its size, so the page answers at once. On arrival the card stands up with an upward impulse, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks. The flight is short, so the page answers at once.
 
 **From the open card, by pointer,** the card folds home first, and the chain starts as it lands, so the move plays on the card where it lies. **By keys,** the sheet walks on to the next card and the chain plays behind it: the keys are for rhythm.
 

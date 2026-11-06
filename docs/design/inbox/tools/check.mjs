@@ -130,6 +130,44 @@ await check("a move on a scrolled page keeps the scroll", async () => {
   assert((await p.evaluate(() => document.getElementById("page").scrollTop)) > 800, "the page jumped");
   return p;
 });
+await check("the menus are readable, own the keys, and a filter tells the truth", async () => {
+  const p = await open("");
+  await p.evaluate(() => Keys.focus("pr-6209"));
+  await p.click('[data-tool="filter"]'); await p.waitForTimeout(150);
+  const cut = await p.evaluate(() => [...document.querySelectorAll("#toolmenu .menu-row span")].filter((s) => s.scrollWidth > s.clientWidth + 1).length);
+  assert(!cut, `${cut} menu rows are cut`);
+  const n = await count(p);
+  await p.keyboard.press("e"); await p.waitForTimeout(250);
+  assert((await count(p)) === n, "a key went through the open menu");
+  await p.click('[data-filter="owner"][data-value="mine"]'); await p.waitForTimeout(400);
+  assert(await p.evaluate(() => document.getElementById("clear").hidden), "a filter raised the sunrise");
+  await p.click("[data-chip]"); await p.waitForTimeout(300);
+  return p;
+});
+await check("a move on a linked row keeps every row in its place", async () => {
+  const p = await open("");
+  const order = () => p.evaluate(() => [...document.querySelectorAll("#work .card--rich")].map((c) => c.dataset.id).join());
+  const before = await order();
+  await p.evaluate(() => Moves.perform("take", "pr-6238")); await p.waitForTimeout(500);
+  assert((await order()) === before, "taking a row reordered the work");
+  return p;
+});
+await check("hovering a row changes no height", async () => {
+  const p = await open("", 1100, 800);
+  const h = await p.evaluate(() => document.getElementById("page").scrollHeight);
+  const a = await p.evaluate(() => { const r = document.querySelector("#work .card--rich .c-title").getBoundingClientRect(); return { x: r.left + 30, y: r.top + 6 }; });
+  await p.mouse.move(a.x, a.y); await p.waitForTimeout(200);
+  assert((await p.evaluate(() => document.getElementById("page").scrollHeight)) === h, "hover moved the page");
+  return p;
+});
+await check("loading shifts nothing", async () => {
+  const p = await open("scene=loading&hold=1000");
+  const read = () => p.evaluate(() => [...document.querySelectorAll(".block, #requests .card, .noticed")].map((c) => Math.round(c.getBoundingClientRect().top)).join());
+  const held = await read();
+  await p.waitForTimeout(1600);
+  assert(held === (await read()), "the words moved the page");
+  return p;
+});
 await check("a click on a title never makes a move", async () => {
   const p = await open("");
   const a = await point(p, "pr-6213");

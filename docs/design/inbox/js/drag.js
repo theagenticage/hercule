@@ -82,7 +82,9 @@ window.Drag = (function () {
     }
     // Over another card, letting go links the two.
     var under = !best && document.elementFromPoint(ev.clientX, ev.clientY);
-    var card = under && under.closest && under.closest('#page .card[data-id]');
+    // The rows set in under a card are part of the same target, so a drop anywhere on the thing counts.
+    var bundle = under && under.closest && under.closest('#page .bundle');
+    var card = bundle && bundle.querySelector('.card[data-id]');
     if (card === source) card = null;
     if (card !== onto) {
       if (onto) onto.classList.remove('is-link-target');

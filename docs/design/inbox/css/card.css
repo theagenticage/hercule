@@ -7,15 +7,19 @@
 
 /* A row of lasting work. */
 .card--rich { position: relative; display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; padding: 11px 16px; }
-.card--rich.is-hover { background: var(--hover); }
+.card--rich { --row-hover: color-mix(in oklab, var(--ink) 5%, var(--stock)); }
+.card--rich.is-hover { background: var(--row-hover); }
 .card--rich.is-focus, .card--rich:focus-visible { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .c-rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 20px; }
 .c-mark { display: inline-grid; place-items: center; flex: none; }
 .c-status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: var(--w-medium) var(--t-13) / 20px var(--font-ui); color: var(--ink); white-space: nowrap; }
 .c-status > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.card--rich .c-title { margin: 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.c-context { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin-top: 2px; color: var(--muted); font: var(--type-summary); }
+.card--rich .c-title { margin: 0; font: var(--w-medium) 15px / 21px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.c-context { display: flex; align-items: center; gap: 0 10px; min-width: 0; margin-top: 2px; color: var(--muted); font: var(--type-summary); white-space: nowrap; overflow: hidden; }
+.c-context > span { flex: none; }
+.c-context > .c-news { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .c-context > span:not(:last-child)::after { content: "·"; margin-left: 10px; color: var(--faint); }
+.c-context > span:not(:last-child)::after { flex: none; }
 .c-news small { color: var(--faint); font: inherit; font-variant-numeric: tabular-nums; }
 .c-news.tone-bad { color: var(--fail-ink); }
 .c-news.tone-good { color: var(--ok); }
@@ -33,9 +37,12 @@
 .card--compact .c-mark { grid-column: 1; grid-row: 1; height: 18px; }
 .card--compact .c-title { grid-column: 2; grid-row: 1; margin: 0; font: var(--type-card); letter-spacing: -0.003em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .card--compact .c-pace { grid-column: 3; grid-row: 1; line-height: 18px; }
-.card--compact > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
-.card--compact.is-hover > .card-stock { box-shadow: var(--h-hover); }
-.card--compact.is-focus > .card-stock, .card--compact:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
+/* A request has no surface of its own at rest: a line round it, and a mark at muted strength. Only places stand on the desk. */
+.card--compact { --mark-ink: var(--muted); }
+.card--compact > .card-stock { background: transparent; box-shadow: inset 0 0 0 1px var(--line-soft); transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease); }
+.card--compact > .card-stock::before { display: none; }
+.card--compact.is-hover > .card-stock { background: var(--stock); box-shadow: var(--h-hover); }
+.card--compact.is-focus > .card-stock, .card--compact:focus-visible > .card-stock { background: var(--stock); box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
 .c-under { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; margin-top: 1px; color: var(--muted); font: var(--type-summary); }
 .c-shape { display: inline-flex; flex: none; }
 .c-roll { position: relative; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -49,11 +56,10 @@
 /* The moves. On a row they take the end of the first line. On a request they take the end of the line under the title, and the
    words there end with an ellipsis, so the title and the reason stay readable. */
 .c-acts { position: absolute; display: flex; align-items: center; justify-content: flex-end; gap: 2px; opacity: 0; pointer-events: none; transition: opacity var(--m-quick) var(--m-ease); }
-.card--rich .c-acts { top: 8px; right: 10px; }
+.card--rich .c-acts { top: 8px; right: 10px; padding-left: 24px; background: linear-gradient(90deg, transparent, var(--row-hover) 18px); }
 .card--compact .c-acts { right: 6px; bottom: 4px; }
 .card.is-hover .c-acts, .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 .card--rich.is-hover .c-end, .card--rich.is-focus .c-end { opacity: 0; }
-.card--rich.is-hover .c-title, .card--rich.is-focus .c-title { margin-right: var(--acts-w, 190px); -webkit-line-clamp: 1; }
 .card--compact.is-hover .c-under, .card--compact.is-focus .c-under { margin-right: var(--acts-w, 190px); }
 .card--compact.is-hover .c-where, .card--compact.is-focus .c-where { display: none; }
 
@@ -112,26 +118,28 @@
 .part.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .p-mark { display: inline-grid; place-items: center; height: 16px; }
 .p-title { min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.part.is-asking .p-title { font-weight: var(--w-medium); }
+.p-ask { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.p-ask .p-said { flex: 0 1 auto; min-width: 0; color: var(--ink); font-weight: var(--w-medium); overflow: hidden; text-overflow: ellipsis; }
+.p-ask .p-said.tone-bad { color: var(--fail-ink); }
+.p-ask .p-said.tone-good { color: var(--ok); }
+.part.is-asking .p-title { flex: 0 1 auto; color: var(--muted); }
 .part--quiet { grid-template-columns: 16px minmax(0, 1fr) auto; }
 .part--quiet .p-title { color: var(--muted); }
 .part--quiet .p-said { flex: none; color: var(--faint); white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .part--closed { padding: 3px 4px; color: var(--faint); }
 .part--closed .p-title { color: var(--faint); }
 .p-line { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
-.p-line .p-said { flex: 0 1 auto; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
-.p-news { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.p-news.tone-bad { color: var(--fail-ink); }
-.p-news.tone-good { color: var(--ok); }
+.p-news { flex: 0 1000 auto; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.p-news::before { content: "·"; margin-right: 6px; color: var(--faint); }
 .is-leaving-copy, .is-leaving-copy * { pointer-events: none; }
 .p-id { flex: 0 1000 auto; min-width: 0; color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
-.p-id::before { content: "·"; margin-right: 6px; }
+.p-id { flex: 0 1000 auto; white-space: nowrap; }
 .bundle.is-carried .tucked { opacity: 0.35; }
 .part .c-pace { grid-column: 3; grid-row: 1; }
 .part .c-acts { top: 0; right: 4px; }
 .part.is-hover .c-acts, .part.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 .part.is-hover .c-pace, .part.is-focus .c-pace { opacity: 0; }
-.part.is-hover .p-title, .part.is-focus .p-title { margin-right: var(--acts-w, 190px); }
+.part.is-hover .p-ask, .part.is-focus .p-ask { margin-right: var(--acts-w, 190px); }
 
 /* A reference found in text: only a hint, until a person says so. It sits inside what it belongs to. */
 .hint { display: flex; align-items: center; gap: 5px; margin: -5px 0 0 136px; padding: 0 16px 10px 16px; color: var(--faint); font: var(--type-meta); }
@@ -181,56 +189,20 @@
 
 /* At one line a card shows its title and nothing else. */
 
-/* What Hercule noticed: one card of the page's own stock, with him behind its top edge, handing it to you. */
-.noticed {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: stretch;
-  min-height: 60px;
-  margin: 0 0 26px;
-  color: var(--ink);
-}
+/* What Hercule noticed: one card of the page's own stock, with him behind its top edge. Each thing is one line: what, and why. */
+.noticed { position: relative; isolation: isolate; margin: 14px 0 26px; padding: 5px 0; color: var(--ink); }
 .noticed[hidden] { display: none; }
 .noticed .card-holder { right: 16px; }
 .noticed .card-paws { right: 19px; }
-.plaque {
-  position: relative;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  column-gap: 10px;
-  align-content: start;
-  padding: 10px 12px;
-  border-radius: var(--card-r);
-  color: var(--ink);
-  cursor: default;
-  outline: none;
-  transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
-}
-.plaque.is-hover { background: var(--hover); }
-.pl-marks { position: relative; grid-row: 1 / 3; align-self: start; width: 22px; height: 20px; }
+.plaque { position: relative; min-width: 0; display: grid; grid-template-columns: 18px auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-height: 30px; padding: 0 16px; color: var(--ink); cursor: default; outline: none; transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease); }
+.plaque.is-hover { background: color-mix(in oklab, var(--ink) 5%, var(--stock)); }
+.plaque:first-of-type { border-radius: var(--card-r) var(--card-r) 0 0; }
+.pl-marks { position: relative; width: 18px; height: 18px; }
 .pl-mark { display: block; line-height: 0; }
-.pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--stock); box-shadow: 0 0 0 1px var(--stock-rim); }
-.pl-title {
-  margin: 0;
-  font: var(--type-card);
-  letter-spacing: -0.003em;
-  text-wrap: pretty;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-.pl-why {
-  color: var(--muted);
-  font: var(--type-summary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.plaque .pl-acts { position: absolute; bottom: 7px; right: 6px; width: auto; height: 22px; margin: 0; }
+.pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--stock); box-shadow: 0 0 0 1px var(--stock); }
+.pl-title { margin: 0; font: var(--type-card); letter-spacing: -0.003em; white-space: nowrap; }
+.pl-why { min-width: 0; color: var(--muted); font: var(--type-summary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plaque .pl-acts { top: 2px; right: 10px; width: auto; height: 26px; margin: 0; }
 .plaque.is-hover .pl-why, .plaque.is-focus .pl-why { margin-right: var(--acts-w, 190px); }
 .plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
 .plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }

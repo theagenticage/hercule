@@ -6,7 +6,7 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 
 ## The rules
 
-1. **Two shapes, two weights.** Lasting work lies wide in rich cards. Small requests lie in a narrow column of compact cards. The shape of a card says how much attention it deserves, with no label to read.
+1. **Two shapes, two weights.** Lasting work lies wide, as rows on the raised surface of its place. Small requests lie in a narrow column of small outlined cards. The shape says how much attention a thing deserves, with no label to read.
 2. **Everything is visible, and the page scrolls.** Nothing is folded to save room. A count never has to say how much is hiding.
 3. **A stack needs a reason you can see.** Only things directly linked by a confirmed claim sit together, and every part is there to read.
 4. **Things stay where they are.** A signal never moves a card. A card someone holds keeps its place until your next visit. Only your own move changes what is under the pointer.
@@ -17,20 +17,22 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 ## The page
 
 ```
-┌ pill: Inbox  Cards  Intake ┐ [Group by Place] [Filter]                          ?
- Hercule noticed                        Hercule, over the edge   Requests 14  [Oldest first]
- ┌───────────────────────────────────────────────────────┐    ┌───────────────────────┐
- │ noticed         noticed          noticed              │    │ title              5d │
- └───────────────────────────────────────────────────────┘    │ Juno · storefront-web │
- Ongoing  8 waiting                                           └───────────────────────┘
- ┌───────────────────────────────────────────────────────┐    ┌───────────────────────┐
- │ Payment retries  At risk         ▬▬▬▭▭ 4 of 9  14 Nov │    │ title              5d │
- │ A checkout that never drops a basket · Shop           │    │ ⊖ Felix asked again   │
- ├───────────────────────────────────────────────────────┤    └───────────────────────┘
- │ ◐ In Review   Title                               ID  │    ┌───────────────────────┐
- │               Milestone, date · what happened         │    │ …                     │
- │               [mark] Linked title                 1d  │    └───────────────────────┘
- │                      What it asks  ⊗ what happened    │     With someone else  15
+┌ pill: Inbox  Cards  Intake ┐ [Group by Place] [Filter]                            ?
+                                      Hercule, over the edge
+ ┌───────────────────────────────────────────────────────┐     Requests 14  [Oldest first]
+ │ [mark] What he noticed     Why                        │    ┌───────────────────────┐
+ │ [mark] What he noticed     Why                        │    │ title              5d │
+ │ [mark] What he noticed     Why                        │    │ Juno · storefront-web │
+ └───────────────────────────────────────────────────────┘    └───────────────────────┘
+ Ongoing                                                      ┌───────────────────────┐
+ ┌───────────────────────────────────────────────────────┐    │ title              5d │
+ │ Payment retries  At risk         ▬▬▬▭▭ 4 of 9  14 Nov │    │ ⊖ Felix asked again   │
+ │ A checkout that never drops a basket · Shop           │    └───────────────────────┘
+ ├───────────────────────────────────────────────────────┤    ┌───────────────────────┐
+ │ ◐ In Review   Title                               ID  │    │ …                     │
+ │               Milestone, date · what happened         │    └───────────────────────┘
+ │               [mark] What it asks of you          1d  │     With someone else  15
+ │                      ⊗ Its title #6238 storefront-web │
  └───────────────────────────────────────────────────────┘
 ```
 
@@ -38,17 +40,17 @@ The wide side takes what is left and the narrow column is 320px, 32px apart, 32p
 
 | Side | Title | Holds | Order |
 |---|---|---|---|
-| Top | none | What Hercule noticed, on one card he hands you | As noticed |
+| Top | none | What Hercule noticed: one line each, what and why, on one card he hands you | As noticed |
 | Wide | **Ongoing** | Lasting work: tickets, errors, orders, as rows on the surface of each place | Places in trouble first, then by date. In a place, what has a part asking comes first |
 | Narrow | **Requests** | Small things asked of you: review requests that stand alone, mail, mentions | Oldest first, or mine first, or by place |
 
-The small numbers add up: `Requests 14` and `Ongoing 8 waiting` make the 22 in the sidebar.
+The sidebar's number counts everything with a clock on it, on both sides. Requests shows its own small count. Nothing else on the page is counted.
 
 **Group by** and **Filter** are the same plain tools Work has, on the top bar. Group by offers `Place`, the usual home of each kind, then every kind of place above what lies there, by the name its kind declares, then status. Filter offers whose it is, then every place on the page. An active filter is a chip that can be removed. External hierarchy is context for grouping and filtering, and nothing more.
 
 **Mine and others.** Requests are mostly other people's. Something of yours says `yours` beside its place, and Filter shows only yours or only theirs. Your own pull requests nearly always ride on a ticket, so they are on the wide side, marked `Yours`.
 
-What Hercule noticed lies on one card of the page's own stock, with ink words and `--h-rest`. He stands behind its top edge at the right with his paws on it, the same blue head with the hat that Work draws. So it reads as a colleague handing you something, and it needs no label.
+What Hercule noticed lies on one card of the page's own stock, with ink words and `--h-rest`: one line each, what and why, so nothing is cut and it reads as a note, not as tiles. He stands behind its top edge at the right with his paws on it, the same blue head with the hat that Work draws. So it reads as a colleague handing you something, and it needs no label.
 
 ## The stack
 
@@ -83,16 +85,15 @@ A place is an ordinary entity that nothing has made a card of. It has a title, a
 
 ## Card anatomy
 
-A place is one surface with Work's 12px corner and `--h-rest`. Its work lies on it as rows. A request is a small card of its own. Type: place 16/22 semibold, status 13/20 medium, row title 14/20 medium, request title 13/18 medium, summary 12/16, meta 11/16.
+A place is one raised surface with Work's 12px corner and `--h-rest`, and its work lies on it as rows. Only places stand on the desk. A request has no surface at rest: a hairline round it and a mark at muted strength, and it rises to the stock under the pointer. Type: place 18/24 semibold, status 13/20 medium, row title 15/21 medium, request title 13/18 medium, summary 12/16, meta 11/16.
 
 ```
  a row, on the surface of its place             a request
  ┌───────────────────────────────────────────┐  ┌───────────────────────────────┐
  │ ◐ In Review   Title                    ID │  │ [mark] Title, up to        5d │
- │               Milestone, date · Tessa     │  │        two lines              │
- │               commented 1d                │  │        Juno · storefront-web  │
- │               [mark] Linked title      1d │  └───────────────────────────────┘
- │                      What it asks ⊗ news  │
+ │               Milestone · what happened   │  │        two lines              │
+ │               [mark] What it asks      1d │  │        Juno · storefront-web  │
+ │                      ⊗ Title #6238 repo   │  └───────────────────────────────┘
  └───────────────────────────────────────────┘
 ```
 
@@ -103,6 +104,7 @@ A place is one surface with Work's 12px corner and `--h-rest`. Its work lies on 
 | Title | The entity | Two lines at most, all of it when open |
 | Sentence | `reasons`, `person` | The latest signal, as a human sentence with the person in it, and how long ago. On a request the usual one needs only a name, because the column's title says what they are. A lasting thing that has only been assigned says nothing |
 | Wait | `pace`, `patience` | On what has a clock. Ink and weight only, measured against patience: `--wait-fresh`, `--wait-recent`, `--wait-due`, `--wait-over` |
+| Whose | `person`, `owner` | On a row, a colleague's name comes first on the second line: `Tessa's`. Your own work needs no name, and a linked row of yours says `yours` |
 | Place | `section`, `home` | On a row, the next places below the one it is shown under, such as its milestone, on every path. On a request, its home |
 | Identifier | `identifier` | Quiet at the end of a row. On a request it waits for the open card |
 | Facts | `facts` | On the place line. Priority bars wait for the open card |
@@ -129,27 +131,30 @@ Every kind is one table in `js/kinds.js`. Places are kinds too. Here are four si
 | Pace, patience | fast, 24h | slow, 14 days | fast, 12h | slow, 5 days |
 | Identifier | `#{number}` | `{key}` | `{key}` | `{key}` |
 | Person, owner | author, author | assignee, assignee | none, assignee | none, assignee |
-| Status | Open, Checks failed, Changes requested, Approved, Draft, Merged | Triage, Backlog, Todo, In Progress, In Review, Done | Unresolved, Came back, Resolved | Waiting for sign-off, Held at the quay |
-| Facts | diff, files | priority, | events, shoppers | amount, due |
+| Status | Open, Checks failed, Changes requested, Approved, Draft, Merged | Triage, Backlog, Todo, In Progress, In Review, Done | Unresolved, Came back, Resolved | Sign-off, Held |
+| Facts | diff, files | priority | events, shoppers | amount, due |
 | Part of (`home` first) | Repository | Project, Milestone, Team, Initiative through its project | Project | Delivery round, Site through its round |
 | Section | none | Milestone | none | none |
 | Place status | none | On track, At risk, Off track | none | Receiving |
 | Place progress | none | when reported | none | when reported |
-| Links it reports | to tickets, in text | attachments to pull requests | to tickets | none: only a person links it |
+| Links it reports | references in text | attachments to pull requests | none here: only a person links it | none: only a person links it |
+| Connect line | Reviews people ask of you | Tickets, with their projects and milestones | Errors assigned to you | Orders waiting for your sign-off |
 
 ```js
 'linear/issue': {
   card: 'rich',            // rich, compact: how much room it deserves
   noun: 'Issue',
-  plugin: { name: 'Linear', mark: 'linear', hue: 277 },
+  plugin: { name: 'Linear', mark: 'linear', hue: 277 }, // solid: true draws a heavy mark a little smaller
   pace: 'slow',            // fast has a clock; slow does not
   patience: 336,           // hours before a wait counts as due
   identifier: '{key}',
+  reference: 'title',      // optional: how a line points at it, when the identifier is not a name
   person: 'assignee',      // a field, or null
   owner: 'assignee',       // the field that says it is yours
   home: 'linear/project',  // the kind of place it is usually grouped under
-  section: 'linear/milestone', // the level shown on the card, below its home
-  status: { started: { shape: 'half', tone: 'active', word: 'In Progress' } },
+  section: 'linear/milestone', // the level shown on a row, below its home
+  connect: 'Tickets, with their projects and milestones', // what first run says it brings
+  status: { started: { shape: 'half', tone: 'active', word: 'In Progress' } }, // norm: true marks the usual state on a request
   facts: [{ field: 'priority', form: 'bars' }],
   reasons: { moved: { say: 'Moved to {value}', tone: 'plain' } },
   workflows: { assigned: ['Draft a change', 'Build it with a second opinion'] },
@@ -178,11 +183,11 @@ Customization grows by adding to these sets, never by a kind drawing itself. The
 
 | Move | Pointer | Key | What happens |
 |---|---|---|---|
-| Hand to an agent | The workflow by name on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The colleague rises over the top edge, the card lies flat, the sentence rolls to "Agent review has it", and its mark flies to Overview |
-| Take it on myself | `Take it` | T | Creates a Task with no run. The marigold tab stands behind the top edge |
+| Hand to an agent | The workflow by name on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The colleague rises into place at the end of the first line, the sentence rolls to "Agent review has it", and its mark flies to Overview |
+| Take it | `Take it` | T | Creates a Task with no run. Your monogram takes the place of the wait |
 | Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next, for as long as the pointer stays there. Plugins are not told |
 | Undo | The undo line, at the foot of the window | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
-| Open | Click a card, a row or a place's head | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next thing in the same place. A place or a link inside the sheet walks there, and a line at the top goes back |
+| Open | Click a card, a row or a place's head | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk through the page's order while the sheet stays where it stands. A place or a link inside the sheet walks there, and a line at the top goes back |
 | Link | `Link them` on a hint; the search in the details; carry a card onto another | | One move, one Undo. A person's link can be removed from the details |
 | See its Task | On Work | G | Goes through to the Task on Work |
 | Carry | Drag | | Lifting a card raises the rail. Over another card, letting go links them. Esc or letting go elsewhere sends it home |
@@ -230,6 +235,10 @@ The row shows a plain grey number, not a badge. A signal landing on a card you a
 - **Stage columns.** To review, To answer, To finish. The founder found them arbitrary, and they sorted things by a label nobody needs.
 - **The deck of piles.** A lead, strips and a pile with a count, opening into a tray. A pile hid unrelated things behind an unrelated top card, and `11 more` opened a small box that still had to be scrolled. Nothing is folded now: the page scrolls, and the only stack is things that truly belong together.
 - **Big numbers and the double brass rule.** They made the page read like a dashboard, and the display face belongs to the logo. Counts are small and quiet, and only where they help.
+- **What Hercule noticed as three columns.** It read as a row of KPI tiles, its reasons were cut, and it needed a label. Three lines inside one card say the same with no cuts.
+- **A hairline under every section title.** Three grey rules added ornament and no meaning.
+- **One skin on both sides.** With shadows on the requests too, the two shapes were only half different. Now only places stand on the desk.
+- **`8 waiting` beside Ongoing.** It made the numbers add up, and pointed at nothing. Nobody needs it.
 - **Tinted stock.** Manila for mail, ledger for tickets, sage for orders. The one cream card read as selected, and the logo already says what a thing is.
 - **Cards on the wide side.** Rich cards side by side were nearly the size of the compact ones, so the page stayed monotone. One surface per place, with work as rows, made the two shapes really different.
 - **Pull requests in the big area.** The first reading of sketch A kept the small transient things wide. The founder corrected it: what he liked was the asymmetry and the two card shapes, and pull requests deserve the small one.

@@ -26,7 +26,7 @@ window.Keys = (function () {
   /** Returns the thing to move on to after a move. */
   function pickNext(order) { return order.filter(function (id) { return !!readEl(id); })[0] || null; }
 
-  /** Makes a card the current card. By keyboard it also takes focus, shows the ring and shows its whole face. */
+  /** Makes a card the current card. By keyboard it also takes focus and shows the ring. */
   function setCurrent(id, how) {
     if (how === 'pointer' && usingKeys) {
       // The pointer takes over only by reaching a card. Passing over empty desk leaves the keys where they are.
@@ -79,7 +79,7 @@ window.Keys = (function () {
       if (dy && !sameSide) return;
       var along = dx ? (x - mx) * dx : (y - my) * dy, across = dx ? Math.abs(y - my) : Math.abs(x - mx);
       if (along <= 4) return;
-      if (dx && sameSide && !(c.classList.contains('plaque') && el.classList.contains('plaque'))) return;
+      if (dx && sameSide) return;
       var s = dx ? across * 3 + along * 0.1 : along + across * 0.2;
       if (s < score) { score = s; best = c; }
     });
@@ -112,7 +112,7 @@ window.Keys = (function () {
     if (name !== 'go' && !severalFit) moveOn();
   }
 
-  /** Keeps Tab inside the open card or the tray. */
+  /** Keeps Tab inside the open card. */
   function trap(ev, host) {
     var stops = [].slice.call(host.querySelectorAll('button:not([tabindex="-1"]), a[href], input, [tabindex="0"]'));
     if (!stops.length) return;
@@ -127,7 +127,7 @@ window.Keys = (function () {
       if (ev.key === 'Escape') ev.target.blur();
       return;
     }
-    if (Menu.key(ev)) { ev.preventDefault(); return; }
+    if (Menu.key(ev) || Toolbar.key(ev)) { ev.preventDefault(); return; }
     var k = ev.key;
     if ((ev.metaKey || ev.ctrlKey) && k === 'z') { ev.preventDefault(); Moves.undo(); return; }
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
@@ -221,7 +221,7 @@ window.Keys = (function () {
       var id = c && c.dataset.id;
       if (usingKeyboardFocus && id && id !== current) focus(id);
     });
-    // The ring and the peek are for someone working by keyboard. A click that moves focus draws neither.
+    // The ring is for someone working by keyboard. A click that moves focus draws neither.
     document.addEventListener('pointerdown', function () { usingKeyboardFocus = false; }, true);
     document.addEventListener('keydown', function () { usingKeyboardFocus = true; }, true);
   }

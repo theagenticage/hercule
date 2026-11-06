@@ -68,7 +68,7 @@ window.Open = (function () {
       (hints.length ? '<ul class="o-hints">' + hints.map(function (h) {
         return '<li class="o-link o-link--hint"><button class="o-link-go" data-walk="' + h.otherId + '">' + Crew.icon('link', 13) + '<span class="o-link-t">' + Card.esc(h.other.title) + '</span></button><small class="o-why">' + Card.esc(Relations.sayClaim(h.claim)) + '</small><button class="btn btn--sm" data-confirm="' + h.otherId + '">Link</button><button class="o-unlink" data-unlink="' + h.otherId + '" title="Not related">' + Crew.icon('close', 12) + '</button></li>';
       }).join('') + '</ul>' : '') +
-      '<div class="o-add"><input class="o-find" data-find placeholder="Link something: search by title or number" aria-label="Link something"><ul class="o-found" data-found hidden></ul></div></section>';
+      '<div class="o-add"><button class="o-add-go" data-add>' + Crew.icon('link', 12) + 'Link something</button><input class="o-find" data-find placeholder="Search by title or number" aria-label="Link something" hidden><ul class="o-found" data-found hidden></ul></div></section>';
   }
 
   /** Returns one thing that concerns the person, as a row of a place's details. */
@@ -126,7 +126,7 @@ window.Open = (function () {
       '<div class="o-meta"><span>' + Card.esc(kind.noun) + '</span>' + (id ? '<i>·</i><span>' + Card.esc(id) + '</span>' : '') + (who ? '<i>·</i><span>' + Card.esc(who.name) + '</span>' : '') + '</div>' +
       '</div>' +
       (e.about ? '<p class="o-note">' + Card.esc(e.about) + '</p>' : '') +
-      '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + Card.drawFacts(kind, f) + '<button class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</button></div>' +
+      '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + (f.target ? '<span class="fact">Target ' + Card.esc(f.target) + '</span>' : '') + Card.drawFacts(kind, f) + '<button class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</button></div>' +
       drawReported(e) +
       (e.signals.length ? '<section class="o-sec">' + drawSignals(e, now) + '</section>' : '') +
       (isPlace ? drawConcerns(e) : '') + drawPlaces(e) + (isPlace ? '' : drawLinks(e)) +
@@ -248,10 +248,12 @@ window.Open = (function () {
     inner = host.firstChild;
     host.hidden = false;
     host.style.cssText = 'left:0;top:0;width:auto;height:auto';
-    var w = Math.min(Math.max(520, Math.round(from.width)), innerWidth - 32);
+    // A place opens over its own surface, because its details are the bigger picture.
+    var block = !plaque && e.concern === null && sourceEl.closest && sourceEl.closest('.block');
+    var w = Math.min(Math.max(520, Math.round(block ? block.offsetWidth : from.width)), innerWidth - 32);
     inner.style.width = w + 'px';
     var h = inner.offsetHeight;
-    var left = Math.max(main.left + 16, Math.min(from.left - 1, main.right - w - 16));
+    var left = Math.max(main.left + 16, Math.min(block ? block.getBoundingClientRect().left : from.left - 1, main.right - w - 16));
     var top = Math.max(main.top + 12, Math.min(from.top, innerHeight - h - 16));
     var to = { left: left, top: top, width: w, height: h };
     host.setAttribute('aria-label', K[e.kind].noun + ': ' + e.title);
@@ -387,7 +389,7 @@ window.Open = (function () {
     refocus(src, id, wasKeyed);
   }
 
-  /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
+  /** Gives focus back to the card. The ring comes back only for someone working by keyboard. */
   function refocus(src, id, wasKeyed) {
     if (wasKeyed && App.findEntity(id)) Keys.focus(id);
     else if (src && src.isConnected) Keys.focusQuietly(src);
@@ -452,6 +454,8 @@ window.Open = (function () {
     scrim.addEventListener('click', function () { if (openId && !host.classList.contains('is-arming')) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
+      var adding = ev.target.closest('[data-add]');
+      if (adding) { adding.hidden = true; var find = host.querySelector('[data-find]'); find.hidden = false; find.focus(); return; }
       if (ev.target.closest('[data-back]')) { var last = trail.pop(); walk(last); return; }
       var to = ev.target.closest('[data-walk]');
       if (to) { trail.push(openId); walk(to.dataset.walk); return; }

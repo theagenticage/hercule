@@ -49,8 +49,8 @@
     extra = extra || {};
     partOf.apply(null, ['ln-' + key].concat(parents));
     return {
-      id: 'ln-' + key, kind: 'linear/issue', concern: 'assigned', title: title, since: hoursAgo(h),
-      fields: { key: key, state: state, assignee: 'you', priority: extra.priority || 0 },
+      id: 'ln-' + key, kind: 'linear/issue', concern: extra.concern || 'assigned', title: title, since: hoursAgo(h),
+      fields: { key: key, state: state, assignee: extra.assignee || 'you', priority: extra.priority || 0 },
       signals: extra.signals || [signal('assigned', h)], task: null,
     };
   }
@@ -91,6 +91,7 @@
       context('ms-door', 'linear/milestone', 'Door scanning', { target: '14 Nov', progress: { done: 5, total: 7 } }),
       context('ms-refund', 'linear/milestone', 'Refund on receipt', { target: '28 Nov', progress: { done: 3, total: 6 } }),
       context('ms-timeouts', 'linear/milestone', 'Gateway timeouts', { target: '7 Nov', progress: { done: 2, total: 4 } }),
+      context('ms-messages', 'linear/milestone', 'Clear messages', { target: '14 Nov', progress: { done: 2, total: 5 } }),
       context('round-rotterdam', 'quayside/round', 'Rotterdam winter stock', { state: 'open', progress: { done: 3, total: 5 }, target: '21 Nov', signals: [signal('update', 8)] }),
       context('site-rotterdam', 'quayside/site', 'Rotterdam depot'),
     ];
@@ -102,6 +103,7 @@
     partOf('ms-door', 'prj-depot');
     partOf('ms-refund', 'prj-depot');
     partOf('ms-timeouts', 'prj-retries');
+    partOf('ms-messages', 'prj-retries');
     partOf('round-rotterdam', 'site-rotterdam');
     return list;
   }
@@ -217,6 +219,9 @@
       issue('SHOP-355', 'Order history hides cancelled items', ['prj-polish', 'team-shop'], 'triage', 300, { signals: [signal('assigned', 300), signal('commented', 90, 'wren-adeyemi')] }),
       issue('SHOP-360', 'Slot picker jumps when a slot sells out', ['prj-polish', 'prj-slots', 'team-shop'], 'todo', 260, { priority: 3, signals: [signal('assigned', 260), signal('mentioned', 20, 'juno-park')] }),
       issue('SHOP-364', 'Coupon box accepts spaces and then fails', ['prj-polish', 'team-shop'], 'triage', 200),
+      issue('SHOP-366', 'Say why a retried payment failed', ['prj-retries', 'ms-messages', 'team-shop'], 'started', 70, { assignee: 'tessa-lindqvist', concern: 'mentioned', signals: [signal('mentioned', 7, 'tessa-lindqvist', null, 'Can you check this wording?')] }),
+      issue('OPS-52', 'Agree the refund wording with the depots', ['prj-depot', 'ms-refund', 'team-depot'], 'started', 60, { assignee: 'omar-haddad', concern: 'mentioned', signals: [signal('mentioned', 12, 'omar-haddad')] }),
+      issue('SHOP-377', 'Hold a slot while the basket is open', ['prj-slots', 'team-shop'], 'review', 50, { assignee: 'juno-park', concern: 'mentioned', signals: [signal('mentioned', 18, 'juno-park')] }),
       issue('PLAT-118', 'Agree a retry rule for browser tests', ['prj-browsers', 'team-platform'], 'triage', 180, { priority: 2, signals: [signal('assigned', 180), signal('commented', 100, 'kofi-mensah')] }),
       issue('PLAT-131', 'Keep card numbers out of the gateway debug log', ['prj-retries', 'ms-timeouts', 'team-platform'], 'review', 300, { priority: 3, signals: [signal('assigned', 300), signal('moved', 296, null, 'In Review')] }),
       issue('PLAT-127', 'Run the invoice export on the job runner', ['prj-browsers', 'team-platform'], 'review', 160, { signals: [signal('assigned', 160), signal('moved', 150, null, 'In Review')] }),

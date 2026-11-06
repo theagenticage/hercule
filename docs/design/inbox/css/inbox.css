@@ -46,9 +46,17 @@
   padding: 10px 32px 40px;
 }
 .ib-wide, .ib-narrow { min-width: 0; }
+.ib-narrow { padding-top: 14px; }
+.r-none { margin: 6px 2px; color: var(--muted); font: var(--type-summary); }
+.r-none[hidden] { display: none; }
+.tools-main[hidden] { display: none; }
+/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
+.ib-page[data-by="status"] .card--rich .c-status { display: none; }
+.ib-page[data-by="status"] .card--rich { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.ib-page[data-by="status"] .tucked, .ib-page[data-by="status"] .hint { margin-left: 30px; }
 
-/* A section title is plain words over one hairline, as a stage heading is on Work. */
-.sec { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--divider); }
+/* A section title is plain words. */
+.sec { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0 0 8px; }
 .sec[hidden] { display: none; }
 .sec h2 { margin: 0; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--ink); }
 .sec-n { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
@@ -63,7 +71,7 @@
 .b-head--plain { padding-bottom: 10px; }
 .b-open { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: inherit; border-radius: var(--r-xs); }
 .b-mark { display: inline-grid; place-items: center; width: 16px; }
-.b-title { margin: 0; font: 600 var(--t-16, 16px) / 22px var(--font-ui); letter-spacing: -0.008em; color: var(--ink); }
+.b-title { margin: 0; font: 600 var(--t-18) / 24px var(--font-ui); letter-spacing: -0.008em; color: var(--ink); }
 .b-open:hover .b-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .b-end { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .b-progress { position: relative; width: 72px; height: 4px; overflow: hidden; border-radius: 2px; background: color-mix(in oklab, var(--ink) 10%, transparent); }

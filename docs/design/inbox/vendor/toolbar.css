@@ -1,7 +1,9 @@
 /* PROTOTYPE - the toolbar, its menus and chips, and Add to Work. Plain controls on the same glass as
    the pill: 36px high, words at 13 medium, nothing clever. */
-.tools { flex: 1; display: flex; align-items: center; min-width: 0; margin: 0 10px; pointer-events: none; }
-.tools-main { display: flex; align-items: center; gap: 6px; min-width: 0; pointer-events: auto; }
+.tools { flex: 1 1 240px; display: flex; align-items: center; min-width: 240px; margin: 0 10px; pointer-events: none; }
+.tools-main { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: clip; overflow-clip-margin: 8px; pointer-events: auto; }
+/* Chips share what room there is, and Clear always stays in reach. */
+.tools-main.has-many .chip small { display: none; }
 .tool { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 11px; border-radius: var(--r-md); white-space: nowrap; color: var(--ink); background: var(--glass-fill); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), var(--glass-shadow); transition: background var(--m-quick); }
 .tool b { font-weight: var(--w-medium); }
 .tool-key { color: var(--muted); }
@@ -15,15 +17,16 @@
 .app[data-view="office"] .tools, .app[data-view="office"] .since { opacity: 0; pointer-events: none; }
 .app[data-view="office"] .tools-main { pointer-events: none; }
 
-.chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; max-width: 240px; padding: 0 7px 0 9px; border-radius: var(--r-btn); background: var(--selected); color: var(--ink); white-space: nowrap; }
+.chip { flex: 0 1 auto; min-width: 54px; display: inline-flex; align-items: center; gap: 5px; height: 28px; max-width: 320px; padding: 0 7px 0 9px; border-radius: var(--r-btn); background: var(--selected); color: var(--ink); white-space: nowrap; }
 .chip small { color: var(--muted); font: var(--type-meta); }
-.chip b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: var(--w-medium); }
+.chip b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: var(--w-medium); }
 .chip .ic { flex: none; color: var(--faint); }
 .chip:hover .ic { color: var(--ink); }
 .chip-clear { flex: none; height: 28px; padding: 0 8px; border-radius: var(--r-btn); color: var(--muted); }
 .chip-clear:hover { background: var(--hover); color: var(--ink); }
-.since { flex: none; display: flex; align-items: center; gap: 6px; margin-right: 12px; color: var(--muted); font: var(--type-summary); white-space: nowrap; pointer-events: auto; }
-.since-item { display: inline-block; }
+.since { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; margin-right: 12px; color: var(--muted); font: var(--type-summary); white-space: nowrap; pointer-events: auto; }
+.since[hidden] { display: none; }
+.since-item { display: inline-block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .since-replay { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--faint); }
 .since-replay:hover { background: var(--hover); color: var(--ink); }
 .has-pane .since { opacity: 0; }
@@ -66,6 +69,7 @@
 .ad-sources button { justify-content: center; }
 .ad-narrow { display: flex; gap: 6px; margin: 8px 0 10px; }
 .ad-scope { flex: 1; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 8px 0 11px; color: var(--muted); }
+.ad-scope:has(option[value=""]:checked) .ad-in { display: none; }
 .ad-scope select { flex: 1; min-width: 0; appearance: none; height: 100%; border: 0; outline: none; background: none; color: var(--ink); font: inherit; }
 .ad-scope .ic { flex: none; color: var(--faint); pointer-events: none; }
 .ad-find { width: 128px; padding: 0 11px; }

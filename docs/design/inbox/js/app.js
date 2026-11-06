@@ -10,6 +10,7 @@ window.App = (function () {
   var blocks = {};     // the block of each place by id, kept so a place keeps its element through a redraw
   var page;
   var waiting = [];    // new cards held back while the pointer is in their part of the page
+  var seenRank = {};   // the order of the work as first drawn, so nothing changes place during a visit
 
   function findEntity(id) { return state.clusters.filter(function (c) { return c.id === id; })[0] || Relations.find(id); }
   function isRich(e) { return K[e.kind].card === 'rich'; }
@@ -79,11 +80,16 @@ window.App = (function () {
 
   /** Returns the groupings the wide side offers: the usual homes, every kind of place above what lies there, and status. */
   function readGroupings() {
-    var nouns = {};
-    readLying().filter(isRich).forEach(function (e) {
-      Relations.readAncestors(e).forEach(function (p) { nouns[K[p.kind].noun] = true; });
+    var nouns = {}, rows = readLying().filter(isRich);
+    rows.forEach(function (e) {
+      var seen = {};
+      // A thing that is itself work, such as a parent ticket, is not a level to group by.
+      Relations.readAncestors(e).forEach(function (p) { if (!p.concern) seen[K[p.kind].noun] = true; });
+      Object.keys(seen).forEach(function (n) { nouns[n] = (nouns[n] || 0) + 1; });
     });
-    return [['home', 'Place']].concat(Object.keys(nouns).map(function (n) { return [n, n]; })).concat([['status', 'Status']]);
+    // A level that most rows have nothing to do with would only say "not in any", so it is not offered.
+    var useful = Object.keys(nouns).filter(function (n) { return nouns[n] * 2 >= rows.length; });
+    return [['home', 'Place']].concat(useful.map(function (n) { return [n, n]; })).concat([['status', 'Status']]);
   }
 
   /** Returns the places a thing shows under for the grouping in use. It shows under each of them, and is still counted once. */
@@ -91,7 +97,8 @@ window.App = (function () {
     if (state.grouping === 'home') return Relations.readHomes(e);
     if (state.grouping === 'status') {
       var status = K[e.kind].status && K[e.kind].status[e.fields.state];
-      return [{ id: 'status-' + (status ? status.word : 'none'), title: status ? status.word : 'No status', isPlain: true, rank: status ? Object.keys(K[e.kind].status).indexOf(e.fields.state) : 99 }];
+      var byTone = { bad: 0, attention: 1, active: 2, quiet: 3, good: 4 };
+      return [{ id: 'status-' + (status ? status.word : 'none'), title: status ? status.word : 'No status', isPlain: true, rank: status ? byTone[status.tone] * 100 + Object.keys(K[e.kind].status).indexOf(e.fields.state) : 9000 }];
     }
     return Relations.readAncestors(e).filter(function (p) { return K[p.kind].noun === state.grouping; });
   }
@@ -117,13 +124,18 @@ window.App = (function () {
   function rankPlace(place) {
     if (place.rank !== undefined) return place.rank;
     var kind = K[place.kind], status = kind.status && kind.status[place.fields.state];
-    var trouble = { bad: 0, you: 1 }[status && status.tone];
+    var trouble = { bad: 0, attention: 1 }[status && status.tone];
     var days = place.fields.targetAt ? Math.round((place.fields.targetAt - state.now) / 864e5) : 500;
     return (trouble === undefined ? 2 : trouble) * 1000 + days;
   }
 
   /** Orders the work of a block: what has a part asking first, then by how far along it is. */
   function rankWork(b) {
+    if (seenRank[b.lead.id] === undefined) seenRank[b.lead.id] = computeRank(b);
+    return seenRank[b.lead.id];
+  }
+
+  function computeRank(b) {
     var asks = b.parts.some(function (p) { return p.rides && p.e.concern && !p.e.task; }) ? 0 : 1;
     var kind = K[b.lead.kind], states = kind.status ? Object.keys(kind.status) : [];
     return asks * 100 - states.indexOf(b.lead.fields.state);
@@ -226,9 +238,7 @@ window.App = (function () {
     Toolbar.draw();
     drawClear(work, requests);
     Nav.setCount('inbox', countOverdue());
-    var riding = countOverdue() - requests.filter(function (b) { return !b.lead.task; }).length;
-    page.querySelector('[data-count="requests"]').textContent = requests.length || '';
-    page.querySelector('[data-count="work"]').textContent = riding > 0 ? riding + ' waiting' : '';
+    page.querySelector('[data-count="requests"]').textContent = requests.filter(function (b) { return !b.lead.task; }).length || '';
     page.dataset.by = state.grouping;
     var entry = page.querySelector('.plaque, .card');
     if (entry) entry.tabIndex = 0;
@@ -240,26 +250,31 @@ window.App = (function () {
   /** Raises a small sunrise in the column once no request is left, so finishing them is marked even though lasting work never ends. */
   function drawClear(work, requests) {
     var host = page.querySelector('#clear');
-    var empty = !requests.length && !waiting.length;
+    // A filter hides things, it does not finish them, so the sunrise reads what is really left.
+    var empty = !Relations.buildBundles(readLying()).some(function (b) { return !isRich(b.lead); }) && !waiting.length;
+    var none = page.querySelector('.r-none');
+    none.hidden = empty || requests.length > 0;
     host.hidden = !empty;
     if (empty && !host.innerHTML) host.innerHTML = Scenes.drawSunrise('zero zero--small');
     if (!empty) host.innerHTML = '';
-    page.querySelector('.work-empty').hidden = work.length > 0;
+    var nothing = page.querySelector('.work-empty');
+    nothing.hidden = work.length > 0;
+    nothing.textContent = state.filters.length ? 'Nothing here matches this filter.' : 'Nothing ongoing concerns you.';
   }
 
   /** Draws the page around the cards. */
   function drawFrame() {
     page.dataset.mode = 'cards';
-    els = {}; blocks = {};
+    els = {}; blocks = {}; seenRank = {};
     page.innerHTML =
       '<div class="ib-wide">' +
-        '<header class="sec sec--noticed"><h2>Hercule noticed</h2></header><div class="noticed" id="noticed" role="list"></div>' +
-        '<header class="sec"><h2>Ongoing</h2><span class="sec-n" data-count="work"></span></header>' +
+        '<h2 class="sr">Hercule noticed</h2><div class="noticed" id="noticed" role="list"></div>' +
+        '<header class="sec"><h2>Ongoing</h2></header>' +
         '<div id="work"></div><p class="work-empty" hidden>Nothing ongoing concerns you.</p>' +
       '</div>' +
       '<aside class="ib-narrow" aria-label="Requests">' +
         '<header class="sec"><h2>Requests</h2><span class="sec-n" data-count="requests"></span><label class="sec-pick"><select data-order aria-label="Order"><option value="oldest">Oldest first</option><option value="mine">Mine first</option><option value="place">By place</option></select></label></header>' +
-        '<div id="requests" role="list"></div><div id="clear" hidden></div>' +
+        '<div id="requests" role="list"></div><p class="r-none" hidden>Nothing here matches this filter.</p><div id="clear" hidden></div>' +
         '<section class="parked" id="parked" hidden><button class="parked-t" data-parked></button><div class="parked-cards"></div></section>' +
       '</aside>';
     page.querySelector('[data-order]').value = state.order;
@@ -273,7 +288,6 @@ window.App = (function () {
     host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span>' +
       '<span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
-    host.previousElementSibling.hidden = host.hidden;
     var was = Keys.current();
     if (Keys.isUsingKeys() && was && host.querySelector('[data-id="' + was + '"]')) Keys.focus(was);
   }

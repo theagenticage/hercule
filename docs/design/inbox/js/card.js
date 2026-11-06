@@ -164,7 +164,9 @@
   /** Returns what a row says under its title: where it sits below the place it is shown under, its facts, and the latest thing that happened. */
   function drawContext(e, ctx) {
     var kind = K.KINDS[e.kind], f = e.fields, parts = [];
-    var near = Relations.readParents(e).filter(function (p) { return p !== ctx.place && (p.kind === kind.home || p.kind === kind.section); });
+    // Someone else's work says whose it is, first: it is the first thing a person asks of it.
+    if (kind.person && f[kind.person] && f[kind.person] !== 'you') parts.push(esc(W.PEOPLE[f[kind.person]].short + "'s"));
+    var near = Relations.readParents(e).filter(function (p) { return p !== ctx.place && (p.concern || [].concat(kind.home, kind.section).indexOf(p.kind) >= 0); });
     near.forEach(function (p) { parts.push(esc(p.title) + (p.fields.target ? ', ' + esc(p.fields.target) : '')); });
     kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).forEach(function (x) { parts.push((FORMS[x.form] || FORMS.word)(f[x.field], x)); });
     var line = describeLine(e);
@@ -200,13 +202,15 @@
     if (!part.rides || !e.concern || e.task || e.settled) {
       return '<div class="part part--quiet" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark + '<span class="p-title">' + esc(e.title) + '</span><span class="p-said">' + fresh + (e.task ? esc(line.text) : (status ? esc(status.word) : '')) + '</span></div>';
     }
-    // The ask comes first. What has happened since follows, with its shape beside its words.
+    // What it asks of you comes first, then what it is. Someone else's red stays in the shape, and your own trouble keeps its words.
+    var mine = isMine(e);
     var ask = e.signals.filter(function (s) { return s.key === e.concern; })[0];
-    var said = isMine(e) ? 'Yours' : (ask ? sayReason(kind, ask).text : line.text);
-    var news = line.text && line.text !== said ? '<span class="p-news tone-' + line.tone + '">' + (status && !status.norm ? drawShape(status, 12) : '') + esc(line.text) + '</span>' : '';
+    var said = mine || !ask ? line.text : sayReason(kind, ask).text;
+    var news = !mine && line.text && line.text !== said ? '<span class="p-news">' + esc(line.text) + '</span>' : '';
+    var id = fill(kind.identifier, e.fields);
     return '<div class="part is-asking" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark +
-      '<span class="p-title">' + esc(e.title) + '</span>' + drawWait(e, ctx.now) +
-      '<span class="p-line">' + fresh + '<span class="p-said">' + esc(said) + '</span>' + news + '<span class="p-id">' + esc(fill(kind.identifier, e.fields)) + (where ? ' ' + esc(where) : '') + '</span></span>' +
+      '<span class="p-ask">' + fresh + '<span class="p-said tone-' + (mine ? line.tone : 'plain') + '">' + esc(said) + '</span>' + news + '</span>' + drawWait(e, ctx.now) +
+      '<span class="p-line">' + (status && !status.norm ? drawShape(status, 12) : '') + '<span class="p-title">' + esc(e.title) + '</span><span class="p-id">' + esc(id) + (where ? ' ' + esc(where) : '') + (mine ? ' · yours' : '') + '</span></span>' +
       '<span class="c-acts">' + drawActs(e) + '</span></div>';
   }
 

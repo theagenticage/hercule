@@ -36,6 +36,8 @@ window.Toolbar = (function () {
         byNoun[noun][p.id] = p;
       });
     });
+    // A level with one value narrows nothing, so it is left out.
+    nouns = nouns.filter(function (noun) { return Object.keys(byNoun[noun]).length > 1; });
     return '<p class="menu-h">Whose</p>' + drawPick('data-filter="owner" data-value="mine" data-label="Mine"', 'Mine', isOn('owner', 'mine')) + drawPick('data-filter="owner" data-value="others" data-label="Other people\'s"', 'Other people\'s', isOn('owner', 'others')) +
       nouns.map(function (noun) {
         return '<p class="menu-h">' + Card.esc(noun) + '</p>' + Object.keys(byNoun[noun]).map(function (id) { var p = byNoun[noun][id]; return drawPick('data-filter="place" data-value="' + id + '" data-label="' + Card.esc(p.title) + '"', p.title, isOn('place', id)); }).join('');
@@ -54,6 +56,8 @@ window.Toolbar = (function () {
     menu.style.left = r.left + 'px';
     menu.style.top = r.bottom + 6 + 'px';
     draw();
+    var first = menu.querySelector('.menu-row');
+    if (first) first.focus({ preventScroll: true });
   }
 
   function close() {
@@ -61,6 +65,16 @@ window.Toolbar = (function () {
     openName = null;
     menu.hidden = true;
     draw();
+  }
+
+  /** An open menu owns the keyboard: nothing reaches the page behind it. Returns whether it took the key. */
+  function key(ev) {
+    if (!openName) return false;
+    var rows = [].slice.call(menu.querySelectorAll('.menu-row')), at = rows.indexOf(document.activeElement);
+    if (ev.key === 'ArrowDown' || ev.key === 'j') rows[(at + 1) % rows.length].focus();
+    else if (ev.key === 'ArrowUp' || ev.key === 'k') rows[(at - 1 + rows.length) % rows.length].focus();
+    else if ((ev.key === 'Enter' || ev.key === ' ') && at >= 0) rows[at].click();
+    return true;
   }
 
   function start() {
@@ -88,5 +102,5 @@ window.Toolbar = (function () {
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && openName) { ev.stopPropagation(); close(); } }, true);
   }
 
-  return { start: start, draw: draw, close: close };
+  return { start: start, draw: draw, close: close, key: key };
 })();

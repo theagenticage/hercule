@@ -53,7 +53,7 @@
 [data-theme="nile"] .card, [data-theme="nile"] .open,
 [data-theme="end-house"] .card, [data-theme="end-house"] .open,
 [data-theme="blue-train"] .card, [data-theme="blue-train"] .open { --faint: var(--faint-on-stock); }
-[data-theme="blue-train"] .card, [data-theme="blue-train"] .open { --fail-ink: oklch(0.82 0.11 30); }
+[data-theme="blue-train"] .card, [data-theme="blue-train"] .block, [data-theme="blue-train"] .open { --fail-ink: oklch(0.82 0.11 30); }
 
 /* With reduced motion the durations collapse, so no CSS movement is left behind. JS moves have their own designed fades. */
 @media (prefers-reduced-motion: reduce) {

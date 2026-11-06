@@ -72,6 +72,7 @@ window.Pages = (function () {
     var again = hadFocus && pill.querySelector('[data-view="' + hadFocus + '"]');
     if (again) again.focus();
     document.querySelector('.ib-end').hidden = name !== 'inbox';
+    document.getElementById('tools').hidden = name !== 'inbox';
   }
 
   /** Raises a row of Intake to the Inbox: the row lifts, a token flies to the Cards tab, and a card waits there. */

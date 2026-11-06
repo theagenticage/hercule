@@ -99,7 +99,7 @@ window.Scenes = (function () {
     });
   }
 
-  /** Draws the first run on the page itself: the stacks stand ready, and each first card asks to be connected. */
+  /** Draws the first run on the page itself: each side asks for the sources whose cards will lie there. */
   function drawFirstRun(page) {
     var connect = function (kind) {
       return '<button class="fr-card">' + Card.drawMark(kind.plugin, 20) + '<div><b>' + Card.esc(kind.plugin.name) + '</b><small>' + Card.esc(kind.connect) + '</small></div><span class="fr-go">Connect ' + Crew.icon('arrow', 12) + '</span></button>';

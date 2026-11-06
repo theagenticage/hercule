@@ -1,11 +1,8 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
-/* Loading: the real cards, with their words held back. */
+/* Loading: the real cards, with their words held back. Every line keeps its height, so nothing shifts when the words arrive. */
 .is-loading .c-title, .is-loading .pl-title, .is-loading .pl-why { color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); border-radius: 4px; }
-.is-loading .c-title { -webkit-line-clamp: 1; width: 72%; }
-.is-loading .pl-title { width: 70%; height: 12px; margin-bottom: 8px; }
-.is-loading .pl-why { width: 52%; height: 10px; }
-.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-rail, .is-loading .c-end, .is-loading .c-context, .is-loading .c-under, .is-loading .part, .is-loading .hint { visibility: hidden; }
+.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-rail > *, .is-loading .c-end, .is-loading .c-context, .is-loading .c-under, .is-loading .part, .is-loading .hint { visibility: hidden; }
 .sk { display: inline-block; vertical-align: middle; border-radius: 4px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
 .sk--title { width: 68%; height: 11px; }
 
@@ -44,7 +41,7 @@
 .fr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .fr-list { display: flex; flex-direction: column; gap: 8px; }
 .fr-welcome { font: var(--type-card); font-size: var(--t-14); }
-.fr-welcome { grid-column: 1 / -1; align-self: center; padding: 0 56px 0 16px; color: var(--ink); }
+.fr-welcome { margin: 0; padding: 8px 56px 8px 16px; color: var(--ink); }
 .fr-welcome small { display: block; color: var(--muted); font: var(--type-summary); }
 
 /* Intake, grouped by entity: the noisy layer, kept plain, and still not a table. */
@@ -121,3 +118,4 @@ html[data-dragging] * { cursor: grabbing !important; }
 .keys h2 { margin: 0 0 6px; font: var(--type-lane); }
 .keys div { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; min-height: 24px; color: var(--muted); }
 .keys kbd { justify-self: start; }
+
