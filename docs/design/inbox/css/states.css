@@ -1,8 +1,8 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
 /* Loading: the real cards, with their words held back. */
-.is-loading .card .c-title,
-.is-loading .card .c-line,
+.stack-wrap.is-loading .card .c-title,
+.stack-wrap.is-loading .card .c-line,
 .is-loading .pl-title,
 .is-loading .pl-why { color: transparent !important; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, transparent); }
 .is-loading .c-title { width: 72%; height: 11px; margin-top: 4px; }
@@ -15,8 +15,10 @@
 .is-loading .pl-src svg { visibility: hidden; }
 .is-loading .c-pace,
 .is-loading .c-status,
-.is-loading .c-foot,
+.is-loading .card .c-foot,
+.is-loading .card.is-whole .c-foot,
 .is-loading .mark,
+.is-loading .pile-n,
 .is-loading .stack-n { visibility: hidden; }
 .is-loading .c-mark::before { content: ""; width: 20px; height: 20px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 7%, transparent); position: absolute; }
 .sk { display: inline-block; vertical-align: middle; border-radius: 4px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
@@ -54,7 +56,7 @@
 .fr-next:nth-of-type(n + 4) { opacity: 0.35; }
 .ib-page[data-mode="firstrun"] .noticed { align-items: center; padding-left: 0; }
 .fr-welcome { font: var(--type-card); font-size: var(--t-14); }
-.fr-welcome { align-self: center; color: var(--plate-ink); }
+.fr-welcome { grid-column: 1 / -1; align-self: center; padding-left: 58px; color: var(--plate-ink); }
 .fr-welcome small { display: block; color: var(--plate-sub); font: var(--type-summary); }
 
 /* Intake, grouped by entity: the noisy layer, kept plain, and still not a table. */

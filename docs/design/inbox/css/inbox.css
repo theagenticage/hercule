@@ -44,7 +44,7 @@
 .stack-h {
   position: relative;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: minmax(44px, auto) minmax(0, 1fr);
   align-items: end;
   height: 46px;
   flex: none;
@@ -80,7 +80,10 @@
   color: var(--count-ink);
   white-space: nowrap;
 }
-.stack-t { padding-bottom: 2px; }
+.stack-n:not(:empty) + .stack-t { padding-bottom: 2px; }
+.stack-t { padding-bottom: 2px; padding-left: 0; }
+/* Past two digits the count takes the room it needs, and the label moves over. */
+.stack-n { padding-right: 6px; }
 .stack-new { position: absolute; right: 0; bottom: 8px; }
 .stack { position: relative; flex: 1; min-height: 0; }
 

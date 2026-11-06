@@ -142,6 +142,9 @@
 .card.is-peek .c-foot { visibility: visible; }
 /* When the second line already says who and what, the facts sit at its end and need no row of their own. */
 .c-foot--facts { grid-column: 3; grid-row: 2; margin-top: 1px; }
+/* Hidden facts must not take room from a one-line title. */
+.card[data-level="one"]:not(.is-peek):not(.is-whole) .c-foot { display: none; }
+.card.is-hover .c-foot--facts, .card.is-focus .c-foot--facts { visibility: hidden; }
 .c-id { color: var(--muted); font-variant-numeric: tabular-nums; }
 .c-ctx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .c-facts { margin-left: auto; display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
