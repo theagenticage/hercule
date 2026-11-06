@@ -55,8 +55,23 @@ window.Board = (function () {
     };
   }
 
-  function drawHolder(h) {
-    if (h.kind === "you") return '<span class="card-holder"><i class="card-tab" data-need="' + h.need + '"></i></span>';
+  function drawHolder(h, stack) {
+    var wants = (h.kind === "you" ? 1 : 0) + (stack ? stack.wants : 0);
+    // One tab per card. Its number counts everything here that wants you. A stack with agents on it
+    // shows one of them beside the tab.
+    var need = h.kind === "you" ? h.need : stack && stack.need;
+    var tab = wants ? '<i class="card-tab' + (wants > 1 ? " card-tab--count" : "") + '" data-need="' + need + '">' + (wants > 1 ? wants : "") + "</i>" : "";
+    if (h.kind !== "agent" && stack && stack.agent) {
+      var one = drawHead(stack.agent, "working");
+      var width = !tab ? 0 : need === "think" ? 44 : 22;
+      return '<span class="card-holder">' + one.head + tab + "</span>" + one.paws.replace('style="', 'style="--paw-right:' + (17 + width) + "px;");
+    }
+    if (h.kind === "agent" && tab) {
+      var own = drawHead(h.name, h.pose);
+      var w2 = need === "think" ? 44 : 22;
+      return '<span class="card-holder">' + own.head + tab + "</span>" + own.paws.replace('style="', 'style="--paw-right:' + (17 + w2) + "px;");
+    }
+    if (tab) return '<span class="card-holder">' + tab + "</span>";
     if (h.kind === "agent") {
       var drawn = drawHead(h.name, h.pose);
       return '<span class="card-holder">' + drawn.head + "</span>" + drawn.paws;
@@ -93,8 +108,7 @@ window.Board = (function () {
     var more = stack && stack.count ? '<button class="card-more" tabindex="-1" title="' + stack.count + " more here" + (stack.wants ? ", " + stack.wants + (stack.wants === 1 ? " wants" : " want") + " you" : "") + ' (E)">+' + stack.count + "</button>" : "";
     var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time>" + more + "</span>";
     var ask = t.ask && t.move === "you" && !Store.isBlocked(t) ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
-    var also = stack && stack.wants ? '<span class="card-holder card-holder--also"><i class="card-tab card-tab--count">' + stack.wants + "</i></span>" : "";
-    return drawHolder(holder) + also + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
+    return drawHolder(holder, stack) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
       '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
   }
 
@@ -107,8 +121,13 @@ window.Board = (function () {
   }
 
   /** Draws or updates one Task's card and returns its element. */
-  function drawCard(t, stack) {
+  function drawCard(t, stack, inFan) {
     var el = node("card:" + t.id, "div", "card");
+    // A card caught flying home from a fan, and needed on the desk, comes back to rest at once.
+    if (!inFan && el.classList.contains("is-flying")) {
+      el.classList.remove("is-flying");
+      Motion.body(el).clear();
+    }
     if (!el.dataset.id) {
       el.dataset.id = t.id;
       el.tabIndex = -1;
@@ -196,6 +215,13 @@ window.Board = (function () {
     cell._hold = null;
   }
 
+  /** Returns a cell's name as a person says it: "Storefront, In review". */
+  function readCellName(key, stage) {
+    var project = Store.state.projects.filter(function (p) { return "lane-" + p.id === key; })[0];
+    var plan = Store.state.plans.filter(function (p) { return "plan-" + p.id === key; })[0];
+    return (project ? project.name : plan ? plan.name : "") + ", " + NW.STAGES.filter(function (s) { return s.id === stage; })[0].name;
+  }
+
   function drawCell(key, stage, tasks, full) {
     var cell = node("cell:" + key + ":" + stage, "div", "cell");
     cell.dataset.stage = stage;
@@ -203,13 +229,33 @@ window.Board = (function () {
     cell.setAttribute("role", "group");
     cell.setAttribute("aria-label", NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ", " + tasks.length + (tasks.length === 1 ? " card" : " cards"));
     var arranged = Store.arrangeCell(tasks, stage, key, full);
-    var behind = arranged.behind;
-    var stack = behind.length ? { count: behind.length, wants: behind.filter(Store.wantsYou).length } : null;
-    var kids = arranged.cards.map(function (t) { return drawCard(t, stack); }).concat(arranged.piles.map(drawPile));
+    var kids = [];
+    var hidden = [];
+    /** Draws one Task on top of the rest, and remembers what lies behind it for the fan. */
+    function drawStack(top, rest, pile) {
+      var wanting = rest.filter(Store.wantsYou);
+      var working = rest.filter(function (t) { return t.agent && t.move !== "you"; })[0];
+      var stack = rest.length ? { count: rest.length, wants: wanting.length, need: wanting[0] ? wanting[0].need : "quick", agent: working ? working.agent : "" } : null;
+      var el = drawCard(top, stack);
+      el._stack = rest.length ? { key: "stack:" + key + ":" + stage + ":" + (pile ? pile.kind : "row"), kind: "stack", title: pile && pile.kind !== "more" ? pile.title : readCellName(key, stage), tasks: rest.slice() } : null;
+      hidden = hidden.concat(rest.map(function (t) { return { task: t, card: el }; }));
+      return el;
+    }
+    arranged.cards.forEach(function (t, i) { kids.push(drawStack(t, i === 0 ? arranged.behind : [])); });
+    var landed = arranged.piles.filter(function (p) { return p.kind === "landed"; });
+    arranged.piles.forEach(function (p) {
+      if (p.kind === "landed") return;
+      var top = Store.pickTop(p.tasks);
+      kids.push(drawStack(top, p.tasks.filter(function (t) { return t !== top; }), p));
+    });
+    kids = kids.concat(landed.map(drawPile));
     // A card you just put down stays on the row you chose, and nothing is pushed out to make room.
-    arranged.held.forEach(function (t, i) { kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawCard(t, i === 0 && !arranged.cards.length ? stack : null)); });
-    cell._piles = arranged.piles;
-    cell._behind = behind;
+    arranged.held.forEach(function (t, i) {
+      var first = i === 0 && !arranged.cards.length;
+      kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawStack(t, first ? arranged.behind : []));
+    });
+    cell._piles = landed;
+    cell._behind = hidden;
     cell._stage = stage;
     cell._owner = key;
     if (cell._hold) kids.splice(cell._hold.index, 0, cell._hold.dent);
@@ -328,7 +374,7 @@ window.Board = (function () {
     lane.classList.toggle("is-full", full);
     var hasMore = all.length > 0;
     var head = node("lanehead:" + p.id, "h3", "lane-head");
-    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? all.length + " in all" : full ? "One row" : "Show all " + all.length) + "</small>" + "</button>");
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? "Open" : full ? "One row" : "More rows") + "</small>" + "</button>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
@@ -428,7 +474,7 @@ window.Board = (function () {
     // Cards in an open fan are outside the lanes, and just as real.
     Fan.openCards().forEach(function (c) {
       var t = Store.task(c.dataset.id);
-      if (t) drawCard(t);
+      if (t) drawCard(t, null, true);
     });
     Fan.refreshHead();
     markLongTitles();
@@ -450,7 +496,8 @@ window.Board = (function () {
       var a = beads[0];
       var b = beads[beads.length - 1];
       var left = a.offsetLeft;
-      var right = b.offsetLeft + b.offsetWidth;
+      // The line ends a little past its last bead. It says how far a plan has come, not how far the page goes.
+      var right = b.offsetLeft + b.offsetWidth + 24;
       reads.push([w.querySelector(".wire-reach"), left, right - left]);
     });
     reads.forEach(function (r) {
@@ -562,19 +609,14 @@ window.Board = (function () {
       (cell._piles || []).forEach(function (p) {
         if (p.tasks.some(function (t) { return t.id === id; })) found = cell.querySelector('[data-pile="' + p.key + '"]');
       });
-      if ((cell._behind || []).some(function (t) { return t.id === id; })) found = cell.querySelector(".card");
+      (cell._behind || []).forEach(function (h) { if (h.task.id === id) found = h.card; });
     });
     return found;
   }
 
-  /** Finds the Task cards behind a card on the desk, as a pile a fan can open. */
+  /** Returns what lies behind a card on the desk, as something a fan can open. */
   function readStack(card) {
-    var cell = card.closest(".cell");
-    if (!cell || !cell._behind || !cell._behind.length) return null;
-    var project = Store.state.projects.filter(function (p) { return "lane-" + p.id === cell._owner; })[0];
-    var plan = Store.state.plans.filter(function (p) { return "plan-" + p.id === cell._owner; })[0];
-    var stage = NW.STAGES.filter(function (s) { return s.id === cell._stage; })[0].name;
-    return { key: "stack:" + cell._owner + ":" + cell._stage, kind: "stack", title: (project ? project.name : plan.name) + ", " + stage, tasks: cell._behind.slice() };
+    return card._stack || null;
   }
 
   return { mount: mount, locate: locate, readStack: readStack, holdLead: holdLead, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };

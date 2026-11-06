@@ -89,7 +89,7 @@
   --lamp: oklch(1 0 0 / 0.5);
   --count-ink: oklch(0.52 0.095 80);
   --rule-ink: oklch(0.72 0.09 82);
-  --tab-ring: inset 0 0 0 1px var(--you-ink);
+  --tab-fill: oklch(0.74 0.15 72);
   --underline: var(--you-ink);
   --stock-flat: color-mix(in oklab, var(--raised) 58%, var(--desk));
   --word-flat: color-mix(in oklab, var(--ink) 80%, var(--muted));
@@ -175,7 +175,7 @@
   gap: 4px;
   pointer-events: none;
 }
-.card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
+.card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--tab-fill, var(--you)); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
 .card-tab[data-need="think"] { width: 40px; }
 /* A person is a round monogram behind the edge, so it can never be read as a key. */
 .card-tab--person { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-bottom: -5px; border-radius: 50%; background: var(--faint); box-shadow: none; color: var(--desk); font-size: 10px; font-weight: var(--w-bold); line-height: 1; }
@@ -184,7 +184,7 @@
 .card-head { display: block; width: 30px; height: 23px; line-height: 0; margin-bottom: 1px; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }
 .card:hover .card-head, .card:focus-visible .card-head { filter: none; }
 .card-head .cr { display: block; overflow: visible; }
-.card-paws { position: absolute; z-index: 1; right: 17px; top: -2.5px; display: flex; gap: 10px; pointer-events: none; }
+.card-paws { position: absolute; z-index: 1; right: var(--paw-right, 17px); top: -2.5px; display: flex; gap: 10px; pointer-events: none; }
 .card-paws i { display: block; width: 7px; height: 5px; border-radius: 50%; background: oklch(var(--char-l) var(--char-c) var(--hue, var(--hue-iris))); box-shadow: inset 0 -1px 0 oklch(calc(var(--char-l) - var(--char-shade)) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris))), 0 0 0 0.5px oklch(0 0 0 / 0.18); }
 .card-paws[data-pose="working"] i { animation: paw-tap 3.4s ease-in-out var(--paw-delay, 0s) infinite; }
 .card-paws[data-pose="working"] i + i { animation-delay: calc(var(--paw-delay, 0s) + 0.16s); }

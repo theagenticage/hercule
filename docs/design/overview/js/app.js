@@ -185,7 +185,6 @@
     if (!e.target.closest("#help")) document.getElementById("help").classList.remove("is-on");
   });
 
-  if (q.get("open") === "all") Store.state.projects.forEach(function (p) { delete Store.state.folded[p.id]; });
   if (q.get("wear")) {
     Store.state.wear = true;
     document.getElementById("wear-switch").checked = true;

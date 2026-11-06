@@ -100,6 +100,8 @@ window.Pane = (function () {
     var drawn = h.kind === "agent" ? Board.drawHead(h.name, h.pose) : null;
     tmp.innerHTML = '<span class="card-holder">' + (h.kind === "you" ? '<i class="card-tab" data-need="' + h.need + '"></i>' : drawn ? drawn.head : '<i class="card-tab card-tab--person">' + esc(h.name.charAt(0)) + "</i>") + "</span>" + (drawn ? drawn.paws : "");
     while (tmp.lastChild) sheet.insertBefore(tmp.lastChild, sheet.firstChild);
+    var fresh = sheet.querySelector(":scope > .card-holder .card-tab");
+    if (fresh && drive) fresh.style.opacity = clamp((0.92 - drive.get()) / 0.3).toFixed(3);
   }
 
   function paint(p) {
@@ -246,10 +248,11 @@ window.Pane = (function () {
     var el = pane.querySelector("#pn-walk");
     if (!el) return;
     var spot = Board.locate(openId);
-    var title = spot && spot.classList.contains("pile") ? spot.querySelector(".pile-text b") : null;
-    var folded = spot && spot.classList.contains("bead");
+    var t = Store.task(openId);
+    var plan = Store.state.plans.filter(function (p) { return p.id === t.initiative; })[0];
+    var onBead = spot && spot.classList.contains("bead");
     var behind = spot && spot.dataset.id && spot.dataset.id !== openId;
-    var where = title ? "in " + esc(title.textContent) + ", " : folded ? "folded, " : behind ? "under a card, " : "";
+    var where = onBead && plan ? "in " + esc(plan.name) + ", " : behind ? "in a stack, " : "";
     el.innerHTML = where + at + " of " + of + '<kbd title="Next (N)">N</kbd>';
   }
 

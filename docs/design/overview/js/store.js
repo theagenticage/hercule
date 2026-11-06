@@ -113,9 +113,19 @@ window.Store = (function () {
 
   function wantsYou(t) { return t.move === "you" && !isBlocked(t) && t.stage !== "landed"; }
 
-  /** Picks the card that lies on top of a stack: the oldest that wants you, otherwise the oldest. */
+  /**
+   * Picks the card that lies on top of a stack: the oldest that wants you, then an agent's, then a
+   * person's, then the oldest. A blocked card comes last, because nobody can do anything with it.
+   */
   function pickTop(tasks) {
-    return tasks.filter(wantsYou)[0] || tasks[0];
+    function rankOf(t) {
+      if (wantsYou(t)) return 0;
+      if (isBlocked(t)) return 4;
+      if (t.agent) return 1;
+      if (t.person) return 2;
+      return 3;
+    }
+    return tasks.slice().sort(function (a, b) { return rankOf(a) - rankOf(b); })[0];
   }
 
   /**
@@ -124,7 +134,7 @@ window.Store = (function () {
    */
   function arrangeOneRow(tasks, stage, owner, held) {
     var memoKey = owner + "/" + stage + "/one";
-    if (stage === "landed" && tasks.length + held.length > 1) {
+    if (stage === "landed" && tasks.length + held.length) {
       return { cards: [], piles: [{ key: owner + "/" + stage + "/landed", kind: "landed", title: "Landed", tasks: tasks.concat(held) }], behind: [], held: [] };
     }
     if (!tasks.length) return { cards: [], piles: [], behind: [], held: held };
@@ -147,7 +157,7 @@ window.Store = (function () {
       list.forEach(function (t) { used[t.id] = true; });
       piles.push({ key: owner + "/" + stage + "/" + kind, kind: kind, title: title, tasks: list });
     }
-    if (stage === "landed" && tasks.length > 1) {
+    if (stage === "landed" && tasks.length) {
       fold("landed", "Landed", tasks);
     } else {
       var reviews = tasks.filter(function (t) { return t.kind === "review" || t.kind === "mention"; });
@@ -224,6 +234,7 @@ window.Store = (function () {
     var mine = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !isBlocked(t); }).length;
     var agents = p.tasks.filter(function (t) { return t.agent && t.move !== "you"; }).length;
     if (p.kind === "landed") return "This week";
+    if (mine && agents) return mine + (mine === 1 ? " wants" : " want") + " you, " + agents + " with agents";
     if (agents) return agents === 1 ? "1 with an agent" : agents + " with agents";
     if (mine) return mine + (mine === 1 ? " wants" : " want") + " you";
     return "With others";
@@ -250,15 +261,19 @@ window.Store = (function () {
     return [t.name, t.now, t.where, t.ask, t.ref, t.agent, t.person, project && project.name, links].join(" ").toLowerCase();
   }
 
-  /** Lists the Tasks that want you, in reading order: lane by lane, stage by stage. */
+  /** Lists the Tasks that want you, in reading order: lane by lane, its loose work, then its plans. */
   function listWanting() {
     var out = [];
-    state.projects.forEach(function (p) {
-      STAGE_IDS.forEach(function (s) {
-        tasksIn(function (t) { return t.project === p.id && t.stage === s && t.stage !== "landed" && t.move === "you" && !isBlocked(t); }).forEach(function (t) {
+    function take(project, plan) {
+      STAGE_IDS.forEach(function (stage) {
+        tasksIn(function (t) { return t.project === project && (t.initiative || "") === plan && t.stage === stage && wantsYou(t); }).forEach(function (t) {
           if (matches(t)) out.push(t);
         });
       });
+    }
+    state.projects.forEach(function (p) {
+      take(p.id, "");
+      state.plans.filter(function (i) { return i.project === p.id; }).forEach(function (i) { take(p.id, i.id); });
     });
     return out;
   }
@@ -285,17 +300,19 @@ window.Store = (function () {
       batch.steps.unshift(restore);
       return;
     }
-    undoStack.push({ label: label, restore: restore, hint: hint });
+    // The cards a stack showed are part of what comes back.
+    undoStack.push({ label: label, restore: restore, hint: hint, memo: JSON.stringify(cellMemo) });
     if (undoStack.length > 50) undoStack.shift();
   }
 
   /** Runs several changes as one gesture: one Undo puts them all back. */
   function group(label, fn) {
+    var memo = JSON.stringify(cellMemo);
     batch = { steps: [] };
     fn();
     var steps = batch.steps;
     batch = null;
-    if (steps.length) undoStack.push({ label: label, restore: function () { steps.forEach(function (r) { r(); }); } });
+    if (steps.length) undoStack.push({ label: label, restore: function () { steps.forEach(function (r) { r(); }); }, memo: memo });
   }
 
   /** Returns the last change's way back, without taking it. */
@@ -306,6 +323,7 @@ window.Store = (function () {
     var last = undoStack.pop();
     if (!last) return null;
     last.restore();
+    if (last.memo) cellMemo = JSON.parse(last.memo);
     return last;
   }
 
@@ -437,6 +455,7 @@ window.Store = (function () {
     isFiltering: isFiltering,
     listWanting: listWanting,
     wantsYou: wantsYou,
+    pickTop: pickTop,
     moveTask: moveTask,
     mergeTasks: mergeTasks,
     endTask: endTask,

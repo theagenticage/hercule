@@ -156,11 +156,9 @@ window.Walk = (function () {
     if (r.bottom > view.bottom - 30) s.scrollTop += r.bottom - view.bottom + 30;
   }
 
-  /** Lists what wants you: cards on the desk first, then what sits in piles and folded lanes. */
+  /** Lists what wants you: one pass down the board, in reading order. */
   function readList() {
-    var all = Store.listWanting();
-    function isOnDesk(t) { return !!document.querySelector('#lanes .card[data-id="' + t.id + '"]'); }
-    return all.filter(isOnDesk).concat(all.filter(function (t) { return !isOnDesk(t); }));
+    return Store.listWanting();
   }
 
   function go(i) {

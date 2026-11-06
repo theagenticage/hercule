@@ -65,7 +65,7 @@ window.Shell = (function () {
     var working = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length + 1;
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;
-    if (!working && !waiting) sum.textContent = "Nothing running";
+    if (!Store.state.tasks.length || (!working && !waiting)) sum.textContent = "Nothing running";
     else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting · <b>2</b> idle";
   }
 

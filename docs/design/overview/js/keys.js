@@ -24,6 +24,8 @@ window.Keys = (function () {
   /** Moves focus to a card and scrolls it into view. Only the keyboard shows the ring. */
   function focusCard(el, byPointer) {
     clearFocus();
+    // The keys have taken over: a resting pointer no longer decides what the current card is.
+    if (!byPointer) hovered = null;
     focused = el;
     if (!byPointer) el.classList.add("is-focus");
     document.querySelectorAll('#lanes .card[tabindex="0"]').forEach(function (c) { if (c !== el) c.tabIndex = -1; });
@@ -44,6 +46,8 @@ window.Keys = (function () {
   function findNext(dir) {
     var items = walkable();
     if (!items.length) return null;
+    // The walk starts from the current card, which may be the one under the pointer.
+    if ((!focused || !focused.isConnected) && hovered && hovered.isConnected) focused = hovered;
     if (!focused || !focused.isConnected) return items[0];
     var a = focused.getBoundingClientRect();
     var ax = a.left + a.width / 2;

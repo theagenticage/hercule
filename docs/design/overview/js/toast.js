@@ -23,7 +23,8 @@ window.Toast = (function () {
 
   /** Puts the last change back: the board plays the same motion in reverse. */
   function doUndo() {
-    if (Fan.isOpen()) Fan.hide(true);
+    var fanHost = Fan.isOpen() ? Fan.pileEl() : null;
+    if (fanHost) Fan.hide(true);
     var next = Store.peekUndo();
     var hint = next && next.hint;
     var origin = hint && hint.from ? Board.locate(hint.from) : null;
@@ -42,6 +43,11 @@ window.Toast = (function () {
     }
     show(done ? "Put back: " + done.label : "Nothing to undo.", false);
     if (hint && hint.reopen && Pane.currentId()) Walk.resume(hint.id);
+    // A fan that was open stays open, now showing the card that came back.
+    if (fanHost && fanHost.isConnected) {
+      if (fanHost.classList.contains("pile")) Fan.show(fanHost);
+      else if (Board.readStack(fanHost)) Fan.show(fanHost, Board.readStack(fanHost));
+    }
   }
 
   return { show: show, hide: hide, undo: doUndo };
