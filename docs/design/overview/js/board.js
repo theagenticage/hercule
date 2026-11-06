@@ -74,7 +74,7 @@ window.Board = (function () {
     var need = Store.describeNeed(t);
     var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 12) + "</span>" : "";
     var ask = t.ask && t.move === "you" ? '<div class="card-text card-text--ask"><span class="card-title">' + esc(t.name) + '</span><br><span class="card-ask">' + esc(t.ask) + "</span></div>" : "";
-    return drawHolder(holder) + '<i class="card-stock"></i>' +
+    return drawHolder(holder) + '<i class="card-stock"></i><i class="card-check">' + Crew.icon("check", 12) + "</i>" +
       '<div class="card-text card-text--rest"><span class="card-title">' + esc(t.name) + "</span><br>" + (t.summaryPending ? '<span class="card-pending">Writing a summary</span>' : esc(t.now || "")) + "</div>" + ask +
       '<footer class="card-foot"><span class="card-need">' + esc(need) + "</span>" + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></footer>";
   }
@@ -95,6 +95,7 @@ window.Board = (function () {
     el.style.setProperty("--tilt", ((wear * (Crew.hash(t.id) % 2 ? 1 : -1)) * 0.5).toFixed(3) + "deg");
     el.classList.toggle("is-off", Store.isFiltering() && !Store.matches(t));
     el.classList.toggle("is-hit", Store.isFiltering() && Store.matches(t));
+    el.classList.toggle("is-selected", !!Store.state.selected[t.id]);
     return el;
   }
 

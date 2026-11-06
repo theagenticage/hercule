@@ -153,3 +153,54 @@ window.Live = (function () {
 
   return { mount: mount, arrive: arrive, fact: fact, replayMorning: replayMorning, rewindToLastNight: rewindToLastNight, note: note };
 })();
+
+// PROTOTYPE - the line from a blocked card to what holds it, drawn on while the pointer rests there.
+window.Blocker = (function () {
+  "use strict";
+  var svg = null;
+  var lit = null;
+
+  function hide() {
+    if (svg) svg.remove();
+    svg = null;
+    if (lit) lit.classList.remove("is-blocker");
+    lit = null;
+  }
+
+  function show(card) {
+    hide();
+    var t = Store.task(card.dataset.id);
+    if (!t || !t.blockedBy.length) return;
+    var target = Board.locate(t.blockedBy[0]);
+    if (!target) return;
+    var host = document.getElementById("flight");
+    var h = host.getBoundingClientRect();
+    var a = card.getBoundingClientRect();
+    var b = target.getBoundingClientRect();
+    var ax = a.left + a.width / 2 - h.left;
+    var ay = a.top - h.top;
+    var bx = b.left + b.width / 2 - h.left;
+    var by = (b.bottom < a.top ? b.bottom : b.top) - h.top;
+    if (Math.abs(a.left - b.left) > 40) {
+      ax = (b.left > a.left ? a.right : a.left) - h.left;
+      ay = a.top + a.height / 2 - h.top;
+      bx = (b.left > a.left ? b.left : b.right) - h.left;
+      by = b.top + b.height / 2 - h.top;
+    }
+    var mid = (ax + bx) / 2;
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "blocker-line");
+    svg.innerHTML = '<path d="M' + ax + " " + ay + "C" + mid + " " + ay + " " + mid + " " + by + " " + bx + " " + by + '"/><circle cx="' + bx + '" cy="' + by + '" r="2.5"/>';
+    host.appendChild(svg);
+    var path = svg.querySelector("path");
+    var len = path.getTotalLength();
+    path.style.strokeDasharray = len;
+    path.style.strokeDashoffset = len;
+    path.getBoundingClientRect();
+    path.style.strokeDashoffset = 0;
+    lit = target;
+    lit.classList.add("is-blocker");
+  }
+
+  return { show: show, hide: hide };
+})();

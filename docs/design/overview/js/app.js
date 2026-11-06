@@ -37,6 +37,7 @@
   Live.mount();
   Overview.mount();
   Tray.mount();
+  Select.mount();
 
   document.getElementById("find-icon").innerHTML = Crew.icon("search", 16);
   document.getElementById("display-btn").innerHTML = Crew.icon("sliders", 16);
@@ -61,6 +62,7 @@
     var card = e.target.closest(".card[data-id]");
     if (card) {
       if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return Select.toggle(card.dataset.id);
       Keys.focusCard(card, true);
       Pane.show(card.dataset.id);
       return;
@@ -108,6 +110,19 @@
   document.querySelector("[data-side]").addEventListener("click", function (e) {
     var row = e.target.closest("[data-task]");
     if (row && row.dataset.task) Pane.show(row.dataset.task);
+  });
+
+  // A blocked card points at what holds it, while the pointer rests on it. The line is a passing
+  // explanation, not structure: One surface is where chains of blockers live.
+  var blockerTimer = 0;
+  document.getElementById("lanes").addEventListener("pointerover", function (e) {
+    var card = e.target.closest('.card[data-height="press"][data-id]');
+    clearTimeout(blockerTimer);
+    if (!card) {
+      Blocker.hide();
+      return;
+    }
+    blockerTimer = setTimeout(function () { Blocker.show(card); }, 240);
   });
 
   var display = document.getElementById("display");

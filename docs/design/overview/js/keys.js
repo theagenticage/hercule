@@ -104,6 +104,7 @@ window.Keys = (function () {
         Lens.clear();
         return;
       }
+      if (Object.keys(Store.state.selected).length) return Select.clear();
       return clearFocus();
     }
     var dirs = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", h: "left", l: "right", k: "up", j: "down" };
@@ -149,6 +150,7 @@ window.Keys = (function () {
     if (key === "a") return Lens.toggle("agents");
     if (key === "w") return Display.toggleWear();
     if (!id3) return;
+    if (key === "x") return Select.toggle(id3);
     if (key === "d") return Actions.run("done", id3);
     if (key === "Backspace") return Actions.run("drop", id3);
     if (key === "m") return Actions.run("merge", id3);
@@ -226,10 +228,55 @@ window.Find = (function () {
   return { open: open, close: close, mount: mount };
 })();
 
+// PROTOTYPE - selecting several cards: X or ⌘-click marks a card, and a quiet line says what you can
+// do with them. Dragging any one of them carries them all.
+window.Select = (function () {
+  "use strict";
+
+  function count() { return Object.keys(Store.state.selected).length; }
+
+  function drawBar() {
+    var bar = document.getElementById("select-bar");
+    var n = count();
+    bar.classList.toggle("is-on", n > 0);
+    if (n) {
+      bar.innerHTML = "<b>" + n + "</b> selected<span>Drag any of them to move them all</span><button data-sel=\"done\">Done</button><button data-sel=\"drop\">Drop</button><button data-sel=\"clear\">Clear<kbd>Esc</kbd></button>";
+    }
+  }
+
+  function toggle(id) {
+    var s = Store.state.selected;
+    if (s[id]) delete s[id];
+    else s[id] = true;
+    Board.draw();
+    drawBar();
+  }
+
+  function clear() {
+    Store.state.selected = {};
+    Board.draw();
+    drawBar();
+  }
+
+  function mount() {
+    document.getElementById("select-bar").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-sel]");
+      if (!b) return;
+      var ids = Object.keys(Store.state.selected);
+      Store.state.selected = {};
+      if (b.dataset.sel !== "clear") ids.forEach(function (id) { Actions.end(id, b.dataset.sel === "done" ? "Done" : "Dropped"); });
+      Board.draw();
+      drawBar();
+    });
+  }
+
+  return { toggle: toggle, clear: clear, mount: mount, drawBar: drawBar };
+})();
+
 // PROTOTYPE - the keys, shown on request.
 window.Help = (function () {
   "use strict";
-  var ROWS = [["↑ ↓ ← →", "Walk the desk"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "Fold this lane or plan"], ["⇧F", "Fold everything"], ["Q R S A", "Lens: quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
+  var ROWS = [["↑ ↓ ← →", "Walk the desk"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "Fold this lane or plan"], ["⇧F", "Fold everything"], ["Q R S A", "Lens: quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
   function toggle() {
     var el = document.getElementById("help");
     if (!el.firstChild) el.innerHTML = "<h3>Keys</h3>" + ROWS.map(function (r) { return "<div><kbd>" + r[0] + "</kbd><span>" + r[1] + "</span></div>"; }).join("");

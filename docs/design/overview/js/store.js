@@ -17,6 +17,7 @@ window.Store = (function () {
     folded: {},
     openPlans: {},
     wear: false,
+    selected: {},
     lens: null,
     query: "",
   };

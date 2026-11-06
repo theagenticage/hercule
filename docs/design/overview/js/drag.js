@@ -160,6 +160,7 @@ window.Drag = (function () {
       goalX += 0;
     }
     Motion.body(c.el).to({ x: goalX, y: goalY, s: scale, r: lean }, "carry");
+    if (c.followers && c.followers.length) moveFollowers(goalX, goalY);
 
     var stage = pickStage(x);
     setTargetStage(stage);
@@ -246,7 +247,59 @@ window.Drag = (function () {
     var own = carry.stages.filter(function (s) { return s.id === t.stage; })[0];
     Motion.body(mark).set({ x: own.left - rule.left + 3 });
     work().classList.add("is-carrying");
+    gatherSelection();
     track(e.clientX, e.clientY);
+  }
+
+  /** Picks up the rest of the selection: each selected card flies in behind the one in hand. */
+  function gatherSelection() {
+    var c = carry;
+    c.followers = [];
+    if (!Store.state.selected[c.id]) return;
+    var host = layer();
+    Object.keys(Store.state.selected).forEach(function (id, i) {
+      if (id === c.id) return;
+      var src = document.querySelector('#lanes .card[data-id="' + id + '"]');
+      if (!src) return;
+      var r = src.getBoundingClientRect();
+      var ghost = Motion.ghost(src, host);
+      ghost.style.position = "fixed";
+      ghost.style.left = r.left + "px";
+      ghost.style.top = r.top + "px";
+      ghost.classList.add("is-follower");
+      src.classList.add("is-away");
+      c.followers.push({ id: id, ghost: ghost, src: src, r: r, n: c.followers.length + 1 });
+    });
+    c.el.classList.toggle("has-followers", c.followers.length > 0);
+    if (c.followers.length) c.el.dataset.count = c.followers.length + 1;
+  }
+
+  function moveFollowers(goalX, goalY) {
+    carry.followers.forEach(function (f) {
+      var x = carry.home.left + goalX + f.n * 5 - f.r.left;
+      var y = carry.home.top + goalY + f.n * 5 - f.r.top;
+      Motion.body(f.ghost).to({ x: x, y: y, s: 1 - f.n * 0.02, r: f.n * 1.1 }, "glide");
+    });
+  }
+
+  function releaseFollowers(c, stageId, project) {
+    if (!c.followers || !c.followers.length) return;
+    c.followers.forEach(function (f) {
+      f.src.classList.remove("is-away");
+      if (stageId) Store.moveTask(f.id, { stage: stageId, project: project });
+    });
+  }
+
+  function settleFollowers(c) {
+    (c.followers || []).forEach(function (f, i) {
+      var r0 = f.ghost.getBoundingClientRect();
+      var el = document.querySelector('#lanes .card[data-id="' + f.id + '"]');
+      if (el) {
+        var r1 = el.getBoundingClientRect();
+        Motion.body(el).set({ x: r0.left - r1.left, y: r0.top - r1.top, r: 2 }).to({ x: 0, y: 0, r: 0 }, "drop", { delay: 40 + i * 40 });
+      }
+      f.ghost.remove();
+    });
   }
 
   /** Works out where the card lands from the slot, as a rank between its new neighbours. */
@@ -281,7 +334,8 @@ window.Drag = (function () {
     work().classList.remove("is-carrying");
     delete work().dataset.dragStage;
     c.slot.remove();
-    c.el.classList.remove("is-carried", "is-docking");
+    c.el.classList.remove("is-carried", "is-docking", "has-followers");
+    delete c.el.dataset.count;
     c.el.style.left = "";
     c.el.style.top = "";
     c.el.style.width = "";
@@ -316,6 +370,8 @@ window.Drag = (function () {
     var stage = carry.stage.id;
     var key = zone.key;
     var c = finish();
+    releaseFollowers(c);
+    settleFollowers(c);
     document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
     var r0 = c.el.getBoundingClientRect();
     var ghost = Motion.ghost(c.el, layer());
@@ -349,7 +405,12 @@ window.Drag = (function () {
     var done = finish();
     if (!landing) return settle(done, "back");
     var moved = landing.stage !== done.task.stage || landing.project !== done.task.project;
-    settle(done, "drop", function () { Store.moveTask(done.id, landing); });
+    settle(done, "drop", function () {
+      Store.moveTask(done.id, landing);
+      releaseFollowers(done, landing.stage, landing.project);
+      if (done.followers && done.followers.length) Store.state.selected = {};
+    });
+    settleFollowers(done);
     if (moved) {
       Toast.show(describeMove(done.task, landing), true);
       if (landing.stage === "landed") {
@@ -376,6 +437,8 @@ window.Drag = (function () {
     var id = target.dataset.id;
     target.classList.remove("is-merge-target");
     var c = finish();
+    releaseFollowers(c);
+    settleFollowers(c);
     var el = c.el;
     // The carried card slides under its new home, then the home takes a small bump.
     var r0 = el.getBoundingClientRect();
@@ -406,7 +469,8 @@ window.Drag = (function () {
     var slot = carry.slot;
     if (carry.merge) setMerge(null);
     var c = finish();
-    settle(c, "back");
+    settle(c, "back", function () { releaseFollowers(c); });
+    settleFollowers(c);
   }
 
   /* ---------- Sliding a bead along its wire ---------- */
