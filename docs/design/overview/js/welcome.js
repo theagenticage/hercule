@@ -3,12 +3,14 @@
 window.Welcome = (function () {
   "use strict";
 
-  /** Returns the markup under the rule for an empty world, or an empty string. */
+  /** Returns the markup under the stage headers for an empty world, or an empty string. */
   function drawEmpty(scene) {
     if (scene === "first") {
-      return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder">' + Board.drawHead("Hercule", "idle").head + "</span>" + Board.drawHead("Hercule", "idle").paws + '<i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task lands here.</p></div></article></div></div>' +
+      return '<div class="welcome-words"><h2>Nothing here yet.</h2><p>Work you take on lands here, by stage. Start a thread, and its Task appears by itself.</p></div>' +
+        '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card card--ghost"><span class="card-holder">' + Board.drawHead("Hercule", "waiting").head + '</span><i class="card-stock"></i><div class="card-words"><p class="card-title">Your first Task lands here</p><p class="card-now">It keeps its place, and moves when the work does.</p></div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
+    if (scene === "empty") return '<div class="welcome--clear"><h2>All clear.</h2><p>12 things landed this week. The crew is at rest.</p></div>';
     return "";
   }
 

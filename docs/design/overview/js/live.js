@@ -13,7 +13,7 @@ window.Live = (function () {
 
   /** Checks whether the person is busy near this spot right now. */
   function isHandNear(rect) {
-    if (Drag.isActive() || Fan.isOpen()) return true;
+    if (Drag.isActive()) return true;
     if (!rect) return false;
     // A pointer parked on a card means someone is reading it, however long it has been still.
     var nearX = Math.max(rect.left - lastX, 0, lastX - rect.right);
@@ -36,7 +36,9 @@ window.Live = (function () {
     whenStill(function () { return null; }, function () {
       Board.change(function () { Store.addTask(t); }, { spring: "self" });
       var el = cardEl(t.id);
-      if (!el) return tuckIn(t);
+      if (!opts.quiet) note("New: " + t.name);
+      // It lies past what the cell shows, or under something folded: the count says it arrived.
+      if (!el) return;
       var b = Motion.body(el);
       if (Motion.isReduced()) {
         b.set({ o: 0 }).to({ o: 1 }, "travel");
@@ -48,7 +50,6 @@ window.Live = (function () {
         if (paws) Motion.body(paws).set({ o: 0 }).to({ o: 1 }, "travel", { delay: 760 });
       }
       el.classList.add("is-new");
-      if (!opts.quiet) note("New: " + t.name);
     });
   }
 
@@ -63,30 +64,6 @@ window.Live = (function () {
     });
   }
 
-  /**
-   * Shows an arrival landing on a stack: it rises on top for a moment, so it is seen, then slides in
-   * underneath. Nothing moves, and only the count beside the age changes.
-   */
-  function tuckIn(t) {
-    var top = Board.locate(t.id);
-    if (!top) return;
-    var r = top.getBoundingClientRect();
-    var host = document.getElementById("carry");
-    var copy = Board.drawCard(t).cloneNode(true);
-    copy.classList.add("is-ghost", "is-new");
-    copy.style.cssText = "position:absolute;margin:0;left:" + r.left + "px;top:" + r.top + "px;width:" + r.width + "px;height:" + r.height + "px";
-    host.appendChild(copy);
-    var b = Motion.body(copy);
-    if (Motion.isReduced()) {
-      setTimeout(function () { copy.remove(); }, 1600);
-      return;
-    }
-    b.set({ y: 10, s: 0.98, o: 0 }).to({ y: 0, s: 1, o: 1 }, "self");
-    setTimeout(function () {
-      b.to({ y: 8, s: 0.97, o: 0 }, "self", { done: function () { copy.remove(); } });
-    }, 2600);
-  }
-
   /** A card moving by itself because a fact arrived, such as a pull request merging. */
   function fact(id, toStage, words, apply) {
     var el = cardEl(id);
@@ -95,7 +72,7 @@ window.Live = (function () {
     function run() {
       var card = cardEl(id);
       if (!card) {
-        // It sits in a pile or a folded lane: only the count and the bead change.
+        // It lies past what the cell shows, or under something folded: only the counts change.
         Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
         note(words);
         return;
@@ -111,9 +88,7 @@ window.Live = (function () {
         // The hand may have arrived during the hold. A card in the hand is not moved by anything.
         if (Drag.isActive()) return setTimeout(move, 300);
         var inCell = card.parentElement && card.parentElement.classList.contains("cell");
-        var stacked = inCell && card.parentElement._behind && card.parentElement._behind.length;
-        // On a stack there is no hole to hold: the next card is already there, under this one.
-        if (!inCell || stacked) {
+        if (!inCell) {
           sig.remove();
           card.classList.remove("has-signal");
           Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });

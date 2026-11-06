@@ -31,40 +31,24 @@ window.Pane = (function () {
     }).join("") + "</ol>";
   }
 
-  /**
-   * Draws the next move of a failed Task: the same words as its card, then the two moves only a
-   * failure has. Done and Drop stay in the foot, where they are on every Task.
-   */
-  function drawFailedMove(t) {
-    var holder = Store.decideHolder(t);
-    var who = holder.kind === "agent" ? Crew.face(holder.name, { pose: "failed", size: 22 }) + "<span><b>" + esc(NW.sayAgent(holder.name)) + "</b> stopped. Your move.</span>" : "<span><b>Your move.</b> The run stopped.</span>";
-    return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + '</p><p class="pn-ask pn-failed">' + Board.FAILED_MARK + esc(Store.describeFailure(t)) + '</p>' +
+  /** Draws what a failed run needs: the card's words, then the two moves only a failure has. */
+  function drawFailure(t) {
+    var who = t.agent ? '<p class="pn-who">' + Crew.face(t.agent, { pose: "failed", size: 22 }) + "<span><b>" + esc(NW.sayAgent(t.agent)) + "</b> stopped.</span></p>" : "";
+    return '<section class="pn-sec pn-next">' + who + '<p class="pn-ask pn-failed">' + Board.FAILED_MARK + esc(Store.describeFailure(t)) + "</p>" +
       '<div class="pn-answers"><button class="pn-answer is-suggested" data-act="retry">Try again</button><button class="pn-answer" data-act="run">Open the run</button></div></section>';
   }
 
-  function drawNextMove(t) {
-    if (t.failed) return drawFailedMove(t);
-    var holder = Store.decideHolder(t);
-    var who = "";
-    var blocked = Store.isBlocked(t);
-    if (blocked) {
-      return '<section class="pn-sec"><h4>Next move</h4><p class="pn-who"><span>Nobody yet. It waits on another Task.</span></p></section>';
-    }
-    if (t.stage === "landed") return "";
-    if (holder.kind === "you") who = '<i class="card-tab" data-need="' + t.need + '"></i><span><b>Your move.</b> ' + (t.need === "think" ? "This needs real thinking." : "A quick call.") + "</span>";
-    else if (holder.kind === "agent") who = Crew.face(holder.name, { pose: holder.pose, size: 22 }) + "<span><b>" + esc(NW.sayAgent(holder.name)) + "</b> " + (holder.pose === "waiting" ? "asks you." : "is working.") + "</span>";
-    else if (holder.kind === "person") who = '<span class="pn-initial">' + esc(holder.name.charAt(0)) + "</span><span><b>" + esc(holder.name) + "</b> has the next move.</span>";
-    else who = "<span>Nobody has the next move.</span>";
-    // Only a question addressed to you is shown. A Task in an agent's hands asks you nothing.
-    var asked = holder.kind === "you" || (holder.kind === "agent" && holder.pose === "waiting");
-    var ask = asked && t.ask ? '<p class="pn-ask">' + esc(t.ask) + "</p>" : "";
-    var opts = (asked ? t.options || [] : []).map(function (o, i) {
-      var label = typeof o === "string" ? o : o.label || "";
+  /** Draws a Thread's open question, with its answers and a line to say something else. */
+  function drawQuestion(t) {
+    var opts = t.question.answers.map(function (label, i) {
       return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + esc(label) + '">' + esc(label) + "</button>";
     }).join("");
-    var reply = holder.kind === "you" || (holder.kind === "agent" && holder.pose === "waiting") ? '<form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form>' : "";
-    if (!opts && holder.kind === "you" && t.need === "think") opts = '<button class="pn-answer is-suggested" data-act="thread">Think it through in a thread</button>';
-    return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + "</p>" + ask + (opts ? '<div class="pn-answers">' + opts + "</div>" : "") + reply + "</section>";
+    return '<section class="pn-sec pn-next"><p class="pn-who">' + Crew.face(t.agent, { pose: "waiting", size: 22 }) + "<span><b>" + esc(NW.sayAgent(t.agent)) + '</b> asks.</span></p><p class="pn-ask">' + esc(t.question.text) + '</p><div class="pn-answers">' + opts + '</div><form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form></section>';
+  }
+
+  function drawNow(t) {
+    if (t.failed) return drawFailure(t);
+    return t.question ? drawQuestion(t) : "";
   }
 
   function drawThreads(t) {
@@ -72,16 +56,49 @@ window.Pane = (function () {
     return '<section class="pn-sec"><h4>Threads <span>' + t.threads.length + "</span></h4>" + t.threads.map(function (th, i) {
       var live = t.agent && i === t.threads.length - 1;
       var broke = live && t.failed;
-      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: broke ? "failed" : live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (broke ? "Failed" : live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
+      var asks = live && t.question;
+      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: broke ? "failed" : asks ? "waiting" : live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (broke ? "Failed" : asks ? "Asks" : live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
     }).join("") + "</section>";
   }
 
+  /** Draws one outside thing as a row: its source's mark, its name, and what it says about itself. */
+  function drawEntityRow(ref, claim) {
+    var e = Graph.entity(ref);
+    var kind = Graph.kindOf(ref);
+    var says = claim ? '<small class="pn-claim">' + esc(claim.evidence === "person" ? claim.claimant + " linked this" : claim.claimant + " reports this") + "</small>" : "";
+    // Something you cannot open: its title was never read, so only its source and kind are known.
+    if (e.access === "restricted") {
+      return '<div class="pn-row is-restricted" tabindex="0">' + Crew.icon("lock", 14) + '<span class="pn-row-text">A ' + esc(Graph.SOURCES[kind.source]) + " " + esc(kind.word.toLowerCase()) + " you cannot open</span>" + says + "</div>";
+    }
+    return '<a class="pn-row" href="#">' + Crew.brand(kind.source, 14) + '<span class="pn-row-text">' + esc(e.label ? e.label + "  " : "") + esc(e.title) + '</span><small class="pn-state">' + esc(e.state || "") + "</small>" + says + "</a>";
+  }
+
+  /** Draws what a Task is, and what it is directly linked to. A reference found in text is a weaker row. */
   function drawLinks(t) {
-    var rows = (t.links || []).map(function (l) {
-      var mark = /pull|#/.test(l.url + l.label) ? Crew.brand("github", 14) : Crew.icon("link", 14);
-      return '<a class="pn-row" href="#">' + mark + '<span class="pn-row-text">' + esc(l.label) + "</span><small>" + esc(l.state || "") + "</small></a>";
+    var links = Graph.readLinks(t);
+    var strong = links.filter(function (l) { return l.evidence !== "text"; });
+    var hints = links.filter(function (l) { return l.evidence === "text"; });
+    var own = (t.entities || []).map(function (r) { return drawEntityRow(r); }).join("");
+    var plain = own ? "" : (t.links || []).map(function (l) {
+      return '<a class="pn-row" href="#">' + Crew.icon("link", 14) + '<span class="pn-row-text">' + esc(l.label) + "</span><small>" + esc(l.state || "") + "</small></a>";
     }).join("");
-    return rows ? '<section class="pn-sec"><h4>Linked</h4>' + rows + "</section>" : "";
+    var rows = own + plain + strong.map(function (l) { return drawEntityRow(l.ref, l); }).join("");
+    var mentions = hints.map(function (l) {
+      var e = Graph.entity(l.ref);
+      return '<a class="pn-row pn-row--hint" href="#">' + Crew.brand(Graph.sourceOf(l.ref), 14) + '<span class="pn-row-text">' + esc(e.label) + "  " + esc(e.title) + '</span><small class="pn-state">Mentioned</small><small class="pn-claim">Found in text on ' + esc(l.claimant) + "</small></a>";
+    }).join("");
+    return (rows ? '<section class="pn-sec"><h4>Linked</h4>' + rows + "</section>" : "") + (mentions ? '<section class="pn-sec"><h4>Mentioned</h4>' + mentions + "</section>" : "");
+  }
+
+  /** Draws everything a Task is part of, by every path, each once. A click shows all its Tasks. */
+  function drawParents(t) {
+    var refs = Graph.readAncestors(t.entities || []);
+    if (!refs.length) return "";
+    return '<section class="pn-sec"><h4>Part of</h4>' + refs.map(function (r) {
+      var e = Graph.entity(r);
+      var shows = Graph.KINDS[e.kind].group;
+      return "<" + (shows ? 'button data-context="' + esc(r) + '" title="Show all its Tasks"' : "div") + ' class="pn-row">' + Crew.brand(Graph.sourceOf(r), 14) + '<span class="pn-row-text">' + esc(e.title) + '</span><small class="pn-state">' + esc(Board.describeContext(e)) + "</small></" + (shows ? "button" : "div") + ">";
+    }).join("") + "</section>";
   }
 
   function drawBlockers(t) {
@@ -98,25 +115,23 @@ window.Pane = (function () {
   function drawInner(t) {
     var project = Store.state.projects.filter(function (p) { return p.id === t.project; })[0];
     var plan = Store.state.plans.filter(function (p) { return p.id === t.initiative; })[0];
-    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb"><span class="pn-crumb-text">' + esc(project.name) + (plan ? " · " + esc(plan.name) : "") + '</span><span class="pn-walk" id="pn-walk"></span></p>' +
+    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb"><span class="pn-crumb-text">' + esc(project ? project.name : "") + (plan ? " · " + esc(plan.name) : "") + "</span></p>" +
       '<h2 class="pn-title" id="pn-title" tabindex="-1">' + esc(t.name) + "</h2>" + drawPath(t) + "</header>" +
       '<p class="pn-where">' + esc(t.where || t.now) + "</p>" +
-      drawNextMove(t) +
+      drawNow(t) +
       (t.left && !/^(nothing|everything)$/i.test(t.left) ? '<section class="pn-sec"><h4>What is left</h4><p class="pn-left">' + esc(t.left) + "</p></section>" : "") +
-      drawBlockers(t) + drawThreads(t) + drawLinks(t) + "</div>" +
+      drawBlockers(t) + drawThreads(t) + drawParents(t) + drawLinks(t) + "</div>" +
       '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button><button class="pn-btn" data-act="merge">' + Crew.icon("overlap", 14) + 'Merge<kbd>M</kbd></button><button class="pn-btn pn-btn--end" data-act="drop">Drop<kbd>⌫</kbd></button></footer>';
   }
 
+  /** Puts the colleague on the open sheet's top edge, if one is on this Task. */
   function drawHolderOnSheet(t) {
-    var h = Store.decideHolder(t);
     sheet.querySelectorAll(":scope > .card-holder, :scope > .card-paws").forEach(function (old) { old.remove(); });
-    if (h.kind === "none") return;
+    if (!t.agent || (t.stage === "landed" && !t.failed)) return;
     var tmp = document.createElement("div");
-    var drawn = h.kind === "agent" ? Board.drawHead(h.name, h.pose) : null;
-    tmp.innerHTML = '<span class="card-holder">' + (h.kind === "you" ? '<i class="card-tab" data-need="' + h.need + '"></i>' : drawn ? drawn.head : '<i class="card-tab card-tab--person">' + esc(h.name.charAt(0)) + "</i>") + "</span>" + (drawn ? drawn.paws : "");
+    var drawn = Board.drawHead(t.agent, t.failed ? "failed" : t.question ? "waiting" : "working");
+    tmp.innerHTML = '<span class="card-holder">' + drawn.head + "</span>" + drawn.paws;
     while (tmp.lastChild) sheet.insertBefore(tmp.lastChild, sheet.firstChild);
-    var fresh = sheet.querySelector(":scope > .card-holder .card-tab");
-    if (fresh && drive) fresh.style.opacity = clamp((0.92 - drive.get()) / 0.3).toFixed(3);
   }
 
   function paint(p) {
@@ -132,10 +147,6 @@ window.Pane = (function () {
     inner.style.opacity = words.toFixed(3);
     inner.style.transform = "translateY(" + ((1 - words) * 10).toFixed(2) + "px)";
     if (ghost) ghost.style.opacity = clamp(1 - p / 0.55).toFixed(3);
-    // A tab rides the sheet's edge while it opens, then goes: "Next move" says it in words. A
-    // colleague stays, because there the head is the person, not a label.
-    var tab = sheet.querySelector(":scope > .card-holder .card-tab");
-    if (tab) tab.style.opacity = clamp((0.92 - p) / 0.3).toFixed(3);
     pane.style.setProperty("--pn-dim", clamp(p).toFixed(3));
   }
 
@@ -156,7 +167,7 @@ window.Pane = (function () {
     opts = opts || {};
     var t = Store.task(id);
     if (!t) return;
-    var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
+    var el = document.querySelector('#lanes .card[data-id="' + id + '"]');
     if (openId && openId !== id) {
       if (opts.followed) trail.push(openId);
       swap(id);
@@ -215,7 +226,7 @@ window.Pane = (function () {
   function swap(id) {
     var t = Store.task(id);
     if (awayEl) awayEl.classList.remove("is-away");
-    var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
+    var el = document.querySelector('#lanes .card[data-id="' + id + '"]');
     if (el) el.classList.add("is-away");
     awayEl = el;
     openId = id;
@@ -250,19 +261,8 @@ window.Pane = (function () {
     if (!openId) return;
     var t = Store.task(openId);
     if (!t) return hide();
-    var keep = pane.querySelector("#pn-walk");
-    var walk = keep ? keep.innerHTML : "";
     inner.innerHTML = drawInner(t);
     drawHolderOnSheet(t);
-    var fresh = pane.querySelector("#pn-walk");
-    if (fresh) fresh.innerHTML = walk;
-  }
-
-  /** Shows where the morning's walk stands, in the head of the details. */
-  function setWalk(at, of) {
-    var el = pane.querySelector("#pn-walk");
-    if (!el) return;
-    el.innerHTML = at + " of " + of + '<kbd title="Next (N)">N</kbd>';
   }
 
   /** Asks what the new thread should do, on one line at the foot of the details. */
@@ -352,6 +352,11 @@ window.Pane = (function () {
       if (act) return Actions.run(act.dataset.act, openId);
       var open = e.target.closest("[data-open]");
       if (open) return show(open.dataset.open, { followed: true });
+      var context = e.target.closest("[data-context]");
+      if (context) {
+        var ref = context.dataset.context;
+        return hide(function () { Filters.showContext(Graph.entity(ref).kind, ref); });
+      }
       var stage = e.target.closest("[data-stage-to]");
       if (stage) Actions.moveToStage(openId, stage.dataset.stageTo);
     });
@@ -365,5 +370,5 @@ window.Pane = (function () {
     });
   }
 
-  return { mount: mount, show: show, hide: hide, back: back, isWalking: function () { var el = pane.querySelector("#pn-walk"); return !!(el && el.textContent); }, acceptSuggested: acceptSuggested, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
+  return { mount: mount, show: show, hide: hide, back: back, acceptSuggested: acceptSuggested, refresh: refresh, askThread: askThread, currentId: currentId };
 })();

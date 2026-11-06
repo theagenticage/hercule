@@ -4,7 +4,7 @@ html, body { overflow: auto; height: auto; background: var(--desk); }
 .st-themes a { color: var(--muted); }
 .st-themes a:hover { color: var(--ink); }
 .st-open { padding: 56px 0 40px; }
-.st-kicker { margin: 0 0 10px; color: var(--numeral); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.09em; text-transform: uppercase; }
+.st-kicker { margin: 0 0 10px; color: var(--muted); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.09em; text-transform: uppercase; }
 .st h1 { margin: 0 0 14px; font-size: 40px; line-height: 46px; font-weight: var(--w-medium); letter-spacing: -0.022em; }
 .st-lede { margin: 0 0 10px; font-size: var(--t-16); line-height: 25px; color: var(--muted); }
 .st-go { display: inline-flex; align-items: center; height: 34px; padding: 0 12px; border-radius: var(--r-btn); background: var(--accent); color: var(--accent-fg); font-size: var(--t-13); font-weight: var(--w-medium); }
@@ -15,7 +15,7 @@ html, body { overflow: auto; height: auto; background: var(--desk); }
 .st b { font-weight: var(--w-medium); color: var(--ink); }
 .st ul { margin: 0 0 12px; padding-left: 20px; }
 .st li { margin-bottom: 6px; }
-.st a:not(.st-go) { text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--brass) 70%, transparent); text-underline-offset: 3px; }
+.st a:not(.st-go) { text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--ink) 40%, transparent); text-underline-offset: 3px; }
 .st code { font-family: var(--font-mono); font-feature-settings: normal; font-size: var(--t-12); }
 .st-frame, .st-still, .st-three, .st-two, .st-grid { position: relative; left: 50%; width: min(1180px, calc(100vw - 56px)); transform: translateX(-50%); margin: 24px 0; }
 .st-frame { margin-top: 12px; }

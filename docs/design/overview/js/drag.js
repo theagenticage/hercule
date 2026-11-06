@@ -25,10 +25,14 @@ window.Drag = (function () {
       var r = grid.getBoundingClientRect();
       zones.push({ key: grid.dataset.key.replace("grid:", ""), grid: grid, top: r.top, bottom: Math.max(r.bottom, r.top + 88) });
     });
-    // A folded lane or plan is a target too: the card shrinks into a bead on its wire.
+    // A closed initiative or a folded lane is a target too: the card shrinks into its bead or its count.
     document.querySelectorAll("#lanes .wire").forEach(function (wire) {
       var r = wire.getBoundingClientRect();
       zones.push({ key: wire.dataset.key.replace("wire:", ""), wire: wire, top: r.top - 22, bottom: r.bottom + 6 });
+    });
+    document.querySelectorAll("#lanes .lane-fold").forEach(function (fold) {
+      var r = fold.getBoundingClientRect();
+      zones.push({ key: "lane-" + fold.dataset.foldLane, wire: fold, top: r.top - 8, bottom: r.bottom + 8 });
     });
     return zones;
   }
@@ -73,44 +77,8 @@ window.Drag = (function () {
     return null;
   }
 
-  /** Checks whether a cell shows one row: a card dropped there lies on top of the stack. */
-  function isOneRow(cell) {
-    var owner = cell.dataset.owner;
-    var project = owner.indexOf("lane-") === 0 ? owner.slice(5) : Store.state.plans.filter(function (p) { return "plan-" + p.id === owner; })[0].project;
-    return !Store.state.full[project];
-  }
-
-  /** Returns the card on the row the pointer is over, or the last one. */
-  function pickRowCard(cell, y) {
-    var cards = cell.querySelectorAll(":scope > .card");
-    for (var i = 0; i < cards.length; i++) {
-      if (y < cards[i].getBoundingClientRect().bottom + 11) return cards[i];
-    }
-    return cards[cards.length - 1] || null;
-  }
-
-  function clearUnder() {
-    if (carry && carry.under) carry.under.classList.remove("is-under");
-    if (carry) carry.under = null;
-  }
-
   /** Puts the slot at the row the pointer is over. Everything below moves aside, and nothing jumps. */
   function moveSlot(cell, y, middle) {
-    var top = isOneRow(cell) ? pickRowCard(cell, y) : null;
-    if (top) {
-      // At rest a card lands on a row. The card there slips down a little to take it, and nothing
-      // else on the desk moves: a lane at rest never changes height.
-      if (carry.under !== top) clearUnder();
-      carry.slot.classList.add("is-over");
-      if (carry.slot.nextElementSibling !== top) cell.insertBefore(carry.slot, top);
-      carry.slot.style.top = top.offsetTop + "px";
-      top.classList.add("is-under");
-      carry.under = top;
-      return;
-    }
-    clearUnder();
-    carry.slot.classList.remove("is-over");
-    carry.slot.style.top = "";
     var kids = Array.prototype.filter.call(cell.children, function (c) { return !c.classList.contains("slot"); });
     var before = null;
     // Arriving on a card's middle, the slot opens after it, so the card stays under the pointer.
@@ -140,9 +108,6 @@ window.Drag = (function () {
     if (carry.stage) carry.stage.el.classList.remove("is-target");
     carry.stage = stage;
     stage.el.classList.add("is-target");
-    var rule = document.getElementById("rule").getBoundingClientRect();
-    var r = stage.el.getBoundingClientRect();
-    Motion.body(document.getElementById("rule-mark")).to({ x: r.left - rule.left }, "hand");
     work().dataset.dragStage = stage.id;
   }
 
@@ -155,7 +120,6 @@ window.Drag = (function () {
     }
     carry.merge = target;
     carry.slot.classList.toggle("is-shut", !!target);
-    if (target) clearUnder();
     if (target) {
       var name = Store.task(target.dataset.id).name;
       target.dataset.mergeLabel = "Merge into " + (name.length > 22 ? name.slice(0, 21) + "…" : name);
@@ -165,7 +129,7 @@ window.Drag = (function () {
   }
 
   function setWireTarget(zone) {
-    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
+    setWireTargetOff();
     if (zone) zone.wire.classList.add("is-target");
   }
 
@@ -206,7 +170,6 @@ window.Drag = (function () {
       setMerge(null);
       c.hoverCard = null;
       c.zone = zone;
-      clearUnder();
       if (c.slot.parentElement) {
         Motion.flip(Board.movables(), function () { c.slot.remove(); }, { spring: "hand" });
         c.zones = readDropZones();
@@ -251,25 +214,15 @@ window.Drag = (function () {
     var fromCell = el.closest(".cell");
     var slot = document.createElement("div");
     slot.className = "slot";
-    if (fromCell) fromCell.insertBefore(slot, el);
+    // A card in a stack leaves its slot where the stack stands: only the one card is in the hand.
+    if (fromCell) fromCell.insertBefore(slot, el.closest(".stack") || el);
     var fromRow = fromCell ? Array.prototype.indexOf.call(fromCell.children, slot) : -1;
-    var fromFan = !!el.closest(".fan");
     Motion.body(el).clear();
-    // What lay behind this card stays behind: only the one card is in the hand.
-    if (el._sheets) {
-      el._sheets.innerHTML = "";
-      el._sheets._html = "";
-    }
-    var moreChip = el.querySelector(".card-more");
-    if (moreChip) moreChip.remove();
-    if (el._body) el._body._html = "";
-    var liftedOffStack = !!(fromCell && isOneRow(fromCell) && fromCell.querySelectorAll(":scope > .card").length + (fromCell._behind || []).length > 1);
     layer().appendChild(el);
     el.classList.add("is-carried");
     el.style.left = home.left + "px";
     el.style.top = home.top + "px";
     el.style.width = home.width + "px";
-    if (fromFan) Fan.hide();
     carry = {
       el: el, id: p.id, task: t, home: home, slot: slot, fromCell: fromCell, fromRow: fromRow,
       grabX: p.x - home.left, grabY: p.y - home.top,
@@ -277,17 +230,7 @@ window.Drag = (function () {
       stage: null, merge: null, hoverCard: null, zone: null, followers: [],
       zones: readDropZones(), stages: readStages(),
     };
-    var rule = document.getElementById("rule").getBoundingClientRect();
-    var own = carry.stages.filter(function (s) { return s.id === t.stage; })[0];
-    Motion.body(document.getElementById("rule-mark")).set({ x: own.left - rule.left });
     work().classList.add("is-carrying");
-    // Lifting the top of a stack shows the next card, already there underneath.
-    if (liftedOffStack) {
-      Store.state.lifted = p.id;
-      slot.classList.add("is-over");
-      Board.draw();
-      el.classList.add("is-carried");
-    }
     gatherSelection();
     track(e.clientX, e.clientY);
   }
@@ -358,22 +301,17 @@ window.Drag = (function () {
     if (a !== null && b !== null) rank = (a + b) / 2;
     else if (a !== null) rank = a + 0.5;
     else if (b !== null) rank = b - 0.5;
-    var owner = cell.dataset.owner;
     var row = Array.prototype.indexOf.call(cell.children, slot);
-    // Where it lands decides what it belongs to: a lane's cells hold loose work, a band its plan's.
-    var inLane = owner.indexOf("lane-") === 0;
-    var plan = inLane ? "" : owner.slice(5);
-    var project = inLane ? owner.slice(5) : Store.state.plans.filter(function (p) { return p.id === plan; })[0].project;
-    return { cell: cell, row: row, stage: cell.dataset.stage, project: project, plan: plan, before: rank };
+    // Where it lands decides what it belongs to. A lane for an outside thing changes neither.
+    var owner = Store.resolveOwner(cell.dataset.owner);
+    return { cell: cell, row: row, stage: cell.dataset.stage, project: owner.project, plan: owner.plan, before: rank };
   }
 
   /** Ends the carry. Keeps how the card looks right now, because the landing starts from there. */
   function finish() {
-    clearUnder();
     var c = carry;
     var b = Motion.body(c.el);
     // The landing starts with the speed of the hand, in pixels a second, so a thrown card lands thrown.
-    Store.state.lifted = null;
     c.look = { rect: c.el.getBoundingClientRect(), s: b.value.s, r: b.value.r, l: b.value.l, vx: c.vx * 600, vy: c.vy * 600 };
     carry = null;
     clearTimeout(c.dwell);
@@ -386,7 +324,7 @@ window.Drag = (function () {
   }
 
   function setWireTargetOff() {
-    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
+    document.querySelectorAll(".wire.is-target, .lane-fold.is-target").forEach(function (w) { w.classList.remove("is-target"); });
   }
 
   function takeOutOfHand(c) {
@@ -437,11 +375,9 @@ window.Drag = (function () {
   function dropOnWire() {
     var zone = carry.zone;
     var stage = carry.stage.id;
-    var key = zone.key;
+    var owner = Store.resolveOwner(zone.key);
     var c = finish();
-    var to = { stage: stage };
-    if (key.indexOf("lane-") === 0) to.project = key.slice(5);
-    if (key.indexOf("plan-") === 0) to.plan = key.slice(5);
+    var to = { stage: stage, project: owner.project, plan: owner.plan };
     settle(c, "travel", function () {
       Store.group(c.task.name, function () {
         Store.moveTask(c.id, to);
@@ -453,7 +389,7 @@ window.Drag = (function () {
     settleFollowers(c);
     var bead = document.querySelector('.bead[data-id="' + c.id + '"]');
     if (bead) Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "hand", { delay: 220 });
-    Toast.show("Moved, and folded away.", true);
+    Toast.show("Moved.", true);
   }
 
   function drop() {
@@ -463,7 +399,7 @@ window.Drag = (function () {
     var landing = readLanding();
     var c = finish();
     if (!landing) return settle(c, "travel", function () { releaseFollowers(c); });
-    var moved = landing.stage !== c.task.stage || landing.project !== c.task.project || landing.plan !== (c.task.initiative || "");
+    var moved = landing.stage !== c.task.stage || (landing.project !== undefined && landing.project !== c.task.project) || (landing.plan !== undefined && landing.plan !== (c.task.initiative || ""));
     // Put back where it was picked up, a drop changes nothing at all.
     if (!moved && landing.cell === c.fromCell && landing.row === c.fromRow && !c.followers.length) return settle(c, "hand");
     settle(c, "hand", function () {
@@ -580,7 +516,7 @@ window.Drag = (function () {
     var beadEl = e.target.closest(".bead[data-id]");
     if (beadEl) return beginBead(e, beadEl);
     var el = e.target.closest(".card[data-id]");
-    if (!el || e.target.closest(".card-more, .card-fan") || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
+    if (!el || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
     press = { el: el, id: el.dataset.id, x: e.clientX, y: e.clientY };
   }
 

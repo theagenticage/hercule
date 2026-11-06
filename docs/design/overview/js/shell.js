@@ -82,10 +82,10 @@ window.Shell = (function () {
 
   /**
    * Shows the marigold dot while any run has failed: on the Overview row, and on the Hercule
-   * segment when the Threads face hides that row. It has no number, because the sentence has one.
+   * segment when the Threads face hides that row. It has no number: the lane says how many.
    */
   function syncFailedDots() {
-    var failed = Store.countAttention().failed;
+    var failed = Store.countStates().failed;
     var words = failed + " failed. Open Work on what failed";
     var row = document.querySelector("[data-side] .nav-dot");
     var door = document.querySelector("[data-side] .seg-dot");
@@ -106,7 +106,7 @@ window.Shell = (function () {
     var waiting = 0;
     document.querySelectorAll("[data-side] .side-row[data-task]").forEach(function (row) {
       var t = Store.task(row.dataset.task);
-      var waits = t && t.move === "you" && !t.ended;
+      var waits = t && !!t.question && !t.ended;
       row.hidden = !waits;
       if (waits) waiting++;
     });
@@ -115,11 +115,11 @@ window.Shell = (function () {
       count.textContent = waiting;
       count.closest(".side-sec").hidden = waiting === 0;
     }
-    var onBoard = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length;
+    var onBoard = Store.state.tasks.filter(function (t) { return t.agent && !t.question && !t.failed && t.stage !== "landed"; }).length;
     // The window opens on the fixture both drawings share. Some sessions work on no Task on this
     // board, such as workflow steps, and from then on the count follows what happens here.
     var scene = document.getElementById("work").dataset.scene;
-    if (elsewhere === null) elsewhere = scene === "today" ? Math.max(0, 16 - onBoard) : scene === "failed" ? Math.max(0, 15 - onBoard) : 0;
+    if (elsewhere === null) elsewhere = scene === "today" || scene === "quiet" ? Math.max(0, 16 - onBoard) : scene === "failed" ? Math.max(0, 15 - onBoard) : 0;
     var working = onBoard + elsewhere;
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;

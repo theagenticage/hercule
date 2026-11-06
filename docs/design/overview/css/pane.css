@@ -20,8 +20,8 @@
 .pn-path li { position: relative; flex: 1; }
 .pn-path button { display: block; width: 100%; padding: 7px 0 0; text-align: left; font: var(--type-meta); color: var(--faint); border-top: 2px solid color-mix(in oklab, var(--ink) 10%, transparent); transition: color var(--m-quick), border-color var(--m-quick); }
 .pn-path button:hover { color: var(--ink); border-color: color-mix(in oklab, var(--ink) 30%, transparent); }
-.pn-path .is-past button { border-color: color-mix(in oklab, var(--brass) 55%, transparent); color: var(--muted); }
-.pn-path .is-here button { border-color: var(--brass); color: var(--ink); font-weight: var(--w-medium); }
+.pn-path .is-past button { border-color: color-mix(in oklab, var(--ink) 30%, transparent); color: var(--muted); }
+.pn-path .is-here button { border-color: var(--ink); color: var(--ink); font-weight: var(--w-medium); }
 .pn-where { margin: 16px 0 0; font-size: var(--t-14); line-height: 21px; color: var(--ink); }
 .pn-sec { margin-top: 22px; }
 .pn-sec h4 { display: flex; gap: 6px; margin: 0 0 7px; color: var(--muted); font: var(--type-summary); font-weight: var(--w-medium); }
@@ -85,3 +85,12 @@
 
 /* A failed run: the card's words, in the question's voice. */
 .pn-failed .failed-mark { width: 18px; height: 18px; vertical-align: -3px; margin-right: 5px; }
+
+/* Who says so stays out of the way, and shows on approach. */
+.pn-row .pn-claim { display: none; }
+.pn-row:hover .pn-claim, .pn-row:focus-visible .pn-claim { display: inline; }
+.pn-row:hover:has(.pn-claim) .pn-state, .pn-row:focus-visible:has(.pn-claim) .pn-state { display: none; }
+.pn-row.is-restricted { color: var(--muted); }
+.pn-row.is-restricted .ic { color: var(--faint); }
+.pn-row--hint { color: var(--muted); }
+button.pn-row { width: 100%; text-align: left; }

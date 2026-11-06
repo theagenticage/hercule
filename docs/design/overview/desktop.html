@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="css/work.css">
 <link rel="stylesheet" href="css/pane.css">
 <link rel="stylesheet" href="css/overview.css">
+<link rel="stylesheet" href="css/toolbar.css">
 </head>
 <body>
 <div class="app" id="app" data-view="work">
@@ -17,15 +18,22 @@
   <main class="main">
     <div class="top">
       <div class="pill" id="switcher"></div>
+      <div class="tools" id="tools"><div class="tools-main" id="tools-main"></div></div>
+      <div class="since" id="since-line" role="status"></div>
       <div class="top-end">
         <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board" role="combobox" aria-expanded="false" aria-controls="find-list"></label>
         <button class="icon-pill" id="display-btn" title="Display" aria-label="Display" aria-expanded="false"></button>
+        <button class="tool tool--add" id="add-btn" title="Add to Work (A)"></button>
         <div class="find-list" id="find-list" role="listbox" aria-label="Matches"></div>
       </div>
+      <div class="menu menu--tool" id="tool-menu" role="menu"></div>
       <div class="menu" id="display">
+        <div class="menu-seg" data-display="plans"><b>Initiatives</b><div class="seg"><button data-place="top">On top</button><button data-place="lanes">In lanes</button></div></div>
+        <div class="menu-seg" data-display="lanes"><b>Lanes</b><div class="seg"><button data-lanes="gutter">Side labels</button><button data-lanes="band">Bands</button></div></div>
+        <i class="menu-line"></i>
         <label class="menu-row menu-row--switch" data-display="wear"><span><b>Wear</b><small>Neglected work ages, slowly.</small></span><input type="checkbox" id="wear-switch"><i class="switch-track"></i></label>
         <label class="menu-row menu-row--switch" data-display="still"><span><b>Still colleagues</b><small>No typing paws, no blinking.</small></span><input type="checkbox" id="still-switch"><i class="switch-track"></i></label>
-        <label class="menu-row menu-row--switch" data-display="keys-toggle"><span><b>Single-key shortcuts</b><small>N, D, Q and the rest.</small></span><input type="checkbox" id="keys-switch" checked><i class="switch-track"></i></label>
+        <label class="menu-row menu-row--switch" data-display="keys-toggle"><span><b>Single-key shortcuts</b><small>D, T, A and the rest.</small></span><input type="checkbox" id="keys-switch" checked><i class="switch-track"></i></label>
         <button class="menu-row" data-display="fold">Fold everything<kbd>⇧F</kbd></button>
         <button class="menu-row" data-display="keys">Keys<kbd>?</kbd></button>
       </div>
@@ -35,15 +43,15 @@
     <section class="view work" id="work" role="tabpanel" aria-label="Work">
       <div class="work-scroll" id="scroll">
         <div class="work-canvas" id="canvas">
-          <header class="lead-row"><div class="lead" id="lead"></div><div class="since" id="since-line" role="status"></div><span class="sr" id="board-status" role="status"></span></header>
-          <div class="rule-wrap"><div class="rule" id="rule"></div><i class="rule-mark" id="rule-mark"></i></div>
+          <span class="sr" id="board-status" role="status"></span>
+          <div class="rule-wrap"><div class="rule" id="rule"></div></div>
           <div id="welcome"></div>
           <div id="lanes"></div>
           <div class="flight" id="flight"></div>
         </div>
       </div>
-      <div class="fan-layer" id="fan-layer"></div>
       <div class="pane" id="pane" hidden><div class="pn-sheet" role="dialog" aria-labelledby="pn-title"><div class="pn-clip"><div class="pn-inner"></div></div></div></div>
+      <aside class="adder" id="adder" hidden aria-label="Add to Work"></aside>
       <div class="toast" id="toast" role="status"></div>
       <div class="select-bar" id="select-bar"></div>
       <div class="help" id="help"></div>
@@ -56,6 +64,7 @@
 <script src="system/brands.js"></script>
 <script src="system/faces.js"></script>
 <script src="../work-views/data.js"></script>
+<script src="js/graph.js"></script>
 <script src="js/world.js"></script>
 <script src="js/shell.js"></script>
 <script src="js/motion.js"></script>
@@ -63,7 +72,6 @@
 <script src="js/scenes.js"></script>
 <script src="js/board.js"></script>
 <script src="js/fold.js"></script>
-<script src="js/fan.js"></script>
 <script src="js/toast.js"></script>
 <script src="js/drag.js"></script>
 <script src="js/pane.js"></script>
@@ -73,6 +81,8 @@
 <script src="js/welcome.js"></script>
 <script src="js/office.js"></script>
 <script src="js/overview.js"></script>
+<script src="js/toolbar.js"></script>
+<script src="js/adder.js"></script>
 <script src="js/tray.js"></script>
 <script src="js/app.js"></script>
 </body>

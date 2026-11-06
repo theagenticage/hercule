@@ -35,10 +35,10 @@ window.Office = (function () {
       desk.object.position.set(deskX[i % 4], 0, row ? 1.5 : -1.5);
       stage.add(desk.object);
       var look = Crew.lookFor(t.agent);
-      var bean = K.colleague({ id: t.agent, pose: t.move === "you" ? "waiting" : "working", look: { hue: look.hue } });
+      var bean = K.colleague({ id: t.agent, pose: t.question ? "waiting" : "working", look: { hue: look.hue } });
       bean.sitAt(desk);
       stage.add(bean);
-      stage.label(bean, K.tag({ name: t.name.length > 26 ? t.name.slice(0, 25) + "…" : t.name, state: t.move === "you" ? "Asks you" : "", hue: bean.look.hue, waiting: t.move === "you" }));
+      stage.label(bean, K.tag({ name: t.name.length > 26 ? t.name.slice(0, 25) + "…" : t.name, state: t.question ? "Asks you" : "", hue: bean.look.hue, waiting: t.move === "you" }));
       beans[t.id] = bean;
     });
     var rug = K.buildRug(2.6, 1.9);

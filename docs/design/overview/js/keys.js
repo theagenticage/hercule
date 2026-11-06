@@ -8,9 +8,8 @@ window.Keys = (function () {
   var singleKeys = true;
 
   function walkable() {
-    var host = Fan.isOpen() ? document.querySelector(".fan-cards") : document.getElementById("lanes");
-    return Array.prototype.filter.call(host.querySelectorAll(".card"), function (el) {
-      return el.offsetParent !== null && !el.classList.contains("is-ghost") && !el.classList.contains("is-off");
+    return Array.prototype.filter.call(document.getElementById("lanes").querySelectorAll(".card"), function (el) {
+      return el.offsetParent !== null && !el.classList.contains("is-ghost");
     });
   }
 
@@ -193,16 +192,13 @@ window.Keys = (function () {
       focused.click();
       return;
     }
-    if (key === "n") return Walk.step(1);
-    if (key === "N") return Walk.step(-1);
-    if ((key === "[" || key === "]") && !Fan.isOpen()) return jumpLane(key === "[" ? -1 : 1);
-    if ((key === "f" || key === "F") && Fan.isOpen()) return;
+    if (key === "[" || key === "]") return jumpLane(key === "[" ? -1 : 1);
     if (key === "f" && focused) {
       var lane = focused.closest(".lane");
       var plan = focused.closest(".plan");
       if (!lane && !plan) return;
       if (plan) Fold.togglePlan(plan.dataset.plan);
-      else if (lane) Fold.toggleRows(lane.dataset.lane);
+      else if (lane) Fold.toggleLane(lane.dataset.lane);
       // The card may have folded away. Focus stays on its plan or lane, so a second F opens it again.
       if (!focused.isConnected) focusCard(plan ? plan.querySelector(".plan-head") : lane.querySelector(".lane-btn"));
       return;
@@ -213,24 +209,12 @@ window.Keys = (function () {
       return Find.open();
     }
     if (key === "?") return Help.toggle();
-    if (key === "!" && Store.countAttention().failed) return Lens.toggle("failed");
-    if (key === "q") return Lens.toggle("quick");
-    if (key === "r") return Lens.toggle("think");
-    if (key === "s") return Lens.toggle("stalled");
-    if (key === "a") return Lens.toggle("agents");
+    if (key === "a") return Adder.show();
     if (key === "w") return Display.toggleWear();
     if (key === "o") return Overview.show("office");
     var id3 = Pane.currentId() || currentCardId();
     if (!id3) return;
-    // With a fan open, a key can only mean a card in that fan.
-    if (Fan.isOpen() && !Pane.currentId() && !((hovered || focused) && (hovered || focused).closest(".fan"))) return;
     if (key === "x") return Select.toggle(id3);
-    if (key === "e") {
-      var host = (hovered && hovered.isConnected ? hovered : focused);
-      var stackOf = host && Board.readStack(host);
-      if (stackOf) Fan.show(host, stackOf);
-      return;
-    }
     if (key === "d") return Actions.run("done", id3);
     if (key === "Backspace") return Actions.run("drop", id3);
     if (key === "m") return Actions.run("merge", id3);
@@ -247,6 +231,8 @@ window.Keys = (function () {
     if (help.classList.contains("is-on")) return help.classList.remove("is-on");
     var menu = document.getElementById("display");
     if (menu.classList.contains("is-on")) return menu.classList.remove("is-on");
+    if (Toolbar.closeMenu()) return;
+    if (Adder.hide()) return;
     if (MergePick.isActive()) return MergePick.cancel();
     if (Pane.currentId()) {
       var id = Pane.currentId();
@@ -255,13 +241,7 @@ window.Keys = (function () {
         if (el) focusCard(el);
       });
     }
-    if (Fan.isOpen()) {
-      var pile = Fan.pileEl();
-      Fan.hide();
-      if (pile) focusCard(pile);
-      return;
-    }
-    if (Store.isFiltering()) return Lens.clear();
+    if (Store.isFiltering()) return Filters.clear();
     if (Object.keys(Store.state.selected).length) return Select.clear();
     clearFocus();
   }
@@ -281,53 +261,8 @@ window.Keys = (function () {
   return { mount: mount, focusCard: focusCard, clearFocus: clearFocus, setSingleKeys: function (on) { singleKeys = on; }, setHover: function (el) { hovered = el; } };
 })();
 
-// PROTOTYPE - the sentence is the filter. Hovering a phrase lights what it counts; pressing keeps it.
-window.Lens = (function () {
-  "use strict";
-  var pinned = null;
-  var previewTimer = 0;
-
-  function set(key) {
-    if (Store.state.lens === key) return;
-    Store.state.lens = key;
-    Board.draw();
-  }
-
-  return {
-    toggle: function (key) {
-      pinned = pinned === key ? null : key;
-      set(pinned);
-    },
-    /** Opens Work with the failed lens on, and brings the first failed Task into view. */
-    showFailed: function () {
-      if (Overview.current() !== "work") Overview.show("work");
-      pinned = "failed";
-      set("failed");
-      var first = Store.listWanting()[0];
-      if (first) Walk.reveal(first.id);
-    },
-    /** Lifts the failed lens once nothing has failed, so the desk does not stay dim with nothing lit. */
-    settle: function () {
-      if (pinned === "failed" && !Store.countAttention().failed) Lens.clear();
-    },
-    clear: function () {
-      pinned = null;
-      Store.state.query = "";
-      Find.close();
-      set(null);
-      Board.draw();
-    },
-    // Passing over the sentence must not flash the board, so a hover takes a moment to count.
-    preview: function (key) {
-      clearTimeout(previewTimer);
-      if (key) previewTimer = setTimeout(function () { set(key); }, 140);
-      else set(pinned);
-    },
-  };
-})();
-
-// PROTOTYPE - find. Type, and everything else steps back in place; a short list offers the top
-// matches, wherever they are: in a pile, in a folded lane, or on a card. Return opens one.
+// PROTOTYPE - find. Type, and the board narrows to what matches. A short list offers the top matches,
+// wherever they are: under a closed initiative, in a folded lane, or on a card. Return opens one.
 window.Find = (function () {
   "use strict";
   var box;
@@ -356,12 +291,12 @@ window.Find = (function () {
     var q = Store.state.query;
     if (!q) return list.classList.remove("is-on");
     list.classList.add("is-on");
-    // What you most likely mean comes first: a match in the title, then what wants you. Landed last.
+    // What you most likely mean comes first: a match in the title. Landed last.
     var needle = q.toLowerCase();
     function score(t) {
-      return (t.name.toLowerCase().indexOf(needle) >= 0 ? 0 : 4) + (Store.wantsYou(t) ? 0 : 1) + (t.stage === "landed" ? 2 : 0);
+      return (t.name.toLowerCase().indexOf(needle) >= 0 ? 0 : 4) + (t.stage === "landed" ? 2 : 0);
     }
-    var all = Store.state.tasks.filter(Store.matches).sort(function (a, b) { return score(a) - score(b); });
+    var all = Store.state.tasks.filter(function (t) { return Store.matches(t); }).sort(function (a, b) { return score(a) - score(b); });
     hits = all.slice(0, 8);
     at = Math.min(at, Math.max(0, hits.length - 1));
     if (!hits.length) {
@@ -376,7 +311,7 @@ window.Find = (function () {
     box.querySelector("input").setAttribute("aria-activedescendant", "find-" + at);
   }
 
-  /** Ends a search. A lens that was pinned stays pinned. */
+  /** Ends a search. Filters that are on stay on. */
   function clearQuery() {
     close();
     Store.state.query = "";
@@ -473,7 +408,7 @@ window.Select = (function () {
 // PROTOTYPE - the keys, shown on request.
 window.Help = (function () {
   "use strict";
-  var ROWS = [["N", "Next thing that wants you"], ["↑ ↓ ← →", "Walk the desk"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["E", "Fan out what lies behind a card"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "More or fewer rows in this lane"], ["⇧F", "Fold everything to a score"], ["! Q R S A", "Lens: failed, quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
+  var ROWS = [["↑ ↓ ← →", "Walk the board"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["A", "Add to Work"], ["F", "Fold this lane or initiative"], ["⇧F", "Fold every lane"], ["/", "Find"], ["⌘Z", "Undo"]];
   function toggle() {
     var el = document.getElementById("help");
     if (!el.firstChild) el.innerHTML = "<h3>Keys</h3>" + ROWS.map(function (r) { return "<div><kbd>" + r[0] + "</kbd><span>" + r[1] + "</span></div>"; }).join("");

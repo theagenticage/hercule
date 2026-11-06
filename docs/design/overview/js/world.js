@@ -7,7 +7,7 @@
 //
 //   now    what the summary writer would say: where it stands, in a few plain words.
 //   agent  the thread working on it now. The Task shows that colleague's face.
-//   person the person the next move sits with, when it is not you.
+//   person who it sits with at the source, such as a reviewer.
 window.NW = (function () {
   "use strict";
 
@@ -25,7 +25,7 @@ window.NW = (function () {
     "flake-clock": { now: "Order tests half done.", agent: "Fake the clock in order tests" },
     "flake-seeds": { now: "Drafted, not wired in." },
     "flake-parallel": { now: "Eleven minutes, fixtures collide." },
-    "flake-browser": { now: "Four of twelve sleeps replaced.", agent: "Replace sleeps in browser tests", move: "agent", need: "look" },
+    "flake-browser": { now: "Four of twelve sleeps replaced.", agent: "Replace sleeps in browser tests" },
     "cost-logs": { now: "Debug logs are 60% of the bill." },
     "secrets-rotation": { now: "14 tokens over a year old." },
     "oncall-runbook": { now: "Seven of ten written." },
@@ -55,14 +55,14 @@ window.NW = (function () {
     "rv-6260": { now: "Asked by Ines Carvalho", person: "Ines Carvalho" },
     "rv-6263": { now: "Asked by Kofi Mensah", person: "Kofi Mensah" },
     "rv-6266": { now: "Asked by Wren Adeyemi", person: "Wren Adeyemi" },
-    "pr-multibuy": { now: "Checks failing on #6118.", agent: "Fix the checks on the multi-buy PR", move: "agent", need: "look" },
+    "pr-multibuy": { now: "Checks failing on #6118.", agent: "Fix the checks on the multi-buy PR" },
     "pr-weighed": { now: "Waiting for a review.", person: "Omar Haddad" },
     "pr-breakdown": { now: "Waiting for a review.", person: "Tessa Lindqvist" },
     "pr-qty-labels": { now: "Approved. Ready to merge." },
     "pr-lazy-photos": { now: "Waiting for a review.", person: "Felix Marsh" },
     "pr-font": { now: "Waiting for a review.", person: "Juno Park" },
     "pr-address-form": { now: "Two changes requested." },
-    "pr-report-runner": { now: "Checks failing on #3318.", agent: "Fix the checks on the export PR", move: "agent", need: "look" },
+    "pr-report-runner": { now: "Checks failing on #3318.", agent: "Fix the checks on the export PR" },
     "pr-fake-clock": { now: "Waiting for a review.", person: "Kofi Mensah" },
     "pr-gateway-debug": { now: "Checks failing on #3299." },
     "pr-rollup": { now: "Waiting for a review.", person: "Ines Carvalho" },
@@ -80,7 +80,7 @@ window.NW = (function () {
     "renew-cert": { now: "With the vendor.", person: "the vendor" },
     "load-test": { now: "Two dates are free." },
     "old-exports": { now: "Breaks monthly." },
-    "search-feed-errors": { now: "Tracing the bad records.", agent: "Trace the search feed errors", move: "agent", need: "look" },
+    "search-feed-errors": { now: "Tracing the bad records.", agent: "Trace the search feed errors" },
   };
 
   // The project names as a person says them, with the tint each one takes from the book.
@@ -100,6 +100,9 @@ window.NW = (function () {
     { id: "landed", name: "Landed" },
   ];
 
+  // Each initiative's colour, as an oklch hue. Kept away from marigold and tomato, which mean things.
+  var HUES = [245, 150, 300, 200, 345, 118];
+
   var TODAY = Date.parse("2026-11-05");
 
   /** Returns the number of whole days between a date string and the world's today. */
@@ -114,44 +117,38 @@ window.NW = (function () {
     return Math.round(days / 7) + "w";
   }
 
-  // Answers written for the cards a reader is most likely to open. Others show no answers.
-  var ANSWERS = {
-    substitutions: ["Riverside depot", "Northgate depot", "Not yet"],
-    "basket-restore": ["Highest quantity", "Add them together"],
-    "price-rounding": ["Round per line", "Round per basket"],
-    "sched-cutover": ["Approve for Monday", "Wait a week"],
-    "slot-rush": ["Five minutes is fine", "Keep it shorter"],
-    "image-sizes": ["Keep the originals", "Drop after a month"],
-    "search-latency": ["Drop images first", "Shrink them"],
-    "guest-checkout": ["An email link is enough", "Ask for an account"],
-    "flake-quarantine": ["Merge together", "One at a time"],
-    "coupons-stack": ["Bring both sides together", "Decide it myself"],
-    "cost-logs": ["30 days", "90 days", "Ask legal"],
+  // The open questions of this morning. A question lives in a Thread and nowhere else: these two are
+  // the sidebar's Waiting on you, and a Task with no open question asks nothing of anyone.
+  var QUESTIONS = {
+    "sched-cutover": { text: "Approve the cutover for Monday?", answers: ["Approve for Monday", "Wait a week"] },
+    "basket-restore": { text: "Highest quantity, or add them?", answers: ["Highest quantity", "Add them together"] },
   };
 
-  function capitalize(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
-
-  /** Offers answers a question already holds: its two sides, or yes and not yet. "Which" has none. */
-  function deriveAnswers(ask) {
-    if (!ask || !/\?$/.test(ask) || /^(who|which|how|what|when|anything)\b/i.test(ask)) return [];
-    var sides = ask.replace(/\?$/, "").split(/,? or /i);
-    if (sides.length === 2 && sides[0].length < 34 && sides[1].length < 34) return sides.map(capitalize);
-    return ["Yes", "Not yet"];
-  }
+  // Two tickets, each with the pull requests the source confirms are theirs.
+  var LEADS = [
+    { id: "t-faster-checkout", name: "Make the checkout load faster on phones", project: "storefront", initiative: "", stage: "reviewing", kind: "ticket", now: "Two pull requests, both waiting.", where: "Both pull requests are open, and the ticket closes when they merge.", left: "Two reviews", lastActivityAt: "2026-11-03", threads: [], links: [], blockedBy: [], context: [] },
+    { id: "t-quiet-gateway", name: "Quieter gateway logs", project: "platform", initiative: "", stage: "reviewing", kind: "ticket", now: "One pull request, checks failing.", where: "The change is ready, and its checks fail on an unrelated test.", left: "Fix the checks", lastActivityAt: "2026-10-26", threads: [], links: [], blockedBy: [], context: [] },
+  ];
 
   /** Returns a fresh copy of every Task, with its summary and holder merged in. */
   function buildTasks() {
-    return WORK.map(function (w) {
+    return WORK.concat(LEADS).map(function (w) {
       var e = ENRICH[w.id] || {};
       var t = Object.assign({}, w, e);
-      t.options = ANSWERS[w.id] || deriveAnswers(w.ask);
+      delete t.move;
+      delete t.need;
+      delete t.ask;
+      delete t.options;
+      delete t.stalled;
       t.where = humanize(t.where);
-      t.ask = humanize(t.ask);
       t.age = daysSince(w.lastActivityAt);
       t.ref = (/#\d+/.exec(w.where) || [""])[0];
       if (w.kind === "review" || w.kind === "mention") t.ref = "#" + w.id.split("-")[1];
-      t.source = w.kind === "ticket" ? "linear" : w.kind === "errors" ? "sentry" : w.kind === "pr" || w.kind === "review" || w.kind === "mention" ? "github" : "";
-      return t;
+      if (QUESTIONS[w.id]) {
+        t.question = QUESTIONS[w.id];
+        t.agent = t.agent || (t.threads[t.threads.length - 1] || { title: t.name }).title;
+      }
+      return Graph.attach(t);
     });
   }
 
@@ -185,21 +182,26 @@ window.NW = (function () {
   /** Returns today's world: every Task of the lo-fi, with its links and holders. */
   function buildToday() {
     var tasks = buildTasks();
+    // Each ticket sits among the work it leads, not at the end of the board.
+    [["t-faster-checkout", "basket-restore"], ["t-quiet-gateway", "oncall-runbook"]].forEach(function (pair) {
+      var lead = tasks.filter(function (t) { return t.id === pair[0]; })[0];
+      tasks.splice(tasks.indexOf(lead), 1);
+      tasks.splice(tasks.findIndex(function (t) { return t.id === pair[1]; }) + 1, 0, lead);
+    });
     var byId = {};
     tasks.forEach(function (t) { byId[t.id] = t; });
     HANDED.forEach(function (id) {
       byId[id].agent = REVIEWER + " " + id;
-      byId[id].move = "agent";
-      byId[id].need = "look";
       byId[id].where = "With the review workflow, which is reading it now.";
     });
     RELATIONS.forEach(function (r) {
       if (r.kind !== "blockedBy" || !byId[r.from] || !byId[r.to]) return;
       byId[r.from].blockedBy = (byId[r.from].blockedBy || []).concat([r.to]);
     });
+    Graph.linkPeers();
     return {
       projects: PROJECTS.slice(),
-      plans: INITIATIVES.map(function (i) { return Object.assign({}, i); }),
+      plans: INITIATIVES.map(function (i, n) { return Object.assign({}, i, { hue: HUES[n % HUES.length] }); }),
       tasks: tasks,
       folded: {},
       openPlans: {},

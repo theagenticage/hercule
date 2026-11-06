@@ -65,7 +65,7 @@ window.Overview = (function () {
     var t = Store.task(card.dataset.id);
     var el = document.createElement("div");
     el.className = "traveller";
-    el.innerHTML = Crew.face(t.agent, { pose: t.move === "you" ? "waiting" : "working", size: 26 });
+    el.innerHTML = Crew.face(t.agent, { pose: t.question ? "waiting" : "working", size: 26 });
     el.style.left = x - 13 + "px";
     el.style.top = y - 13 + "px";
     document.getElementById("carry").appendChild(el);
@@ -229,8 +229,7 @@ window.Later = (function () {
   function drawList(el) {
     var open = Store.state.tasks.filter(function (t) { return t.stage !== "landed"; }).slice(0, 26);
     el.innerHTML = '<div class="later-note">List, later: a title, one muted line, one mark. Sketch only.</div><div class="later-list">' + open.map(function (t) {
-      var h = Store.decideHolder(t);
-      var mark = h.kind === "you" ? '<i class="card-tab" data-need="' + t.need + '"></i>' : h.kind === "agent" ? Crew.face(t.agent, { pose: "working", size: 18 }) : "";
+      var mark = t.agent ? Crew.face(t.agent, { pose: t.question ? "waiting" : "working", size: 18 }) : "";
       return '<div class="later-row"><span class="later-mark">' + mark + "</span><b>" + Board.esc(t.name) + "</b><span>" + Board.esc(t.now || "") + "</span><time>" + NW.formatAge(t.age) + "</time></div>";
     }).join("") + "</div>";
   }
@@ -253,7 +252,7 @@ window.Later = (function () {
       }).join("");
     }).join("");
     el.innerHTML = '<div class="later-note">One surface, later: every Task has a place of its own, and chains of blockers are real structure. Sketch only.</div><svg class="later-surface">' + lines + "</svg>" + dots.map(function (d) {
-      return '<i class="later-dot" style="left:' + d.x + "%;top:" + d.y + '%" data-mine="' + (d.t.move === "you" ? 1 : 0) + '"></i>';
+      return '<i class="later-dot" style="left:' + d.x + "%;top:" + d.y + '%" data-mine="' + (d.t.question ? 1 : 0) + '"></i>';
     }).join("");
   }
 

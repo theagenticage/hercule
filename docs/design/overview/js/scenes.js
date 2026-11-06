@@ -35,16 +35,14 @@ window.Scenes = (function () {
       var plans = w.plans.filter(function (p) { return p.project === project; });
       var inPlan = plans.length && h % 3 === 0;
       var stage = pick(stages, h >>> 7);
-      var mine = (h >>> 11) % 5 < 2;
-      var agent = !mine && (h >>> 13) % 3 === 0;
+      var agent = (h >>> 13) % 7 === 0;
       var kinds = ["thread", "thread", "pr", "pr", "ticket", "review"];
       var kind = pick(kinds, h >>> 15);
       w.tasks.push({
         id: "m" + i, name: pick(VERBS, h >>> 17) + " " + pick(THINGS, h >>> 21), project: project, initiative: inPlan ? pick(plans, h >>> 5).id : "",
-        stage: stage, move: stage === "landed" ? "nobody" : mine ? "you" : agent ? "agent" : "others", need: mine ? ((h >>> 23) % 3 === 0 ? "think" : "quick") : "look",
-        now: pick(NOWS, h >>> 9), where: pick(NOWS, h >>> 9), left: "", ask: mine ? "Good to go?" : "", kind: kind, source: kind === "ticket" ? "linear" : kind === "thread" ? "" : "github",
-        ref: "", age: (h >>> 25) % 30, stalled: mine && (h >>> 25) % 30 > 16, agent: agent ? "Agent " + i : "", person: !mine && !agent ? pick(["Juno Park", "Felix Marsh", "Omar Haddad", "Tessa Lindqvist"], h >>> 19) : "",
-        threads: [], links: [], options: [], context: [], blockedBy: [],
+        stage: stage, now: pick(NOWS, h >>> 9), where: pick(NOWS, h >>> 9), left: "", kind: kind, source: "",
+        ref: "", age: (h >>> 25) % 30, agent: agent ? "Agent " + i : "", person: !agent && (h >>> 11) % 4 === 0 ? pick(["Juno Park", "Felix Marsh", "Omar Haddad", "Tessa Lindqvist"], h >>> 19) : "",
+        threads: [], links: [], context: [], blockedBy: [], entities: [],
       });
     }
     w.folded = {};
@@ -63,6 +61,13 @@ window.Scenes = (function () {
     t.initiative = "";
     t.project = "storefront";
     w.tasks = [t];
+    return w;
+  }
+
+  /** Returns today's world with no open question: the normal case. */
+  function buildQuiet() {
+    var w = NW.buildToday();
+    w.tasks.forEach(function (t) { t.question = null; });
     return w;
   }
 
@@ -94,9 +99,9 @@ window.Scenes = (function () {
 
   // What happened since the person last looked. The replay starts from `was` and plays forward.
   var OVERNIGHT = [
-    { kind: "move", id: "slot-rush", from: "reviewing", to: "landed", note: "PR #6221 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; t.where = "The cache merged last night as #6221. Slot lookups dropped at the noon peak."; t.ask = ""; t.links = t.links.map(function (l) { return /^PR /.test(l.label) ? { label: "PR #6221", url: l.url, state: "merged" } : l; }); } },
-    { kind: "arrive", task: { id: "refund-currency", name: "Refund emails show the wrong currency", project: "storefront", initiative: "", stage: "exploring", move: "agent", need: "look", agent: "Find why refund emails use the wrong currency", now: "From a support ticket.", where: "A thread started last night from a support ticket. It is tracing where the currency is set.", left: "Find the cause", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: "Find why refund emails use the wrong currency", id: "a1" }] } },
-    { kind: "move", id: "pr-fake-clock", from: "reviewing", to: "landed", note: "PR #3331 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; } },
+    { kind: "move", id: "slot-rush", from: "reviewing", to: "landed", note: "PR #6221 merged", apply: function (t) { t.person = ""; t.now = "Merged last night."; t.where = "The cache merged last night as #6221. Slot lookups dropped at the noon peak."; t.ask = ""; t.links = t.links.map(function (l) { return /^PR /.test(l.label) ? { label: "PR #6221", url: l.url, state: "merged" } : l; }); } },
+    { kind: "arrive", task: { id: "refund-currency", name: "Refund emails show the wrong currency", project: "storefront", initiative: "", stage: "exploring", agent: "Find why refund emails use the wrong currency", now: "From a support ticket.", where: "A thread started last night from a support ticket. It is tracing where the currency is set.", left: "Find the cause", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: "Find why refund emails use the wrong currency", id: "a1" }] } },
+    { kind: "move", id: "pr-fake-clock", from: "reviewing", to: "landed", note: "PR #3331 merged", apply: function (t) { t.person = ""; t.now = "Merged last night."; } },
   ];
 
   // A review handed to the workflow, on the Storefront lane, that stopped overnight.
@@ -111,6 +116,7 @@ window.Scenes = (function () {
       if (name === "first" || name === "empty") return buildEmptyWorld();
       if (name === "one") return buildOne();
       if (name === "awkward") return buildAwkward();
+      if (name === "quiet") return buildQuiet();
       return NW.buildToday();
     },
     OVERNIGHT: OVERNIGHT,

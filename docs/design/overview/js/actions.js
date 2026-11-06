@@ -3,36 +3,27 @@ window.Actions = (function () {
   "use strict";
 
   /**
-   * Sends a card off the desk. Done shrinks into its number in the sentence, and the number rolls
-   * down: the sentence getting shorter is the reward. Drop sinks and fades.
+   * Sends a card off the desk. Done shrinks into its stage's count, and the count rolls down. Drop
+   * sinks and fades.
    */
-  function animateLeaving(id, how, need) {
+  function animateLeaving(id, how) {
     var el = document.querySelector('.card[data-id="' + id + '"]');
     if (!el) return;
     var ghost = Motion.ghost(el, document.getElementById("carry"));
     ghost.classList.remove("is-away");
     ghost.classList.add(how === "Done" ? "is-done" : "is-dropped");
-    var number = how === "Done" && need ? document.querySelector('.lens[data-lens="' + need + '"] .lens-n') : null;
-    // Scrolled down, the sentence is out of sight, so the card lands on its stage's count instead.
-    var stuck = document.getElementById("scroll").scrollTop > 40;
-    if (stuck && how === "Done") {
-      var t = Store.task(id);
-      number = t ? document.querySelector('.stage[data-stage="' + t.stage + '"] .stage-count') : null;
-    }
+    var t = Store.task(id);
+    var number = how === "Done" && t ? document.querySelector('.stage[data-stage="' + t.stage + '"] .stage-count') : null;
     if (number) {
       var a = ghost.getBoundingClientRect();
       var n = number.getBoundingClientRect();
-      Board.holdLead(true);
       Motion.body(ghost).to({ x: n.left + n.width / 2 - (a.left + a.width / 2), y: n.top + n.height / 2 - (a.top + a.height / 2), s: 0.08 }, "travel", {
         done: function () { ghost.remove(); },
       });
       ghost.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 380, fill: "forwards" });
-      setTimeout(function () { Board.holdLead(false); }, 340);
       return;
     }
-    var goal = how === "Done" ? { x: 26, y: -14, s: 1.02, r: 0, o: 0 } : { x: 0, y: 12, s: 0.97, r: -1.6, o: 0 };
-    Motion.body(ghost).to(goal, "travel", {
-      delay: how === "Done" ? 120 : 0,
+    Motion.body(ghost).to({ x: 0, y: 12, s: 0.97, r: -1.6, o: 0 }, "travel", {
       done: function () { ghost.remove(); },
     });
   }
@@ -48,29 +39,15 @@ window.Actions = (function () {
     var t = Store.task(id);
     if (!t) return;
     var next = pickNeighbour(id);
-    var need = t.failed ? "failed" : Store.wantsYou(t) ? t.need : null;
     var finish = function () {
-      animateLeaving(id, how, need);
+      animateLeaving(id, how);
       Board.change(function () { Store.endTask(id, how); }, { spring: "hand" });
-      Fan.dropCard(id);
+      Filters.settle();
       if (!quiet) Toast.show(how + (Store.state.offline ? ". It will sync when you are back." : ". " + t.name + " has left the board."), true);
       if (next && next.isConnected && next.classList.contains("card") && !Pane.currentId()) Keys.focusCard(next);
     };
-    // In the middle of a walk the details stay open and move on: Done is an answer too.
-    if (Pane.currentId() === id && Pane.isWalking()) {
-      Walk.notePlace(id);
-      finish();
-      Walk.afterAnswer();
-      Lens.settle();
-    } else if (Pane.currentId() === id) {
-      Pane.hide(function () {
-        finish();
-        Lens.settle();
-      });
-    } else {
-      finish();
-      Lens.settle();
-    }
+    if (Pane.currentId() === id) Pane.hide(finish);
+    else finish();
   }
 
   /** Ends several Tasks as one gesture: one Undo brings them all back. */
@@ -110,24 +87,16 @@ window.Actions = (function () {
     Toast.show(Store.state.offline ? "This thread starts when you are back." : "A thread started on this Task.", true);
   }
 
-  /** Answers a Task's question. The card lies down, and the walk moves on to the next thing. */
+  /** Answers a Thread's question. The sheet closes, and the head goes back to work. */
   function answer(id, words) {
-    var walking = Pane.isWalking();
-    if (walking) Walk.notePlace(id);
     Board.change(function () { Store.answerTask(id, words); });
     Toast.show((Store.state.offline ? "Sends when you are back: " : "Sent: ") + words, true);
-    // In a walk the next thing comes up. Otherwise the sheet closes, so you see the card lie down.
-    if (walking) {
-      handOff(id);
-      Walk.afterAnswer(id);
-    } else {
-      Pane.hide(function () { handOff(id); });
-    }
+    Pane.hide();
   }
 
   /**
-   * Plays a hand-off as one chain: the colleague's head rises while the card still stands, its paws
-   * reach the edge, and only then does the card give up its height.
+   * Plays a hand-off as one chain: the colleague's head rises behind the card, and its paws reach
+   * the edge.
    */
   function handOff(id) {
     var card = document.querySelector('.card[data-id="' + id + '"]');
@@ -135,27 +104,16 @@ window.Actions = (function () {
     var head = card.querySelector(".card-head");
     var paws = card.querySelector(".card-paws");
     if (!head || Motion.isReduced()) return;
-    var settled = card.dataset.height;
-    card.dataset.height = "stand";
     Motion.body(head).set({ y: 18 }).to({ y: 0 }, "travel");
     if (paws) Motion.body(paws).set({ o: 0 }).to({ o: 1 }, "travel", { delay: 90 });
-    setTimeout(function () { card.dataset.height = settled; }, 130);
   }
 
-  /** Starts a failed run again. In a walk the next thing comes up; otherwise the sheet closes, and the card lies down. */
+  /** Starts a failed run again. The sheet closes, and the colleague's head comes back up. */
   function retry(id) {
-    var walking = Pane.isWalking();
-    if (walking) Walk.notePlace(id);
     Board.change(function () { Store.retryRun(id); });
     Toast.show(Store.state.offline ? "This run starts again when you are back." : "Trying again.", true);
-    if (walking) {
-      handOff(id);
-      Walk.afterAnswer(id);
-    } else {
-      Pane.hide(function () { handOff(id); });
-    }
-    // After the walk has moved on: a walk under this lens ends with its last failure.
-    Lens.settle();
+    Pane.hide(function () { handOff(id); });
+    Filters.settle();
   }
 
   function run(act, id) {
@@ -168,84 +126,6 @@ window.Actions = (function () {
   }
 
   return { run: run, moveToStage: moveToStage, end: end, endMany: endMany, startThread: startThread, answer: answer, reportMove: reportMove };
-})();
-
-// PROTOTYPE - the morning's walk: from one thing that wants you to the next, with the details open.
-// It goes through piles and folded lanes too, so nothing that wants you is out of reach. A lens narrows it.
-window.Walk = (function () {
-  "use strict";
-
-  var list = [];
-  var index = -1;
-
-  /** Finds a Task's place on the board, and lights the pile or bead that holds it. */
-  function point(id) {
-    document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
-    var el = Board.locate(id);
-    if (!el) return;
-    if (el.dataset.id !== id || el.classList.contains("bead")) el.classList.add("is-called");
-    var s = document.getElementById("scroll");
-    var r = el.getBoundingClientRect();
-    var view = s.getBoundingClientRect();
-    if (r.top < view.top + 110) s.scrollTop -= view.top + 110 - r.top;
-    if (r.bottom > view.bottom - 30) s.scrollTop += r.bottom - view.bottom + 30;
-  }
-
-  /** Lists what wants you: one pass down the board, in reading order. */
-  function readList() {
-    return Store.listWanting();
-  }
-
-  function go(i) {
-    if (!list.length) return Toast.show("Nothing wants you right now.", false);
-    index = (i + list.length) % list.length;
-    var id = list[index].id;
-    point(id);
-    Pane.show(id);
-    Pane.setWalk(index + 1, list.length);
-  }
-
-  /** Steps through what wants you, by = 1 or -1. Starts from the open card, or the first. */
-  function step(by) {
-    var open = Pane.currentId();
-    list = readList();
-    var at = open ? list.findIndex(function (t) { return t.id === open; }) : -1;
-    // Closed in the middle of a walk, the walk picks up where it stopped.
-    var from = at >= 0 ? at : index;
-    var next = from >= 0 ? from + by : by > 0 ? 0 : list.length - 1;
-    // The end of the walk is an end, and it says so. It does not start again by itself.
-    if (next >= list.length || next < 0) {
-      index = -1;
-      Pane.hide();
-      Toast.show(list.length ? "That was all " + list.length + "." : "Nothing wants you right now.", false);
-      return;
-    }
-    go(next);
-  }
-
-  /** Reopens a Task in the walk: what Undo does after an answer. */
-  function resume(id) {
-    list = readList();
-    var at = list.findIndex(function (t) { return t.id === id; });
-    if (at >= 0) go(at);
-  }
-
-  /** Remembers where a Task stands in the walk, just before it leaves the list. */
-  function notePlace(id) {
-    index = Math.max(0, readList().findIndex(function (t) { return t.id === id; }));
-  }
-
-  function afterAnswer() {
-    list = readList();
-    if (!list.length) {
-      Pane.hide();
-      Toast.show("That was the last one.", true);
-      return;
-    }
-    go(Math.min(index, list.length - 1));
-  }
-
-  return { step: step, resume: resume, reveal: point, notePlace: notePlace, afterAnswer: afterAnswer };
 })();
 
 // PROTOTYPE - merging without a pointer: pick the card to merge into with the arrows and Return.

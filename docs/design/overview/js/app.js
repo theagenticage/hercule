@@ -10,7 +10,7 @@
   var work = document.getElementById("work");
   Shell.drawSidebar(document.querySelector("[data-side]"), {
     inboxCount: scene === "first" || scene === "empty" ? 0 : 22,
-    waiting: scene === "first" || scene === "empty" ? [] : undefined,
+    waiting: scene === "first" || scene === "empty" || scene === "quiet" ? [] : undefined,
     sum: scene === "first" || scene === "empty" ? "Nothing running" : undefined,
   });
   Store.loadWorld(Scenes.build(scene));
@@ -21,7 +21,7 @@
   }
 
   var replay = scene === "today" && q.get("replay") !== "off";
-  if (scene === "today" || scene === "failed") {
+  if (scene === "today" || scene === "failed" || scene === "quiet") {
     // Scenes hold the morning's end state; arrivals have not happened until the replay plays them.
     Live.rewindToLastNight();
     if (!replay) {
@@ -34,6 +34,10 @@
 
   if (scene === "failed") Store.failRun(Scenes.FAILED_RUN.id, Scenes.FAILED_RUN.failure);
 
+  if (q.get("plans")) Store.state.planPlace = q.get("plans");
+  if (q.get("lanes")) Store.state.laneStyle = q.get("lanes");
+  if (q.get("group")) Store.state.groupBy = q.get("group");
+
   Board.mount();
   Drag.mount();
   Pane.mount();
@@ -43,6 +47,9 @@
   Overview.mount();
   Tray.mount();
   Select.mount();
+  Toolbar.mount();
+  Adder.mount();
+  Board.draw();
 
   document.getElementById("find-icon").innerHTML = Crew.icon("search", 16);
   document.getElementById("display-btn").innerHTML = Crew.icon("sliders", 16);
@@ -50,28 +57,22 @@
   var scroll = document.getElementById("scroll");
   scroll.addEventListener("scroll", function () {
     document.querySelector(".rule-wrap").classList.toggle("is-stuck", scroll.scrollTop > 72);
-    // The sentence fades before it reaches the pill, so the pill never cuts it in half.
-    document.querySelector(".lead-row").style.opacity = Math.max(0, 1 - scroll.scrollTop / 40).toFixed(2);
   }, { passive: true });
 
   work.addEventListener("click", function (e) {
-    var more = e.target.closest(".card-more, .card-fan");
-    if (more) {
-      var host = more.closest(".card");
-      var stack = Board.readStack(host);
-      if (stack) Fan.show(host, stack);
-      return;
+    var addLane = e.target.closest("[data-add-lane]");
+    if (addLane) {
+      e.stopPropagation();
+      return Adder.show(addLane.dataset.addLane);
     }
+    var more = e.target.closest("[data-more]");
+    if (more) return Fold.toggleCell(more.dataset.more);
+    var bar = e.target.closest("[data-stack]");
+    if (bar) return Fold.toggleStack(bar.dataset.stack, bar.getAttribute("aria-expanded") !== "true");
     var fold = e.target.closest("[data-fold-lane]");
-    if (fold) return Fold.toggleRows(fold.dataset.foldLane);
+    if (fold) return Fold.toggleLane(fold.dataset.foldLane);
     var plan = e.target.closest("[data-fold-plan]");
     if (plan) return Fold.togglePlan(plan.dataset.foldPlan);
-    var pile = e.target.closest(".pile");
-    if (pile) return Fan.show(pile);
-    if (Fan.isOpen() && !e.target.closest(".card")) return Fan.hide();
-    if (e.target.closest("[data-walk]")) return Walk.step(1);
-    var lens = e.target.closest(".lens[data-lens]");
-    if (lens) return Lens.toggle(lens.dataset.lens);
     var bead = e.target.closest(".bead[data-id]");
     if (bead) return Pane.show(bead.dataset.id);
     var wire = e.target.closest(".wire");
@@ -99,13 +100,6 @@
   });
   work.addEventListener("pointerleave", function () { Keys.setHover(null); });
 
-  var lead = document.getElementById("lead");
-  lead.addEventListener("pointerover", function (e) {
-    var lens = e.target.closest(".lens[data-lens]");
-    if (lens) Lens.preview(lens.dataset.lens);
-  });
-  lead.addEventListener("pointerleave", function () { Lens.preview(null); });
-
   // A bead shows what it is on approach, and a waiting row in the sidebar points at its card.
   var peek = document.getElementById("peek");
   var peekTimer = 0;
@@ -119,7 +113,7 @@
     peekTimer = setTimeout(function () {
       var t = Store.task(bead.dataset.id);
       if (!t) return;
-      peek.innerHTML = "<b>" + Board.esc(t.name) + "</b><span>" + Board.esc(t.now || "") + "</span><small>" + Board.esc(Store.describeNeed(t)) + "</small>";
+      peek.innerHTML = "<b>" + Board.esc(t.name) + "</b><span>" + Board.esc(t.failed ? Store.describeFailure(t) : t.question ? t.question.text : t.now || "") + "</span>";
       peek.setAttribute("aria-hidden", "true");
       var r = bead.getBoundingClientRect();
       peek.style.left = Math.min(innerWidth - 262, Math.max(280, r.left - 20)) + "px";
@@ -142,10 +136,10 @@
     if (face) return Shell.showFace(face.dataset.face);
     // The dot on the Hercule segment is its own small button, so the word still only changes the face.
     var door = e.target.closest("[data-failed-door]");
-    if (door || (e.target.closest('[data-nav="overview"]') && Store.countAttention().failed)) {
+    if (door || (e.target.closest('[data-nav="overview"]') && Store.countStates().failed)) {
       e.preventDefault();
       Shell.showFace("hercule");
-      return Lens.showFailed();
+      return Filters.showFailed();
     }
     var row = e.target.closest("[data-task]");
     if (!row || !row.dataset.task) return;
@@ -161,7 +155,7 @@
   // explanation, not structure: One surface is where chains of blockers live.
   var blockerTimer = 0;
   document.getElementById("lanes").addEventListener("pointerover", function (e) {
-    var card = e.target.closest('.card[data-height="press"][data-id]');
+    var card = e.target.closest('.card[data-state="blocked"][data-id]');
     clearTimeout(blockerTimer);
     if (!card) {
       Blocker.hide();
@@ -188,6 +182,14 @@
     e.stopPropagation();
     var act = e.target.closest("[data-display]");
     if (!act) return;
+    var seg = e.target.closest("[data-place], [data-lanes]");
+    if (seg) {
+      Board.change(function () {
+        if (seg.dataset.place) Store.state.planPlace = seg.dataset.place;
+        if (seg.dataset.lanes) Store.state.laneStyle = seg.dataset.lanes;
+      }, { spring: "travel", quietExits: true, noAnchor: true });
+      return Toolbar.drawDisplay();
+    }
     if (act.dataset.display === "fold") Fold.toggleAll();
     if (act.dataset.display === "keys") Help.toggle();
     if (act.dataset.display === "fold" || act.dataset.display === "keys") display.classList.remove("is-on");

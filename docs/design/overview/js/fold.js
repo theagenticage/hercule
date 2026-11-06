@@ -1,27 +1,27 @@
-// PROTOTYPE - folding. Anything folded is a wire with one bead per Task, on the same stage axis as
-// the cards. A card shrinks into its bead when its lane or plan folds, and grows out of it again
-// when it opens, so nothing ever just vanishes. Reversing halfway picks up from what is on screen.
+// PROTOTYPE - folding and opening in place. A folded lane is one line with a count under each stage.
+// A closed initiative is its coloured line, with one bead per Task. A card shrinks into its count or
+// its bead, and grows out of it again, so nothing ever just vanishes. Reversing halfway picks up from
+// what is on screen.
 window.Fold = (function () {
   "use strict";
 
   // Copies fly in the fixed layer, so a scroll caused by the fold itself cannot carry them off.
   function flight() { return document.getElementById("carry"); }
 
-  /** Returns the cards and piles under an element, each with the Task ids it stands for. */
+  /** Returns the cards under an element, each with the Task it stands for. */
   function collectItems(root) {
-    var items = [];
-    root.querySelectorAll(".cell > .card").forEach(function (el) {
-      var ids = el.dataset.id ? [el.dataset.id] : [];
-      if (el.dataset.pile) {
-        var pile = (el.parentElement._piles || []).find(function (p) { return p.key === el.dataset.pile; });
-        if (pile) ids = pile.tasks.map(function (t) { return t.id; });
-      }
-      items.push({ el: el, ids: ids });
+    return Array.prototype.map.call(root.querySelectorAll(".cell .card[data-id]"), function (el) {
+      return { el: el, ids: [el.dataset.id] };
     });
-    return items;
   }
 
-  function findBead(root, id) { return root.querySelector('.bead[data-id="' + id + '"]'); }
+  /** Finds what a Task folds into: its bead on an initiative's line, or its stage's count on a lane's line. */
+  function findTarget(root, id) {
+    var bead = root.querySelector('.bead[data-id="' + id + '"]');
+    if (bead) return bead;
+    var t = Store.task(id);
+    return t ? root.querySelector('.fold-cell[data-stage="' + t.stage + '"]') : null;
+  }
 
   /** Makes a flying copy of everything under each root. Stored on the root, for a reversal. */
   function launch(roots) {
@@ -40,7 +40,7 @@ window.Fold = (function () {
   function flyHome(group) {
     var seen = 0;
     group.flights.forEach(function (f, i) {
-      var bead = findBead(group.root, f.ids[0]);
+      var bead = findTarget(group.root, f.ids[0]);
       if (!bead) {
         f.ghost.remove();
         return;
@@ -58,10 +58,7 @@ window.Fold = (function () {
         done: function () { f.ghost.remove(); },
       });
       f.ghost.animate([{ opacity: 1 }, { opacity: 0 }], { delay: delay + 210, duration: 90, fill: "forwards" });
-      f.ids.forEach(function (id) {
-        var b = findBead(group.root, id);
-        if (b) Motion.body(b).set({ s: 0.2, o: 0 }).to({ s: 1, o: 1 }, "hand", { delay: delay + 230 });
-      });
+      if (bead.classList.contains("bead")) Motion.body(bead).set({ s: 0.2, o: 0 }).to({ s: 1, o: 1 }, "hand", { delay: delay + 230 });
     });
     group.root._flights = group.flights;
   }
@@ -69,7 +66,8 @@ window.Fold = (function () {
   /** Grows each card out of where it was: its bead, or a copy still flying from a moment ago. */
   function growFrom(root, from) {
     collectItems(root).forEach(function (it, i) {
-      var start = it.ids.map(function (id) { return from[id]; }).filter(Boolean)[0];
+      var t = Store.task(it.ids[0]);
+      var start = from[it.ids[0]] || (t && from["stage:" + t.stage]);
       if (!start) return;
       var r = Motion.layoutRect(it.el);
       var b = Motion.body(it.el);
@@ -89,6 +87,10 @@ window.Fold = (function () {
       var r = b.getBoundingClientRect();
       from[b.dataset.id] = { left: r.left, top: r.top, width: r.width, height: r.height, s: 0.1, o: 0 };
     });
+    root.querySelectorAll(".fold-cell").forEach(function (c) {
+      var r = c.getBoundingClientRect();
+      from["stage:" + c.dataset.stage] = { left: r.left, top: r.top, width: r.width, height: r.height, s: 0.1, o: 0 };
+    });
     (root._flights || []).forEach(function (f) {
       if (!f.ghost.isConnected) return;
       var r = f.ghost.getBoundingClientRect();
@@ -106,64 +108,31 @@ window.Fold = (function () {
 
   /** Folds these roots with one change of the board. */
   function fold(roots, mutate) {
-    if (Fan.isOpen()) Fan.hide(true);
     var groups = launch(roots);
     Board.change(mutate, { spring: "travel", quietExits: true, stagger: function () { return 70; } });
-    // A wire is new on the page. It starts where its lane's name starts, and travels with it.
-    roots.forEach(function (root) {
-      var head = root.querySelector(".lane-head");
-      var wire = root.querySelector(":scope > .wire");
-      if (!head || !wire) return;
-      var y = Motion.body(head).value.y;
-      if (y) Motion.body(wire).set({ y: y }).to({ y: 0 }, "travel", { delay: 70 });
-    });
     groups.forEach(flyHome);
   }
 
   /** Opens these roots with one change of the board. */
   function open(roots, mutate, after) {
-    if (Fan.isOpen()) Fan.hide(true);
     var origins = roots.map(recordOrigins);
     Board.change(mutate, { spring: "travel", quietExits: true });
     roots.forEach(function (root, i) { growFrom(root, origins[i]); });
     if (after) after();
   }
 
-  /**
-   * Shows a lane in full, or back to its rows at rest. The cards behind come out from under the last,
-   * and go back the same way. This is what clicking a lane's name does.
-   */
-  function toggleRows(id) {
+  /** Opens the rest of a cell in place, or closes it again. The lanes below make room. */
+  function toggleCell(key) {
     var st = Store.state;
-    if (st.folded[id]) return toggleLane(id);
-    if (Fan.isOpen()) Fan.hide(true);
-    var lane = Board.node("lane:" + id);
-    var goingFull = !st.full[id];
-    var tops = new Map();
-    lane.querySelectorAll(".cell").forEach(function (cell) {
-      var top = cell.querySelector(":scope > .card:last-of-type") || cell.querySelector(".card");
-      if (top) tops.set(cell, top.getBoundingClientRect());
-    });
-    var piles = goingFull ? [] : Array.prototype.map.call(lane.querySelectorAll(".cell > .pile:not([data-kind='landed'])"), function (el) {
-      return { cell: el.parentElement, rect: Motion.layoutRect(el), ghost: Motion.ghost(el, flight()) };
-    });
-    Board.change(function () { st.full[id] = goingFull; }, { spring: "travel", quietExits: !goingFull ? false : true });
-    piles.forEach(function (p) {
-      var top = p.cell.querySelector(".card");
-      var r = top ? top.getBoundingClientRect() : p.rect;
-      Motion.body(p.ghost).to({ x: r.left - p.rect.left, y: r.top - p.rect.top, s: 0.96, o: 0 }, "travel", { done: function () { p.ghost.remove(); } });
-    });
-    if (!goingFull || Motion.isReduced()) return;
-    tops.forEach(function (from, cell) {
-      Array.prototype.forEach.call(cell.children, function (el, i) {
-        if (i < (st.rows[id] || 1) || !el.classList.contains("card")) return;
-        var r = Motion.layoutRect(el);
-        Motion.body(el).set({ x: from.left - r.left, y: from.top - r.top, s: 0.97, o: 0 }).to({ x: 0, y: 0, s: 1, o: 1 }, "travel", { delay: 20 + i * 26 });
-      });
-    });
+    Board.change(function () { st.openCells[key] = !st.openCells[key]; }, { spring: "travel" });
   }
 
-  /** Folds or opens a project's lane. */
+  /** Opens a stack in place, or closes it again. */
+  function toggleStack(id, open) {
+    Board.change(function () { Store.state.openStacks[id] = open; }, { spring: "travel" });
+  }
+
+  /** Folds or opens a lane. */
   function toggleLane(id) {
     var st = Store.state;
     var lane = Board.node("lane:" + id);
@@ -188,12 +157,13 @@ window.Fold = (function () {
   /** Folds every lane, or opens them all when all are folded. One change, however many lanes. */
   function toggleAll() {
     var st = Store.state;
-    var all = st.projects.every(function (p) { return st.folded[p.id]; });
-    var list = st.projects.filter(function (p) { return !!st.folded[p.id] === all; });
-    var roots = list.map(function (p) { return Board.node("lane:" + p.id); });
-    if (all) open(roots, function () { list.forEach(function (p) { st.folded[p.id] = false; }); });
-    else fold(roots, function () { list.forEach(function (p) { st.folded[p.id] = true; }); });
+    var lanes = Store.readLanes();
+    var all = lanes.every(function (l) { return st.folded[l.id]; });
+    var list = lanes.filter(function (l) { return !!st.folded[l.id] === all; });
+    var roots = list.map(function (l) { return Board.node("lane:" + l.id); });
+    if (all) open(roots, function () { list.forEach(function (l) { st.folded[l.id] = false; }); });
+    else fold(roots, function () { list.forEach(function (l) { st.folded[l.id] = true; }); });
   }
 
-  return { toggleLane: toggleLane, toggleRows: toggleRows, togglePlan: togglePlan, toggleAll: toggleAll };
+  return { toggleLane: toggleLane, toggleCell: toggleCell, toggleStack: toggleStack, togglePlan: togglePlan, toggleAll: toggleAll };
 })();

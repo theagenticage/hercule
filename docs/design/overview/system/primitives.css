@@ -1,9 +1,8 @@
-/* PROTOTYPE - the shared primitives of Work and Inbox: desk, card stock, heights, type roles,
-   spacing and motion tokens. SHARED.md explains every value. Load after tokens.css.
+/* PROTOTYPE - the shared primitives of Work and Inbox: desk, card stock, type roles, spacing and
+   motion tokens. SHARED.md explains every value. Load after tokens.css.
 
-   The one idea: a card's height above the desk says something. A card that wants you stands up.
-   A card someone else holds lies flat. A card that cannot move is pressed in. A finished card
-   is only an outline. Nothing else on the desk has a shadow. */
+   Clean first. Every card is the same sheet. Height says nothing: a card lifts only while it is in
+   your hand. Most cards have a stage and nothing else to say. */
 
 :root,
 [data-theme] {
@@ -11,31 +10,24 @@
      read as objects lying on it. */
   --desk: color-mix(in oklab, var(--bg) 70%, var(--surface));
 
-  /* ---- The lamp over the desk: a little warmth in the dark themes, a little daylight in the light. */
-  --lamp: color-mix(in oklab, var(--brass) 7%, transparent);
-
-  /* ---- Words follow height. On a dark desk a pale word on an unlit card would outshine a standing
-     card, so what lies lower is written dimmer. */
-  --word-flat: var(--faint);
-  --word-flat-2: color-mix(in oklab, var(--faint) 86%, var(--desk));
+  /* ---- A blocked card goes quiet: its words step back. */
   --word-press: color-mix(in oklab, var(--faint) 80%, var(--desk));
   --paper: oklch(0.36 0.05 76);
   /* The one suggested answer. Each theme's --accent, except where --accent is not green. */
   --answer: var(--accent);
   --answer-fg: var(--accent-fg);
 
-  /* ---- Brass that may be read: the stage counts. Brass itself is too pale on a light desk. */
-  --numeral: var(--count-ink);
-  --underline: var(--you);
-  /* Stage and stack counts, and the double rule under them. Brass that can be read. */
-  --count-ink: oklch(0.76 0.09 82);
-  --rule-ink: oklch(0.62 0.075 82);
+  /* ---- An initiative's colour: one hue each, set on the row as --plan-hue, at a lightness and
+     chroma each theme family can carry. Kept away from marigold and tomato, which mean things. */
+  --plan-l: 0.76;
+  --plan-c: 0.105;
+  --plan-soft-a: 0.24;
 
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
   --stock: oklch(0.345 0.022 62);
   --stock-carry: oklch(from var(--stock) calc(l + 0.03) c h);
-  /* On a near-black desk a shadow says little. A standing card reads by what light does to it: a
-     lit top edge, and a sheen falling from above and fading out before the middle. */
+  /* On a near-black desk a shadow says little. A card reads by what light does to it: a lit top
+     edge, and a sheen falling from above and fading out before the middle. */
   --stock-sheen: linear-gradient(oklch(1 0 0 / 0.035), oklch(1 0 0 / 0) 45%);
   --stock-flat: color-mix(in oklab, var(--raised) 70%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
@@ -43,17 +35,13 @@
   --stock-lit: color-mix(in oklab, white 13%, transparent);
   --stock-press: color-mix(in oklab, var(--sunken) 42%, var(--desk));
 
-  /* ---- Heights: the box-shadow of each. Dark values; the light themes follow below. */
-  --h-stand: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
+  /* ---- A card at rest, under the pointer, and in the hand. Dark values; the light themes follow. */
+  --h-rest: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
   --h-hover: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 6px 10px -3px oklch(0 0 0 / 0.3), 0 16px 28px -12px oklch(0 0 0 / 0.42);
   --h-carry: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0 0 0 / 0.26), 0 14px 20px -6px oklch(0 0 0 / 0.36), 0 36px 56px -18px oklch(0 0 0 / 0.56);
-  --h-flat: inset 0 1px 0 oklch(1 0 0 / 0.06);
-  --h-press: inset 0 1px 3px oklch(0 0 0 / 0.16);
-  --h-etch: none;
 
   /* ---- Type roles, on the app's scale. */
-  --type-lead: var(--w-medium) 26px / 32px var(--font-ui);
-  --type-lane: var(--w-bold) 15px / 20px var(--font-ui);
+  --type-lane: var(--w-bold) 14px / 20px var(--font-ui);
   --type-card: var(--w-medium) var(--t-13) / 18px var(--font-ui);
   --type-summary: var(--w-regular) var(--t-12) / 16px var(--font-ui);
   --type-meta: var(--w-regular) var(--t-11) / 16px var(--font-ui);
@@ -64,7 +52,7 @@
   --card-pad-x: 12px;
   --card-pad-y: 10px;
   --card-h: 88px;
-  --card-gap: 22px;
+  --card-gap: 20px;
 
   /* ---- Motion. MOTION.md says where each is used. */
   --m-press: 80ms;
@@ -86,25 +74,19 @@
   --stock: var(--raised);
   --stock-carry: var(--raised);
   --stock-sheen: none;
-  --lamp: oklch(1 0 0 / 0.5);
-  --count-ink: oklch(0.52 0.095 80);
-  --rule-ink: oklch(0.72 0.09 82);
-  --tab-fill: oklch(0.74 0.15 72);
-  --underline: var(--you-ink);
-  --h-flat: none;
   --stock-flat: color-mix(in oklab, var(--raised) 58%, var(--desk));
-  --word-flat: color-mix(in oklab, var(--ink) 80%, var(--muted));
-  --word-flat-2: var(--muted);
   --word-press: var(--muted);
+  --plan-l: 0.56;
+  --plan-c: 0.135;
+  --plan-soft-a: 0.22;
   --paper: oklch(0.72 0.07 80);
   --stock-rim: color-mix(in oklab, var(--rim) 40%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
   --stock-lit: oklch(1 0 0 / 0.9);
   --stock-press: color-mix(in oklab, var(--sunken) 80%, var(--desk));
-  --h-stand: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 2px 5px -1px oklch(0.3 0.03 70 / 0.09), 0 8px 20px -6px oklch(0.3 0.03 70 / 0.28);
+  --h-rest: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.05), 0 2px 5px -2px oklch(0.3 0.03 70 / 0.1);
   --h-hover: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 5px 9px -2px oklch(0.3 0.03 70 / 0.1), 0 16px 28px -10px oklch(0.3 0.03 70 / 0.26);
   --h-carry: inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0.3 0.03 70 / 0.08), 0 14px 20px -6px oklch(0.3 0.03 70 / 0.16), 0 36px 56px -18px oklch(0.3 0.03 70 / 0.34);
-  --h-press: inset 0 1px 3px oklch(0.3 0.03 70 / 0.07);
 }
 
 [data-theme="nile"] {
@@ -114,6 +96,12 @@
 }
 [data-theme="end-house"] { --stock: oklch(0.345 0.03 352); }
 [data-theme="blue-train"] { --stock: oklch(0.385 0.034 250); }
+
+/* Declared where the hue is, because a custom property resolves on the element that declares it. */
+.plan, .lane-flag, .card-plan, .menu-mark--plan {
+  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
+  --plan-soft: oklch(var(--plan-l) var(--plan-c) var(--plan-hue) / var(--plan-soft-a));
+}
 
 /* ---------- The card ----------
    Three layers in one stacking context, back to front: what stands behind the top edge (.card-holder),
@@ -134,14 +122,14 @@
   z-index: -1;
   border-radius: var(--card-r);
   background: var(--stock);
-  box-shadow: var(--h-stand);
+  box-shadow: var(--h-rest);
   transition: box-shadow 260ms var(--m-ease), background-color 260ms var(--m-ease);
 }
-.card-stock::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-sheen); opacity: 0; transition: opacity 260ms var(--m-ease); pointer-events: none; }
-.card[data-height="stand"] .card-stock::before { opacity: 1; }
-.card[data-height="flat"] .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
-.card[data-height="press"] .card-stock { background: var(--stock-press); box-shadow: var(--h-press); }
-.card[data-height="etch"] .card-stock { background: transparent; box-shadow: var(--h-etch); }
+.card-stock::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-sheen); pointer-events: none; }
+.card[data-state="blocked"] .card-stock { background: var(--stock-flat); box-shadow: inset 0 0 0 1px var(--stock-rim-flat); }
+.card[data-state="blocked"] .card-stock::before { display: none; }
+.card[data-state="landed"] .card-stock { background: transparent; box-shadow: none; }
+.card[data-state="landed"] .card-stock::before { display: none; }
 
 /* Words. A title of up to two lines, then a summary of a few words, three lines in all. The age sits
    on its own at the bottom right. The height never changes, so a new summary can never move a
@@ -150,22 +138,22 @@
 .card-meta { position: absolute; right: var(--card-pad-x); bottom: 8px; display: inline-flex; align-items: center; gap: 5px; height: 16px; font: var(--type-meta); color: var(--faint); font-variant-numeric: tabular-nums; }
 .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; font: var(--type-card); color: var(--ink); letter-spacing: -0.003em; text-wrap: pretty; }
 .card-now { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 2px 0 0; text-wrap: pretty; }
-.card.has-long-title .card-words--rest .card-now { -webkit-line-clamp: 1; }
-.card[data-height="flat"] .card-title { color: var(--word-flat); }
-.card[data-height="flat"] .card-words { color: var(--word-flat-2); }
-.card[data-height="press"] .card-title, .card[data-height="press"] .card-words { color: var(--word-press); }
+.card.has-long-title .card-now { -webkit-line-clamp: 1; }
+.card[data-state="blocked"] .card-title, .card[data-state="blocked"] .card-words { color: var(--word-press); }
+.card[data-state="blocked"] .card-now .ic { margin-right: 4px; vertical-align: -1px; }
 .card:hover .card-title, .card:focus-visible .card-title { color: var(--ink); }
 .card:hover .card-words, .card:focus-visible .card-words { color: var(--muted); }
-.card[data-height="etch"] .card-title { color: var(--faint); font-weight: var(--w-regular); }
+.card[data-state="landed"] .card-title { color: var(--faint); font-weight: var(--w-regular); }
 /* A landed card has no sheet, so its words stand on the column's left edge, under its stage name. */
-.card[data-height="etch"] { padding-left: 0; padding-right: 0; }
-.card[data-height="etch"] .card-meta { right: 0; }
+.card[data-state="landed"] { padding-left: 0; padding-right: 0; min-height: 0; }
+.card[data-state="landed"] .card-words { min-height: 0; }
+.card[data-state="landed"] .card-meta { display: none; }
+/* A Thread's open question: the second line is the question, and nothing else on the card changes. */
+.card-now.card-question { color: var(--you-ink); }
 
-/* ---------- Who holds it: the top edge ----------
-   The top edge is one slot. What stands behind it says who has the next move, before a word is
-   read, the way a metal signal tab did on a card in a 1930s file: a marigold tab for you, short
-   for a quick call and long for real thinking; a colleague's head for an agent; a grey tab with
-   an initial for a person; nothing for nobody. The sheet cuts them all off along its edge. */
+/* ---------- Who is on it right now ----------
+   Only a live Thread stands behind the top edge. Most cards have nobody there. The sheet cuts the
+   head off along its edge. */
 .card-holder {
   position: absolute;
   z-index: -2;
@@ -176,10 +164,6 @@
   gap: 4px;
   pointer-events: none;
 }
-.card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--tab-fill, var(--you)); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
-.card-tab[data-need="think"] { width: 40px; }
-/* A person is a round monogram behind the edge, so it can never be read as a key. */
-.card-tab--person { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-bottom: 1px; border-radius: 50%; background: var(--faint); box-shadow: none; color: var(--desk); font-size: 10px; font-weight: var(--w-bold); line-height: 1; }
 /* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
    on the edge in front of the sheet. While it works, the paws type on the card itself. */
 .card-head { display: block; width: 30px; height: 23px; line-height: 0; margin-bottom: 1px; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }

@@ -67,7 +67,7 @@ input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-o
 .tray-swatch.is-on { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* ---------- The sidebar's failed dot, and the Threads face ---------- */
-/* Marigold, because the next move is yours. No number: the sentence holds the count. It is the only
+/* Marigold, because something needs you. No number: the lane says how many. It is the only
    signal in the sidebar, so it sits between --you and --you-ink, which reaches 3:1 in all six themes. */
 [data-side] { --failed-dot: color-mix(in oklab, var(--you) 45%, var(--you-ink)); }
 .nav-dot { flex: none; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--failed-dot); }

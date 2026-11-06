@@ -3,7 +3,7 @@
 window.Tray = (function () {
   "use strict";
   var THEMES = [["whitehaven", "Whitehaven"], ["styles", "Styles"], ["orient-express", "Orient Express"], ["nile", "Nile"], ["end-house", "End House"], ["blue-train", "Blue Train"]];
-  var SCENES = [["today", "This morning"], ["many", "300 cards"], ["one", "One card"], ["first", "First run"], ["empty", "Desk clear"], ["loading", "Loading"], ["offline", "Offline"], ["failed", "A run failed"], ["awkward", "Awkward data"]];
+  var SCENES = [["today", "This morning"], ["many", "300 cards"], ["one", "One card"], ["first", "First run"], ["empty", "Desk clear"], ["loading", "Loading"], ["offline", "Offline"], ["quiet", "Nothing asks"], ["failed", "A run failed"], ["awkward", "Awkward data"]];
   var EVENTS = [["thread", "A thread starts"], ["merge", "A pull request merges"], ["fail", "The next move fails"], ["run-fails", "A run fails"], ["replay", "Replay the morning"]];
 
   function link(key, value) {
@@ -43,19 +43,19 @@ window.Tray = (function () {
   function arriveNext() {
     var name = titles[n % titles.length];
     n++;
-    Live.arrive({ id: "new-" + n + "-" + Date.now(), name: name, project: "storefront", initiative: "", stage: "exploring", move: "agent", need: "look", agent: "Look into " + name, now: "A thread just started.", where: "A thread just started on this.", left: "", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: name, id: "x" + n }] });
+    Live.arrive({ id: "new-" + n + "-" + Date.now(), name: name, project: "storefront", initiative: "", stage: "exploring", agent: "Look into " + name, now: "A thread just started.", where: "A thread just started on this.", left: "", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: name, id: "x" + n }] });
   }
 
   function mergeNext() {
     var pick = Store.state.tasks.filter(function (t) { return t.stage === "reviewing" && document.querySelector('#lanes .card[data-id="' + t.id + '"]'); })[0];
     if (!pick) pick = Store.state.tasks.filter(function (t) { return t.stage === "reviewing"; })[0];
-    Live.fact(pick.id, "landed", "PR merged", function (t) { t.move = "nobody"; t.agent = ""; t.person = ""; t.now = "Merged just now."; });
+    Live.fact(pick.id, "landed", "PR merged", function (t) { t.agent = ""; t.person = ""; t.now = "Merged just now."; });
   }
 
   var causes = ["the job ran out of time", "the runner went offline", "a check would not start"];
 
   function failNextRun() {
-    var pick = Store.state.tasks.filter(function (t) { return t.agent && t.move === "agent"; })[0];
+    var pick = Store.state.tasks.filter(function (t) { return t.agent && !t.question && !t.failed; })[0];
     if (!pick) return Toast.show("No run to fail right now.", false);
     n++;
     Live.fail(pick.id, { action: "Run the plan", cause: causes[n % causes.length] });
