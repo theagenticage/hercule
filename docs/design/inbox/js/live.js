@@ -10,11 +10,24 @@ window.Live = (function () {
     { to: 'se-1', s: function () { return W.signal('cameBack', 0.01); } },
     { arrive: function () { return { id: 'pr-6270', kind: 'github/pull-request', concern: 'reviewRequested', title: 'Show the delivery window on the order page', since: W.hoursAgo(0.02), fields: { number: 6270, repo: 'storefront-web', author: 'ines-carvalho', state: 'running', diff: [64, 8], files: 3 }, signals: [W.signal('reviewRequested', 0.02, 'ines-carvalho')], task: null, project: 'storefront-web' }; } },
   ];
-  var i = 0, timer = 0;
+  // Something Hercule notices later in the morning, once the plate has room for it.
+  var LATER = { id: 'c-scanners', kind: 'hercule/cluster', title: 'Depot scanners drop off at night', why: 'Twelve reports, one firmware version', sources: ['slack', 'sentry'], figures: '12 reports · 3 depots', detail: 'Three depots report scanners going offline between two and four. Every report names the same firmware.', parts: [], since: W.hoursAgo(0.05), signals: [], fields: {}, concern: 'noticed' };
+  var i = 0, timer = 0, noticedLater = false;
 
   /** Plays the next signal of the script. Returns false once the script has run out. */
   function next() {
     if (!App.state.isLive) return false;
+    if (!noticedLater && App.state.mode === 'stacks' && App.state.clusters.length < 3) {
+      noticedLater = true;
+      App.state.clusters.push(Object.assign({}, LATER));
+      App.reflowNoticed();
+      var plate = document.getElementById('noticed');
+      plate.classList.remove('is-glint');
+      void plate.offsetWidth;
+      plate.classList.add('is-glint');
+      Landing.announce('Hercule noticed: ' + LATER.title);
+      return true;
+    }
     var away = App.state.mode !== 'stacks' && App.state.mode !== 'zero';
     var step = script[i % script.length];
     i++;

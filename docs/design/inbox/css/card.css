@@ -184,7 +184,9 @@
 .card.is-hover .c-acts,
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 .card.is-hover .c-pace,
-.card.is-focus .c-pace { display: none; }
+.card.is-focus .c-pace,
+.card.pace-slow.is-hover .c-pace,
+.card.pace-slow.is-focus .c-pace { display: none; }
 /* The title gives way to the actions with an ellipsis, so no word is cut in half. */
 .stack .card.is-hover:not(.is-whole):not(.is-peek) .c-title,
 .stack .card.is-focus:not(.is-whole):not(.is-peek) .c-title { margin-right: var(--acts-w, 90px); }
@@ -266,6 +268,11 @@
   color: var(--plate-ink);
 }
 .noticed[hidden] { display: none; }
+/* When Hercule notices something new, one glint of light crosses the plate. It is the only time the plate moves. */
+.noticed::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(105deg, transparent 42%, color-mix(in oklab, white 34%, transparent) 50%, transparent 58%) no-repeat; background-size: 240% 100%; background-position: 130% 0; opacity: 0; }
+.noticed.is-glint::after { animation: plate-glint 1200ms cubic-bezier(0.4, 0, 0.2, 1); }
+@keyframes plate-glint { 0% { background-position: 130% 0; opacity: 1; } 100% { background-position: -40% 0; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .noticed.is-glint::after { animation: none; } }
 .plate-crest { flex: none; display: grid; place-items: center; width: 58px; color: var(--plate-ink); }
 .plate-crest .logo g { fill: var(--plate); }
 .plaque {

@@ -107,6 +107,10 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 | A tray closes | The same cards travel back into the pile, and the panel fades from 150ms |
 | A pile on hover | Its edges part by 1 and 3px over `--m-base` |
 
+### Hercule notices something
+
+The plate has room, so a new segment joins it, the stacks glide on `travel` if the plate was empty, and one glint of light crosses the plate over 1200ms. It is the only time the plate moves.
+
 ### The empty Inbox
 
 When the last card leaves: the horizon draws outward over 700ms, Hercule's head rises through it from below, cut off by the horizon, over 1400ms on `cubic-bezier(.3,0,.2,1)`, the rays draw from the middle outward from 420ms, 26ms apart, and the words fade up at 900ms. It plays once. If the last card was handed on, the page waits 1.5 seconds for the chain to play out, and then settles.

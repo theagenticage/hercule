@@ -295,7 +295,8 @@ window.App = (function () {
           el.style.top = p.y + 'px';
           if (it.tab) return;
           el._rest = p.level === 'full' ? it.full : Math.min(it.full, runEnd - p.y);
-          if (it.pile) el._rest = p.show;
+          // A shelf row has no sheet at rest, so nothing may hide behind the row after it.
+          if (it.pile || (b.name === 'shelf' && p.level !== 'full')) el._rest = p.show;
           el._full = it.full;
           if (!el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
           var becomesWhole = p.level === 'full' && !el.classList.contains('is-whole') && hasDrawn;
