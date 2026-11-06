@@ -61,7 +61,8 @@ window.Shell = (function () {
       count.textContent = waiting;
       count.closest(".side-sec").hidden = waiting === 0;
     }
-    var working = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length;
+    // One more session works on no Task on this board: a workflow step, as the Inbox's sidebar counts it.
+    var working = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length + 1;
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;
     if (!working && !waiting) sum.textContent = "Nothing running";
