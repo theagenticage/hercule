@@ -189,6 +189,18 @@ window.App = (function () {
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
     var moving = [].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving), .stack .tab')).filter(function (el) { return el._plan; });
     Motion.flip(moving.concat([].slice.call(page.querySelectorAll('.stack-h, .stack-foot:not([hidden])'))), placeStacks, { spring: 'hand', stagger: stagger });
+    dealFromPiles();
+  }
+
+  /** Brings a card that just came out of a pile up from the pile, so a stack can be seen to feed itself. The pile gives a little. */
+  function dealFromPiles() {
+    [].forEach.call(page.querySelectorAll('.stack .card.is-new'), function (el) {
+      var pile = el.parentNode.querySelector('.card.is-pile');
+      if (!pile || !pile._plan || !el._plan || Motion.isReduced()) return;
+      el.classList.remove('is-new');
+      Motion.body(el).set({ y: pile._plan.y - el._plan.y + 10, o: 0 }).to({ y: 0, o: 1 }, 'hand');
+      Motion.knock(pile, -70);
+    });
   }
 
   function placeStacks() {
@@ -286,8 +298,14 @@ window.App = (function () {
           if (it.pile) el._rest = p.show;
           el._full = it.full;
           if (!el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
+          var becomesWhole = p.level === 'full' && !el.classList.contains('is-whole') && hasDrawn;
           el.classList.toggle('is-whole', p.level === 'full');
           el.dataset.level = p.level;
+          // The next card stepping up to lead grows into its larger title, rather than jumping to it.
+          if (becomesWhole) {
+            var title = el.querySelector('.c-title');
+            if (title) Motion.animate(title, [{ transform: 'scale(.867)', transformOrigin: '0 0' }, { transform: 'none', transformOrigin: '0 0' }], { duration: Motion.curve('hand').ms, easing: Motion.curve('hand').ease });
+          }
           el.classList.toggle('is-run-end', !!endOfRun);
         });
         var lying = b.parts.lying.length;
