@@ -23,15 +23,19 @@
     return { ease: 'linear(' + out.join(', ') + ')', ms: Math.round(t * 1000), ratio: z };
   }
 
+  // The shared springs of Work and the Inbox, as stiffness and damping at mass 1. SHARED.md has the table.
   var SPRINGS = {
-    settle: buildSpring(260, 26),  // a card finding its place: no overshoot to speak of
-    lift: buildSpring(520, 30),    // a card coming up to the pointer: quick, a trace of overshoot
-    land: buildSpring(420, 18),    // something arriving with weight: one visible bounce
-    magnet: buildSpring(700, 38),  // a dragged card pulled to a target: firm, no bounce
+    carry: buildSpring(900, 48),   // follows the pointer, a hair behind
+    glide: buildSpring(420, 36),   // neighbours moving aside
+    drop: buildSpring(520, 30),    // settling into a slot, slight overshoot
+    return: buildSpring(300, 30),  // going home after a cancel
+    open: buildSpring(260, 28),    // a card opening into its details
+    fan: buildSpring(340, 26),     // a pile opening
+    fold: buildSpring(300, 32),    // a pile closing
+    bump: buildSpring(900, 28),    // a small acknowledgement
   };
   Object.keys(SPRINGS).forEach(function (k) {
     document.documentElement.style.setProperty('--spring-' + k, SPRINGS[k].ease);
-    document.documentElement.style.setProperty('--spring-' + k + '-ms', SPRINGS[k].ms + 'ms');
   });
 
   /** Runs a Web Animation unless reduced motion is on, and returns a promise for its end. */

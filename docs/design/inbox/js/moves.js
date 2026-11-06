@@ -26,6 +26,7 @@ window.Moves = (function () {
     var el = App.els()[e.id];
     undoable = { type: 'assign', id: e.id };
     e.task = { by: by, startedAt: App.state.now };
+    if (e.kind === 'hercule/cluster') { assignPlaque(e, by); return; }
     if (!el) { App.layOut(); return; }
     Pointer.setHover(null);
     Pointer.unpeek();
@@ -36,7 +37,7 @@ window.Moves = (function () {
     el.classList.add('is-handing');
     Landing.rollLine(el, old);
     var who = el.querySelector('.c-who > *');
-    if (who) Motion.animate(who, [{ transform: 'scale(.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: Motion.SPRINGS.land.ms, easing: Motion.SPRINGS.land.ease });
+    if (who) Motion.animate(who, [{ transform: 'scale(.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: Motion.SPRINGS.drop.ms, easing: Motion.SPRINGS.drop.ease });
     setTimeout(function () { el.classList.remove('is-handing'); }, 700);
     setTimeout(function () { flyToWork(el, e); }, 120);
     App.layOut();
@@ -44,10 +45,21 @@ window.Moves = (function () {
     showToast(said, true);
   }
 
+  /** Hands on what Hercule noticed. The plaque goes flat in its place, and leaves at the next visit. */
+  function assignPlaque(e, by) {
+    var el = document.querySelector('.plaque[data-id="' + e.id + '"]');
+    el.classList.add('is-handed');
+    el.querySelector('.pl-why').textContent = by === 'you' ? 'You took it on' : by + ' has it';
+    var c = el.getBoundingClientRect();
+    Motion.fly('<span class="token">' + Crew.logo(14, { mono: true }) + '</span>', { left: c.left + 16, top: c.top + 22, width: 24, height: 24 }, readWorkRow().getBoundingClientRect());
+    showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, true);
+    App.drawBar();
+  }
+
   function hand(e, workflow, anchor) {
     var flows = Card.readWorkflows(e);
-    if (!flows.length) return take(e);
     if (workflow) return assign(e, workflow.name);
+    if (!flows.length) return take(e);
     if (flows.length === 1) return assign(e, flows[0].name);
     Menu.show(anchor || App.els()[e.id], flows, function (w) { assign(e, w.name); });
   }
@@ -82,7 +94,7 @@ window.Moves = (function () {
     });
     var left = holes.filter(function (e) { return e.gone >= 0; });
     holes = [];
-    if (left.length) { undoableGone = left; App.layOut(); }
+    if (left.length) { undoableGone = left; App.layOut(); App.checkZero(); }
   }
   var undoableGone = [];
 
@@ -133,6 +145,14 @@ window.Moves = (function () {
   function perform(act, id, anchor) {
     var e = App.findEntity(id);
     if (!e) return;
+    if (e.kind === 'hercule/cluster' && act === 'dismiss') {
+      var i = App.state.clusters.indexOf(e);
+      App.state.clusters.splice(i, 1);
+      var plaque = document.querySelector('.plaque[data-id="' + id + '"]');
+      Motion.animate(plaque, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px) scale(.98)' }], { duration: 200, easing: 'ease-in' }).then(function () { App.drawNoticed(); App.layOut(); App.checkZero(); });
+      showToast('Back in Intake', false);
+      return;
+    }
     if (act === 'hand') hand(e, null, anchor);
     else if (act === 'take') take(e);
     else if (act === 'dismiss') dismiss(e);

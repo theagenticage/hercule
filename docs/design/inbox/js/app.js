@@ -32,20 +32,69 @@ window.App = (function () {
     return { lying: lying, settled: list.filter(function (e) { return e.settled; }) };
   }
 
-  /** Returns the items a stack draws: its cards, with a tab before each group when the stack groups. */
-  function buildItems(name, lying) {
-    if (name !== 'shelf') return lying.map(function (e) { return { e: e }; });
-    var groups = {}, order = [], items = [];
-    lying.forEach(function (e) {
-      var g = e.project || 'Elsewhere';
-      if (!groups[g]) { groups[g] = []; order.push(g); }
-      groups[g].push(e);
+  /** Replaces the members of each stream by one pile at the place of its oldest member. */
+  function foldStreams(list) {
+    var streams = {}, out = [];
+    list.forEach(function (e) {
+      if (!e.stream) { out.push(e); return; }
+      if (!streams[e.stream]) { streams[e.stream] = { pile: true, id: 'stream-' + e.stream, title: e.stream, members: [], since: e.since, kind: e.kind }; out.push(streams[e.stream]); }
+      streams[e.stream].members.push(e);
     });
-    order.forEach(function (g) {
-      items.push({ tab: 30, label: g, count: groups[g].filter(function (e) { return !e.leaving; }).length });
-      groups[g].forEach(function (e) { items.push({ e: e }); });
+    return out;
+  }
+
+  /** Returns one folded pile of a group: `members` are the entities it holds. */
+  function buildPile(id, title, members, note) {
+    return { pile: { id: id, title: title, members: members, kind: members[0].kind, note: note } };
+  }
+
+  /** Returns the value a kind groups by, for an entity. */
+  function readGroup(e) { return e.fields[K[e.kind].group] || e.project || 'Elsewhere'; }
+
+  /**
+   * Returns the items a stack draws, for its depth: its cards, tabs before groups in a stack that groups, and piles where
+   * the stack holds more than its depth can show. The oldest stay out, because they have waited longest.
+   */
+  function buildItems(name, lying, depth) {
+    var open = Stacks.METRICS.open, tight = Stacks.METRICS.tight;
+    if (name === 'shelf') {
+      var groups = {}, order = [], items = [];
+      lying.forEach(function (e) {
+        var g = e.project || 'Elsewhere';
+        if (!groups[g]) { groups[g] = []; order.push(g); }
+        groups[g].push(e);
+      });
+      var room = depth - order.length * 28;
+      var quota = Math.max(1, Math.floor(room / order.length / tight.two) - 1);
+      var total = lying.length;
+      var fits = total * tight.two + order.length * 28 + 40 <= depth;
+      order.forEach(function (g) {
+        var list = groups[g], kept = fits ? list.length : Math.min(list.length, quota);
+        items.push({ tab: 28, label: g, count: list.filter(function (e) { return !e.leaving; }).length });
+        list.slice(0, kept).forEach(function (e) { items.push({ e: e }); });
+        if (kept < list.length) items.push(buildPile('fold-' + g, list.length - kept + ' more in ' + g, list.slice(kept), ''));
+      });
+      return items;
+    }
+    var folded = foldStreams(lying);
+    var kept = Stacks.countKept(folded.length, depth, open, 90);
+    if (kept >= folded.length) return folded.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
+    var rest = folded.slice(Math.max(1, kept - 2));
+    var out = folded.slice(0, Math.max(1, kept - 2)).map(function (e) { return e.pile ? { pile: e } : { e: e }; });
+    var byGroup = {}, keys = [];
+    rest.forEach(function (e) {
+      (e.members || [e]).forEach(function (m) {
+        var g = readGroup(m);
+        if (!byGroup[g]) { byGroup[g] = []; keys.push(g); }
+        byGroup[g].push(m);
+      });
     });
-    return items;
+    keys.sort(function (a, b) { return byGroup[b].length - byGroup[a].length; });
+    keys.slice(0, 2).forEach(function (g, i) {
+      var members = i === 1 ? [].concat.apply([], keys.slice(1).map(function (k) { return byGroup[k]; })) : byGroup[g];
+      out.push(buildPile('fold-' + name + '-' + i, members.length + ' more' + (i === 1 && keys.length > 2 ? '' : ' in ' + g), members, 'Newer than the cards above'));
+    });
+    return out;
   }
 
   /** Returns the whole height of a card at the current column width. */
@@ -54,7 +103,7 @@ window.App = (function () {
     var had = el.classList.contains('is-whole'), h = el.style.height;
     el.classList.add('is-whole');
     el.style.height = 'auto';
-    var whole = el.offsetHeight + 10;
+    var whole = el.offsetHeight + 9;
     el.style.height = h;
     if (!had) el.classList.remove('is-whole');
     measured[e.id] = whole;
@@ -120,7 +169,7 @@ window.App = (function () {
       var built = names.map(function (n) {
         var host = page.querySelector('[data-stack="' + n + '"]');
         var parts = readStackEntities(n);
-        var items = buildItems(n, parts.lying);
+        var items = buildItems(n, parts.lying, names.length === 1 ? depth : Math.floor(depth / 2));
         var kept = {};
         var tabs = [].slice.call(host.querySelectorAll('.tab'));
         items.forEach(function (it) {
@@ -130,6 +179,16 @@ window.App = (function () {
             t.innerHTML = '<span>' + Card.esc(it.label) + '</span><small>' + it.count + '</small>';
             it.el = t;
             kept[it.label] = true;
+            return;
+          }
+          if (it.pile) {
+            var pe = els[it.pile.id];
+            if (!pe) { pe = els[it.pile.id] = drawStreamPile(it.pile); host.appendChild(pe); }
+            pe.querySelector('.c-title').textContent = it.pile.title;
+            pe.querySelector('.pile-n').textContent = it.pile.note === undefined ? it.pile.members.length : '';
+            pe.querySelector('.c-roll').textContent = it.pile.note === undefined ? 'One stream of like things' : it.pile.note;
+            pe._members = it.pile.members;
+            it.el = pe; it.full = 49; it.two = 49; it.one = 34; it.gap = 14;
             return;
           }
           var e = it.e, el = els[e.id];
@@ -143,6 +202,12 @@ window.App = (function () {
           it.el = el; it.full = measureWhole(el, e); it.two = m.two; it.one = m.one; it.gap = m.gap;
         });
         tabs.forEach(function (t) { if (!kept[t.dataset.tab]) t.remove(); });
+        var wanted = {};
+        items.forEach(function (it) { if (it.pile) wanted[it.pile.id] = true; else if (it.e) wanted[it.e.id] = true; });
+        [].forEach.call(host.querySelectorAll('.card'), function (c) {
+          var id = c.dataset.id || c.dataset.pile;
+          if (!wanted[id]) { c.style.display = 'none'; c._plan = null; }
+        });
         var whole = items.reduce(function (a, m) { return a + (m.tab ? m.tab : m.full + m.gap); }, 0);
         var firstCard = items[0] && items[0].tab ? 1 : 0;
         var least = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full : m.one); }, 0);
@@ -203,6 +268,15 @@ window.App = (function () {
     if (lying && note) note.remove();
   }
 
+  /** Returns a stream's pile: one strip with the edges of the cards behind it, and how many there are. */
+  function drawStreamPile(pile) {
+    var el = document.createElement('button');
+    el.className = 'card is-pile';
+    el.dataset.pile = pile.id;
+    el.innerHTML = '<span class="pile-back"></span><span class="pile-back"></span><i class="card-stock"></i><div class="c-mark">' + Card.drawMark(K[pile.kind].plugin) + '</div><h3 class="c-title">' + Card.esc(pile.title) + '</h3><div class="c-pace"><span class="pile-n"></span></div><div class="c-line"><span class="c-roll">One stream of like things</span></div>';
+    return el;
+  }
+
   /** Writes the line under a stack: what settled there, and how many cards folded away. */
   function drawFoot(b, plan) {
     var foot = page.querySelector('[data-foot="' + b.name + '"]');
@@ -214,13 +288,7 @@ window.App = (function () {
     var words = Object.keys(groups).map(function (g) { return '<span><b>' + groups[g] + '</b> ' + g + '</span>'; });
     foot.hidden = !words.length;
     foot.innerHTML = words.join('<i>·</i>');
-    var pile = b.host.querySelector('.pile');
-    if (plan.folded) {
-      if (!pile) { pile = document.createElement('button'); pile.className = 'pile'; b.host.appendChild(pile); }
-      pile.innerHTML = '<span class="pile-edges"></span><span class="pile-n">' + plan.folded + ' newer</span>';
-      pile.style.transform = 'translate3d(0,' + (plan.used + 4) + 'px,0)';
-      pile.dataset.pile = b.name;
-    } else if (pile) pile.remove();
+    foot._members = b.parts.settled;
   }
 
   /** Redraws one card's insides after its entity changed, keeping the element so its place and motion carry on. */
@@ -230,8 +298,33 @@ window.App = (function () {
     var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
+    if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
     el.innerHTML = Card.drawCardBody(e, readCtx(readStack(e)));
     delete measured[e.id];
+  }
+
+  /** Lets every card someone holds settle at the foot of its stack. It runs when you come back, never while you watch. */
+  function settle() {
+    state.entities.forEach(function (e) { if (e.task || e.quiet) e.settled = true; });
+  }
+
+  /** Draws the page again from state, after another view held it. */
+  function redraw() {
+    els = {}; measured = {};
+    page.dataset.mode = 'stacks';
+    drawFrame();
+    drawNoticed();
+    layOut();
+    drawNotice();
+    checkZero();
+  }
+
+  /** Shows the empty Inbox once the last card has gone. */
+  function checkZero() {
+    var left = state.entities.filter(function (e) { return !e.settled && !e.task && !e.leaving; }).length + state.clusters.length;
+    if (left || state.mode !== 'stacks') return false;
+    Scenes.showZero();
+    return true;
   }
 
   /** Dims every card that does not come from the given plugin. Nothing moves, so the page keeps its shape. */
@@ -255,12 +348,23 @@ window.App = (function () {
     state.now = scene.now || W.NOW;
     state.scene = scene.name;
     state.dim = null;
+    state.mode = scene.mode || 'stacks';
+    state.notice = scene.notice || null;
     els = {}; measured = {};
-    document.querySelector('.ib-page').dataset.scene = scene.name;
+    page.dataset.scene = scene.name;
+    page.dataset.mode = state.mode;
+    if (scene.draw) { scene.draw(page); drawBar(); return; }
     drawFrame();
     drawNoticed();
-    if (scene.page) { page.dataset.mode = scene.page; }
     layOut();
+    drawNotice();
+  }
+
+  /** Writes the one line that tells the user when the picture may be out of date. Nothing here is silent. */
+  function drawNotice() {
+    var n = document.getElementById('notice');
+    n.hidden = !state.notice;
+    n.innerHTML = state.notice || '';
   }
 
   function start() {
@@ -269,18 +373,18 @@ window.App = (function () {
     var timer;
     window.addEventListener('resize', function () {
       clearTimeout(timer);
-      timer = setTimeout(function () { measured = {}; layOut(); }, 60);
+      timer = setTimeout(function () { measured = {}; if (state.mode === 'stacks') layOut(); }, 60);
     });
     document.addEventListener('click', function (ev) {
       var d = ev.target.closest('[data-dim]');
       if (d) setDim(d.dataset.dim);
     });
     Scenes.play(params.get('scene') || 'morning');
-    document.fonts.ready.then(function () { measured = {}; layOut(); });
+    document.fonts.ready.then(function () { measured = {}; if (state.mode === 'stacks') layOut(); });
   }
 
   return {
     state: state, els: function () { return els; }, STACKS: STACKS, COLUMNS: COLUMNS, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
-    load: load, setDim: setDim, start: start, measured: function () { return measured; }, removeEl: function (id) { if (els[id]) { els[id].remove(); delete els[id]; } },
+    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countOverdue: countOverdue, start: start, measured: function () { return measured; }, removeEl: function (id) { if (els[id]) { els[id].remove(); delete els[id]; } },
   };
 })();

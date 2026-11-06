@@ -22,7 +22,7 @@
   function drawPerson(key, size) {
     var p = W.PEOPLE[key];
     if (!p) return '';
-    size = size || 18;
+    size = size || 16;
     var letters = p.name.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2);
     var cls = key === 'you' ? 'person person--you' : 'person';
     return '<span class="' + cls + '" style="--person-hue:' + p.hue + ';--person-size:' + size + 'px" title="' + esc(p.name) + '">' + letters + '</span>';
@@ -82,8 +82,8 @@
     var kind = K.KINDS[e.kind], f = e.fields;
     if (e.task) {
       var by = e.task.by === 'you'
-        ? { face: drawPerson('you'), text: 'You took it on', tone: 'plain' }
-        : { face: Crew.face(e.task.by, { pose: 'working', size: 20 }), text: e.task.by + ' has it', tone: 'plain' };
+        ? { face: '', text: 'You took it on', tone: 'plain' }
+        : { face: '', text: e.task.by + ' has it', tone: 'plain' };
       return { lead: by.face, text: by.text, tone: by.tone, more: 0 };
     }
     var latest = e.signals[e.signals.length - 1];
@@ -107,29 +107,35 @@
     var flows = readWorkflows(e);
     var hand = flows.length
       ? '<button class="c-act c-act--hand" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to an agent">' +
-        flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 20 }); }).join('') + '</button>'
+        flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>'
       : '';
     var acts = e.task
       ? '<button class="c-act c-act--go" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
       : hand +
         '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
         '<button class="c-act c-act--plain" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
-    return '<div class="c-mark">' + drawMark(kind.plugin) + '</div>' +
-      '<h3 class="c-title">' + esc(e.title) + '</h3>' +
+    return drawHolder(e) + '<i class="card-stock"></i>' +
+      '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 17 : 20) + '</div>' +
+      '<h3 class="c-title">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + pace + '</div>' +
       '<div class="c-line tone-' + line.tone + '"><span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
       '<div class="c-status' + (status && status.norm ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
       '<div class="c-foot"><span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span><span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
-      '<div class="c-acts">' + acts + '</div>' +
-      '<div class="c-hit"></div>';
+      '<div class="c-hit"></div>' +
+      '<div class="c-acts">' + acts + '</div>';
+  }
+
+  /** Returns what stands behind the card's top edge: who holds it now, by the rule Work's cards follow. */
+  function drawHolder(e) {
+    if (!e.task) return '';
+    if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab" data-need="quick"></i></span>';
+    return '<span class="card-holder"><span class="card-head">' + Crew.face(e.task.by, { pose: 'working', size: 26 }) + '</span></span>';
   }
 
   /** Returns the class list of a card for its kind and its state. */
   function cardClasses(e) {
     var kind = K.KINDS[e.kind];
     var c = ['card', 'paper-' + kind.paper, 'density-' + kind.density, 'pace-' + kind.pace];
-    if (e.task) c.push('has-task');
-    if (e.quiet) c.push('is-quiet');
     return c.join(' ');
   }
 
@@ -137,6 +143,7 @@
   function createCard(e, ctx) {
     var el = document.createElement('article');
     el.className = cardClasses(e);
+    if (e.task || e.quiet) el.dataset.height = 'flat';
     el.dataset.id = e.id;
     el.tabIndex = -1;
     el.setAttribute('aria-label', K.KINDS[e.kind].noun + ': ' + e.title);
@@ -155,7 +162,7 @@
   }
 
   window.Card = {
-    createCard: createCard, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();

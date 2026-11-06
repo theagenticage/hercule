@@ -98,7 +98,7 @@ window.Open = (function () {
     sourceEl.classList.add('is-source');
     App.state.open = id;
     if (!Motion.reduced.matches) {
-      var ease = Motion.SPRINGS.settle.ease, ms = Math.min(Motion.SPRINGS.settle.ms, 460);
+      var ease = Motion.SPRINGS.open.ease, ms = Math.min(Motion.SPRINGS.open.ms, 520);
       var clipFrom = 'inset(' + Math.max(0, r.top - top) + 'px ' + Math.max(0, w - (r.left - left) - r.width) + 'px ' + Math.max(0, top + h - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - left) + 'px round 12px)';
       host.animate([{ clipPath: clipFrom }, { clipPath: 'inset(-40px -40px -60px -40px round 14px)' }], { duration: ms, easing: ease });
       [].forEach.call(host.querySelectorAll('.o-sec, .o-note, .o-parts, .o-facts, .o-row'), function (el, i) {
@@ -136,7 +136,7 @@ window.Open = (function () {
     var a = btn.dataset.act;
     hide(true);
     if (a === 'hand-to') {
-      var flows = e.kind === 'hercule/cluster' ? K['hercule/cluster'].workflows.noticed : Card.readWorkflows(e);
+      var flows = Card.readWorkflows(e);
       Moves.hand(e, flows[Number(btn.dataset.i)]);
     } else Moves.perform(a, id, btn);
   }

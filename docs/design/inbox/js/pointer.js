@@ -59,6 +59,8 @@ window.Pointer = (function () {
     });
     page.addEventListener('pointerleave', function () { setHover(null); Moves.closeHoles(); });
     page.addEventListener('click', function (ev) {
+      var folded = ev.target.closest('.pile, .card.is-pile, .stack-foot');
+      if (folded) { Tray.show(folded); return; }
       var act = ev.target.closest('[data-act]');
       var card = ev.target.closest('.card, .plaque');
       if (!card) return;

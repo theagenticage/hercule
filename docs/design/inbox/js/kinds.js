@@ -63,7 +63,7 @@
         approved: { say: '{person} approved it', tone: 'good' },
         commented: { say: '{person} commented', tone: 'plain' },
         readyToMerge: { say: 'Approved, ready to merge', tone: 'good' },
-        waiting: { say: 'Waiting for a review', tone: 'plain' },
+        waiting: { say: 'With reviewers', tone: 'plain' },
         merged: { say: 'Merged by {person}', tone: 'plain' },
       },
       workflows: {

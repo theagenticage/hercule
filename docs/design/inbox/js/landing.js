@@ -11,7 +11,7 @@ window.Landing = (function () {
     old.style.gridRow = window.getComputedStyle(line).gridRowStart;
     line.parentNode.insertBefore(old, line);
     Motion.animate(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-14px)', opacity: 0 }], { duration: 240, easing: 'cubic-bezier(.5,0,.8,.4)' }).then(function () { old.remove(); });
-    Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.SPRINGS.settle.ms, delay: 80, fill: 'backwards', easing: Motion.SPRINGS.settle.ease });
+    Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.SPRINGS.glide.ms, delay: 80, fill: 'backwards', easing: Motion.SPRINGS.glide.ease });
   }
 
   /** Lands a signal on an entity. The kind's phrase becomes the card's line; the older signal joins the quiet count. */
@@ -31,7 +31,7 @@ window.Landing = (function () {
     setTimeout(function () { el.classList.remove('is-landed'); }, 1500);
     var base = el.style.transform;
     if (!Motion.reduced.matches) {
-      el.animate([{ transform: base }, { transform: base + ' translateY(2px) scale(.996)', offset: 0.18 }, { transform: base }], { duration: Motion.SPRINGS.land.ms, easing: 'linear', composite: 'replace' });
+      el.animate([{ transform: base }, { transform: base + ' translateY(2px) scale(.996)', offset: 0.18 }, { transform: base }], { duration: Motion.SPRINGS.bump.ms, easing: 'linear', composite: 'replace' });
       var n = el.querySelector('.c-more');
       if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     }

@@ -12,7 +12,7 @@
     'wren-adeyemi': { name: 'Wren Adeyemi', short: 'Wren', hue: 312 },
     'kofi-mensah': { name: 'Kofi Mensah', short: 'Kofi', hue: 78 },
     'tessa-lindqvist': { name: 'Tessa Lindqvist', short: 'Tessa', hue: 240 },
-    you: { name: 'Dana Reyes', short: 'You', hue: 78 },
+    you: { name: 'Noa', short: 'You', hue: 78 },
   };
 
   var uid = 0;
@@ -29,6 +29,9 @@
   }
   function mine(number, repo, title, days, state, signals, extra) {
     return pr(number, repo, title, 'you', days * 24, state, Object.assign({ concern: 'opened', signals: signals }, extra || {}));
+  }
+  function parked(number, repo, title, days) {
+    return Object.assign(mine(number, repo, title, days, 'passing', [signal('waiting', days * 24)]), { settled: true, parked: 'with reviewers' });
   }
   function issue(key, title, team, project, state, h, extra) {
     extra = extra || {};
@@ -82,6 +85,23 @@
         signals: [signal('assigned', 14), signal('spiked', 1.6)], task: null, project: 'checkout-api',
       },
 
+      // Yours, with someone else: they settle at the foot of the stack, because the next move is not yours.
+      parked(6147, 'storefront-web', 'Price engine: handle weighed items', 13.2),
+      parked(6171, 'storefront-web', 'Show the price breakdown in the basket', 8.4),
+      parked(6135, 'storefront-web', 'Lazy-load photos below the fold', 15.3),
+      parked(6162, 'storefront-web', 'Preload the checkout font', 9.8),
+      parked(3331, 'platform-core', 'Freeze time in the order expiry tests', 2.3),
+      parked(1487, 'insights-jobs', 'Nightly basket size rollup', 1.4),
+      parked(3337, 'platform-core', 'Quarantine the flaky order expiry test', 8.1),
+      parked(3338, 'platform-core', 'Quarantine the flaky slot booking test', 8),
+      parked(3339, 'platform-core', 'Quarantine the flaky coupon refusal test', 6.3),
+      parked(3340, 'platform-core', 'Quarantine the flaky address lookup test', 6.2),
+      parked(3341, 'platform-core', 'Quarantine the flaky refund webhook test', 6.1),
+      parked(3342, 'platform-core', 'Quarantine the flaky search paging test', 1.2),
+      parked(3326, 'platform-core', 'Add a runbook for queue backlog alerts', 10.2),
+      Object.assign(pr(6199, 'storefront-web', 'Tidy the delivery cut-off copy', 'theo-brandt', 70, 'passing'), { settled: true, task: { by: 'Agent review' } }),
+      Object.assign(pr(6201, 'storefront-web', 'Add the photo carousel', 'wren-adeyemi', 90, 'merged', { signals: [signal('merged', 40, 'omar-haddad')] }), { settled: true, quiet: true }),
+
       // On the shelf: slow things, by project.
       issue('OPS-41', 'Scan a returned crate at the depot door', 'Depot', 'Returns', 'triage', 400),
       issue('OPS-44', 'Print a return label without a print queue', 'Depot', 'Returns', 'triage', 390),
@@ -113,5 +133,31 @@
     { id: 'c-photos', kind: 'hercule/cluster', title: 'Photo carousel crashes on old tablets', why: 'Seven errors with one cause', sources: ['sentry', 'github'], figures: '96 events · 1 shopper', detail: 'The carousel assumes a browser feature that old tablets lack. Pull request #6201 added the call.', parts: [{ plugin: S, title: 'TypeError: slideWatcher.observe is not a function', fact: '38 events' }, { plugin: S, title: 'TypeError: carousel.next is not a function', fact: '21 events' }, { plugin: S, title: '5 more with the same cause', fact: '37 events' }, { plugin: G, title: '#6201 Add the photo carousel', fact: 'Merged' }], since: hoursAgo(20), signals: [], fields: {}, concern: 'noticed' },
   ];
 
-  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, CLUSTERS: CLUSTERS };
+  /** Returns a person's key, to spread the invented volume over everyone. */
+  var names = ['juno-park', 'felix-marsh', 'omar-haddad', 'ines-carvalho', 'theo-brandt', 'wren-adeyemi', 'kofi-mensah', 'tessa-lindqvist'];
+  var verbs = ['Tidy', 'Split', 'Cache', 'Retry', 'Rename', 'Harden', 'Trim', 'Speed up', 'Document', 'Remove', 'Log', 'Guard'];
+  var things = ['the basket drawer', 'delivery slot lookups', 'the coupon banner', 'the address finder', 'order emails', 'the returns label', 'the search feed', 'photo decoding', 'the price engine', 'loyalty points', 'the refund webhook', 'depot opening hours', 'the checkout font', 'stock counts', 'the invoice export'];
+
+  /** Returns about 300 invented entities, for the heavy morning: a week away from the desk. */
+  function buildVolume() {
+    var list = buildEntities();
+    var n = 7000;
+    for (var i = 0; i < 118; i++) {
+      var who = names[i % names.length];
+      list.push(pr(n + i, i % 3 ? 'storefront-web' : 'platform-core', verbs[i % verbs.length] + ' ' + things[(i * 7) % things.length], who, 3 + i * 1.3, i % 9 === 0 ? 'failing' : 'passing', i % 9 === 0 ? { signals: [signal('reviewRequested', 3 + i * 1.3, who), signal('checksFailed', 2 + i)] } : undefined));
+    }
+    for (var d = 0; d < 26; d++) {
+      var bump = pr(8000 + d, 'storefront-web', 'Bump ' + ['eslint', 'vite', 'react', 'effect', 'zod-free-schema', 'typescript', 'vitest'][d % 7] + ' to the next minor', 'theo-brandt', 40 + d, 'passing');
+      bump.stream = 'Dependency updates';
+      list.push(bump);
+    }
+    var teams = [['Depot', 'Returns'], ['Shop', 'Shop'], ['Platform', 'Platform'], ['Shop', 'Search'], ['Depot', 'Depots'], ['Platform', 'Observability']];
+    for (var t = 0; t < 120; t++) {
+      var g = teams[t % teams.length];
+      list.push(issue(g[0].slice(0, 4).toUpperCase() + '-' + (900 + t), verbs[(t * 5) % verbs.length] + ' ' + things[(t * 3) % things.length], g[0], g[1], ['triage', 'todo', 'backlog', 'started'][t % 4], 200 + t * 7));
+    }
+    return list;
+  }
+
+  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, buildVolume: buildVolume, CLUSTERS: CLUSTERS };
 })();

@@ -5,13 +5,13 @@
   z-index: 40;
   background: var(--scrim);
   opacity: 0;
-  transition: opacity var(--m-open) var(--e-out);
+  transition: opacity var(--m-slow) var(--m-ease);
 }
 .scrim.is-on { opacity: 1; }
 .scrim[hidden] { display: none; }
 
 .open {
-  --paper: var(--paper-bond);
+  --stock: var(--raised);
   position: fixed;
   z-index: 60;
   display: flex;
@@ -20,14 +20,14 @@
   overflow: auto;
   padding: 12px 0 8px;
   border-radius: 14px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--paper-rim), inset 0 1px 0 var(--paper-edge), var(--shadow-3);
+  background: var(--stock);
+  box-shadow: var(--h-carry);
   color: var(--ink);
 }
 .open[hidden] { display: none; }
-.open.paper-manila { --paper: var(--paper-manila); }
-.open.paper-ledger { --paper: var(--paper-ledger); }
-.open.paper-sage { --paper: var(--paper-sage); }
+.open.paper-manila { --stock: var(--stock-manila); }
+.open.paper-ledger { --stock: var(--stock-ledger); }
+.open.paper-sage { --stock: var(--stock-sage); }
 .open--plaque {
   background: linear-gradient(180deg, var(--lacquer-lit), transparent 120px), var(--lacquer);
   box-shadow: inset 0 0 0 1px var(--lacquer-rim), var(--shadow-3);
@@ -78,7 +78,7 @@
 .o-parts span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .o-parts small { color: var(--lacquer-sub); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
 
-.o-ledger { display: flex; flex-direction: column; margin-top: 2px; padding: 6px 6px 0; border-top: 1px solid var(--paper-rim); }
+.o-ledger { display: flex; flex-direction: column; margin-top: 2px; padding: 6px 6px 0; border-top: 1px solid var(--divider); }
 .open--plaque .o-ledger { border-top-color: color-mix(in oklab, var(--lacquer-rim) 60%, transparent); }
 .o-row {
   display: grid;
@@ -91,7 +91,7 @@
   text-align: left;
   color: inherit;
   outline: none;
-  transition: background var(--m-hover);
+  transition: background var(--m-quick);
 }
 .o-row:hover, .o-row:focus-visible { background: var(--hover); }
 .open--plaque .o-row:hover, .open--plaque .o-row:focus-visible { background: color-mix(in oklab, white 9%, transparent); }
@@ -140,7 +140,7 @@
   box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2);
   font-size: var(--t-13);
   transform: translateX(-50%);
-  transition: opacity var(--m-peek) var(--e-out), transform var(--m-peek) var(--e-out);
+  transition: opacity var(--m-base) var(--m-ease), transform var(--m-base) var(--m-ease);
 }
 .toast[hidden] { display: none; }
 .toast.is-gone { opacity: 0; transform: translate(-50%, 6px); }
@@ -149,10 +149,10 @@
 
 /* A small token of a card, in flight to where its Task went. */
 .flight { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; will-change: transform; }
-.token { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--paper-rim), var(--shadow-2); }
+.token { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--raised); box-shadow: var(--h-hover); }
 
 /* Landing and leaving. */
-.card.is-source { opacity: 0.0; }
+.card.is-source { opacity: 0; }
 .card.is-landed::after {
   content: "";
   position: absolute;
@@ -160,17 +160,60 @@
   border-radius: inherit;
   pointer-events: none;
   box-shadow: inset 0 0 0 1px var(--land), 0 0 0 3px color-mix(in oklab, var(--land) 22%, transparent);
-  animation: land-rim var(--m-land) var(--e-out) forwards;
+  animation: land-rim 1100ms var(--m-ease) forwards;
 }
 .card { --land: var(--you); }
 .card[data-landed="bad"] { --land: var(--fail); }
 .card[data-landed="good"] { --land: var(--ok); }
 @keyframes land-rim { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
-.card.is-leaving { opacity: 0; transform-origin: 50% 0; pointer-events: none; transition: opacity var(--m-peek) var(--e-out); }
-.c-line--old { position: absolute; left: 42px; right: 42px; pointer-events: none; }
-.card.is-handing { transition: transform var(--m-move) var(--e-out), box-shadow var(--m-settle) var(--e-out), background var(--m-settle) var(--e-out); }
+.card.is-leaving { opacity: 0; transform-origin: 50% 0; pointer-events: none; transition: opacity var(--m-base) var(--m-ease); }
+.c-line--old { position: absolute; left: 42px; right: 42px; top: 31px; pointer-events: none; }
 .card.is-new { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .card, .scrim, .toast, .c-acts { transition: none !important; }
   .card.is-landed::after { animation: none; opacity: 1; }
 }
+
+/* The tray: a pile fanned open. */
+.tray {
+  position: fixed;
+  z-index: 55;
+  overflow: auto;
+  padding: 12px 14px 14px;
+  border-radius: 14px;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
+}
+.tray[hidden] { display: none; }
+.tray-h { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }
+.tray-h h2 { margin: 0; font: var(--type-lane); }
+.tray-h small { color: var(--faint); font: var(--type-summary); }
+.tray-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tray-cell { position: relative; min-height: 76px; }
+.tray-cell .card { position: relative; top: auto; height: auto; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
+
+/* The reviewer's dock. Not part of the product. */
+.dock { position: fixed; right: 12px; bottom: 10px; z-index: 95; display: flex; gap: 4px; opacity: 0.45; transition: opacity var(--m-quick); }
+.dock:hover, .dock:focus-within { opacity: 1; }
+.dock select, .dock-btn { height: 26px; padding: 0 6px; border-radius: var(--r-xs); border: 0; background: var(--glass-fill-raised); box-shadow: inset 0 0 0 1px var(--glass-rim); color: var(--muted); font: var(--type-summary); }
+.dock-btn { padding: 0 8px; }
+
+.ib-notice { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 26px; border-radius: var(--r-sm); background: var(--you-tint); color: var(--ink); font: var(--type-summary); white-space: nowrap; }
+.ib-notice[hidden] { display: none; }
+.ib-notice b { font-weight: var(--w-medium); }
+.ib-notice a { text-decoration: underline; cursor: pointer; }
+.notice-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
+
+/* The piles. */
+.stack .card.is-pile { width: auto; text-align: left; }
+.pile-back { position: absolute; left: 6px; right: 6px; top: -3px; height: 12px; border-radius: 9px 9px 0 0; background: var(--stock); box-shadow: var(--h-flat); z-index: -3; }
+.pile-back + .pile-back { left: 12px; right: 12px; top: -6px; z-index: -4; }
+.pile-n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pile { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: block; text-align: left; }
+.pile-edge { position: absolute; left: 6px; right: 6px; top: 0; height: 8px; border-radius: 0 0 9px 9px; background: var(--stock); box-shadow: var(--h-flat); }
+.pile-edge + .pile-edge { left: 12px; right: 12px; top: 5px; z-index: -1; }
+.pile-label { position: absolute; left: 2px; top: 13px; color: var(--faint); font: var(--type-summary); }
+.pile-label b { color: var(--muted); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
+.pile:hover .pile-label { color: var(--muted); }

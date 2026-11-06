@@ -1,35 +1,29 @@
 /* The window and the page. */
 .app { grid-template-columns: 272px minmax(0, 1fr); }
 .side { width: 272px; height: 100vh; }
+.side-grow { flex: 1; }
 
 .main {
   height: 100vh;
   overflow: hidden;
-  background:
-    radial-gradient(90% 70% at 42% -12%, color-mix(in oklab, var(--surface) 55%, transparent), transparent 70%),
-    var(--desk);
+  background: var(--desk);
 }
 
 .ib-bar {
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 52px;
+  height: 56px;
   flex: none;
-  padding: 0 24px;
+  padding: 0 32px 0 14px;
 }
-.ib-title { margin: 0; font-size: var(--t-18); font-weight: var(--w-bold); letter-spacing: -0.01em; }
-.ib-sum { color: var(--muted); font-size: var(--t-13); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ib-sum b { color: var(--ink); font-weight: var(--w-medium); }
+.ib-sum { color: var(--muted); font-size: var(--t-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-sum b { color: var(--you-ink); font-weight: var(--w-bold); }
 .ib-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .ib-sources { display: flex; gap: 2px; }
-.ib-src { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); color: var(--faint); }
-.ib-src:hover { background: var(--hover); color: var(--ink); }
-.ib-src .mark { color: inherit; }
-.ib-src .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
-.ib-src.is-on { background: var(--selected); color: var(--ink); }
-.ib-link { margin-left: 10px; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--r-sm); color: var(--faint); font-size: var(--t-12); font-weight: var(--w-medium); }
-.ib-link:hover { background: var(--hover); color: var(--ink); }
+.ib-src { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); }
+.ib-src:hover { background: var(--hover); }
+.ib-src.is-on { background: var(--selected); }
 
 .ib-page {
   --cols: 3;
@@ -39,11 +33,12 @@
   column-gap: 20px;
   flex: 1;
   min-height: 0;
-  padding: 0 24px 14px;
+  padding: 0 32px 14px;
 }
-.noticed { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; margin-bottom: 18px; }
+.noticed { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; margin-bottom: 20px; }
+.noticed[hidden] { display: none; }
 
-.col { display: flex; flex-direction: column; min-height: 0; gap: 14px; }
+.col { display: flex; flex-direction: column; min-height: 0; gap: 16px; }
 .stack-wrap { display: flex; flex-direction: column; min-height: 0; flex: none; }
 .stack-h {
   display: flex;
@@ -51,14 +46,15 @@
   gap: 7px;
   height: 22px;
   flex: none;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
   padding: 0 2px;
-  font-size: var(--t-13);
-  font-weight: var(--w-bold);
+  font: var(--type-lane);
   letter-spacing: -0.003em;
 }
-.stack-h small { color: var(--faint); font-size: var(--t-12); font-weight: var(--w-regular); font-variant-numeric: tabular-nums; }
+.stack-h small { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .stack { position: relative; flex: 1; min-height: 0; }
+
+.nav-row .count { background: none; color: var(--faint); padding: 0; min-width: 0; font-weight: var(--w-medium); }
 
 .tab {
   position: absolute;
@@ -69,26 +65,24 @@
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 4px 2px 0;
+  padding: 6px 2px 0;
   color: var(--muted);
-  font-size: var(--t-12);
+  font: var(--type-summary);
   font-weight: var(--w-medium);
+  transition: transform var(--m-slow) var(--m-ease);
 }
-.tab small { color: var(--faint); font-size: var(--t-12); font-weight: var(--w-regular); }
+.tab small { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 
-.side-grow { flex: 1; }
-.nav-row .count { background: none; color: var(--faint); padding: 0; min-width: 0; font-weight: var(--w-medium); }
-.nav-new { width: 6px; height: 6px; border-radius: 50%; background: var(--you); margin-left: auto; margin-right: -2px; }
 .stack-foot {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
-  height: 22px;
+  height: 20px;
   margin-top: 6px;
   padding: 0 2px;
   color: var(--faint);
-  font-size: var(--t-12);
+  font: var(--type-summary);
   text-align: left;
 }
 .stack-foot[hidden] { display: none; }

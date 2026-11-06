@@ -11,27 +11,32 @@
 <link rel="stylesheet" href="vendor/shell.css">
 <link rel="stylesheet" href="vendor/sidebar.css">
 <link rel="stylesheet" href="vendor/face.css">
+<link rel="stylesheet" href="vendor/primitives.css">
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/card.css">
 <link rel="stylesheet" href="css/inbox.css">
 <link rel="stylesheet" href="css/open.css">
+<link rel="stylesheet" href="css/states.css">
 </head>
 <body>
 <div class="app">
   <aside class="side" id="side"></aside>
   <main class="main" id="main">
     <div class="ib-bar">
-      <h1 class="ib-title">Inbox</h1>
+      <div class="pill"><h1 class="pill-title">Inbox</h1><button class="ptab is-on" data-view="cards">Cards</button><button class="ptab" data-view="intake">Intake <small id="intake-n">214</small></button></div>
       <div class="ib-sum" id="sum"></div>
-      <div class="ib-end"><div class="ib-sources" id="sources"></div><a class="ib-link" data-nav="intake">Intake <span id="intake-n">214</span></a></div>
+      <div class="ib-notice" id="notice" role="status" hidden></div>
+      <div class="ib-end"><div class="ib-sources" id="sources"></div></div>
     </div>
     <div class="ib-page" id="page"></div>
+    <div class="rail" id="rail" hidden></div>
     <div class="scrim" id="scrim" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
   </main>
 </div>
 <section class="open" id="open" hidden aria-label="Open card"></section>
 <div class="menu" id="menu" hidden></div>
+<section class="tray" id="tray" hidden aria-label="Folded cards"></section>
 <script src="vendor/brands.js"></script>
 <script src="vendor/crew.js"></script>
 <script src="js/kinds.js"></script>
@@ -45,9 +50,14 @@
 <script src="js/landing.js"></script>
 <script src="js/moves.js"></script>
 <script src="js/open.js"></script>
+<script src="js/tray.js"></script>
+<script src="js/drag.js"></script>
+<script src="js/skeleton.js"></script>
 <script src="js/keys.js"></script>
 <script src="js/pages.js"></script>
+<script src="js/live.js"></script>
 <script src="js/scenes.js"></script>
-<script>Nav.draw(); App.start(); Pointer.start(); Moves.start(); Open.start(); Keys.start();</script>
+<script src="js/director.js"></script>
+<script>Nav.draw(); Pointer.start(); Moves.start(); Open.start(); Tray.start(); Keys.start(); Pages.start(); Drag.start(); App.start(); Director.start(); Live.start();</script>
 </body>
 </html>

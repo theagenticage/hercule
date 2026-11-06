@@ -2,8 +2,8 @@
 (function () {
   // The heights a card can show, by density. `two` shows the title and one line under it, `one` shows the title.
   var METRICS = {
-    open: { two: 49, one: 36, gap: 8 },
-    tight: { two: 43, one: 32, gap: 6 },
+    open: { two: 49, one: 34, gap: 14 },
+    tight: { two: 44, one: 32, gap: 8 },
   };
 
   /**
@@ -43,6 +43,16 @@
   }
 
   /**
+   * Returns how many cards of a stack may stay out at this depth. A stack keeps showing two lines as long as it can, and
+   * takes one-line strips only for a small overflow: past that, a wall of titles is worse than a pile.
+   */
+  function countKept(count, depth, m, firstHeight) {
+    var byTwo = 1 + Math.floor((depth - firstHeight) / m.two);
+    var byOne = 1 + Math.floor((depth - firstHeight) / m.one);
+    return count <= Math.min(byOne, Math.ceil(byTwo * 1.3)) ? count : byTwo;
+  }
+
+  /**
    * Returns the depth each stack of a column gets. Each stack first gets what it needs to show its cards whole. When the
    * column is too short for that, the depth is shared in proportion to need, and no stack gets less than its least.
    */
@@ -50,9 +60,10 @@
     var total = needs.reduce(function (a, n) { return a + n.whole; }, 0);
     if (total <= depth) return needs.map(function (n) { return n.whole; });
     var least = needs.reduce(function (a, n) { return a + n.least; }, 0);
-    var spare = Math.max(0, depth - least), wants = total - least;
+    if (least >= depth) return needs.map(function (n) { return Math.floor((depth * n.least) / least); });
+    var spare = depth - least, wants = total - least;
     return needs.map(function (n) { return Math.floor(n.least + (spare * (n.whole - n.least)) / wants); });
   }
 
-  window.Stacks = { METRICS: METRICS, layOut: layOut, shareDepth: shareDepth };
+  window.Stacks = { METRICS: METRICS, layOut: layOut, shareDepth: shareDepth, countKept: countKept };
 })();

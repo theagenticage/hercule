@@ -13,14 +13,14 @@ window.Nav = (function () {
   function draw() {
     document.getElementById('side').innerHTML =
       '<div class="side-top"><button class="icon-btn" title="Hide the sidebar">' + Crew.icon('sidebar', 16) + '</button></div>' +
-      '<div class="seg seg--side"><button>Threads</button><button aria-pressed="true">Hercule <b class="count count--you" style="margin-left:6px">2</b></button></div>' +
+      '<div class="seg seg--side"><button>Threads</button><button aria-pressed="true">Hercule</button></div>' +
       '<div class="side-actions"><button class="nav-row">' + Crew.icon('compose', 16) + '<span>New thread</span><kbd>⌘N</kbd></button><button class="icon-btn">' + Crew.icon('search', 16) + '</button></div>' +
       '<section class="side-sec side-sec--wait"><h3 class="side-h"><span>Waiting on you</span><b class="count count--you">2</b></h3>' +
-      '<a class="side-row side-row--who">' + Crew.face('Fix 3-D Secure checkout', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Fix 3-D Secure checkout for E…</span><span class="side-ask">Run git push?</span></span></a>' +
-      '<a class="side-row side-row--who">' + Crew.face('Migrate ops dashboards', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Migrate ops dashboards</span><span class="side-ask">Keep the old folder?</span></span></a></section>' +
+      '<a class="side-row side-row--who">' + Crew.face('Cut over the invoice export', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Cut over the invoice export</span><span class="side-ask">Approve the cutover for Monday?</span></span></a>' +
+      '<a class="side-row side-row--who">' + Crew.face('Restore a basket after sign-in', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Restore a basket after sign-in</span><span class="side-ask">Highest quantity, or add them?</span></span></a></section>' +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' + rows.map(drawRow).join('') + '</section>' +
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3><a class="nav-row">' + Crew.icon('fleet', 16) + '<span>Fleet</span></a><a class="nav-row">' + Crew.icon('connections', 16) + '<span>Connections</span></a></section>' +
-      '<div class="side-grow"></div><div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Card.drawPerson('you', 24) + '<span class="side-name">Dana Reyes</span><button class="icon-btn icon-btn--sm" title="Settings">' + Crew.icon('sliders', 14) + '</button></div></div>';
+      '<div class="side-grow"></div><div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Card.drawPerson('you', 24) + '<span class="side-name">Noa</span><button class="icon-btn icon-btn--sm" title="Settings">' + Crew.icon('sliders', 14) + '</button></div></div>';
   }
   function setCount(id, n) {
     var el = document.querySelector('[data-nav-count="' + id + '"]');

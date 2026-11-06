@@ -1,40 +1,33 @@
-/* New tokens for the Inbox, on top of the desktop app's tokens.css. Everything that is new to the
-   design system is here, so the list in DESIGN.md can be checked against one file. */
+/* What the Inbox adds to the design system. The desk, the card stock, the heights, the type roles and the motion tokens
+   are shared with Work and come from vendor/primitives.css. Everything new is in this file, so DESIGN.md can be checked
+   against it line by line. */
 
 :root,
 [data-theme] {
-  /* The desk: the surface things rest on. One step below the sidebar's --bg, so paper needs no
-     heavy border to stand on it. */
-  --desk: color-mix(in oklab, var(--bg) 62%, var(--sunken));
+  /* Stock with a trace of hue. A kind picks one, so sorted cards can be told apart at a glance, the way coloured cards
+     are in a card file. Each is --stock with a little colour, so a theme keeps its character. */
+  --stock-manila: color-mix(in oklab, var(--raised) 93%, oklch(0.8 0.11 85));
+  --stock-ledger: color-mix(in oklab, var(--raised) 94%, oklch(0.78 0.07 232));
+  --stock-sage: color-mix(in oklab, var(--raised) 94%, oklch(0.78 0.07 150));
 
-  /* Paper: what a card is made of. The fixed set a kind picks from. Each one is --raised with a
-     trace of hue, so a theme keeps its character and sorted cards can be told apart at a glance,
-     the way coloured cards are in a card file. */
-  --paper-bond: var(--raised);
-  --paper-manila: color-mix(in oklab, var(--raised) 93%, oklch(0.8 0.11 85));
-  --paper-ledger: color-mix(in oklab, var(--raised) 94%, oklch(0.78 0.07 232));
-  --paper-sage: color-mix(in oklab, var(--raised) 94%, oklch(0.78 0.07 150));
+  /* A card lying over the one behind it. Its shadow falls up onto that card, because --h-stand falls down and would be
+     hidden by the card in front. */
+  --h-stack-shade: oklch(0.3 0.03 70 / 0.1);
+  --h-stack: inset 0 0 0 1px var(--stock-rim), inset 0 1px 0 var(--stock-lit), 0 -1px 2px var(--h-stack-shade), 0 -3px 7px -3px var(--h-stack-shade);
 
-  /* What a card that has gone quiet is made of: it stops being paper and sinks into the desk. */
-  --paper-vellum: color-mix(in oklab, var(--raised) 26%, var(--desk));
-
-  /* The rim of paper, and the light that catches its top edge. */
-  --paper-rim: color-mix(in oklab, var(--ink) 9%, transparent);
-  --paper-edge: color-mix(in oklab, white 70%, transparent);
-  --paper-shade: oklch(0.3 0.03 165 / 0.1);
-
-  /* The mark of a kind in the hue its plugin declares. --mark-l and --mark-c are the theme's, so
-     no plugin's hue can be louder than a name, or unreadable, in any theme. */
+  /* The mark of a kind, in the hue its plugin declares. --mark-l and --mark-c belong to the theme, so no plugin's hue can
+     be louder than a name, or unreadable, in any theme. */
+  --mark-ink: color-mix(in oklab, var(--ink) 84%, transparent);
   --mark-l: 0.44;
   --mark-c: 0.13;
 
-  /* Quiet figures: --faint at rest, --muted when a little older. */
-  --figure-fresh: var(--faint);
-  --figure-recent: var(--muted);
-  --figure-stale: var(--ink);
-  --figure-overdue: var(--you-ink);
+  /* A wait, measured against the patience of its kind. */
+  --wait-fresh: var(--faint);
+  --wait-recent: var(--muted);
+  --wait-due: var(--ink);
+  --wait-over: var(--you-ink);
 
-  /* Lacquer: Hercule's own material. Used for nothing else. */
+  /* Lacquer: Hercule's own material, for what Hercule noticed. Used for nothing else. */
   --lacquer: oklch(0.255 0.024 165);
   --lacquer-lit: oklch(0.31 0.03 165);
   --lacquer-ink: oklch(0.965 0.012 90);
@@ -50,7 +43,6 @@
   --lacquer-sub: oklch(0.83 0.035 75);
   --lacquer-rim: oklch(0.72 0.09 80 / 0.55);
   --lacquer-shadow: 0 1px 2px oklch(0.25 0.04 45 / 0.22), 0 12px 28px -14px oklch(0.25 0.05 45 / 0.5);
-  --paper-shade: oklch(0.35 0.05 45 / 0.12);
   --mark-l: 0.43;
 }
 
@@ -58,12 +50,10 @@
 [data-theme="nile"],
 [data-theme="end-house"],
 [data-theme="blue-train"] {
-  --paper-manila: color-mix(in oklab, var(--raised) 91%, oklch(0.62 0.11 85));
-  --paper-ledger: color-mix(in oklab, var(--raised) 91%, oklch(0.6 0.08 232));
-  --paper-sage: color-mix(in oklab, var(--raised) 91%, oklch(0.6 0.08 150));
-  --paper-rim: color-mix(in oklab, white 7%, transparent);
-  --paper-edge: color-mix(in oklab, white 12%, transparent);
-  --paper-shade: oklch(0 0 0 / 0.34);
+  --stock-manila: color-mix(in oklab, var(--raised) 91%, oklch(0.62 0.11 85));
+  --stock-ledger: color-mix(in oklab, var(--raised) 91%, oklch(0.6 0.08 232));
+  --stock-sage: color-mix(in oklab, var(--raised) 91%, oklch(0.6 0.08 150));
+  --h-stack-shade: oklch(0 0 0 / 0.34);
   --mark-l: 0.82;
   --mark-c: 0.09;
 }
@@ -99,19 +89,4 @@
   --lacquer-sub: oklch(0.86 0.03 245);
   --lacquer-rim: oklch(0.74 0.085 85 / 0.5);
   --lacquer-shadow: 0 1px 2px oklch(0 0 0 / 0.35), 0 14px 30px -14px oklch(0 0 0 / 0.6);
-}
-
-/* Motion. See MOTION.md. */
-:root {
-  --m-press: 90ms;
-  --m-hover: 140ms;
-  --m-peek: 180ms;
-  --m-move: 260ms;
-  --m-open: 340ms;
-  --m-settle: 520ms;
-  --m-land: 1100ms;
-  --e-out: cubic-bezier(0.22, 0.9, 0.24, 1);
-  --e-in: cubic-bezier(0.5, 0, 0.8, 0.4);
-  --e-inout: cubic-bezier(0.55, 0, 0.2, 1);
-  --e-back: cubic-bezier(0.3, 1.45, 0.5, 1);
 }

@@ -1,59 +1,50 @@
-/* The card: paper with weight. Rows sit on a 4px grid. */
+/* The Inbox card: the shared .card and .card-stock of Work, laid out from the slots a kind declares.
+   Rows sit on a 2px grid inside the shared padding of 10, 12 and 8. */
 
-.card {
-  --paper: var(--paper-bond);
-  --pad-x: 12px;
-  --rail: 20px;
-  --gutter: 10px;
+.stack .card {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  width: auto;
+  height: auto;
   display: grid;
-  grid-template-columns: var(--rail) minmax(0, 1fr) auto;
-  grid-template-rows: auto;
-  column-gap: var(--gutter);
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  column-gap: 10px;
   align-content: start;
-  padding: 9px var(--pad-x) 0;
-  border-radius: var(--r-md);
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--paper-rim),
-    inset 0 1px 0 var(--paper-edge),
-    0 -1px 3px var(--paper-shade),
-    0 1px 2px var(--paper-shade);
+  padding: var(--card-pad-y) var(--card-pad-x) 0;
   color: var(--ink);
   cursor: default;
   outline: none;
-  overflow: hidden;
-  contain: layout paint style;
   transition:
-    transform var(--m-move) var(--e-out),
-    box-shadow var(--m-hover) var(--e-out),
-    background var(--m-settle) var(--e-out),
-    height var(--m-peek) var(--e-out);
+    transform var(--m-slow) var(--spring-glide, var(--m-ease)),
+    height var(--m-base) var(--m-ease),
+    opacity var(--m-base) var(--m-ease);
 }
-.card.paper-manila { --paper: var(--paper-manila); }
-.card.paper-ledger { --paper: var(--paper-ledger); }
-.card.paper-sage { --paper: var(--paper-sage); }
+.card.paper-manila { --stock: var(--stock-manila); }
+.card.paper-ledger { --stock: var(--stock-ledger); }
+.card.paper-sage { --stock: var(--stock-sage); }
 
-.mark { display: inline-grid; place-items: center; color: color-mix(in oklab, var(--ink) 82%, transparent); }
+/* A card clips its own words, not what stands behind its top edge. */
+.c-clip { display: contents; }
+.stack .card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
+.stack .card:not([data-level="full"]) > .card-stock { box-shadow: var(--h-stack); }
+
+.mark { display: inline-grid; place-items: center; color: var(--mark-ink); }
 .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
 
-.c-mark { grid-column: 1; grid-row: 1; height: 20px; display: flex; align-items: center; }
+.c-mark { grid-column: 1; grid-row: 1; height: 18px; display: flex; align-items: center; }
 .c-title {
   grid-column: 2;
   grid-row: 1;
   margin: 0;
   min-width: 0;
-  font-size: var(--t-13);
-  font-weight: var(--w-medium);
-  line-height: 20px;
+  font: var(--type-card);
+  letter-spacing: -0.003em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.card.is-whole .c-title { font-size: var(--t-14); }
 .card.is-whole .c-title,
 .card.is-peek .c-title {
   white-space: normal;
@@ -67,18 +58,17 @@
   grid-row: 1;
   justify-self: end;
   align-self: start;
-  height: 20px;
-  line-height: 20px;
-  font-size: var(--t-13);
-  font-weight: var(--w-medium);
+  height: 18px;
+  font: var(--type-card);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   white-space: nowrap;
+  transition: opacity var(--m-quick) var(--m-ease);
 }
-.c-pace[data-ramp="fresh"] { color: var(--figure-fresh); }
-.c-pace[data-ramp="recent"] { color: var(--figure-recent); }
-.c-pace[data-ramp="stale"] { color: var(--figure-stale); }
-.c-pace[data-ramp="overdue"] { color: var(--figure-overdue); }
+.c-pace[data-ramp="fresh"] { color: var(--wait-fresh); }
+.c-pace[data-ramp="recent"] { color: var(--wait-recent); }
+.c-pace[data-ramp="stale"] { color: var(--wait-due); }
+.c-pace[data-ramp="overdue"] { color: var(--wait-over); }
 
 .c-line {
   grid-column: 2;
@@ -87,18 +77,22 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  height: 18px;
-  margin-top: 1px;
+  height: 16px;
+  margin-top: 3px;
+  font: var(--type-summary);
   color: var(--muted);
-  font-size: var(--t-12);
-  line-height: 18px;
 }
 .c-line.tone-bad { color: var(--fail-ink); }
 .c-line.tone-good { color: var(--ok); }
 .c-line.tone-you { color: var(--you-ink); }
+.c-who { display: contents; }
 .c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
-.c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 18px; margin-top: 1px; display: flex; align-items: center; }
+.c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 16px; margin-top: 3px; display: flex; align-items: center; }
+/* The usual state of a kind says nothing at rest. */
+.c-status.is-norm { visibility: hidden; }
+.card.is-whole .c-status.is-norm,
+.card.is-peek .c-status.is-norm { visibility: visible; }
 
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
@@ -111,32 +105,33 @@
   flex: none;
   display: inline-grid;
   place-items: center;
-  width: var(--person-size, 18px);
-  height: var(--person-size, 18px);
+  width: var(--person-size, 16px);
+  height: var(--person-size, 16px);
   border-radius: 50%;
   background: oklch(var(--char-tint-l) calc(var(--char-c) * 0.42) var(--person-hue));
   box-shadow: inset 0 0 0 0.5px oklch(var(--char-ink-l) var(--char-c) var(--person-hue) / 0.25);
   color: oklch(var(--char-ink-l) var(--char-c) var(--person-hue));
-  font-size: 8px;
+  font-size: calc(var(--person-size, 16px) * 0.44);
   font-weight: var(--w-bold);
   letter-spacing: 0.01em;
   line-height: 1;
 }
+.person--you { background: var(--you); color: var(--face-ink); box-shadow: none; }
 
 .c-foot {
   grid-column: 2 / -1;
   grid-row: 3;
-  visibility: hidden;
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  height: 18px;
+  height: 16px;
   margin-top: 5px;
+  padding-bottom: 0;
+  font: var(--type-meta);
   color: var(--faint);
-  font-size: var(--t-12);
-  line-height: 18px;
   white-space: nowrap;
+  visibility: hidden;
 }
 .card.is-whole .c-foot,
 .card.is-peek .c-foot { visibility: visible; }
@@ -157,39 +152,29 @@
 .card[data-level="one"]:not(.is-peek) .c-line,
 .card[data-level="one"]:not(.is-peek) .c-status { visibility: hidden; }
 
-/* The usual state of a kind says nothing at rest. */
-.c-status.is-norm { visibility: hidden; }
-.card.is-whole .c-status.is-norm,
-.card.is-peek .c-status.is-norm { visibility: visible; }
-
 /* A slow kind shows no wait, so its status takes the place of the wait. */
 .card.pace-slow .c-status { grid-row: 1; height: 18px; margin-top: 0; }
-.c-who { display: contents; }
 
-/* Tight: a Linear issue. Smaller title, closer rows. */
-.card.density-tight { padding-top: 7px; }
-.card.density-tight .c-title,
-.card.density-tight.is-whole .c-title { font-size: var(--t-13); line-height: 18px; }
-.card.density-tight .c-mark { height: 18px; }
+/* Tight: a Linear issue. A little closer, and the mark a little smaller. */
+.stack .card.density-tight { padding-top: 8px; }
 .card.density-tight .mark svg { width: 17px; height: 17px; }
-.card.density-tight .c-line { height: 16px; margin-top: 0; line-height: 16px; }
-.card.density-tight .c-foot { margin-top: 3px; }
+.card.density-tight .c-line { margin-top: 1px; }
 .card.density-tight .c-line .person { display: none; }
 
 /* Hover: the actions take the place of the figures. */
 .c-acts {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: 5px;
+  right: 7px;
   z-index: 3;
   display: flex;
   align-items: center;
   gap: 2px;
   padding-left: 22px;
-  background: linear-gradient(90deg, transparent, var(--paper) 18px);
+  background: linear-gradient(90deg, transparent, var(--stock) 18px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--m-hover) var(--e-out);
+  transition: opacity var(--m-quick) var(--m-ease);
 }
 .card.is-hover .c-acts,
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
@@ -205,31 +190,27 @@
   padding: 0 3px;
   border-radius: var(--r-xs);
   color: var(--muted);
-  transition: background var(--m-hover), color var(--m-hover), transform var(--m-press);
+  transition: background var(--m-quick), color var(--m-quick), transform var(--m-press);
 }
 .c-act:hover { background: var(--hover); color: var(--ink); }
 .c-act:active { transform: scale(0.94); }
 .c-act--hand .cr + .cr { margin-left: -8px; }
 .c-act--go { padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
-.c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; }
-.card:not(.is-peek) .c-hit { display: none; }
-.card.is-peek { pointer-events: none; z-index: 500 !important; box-shadow: inset 0 0 0 1px var(--paper-rim), inset 0 1px 0 var(--paper-edge), var(--shadow-3); }
-.card.is-peek .c-hit { pointer-events: auto; }
-.card.is-peek .c-acts { pointer-events: auto; }
-.card.is-hover:not(.is-peek) { box-shadow: inset 0 0 0 1px var(--paper-rim), inset 0 1px 0 var(--paper-edge), 0 -1px 3px var(--paper-shade), 0 2px 6px var(--paper-shade); }
-.card.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus), inset 0 1px 0 var(--paper-edge), var(--shadow-3); }
-.card.is-dim { opacity: 0.32; }
-.plaque.is-dim { opacity: 0.32; }
 
-/* Someone has it now: the card steps back. */
-.card.has-task { --paper: var(--paper-vellum); box-shadow: inset 0 0 0 1px var(--paper-rim), 0 -1px 2px color-mix(in oklab, var(--paper-shade) 50%, transparent); }
-.card.has-task .c-title { color: var(--muted); }
-.card.has-task .mark { opacity: 0.55; }
-.card.is-quiet { --paper: var(--paper-vellum); }
-.card.is-quiet .c-title { color: var(--muted); }
-.card.is-quiet .mark { opacity: 0.55; }
+.c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
+.card.is-peek .c-hit { display: block; pointer-events: auto; }
+.stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
+.stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); }
+.card.is-peek .c-acts { z-index: 4; }
+.stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
+.stack .card.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
+.card.is-dim, .plaque.is-dim { opacity: 0.3; }
 
-.person--you { background: var(--you); color: var(--face-ink); box-shadow: none; }
+/* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
+.stack .card[data-height="flat"] > .card-stock { box-shadow: var(--h-flat); background: var(--stock-flat); }
+.card[data-height="flat"] .c-title { color: color-mix(in oklab, var(--ink) 74%, var(--muted)); }
+.card[data-height="flat"] .mark { opacity: 0.6; }
+.card[data-height="flat"] .c-line { color: var(--muted); }
 
 /* The plaque: Hercule's own, in lacquer. */
 .plaque {
@@ -238,15 +219,17 @@
   grid-template-columns: auto minmax(0, 1fr);
   column-gap: 12px;
   align-content: center;
-  height: 76px;
+  height: 72px;
   padding: 0 16px 0 14px;
-  border-radius: var(--r-md);
+  border-radius: var(--card-r);
   background:
     linear-gradient(180deg, color-mix(in oklab, var(--lacquer-lit) 60%, transparent), transparent 60%),
     var(--lacquer);
   box-shadow: inset 0 0 0 1px var(--lacquer-rim), var(--lacquer-shadow);
   color: var(--lacquer-ink);
+  cursor: default;
   outline: none;
+  transition: transform var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
 .pl-marks { grid-row: 1 / 3; align-self: center; display: flex; }
 .pl-src {
@@ -262,8 +245,8 @@
 .pl-src + .pl-src { margin-left: -9px; }
 .pl-title {
   margin: 0;
+  font: var(--type-card);
   font-size: var(--t-14);
-  font-weight: var(--w-medium);
   line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
@@ -271,7 +254,7 @@
 }
 .pl-why {
   color: var(--lacquer-sub);
-  font-size: var(--t-12);
+  font: var(--type-summary);
   line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
