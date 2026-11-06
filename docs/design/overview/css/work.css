@@ -242,10 +242,10 @@
 .welcome-btn kbd { background: color-mix(in oklab, var(--accent-fg) 16%, transparent); color: inherit; }
 
 /* ---------- Loading: the layout is already right, only the words are missing ---------- */
-.card.is-skeleton > *:not(.card-stock) { opacity: 0; }
+.card.is-skeleton .card-body > *, .card.is-skeleton > .pile-text, .card.is-skeleton > .pile-line, .card.is-skeleton > .pile-meta { opacity: 0; }
 .card.is-skeleton .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
 .card.is-skeleton::after { content: ""; position: absolute; left: 12px; top: 13px; width: 66%; height: 42px; border-radius: 4px; background: linear-gradient(color-mix(in oklab, var(--ink) 9%, transparent) 0 11px, transparent 11px 19px, color-mix(in oklab, var(--ink) 6%, transparent) 19px 28px, transparent 28px); animation: pending 1.8s ease-in-out infinite; }
-.card > * { transition: opacity var(--m-base) var(--m-ease); }
+.card-body > *, .pile > * { transition: opacity var(--m-base) var(--m-ease); }
 .is-loading .lane-need, .is-loading .bullet-words { opacity: 0.4; }
 
 /* ---------- Offline ---------- */
