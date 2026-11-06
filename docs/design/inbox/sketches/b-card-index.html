@@ -1,0 +1,44 @@
+<!doctype html><html lang="en" data-theme="whitehaven"><head><meta charset="utf-8"><title>Sketch B: Card index</title>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../vendor/tokens.css"><link rel="stylesheet" href="../vendor/row-heights.css"><link rel="stylesheet" href="../vendor/base.css"><link rel="stylesheet" href="../vendor/controls.css"><link rel="stylesheet" href="../vendor/shell.css"><link rel="stylesheet" href="../vendor/sidebar.css"><link rel="stylesheet" href="sketch.css">
+<style>
+.main{overflow:hidden;display:flex;flex-direction:column}
+.noticed{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:0 24px 20px}
+.drawers{flex:1;min-height:0;display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:20px;padding:0 24px 20px}
+.dr{display:flex;flex-direction:column;min-height:0}
+.dr .sec{margin-bottom:10px}
+.stack{position:relative;flex:1;min-height:0}
+.ix{position:absolute;left:0;right:0;top:0;height:112px;padding:10px 12px;will-change:transform;transition:box-shadow .2s;cursor:default;border-radius:12px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--line-soft),0 -1px 3px oklch(.3 .03 165 /.07)}
+.ix.on{box-shadow:inset 0 0 0 1px var(--line),0 -6px 18px -6px oklch(.3 .03 165 /.18)}
+.ix .a{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center}
+.ix .br{color:var(--ink)}
+.ix .t{font-weight:500;font-size:var(--t-13);line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ix .w{font-size:var(--t-12)}
+.ix .r{display:flex;gap:7px;align-items:center;margin:6px 0 0 29px;color:var(--muted);font-size:var(--t-12)}
+.ix .x{margin:8px 0 0 29px;color:var(--faint);font-size:var(--t-12)}
+.ix.bad .r{color:var(--fail-ink)}
+</style></head><body><div class="app"><aside class="side"></aside><main class="main">
+<div class="bar">Inbox</div>
+<div class="noticed" id="n"></div>
+<div class="drawers">
+ <div class="dr"><div class="sec">On the clock <i>oldest in front</i></div><div class="stack" id="s1"></div></div>
+ <div class="dr"><div class="sec">Yours</div><div class="stack" id="s2"></div></div>
+ <div class="dr"><div class="sec">On the shelf</div><div class="stack" id="s3"></div></div>
+</div></main></div>
+<script src="../vendor/brands.js"></script><script src="../vendor/crew.js"></script><script src="sketch.js"></script>
+<script>
+function wc(h){return h>=72?'hot':h>=24?'mid':h>=6?'low':'new'}
+n.innerHTML=S.noticed.map(c=>`<div class="lac"><div class="t" style="margin-top:0">${c.t}</div><div class="why">${c.why}</div></div>`).join('');
+function card(c){return `<div class="ix ${c.bad?'bad':''}"><div class="a">${S.br(c.m,18)}<div class="t">${c.t}</div><span class="w ${wc(c.h||0)}">${c.w||''}</span></div><div class="r">${c.p?S.av(c.p,18):''}<span>${c.r||c.team+' · '+c.id}</span></div><div class="x">${c.id} · ${c.g||''}</div></div>`}
+var sh=[];S.shelf.forEach(g=>g.items.forEach(i=>sh.push(Object.assign({g:g.g},i))));
+function stack(el,items){el.innerHTML=items.map(card).join('');var cs=[].slice.call(el.children),N=cs.length,H=el.clientHeight,full=112;
+ var y=cs.map(()=>0),v=cs.map(()=>0),hover=-1,sm=-1;
+ function targets(){var base=Math.min(full+8,(H-full)/Math.max(1,N-1));var t=[];var open=sm<0?null:sm;var acc=0;
+  for(var i=0;i<N;i++){t[i]=acc;var s=base;if(open!==null){var d=Math.abs(i-open);var extra=Math.max(0,1-d/1.6);s=base*0.72+(full-base*0.72)*extra*extra}acc+=s}
+  var total=t[N-1]+full;if(total>H){var k=(H-full)/t[N-1];t=t.map(a=>a*k)}return t}
+ function step(){var t=targets();for(var i=0;i<N;i++){var a=(t[i]-y[i])*.16-v[i]*.5;v[i]+=a;y[i]+=v[i];cs[i].style.transform='translateY('+y[i].toFixed(2)+'px)';cs[i].style.zIndex=i;}requestAnimationFrame(step)}
+ el.addEventListener('mousemove',e=>{var r=el.getBoundingClientRect(),py=e.clientY-r.top;var t=targets(),best=0;for(var i=0;i<N;i++){if(t[i]<=py)best=i}hover=best;sm=sm<0?best:sm+(best-sm)*.35;cs.forEach((c,i)=>c.classList.toggle('on',i===best))});
+ el.addEventListener('mouseleave',()=>{sm=-1;cs.forEach(c=>c.classList.remove('on'))});
+ y=targets();step()}
+setTimeout(()=>{stack(s1,S.clock);stack(s2,S.mine);stack(s3,sh)},200);
+</script></body></html>

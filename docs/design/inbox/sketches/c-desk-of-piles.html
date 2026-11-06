@@ -1,0 +1,32 @@
+<!doctype html><html lang="en" data-theme="whitehaven"><head><meta charset="utf-8"><title>Sketch C: Desk of piles</title>
+<script src="../../shared/page.js"></script>
+<link rel="stylesheet" href="../vendor/tokens.css"><link rel="stylesheet" href="../vendor/row-heights.css"><link rel="stylesheet" href="../vendor/base.css"><link rel="stylesheet" href="../vendor/controls.css"><link rel="stylesheet" href="../vendor/shell.css"><link rel="stylesheet" href="../vendor/sidebar.css"><link rel="stylesheet" href="sketch.css">
+<style>
+.desk{padding:8px 40px 40px;display:grid;grid-template-columns:repeat(3,1fr);gap:44px 36px;align-items:start}
+.hero{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:36px;margin-bottom:6px}
+.pile{position:relative;cursor:pointer}
+.pile .cap{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-weight:600;font-size:var(--t-14)}
+.pile .cap .n{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--faint);font-weight:500}
+.pl{position:relative;height:138px}
+.pl>div{position:absolute;left:0;right:0;top:0;height:128px;transition:transform .32s var(--ease-out)}
+.pl>div:nth-child(1){transform:translate(10px,10px) rotate(1.4deg)}
+.pl>div:nth-child(2){transform:translate(-6px,6px) rotate(-1.1deg)}
+.pl>div:nth-child(3){transform:translate(4px,3px) rotate(.5deg)}
+.pl>div:nth-child(4){padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.pile:hover .pl>div:nth-child(1){transform:translate(26px,14px) rotate(4deg)}
+.pile:hover .pl>div:nth-child(2){transform:translate(-22px,10px) rotate(-3.4deg)}
+.pile:hover .pl>div:nth-child(3){transform:translate(12px,5px) rotate(1.6deg)}
+.pl .h{display:flex;gap:7px;align-items:center;color:var(--faint);font-size:var(--t-12)}.pl .h .br{color:var(--ink)}.pl .h .w{margin-left:auto;font-size:var(--t-14)}
+.pl .t{font-size:var(--t-14);font-weight:500;line-height:20px;flex:1}
+.pl .r{display:flex;gap:7px;align-items:center;color:var(--muted);font-size:var(--t-12)}
+</style></head><body><div class="app"><aside class="side"></aside><main class="main">
+<div class="bar">Inbox</div>
+<div class="desk"><div class="hero" id="n"></div><div id="d" style="display:contents"></div></div></main></div>
+<script src="../vendor/brands.js"></script><script src="../vendor/crew.js"></script><script src="sketch.js"></script>
+<script>
+function wc(h){return h>=72?'hot':h>=24?'mid':h>=6?'low':'new'}
+n.innerHTML=S.noticed.map(c=>`<div class="lac"><div class="t" style="margin-top:0">${c.t}</div><div class="why">${c.why}</div></div>`).join('');
+function pile(name,mark,items){var c=items[0];return `<div class="pile"><div class="cap">${S.br(mark,18)}<span>${name}</span><span class="n">${items.length}</span></div><div class="pl"><div class="card"></div><div class="card"></div><div class="card"></div><div class="card"><div class="h">${S.br(c.m,16)}<span>${c.id}</span><span class="w ${wc(c.h||0)}">${c.w||''}</span></div><div class="t">${c.t}</div><div class="r">${c.p?S.av(c.p):''}<span>${c.r||c.team}</span></div></div></div></div>`}
+var sh=[];S.shelf.forEach(g=>g.items.forEach(i=>sh.push(i)));
+d.innerHTML=pile('Reviews','github',S.clock.filter(c=>c.m=='github'))+pile('Your pull requests','github',S.mine)+pile('Mail','gmail',S.clock.filter(c=>c.m=='gmail').concat(S.clock.filter(c=>c.m=='gmail')))+pile('Returns','linear',S.shelf[0].items)+pile('Shop','linear',S.shelf[1].items)+pile('Platform','linear',S.shelf[2].items);
+</script></body></html>

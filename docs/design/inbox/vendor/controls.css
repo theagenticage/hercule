@@ -1,0 +1,974 @@
+/* The controls every screen shares: the buttons, the answer ledger, the
+   pills, the segmented controls, the navigation rows, the counts, the
+   meters, the text field, the switches and choices, the quiet text and
+   dots, the priority bars, the bar over the main pane, the tabs and the
+   section headings. The rules and
+   class names are the Bureau book's, as its system.css spells them. Each
+   departure from the book says why. */
+
+/* ---------- Buttons ---------- */
+/* One doctrine for every button:
+   - .btn          a neutral tablet. The default for an answer that does something.
+   - .btn--accent  the one suggested answer of a group. The only filled button anywhere.
+   - .btn--quiet   declines and dismissals: text until hovered.
+   - .btn--danger  an answer that destroys or deletes: red ink on the neutral tablet. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-btn);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--btn-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 1px 2px oklch(0 0 0 / calc(0.07 * var(--glass-level)));
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.btn:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--btn-fill));
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn--accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: var(--w-bold);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 80%, black),
+    inset 0 1px 0 color-mix(in oklab, white calc(30% * var(--glass-level)), transparent);
+}
+.btn--accent:hover {
+  background: color-mix(in oklab, var(--accent) 90%, var(--accent-fg));
+}
+/* A key beside the label of a filled button. The global `kbd` draws faint ink
+   on a tint of ink, which reads poorly on the accent fill, so here the key
+   takes the button's ink on a tint of that same ink. An unready button fades as
+   a whole, so its key fades with it. */
+.btn--accent kbd {
+  background: color-mix(in oklab, var(--accent-fg) 16%, transparent);
+  color: var(--accent-fg);
+}
+.btn--quiet {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.btn--quiet:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.btn--danger {
+  color: var(--fail-ink);
+}
+/* A smaller button, for answers inside a row or a card, such as a queued
+   message's Steer and Cancel. */
+.btn--sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+  gap: 5px;
+}
+/* A face before a button's label, such as the workflow on a Hand to an agent
+   answer, sits closer to the button's edge, as the book draws it. */
+.btn .cr {
+  margin-left: -6px;
+}
+/* A key at the end of a button, such as the Reply button's ⌘↩, sits closer
+   to the edge. The key's tint has padding of its own, so without this the gap
+   between the tint and the button's edge is much wider than the gap above and
+   below it. */
+.btn kbd {
+  margin-right: -4px;
+}
+/* The large button that ends a step of the first run, such as Add project. */
+.btn--lg {
+  height: 38px;
+  padding: 0 16px;
+  font-size: var(--t-14);
+}
+/* A button that cannot act yet, such as Sign in before both fields hold
+   text. The book's second edition draws it at half opacity, in its own
+   colours, on its first-run page. Without pointer events, the hover and press
+   rules above cannot fire, so the button neither brightens nor sinks. A
+   button that must keep the focus while it cannot act is `aria-disabled`
+   rather than `disabled`, and marks the same state with `data-unready`. */
+.btn:disabled,
+.btn[data-unready] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* A button whose action is already running. It keeps its full colour and its
+   focus, and its label says what is happening. It neither brightens nor
+   sinks, because pressing it again does nothing. */
+.btn[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+/* An icon alone as a button: 28px square, or 22px as --sm, muted until
+   hovered. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* Not in the book, whose disabled icon buttons have no style of their own.
+   An icon button that cannot act, such as the timeline's step on while it
+   shows today, is drawn at half opacity and takes no hover, as `.btn` is.
+   One that must keep the focus is `aria-disabled` with `data-unready`, as
+   for `.btn`. `aria-disabled` alone does not dim it, so the icon buttons that
+   already use it, such as the sidebar's Search, keep their look. */
+.icon-btn:disabled,
+.icon-btn[data-unready] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.icon-btn--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-xs);
+}
+/* Not in the book. An icon button whose screen is open, such as the Office
+   or Settings, drawn as a selected row. */
+.icon-btn.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---------- Answers ---------- */
+/* The ledger: each answer on its own line with what the click does. Buttons
+   share one width, so their left and right edges line up down the ledger.
+   A row is one button: the `.btn` inside it is drawn as a span. */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ans {
+  display: grid;
+  grid-template-columns: 156px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 38px;
+  padding: 4px 12px 4px 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.ans:hover {
+  background: var(--hover);
+}
+.ans > .btn {
+  width: 100%;
+}
+/* The label of an answer whose text a plugin or a workflow chose, so it may be
+   longer than the 156px button. It is cut with an ellipsis inside the
+   button's padding, never wrapped: the describe line beside the button is
+   where an answer says what it does. Text-overflow needs the text in an
+   element of its own, because bare text in a flex box cannot be cut. */
+.ans-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Not in the book, whose descriptions are short. A description may name a
+   profile of 128 characters with no space, so it wraps anywhere rather than
+   widen the ledger past its container. */
+.ans-desc {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ans kbd {
+  justify-self: end;
+}
+/* An answer that was already given. As with a button whose action is
+   running, the row keeps its colour and its focus, and neither it nor its
+   button reacts to the pointer. */
+.ans[aria-disabled="true"] {
+  pointer-events: none;
+}
+/* An answer that cannot be given yet fades its key with its button, so the
+   key does not read as live beside a faded button. */
+.ans:has(> .btn[data-unready]) kbd {
+  opacity: 0.5;
+}
+
+/* ---------- Pills ---------- */
+/* A floating glass layer holding a few controls, such as the thread header's
+   tabs. Only content shows through it: no gradient and no glow behind. Every
+   value comes from --glass-level, so at 0 this is a solid, flat surface. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+}
+/* The page's name, set as a title, leading a floating pill. The margin and
+   the size are reset so it can be the page's h1. */
+.pill-title {
+  margin: 0;
+  padding: 0 8px 0 10px;
+  font-size: inherit;
+  font-weight: var(--w-bold);
+}
+/* A tab in a floating pill: a thread of the open thread's workspace, with
+   its state mark, its title and an age when idle, or a filter with its
+   count. */
+.ptab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.ptab:hover {
+  background: var(--hover);
+}
+.ptab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ptab small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* A button in a floating pill, with an icon and a word, such as Cancel run…
+   on a run's page and Done in the thread's header. */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+}
+.pill-btn:hover {
+  background: var(--hover);
+}
+
+/* ---------- Segmented controls ---------- */
+/* A row of buttons that picks one of a few values, such as a model option's
+   choices. The pressed button is the value in use.
+   Not in the book: a segment may also be a label around a native radio
+   button, such as the Text size steps. The radio gives the group its
+   semantics and its arrow keys, and is drawn invisibly over its label, so the
+   label looks exactly like a button. The checked radio is the value in use,
+   and a keyboard focus ring goes round its segment. */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+.seg button,
+.seg label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2);
+}
+.seg label {
+  position: relative;
+}
+.seg label > input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+}
+.seg label:has(> input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.seg button[aria-pressed="true"],
+.seg button[aria-selected="true"],
+.seg label:has(> input:checked) {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--divider),
+    var(--shadow-1);
+}
+
+/* ---------- Navigation rows ---------- */
+/* Icon, label, and whatever sits at the right end, such as a key cap. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.nav-row > span {
+  flex: 1;
+}
+.nav-row:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.nav-row.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+/* Not in the book, whose rows are all links. A row that is a button, such as
+   an inert one, would otherwise centre its text, take only the width of its
+   content, and take Chromium's text rendering for buttons. */
+button.nav-row {
+  width: 100%;
+  text-align: start;
+  text-rendering: inherit;
+}
+
+/* ---------- Counts ---------- */
+/* A number in a pill, such as the count of threads waiting on you. */
+.count {
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  display: inline-grid;
+  place-items: center;
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+/* A count of things waiting on you: marigold, the one colour that means "you". */
+.count--you {
+  color: var(--face-ink);
+  background: var(--you);
+}
+
+/* ---------- Meters ---------- */
+/* How full something is, as a bar in the colour of whose it is, such as a
+   permission profile's share of agents or an assistant's core note against
+   its cap. The bar is the `i`, whose width the screen sets. */
+.meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--who, var(--ink));
+}
+
+/* ---------- Chips ---------- */
+/* A small pill naming one thing in a list of a few, such as a tool family an
+   assistant may never use. The book's tinted variants follow it: `--you`
+   for something that waits on the user, such as an update, and `--fail` for
+   something that failed. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.chip--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.chip--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+/* Not in the book. The "New" pill that marks a model the controller announced
+   as new, in the composer's model menu and on Settings > Providers > Models.
+   It is the prototype's `.pk-new`. Each place sets its own margin, because
+   each sets the gap to the name differently. */
+.new-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 17px;
+  /* Centred by the line box, the word sits one pixel above the baseline of the
+     names beside it, so two pixels of padding at the top bring it down to
+     that baseline. */
+  padding: 2px 5px 0;
+  border-radius: var(--r-pill);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
+
+/* ---------- Inputs ---------- */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+}
+/* The book draws a field as a box around text. Here it is also a real text
+   input, which comes with the browser's own border; .field draws the edge
+   instead. */
+input.field {
+  border: 0;
+}
+/* The book's placeholder colour, from its composer. */
+.field::placeholder {
+  color: var(--faint);
+}
+
+/* Chromium draws each character of a password as a bullet (U+2022) in the
+   field's font. Inter's bullet is 4.1px across at 13px (0.3125em, read from
+   the font's outline), less than the 5.5px bullet of a macOS secure text
+   field. Enlarging it with size-adjust does not help: a glyph grows away from
+   the baseline, so at the right size the bullet floats above the x-height.
+
+   So this face takes only that one character from Geneva, which macOS
+   installs in /System/Library/Fonts. Measured at 13px against an
+   NSSecureTextField in the 13pt system font:
+   - Geneva's bullet is 5.5px across, as the native bullet is.
+   - Its centre is 5.1px above the baseline; the native one is 5px.
+   The app runs only on macOS. Another platform would need its own local()
+   source. Without Geneva, the bullet falls back to Inter's smaller one.
+
+   Inter stays the field's first font, so the line height, the placeholder
+   and the caret follow it. The ascent and descent below are Inter's own
+   (1984 and 494 of 2048 units). With Geneva's, a line of bullets would sit
+   lower than an empty line, and the caret would jump at the first character. */
+@font-face {
+  font-family: "Password bullet";
+  src: local("Geneva");
+  unicode-range: U+2022;
+  ascent-override: 96.875%;
+  descent-override: 24.12%;
+}
+input.field[type="password"] {
+  font-family: "Password bullet", var(--font-ui);
+}
+/* Geneva's bullet advances 0.667em; the native one advances 0.622em (8.1px at
+   13px). The placeholder, shown only while the field is empty, keeps its
+   normal spacing. */
+input.field[type="password"]:not(:placeholder-shown) {
+  letter-spacing: -0.045em;
+}
+
+/* ---------- Labelled fields ---------- */
+/* A field with its label above it and a hint or an error below it, as the
+   book's first-run page draws a form. There `.field` is a box that holds an
+   input, rather than the input itself, and is 36px tall. The input draws no
+   ring of its own, so the box shows the focus ring. */
+.fl {
+  display: grid;
+  gap: 6px;
+}
+/* The label element holds the label and the field, so the input is named by
+   the label alone. It draws no box, so the two sit in .fl's grid. */
+.fl > label {
+  display: contents;
+}
+.fl-label,
+.fl-aside {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+/* The aside sits outside the label element (see LabelledField), and shares the
+   label's grid cell, at its far end. Both are placed in the first row, so
+   the field and the line under it fill the rows after. Their text shares a
+   baseline, as it did in one flex row. */
+.fl-label,
+.fl-aside {
+  grid-area: 1 / 1;
+  align-self: baseline;
+}
+.fl-aside {
+  justify-self: end;
+}
+.fl-hint {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.fl-err {
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.fl .field {
+  height: 36px;
+}
+/* The padding is zeroed because the browser gives an input 2px of its own,
+   which would put its text 2px right of the book's text in a field. */
+.field > input,
+.field > select {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.field > input::placeholder {
+  color: var(--faint);
+}
+/* A select drawn as the book's select field: the value, then a chevron at
+   the right edge. The select itself is invisible and covers the whole field,
+   chevron included, so a click anywhere on the field opens it. */
+.field--select::after {
+  content: "";
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--faint);
+  border-bottom: 1.5px solid var(--faint);
+  transform: translateY(-2px) rotate(45deg);
+  pointer-events: none;
+}
+/* The negative margins reach the field's edges: its 11px padding on the
+   left, and on the right its padding, the 8px gap and the 7px chevron. */
+.field--select > select {
+  margin: 0 -26px 0 -11px;
+  padding: 0 26px 0 11px;
+  appearance: none;
+  cursor: default;
+}
+/* A select field that starts with an icon, such as Follow the system's sun
+   and moon. The select still covers the whole field, icon included: it
+   reaches back over the field's left padding, the icon and the gap after it,
+   11px + 14px + 8px = 33px, and its text starts where it would after them. */
+.field--select > .ic + select {
+  margin-left: -33px;
+  padding-left: 33px;
+}
+.field:has(> input, > select):focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.field.is-bad {
+  box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+/* The focus ring's rule above outranks `.field.is-bad`, because `:has(> input)`
+   counts as an element, so the red ring needs a rule that outranks it. */
+.field.is-bad:focus-within {
+  outline-color: var(--fail);
+}
+/* An input sets `font: inherit`, which would undo the code font, so it is
+   set again here. */
+.field > input.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-12);
+}
+
+/* An on and off switch, such as whether an assistant's heartbeat runs. It is
+   a button with role="switch", and aria-checked holds its state. */
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  flex: none;
+  transition: background var(--dur-2);
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: transform var(--dur-2) var(--ease-spring);
+}
+/* On is ink, not green: green is kept for passing tests and added lines. */
+.toggle[aria-checked="true"] {
+  background: var(--ink);
+}
+.toggle[aria-checked="true"]::after {
+  background: var(--raised);
+  transform: translateX(14px);
+}
+/* Not in the book. A switch the user cannot change, such as Reduce
+   transparency while macOS's own is on, at half opacity like a disabled
+   button. */
+.toggle:disabled {
+  opacity: 0.5;
+}
+
+/* A checkbox or radio drawn in the book's ink: the native input keeps its
+   keyboard and screen reader behaviour, and a checkbox's tick is the check
+   icon laid over it. */
+.choice-box {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.choice-box input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.choice-box input[type="radio"] {
+  border-radius: 50%;
+}
+.choice-box input:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* A checked radio is an ink dot inside an ink ring, with the field's colour
+   between them. */
+.choice-box input[type="radio"]:checked {
+  box-shadow:
+    inset 0 0 0 1px var(--ink),
+    inset 0 0 0 4px var(--field);
+}
+.choice-box input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* Not in the book, whose choices are never disabled. A choice the user
+   cannot change, such as a checkout picked while its project is being
+   added, at half opacity like a disabled toggle. A choice marked
+   `aria-disabled` stays focusable, so its title can say why it cannot
+   change, and looks the same. */
+.choice-box input:disabled,
+.choice-box input[aria-disabled="true"] {
+  opacity: 0.5;
+}
+.choice-box .ic {
+  position: absolute;
+  color: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.choice-box input:checked + .ic {
+  opacity: 1;
+}
+
+/* Stacked choices: a .choice-box, its label, and its explanation under the
+   label. The whole row is the target, and its hover reaches 8px past the
+   text on each side. */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -8px 4px;
+}
+/* Not in the book. The text column may shrink below its longest word, and
+   a word wider than the row breaks, so a long value never widens the row. */
+.option {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  overflow-wrap: anywhere;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+/* Not in the book. A row whose choice cannot change shows no hover. */
+.option:hover:not(:has(input:disabled, input[aria-disabled="true"])) {
+  background: var(--hover);
+}
+.option b {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.option small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* A slider in ink, like the toggle's on state, such as the Glass level. The
+   native control keeps its keyboard and screen reader behaviour. The value
+   beside it is a `.range-out`. */
+.range {
+  width: 200px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--ink);
+}
+.range-out {
+  width: 38px;
+  flex: none;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- Text ---------- */
+/* A link drawn as text in the accent's ink, underlined while hovered. */
+.link {
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+  text-decoration: none;
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* Small print beside or under the main text. */
+.fine {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* A quiet time or note at the end of a line, such as a notice's time or
+   Appearance's "Saved on this Mac". */
+.time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A small round dot. `.dot--fail` is the book's tomato dot: something
+   failed or needs a look, such as a Connection that is reconnecting. */
+.dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.dot--fail {
+  background: var(--fail);
+}
+.nav-row .dot {
+  margin-right: 7px;
+}
+/* Items side by side, centred on one line. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Spinner ---------- */
+/* A ring with a gap that turns while a wait the user started runs: Hercule
+   starting, or a provider login waiting for the browser. Spec 17 allows no
+   other spinner. With Reduce motion, the ring stands still, closed and
+   half faded. */
+.spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.75px solid currentColor;
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spin {
+    border-right-color: transparent;
+    opacity: 1;
+    animation: spin 0.8s linear infinite;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* ---------- Priority bars ---------- */
+/* Four bars rising left to right, filled up to the priority: one for low,
+   four for urgent. Urgent fills all four in the failure colour. */
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.bars i:nth-child(1) {
+  height: 5px;
+}
+.bars i:nth-child(2) {
+  height: 7.5px;
+}
+.bars i:nth-child(3) {
+  height: 10px;
+}
+.bars i:nth-child(4) {
+  height: 12px;
+}
+.bars[data-p="1"] i:nth-child(-n + 1),
+.bars[data-p="2"] i:nth-child(-n + 2),
+.bars[data-p="3"] i:nth-child(-n + 3) {
+  background: var(--ink);
+}
+/* The book also lists urgent among the ink bars above, and overrides it
+   here with `!important`. Here urgent is left out above, so this rule has
+   nothing to override. */
+.bars[data-p="4"] i {
+  background: var(--fail);
+}
+
+/* ---------- The bar ---------- */
+/* The header over the main pane. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px 0 24px;
+  flex: none;
+}
+/* While the sidebar is hidden, the bar's content starts after the traffic
+   lights and the shell's Show button. */
+.app[data-sidebar="closed"] .bar {
+  padding-left: var(--side-show-end);
+}
+.title {
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  /* Not in the book. A record's name is the title and can be 128
+     characters, so a name too long for the header ends in an ellipsis rather
+     than pushing the header's actions out of the window. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Not in the book, which is a page, not a window. The bar lies in the
+   window's drag strip, so each control in it is marked as no part of the
+   strip, or a click on it would start dragging the window. */
+.bar :is(a, button, [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Tabs ---------- */
+/* Topic tabs in a bar, such as Intake's sources: text on a tint while
+   selected, with a count beside. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.tab:hover {
+  background: var(--hover);
+}
+.tab.is-on {
+  color: var(--ink);
+  background: var(--selected);
+}
+.tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Section headings ---------- */
+/* A small bold heading over a group, with an icon before it. */
+.section-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.005em;
+}
+.section-h .count {
+  height: 17px;
+}
