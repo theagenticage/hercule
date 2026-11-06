@@ -27,24 +27,21 @@ Durations, from `vendor/primitives.css`: `--m-press` 80ms, `--m-quick` 140ms, `-
 |---|---|---|
 | Actions | Pointer enters a card | Fade in over `--m-quick`, in the place of the wait. The title gives way with an ellipsis, so no word is cut |
 | Height | The same | The sheet's shadow goes to `--h-hover` over `--m-quick`. Nothing moves |
-| Peek | 260ms of rest on a strip, or at once if a peek is already showing | The card rises above those in front of it and its height grows from its strip to its whole face over `--m-base`. Its shadow goes to `--h-carry` |
-| Peek near the foot | A peek would pass the stack's foot | The card lifts by the difference on `hand` |
+| Peek | 260ms of rest on a strip | The card rises above those in front of it and its height grows from its strip to its whole face over `--m-base`, ending on the edge of a strip. Its shadow goes to `--h-carry` |
+| Hand-over | A peek is showing and the pointer reaches another card | The peek moves after 70ms of rest, or 220ms if the pointer is still moving fast, so a quick exit does not ripple through the stack |
 | Peek ends | Pointer leaves the stack, after 140ms | The height closes over `--m-base`, then the card returns to its place in the order |
-
-Sweeping the pointer down a stack switches the peek at once from card to card: a riffle with no neighbour moving.
 
 ### A signal landing
 
-A signal is the one moment the Inbox lets itself be noticed. Total: about 900ms, with the card's change at 210ms.
+A signal is the one moment the Inbox lets itself be noticed. Total: about 1000ms, with the card's change at 280ms.
 
 | Time | Part | Motion |
 |---|---|---|
-| 0 | The drop | A 7px dot in the tone of the news appears 40px above the card's line and falls onto the line on a falling curve, 210ms, squashing a little on contact |
-| 210ms | The card | Takes a knock: 2px down on `hand`, and back on `hand` |
-| 210ms | The old sentence | Rolls up 12px and fades, 160ms, in its own place |
-| 250ms | The new sentence | Rolls up from 12px below on `hand` |
-| 370ms | The count | Ticks up from 6px below, 260ms |
-| 210ms | The rim | A hairline and a 3px glow in the tone of the news, in at 14% of 1100ms and fading out |
+| 0 | The drop | An 8px dot in the tone of the news appears 60px above the card's line and falls onto it over 280ms, stretching as it goes and flattening on contact |
+| 280ms | The card | Takes a knock: an impulse of 145 on `hand`, so it peaks at 2px within 30ms and comes back by itself |
+| 280ms | The sentences | Old and new roll together on one `hand` curve, 16px apart, clipped by the line, so they never show at once |
+| 440ms | The count | Ticks up from 6px below, 260ms |
+| 280ms | The rim | A hairline and a 3px glow in the tone of the news, in at 14% of 1100ms and fading out |
 | After | The new mark | A 6px marigold dot stays before the sentence until the pointer or the keyboard reaches the card, so news that arrived unseen can still be found |
 
 The card never changes place, and its neighbours do not move. A signal on a card folded in a pile knocks the pile instead.
@@ -57,16 +54,16 @@ One click, one chain: hand, weight, flight, receipt. The cause always comes befo
 |---|---|---|
 | 0 | The count | The sidebar's digit rolls by 4px, 260ms: the card has left your hands |
 | 0 | The colleague | The wait goes, and the colleague comes up 26px into its place on `hand`, at work, while the card still stands |
-| 170ms | The card | Only now gives up its weight: it sinks 1.5px on `hand`, and its stock and shadow go flat over `--m-base`. The sheet itself survives, so the change is a real transition |
+| 170ms | The card | Only now gives up its weight: one impulse of 110 on `hand` sinks it 1.5px, and the same impulse of 150 dips the colleague, who recovers. The shadow goes flat over `--m-quick`, the stock over `--m-long`. The sheet survives the redraw, so the change is a real transition |
 | 170ms | The sentence | Rolls to "Agent review has it" |
 | 170ms | The mark | The card's own mark lifts off and flies along an arc to Overview's icon, 420 to 760ms by distance, shrinking to 55%. A dimmer mark stays behind |
-| On arrival | Overview | Its icon dips 1.5px on `hand`, and a wash of the accent fades over 640ms: something received it |
+| On arrival | Overview | The mark stays solid until contact. Then the icon takes the same small knock, and a wash of the accent fades over 640ms: something received it |
 
 Taking it on yourself is the same with your monogram in place of the colleague.
 
-**Undo plays it backwards.** The mark flies home from Overview, the card stands up, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks on arrival.
+**Undo plays it backwards.** The mark flies home from Overview, growing back to its size. On arrival the card stands up with an upward impulse, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks.
 
-**From the open card,** the card folds home first, and the chain starts as it lands, so the move plays on the card where it lies.
+**From the open card, by pointer,** the card folds home first, and the chain starts as it lands, so the move plays on the card where it lies. **By keys,** the sheet walks on to the next card and the chain plays behind it: the keys are for rhythm.
 
 ### Dismiss and undo
 
@@ -83,12 +80,12 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 
 | Part | Motion |
 |---|---|
-| The sheet | Grows from the visible part of the card with its shadow, its corner staying put. A sheet changing shape is the one thing a transform cannot do, so its size is set per frame |
-| The title and mark | The same objects: they grow from where they lay, by transform, on the same number |
-| The rest | Meta, signals, facts and rows rise 6px and fade in, 240ms, 20ms apart from 70ms |
+| The sheet | Grows from the visible part of the card with its shadow, its corner staying put, its radius going from 12 to 14. A sheet changing shape is the one thing a transform cannot do, so its size is set per frame |
+| The title, mark and latest line | The same objects: they grow from where they lay, by transform, on the same number |
+| The rest | Meta, signals, facts and rows rise 6px and fade in, 240ms, 20ms apart from 30ms |
 | The veil | Fades over `--m-slow`, and is taken away when it has gone |
 | Walking | J and K keep the sheet where it stands. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
-| Closing | The same number going home. The rest fades in 100ms. Near home the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
+| Closing | The same number going home, from wherever it is. Asked to open again on the way, it turns round with its speed. The rest fades in 100ms. Near home the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
 
 ### Carrying a card
 
@@ -96,18 +93,18 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 |---|---|
 | Lift | After 6px of travel a ghost comes up at 103% with `--h-carry`, growing from the strip to the whole card, and its place stays open |
 | Carry | The ghost follows the pointer one to one. Only its scale and its lean, up to 3.5 degrees, ride `hand` |
-| The rail | Rises on `travel` |
-| Near a target | Within 96px the target swells to 116%, and the card is pulled towards it, shrinking to 62% |
-| Drop on a target | The target pulses once and the rail holds for 340ms, so the choice is seen to land. The card goes home on `travel`, and the chain runs there: one object, one place |
+| The rail | Rises on `travel`, its targets fading up 28ms apart |
+| Near a target | Within 96px the target swells to 116%, and the card is pulled towards it on a smooth ramp, shrinking to 62% |
+| Drop on a target | The target pulses once and the rail holds for 340ms, so the choice is seen to land. The card goes home on `travel`, keeping the speed of the throw, and the chain starts 200ms in, as it comes in to land: one object, one place. A card dropped on Dismiss leaves from the rail |
 | Cancel | Esc, or letting go elsewhere: the ghost goes home on `travel` and the card takes over with no blink |
 
 ### Arrivals and piles
 
 | Moment | Motion |
 |---|---|
-| A new card | Joins at the end of its stack: comes down 20px and fades in on `self`, because nothing you did caused it, with the same rim as a landing. Neighbours make room on `hand` |
+| A new card | Joins at the end of its stack: comes down 20px and fades in on `self`, because nothing you did caused it, and the rim lights 200ms in, once it can be seen. Neighbours make room on `hand`. While the pointer is in that column it waits at the heading as "1 new", and arrives the same way when the pointer leaves |
 | A tray opens | The pile takes a knock, and the visible cards travel out of it to their cells on `travel`, 18ms apart, capped at 180ms |
-| A tray closes | The same cards travel back into the pile |
+| A tray closes | The same cards travel back into the pile, and the panel fades from 150ms |
 | A pile on hover | Its edges part by 1 and 3px over `--m-base` |
 
 ### The empty Inbox
