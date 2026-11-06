@@ -21,7 +21,7 @@ const STATES = {
   lens: { q: "replay=off", run: async (p) => { await p.click('.lens[data-lens="think"]'); await p.mouse.move(700, 880); await p.waitForTimeout(450); } },
   plan: { q: "replay=off", run: async (p) => { await p.click('.plan-head[data-fold-plan="priceengine"]'); await p.mouse.move(700, 880); await p.waitForTimeout(1100); } },
   folded: { q: "replay=off", run: async (p) => { await p.keyboard.press("Shift+F"); await p.waitForTimeout(1200); } },
-  pile: { q: "replay=off", run: async (p) => { await p.click('.pile[data-kind="reviews"]'); await p.mouse.move(700, 120); await p.waitForTimeout(1200); } },
+  pile: { q: "replay=off", run: async (p) => { await p.click('.pile[data-kind="streams"]'); await p.mouse.move(700, 120); await p.waitForTimeout(1200); } },
   drag: { q: "replay=off", run: async (p) => {
     const c = await card(p, "substitutions");
     await p.mouse.move(c.x + 60, c.y + 40); await p.mouse.down();

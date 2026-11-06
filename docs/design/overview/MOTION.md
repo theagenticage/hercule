@@ -62,7 +62,7 @@ The card scales to 0.992 at once. It is a dent, not an animation.
 
 1. **Lift.** Past 5px of movement the card leaves the page for the carry layer. It keeps its exact position. Scale goes to 1.03 on `hand`. Height rises on the same spring: a layer with `--h-carry` crossfades in, driven by the `l` (lift) channel, so the shadow visibly grows. There is no separate lift animation, so nothing delays the hand.
 2. **Follow.** Position is one to one: the card is exactly under your finger, with no lag at any speed. Only scale, height and lean ride a spring. It leans at most ±1.2 degrees, from smoothed speed, and stands straight 60ms after you stop, so text is never left tilted.
-3. **The stage answers.** A brass diamond runs along the stage rule to the target column on `hand`. The stage's name goes to ink. A faint aisle shows behind the column: at rest the stages are only alignment, so the grid appears only when it is needed.
+3. **The stage answers.** A brass diamond runs along the stage rule to the target stage's number on `hand`. The stage's name goes to ink. A faint aisle shows behind the column: at rest the stages are only alignment, so the grid appears only when it is needed.
 4. **The slot opens.** A hollow slot fades in, in `--m-quick`, at the target row. Everything below it moves aside on `hand`, including the lanes below. All of it is FLIP: the slot moves in the DOM, and everything springs from where it was, so nothing jumps. The top and bottom of a card move the slot; its middle means merge and moves nothing, so a card never runs away from the pointer.
 5. **Land.** On release the card returns to the page from exactly where it looks, and springs to the slot on `hand`, keeping the velocity of your hand. Scale, tilt and lift settle together, so it visibly comes down. The stage counts roll over.
 6. **Cancel.** Esc, or a pointer cancel, springs it home on `travel`: same path, no bounce.
@@ -75,10 +75,10 @@ Carrying several cards: the rest of the selection fly in behind the first as a s
 ### Merging
 
 1. Rest the carried card over the middle 40% of another for 600ms. A shorter wait catches people lining up a reorder.
-2. The target scales to 1.02 on `hand` and takes a focus ring and a "Merge" label on its top edge.
+2. The target scales to 1.02 on `hand` and takes a focus ring and a label naming it, "Merge into Serve smaller…", on its top edge.
 3. The carried card docks on the target's corner, 10px across and 8px down. It shrinks to 0.96 and tilts 1.6 degrees. The slot closes. Moving away undoes all of it at once.
-4. On release, the carried card slides under the target and fades, on `hand`. 60ms later the target settles from 1.03 to 1 on `hand`, and a brass ring fades over `--m-long`.
-5. A line at the foot offers Undo. Undo plays it backwards.
+4. On release, the carried card slides in under the target and fades, on `hand`. 60ms later the target settles from 1.03 to 1 on `hand`, and a brass ring fades over `--m-long`.
+5. A line at the foot offers Undo. Undo plays it backwards: the card comes out from under the target.
 
 ### Sliding a bead
 
@@ -94,7 +94,8 @@ One number from 0 to 1 on `travel` drives everything, which is why Esc halfway s
 - The pane's words are laid out once, at the final size. The growing sheet reveals them, so a paragraph never rewraps.
 - What stands behind the top edge is part of the sheet, so the tab or the head rides along.
 - The board dims 34% toward the desk. It never moves.
-- The card's place stays as a dent (`--h-etch`).
+- The card's place stays as a dent: a faint outline.
+- A Task with no card on the desk opens from its pile or its bead, so the sheet always comes from somewhere.
 
 Choosing another card while the pane is open swaps the words in 200ms. The sheet stays still, and the dent moves.
 
@@ -132,7 +133,11 @@ On opening, the board starts from how you left it and plays each change in turn,
 
 ### Done and Dropped
 
-Done: the pane closes, then the card rises 14px and moves 26px right as it fades, on `travel`: it has gone on. Dropped: it sinks 12px with a small tilt, on `travel`: it has been let go. Neighbours close up on `hand`. Undo returns it.
+Done: the card rises 14px and moves 26px right as it fades, on `travel`: it has gone on. Dropped: it sinks 12px with a small tilt, on `travel`: it has been let go. Neighbours close up on `hand`. Undo brings it back along the same path. During a walk, the details stay open and move to the next thing.
+
+### A hand-off
+
+Answering, or starting a thread, is one chain, not a cut. The colleague's head rises from behind the edge while the card still stands, on `travel`. Its paws reach the edge at 90ms. At 130ms the card gives up its height and sinks over 260ms. Undo plays it back.
 
 ### Switching views
 
