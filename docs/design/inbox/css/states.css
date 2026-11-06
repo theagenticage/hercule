@@ -6,7 +6,8 @@
 .main.is-loading .card .c-line,
 .main.is-loading .pl-title,
 .main.is-loading .pl-why { color: transparent !important; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, transparent); }
-.main.is-loading .c-title { width: 72%; height: 12px; margin-top: 3px; }
+.main.is-loading .c-title { width: 72%; height: 11px; margin-top: 4px; }
+.main.is-loading .card:not(.is-whole) .c-line, .main.is-loading .stack-foot, .main.is-loading .card.is-pile .c-title { visibility: hidden; }
 .main.is-loading .c-title { white-space: nowrap; -webkit-line-clamp: 1; }
 .main.is-loading .c-line { width: 38%; height: 10px; margin-top: 8px; }
 .main.is-loading .c-line * { visibility: hidden; }
@@ -28,7 +29,7 @@
 .zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 160; stroke-dashoffset: 0; }
 .zero-sun .ray-h { stroke: var(--brass); stroke-width: 1.5; opacity: 0.85; }
-.zero-n { position: relative; width: 92px; height: 74px; margin-top: -78px; overflow: hidden; color: var(--brass); }
+.zero-n { position: relative; width: 92px; height: 71px; margin-top: -78px; margin-bottom: 7px; overflow: hidden; color: var(--brass); }
 .zero-n .logo { display: block; }
 .zero-n .logo g { fill: var(--desk); }
 .zero-t { margin: 30px 0 6px; font-size: var(--t-20); font-weight: var(--w-bold); letter-spacing: -0.008em; }
@@ -41,7 +42,7 @@
 }
 @keyframes ray-draw { from { stroke-dashoffset: 160; opacity: 0; } }
 @keyframes rule-draw { from { transform: scaleX(0); opacity: 0; } }
-@keyframes sun-rise { from { transform: translateY(74px); clip-path: inset(0 0 74px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
+@keyframes sun-rise { from { transform: translateY(71px); clip-path: inset(0 0 71px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
 @keyframes fade-up { from { transform: translateY(6px); opacity: 0; } }
 
 /* First run: the page itself, with the first cards inviting you to connect. No dialog. */

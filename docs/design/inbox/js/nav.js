@@ -14,7 +14,7 @@ window.Nav = (function () {
     document.getElementById('side').innerHTML =
       '<div class="side-top"><button class="icon-btn" title="Hide the sidebar">' + Crew.icon('sidebar', 16) + '</button></div>' +
       '<div class="seg seg--side"><button>Threads</button><button aria-pressed="true">Hercule</button></div>' +
-      '<div class="side-actions"><button class="nav-row">' + Crew.icon('compose', 16) + '<span>New thread</span><kbd>⌘N</kbd></button><button class="icon-btn">' + Crew.icon('search', 16) + '</button></div>' +
+      '<div class="side-actions"><button class="nav-row">' + Crew.icon('compose', 16) + '<span>New thread</span><kbd>⌘N</kbd></button><button class="icon-btn" title="Search" aria-label="Search">' + Crew.icon('search', 16) + '</button><button class="icon-btn" title="Home" aria-label="Home">' + Crew.icon('office', 16) + '</button></div>' +
       '<div class="side-scroll"><section class="side-sec"><h3 class="side-h"><span>Waiting on you</span><span class="count count--you">2</span></h3>' +
       '<div class="side-row">' + Crew.face('Cut over the invoice export', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Cut over the invoice export</span><span class="side-ask">Approve the cutover for Monday?</span></span></div>' +
       '<div class="side-row">' + Crew.face('Restore a basket after sign-in', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Restore a basket after sign-in</span><span class="side-ask">Highest quantity, or add them?</span></span></div></section>' +
