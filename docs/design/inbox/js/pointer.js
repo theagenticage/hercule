@@ -55,9 +55,16 @@ window.Pointer = (function () {
     var page = document.getElementById('page');
     page.addEventListener('pointermove', function (ev) {
       if (document.documentElement.dataset.dragging) return;
-      setHover(ev.target.closest('.card'));
+      setHover(ev.target.closest('.card:not(.is-pile)'));
+      var plaque = ev.target.closest('.plaque');
+      document.querySelectorAll('.plaque.is-hover').forEach(function (p) { if (p !== plaque) p.classList.remove('is-hover'); });
+      if (plaque) plaque.classList.add('is-hover');
     });
-    page.addEventListener('pointerleave', function () { setHover(null); Moves.closeHoles(); });
+    page.addEventListener('pointerleave', function () {
+      setHover(null);
+      document.querySelectorAll('.plaque.is-hover').forEach(function (p) { p.classList.remove('is-hover'); });
+      Moves.closeHoles();
+    });
     page.addEventListener('click', function (ev) {
       var folded = ev.target.closest('.pile, .card.is-pile, .stack-foot');
       if (folded) { Tray.show(folded); return; }

@@ -1,0 +1,69 @@
+/* The story page. It reads on the same tokens as the window it describes. */
+html, body { height: auto; overflow: auto; background: var(--desk); }
+body { color: var(--ink); }
+.st { max-width: 1180px; margin: 0 auto; padding: 0 40px 120px; }
+.st-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; height: 52px; margin: 0 -40px; padding: 0 40px; background: color-mix(in oklab, var(--desk) 88%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.st-top b { font-size: var(--t-13); font-weight: var(--w-bold); }
+.st-top small { color: var(--muted); font-size: var(--t-12); }
+.st-top select { margin-left: auto; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-xs); background: var(--btn-fill); box-shadow: inset 0 0 0 1px var(--btn-rim); color: var(--ink); font: var(--type-summary); }
+.st-top a.btn { text-decoration: none; }
+
+.st-hero { padding: 72px 0 32px; max-width: 800px; }
+.st-hero h1 { margin: 0 0 14px; font-size: 40px; line-height: 46px; font-weight: var(--w-bold); letter-spacing: -0.022em; text-wrap: balance; }
+.st-hero p { margin: 0; color: var(--muted); font-size: 18px; line-height: 28px; text-wrap: pretty; }
+
+section.ch { margin-top: 88px; }
+.ch > header { max-width: 680px; margin-bottom: 24px; }
+.ch h2 { margin: 0 0 10px; font-size: 26px; line-height: 32px; font-weight: var(--w-bold); letter-spacing: -0.016em; text-wrap: balance; }
+.ch p, .ch li { color: var(--muted); font-size: 15px; line-height: 24px; text-wrap: pretty; }
+.ch p { margin: 0 0 10px; }
+.ch p b, .ch li b { color: var(--ink); font-weight: var(--w-medium); }
+.ch ul { margin: 8px 0; padding-left: 20px; }
+.ch q { color: var(--ink); quotes: "\201C" "\201D"; }
+.ch > h3 { margin: 28px 0 8px; font: var(--type-lane); color: var(--ink); }
+
+.frame { position: relative; margin: 0; border-radius: 14px; overflow: hidden; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 2px 4px oklch(0 0 0 / 0.06), 0 24px 56px -24px oklch(0 0 0 / 0.32); }
+.frame iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
+.frame-cap { display: flex; justify-content: space-between; gap: 16px; margin: 10px 2px 0; color: var(--faint); font: var(--type-summary); }
+.frame-cap a { color: var(--muted); text-decoration: underline; }
+.row { display: grid; gap: 20px; }
+.row--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.row--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.row h4 { margin: 0 0 8px; font: var(--type-card); color: var(--ink); }
+
+.try { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+
+.anat { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 40px; align-items: center; padding: 36px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim); }
+.anat-card { position: relative; width: 360px; zoom: 1.34; }
+.anat-pin { position: absolute; z-index: 5; display: grid; place-items: center; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 9px; font-weight: var(--w-bold); box-shadow: 0 0 0 2px var(--bg); }
+.anat ol { list-style: none; margin: 0; padding: 0; }
+.anat li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; padding: 5px 0; font-size: var(--t-13); line-height: 19px; }
+.anat li i { display: grid; place-items: center; width: 17px; height: 17px; margin-top: 1px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 10px; font-style: normal; font-weight: var(--w-bold); }
+
+.k-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.k-cell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 18px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim); }
+.k-card .card { position: relative; }
+.k-table { margin: 0; color: var(--muted); font-family: var(--font-mono); font-feature-settings: normal; font-size: 11px; line-height: 17px; white-space: pre-wrap; }
+.k-table .t-k { color: var(--faint); display: inline-block; min-width: 88px; }
+.k-table .t-v { color: var(--ink); }
+
+.card--loose { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; align-content: start; height: auto; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
+.card--loose .c-acts { display: none; }
+.anat-card .card { height: auto; }
+
+.swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.sw { height: 88px; padding: 10px 12px; border-radius: var(--card-r); box-shadow: var(--h-stand); font: var(--type-summary); color: var(--ink); }
+.sw b { display: block; font-weight: var(--w-medium); }
+.sw small { color: var(--muted); font: var(--type-meta); }
+.shapes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px 12px; padding: 16px 18px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim); }
+.shapes div { display: flex; align-items: center; gap: 8px; font: var(--type-summary); color: var(--muted); }
+
+.gal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 16px; }
+.gal a { color: var(--muted); font: var(--type-summary); text-decoration: none; }
+.gal img { display: block; width: 100%; margin-bottom: 6px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--stock-rim), 0 10px 26px -14px oklch(0 0 0 / 0.3); }
+
+table.st-t { width: 100%; border-collapse: collapse; font-size: var(--t-13); line-height: 20px; color: var(--muted); }
+.st-t th { padding: 6px 12px 6px 0; text-align: left; color: var(--ink); font-weight: var(--w-medium); border-bottom: 1px solid var(--line-soft); }
+.st-t td { padding: 7px 12px 7px 0; vertical-align: top; border-bottom: 1px solid var(--divider); }
+.st-t td:first-child { color: var(--ink); white-space: nowrap; }
+@media (max-width: 900px) { .row--3, .row--2, .anat, .k-grid, .gal { grid-template-columns: minmax(0, 1fr); } .swatches, .shapes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

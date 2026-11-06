@@ -25,6 +25,8 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 await page.goto(url, { waitUntil: "load" });
 await page.waitForTimeout(+opt.wait);
+// --slow 0.1 plays every CSS transition and Web Animation at a tenth of its speed, to judge motion frame by frame.
+if (opt.slow) { const cdp = await ctx.newCDPSession(page); await cdp.send("Animation.enable"); await cdp.send("Animation.setPlaybackRate", { playbackRate: +opt.slow }); }
 // The point of a card that is really visible: 14px into its strip, left of the action buttons.
 const pointOf = (id) => page.evaluate((id) => {
   const el = document.querySelector(`[data-id="${id}"]`);

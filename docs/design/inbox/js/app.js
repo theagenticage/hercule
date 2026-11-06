@@ -37,7 +37,7 @@ window.App = (function () {
     var streams = {}, out = [];
     list.forEach(function (e) {
       if (!e.stream) { out.push(e); return; }
-      if (!streams[e.stream]) { streams[e.stream] = { pile: true, id: 'stream-' + e.stream, title: e.stream, members: [], since: e.since, kind: e.kind }; out.push(streams[e.stream]); }
+      if (!streams[e.stream]) { streams[e.stream] = { pile: true, id: 'stream-' + e.stream, title: e.stream, members: [], since: e.since, kind: e.kind, note: 'One stream of like things' }; out.push(streams[e.stream]); }
       streams[e.stream].members.push(e);
     });
     return out;
@@ -45,7 +45,7 @@ window.App = (function () {
 
   /** Returns one folded pile of a group: `members` are the entities it holds. */
   function buildPile(id, title, members, note) {
-    return { pile: { id: id, title: title, members: members, kind: members[0].kind, note: note } };
+    return { pile: { id: id, title: title, members: members, kind: members[0].kind, note: note || '' } };
   }
 
   /** Returns the value a kind groups by, for an entity. */
@@ -64,15 +64,13 @@ window.App = (function () {
         if (!groups[g]) { groups[g] = []; order.push(g); }
         groups[g].push(e);
       });
-      var room = depth - order.length * 28;
-      var quota = Math.max(1, Math.floor(room / order.length / tight.two) - 1);
-      var total = lying.length;
-      var fits = total * tight.two + order.length * 28 + 40 <= depth;
+      var fits = lying.length * tight.two + order.length * 28 + 40 <= depth;
       order.forEach(function (g) {
-        var list = groups[g], kept = fits ? list.length : Math.min(list.length, quota);
+        var list = groups[g];
+        // Past what the shelf can show, a project is one pile, so the shelf reads as a list of projects.
+        if (!fits && list.length > 1) { items.push(buildPile('fold-' + g, g, list, list[0].title)); return; }
         items.push({ tab: 28, label: g, count: list.filter(function (e) { return !e.leaving; }).length });
-        list.slice(0, kept).forEach(function (e) { items.push({ e: e }); });
-        if (kept < list.length) items.push(buildPile('fold-' + g, list.length - kept + ' more in ' + g, list.slice(kept), ''));
+        list.forEach(function (e) { items.push({ e: e }); });
       });
       return items;
     }
@@ -92,7 +90,7 @@ window.App = (function () {
     keys.sort(function (a, b) { return byGroup[b].length - byGroup[a].length; });
     keys.slice(0, 2).forEach(function (g, i) {
       var members = i === 1 ? [].concat.apply([], keys.slice(1).map(function (k) { return byGroup[k]; })) : byGroup[g];
-      out.push(buildPile('fold-' + name + '-' + i, members.length + ' more' + (i === 1 && keys.length > 2 ? '' : ' in ' + g), members, 'Newer than the cards above'));
+      out.push(buildPile('fold-' + name + '-' + i, i === 1 && keys.length > 2 ? 'The rest' : g, members, 'Newer than the cards above'));
     });
     return out;
   }
@@ -185,10 +183,10 @@ window.App = (function () {
             var pe = els[it.pile.id];
             if (!pe) { pe = els[it.pile.id] = drawStreamPile(it.pile); host.appendChild(pe); }
             pe.querySelector('.c-title').textContent = it.pile.title;
-            pe.querySelector('.pile-n').textContent = it.pile.note === undefined ? it.pile.members.length : '';
-            pe.querySelector('.c-roll').textContent = it.pile.note === undefined ? 'One stream of like things' : it.pile.note;
+            pe.querySelector('.pile-n').textContent = it.pile.members.length;
+            pe.querySelector('.c-roll').textContent = it.pile.note;
             pe._members = it.pile.members;
-            it.el = pe; it.full = 49; it.two = 49; it.one = 34; it.gap = 14;
+            it.el = pe; it.full = 58; it.two = 58; it.one = 58; it.gap = 8;
             return;
           }
           var e = it.e, el = els[e.id];
@@ -273,7 +271,7 @@ window.App = (function () {
     var el = document.createElement('button');
     el.className = 'card is-pile';
     el.dataset.pile = pile.id;
-    el.innerHTML = '<span class="pile-back"></span><span class="pile-back"></span><i class="card-stock"></i><div class="c-mark">' + Card.drawMark(K[pile.kind].plugin) + '</div><h3 class="c-title">' + Card.esc(pile.title) + '</h3><div class="c-pace"><span class="pile-n"></span></div><div class="c-line"><span class="c-roll">One stream of like things</span></div>';
+    el.innerHTML = '<span class="pile-back"></span><span class="pile-back"></span><i class="card-stock"></i><div class="c-mark">' + Card.drawMark(K[pile.kind].plugin, K[pile.kind].density === 'tight' ? 17 : 20) + '</div><h3 class="c-title"></h3><div class="c-pace"><span class="pile-n"></span></div><div class="c-line"><span class="c-roll"></span></div>';
     return el;
   }
 

@@ -27,7 +27,7 @@
 .zero-sun { position: relative; width: 720px; max-width: 80%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1; stroke-linecap: round; opacity: 0.62; stroke-dasharray: 160; stroke-dashoffset: 0; }
 .zero-sun .ray-h { stroke: var(--brass); stroke-width: 1; opacity: 0.8; }
-.zero-n { margin-top: -158px; height: 150px; font-family: var(--font-deco); font-feature-settings: normal; font-size: 148px; line-height: 150px; color: var(--ink); }
+.zero-n { margin-top: -152px; height: 140px; font-family: var(--font-deco); font-feature-settings: normal; font-size: 136px; line-height: 140px; color: var(--ink); }
 .zero-t { margin: 34px 0 6px; font-size: var(--t-20); font-weight: var(--w-bold); letter-spacing: -0.008em; }
 .zero-s { margin: 0; color: var(--muted); font-size: var(--t-14); }
 @media (prefers-reduced-motion: no-preference) {
@@ -125,3 +125,10 @@ html[data-dragging] * { cursor: grabbing !important; }
 .plaque.is-handed { background: transparent; box-shadow: inset 0 0 0 1px var(--stock-rim-flat); color: var(--muted); transition: background var(--m-long) var(--m-ease), color var(--m-long) var(--m-ease); }
 .plaque.is-handed .pl-why { color: var(--muted); }
 .plaque.is-handed .pl-src { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--stock-rim-flat); }
+
+/* The sheet of keys. */
+.keys { position: absolute; right: 24px; bottom: 54px; z-index: 36; width: 250px; padding: 12px 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry); font: var(--type-summary); }
+.keys[hidden] { display: none; }
+.keys h2 { margin: 0 0 6px; font: var(--type-lane); }
+.keys div { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; min-height: 24px; color: var(--muted); }
+.keys kbd { justify-self: start; }

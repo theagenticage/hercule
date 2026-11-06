@@ -36,8 +36,8 @@ window.Moves = (function () {
     App.redrawCard(e);
     el.classList.add('is-handing');
     Landing.rollLine(el, old);
-    var who = el.querySelector('.c-who > *');
-    if (who) Motion.animate(who, [{ transform: 'scale(.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: Motion.SPRINGS.drop.ms, easing: Motion.SPRINGS.drop.ease });
+    var who = el.querySelector('.card-holder > *');
+    if (who) Motion.animate(who, [{ transform: 'translateY(20px)' }, { transform: 'none' }], { duration: Motion.SPRINGS.drop.ms, delay: 120, fill: 'backwards', easing: Motion.SPRINGS.drop.ease });
     setTimeout(function () { el.classList.remove('is-handing'); }, 700);
     setTimeout(function () { flyToWork(el, e); }, 120);
     App.layOut();

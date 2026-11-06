@@ -92,4 +92,19 @@ window.Keys = (function () {
   return { start: start, focus: focus, focused: function () { return focused; } };
 })();
 
-window.Help = { toggle: function () {} };
+// The sheet of keys, on ?.
+window.Help = (function () {
+  var el;
+  var KEYS = [['↑ ↓ ← →', 'Move through the page'], ['J K', 'Next, previous'], ['Space', 'Open the card'], ['H', 'Hand to an agent'], ['T', 'Take it on myself'], ['E', 'Dismiss'], ['G', 'See its Task on Work'], ['⌘Z', 'Undo'], ['Esc', 'Close, or let go']];
+  function toggle() {
+    if (!el) {
+      el = document.createElement('aside');
+      el.className = 'keys';
+      el.innerHTML = '<h2>Keys</h2>' + KEYS.map(function (k) { return '<div><kbd>' + k[0] + '</kbd><span>' + k[1] + '</span></div>'; }).join('');
+      document.getElementById('main').appendChild(el);
+      return;
+    }
+    el.hidden = !el.hidden;
+  }
+  return { toggle: toggle };
+})();

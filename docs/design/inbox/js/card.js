@@ -154,10 +154,14 @@
   /** Returns the HTML of a plaque: the lacquer card of what Hercule noticed. */
   function drawPlaque(c) {
     var marks = c.sources.map(function (s) { return '<span class="pl-src">' + Crew.brand(s, 13) + '</span>'; }).join('');
+    var flows = readWorkflows(c);
     return '<article class="plaque" data-id="' + c.id + '" tabindex="-1" aria-label="Hercule noticed: ' + esc(c.title) + '">' +
       '<div class="pl-marks">' + marks + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(c.why) + '</div>' +
+      '<div class="c-acts pl-acts"><button class="c-act c-act--hand" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
+      '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
+      '<button class="c-act c-act--plain" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button></div>' +
       '</article>';
   }
 

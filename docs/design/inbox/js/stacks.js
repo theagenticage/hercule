@@ -33,7 +33,7 @@
       var m = items[i];
       if (m.tab) { out.push({ y: y, show: m.tab, level: 'tab' }); y += m.tab; continue; }
       if (i === firstCard) { out.push({ y: y, show: m.full, level: 'full' }); y += m.full + 2; continue; }
-      var grow = m.two - m.one, level = m.two > m.one && spare >= grow ? 'two' : 'one';
+      var grow = m.two - m.one, level = spare >= grow ? 'two' : 'one';
       if (level === 'two') spare -= grow;
       var show = level === 'two' ? m.two : m.one;
       out.push({ y: y, show: show, level: level });

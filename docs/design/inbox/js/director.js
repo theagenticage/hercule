@@ -1,8 +1,27 @@
 // The small dock for a reviewer: switch the theme, jump to a state, land a signal. It is not part of the product.
 window.Director = (function () {
   var THEMES = [['whitehaven', 'Whitehaven'], ['styles', 'Styles'], ['orient-express', 'Orient Express'], ['nile', 'Nile'], ['end-house', 'End House'], ['blue-train', 'Blue Train']];
+  // What the story page's buttons can ask of a framed window.
+  var SIGNALS = {
+    comment: ['pr-6238', function () { return World.signal('commented', 0.02, 'omar-haddad', null, 'Should the retry wait for the gateway\'s own timeout?'); }],
+    fail: ['pr-6266', function () { var s = World.signal('checksFailed', 0.01); s.state = 'failing'; return s; }],
+    mail: ['mail-1', function () { return World.signal('replied', 0.01, 'felix-marsh', null, 'Thursday works for the depots.'); }],
+  };
+  function listen() {
+    window.addEventListener('message', function (ev) {
+      var m = ev.data || {};
+      if (m.land) Landing.land(App.findEntity(SIGNALS[m.land][0]), SIGNALS[m.land][1]());
+      if (m.hand) Moves.hand(App.findEntity(m.hand));
+      if (m.take) Moves.take(App.findEntity(m.take));
+      if (m.undo) Moves.undo();
+    });
+  }
+
   function start() {
     var params = new URLSearchParams(location.search);
+    listen();
+    if (params.get('open')) setTimeout(function () { Open.show(params.get('open')); }, 300);
+    if (params.get('view')) Pages.setView(params.get('view'));
     if (params.get('dock') === '0') return;
     var dock = document.createElement('aside');
     dock.className = 'dock';

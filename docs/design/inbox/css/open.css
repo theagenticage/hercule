@@ -206,14 +206,13 @@
 .ib-notice a { text-decoration: underline; cursor: pointer; }
 .notice-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
 
-/* The piles. */
-.stack .card.is-pile { width: auto; text-align: left; }
-.pile-back { position: absolute; left: 6px; right: 6px; top: -3px; height: 12px; border-radius: 9px 9px 0 0; background: var(--stock); box-shadow: var(--h-flat); z-index: -3; }
-.pile-back + .pile-back { left: 12px; right: 12px; top: -6px; z-index: -4; }
+/* The piles: one strip with the edges of the cards under it. */
+.stack .card.is-pile { width: auto; text-align: left; cursor: pointer; }
+.stack .card.is-pile > .card-stock { box-shadow: var(--h-stand); }
+.stack .card.is-pile:hover > .card-stock { box-shadow: var(--h-hover); }
+.pile-back { position: absolute; left: 7px; right: 7px; bottom: -4px; height: 14px; border-radius: 0 0 10px 10px; background: var(--stock); box-shadow: var(--h-flat), 0 1px 2px var(--h-stack-shade); z-index: -2; transition: transform var(--m-base) var(--spring-fan, var(--m-ease)); }
+.pile-back + .pile-back { left: 14px; right: 14px; bottom: -8px; z-index: -3; }
+.card.is-pile:hover .pile-back { transform: translateY(1px); }
+.card.is-pile:hover .pile-back + .pile-back { transform: translateY(3px); }
 .pile-n { color: var(--muted); font-variant-numeric: tabular-nums; }
-.pile { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: block; text-align: left; }
-.pile-edge { position: absolute; left: 6px; right: 6px; top: 0; height: 8px; border-radius: 0 0 9px 9px; background: var(--stock); box-shadow: var(--h-flat); }
-.pile-edge + .pile-edge { left: 12px; right: 12px; top: 5px; z-index: -1; }
-.pile-label { position: absolute; left: 2px; top: 13px; color: var(--faint); font: var(--type-summary); }
-.pile-label b { color: var(--muted); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
-.pile:hover .pile-label { color: var(--muted); }
+.card.is-pile .c-line { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

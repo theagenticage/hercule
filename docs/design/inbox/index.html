@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Inbox</title>
+<script src="../shared/page.js"></script>
+<link rel="stylesheet" href="vendor/tokens.css">
+<link rel="stylesheet" href="vendor/row-heights.css">
+<link rel="stylesheet" href="vendor/base.css">
+<link rel="stylesheet" href="vendor/controls.css">
+<link rel="stylesheet" href="vendor/face.css">
+<link rel="stylesheet" href="vendor/primitives.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/card.css">
+<link rel="stylesheet" href="css/story.css">
+</head>
+<body>
+<div class="st">
+  <div class="st-top"><b>The Inbox</b><small>Hi-fi design, session B</small>
+    <select id="theme" title="Theme"><option value="whitehaven">Whitehaven</option><option value="styles">Styles</option><option value="orient-express">Orient Express</option><option value="nile">Nile</option><option value="end-house">End House</option><option value="blue-train">Blue Train</option></select>
+    <a class="btn btn--sm btn--accent" href="desktop.html">Open the window</a>
+  </div>
+
+  <div class="st-hero">
+    <h1>A card index for everything out there.</h1>
+    <p>Rogier, this is where every outside thing that concerns you lands, before you take it on. It never scrolls. A pull request looks like a pull request, a ticket like a ticket, and you can tell them apart by logo alone. Signals live inside their card, so the feed becomes things with a history.</p>
+  </div>
+
+  <figure class="frame" id="hero" data-q="live=1" aria-label="The Inbox on a morning, live"></figure>
+  <figcaption class="frame-cap"><span>This frame is live. Signals land on cards every few seconds. Hover a card, click one, drag one.</span><a href="desktop.html">Open it full size</a></figcaption>
+
+  <section class="ch">
+    <header>
+      <h2>One rule: a stack has a fixed depth, and its cards share it.</h2>
+      <p>The lo-fi Inbox was right about cards and had two weaknesses: <q>still a long page</q>, and it repeated itself. Both are gone.</p>
+      <p>Things rest in a few stacks that stand in fixed places. With room, each card is whole. With less room, the cards overlap, like cards in a file drawer: the first stays whole and the others show two lines. With too many, the newest fold into piles. <b>Nothing scrolls, and nothing changes place.</b> You learn where things are, the way you know your own desk.</p>
+      <p>This one rule is why the page stays calm at 8 cards and at 300. There is no compact mode to switch to.</p>
+    </header>
+    <div class="row row--3">
+      <div><h4>A light day: 8 cards</h4><figure class="frame" data-q="live=0&scene=light" aria-label="A light day"></figure></div>
+      <div><h4>A normal morning: 34 cards</h4><figure class="frame" data-q="live=0" aria-label="A morning"></figure></div>
+      <div><h4>A week away: 300 cards</h4><figure class="frame" data-q="live=0&scene=volume" aria-label="300 cards"></figure></div>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>The page says only what differs.</h2>
+      <p>The lo-fi card said <q>Review requested</q> on every card, and showed a green check on every card. That is the repetition. So the rule here is: <b>what is usual says nothing.</b></p>
+      <ul>
+        <li>The stack's heading says why most cards are in it, so a card in To review shows only who asks: <b>Juno Park</b>.</li>
+        <li>What is unusual gets the words and the colour: <b>Felix asked again</b>, <b>Checks failed</b>, <b>Omar requested changes</b>.</li>
+        <li>A healthy pull request shows no status at rest. Only trouble draws a shape, so a column of red marks needs no reading.</li>
+      </ul>
+    </header>
+    <div class="anat">
+      <div class="anat-card" id="anat"></div>
+      <ol>
+        <li><i>1</i><span><b>Mark.</b> The plugin's logo, 20px, the first thing in the row. Marks line up down the stack, so provenance reads as one straight line.</span></li>
+        <li><i>2</i><span><b>Title.</b> 13/18 medium, shared with Work.</span></li>
+        <li><i>3</i><span><b>Pace.</b> How long it has waited, measured against the patience of its kind. It darkens as patience runs out.</span></li>
+        <li><i>4</i><span><b>Person.</b> A monogram. People are letters; faces are for colleagues.</span></li>
+        <li><i>5</i><span><b>Reason.</b> The latest signal, in one sentence.</span></li>
+        <li><i>6</i><span><b>The rest.</b> A quiet count of the signals behind it.</span></li>
+        <li><i>7</i><span><b>Status.</b> One shape from a fixed set, plus a tone.</span></li>
+        <li><i>8</i><span><b>Identifier and context.</b> Shown on a whole card, and on approach.</span></li>
+        <li><i>9</i><span><b>Facts.</b> At most three short ones, in a fixed set of forms.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>One card, drawn from a table. A plugin never ships UI.</h2>
+      <p>Every card below comes from the same function, which has no branch on a kind. All a kind can do is fill in a table: its mark and hue, its stock, its density, its pace, its identifier, its status shapes, its facts. <b>Quayside is a plugin I made up.</b> It ships this table and one mark, and no code.</p>
+      <p>So GitHub reads as GitHub (<b>#6213</b>, a diff in green and red, a fork shape), Linear reads as Linear (tight, a ledger stock, a key like <b>SHOP-360</b>, progress circles, priority bars), and a mail thread reads as a letter on manila, with no status at all.</p>
+    </header>
+    <div class="k-grid" id="kinds"></div>
+    <h3>The fixed set of status shapes</h3>
+    <div class="shapes" id="shapes"></div>
+    <h3>The fixed set of stock</h3>
+    <div class="swatches">
+      <div class="sw" style="background:var(--raised)"><b>Bond</b><small>The default</small></div>
+      <div class="sw" style="background:var(--stock-ledger)"><b>Ledger</b><small>Cool: tickets</small></div>
+      <div class="sw" style="background:var(--stock-manila)"><b>Manila</b><small>Warm: letters</small></div>
+      <div class="sw" style="background:var(--stock-sage)"><b>Sage</b><small>Green: orders</small></div>
+      <div class="sw" style="background:var(--lacquer);color:var(--lacquer-ink);box-shadow:inset 0 0 0 1px var(--lacquer-rim)"><b>Lacquer</b><small style="color:var(--lacquer-sub)">Hercule's own</small></div>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Signals live inside their entity.</h2>
+      <p>At rest a card shows the latest reason it is here, and a quiet count of the rest. A second review request, a mention or a failed check adds a line to the same card. It never adds a card, and it never moves one.</p>
+      <p>That moment gets the one flourish the Inbox allows itself: the card takes a small knock, the old sentence rolls away, the new one rolls in, the count ticks, and a rim of light fades in the colour of the news. Then everything is still again.</p>
+    </header>
+    <figure class="frame" id="signal" data-q="live=0" aria-label="A signal landing"></figure>
+    <div class="try">
+      <button class="btn btn--sm" data-to="signal" data-send='{"land":"comment"}'>Omar comments on #6238</button>
+      <button class="btn btn--sm" data-to="signal" data-send='{"land":"fail"}'>Checks fail on #6266</button>
+      <button class="btn btn--sm" data-to="signal" data-send='{"land":"mail"}'>Felix replies to the mail thread</button>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Different kinds keep different time.</h2>
+      <p>The working names are gone. Rather than sort by speed, the page says what you would do next.</p>
+    </header>
+    <table class="st-t">
+      <tr><th>Was</th><th>Now</th><th>How it behaves</th></tr>
+      <tr><td>Triage</td><td>Noticed</td><td>Hercule's own, in lacquer, above everything, one short reason. The only dark objects on the page, so the eye goes there first. Three at most, on the same grid as the stacks.</td></tr>
+      <tr><td>Fast</td><td>To review, To answer, To finish</td><td>On the clock. Oldest first, because people wait in order. Waiting time leads each row and darkens against the kind's patience.</td></tr>
+      <tr><td>Slow</td><td>On the shelf</td><td>No clock. Grouped by project, tighter, with team and key in view. Past what fits, a project becomes one pile.</td></tr>
+    </table>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Handing off should feel like giving it to a capable colleague.</h2>
+      <p>Hover a card and its actions take the place of the wait: the faces of the workflows that fit, your own monogram, and a close. With one workflow it is one click. With several, a small menu names them. Press H, or pick the card up and drop it on a colleague.</p>
+      <p>The card then lies flat, and <b>the colleague's head rises behind its top edge</b>, the same slot Work uses. The sentence rolls to <b>Agent review has it</b>, and a small token flies to Overview, so you see where the Task went. Take it on yourself and a marigold tab stands there instead.</p>
+      <p>The card stays where it is while you are here. You watch the list go quiet from the top, the way ticked items stay put in Things. On your next visit it has settled at the foot of its stack, counted as <b>on Work</b>, with a way through.</p>
+    </header>
+    <figure class="frame" id="hand" data-q="live=0" aria-label="Handing a card to an agent"></figure>
+    <div class="try">
+      <button class="btn btn--sm" data-to="hand" data-send='{"hand":"pr-6204"}'>Hand #6204 to Agent review</button>
+      <button class="btn btn--sm" data-to="hand" data-send='{"take":"pr-6241"}'>Take #6241 on myself</button>
+      <button class="btn btn--sm" data-to="hand" data-send='{"undo":true}'>Undo</button>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>A card opens where it lies.</h2>
+      <p>Its corner stays put and it unfolds across its neighbours, so the eye does not travel and nothing behind it moves. Open, it shows the signals in order, its facts, and its moves as the ledger Intake already uses. Esc folds it back into its place.</p>
+    </header>
+    <figure class="frame" data-q="live=0&open=pr-6213" aria-label="An open card"></figure>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Intake stays the noisy layer. Things rise out of it.</h2>
+      <p>Intake moves behind the Inbox, the way Office sits behind Overview: one pill, <b>Cards</b> and <b>Intake</b>, and one sidebar row fewer. It is now grouped by entity, so an error with 200 events is one line. This is a sketch, as asked.</p>
+      <p>Something rises in two ways. Hercule raises it, and it arrives in Noticed. Or you press <b>Raise to Inbox</b>, the row lifts, and a token flies to Cards.</p>
+    </header>
+    <figure class="frame" data-q="live=0&view=intake" aria-label="Intake grouped by entity"></figure>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Where it lives, and how it asks for you.</h2>
+      <p>Inbox takes the row Intake had. It tells you it needs you without nagging:</p>
+      <ul>
+        <li>The row shows a plain grey number, not a marigold badge. It counts only what has outlasted its patience, plus what Hercule noticed.</li>
+        <li>A signal landing on a card you already have never raises the number. Only a new thing does, and the digit rolls once. No bounce, no dock badge.</li>
+        <li>The page's own sentence gives the one fact worth a glance: <b>Juno has waited longest.</b></li>
+      </ul>
+    </header>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Every state is designed.</h2>
+      <p>The Inbox at zero is a sunrise: the numeral is the sun, in the book's Deco face, and brass rays draw themselves out from it when the last card leaves. Loading uses the real cards with their words held back, so nothing shifts when they arrive. Nothing fails silently: offline and a failing source each say what they mean for what you see.</p>
+    </header>
+    <div class="gal" id="gal"></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>What I rejected, and what is new.</h2>
+      <p>I sketched three compositions on the real tokens, kept in <a href="sketches/a-clock-and-shelf.html">sketches/</a>. <b>A grid of cards with a shelf beside it</b> was a long wall. <b>A desk of piles</b> was wonderfully calm and hid too much. <b>The card index</b> read as quiet as the thread list you still prefer, and I noticed the piles are the same object at another compression. So one model covers both.</p>
+      <p>The system gains: <b>stacks</b> and their one rule, <b>lacquer</b>, <b>stock with a trace of hue</b>, <b>marks in a declared hue</b>, <b>patience</b> as a field of a kind, the <b>peek</b>, and the <b>kept hole</b>. The full list is in <a href="DESIGN.md">DESIGN.md</a>, the motion in <a href="MOTION.md">MOTION.md</a>.</p>
+    </header>
+  </section>
+</div>
+<script src="vendor/brands.js"></script>
+<script src="vendor/crew.js"></script>
+<script src="js/kinds.js"></script>
+<script src="js/world.js"></script>
+<script src="js/card.js"></script>
+<script src="js/frames.js"></script>
+<script src="js/story.js"></script>
+</body>
+</html>

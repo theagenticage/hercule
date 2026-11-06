@@ -212,6 +212,8 @@
 .card[data-height="flat"] .mark { opacity: 0.6; }
 .card[data-height="flat"] .c-line { color: var(--muted); }
 
+.stack .card .card-holder { right: 44px; }
+
 /* The plaque: Hercule's own, in lacquer. */
 .plaque {
   position: relative;
@@ -260,3 +262,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.plaque .pl-acts { background: linear-gradient(90deg, transparent, var(--lacquer) 18px); top: 50%; right: 10px; transform: translateY(-50%); }
+.plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
+.plaque .c-act { color: var(--lacquer-sub); }
+.plaque .c-act:hover { background: color-mix(in oklab, white 12%, transparent); color: var(--lacquer-ink); }
+.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--lacquer-ink), var(--lacquer-shadow); }

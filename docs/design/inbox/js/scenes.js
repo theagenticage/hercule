@@ -55,11 +55,11 @@ window.Scenes = (function () {
 
   /** Returns the rays of the sunrise behind the empty Inbox's numeral. */
   function drawRays() {
-    var out = '', cx = 360, cy = 250, n = 41;
+    var out = '', cx = 360, cy = 250, n = 45;
     for (var i = 0; i < n; i++) {
       var a = Math.PI * (i / (n - 1));
       var long = i % 2 === 0;
-      var r0 = 96, r1 = long ? 232 : 176;
+      var r0 = 124, r1 = long ? 240 : 186;
       var x0 = cx - Math.cos(a) * r0, y0 = cy - Math.sin(a) * r0, x1 = cx - Math.cos(a) * r1, y1 = cy - Math.sin(a) * r1;
       var d = Math.abs(i - (n - 1) / 2);
       out += '<line class="ray" style="--d:' + (d * 26) + 'ms" x1="' + x0.toFixed(1) + '" y1="' + y0.toFixed(1) + '" x2="' + x1.toFixed(1) + '" y2="' + y1.toFixed(1) + '"/>';
