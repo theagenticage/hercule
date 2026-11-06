@@ -1,0 +1,43 @@
+/* COLLEAGUES WHO NOTICE. A head is really behind the sheet, each one sits a little differently, and
+   they glance at you as you pass. Nothing here says anything new: the card still reads the same. */
+
+html[data-b-colleagues] {
+  /* The darkening in the crevice where a head meets the sheet's top edge. colleagues.js draws it
+     inside the head, in the head's own outline, so it never lands on the desk beside it. */
+  --b-crevice: oklch(0.3 0.05 270 / 0.34);
+  --b-paw-contact: oklch(0.3 0.03 70 / 0.26);
+}
+html[data-b-colleagues]:not([data-theme="whitehaven"], [data-theme="styles"]) {
+  --b-crevice: oklch(0.1 0.02 270 / 0.26);
+  --b-paw-contact: oklch(0 0 0 / 0.42);
+}
+
+/* The sheet does the cutting, not a clipped box: the rest of the head carries on behind it. That is
+   what lets a head rise on hover without its lower edge coming into view. */
+html[data-b-colleagues] .card-head { overflow: visible; }
+/* Someone whose run has just failed does not perk up, and the badge under the plaster stays out of sight. */
+html[data-b-colleagues] .card-head[data-pose="failed"] { overflow: hidden; }
+
+html[data-b-colleagues] :is(.card-head, .side-row, .c-holder-in) .cr { rotate: var(--b-lean, 0deg); }
+html[data-b-colleagues] .card-head .cr {
+  transform-origin: 50% 96%;
+  transition: translate var(--m-slow) var(--m-settle);
+}
+
+/* The paws press on the sheet, so they leave a small shadow on it. They keep tapping as they did. */
+html[data-b-colleagues] .card-paws i {
+  box-shadow:
+    inset 0 -1px 0 oklch(calc(var(--char-l) - var(--char-shade)) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris))),
+    0 0 0 0.5px oklch(0 0 0 / 0.18),
+    0 1px 1.5px var(--b-paw-contact);
+}
+
+/* Under the pointer a colleague looks up from behind the card. A person caused it, so it answers at
+   the speed of a hand. */
+html[data-b-colleagues]:not([data-still="1"]) :is(.card:hover, .card.is-focus, .card:focus-visible, .noticed:hover) .card-head:not([data-pose="failed"]) .cr { translate: 0 -3px; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-b-colleagues] .card-head .cr { translate: none !important; transition: none; }
+}
+html[data-b-colleagues][data-motion="reduced"] .card-head .cr { translate: none !important; transition: none; }
+/* The Inbox's Hercule has no card of his own to saturate him on hover. */
+html[data-b-colleagues] .noticed:hover .card-head { filter: none; }

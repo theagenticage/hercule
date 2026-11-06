@@ -1,0 +1,49 @@
+/* FINE LINES. On a Retina screen a 1px rule is two device pixels thick. Every hairline here is drawn
+   at one device pixel, which is what makes a printed page look crisp. Where a rule runs across an
+   open surface it fades out before the far edge, so no line ends in a hard stop. An initiative's
+   line goes the same way: thinner, with its beads sitting right on it. */
+
+html[data-b-hairlines] {
+  /* Full strength at one device pixel would read as thinner, so the colour steps up a little. */
+  --hair-w: 1px;
+}
+@media (min-resolution: 2dppx) {
+  html[data-b-hairlines] { --hair-w: 0.5px; --divider: color-mix(in oklab, var(--ink) 15%, var(--bg)); --line-soft: color-mix(in oklab, var(--ink) 11%, transparent); }
+}
+html[data-b-hairlines] :is(.lane, .pn-foot, .ad-foot) { border-top-width: var(--hair-w); }
+html[data-b-hairlines] :is(.later-row, .b-head) { border-bottom-width: var(--hair-w); }
+html[data-b-hairlines] .b-work > :is(.bundle + .bundle, .echo) { border-top-width: var(--hair-w); }
+html[data-b-hairlines] .stack-members { border-left-width: var(--hair-w); }
+html[data-b-hairlines] .menu-line { height: var(--hair-w); }
+
+/* The stage rule starts firmly under "Exploring", on the page's left edge, and fades at the far end. */
+html[data-b-hairlines] .rule {
+  border-bottom: var(--hair-w) solid;
+  border-image: linear-gradient(90deg, var(--divider), var(--divider) calc(100% - 28px), transparent) 1;
+}
+
+/* A row's rule starts where its words start and fades before the far edge of the surface. */
+html[data-b-hairlines] :is(.b-head, .b-work > .bundle + .bundle, .b-work > .echo) {
+  border-image: linear-gradient(90deg, transparent 16px, var(--line-soft) 16px, var(--line-soft) calc(100% - 72px), transparent) 1;
+}
+
+/* An initiative's line. Beads sit on it with no gap round them, so a run of beads reads as beads on a
+   thread and not as dots and dashes. Rings still hide the line, so they read as open. */
+html[data-b-hairlines] { --thread-w: 2px; }
+@media (min-resolution: 2dppx) { html[data-b-hairlines] { --thread-w: 1.5px; } }
+html[data-b-hairlines] .wire::before {
+  height: var(--thread-w);
+  margin-top: calc(var(--thread-w) / -2);
+  background: linear-gradient(90deg, var(--plan-soft), var(--plan-soft) calc(100% - 56px), transparent);
+}
+html[data-b-hairlines] .wire-reach { height: var(--thread-w); margin-top: calc(var(--thread-w) / -2); }
+html[data-b-hairlines] .bead { box-shadow: none; }
+html[data-b-hairlines] .bead[data-kind="landed"] { box-shadow: inset 0 0 0 1.75px var(--plan-ink); }
+html[data-b-hairlines] .bead[data-kind="blocked"] { box-shadow: inset 0 0 0 1.75px var(--plan-soft); }
+
+/* An opened initiative's bar is the same ink, and it runs out rather than stopping. */
+html[data-b-hairlines] .plan-band {
+  border-left: 0;
+  padding-left: 12px;
+  background: linear-gradient(var(--plan-ink), var(--plan-soft) 72%, transparent) left top / var(--thread-w) 100% no-repeat;
+}

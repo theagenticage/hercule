@@ -1,0 +1,54 @@
+/* ONE RING. At rest the ring is the clean ring, drawn by the card itself, so it
+   moves with the card and survives every redraw. Only between two cards does a separate ring
+   exist: moves/ring.js sends it from one to the other, and the card's own ring stays hidden until
+   it arrives. Both are the same shape, so the hand-over cannot be seen. */
+
+/* The one that travels. Its size and corner are written by the script. */
+html[data-b-ring] .b-ring {
+  position: fixed;
+  z-index: 27;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  border: var(--b-ring-w, 2px) solid var(--focus);
+  pointer-events: none;
+}
+html[data-b-ring] .b-ring[hidden] { display: none; }
+
+/* Work: a card's ring, 2px out from the sheet, as in the clean build. It is a pseudo-element and not
+   an outline so that it can take the sheet's corner. */
+html[data-b-ring] #lanes .card:is(.is-focus, :focus-visible):not(.is-away) .card-stock { outline-color: transparent; }
+html[data-b-ring] #lanes .card:is(.is-focus, :focus-visible):not(.is-away)::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: -4px;
+  box-sizing: border-box;
+  border: 2px solid var(--focus);
+  border-radius: calc(var(--card-r) + 4px);
+  pointer-events: none;
+}
+html[data-b-ring][data-b-paper] .b-ring, html[data-b-ring][data-b-paper] #lanes .card::before { corner-shape: squircle; }
+
+/* While the ring travels, the place it is heading for shows nothing yet. */
+html[data-b-ring] #lanes .card.b-ring-wait::before { opacity: 0; }
+html[data-b-ring] #lanes :is(.lane-btn, .plan-head).b-ring-wait { outline-color: transparent; }
+
+/* Picking a card to merge into is its own mode, with its own colour. It keeps the clean ring. */
+html[data-b-ring] .is-merge-picking #lanes .card.is-focus::before { display: none; }
+html[data-b-ring] .is-merge-picking #lanes .card.is-focus .card-stock { outline-color: var(--accent); }
+
+/* Inbox: the rings lie inside a thing's edge, 1.5px, as in the clean build.  */
+html[data-b-ring] .card--rich.is-focus, html[data-b-ring] .plaque.is-focus, html[data-b-ring] .part.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
+html[data-b-ring] .card--compact.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
+html[data-b-ring] :is(.card--rich, .plaque, .part).b-ring-wait { box-shadow: none; }
+html[data-b-ring] .b-open.b-ring-wait { outline-color: transparent; }
+html[data-b-ring] .card--compact.b-ring-wait > .card-stock { box-shadow: var(--h-carry); }
+
+/* Selecting: the ink ring arrives on a spring and the check draws itself. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-b-ring]:not([data-motion="reduced"]) .card.is-selected .card-stock { animation: b-ring-select 460ms var(--m-settle) backwards; }
+  html[data-b-ring]:not([data-motion="reduced"]) .card.is-selected .card-check path { stroke-dasharray: 13.4; animation: b-check-draw 240ms var(--m-ease) 70ms backwards; }
+}
+@keyframes b-ring-select { from { box-shadow: var(--h-hover), 0 0 0 7px transparent; } }
+@keyframes b-check-draw { from { stroke-dashoffset: 13.4; } }

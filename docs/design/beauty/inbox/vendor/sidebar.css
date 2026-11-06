@@ -1,0 +1,825 @@
+/* The sidebar. The rules and class names are the Bureau book's, as its
+   system.css spells them, in the book's order. Each departure from the book,
+   and each rule the book does not have, says why. */
+
+/* Solid, one tone darker than the main pane. It never floats over content,
+   so it is not glass. */
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 12px;
+  background: var(--bg);
+}
+
+/* The strip along the top of the sidebar. The book draws the traffic lights
+   first in it (`.tl`) and pushes the button to the other end with
+   `space-between`. macOS draws the real traffic lights over the window, so
+   the strip holds only the button, pushed to the end with `flex-end`. */
+.side-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 48px;
+  padding: 0 0 0 8px;
+  flex: none;
+}
+
+/* The shell's drag strip covers the top 52px of the window and drags it. A
+   control in that band opts out, so a click reaches it. The face switch
+   starts at 48px, inside the band. */
+.side-top .icon-btn,
+.seg--side {
+  -webkit-app-region: no-drag;
+}
+
+/* The face switch, Threads | Hercule: its two segments share the sidebar's
+   width. Two classes, as in the book, so the grid wins over `.seg`'s
+   `inline-flex` whichever style sheet loads first. */
+.seg.seg--side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  margin-bottom: 8px;
+}
+
+/* Not the book's, which draws New thread and Search as two full-width rows.
+   Here they share one row with the Office: New thread takes the width the
+   two icon buttons leave. The buttons are as tall as the row, 30px, so
+   their hover and selected backgrounds line up with New thread's, and the
+   2px between them is the space the book puts between the buttons of a
+   pill or a segmented control. */
+.side-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  container-type: inline-size;
+}
+.side-actions .nav-row {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+/* New thread stays on one line. Its label is cut with an ellipsis rather
+   than wrapped, and in a sidebar too narrow for both the label and the key
+   cap, about 245px or less, the key cap gives way first: the File menu still
+   shows the shortcut. */
+.side-actions .nav-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@container (width < 216px) {
+  .side-actions .nav-row > kbd {
+    display: none;
+  }
+}
+.side-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+/* The list scrolls under a fixed top and foot. The book hides the scroll bar
+   (`scrollbar-width: none`). The app keeps it, drawn as base.css sets every
+   scroll bar: an overlay bar that shows only while the list scrolls, or a
+   thin classic one with a mouse. */
+.side-scroll {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -12px;
+  padding: 0 12px 12px;
+}
+
+/* Sections are separated by space and a small label, never by a rule. The
+   virtualized list spaces its own sections (`leading` in sidebar-items.ts);
+   these are the sections drawn in flow: the Hercule face's, and Settings'
+   list. */
+.side-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 8px;
+}
+
+.side-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-height-header);
+  margin: 0;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.side-h > :first-child {
+  flex: 1;
+}
+.side-h--proj {
+  padding-left: 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.side-h--proj .proj {
+  color: var(--muted);
+}
+
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 35px;
+  padding: 1px 8px 1px 10px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-1);
+}
+/* Not in the book: a row whose composer holds unsent work, and the draft's
+   row, take a light wash of the accent, lighter than a selected row's
+   background, so unsent work is found again. Hover and selection draw over
+   it; a selected row keeps only its pencil. */
+.side-row.is-unsent {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+/* A thread row's Done or Reopen button sits beside its link, not in it, so
+   the row keeps its hover background while the pointer is on the button. */
+.side-row:hover,
+.side-thread:hover > .side-row {
+  background: var(--hover);
+}
+.side-row.is-on,
+.side-thread > .side-row.is-on {
+  background: var(--selected);
+}
+.side-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.side-name {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-ask {
+  font-size: var(--t-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The pencil before an unsent row's title, in the accent's ink. Lowered
+   1.5px from the baseline, its strokes sit centred on the title's capitals. */
+.side-name .ic {
+  margin-right: 4px;
+  color: var(--accent-ink);
+  vertical-align: -1.5px;
+}
+.side-ask {
+  color: var(--you-ink);
+}
+
+/* A thread row, and a Done shelf row, which has the same shape. Not the
+   book's three lines: two, 52px tall. 6px above the title, 18px for the
+   title, 6px, 16px for the second line and 6px under it. The wrapper holds
+   the link and the Done or Reopen button, which cannot sit inside the link,
+   and holds the title that recedes. Only a colour moves, so nothing is laid
+   out again. */
+.side-thread {
+  position: relative;
+}
+.side-thread .side-name {
+  transition: color var(--dur-1);
+}
+.side-thread > .side-row {
+  height: 100%;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+}
+.side-thread .side-text {
+  gap: 6px;
+  line-height: normal;
+}
+.side-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--line-18);
+  font-size: var(--t-13);
+  line-height: var(--line-18);
+}
+.side-line .side-name {
+  flex: 1;
+  min-width: 0;
+}
+/* The status slot is as wide as its widest word, "Approval", so the title
+   is cut at the same place whatever the status, and the Done button that
+   takes its place never moves the title. */
+.side-line .side-end {
+  min-width: 48px;
+}
+/* A done row's slot is empty, and wide enough for Reopen, the wider word,
+   and Archive beside it. */
+.side-thread.is-done .side-line .side-end {
+  min-width: 82px;
+}
+/* A working thread steps back so the threads that need the user stand out,
+   unless it is the open thread (`receded` in sidebar-items.ts), and so does
+   a Done thread. Only the title steps back, from the ink to the muted ink.
+   The second line is already faint, and the status word keeps its own
+   colour. The title comes back while the pointer is on the row or focus is
+   in it. */
+.side-thread.is-receded .side-name,
+.side-thread.is-done .side-name {
+  color: var(--muted);
+}
+.side-thread:hover .side-name,
+.side-thread:focus-within .side-name {
+  color: var(--ink);
+}
+/* A row's second line: the harness's mark, then where the thread works.
+   The first part ellipsizes; the part kept after it, the end of a branch
+   or a machine's name, never does. */
+.side-detail {
+  display: flex;
+  align-items: center;
+  height: var(--line-16);
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+  white-space: nowrap;
+}
+/* The glyph's slot keeps its width when the harness is unknown, so every
+   second line starts at the same place. */
+.side-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+}
+.side-detail-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The kept part takes the width it needs, but never more than the line has
+   after the harness's mark (12px and its 6px margin), so a long machine
+   name in a narrow sidebar cannot run past the row. When it is cut, its head
+   ends in an ellipsis and its tail stays whole, which cuts it in the middle.
+   `pre` keeps the space that starts the machine's part, which a flex item
+   would otherwise drop. */
+.side-detail-keep {
+  display: flex;
+  flex: none;
+  max-width: calc(100% - 18px);
+  white-space: pre;
+}
+.side-detail-keep-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-detail-keep-tail {
+  flex: none;
+}
+/* Done, or Reopen on the Done shelf: drawn over the status slot, on the
+   first line's centre, and shown in the slot's place while the pointer is
+   on the row or the keyboard's focus is in it. A click also leaves the
+   focus in the row, but `:focus-visible` does not match then, so the row
+   the user clicked shows its status, not the button. The two crossfade; neither moves. The
+   button sits 4px further right than the slot, so its word, inside its 4px
+   padding, ends where the slot's word ends. A row with no such button, the
+   draft's, keeps its status in view. */
+.side-act {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 48px;
+  height: var(--line-18);
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+  opacity: 0;
+  transition:
+    opacity var(--dur-1),
+    background var(--dur-1);
+}
+.side-act:hover:not([aria-disabled="true"]) {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* Not in the book. Archive on the Done shelf, beside Reopen: an icon alone,
+   so the pair fits where Reopen sat. While the row works it is disabled,
+   faint, and its tooltip says why. */
+.side-act--icon {
+  min-width: 0;
+}
+.side-act[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+/* The pair of buttons on a Done shelf row sits where one button does, with
+   the same top and right edge. Each button is placed by the pair, so it
+   keeps its own fade (`.side-act`'s opacity and the rules below). */
+.side-acts {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  gap: 2px;
+}
+.side-acts > .side-act {
+  position: static;
+}
+.side-thread .side-end {
+  transition: opacity var(--dur-1);
+}
+.side-thread:hover .side-act,
+.side-thread:has(:focus-visible) .side-act {
+  opacity: 1;
+}
+/* The status fades only where a button takes its place. The draft's row, and
+   a group with no Thread left to mark Done, have none and keep their status
+   in view. */
+.side-thread:has(> :is(.side-act, .side-acts)):hover .side-end,
+.side-thread:has(> :is(.side-act, .side-acts)):has(:focus-visible) .side-end {
+  opacity: 0;
+}
+
+/* A group's second line while a session of it asks something: the question
+   in the colour of a question to the user, with the asker's name in bold. */
+.side-detail--ask .side-detail-clip {
+  color: var(--you-ink);
+}
+.side-asker {
+  font-weight: var(--w-bold);
+}
+/* A finished group's second line starts with a green check, where a thread's
+   starts with its harness's mark. */
+.side-glyph--done {
+  color: var(--ok);
+}
+.side-glyph--done .ic {
+  stroke-width: 2;
+}
+
+/* The dots of a group: what each of its sessions is doing, in the colours of
+   the status words. Marigold waits on the user, the accent's ink works, an
+   empty ring is quiet. */
+.side-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.side-dot--waiting {
+  background: var(--you);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you-ink) 35%, transparent);
+}
+.side-dot--working {
+  background: var(--accent-ink);
+}
+.side-dot--quiet {
+  border: 1.5px solid var(--faint);
+}
+/* A Done Thread's check takes a dot's place and width, so the names of the
+   lines of a group stay level. The check is wider than the dot and centred
+   on its slot. */
+.side-check {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 7px;
+  color: var(--ok);
+}
+.side-check .ic {
+  flex: none;
+  stroke-width: 2;
+}
+/* Line 2 of a group row leaves room at its end for the dots button and the
+   chevron beside it, which sit over it (`--dots` is set inline). The button's
+   "+n" is drawn in the 11px text, whose characters are 7px wide at the
+   default Text size, so each of its characters (`--dots-characters`, set
+   inline) takes 7/11 of the step more, and the button and the room grow
+   together. */
+.side-thread.has-crew .side-detail {
+  padding-right: calc(var(--dots) + 4px + var(--dots-characters) * 0.64 * var(--text-size-step));
+}
+/* The dots are one button, drawn over line 2's end, in line 2's vertical
+   centre: 27px from the row's top and 22px tall. Each px of the Text size's
+   step moves that centre 1.5px down, and the top follows it, rounded to a
+   whole pixel. The button is at least as wide as it is tall, so a group with
+   no counted session, and so no dot, still has a target to unfold it by. */
+.side-dots {
+  position: absolute;
+  top: round(calc(27px + 1.5 * var(--text-size-step)), 1px);
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  transition: background var(--dur-1);
+}
+.side-dots:hover {
+  background: var(--hover);
+}
+/* With no dots, the button is only the chevron's target: the chevron sits
+   inside it, in its centre, instead of beside it. */
+.side-dots.has-no-dots {
+  justify-content: center;
+}
+.side-dots.has-no-dots .side-dots-chevron {
+  position: static;
+}
+.side-dots:focus-visible {
+  outline-offset: 0;
+}
+.side-dots-more {
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+/* The chevron shows beside the dots while the pointer is on the row or the
+   button has focus, and stays while the group is unfolded. It sits outside
+   the button's flow, to the left, so the dots never move. */
+.side-dots-chevron {
+  position: absolute;
+  top: 5px;
+  left: -14px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity var(--dur-1),
+    transform var(--dur-1) var(--ease-out);
+}
+.side-thread:hover .side-dots-chevron,
+.side-dots:focus-visible .side-dots-chevron,
+.side-dots.is-open .side-dots-chevron {
+  opacity: 1;
+}
+.side-dots.is-open .side-dots-chevron {
+  transform: rotate(90deg);
+}
+/* While a group is unfolded, the open session is selected on its own line,
+   and its row keeps only a hint of the selection. */
+.side-thread.is-unfolded > .side-row.is-on {
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+}
+
+/* The lines of an unfolded group: 32px each, indented under the row, joined
+   by a hairline 2px inside the lines' left edge. Each line draws its part of
+   the hairline: from 1px below its own top to 2px past its bottom, which is
+   1px into the next line, so the parts meet with no gap, and the first one
+   starts 1px below the row's end. The last one stops 4px above its bottom. */
+.side-member {
+  position: relative;
+  padding-left: 12px;
+}
+.side-member::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: -2px;
+  left: 14px;
+  width: 1px;
+  background: var(--line);
+}
+.side-member.is-last::before {
+  bottom: 4px;
+}
+.side-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-13);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.side-m:hover {
+  background: var(--hover);
+}
+.side-m.is-on {
+  background: var(--selected);
+}
+.side-m-name {
+  /* The name shrinks only once the model has none left to give (see
+     `.side-agent` in screens/session-status.css). It keeps a shrink factor
+     above zero so it can shrink at
+     all, but so small next to the model's that it loses no visible width
+     while the model still can. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.side-m.is-on .side-m-name {
+  font-weight: var(--w-medium);
+}
+/* The status goes to the line's end. */
+.side-m .side-end {
+  margin-left: auto;
+}
+.side-m--quiet {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.side-m--quiet .ic {
+  color: var(--faint);
+}
+
+/* A project's count of threads that wait on the user, before its `+`. */
+.side-need {
+  flex: none;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Done shelf's heading: a button across the heading, with a chevron
+   that turns down while the shelf is open, and the count. */
+.side-h--done > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-rendering: inherit;
+}
+.side-h--done .ic {
+  transition: transform var(--dur-1);
+}
+.side-h--done > button[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.side-h--done .count {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the book. "Archive all", at the end of the open shelf's heading:
+   quiet text that takes the heading's size and turns to the ink under the
+   pointer. The heading's capitals and tracking are for labels, not buttons. */
+.side-h--done > .side-h-act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background var(--dur-1);
+}
+.side-h--done > .side-h-act:hover:not([aria-disabled="true"]) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.side-h--done > .side-h-act[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* "Marked done" with Undo, after a thread is marked done: Intake's toast,
+   over the list's bottom edge. The anchor takes no height, so the list
+   does not move when the toast comes and goes. */
+.side-toast-anchor {
+  position: relative;
+  height: 0;
+  flex: none;
+}
+.side-toast {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.side-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+/* A Done move that failed, in the toast's place, as Intake draws one: the
+   mark in the failure colour, beside the first line, and the text wrapping
+   instead of being cut short, because the reason it failed is at the end.
+   It has no Undo, so its padding is Intake's toast's, not the button's. */
+.side-toast[role="alert"] {
+  align-items: flex-start;
+  padding: 9px 12px;
+}
+.side-toast[role="alert"] > .mark {
+  height: 1lh;
+  line-height: inherit;
+  color: var(--fail);
+}
+.side-toast[role="alert"] .side-toast-text {
+  white-space: normal;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side-toast.is-new {
+    animation: side-toast-rise var(--dur-2) var(--ease-out);
+  }
+  .side-toast.is-fading {
+    animation: side-toast-fade var(--dur-2) var(--ease-out) forwards;
+  }
+}
+@keyframes side-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes side-toast-fade {
+  to {
+    opacity: 0;
+  }
+}
+.side-row--wait {
+  min-height: var(--side-height-waiting-row);
+  padding-left: 6px;
+}
+/* "From runs", the book's label over the runs' sessions in Waiting on you,
+   indented to the rows' text: the row's 6px padding, the 24px face and the
+   9px gap. The 6px above it is part of the item's leading, set inline. */
+.side-sub {
+  height: var(--side-height-runs-label);
+  margin: 0;
+  padding-left: 39px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  line-height: var(--line-16);
+}
+/* A run's session's row draws its state mark in the face's 24px slot, so
+   every row's text starts at the same place. */
+.side-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+.side-row--more,
+.side-row--fewer {
+  min-height: var(--side-height-more-row);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The book draws a "more" row as a link, which leads to Intake. Here it
+   expands its section in place and goes nowhere, so it is a button, drawn as
+   the link is: the full width, the text at the start, and the page's text
+   rendering, where Chromium gives a button its own. The "Show fewer" row that
+   collapses an expanded section is not in the book: it is drawn as the "more"
+   row is, at the end of the section. */
+button.side-row--more,
+button.side-row--fewer {
+  width: 100%;
+  text-align: left;
+  text-rendering: inherit;
+}
+
+/* Not in the book, which always has threads: the line an empty list shows,
+   where the first section's heading would start. It is a sentence the user
+   reads, not metadata, so it is muted, not faint. */
+.side-empty {
+  margin: 0;
+  padding: 8px 10px 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* The Assistants section (the book's `.side-sec` with `.side-row--who`). The
+   book draws it in the scrolling list, after the projects. Here it is pinned
+   between the list and the foot, so it stays in one place however many
+   threads there are. It meets the list as the foot does, with a hairline
+   across the sidebar's full width, so the rows that scroll under the list's
+   end do not read as part of it. Inside, it keeps the book's section
+   spacing: 8px above the heading, 1px between rows, and 12px under the last
+   row, the space the list leaves under its own last row.
+
+   Not in the book either: the section takes at most 40% of the sidebar's
+   height, so many assistants cannot squeeze the thread list away. Past that,
+   its rows scroll under a fixed heading, with the system's overlay scroll
+   bar at the sidebar's edge, as the list's is, so a scroll bar never moves
+   a row. */
+.side-sec--who {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 40%;
+  margin: 0 -12px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--divider);
+}
+.side-who-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -12px;
+  padding: 0 12px;
+}
+.side-row--who {
+  min-height: 32px;
+  padding-left: 7px;
+}
+.side-row--who .side-name {
+  flex: 1;
+}
+.side-presence.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+.side-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+  margin: 0 -12px;
+  padding: 9px 16px 10px;
+  border-top: 1px solid var(--divider);
+}
+.side-sum {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.side-sum b {
+  color: var(--muted);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.side-sum .you-ink {
+  color: var(--you-ink);
+}
+.side-me {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.side-me .side-name {
+  flex: 1;
+}

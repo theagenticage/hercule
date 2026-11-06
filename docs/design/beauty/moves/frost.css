@@ -1,0 +1,127 @@
+/* A SOFT EDGE. Where the board meets something that floats over it, cards are not cut off by a hard
+   line: they melt away. The foot of the window fades instead of slicing, and the menus are a little
+   more like glass. At rest, at the top of the page, nothing here is visible at all. */
+
+/* Work: the words of the stage header stay on solid desk, as in the clean build, so nothing ever
+   shows through them. The blur lives in the 14px under the rule, where cards melt away. */
+html[data-b-frost] .rule-wrap { background: transparent; }
+html[data-b-frost] .rule-wrap::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 -16px;
+  background: linear-gradient(var(--desk) 86px, color-mix(in oklab, var(--desk) 30%, transparent));
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-mask: linear-gradient(#000 86px, transparent);
+  mask: linear-gradient(#000 86px, transparent);
+  pointer-events: none;
+}
+/* A lane's band stays solid, so its name always reads cleanly. The rule's own fade would paint over
+   the band's top corners, so with bands it stops at the rule, and the initiatives block keeps a fade
+   of its own that comes in with the scroll. */
+html[data-b-frost] .work[data-lanes="band"] .rule-wrap::before {
+  inset: 0;
+  background: var(--desk);
+  -webkit-mask: none;
+  mask: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+@supports (animation-timeline: scroll()) {
+  html[data-b-frost] .work[data-lanes="band"] .top-plans::before {
+    content: "";
+    display: block;
+    position: sticky;
+    z-index: 7;
+    top: 86px;
+    height: 22px;
+    margin-bottom: -22px;
+    background: linear-gradient(var(--desk), transparent);
+    pointer-events: none;
+    animation: frost-in linear both;
+    animation-timeline: scroll(nearest block);
+    animation-range: 0 40px;
+  }
+}
+
+/* Only while a band is stuck, a soft edge hangs under it, where cards would otherwise be cut off by
+   a hard line. It is plain desk colour and no blur: a blur would turn cut-off words into ghosts. */
+html[data-b-frost] .work[data-lanes="band"] .lane-head { container-type: scroll-state; }
+html[data-b-frost] .work[data-lanes="band"] .lane-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 30px;
+  background: linear-gradient(var(--desk), color-mix(in oklab, var(--desk) 62%, transparent) 45%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+@container scroll-state(stuck: top) {
+  html[data-b-frost] .work[data-lanes="band"] .lane-head::after { opacity: 1; }
+}
+
+/* The foot of the window: the page fades into the desk rather than stopping at the edge. */
+html[data-b-frost] .work::after {
+  content: "";
+  position: absolute;
+  z-index: 13;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44px;
+  background: linear-gradient(transparent, color-mix(in oklab, var(--desk) 88%, transparent));
+  pointer-events: none;
+}
+
+/* Inbox: the page scrolls under the bar, so the same soft edge sits where it meets the bar. It fades
+   in with the scroll, because at the top of the page Hercule stands right on that edge. */
+html[data-b-frost] .main:has(> .ib-page) { timeline-scope: --page-scroll; position: relative; }
+html[data-b-frost] .ib-page { scroll-timeline: --page-scroll block; }
+html[data-b-frost] .main:has(> .ib-page)::before {
+  content: "";
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  right: 0;
+  top: 46px;
+  height: 34px;
+  background: linear-gradient(var(--desk), color-mix(in oklab, var(--desk) 40%, transparent));
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-mask: linear-gradient(#000 20%, transparent);
+  mask: linear-gradient(#000 20%, transparent);
+  pointer-events: none;
+  animation: frost-in linear both;
+  animation-timeline: --page-scroll;
+  animation-range: 0 40px;
+}
+@keyframes frost-in { from { opacity: 0; } to { opacity: 1; } }
+html[data-b-frost] .main:has(> .ib-page)::after {
+  content: "";
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44px;
+  background: linear-gradient(transparent, color-mix(in oklab, var(--desk) 88%, transparent));
+  pointer-events: none;
+}
+
+/* Menus and floating bars: a lit top edge and a deeper blur, solid enough that nothing streaks through. */
+html[data-b-frost] :is(.menu, .toast, .select-bar, .find-list) {
+  background: color-mix(in oklab, var(--raised) 94%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+}
+html[data-b-frost] .menu { box-shadow: inset 0 0.5px 0 oklch(1 0 0 / 0.34), inset 0 0 0 0.5px var(--glass-rim), var(--h-hover); }
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-b-frost] .rule-wrap { background: var(--desk); }
+  html[data-b-frost] .rule-wrap::before, html[data-b-frost] .main:has(> .ib-page)::before { display: none; }
+  html[data-b-frost] :is(.menu, .toast, .select-bar, .find-list) { background: var(--raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

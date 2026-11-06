@@ -1,0 +1,42 @@
+/* SET BY HAND. The same face at the same sizes, given the care a typesetter would give it.
+
+   - Inter is a variable face with an optical size. Large titles use its display cut, which is finer
+     and tighter. Small words keep the sturdy text cut.
+   - Words carry their own weight in each light. Light text on a dark desk blooms, so it is set a
+     touch lighter there, and both modes read the same strength.
+   - Two-line titles break into even lines, so no word is left alone on a line.
+   - Identifiers use case-sensitive forms: a hyphen sits at the height of the capitals, and tabular
+     spacing no longer pulls it apart.
+*/
+html[data-b-type] { --type-lane: 620 14px / 20px var(--font-ui); }
+html[data-b-type]:is([data-theme="orient-express"], [data-theme="nile"], [data-theme="end-house"], [data-theme="blue-train"]) {
+  --w-regular: 380;
+  --w-medium: 480;
+  --w-bold: 620;
+  --type-lane: 600 14px / 20px var(--font-ui);
+}
+
+/* Large titles: the display cut. */
+html[data-b-type] :is(.b-title, .pn-title, .ad-head h2, .zero-t, .welcome-words h2, .welcome--clear h2) {
+  font-variation-settings: "opsz" 30;
+  letter-spacing: -0.012em;
+}
+html[data-b-type] .pn-ask { font-variation-settings: "opsz" 24; letter-spacing: -0.012em; }
+html[data-b-type] .b-title { font-weight: 600; }
+
+/* Titles of two lines break evenly. One-line titles are untouched. */
+html[data-b-type] :is(.card-title, .c-title, .pn-title) { text-wrap: balance; }
+/* The smallest figures open up a hair, as they do in print. */
+html[data-b-type] :is(.card-meta, .plan-facts, .c-id, .sec-n, .stage-count) { letter-spacing: 0.002em; }
+
+/* Identifiers: the hyphen at capital height, and letters spaced as letters. */
+html[data-b-type] :is(.c-id, .p-id, .ad-ref) {
+  font-variant-numeric: normal;
+  font-feature-settings: var(--font-ui-features), "case";
+  letter-spacing: 0.012em;
+}
+
+/* The Inbox's status shapes: a lighter ring and more air around the wedge, so a fraction reads as a
+   fraction at 13px instead of closing up into a dot. */
+html[data-b-type] .shape svg { stroke-width: 1.25; }
+html[data-b-type] .shape svg path[fill="currentColor"] { transform: scale(0.9); transform-origin: 8px 8px; }

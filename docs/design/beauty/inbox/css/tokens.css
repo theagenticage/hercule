@@ -1,0 +1,61 @@
+/* What the Inbox adds to the design system. The desk, the card stock, the heights, the type roles and the motion tokens
+   are shared with Work and come from vendor/primitives.css. Everything new is in this file, so DESIGN.md can be checked
+   against it line by line. */
+
+:root,
+[data-theme] {
+
+  /* The mark of a kind, in the hue its plugin declares. --mark-l and --mark-c belong to the theme, so no plugin's hue can
+     be louder than a name, or unreadable, in any theme. */
+  --mark-ink: color-mix(in oklab, var(--ink) 84%, transparent);
+  --mark-l: 0.45;
+  --mark-c: 0.17;
+
+  /* What dims the page behind an open card. In the light themes it is paper, so nothing turns grey. */
+  --veil: color-mix(in oklab, var(--desk) 72%, transparent);
+
+  /* A wait, measured against the patience of its kind. */
+  /* A status that wants watching. Plugins reach this, and never the colour kept for the person. */
+  --attention-ink: color-mix(in oklab, var(--you-ink) 72%, var(--ink));
+
+  --wait-fresh: var(--faint);
+  --wait-recent: var(--faint);
+  --wait-due: var(--muted);
+  --wait-over: var(--ink);
+
+}
+
+[data-theme="styles"] {
+  --mark-l: 0.43;
+}
+
+[data-theme="orient-express"],
+[data-theme="nile"],
+[data-theme="end-house"],
+[data-theme="blue-train"] {
+  --mark-l: 0.8;
+  --mark-c: 0.14;
+  --veil: var(--scrim);
+}
+
+[data-theme="orient-express"] {
+}
+[data-theme="nile"] {
+}
+[data-theme="end-house"] {
+}
+[data-theme="blue-train"] {
+}
+
+/* In the dark themes the stock is lighter than --faint was set for, so words on a card take a step more ink. */
+[data-theme="orient-express"], [data-theme="nile"], [data-theme="end-house"], [data-theme="blue-train"] { --faint-on-stock: color-mix(in oklab, var(--muted) 45%, var(--faint)); }
+[data-theme="orient-express"] .block, [data-theme="orient-express"] .noticed, [data-theme="orient-express"] .open,
+[data-theme="nile"] .block, [data-theme="nile"] .noticed, [data-theme="nile"] .open,
+[data-theme="end-house"] .block, [data-theme="end-house"] .noticed, [data-theme="end-house"] .open,
+[data-theme="blue-train"] .block, [data-theme="blue-train"] .noticed, [data-theme="blue-train"] .open { --faint: var(--faint-on-stock); }
+[data-theme="blue-train"] .card, [data-theme="blue-train"] .block, [data-theme="blue-train"] .open { --fail-ink: oklch(0.82 0.11 30); }
+
+/* With reduced motion the durations collapse, so no CSS movement is left behind. JS moves have their own designed fades. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --m-press: 0ms; --m-quick: 0ms; --m-base: 0ms; --m-slow: 0ms; --m-long: 0ms; }
+}

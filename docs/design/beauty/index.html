@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+<head>
+<meta charset="utf-8">
+<title>A study in beauty: Work and Inbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="work/system/tokens.css">
+<link rel="stylesheet" href="work/system/base.css">
+<link rel="stylesheet" href="work/system/primitives.css">
+<link rel="stylesheet" href="study.css">
+</head>
+<body>
+<div class="frames" id="frames"></div>
+<aside class="panel" id="panel" aria-label="The moves">
+  <div class="p-head">
+    <div class="p-title"><h1>A study in beauty</h1><button class="p-hide" data-hide title="Hide this panel (\)" aria-label="Hide this panel">\</button></div>
+    <div class="p-seg"><button data-view="work">Work</button><button data-view="inbox">Inbox</button></div>
+    <div class="p-themes" id="themes"></div>
+  </div>
+  <div class="p-all"><b>Everything I recommend</b><button class="tg" id="all" role="switch" aria-checked="false" aria-label="Everything I recommend"></button></div>
+  <button class="p-clean" id="clean">Hold to see the clean build<kbd>⌥</kbd></button>
+  <div class="p-list" id="list"></div>
+  <div class="p-foot"><span>Reduced motion</span><button class="tg" id="calm" role="switch" aria-checked="false" aria-label="Reduced motion"></button></div>
+</aside>
+<button class="panel-tab" id="tab">Show the moves</button>
+<script src="study-moves.js"></script>
+<script src="study.js"></script>
+</body>
+</html>

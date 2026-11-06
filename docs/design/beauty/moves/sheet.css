@@ -1,0 +1,49 @@
+/* A SHEET THAT OPENS BEAUTIFULLY. On the same spring the sheet already rides, its words arrive in
+   reading order, and its shadow keeps opening a little after it stops, the way a sheet settles onto
+   a desk. On the Inbox, which is modal, the page behind also goes out of focus. Work's board stays
+   sharp, because it must still read beside the details. */
+
+html[data-b-sheet] {
+  --b-sheet-bloom: 0 34px 70px -22px oklch(0 0 0 / 0.46), 0 70px 130px -48px oklch(0 0 0 / 0.5);
+}
+html[data-b-sheet]:is([data-theme="whitehaven"], [data-theme="styles"]) {
+  --b-sheet-bloom: 0 34px 70px -22px oklch(0.3 0.03 70 / 0.2), 0 70px 130px -48px oklch(0.3 0.03 70 / 0.22);
+}
+
+html[data-b-sheet] .pn-sheet::after, html[data-b-sheet] .adder::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--b-sheet-bloom);
+  opacity: var(--b-bloom, 0);
+  pointer-events: none;
+}
+html[data-b-sheet] .pn-sheet::after { border-radius: var(--pn-r); }
+html[data-b-sheet][data-b-paper] .pn-sheet::after, html[data-b-sheet][data-b-paper] .adder::after { corner-shape: squircle; }
+
+/* Inbox. Its open card is modal and its veil is thick, so the page may go further out of focus. The
+   veil already fades on its own, and the blur rides the same fade. */
+html[data-b-sheet] .scrim {
+  -webkit-backdrop-filter: blur(2px) saturate(0.9);
+  backdrop-filter: blur(2px) saturate(0.9);
+}
+/* The open card clips what is inside it, so here the bloom is a second shadow on the card itself. */
+html[data-b-sheet] .open {
+  box-shadow: var(--h-carry), 0 34px 70px -22px oklch(0 0 0 / calc(var(--b-bloom, 0) * 0.46)), 0 70px 130px -48px oklch(0 0 0 / calc(var(--b-bloom, 0) * 0.5));
+}
+html[data-b-sheet]:is([data-theme="whitehaven"], [data-theme="styles"]) .open {
+  box-shadow: var(--h-carry), 0 34px 70px -22px oklch(0.3 0.03 70 / calc(var(--b-bloom, 0) * 0.2)), 0 70px 130px -48px oklch(0.3 0.03 70 / calc(var(--b-bloom, 0) * 0.22));
+}
+
+/* Reduced transparency is a promise: nothing shows through, and that includes a softened page. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-b-sheet] .pane.is-on::after { display: none; }
+  html[data-b-sheet] .scrim { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* A promise to the reader: no see-through or blurred surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-b-sheet] .scrim { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

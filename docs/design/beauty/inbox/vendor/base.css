@@ -1,0 +1,294 @@
+/* The page under the app: rules for the whole document, not for one
+   component. The window is a Mac app, not a web page (spec 17 §Native
+   behaviour), so the page never shows the signs of one. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* In each of the six themes, `--bg` is the exact 8-bit sRGB colour
+   that main gives the native window (src/main/window-background.ts), not the
+   book's oklch value. tokens.css keeps the oklch value.
+
+   On macOS, Chromium splits the page into tiles, and each tile reaches the
+   screen by one of two paths:
+   - A tile with content in it is drawn by Chromium, which converts its
+     colours to the display's colours itself.
+   - A tile of one flat colour is handed to macOS, which converts that colour,
+     as it converts the native window's background.
+   The two paths round colours differently. An oklch colour falls between two
+   8-bit values, so on a wide-gamut display the band of tiles holding the
+   content showed a step off from the rest of the page. From an exact 8-bit
+   colour, the flat tiles match the native window, and the tiles with content
+   match them too, or at times sit one step off in a single channel. No CSS
+   value removes that last step: macOS's own conversion varies over time.
+
+   One rule per theme rather than one on :root, so a nested [data-theme]
+   preview gets its own theme's `--bg`. */
+[data-theme="whitehaven"] {
+  --bg: #f4f3f0;
+}
+
+[data-theme="styles"] {
+  --bg: #f5eee3;
+}
+
+[data-theme="orient-express"] {
+  --bg: #1a1310;
+}
+
+[data-theme="nile"] {
+  --bg: #0e1714;
+}
+
+[data-theme="end-house"] {
+  --bg: #1d1217;
+}
+
+[data-theme="blue-train"] {
+  --bg: #17212b;
+}
+
+/* The glass level comes from the Appearance's Glass slider: theme-init.js
+   sets `--glass-percent`, from 0 to 100, on the root element, and never the
+   level itself. This rule loads after tokens.css, so it replaces the book's
+   default of 0.4; the reduce-transparency rule in tokens.css is !important,
+   and the solid-glass rule below is more specific, so both still win. */
+:root {
+  --glass-level: calc(var(--glass-percent, 40) / 100);
+}
+
+/* The Text size setting: theme-init.js sets data-text-size, from 1 to 4, on
+   the root element, and tokens.css builds the five text sizes from
+   --text-size-step. Step 2 is the default and sets nothing, so a page with no
+   attribute, such as a specimen, is drawn at the default too. These selectors
+   have two parts, so they beat the `:root` that declares the default in
+   tokens.css whatever the order of the two files. */
+:root[data-text-size="1"] {
+  --text-size-step: -1px;
+}
+:root[data-text-size="3"] {
+  --text-size-step: 1px;
+}
+:root[data-text-size="4"] {
+  --text-size-step: 2px;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Painted before React mounts too, so the first frame is already --bg,
+     the colour main gives the window. */
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  line-height: 1.45;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Every scroll bar is drawn by Chromium in the theme's ink: a thin thumb on
+   a transparent track. Left alone, macOS draws classic scroll bars (15px, on
+   a white track) whenever a mouse is attached, which clash with every theme.
+
+   The width a thin classic scroll bar takes is `--scrollbar-width`. An
+   overlay scroll bar, which macOS draws with a trackpad, takes no room and
+   still fades out when the list is not scrolling. Chromium keeps both
+   behaviours when `scrollbar-color` is set, but not when `::-webkit-scrollbar`
+   is, which always takes room.
+
+   The thumb darkens while the pointer is over the scroll area. CSS cannot
+   target the thumb itself, so the whole area counts.
+
+   Two details keep this cheap and correct:
+   - The two thumb colours are custom properties set where the theme is, so
+     that a nested `[data-theme]` preview gets its own ink.
+   - `scrollbar-color` is inherited, but it is declared on every element
+     here. A hover then changes the value of the hovered elements only. Set
+     once on the root and overridden on hover, the change would restyle every
+     descendant: 1.6 ms for 3,900 elements, against 0.1 ms declared on each. */
+:root {
+  --scrollbar-width: 11px;
+}
+:root,
+[data-theme] {
+  --scrollbar-thumb: color-mix(in oklab, var(--ink) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+}
+
+/* Controls take the page's type and ink, not the browser's own. */
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/* Four of the book's element rules, copied from its system.css with their
+   selectors. An element rule reaches every screen, whichever file holds it,
+   so they sit here rather than with the first screen that uses them.
+   - A link takes the text around it: the book draws rows and buttons as
+     links, not as underlined text.
+   - Bold text takes the type scale's bold, not the browser's heavier 700.
+   - Monospace is for code only: code, commands and diffs. Branches and
+     workspace labels are set in the UI face. `.mono` sets code inside a
+     sentence, such as a command or an address.
+   - A key cap names a shortcut in the UI face, never in monospace. */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+b,
+strong {
+  font-weight: var(--w-bold);
+}
+/* The browser sets `small` one size smaller than its parent, a fractional size
+   that is on no step of the type scale. */
+small {
+  font-size: var(--t-11);
+}
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-12);
+}
+kbd {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: var(--t-11);
+  line-height: 1.6;
+}
+
+/* Three of the book's helper classes, which any screen may use:
+   - `.faint` draws secondary text in faint ink;
+   - `.spacer` takes the free space of a flex row, pushing what follows it to
+     the row's far end;
+   - `.wordmark` sets the product's name in the Deco face, as the book spells
+     it. The Deco face sets the wordmark and a few large headline numerals,
+     never words in the interface. */
+.faint {
+  color: var(--faint);
+}
+.spacer {
+  flex: 1;
+}
+.wordmark {
+  font-family: var(--font-deco);
+  font-feature-settings: normal;
+  font-weight: var(--w-regular);
+  letter-spacing: 0.02em;
+}
+
+html {
+  /* The window never bounces as a whole. Scroll areas inside it keep macOS's
+     elastic scrolling. */
+  overscroll-behavior: none;
+  /* The chrome is not text: it cannot be selected, and the pointer is an
+     arrow over it, as over native controls. Links are the one exception to
+     the arrow, handled below. Text a reader may copy, such as the transcript
+     and code, opts back in to selection where it is drawn. */
+  user-select: none;
+  cursor: default;
+}
+
+/* Chromium gives every link the pointing hand, whatever cursor its parent
+   has. The book draws rows and tabs as links, and a native row shows the
+   arrow. */
+:any-link {
+  cursor: default;
+}
+
+/* A focus ring shows only for keyboard focus. Chromium already keeps its own
+   ring to :focus-visible; this draws Bureau's ring in its place. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* A theme change snaps, as the native window around the page does. The theme
+   script (public/theme-init.js) sets the attribute only while it switches the
+   theme. */
+html[data-theme-changing] *,
+html[data-theme-changing] *::before,
+html[data-theme-changing] *::after {
+  transition: none !important;
+}
+
+/* With Reduce motion on, no transition runs: a hovered button, for one, takes
+   its new colours at once.
+   - Every transition lasts one of the three duration tokens;
+     styles/motion.test.ts refuses any other duration.
+   - Setting the tokens to 0s therefore stops every transition, and Chromium
+     starts none, so no transition event fires. No renderer code waits for
+     `transitionend`.
+   - This file loads after tokens.css, so these values replace the tokens'.
+   A rule that set a duration on every element would be wrong: an element
+   transitions every property by default, layout included, so each change
+   would start a transition of its own.
+   The one animation, the working pose's paws, is declared only for
+   no-preference, so it stops without a rule here. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+  }
+}
+
+/* With Reduce transparency on, glass has no blur at all. tokens.css sets the
+   glass level to 0 then, and its filter to `blur(0px) saturate(1)`, which
+   changes no pixel. Chromium still draws a backdrop filter for it, though: it
+   composites every frame itself, and holds about 400 MB more GPU memory while
+   a caret blinks. `none` draws no filter. The selectors are the ones
+   tokens.css derives the filter on, so a nested [data-theme] preview gets it
+   too; this file loads later, so its value wins. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme] {
+    --glass-filter: none;
+  }
+}
+
+/* Nothing in the window is see-through while either attribute is on the root
+   element. It is the same mechanism as Reduce transparency: the glass level
+   is 0, so every glass fill is the solid surface under it, and the filter is
+   none, so no backdrop filter is drawn. The rim and the shadow stay.
+   - The Office screen sets data-office while it is mounted. A backdrop filter
+     anywhere in the window makes the GPU process composite the whole window
+     again for every frame the Office draws (spec 17, Performance, Rules,
+     rule 5).
+   - theme-init.js sets data-solid-glass while the app's own Reduce
+     transparency is on, or the Glass slider is at 0. A level of 0 alone
+     would still draw a filter that changes no pixel. */
+:root[data-office],
+:root[data-office] [data-theme],
+:root[data-solid-glass],
+:root[data-solid-glass] [data-theme] {
+  --glass-level: 0;
+  --glass-filter: none;
+}

@@ -1,0 +1,231 @@
+/* PROTOTYPE - the page rules, the face and mark rules, and the shared chrome, taken from the app's
+   base.css and sidebar.css and the book's system.css, so a drawing sits in the real window. */
+
+[data-theme="whitehaven"] { --bg: #f4f3f0; }
+[data-theme="styles"] { --bg: #f5eee3; }
+[data-theme="orient-express"] { --bg: #1a1310; }
+[data-theme="nile"] { --bg: #0e1714; }
+[data-theme="end-house"] { --bg: #1d1217; }
+[data-theme="blue-train"] { --bg: #17212b; }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-ui); font-size: var(--t-13); line-height: 1.45;
+  font-optical-sizing: auto; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+button, input, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: default; }
+a { color: inherit; text-decoration: none; }
+b, strong { font-weight: var(--w-bold); }
+small { font-size: var(--t-11); }
+kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 5px; background: color-mix(in oklab, var(--ink) 6%, transparent); color: var(--muted); font: inherit; font-size: var(--t-11); font-weight: var(--w-medium); }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ic { flex: none; display: block; }
+.br { flex: none; display: block; }
+:root, [data-theme] {
+  --scrollbar-thumb: color-mix(in oklab, var(--ink) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+
+/* ---------- Characters ---------- */
+.cr,
+.cr-you,
+.logo {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+  overflow: visible;
+}
+.cr-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cr-blink 7.2s infinite;
+}
+@keyframes cr-blink {
+  0%,
+  95.6% {
+    transform: scaleY(1);
+  }
+  97% {
+    transform: scaleY(0.12);
+  }
+  98.6%,
+  100% {
+    transform: scaleY(1);
+  }
+}
+.cr-tap {
+  animation: cr-tap 0.52s ease-in-out infinite alternate;
+}
+.cr-tap--2 {
+  animation-delay: 0.26s;
+}
+@keyframes cr-tap {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1.3px);
+  }
+}
+.cr-wave {
+  transform-origin: 36.5px 32.5px;
+  animation: cr-wave 3.6s var(--ease-out) 1.2s infinite;
+}
+@keyframes cr-wave {
+  0%,
+  80%,
+  100% {
+    transform: rotate(0);
+  }
+  86% {
+    transform: rotate(9deg);
+  }
+  92% {
+    transform: rotate(-5deg);
+  }
+}
+.cr--asleep {
+  filter: saturate(0.5);
+}
+.cr-z text {
+  animation: cr-z 3.4s ease-in-out infinite;
+}
+.cr-z text + text {
+  animation-delay: 0.8s;
+}
+@keyframes cr-z {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.cr--away {
+  opacity: 0.55;
+  filter: saturate(0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cr-eyes,
+  .cr-tap,
+  .cr-wave,
+  .cr-z text {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+html[data-motion="off"] .cr * {
+  animation: none !important;
+}
+
+/* A row of overlapping faces, used for aggregation ("12 idle"). */
+.stack {
+  display: inline-flex;
+
+}
+
+/* ---------- State marks ---------- */
+/* Six marks, one meaning each, drawn in the icon family. Color helps but is never the only cue. */
+.mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  line-height: 0;
+}
+.mark--working {
+  color: var(--muted);
+}
+.mark--waiting {
+  color: var(--you);
+}
+.mark--done {
+  color: var(--ok);
+}
+.mark--failed {
+  color: var(--fail-ink);
+}
+.mark--paused {
+  color: var(--muted);
+}
+.mark--idle {
+  color: var(--faint);
+}
+/* Working dots take turns, slowly: busy, not urgent. */
+.mark--working circle {
+  animation: mark-dot 1.6s ease-in-out infinite;
+}
+.mark--working circle:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.mark--working circle:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes mark-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark--working circle {
+    animation: none;
+  }
+}
+
+
+/* ---------- The window ---------- */
+.app { display: grid; grid-template-columns: 272px minmax(0, 1fr); height: 100vh; width: 100vw; background: var(--bg); overflow: hidden; }
+.side { display: flex; flex-direction: column; min-height: 0; padding: 0 12px; background: var(--bg); }
+.side-top { display: flex; align-items: center; justify-content: flex-end; height: 48px; padding: 0 0 0 8px; flex: none; }
+.icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-btn); color: var(--muted); transition: background var(--dur-1), color var(--dur-1); }
+.icon-btn:hover { background: var(--hover); color: var(--ink); }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--r-sm); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--divider); }
+.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: var(--r-btn); color: var(--muted); font-weight: var(--w-medium); transition: background var(--dur-2) var(--ease-out), color var(--dur-2); }
+.seg button[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--divider), var(--shadow-1); }
+.seg.seg--side { display: grid; grid-template-columns: 1fr 1fr; flex: none; margin-bottom: 8px; }
+.side-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.side-actions .icon-btn { width: 30px; height: 30px; }
+.nav-row { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px 0 10px; border-radius: var(--r-sm); color: var(--muted); font-weight: var(--w-medium); transition: background var(--dur-1); width: 100%; text-align: left; }
+.nav-row > span:not(.count) { flex: 1; min-width: 0; }
+.nav-row:hover { background: var(--hover); color: var(--ink); }
+.nav-row.is-on { background: var(--selected); color: var(--ink); }
+.nav-row .ic { color: var(--muted); }
+.side-actions .nav-row { flex: 1; min-width: 0; }
+.side-scroll { flex: 1; min-height: 0; margin: 0 -12px; padding: 0 12px 12px; overflow: auto; }
+.side-sec { display: flex; flex-direction: column; gap: 1px; padding-top: 8px; }
+.side-h { display: flex; align-items: center; gap: 8px; height: 24px; margin: 0; padding: 0 4px 0 10px; color: var(--faint); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.07em; text-transform: uppercase; }
+.side-h > :first-child { flex: 1; }
+.side-row { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 1px 8px 1px 10px; border-radius: var(--r-sm); transition: background var(--dur-1); }
+.side-row:hover { background: var(--hover); }
+.side-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.3; }
+.side-name { font-weight: var(--w-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-ask { font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--you-ink); }
+.count { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: var(--r-pill); color: var(--muted); background: color-mix(in oklab, var(--ink) 7%, transparent); font-size: var(--t-11); font-weight: var(--w-bold); font-variant-numeric: tabular-nums; }
+.count--you { color: var(--face-ink); background: var(--you); }
+.side-foot { display: flex; flex-direction: column; gap: 6px; flex: none; margin: 0 -12px; padding: 9px 16px 10px; border-top: 1px solid var(--divider); }
+.side-sum { color: var(--faint); font-size: var(--t-12); white-space: nowrap; }
+.side-sum b { color: var(--muted); font-weight: var(--w-bold); font-variant-numeric: tabular-nums; }
+.side-sum .you-ink { color: var(--you-ink); }
+.side-me { display: flex; align-items: center; gap: 9px; }
+.side-me .side-name { flex: 1; }
+.main { position: relative; isolation: isolate; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); box-shadow: -1px 0 0 var(--divider); overflow: hidden; }
+
+/* A floating glass layer holding a few controls. */
+.pill { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 0 4px; border-radius: var(--r-md); white-space: nowrap; background: var(--glass-fill); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow); }
+.pill-title { margin: 0; padding: 0 8px 0 10px; font-size: inherit; font-weight: var(--w-bold); }
+.ptab { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px 0 8px; border-radius: 8px; color: var(--muted); font-weight: var(--w-medium); transition: background var(--dur-1); }
+.ptab:hover { background: var(--hover); }
+.ptab.is-on { background: var(--selected); color: var(--ink); }
+.ptab small { color: var(--faint); font-size: var(--t-12); font-weight: var(--w-regular); }

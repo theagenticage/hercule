@@ -1,0 +1,123 @@
+/* The page: a wide side for lasting work, a narrow column for small requests. Pace and weight are said by shape, not by labels. */
+.app { grid-template-columns: 272px minmax(0, 1fr); }
+.side { width: 272px; height: 100vh; }
+.side-scroll { overflow: visible; }
+.side-row { min-height: 38px; }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(1100px 620px at 26% -8%, var(--lamp, transparent), transparent 72%), var(--desk);
+}
+
+.ib-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 56px;
+  flex: none;
+  padding: 0 14px;
+}
+.tools-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.ib-end[hidden] { display: none; }
+.ib-notice { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: color-mix(in oklab, var(--you) 18%, transparent); color: var(--ink); font: var(--type-summary); }
+.ib-notice[hidden] { display: none; }
+.ib-notice b { font-weight: var(--w-medium); }
+.notice-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
+/* The one glass button of the top bar, shared with Work. */
+.icon-pill { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-md); color: var(--muted); background: var(--glass-fill); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow); }
+.icon-pill:hover { color: var(--ink); }
+.ib-fix { margin-left: 4px; text-decoration: underline; color: inherit; font: inherit; }
+
+.ib-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  column-gap: 32px;
+  align-items: start;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+  /* The page starts 10px under the bar's edge, so Hercule's head over the top card is not clipped. */
+  margin-top: -10px;
+  padding: 10px 32px 40px;
+}
+.ib-wide, .ib-narrow { min-width: 0; }
+.ib-narrow { padding-top: 14px; }
+.r-none { margin: 6px 2px; color: var(--muted); font: var(--type-summary); }
+.r-none[hidden] { display: none; }
+.tools-main[hidden] { display: none; }
+/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
+.ib-page[data-by="status"] .card--rich .c-status { display: none; }
+.ib-page[data-by="status"] .card--rich { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.ib-page[data-by="status"] .tucked, .ib-page[data-by="status"] .hint { margin-left: 30px; }
+
+/* A section title is plain words. */
+.sec { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0 0 8px; }
+.sec[hidden] { display: none; }
+.sec h2 { margin: 0; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--ink); }
+.sec-n { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
+.sec-note { color: var(--faint); font: var(--type-summary); }
+.sec-pick { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--faint); font: var(--type-summary); }
+.sec-pick select { field-sizing: content; height: 24px; padding: 0 20px 0 6px; border: 0; border-radius: var(--r-xs); appearance: none; -webkit-appearance: none; color: var(--muted); font: var(--type-summary); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 6px center; cursor: pointer; }
+.sec-pick select:hover { color: var(--ink); background-color: var(--hover); }
+
+/* One place is one surface: its head, then its work as rows. */
+.block { position: relative; isolation: isolate; margin: 0 0 16px; color: var(--ink); }
+.b-head { position: relative; display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 1px; padding: 12px 16px 11px; border-bottom: 1px solid var(--line-soft); }
+.b-head--plain { padding-bottom: 10px; }
+.b-open { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: inherit; border-radius: var(--r-xs); }
+.b-mark { display: inline-grid; place-items: center; width: 16px; }
+.b-title { margin: 0; font: 600 var(--t-18) / 24px var(--font-ui); letter-spacing: -0.008em; color: var(--ink); }
+.b-open:hover .b-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.b-end { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
+.b-progress { position: relative; width: 72px; height: 4px; overflow: hidden; border-radius: 2px; background: color-mix(in oklab, var(--ink) 10%, transparent); }
+.b-progress i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: color-mix(in oklab, var(--ink) 55%, transparent); }
+.b-above { flex-basis: 100%; margin: 0 0 0 24px; color: var(--faint); font: var(--type-summary); }
+.b-above i { margin: 0 6px; font-style: normal; }
+
+.work-empty { color: var(--muted); font: var(--type-summary); }
+
+/* A pointer to a thing that lives under another place too. */
+.echo { display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; opacity: 0.86; width: 100%; min-height: 38px; padding: 8px 16px; color: var(--muted); font: var(--type-summary); text-align: left; }
+.echo:hover { color: var(--ink); background: var(--hover); }
+.echo-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.echo small { color: var(--faint); font: inherit; white-space: nowrap; }
+
+/* The narrow column. */
+#requests { display: flex; flex-direction: column; gap: 6px; }
+.r-label { margin: 10px 2px 0; color: var(--faint); font: var(--type-summary); }
+.parked { margin-top: 18px; }
+.parked[hidden] { display: none; }
+.parked-t { display: inline-flex; align-items: center; gap: 7px; height: 26px; color: var(--muted); font: var(--type-summary); }
+.parked-t:hover { color: var(--ink); }
+.parked-t small { color: var(--faint); font: inherit; font-variant-numeric: tabular-nums; }
+.chev { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--m-quick); }
+.parked.is-open .chev { transform: rotate(45deg); }
+.parked-cards { display: none; flex-direction: column; gap: 8px; margin-top: 8px; }
+.parked.is-open .parked-cards { display: flex; }
+
+.icon-btn--sm { width: 24px; height: 24px; }
+.nav-new { flex: none; width: 6px; height: 6px; margin-right: -2px; border-radius: 50%; background: var(--you-ink); }
+.nav-new[hidden] { display: none; }
+.nav-row { position: relative; }
+.skip { position: absolute; left: 12px; top: -40px; z-index: 100; padding: 6px 10px; border-radius: var(--r-xs); background: var(--raised); color: var(--ink); font-size: var(--t-12); }
+.skip:focus { top: 8px; box-shadow: var(--h-hover); }
+/* The shared styles give these a display of their own, which would otherwise show an empty count and section. */
+.count[hidden], .side-sec[hidden] { display: none; }
+
+@media (max-width: 1180px) {
+  .ib-page { grid-template-columns: minmax(0, 1fr) 272px; column-gap: 24px; padding-left: 24px; padding-right: 24px; }
+  .card--rich, .echo { grid-template-columns: 96px minmax(0, 1fr) auto; }
+  .tucked, .hint { margin-left: 108px; }
+}
+@media (max-width: 960px) {
+  .ib-page { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+}

@@ -1,0 +1,146 @@
+/* A CLEAR DESK. The one place with nothing else on it, so the page can be quietly gorgeous. The ring
+   of rays gives way to a real horizon: light in the colour of the hour, a disc behind Hercule, a line
+   that fades out at both ends, and his reflection under it. All of it plays once. */
+
+/* The clean drawing stays in place, unseen, so the words under it keep their exact position. */
+html[data-b-clear] :is(.sunrise > svg, .zero-sun) { visibility: hidden; }
+html[data-b-clear] :is(.sunrise-head, .zero-n) > .cr { visibility: hidden; }
+html[data-b-clear] [data-scene="empty"] .rule { border-bottom-color: transparent; }
+html[data-b-clear] .sunrise { bottom: 0; }
+html[data-b-clear] :is(.sunrise-head, .zero-n) { overflow: visible; animation: none; }
+html[data-b-clear] #welcome { position: relative; z-index: 13; }
+html[data-b-clear] :is(.zero-t, .zero-s) { position: relative; }
+
+/* A point on the horizon, under Hercule. Everything is placed from it, so both views draw one scene. */
+html[data-b-clear] .b-sky {
+  --sky-w: min(1120px, calc(100vw - 320px));
+  --sky-h: 300px;
+  --sky: oklch(calc(0.875 - 0.075 * var(--sky-night)) calc(var(--sky-chroma) * 1.25) var(--sky-hue));
+  --sky-core: oklch(0.985 calc(var(--sky-chroma) * 0.34) var(--sky-hue));
+  --sky-line: color-mix(in oklab, var(--ink) 24%, transparent);
+  --sky-star: oklch(0.99 0.01 var(--sky-hue) / 0.95);
+  --sky-moon: oklch(0.99 0.012 90);
+  --sky-disc: 0.82;
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+html[data-b-clear]:not([data-theme="whitehaven"], [data-theme="styles"]) .b-sky {
+  --sky: oklch(calc(0.48 - 0.05 * var(--sky-night)) calc(var(--sky-chroma) * 1.3) var(--sky-hue));
+  --sky-core: oklch(0.86 calc(var(--sky-chroma) * 0.9) var(--sky-hue));
+  --sky-star: oklch(0.94 0.02 90 / 0.62);
+  --sky-moon: oklch(0.93 0.035 90);
+  --sky-disc: 0.24;
+}
+/* The small sunrise that closes the column of Requests is the same scene from further away. */
+html[data-b-clear] .zero--small .b-sky { --sky-w: 590px; --sky-h: 170px; transform: scale(0.54); transform-origin: 0 100%; }
+
+/* Everything above the horizon sits in one clipped box, so the horizon does the cutting. */
+html[data-b-clear] .b-sky-above { position: absolute; left: calc(var(--sky-w) / -2); bottom: 0; width: var(--sky-w); height: var(--sky-h); overflow: hidden; }
+/* Two lights in one layer: a wide low band along the horizon, and a taller glow round the sun. */
+html[data-b-clear] .b-sky-dome {
+  position: absolute;
+  inset: 0;
+  opacity: var(--sky-glow);
+  background:
+    radial-gradient(ellipse 46% 40% at 50% 100%,
+      color-mix(in oklab, var(--sky) 62%, transparent) 0%,
+      color-mix(in oklab, var(--sky) 44%, transparent) 26%,
+      color-mix(in oklab, var(--sky) 24%, transparent) 52%,
+      color-mix(in oklab, var(--sky) 8%, transparent) 78%,
+      transparent 100%),
+    radial-gradient(ellipse 27% 92% at 50% 100%,
+      color-mix(in oklab, var(--sky) 72%, transparent) 0%,
+      color-mix(in oklab, var(--sky) 56%, transparent) 22%,
+      color-mix(in oklab, var(--sky) 36%, transparent) 44%,
+      color-mix(in oklab, var(--sky) 17%, transparent) 66%,
+      color-mix(in oklab, var(--sky) 5%, transparent) 86%,
+      transparent 100%);
+}
+/* A wide gradient this faint falls into bands on an 8-bit screen, and a very fine noise breaks them up. */
+html[data-b-clear] .b-sky-dome::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("grain.png") 0 0 / 128px 128px;
+  opacity: 0.5;
+  -webkit-mask: radial-gradient(ellipse 46% 92% at 50% 100%, #000 40%, transparent);
+  mask: radial-gradient(ellipse 46% 92% at 50% 100%, #000 40%, transparent);
+}
+html[data-b-clear] .b-sky-disc {
+  position: absolute;
+  left: 50%;
+  bottom: -40px;
+  width: 172px;
+  height: 172px;
+  margin-left: -86px;
+  border-radius: 50%;
+  opacity: calc(var(--sky-disc) * (1 - var(--sky-night) * 0.9));
+  background: radial-gradient(closest-side circle, var(--sky-core) 0%, var(--sky-core) 84%, color-mix(in oklab, var(--sky-core) 50%, transparent) 93%, transparent 100%);
+}
+html[data-b-clear] .b-sky-night { position: absolute; left: 50%; bottom: 0; width: 720px; height: 300px; margin-left: -360px; opacity: var(--sky-night); }
+/* On a light desk a moon and stars are only pale on pale, so the night there is the sky's colour alone. */
+html[data-b-clear]:is([data-theme="whitehaven"], [data-theme="styles"]) .b-sky-night { display: none; }
+html[data-b-clear] .b-sky-night circle { fill: var(--sky-star); }
+html[data-b-clear] .b-sky-night path { fill: var(--sky-moon); }
+/* 45px, not 48px: the face sits a little left of the middle of its drawing, and the disc would show that. */
+html[data-b-clear] .b-sky-head { position: absolute; left: 50%; bottom: 0; width: 96px; height: 76px; margin-left: -45px; line-height: 0; }
+html[data-b-clear] .b-sky-head .cr { display: block; overflow: visible; transform-origin: 50% 100%; animation: none; }
+/* He is still once he has risen. Clean Hercule blinks, and this one blinks once, with his bow. */
+html[data-b-clear] .b-sky-head .cr-eyes { animation: none; }
+
+/* The horizon: a hairline that fades out at both ends, brightest where the light is. */
+html[data-b-clear] .b-sky-line {
+  position: absolute;
+  left: calc(var(--sky-w) / -2);
+  bottom: -1px;
+  width: var(--sky-w);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sky-line) 22%, var(--sky-line) 78%, transparent);
+}
+@media (min-resolution: 2dppx) { html[data-b-clear] .b-sky-line { height: 0.5px; bottom: -0.5px; } }
+
+/* What the light does to the surface it falls on: a soft glow, and Hercule faintly in it. */
+html[data-b-clear] .b-sky-ground {
+  position: absolute;
+  left: calc(var(--sky-w) / -3.2);
+  top: 0;
+  width: calc(var(--sky-w) / 1.6);
+  height: 44px;
+  opacity: var(--sky-glow);
+  background: radial-gradient(ellipse 50% 100% at 50% 0, color-mix(in oklab, var(--sky) 44%, transparent), color-mix(in oklab, var(--sky) 16%, transparent) 54%, transparent);
+}
+
+/* The rise. The light comes first, as it does, then the line, then the disc, then Hercule. */
+html[data-b-clear] .b-sky.is-rising .b-sky-dome { animation: b-sky-light 2400ms cubic-bezier(0.3, 0.1, 0.3, 1) backwards; }
+html[data-b-clear] .b-sky.is-rising .b-sky-ground { animation: b-sky-light 2400ms cubic-bezier(0.3, 0.1, 0.3, 1) 500ms backwards; }
+html[data-b-clear] .b-sky.is-rising .b-sky-line { animation: b-sky-line 1300ms var(--m-ease) 160ms backwards; }
+html[data-b-clear] .b-sky.is-rising .b-sky-disc { animation: b-sky-up 2300ms cubic-bezier(0.16, 0.7, 0.2, 1) 160ms backwards; }
+html[data-b-clear] .b-sky.is-rising .b-sky-head .cr { animation: b-sky-up 2100ms cubic-bezier(0.16, 0.7, 0.2, 1) 360ms backwards, b-sky-bow 980ms var(--m-ease-both) 2750ms; }
+html[data-b-clear] .b-sky.is-rising .b-hat { animation: b-sky-tip 980ms var(--m-ease-both) 2750ms; }
+html[data-b-clear] .b-sky.is-rising .b-sky-head .cr-eyes { transform-box: fill-box; transform-origin: center; animation: b-sky-blink 260ms ease-in-out 3010ms; }
+html[data-b-clear] .b-sky.is-rising .b-sky-night { animation: b-sky-night 1800ms var(--m-ease) 700ms backwards; }
+@keyframes b-sky-light { from { opacity: 0; } }
+@keyframes b-sky-night { from { opacity: 0; } }
+@keyframes b-sky-line { from { transform: scaleX(0.12); opacity: 0; } }
+@keyframes b-sky-up { from { transform: translateY(112px); } }
+/* A hat tipped by a person: the brim comes up and over, the head inclines, and both go back. */
+@keyframes b-sky-tip {
+  0%, 100% { transform: none; }
+  30%, 52% { transform: translateY(-2.3px) rotate(-9deg); }
+}
+@keyframes b-sky-bow {
+  0%, 100% { transform: none; }
+  30%, 52% { transform: rotate(-2.4deg) translateY(1px); }
+}
+@keyframes b-sky-blink { 50% { transform: scaleY(0.12); } }
+html[data-b-clear] .b-hat { transform-box: fill-box; transform-origin: 30% 100%; }
+
+/* Work's words have no entrance of their own in the clean build. The Inbox's do, so they keep theirs. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-b-clear]:not([data-motion="reduced"]) .welcome--clear > * { animation: b-sky-words 640ms var(--m-ease) 400ms backwards; }
+}
+@keyframes b-sky-words { from { transform: translateY(6px); opacity: 0; } }

@@ -1,0 +1,232 @@
+/* The open card and everything that floats. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--veil);
+  opacity: 0;
+  transition: opacity var(--m-slow) var(--m-ease);
+}
+.scrim.is-on { opacity: 1; }
+.scrim:not(.is-on), .open.is-closing { pointer-events: none; }
+.scrim[hidden] { display: none; }
+
+.open {
+  position: fixed;
+  z-index: 60;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--stock);
+  box-shadow: var(--h-carry);
+  color: var(--ink);
+}
+.open[hidden] { display: none; }
+.open.is-walking { transition: height var(--m-base) var(--m-ease), top var(--m-base) var(--m-ease); }
+.open.is-arming * { pointer-events: none; }
+.open kbd { color: var(--ink); }
+.open-in { display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: auto; padding: 12px 0 8px; will-change: transform; }
+.open.is-closing .o-meta, .open.is-closing .o-signal:not(.is-latest), .open.is-closing .o-note, .open.is-closing .o-parts, .open.is-closing .o-facts, .open.is-closing .o-ledger, .open.is-closing .o-close { opacity: 0; transition: none; }
+
+.o-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  padding: 0 12px 0 12px;
+}
+.o-title { grid-column: 2; margin: 0; font-size: var(--t-20); font-weight: var(--w-bold); line-height: 26px; letter-spacing: -0.008em; text-wrap: pretty; }
+.o-close { grid-column: 3; align-self: start; margin-top: -1px; }
+.o-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; color: var(--muted); font-size: var(--t-12); line-height: 18px; }
+.o-meta i { font-style: normal; color: var(--faint); }
+
+.o-sec { padding: 12px 12px 4px 42px; }
+.o-head .c-mark { margin-top: 3px; }
+.o-signals { list-style: none; margin: 0; padding: 0; }
+.o-signal { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 3px 0; color: var(--muted); font-size: var(--t-13); line-height: 18px; }
+.o-signal time { color: var(--faint); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
+.o-signal q { display: block; margin-top: 2px; color: var(--muted); quotes: none; }
+.o-dot { position: absolute; left: -14px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.o-signal::before { content: ""; position: absolute; left: -11.5px; top: 15px; bottom: -9px; width: 1px; background: var(--line-soft); }
+.o-signal:last-child::before { display: none; }
+.o-signal.is-latest { color: var(--ink); font-weight: var(--w-medium); }
+.o-signal.is-latest .o-dot { background: var(--ink); }
+.o-signal.tone-bad.is-latest { color: var(--fail-ink); }
+.o-signal.tone-bad.is-latest .o-dot { background: var(--fail-ink); }
+.o-signal.tone-good.is-latest { color: var(--ok); }
+.o-signal.tone-good.is-latest .o-dot { background: var(--ok); }
+
+.o-facts { display: flex; align-items: center; gap: 12px; min-height: 26px; padding: 8px 14px 8px 42px; color: var(--muted); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
+.o-status { display: inline-flex; align-items: center; gap: 5px; margin-left: -20px; }
+.o-source { margin-left: auto; min-height: 24px; font-size: inherit; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--w-medium); }
+.o-source:hover { color: var(--ink); }
+
+.o-note { margin: 12px 16px 6px 42px; color: var(--muted); font-size: var(--t-13); line-height: 20px; }
+.o-parts { list-style: none; margin: 4px 14px 10px 42px; padding: 0; }
+.o-parts li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; min-height: 26px; font-size: var(--t-12); }
+.o-parts .mark { color: var(--muted); }
+.o-parts span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.o-parts small { color: var(--muted); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
+
+/* The rows share one grid, so the first column is as wide as the longest name on this card and no wider, and every name stays on one line. */
+.o-ledger { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; margin-top: 2px; padding: 6px 6px 0; border-top: 1px solid var(--divider); }
+
+.o-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 12px;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: inherit;
+  outline: none;
+  transition: background var(--m-quick);
+}
+.o-row:hover, .o-row:focus-visible { background: var(--hover); }
+.o-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.o-label { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: var(--w-medium); font-size: var(--t-13); white-space: nowrap; }
+.o-says { min-width: 0; color: var(--muted); font-size: var(--t-12); line-height: 16px; }
+
+.o-row--quiet .o-label { color: var(--muted); padding-left: 28px; }
+/* The suggested move: the one filled button of the card, as in Intake's ledger. */
+.o-row.is-first .o-label { height: 32px; margin-left: -6px; padding: 0 12px 0 6px; width: fit-content; border-radius: var(--r-btn); background: var(--answer); color: var(--answer-fg); font-weight: var(--w-bold); }
+.o-row.is-first:hover .o-label, .o-row.is-first:focus-visible .o-label { background: color-mix(in oklab, var(--answer) 88%, var(--ink)); }
+.o-row.is-first:hover, .o-row.is-first:focus-visible { background: none; }
+
+
+.o-row kbd { justify-self: end; min-width: 18px; text-align: center; }
+
+/* The workflow menu. */
+.menu {
+  position: fixed;
+  z-index: 70;
+  width: 320px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+}
+.menu[hidden] { display: none; }
+.menu-h { padding: 4px 8px 6px; color: var(--faint); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.07em; text-transform: uppercase; }
+.menu-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; width: 100%; padding: 6px 8px; border-radius: var(--r-sm); text-align: left; }
+.menu-row.is-on, .menu-row:hover { background: var(--hover); }
+.menu-t { display: flex; flex-direction: column; min-width: 0; }
+.menu-t b { font-size: var(--t-13); font-weight: var(--w-medium); }
+.menu-t small { color: var(--muted); font-size: var(--t-12); line-height: 16px; }
+
+/* The undo line, at the foot of the page. */
+.toast {
+  position: absolute;
+  left: 32px;
+  bottom: 13px;
+  z-index: 65;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  padding: 0 3px 0 10px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-hover);
+  font-size: var(--t-13);
+}
+.toast[hidden] { display: none; }
+.toast button { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--r-xs); color: var(--ink); font-weight: var(--w-medium); }
+.toast button:hover { background: var(--hover); }
+
+/* A small token of a card, in flight to where its Task went. */
+.flight { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; will-change: transform; }
+.flight .token { display: inline-grid; place-items: center; }
+.flight .mark { color: var(--mark-ink); }
+.flight .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
+
+/* Landing and leaving. */
+.drop { position: fixed; left: 0; top: 0; z-index: 90; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--you-ink); pointer-events: none; }
+.drop--bad { background: var(--fail); }
+.drop--good { background: var(--ok); }
+.c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you-ink); }
+.card.is-source { opacity: 0; }
+/* The rim follows the strip that can be seen, at the card's own corner, and prints over nothing else. */
+.card.is-landed::after, .part.is-landed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--card-r);
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px var(--land), inset 0 0 14px -6px var(--land);
+  animation: land-rim 1100ms var(--m-ease) forwards;
+}
+.card, .part { --land: var(--you); }
+[data-landed="bad"] { --land: var(--fail); }
+[data-landed="good"] { --land: var(--ok); }
+@keyframes land-rim { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
+.card.is-leaving { pointer-events: none; }
+.nav-wash { position: absolute; inset: 0; border-radius: inherit; background: color-mix(in oklab, var(--accent) 16%, transparent); pointer-events: none; }
+.c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
+.c-line--old { margin: 0; }
+@media (forced-colors: active) {
+  .card-stock { border: 1px solid CanvasText; }
+  .card.is-focus, .plaque.is-focus, .o-row:focus-visible { outline: 2px solid Highlight; }
+  .ptab.is-on { outline: 2px solid CanvasText; outline-offset: -2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scrim, .rail { transition: opacity 200ms linear !important; }
+  .card.is-landed::after, .part.is-landed::after { animation: land-fade 900ms linear forwards; }
+  .rail, .rail.is-on { transform: translate(-50%, 0); transition: opacity var(--m-base) linear; }
+}
+@keyframes land-fade { from { opacity: 1; } to { opacity: 0; } }
+
+.o-progress { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 0 16px 0 45px; color: var(--faint); font: var(--type-summary); }
+.o-signal.is-linked { color: var(--muted); }
+.o-from { position: absolute; left: -18px; top: 6px; display: grid; place-items: center; width: 13px; height: 13px; background: var(--stock); }
+.o-h { margin: 0 0 4px; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--muted); }
+.o-links { margin-top: 8px; padding: 0 12px 8px 41px; }
+.o-links ul { list-style: none; margin: 0; padding: 0; }
+.o-link { position: relative; display: flex; align-items: center; gap: 8px; min-height: 24px; border-radius: var(--r-xs); font: var(--type-summary); }
+.o-link-go { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; min-height: 24px; padding: 0 4px; border-radius: var(--r-xs); text-align: left; color: inherit; }
+button.o-link-go:hover { background: var(--hover); }
+.o-link-t { min-width: 0; flex: 1; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.o-link-s { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); transition: opacity var(--m-quick); }
+.o-link small { flex: none; color: var(--faint); font: var(--type-meta); }
+/* Who claims a link stays quiet until the row is reached for. */
+.o-claim { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 6px; border-radius: var(--r-xs); background: var(--stock); opacity: 0; pointer-events: none; transition: opacity var(--m-quick); }
+.o-link:hover .o-claim, .o-link:focus-within .o-claim { opacity: 1; }
+.o-link:has(.o-claim):hover .o-link-s, .o-link:has(.o-claim):focus-within .o-link-s { opacity: 0; }
+.o-link--closed { padding: 0 4px; color: var(--faint); }
+.o-link--closed .o-link-t { color: var(--faint); }
+.o-link--hint .o-link-t { color: var(--muted); }
+.o-why { color: var(--faint); }
+.o-unlink { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--r-xs); color: var(--faint); opacity: 0; }
+.o-link:hover .o-unlink, .o-unlink:focus-visible { opacity: 1; }
+.o-unlink:hover { color: var(--ink); background: var(--hover); }
+.o-add { position: relative; margin-top: 2px; }
+.o-add-go { display: inline-flex; align-items: center; gap: 7px; min-height: 24px; padding: 0 4px; color: var(--muted); font: var(--type-summary); }
+.o-add-go[hidden], .o-find[hidden] { display: none; }
+.o-add-go:hover { color: var(--ink); }
+.o-find { width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
+.o-find::placeholder { color: var(--faint); }
+.o-found { margin-top: 4px !important; }
+.o-found[hidden] { display: none; }
+.o-text small { color: var(--faint); font: var(--type-meta); }
+.o-back { display: flex; align-items: center; gap: 6px; max-width: 100%; margin: -4px 16px 6px 42px; color: var(--muted); font: var(--type-summary); text-align: left; }
+.o-back .ic { flex: none; transform: rotate(180deg); }
+.o-back span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.o-back:hover { color: var(--ink); }
+.o-inner { margin-top: 4px; }
+.o-inner-go { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 26px; padding: 0 4px; border-radius: var(--r-xs); font: var(--type-summary); text-align: left; }
+.o-inner-go:hover { background: var(--hover); }
+.o-inner-t { min-width: 0; flex: 1; color: var(--ink); font-weight: var(--w-medium); }
+.o-inner-n { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.o-inner ul { margin-left: 8px; }
+/* The toolbar's menus lie in the window, so they are placed by what opened them. */
+#toolmenu { position: fixed; z-index: 60; }
+#toolmenu .menu-row { display: flex; align-items: center; }

@@ -1,0 +1,68 @@
+/* PAPER. A card is a real sheet: a corner with no join in it, a rim that catches the light from
+   above, and a shadow in layers that takes the desk's warmth. It changes only tokens and the sheet
+   itself, so every state of a card inherits it. */
+
+html[data-b-paper] {
+  /* What the sheet's face and rim are made of. The light themes follow below. */
+  --paper-face: linear-gradient(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.012) 38%, oklch(0 0 0 / 0.035));
+  --paper-rim: linear-gradient(oklch(1 0 0 / 0.08), oklch(1 0 0 / 0.04) 26%, oklch(1 0 0 / 0.02) 62%);
+  --stock-rim: oklch(0 0 0 / 0.16);
+  --h-rest: 0 0 0 0.5px oklch(0 0 0 / 0.16), 0 1px 1px oklch(0 0 0 / 0.26), 0 3px 5px -1px oklch(0 0 0 / 0.26), 0 9px 16px -6px oklch(0 0 0 / 0.34), 0 22px 34px -18px oklch(0 0 0 / 0.42);
+  --h-hover: 0 0 0 0.5px oklch(0 0 0 / 0.18), 0 1px 1px oklch(0 0 0 / 0.26), 0 5px 9px -2px oklch(0 0 0 / 0.3), 0 16px 26px -10px oklch(0 0 0 / 0.44), 0 34px 52px -22px oklch(0 0 0 / 0.5);
+  --h-carry: 0 0 0 0.5px oklch(0 0 0 / 0.2), 0 2px 3px oklch(0 0 0 / 0.28), 0 14px 20px -6px oklch(0 0 0 / 0.38), 0 36px 56px -18px oklch(0 0 0 / 0.56), 0 64px 90px -34px oklch(0 0 0 / 0.5);
+}
+html[data-b-paper]:is([data-theme="whitehaven"], [data-theme="styles"]) {
+  --paper-shadow: 0.34 0.022 78;
+  --paper-face: linear-gradient(oklch(1 0 0 / 0), oklch(0.72 0.012 88 / 0.028));
+  --paper-rim: linear-gradient(oklch(0.34 0.02 80 / 0.045), oklch(0.34 0.02 80 / 0.06) 60%, oklch(0.34 0.02 80 / 0.085));
+  --h-rest:
+    0 0.5px 0.5px oklch(var(--paper-shadow) / 0.1),
+    0 1px 2px -0.5px oklch(var(--paper-shadow) / 0.1),
+    0 3px 6px -2px oklch(var(--paper-shadow) / 0.075),
+    0 10px 18px -8px oklch(var(--paper-shadow) / 0.1),
+    0 22px 36px -22px oklch(var(--paper-shadow) / 0.1);
+  --h-hover:
+    0 0.5px 0.5px oklch(var(--paper-shadow) / 0.1),
+    0 2px 3px -1px oklch(var(--paper-shadow) / 0.1),
+    0 6px 10px -3px oklch(var(--paper-shadow) / 0.1),
+    0 16px 26px -10px oklch(var(--paper-shadow) / 0.16),
+    0 34px 54px -24px oklch(var(--paper-shadow) / 0.2);
+  --h-carry:
+    0 1px 1px oklch(var(--paper-shadow) / 0.08),
+    0 4px 6px -2px oklch(var(--paper-shadow) / 0.1),
+    0 14px 20px -6px oklch(var(--paper-shadow) / 0.14),
+    0 36px 56px -18px oklch(var(--paper-shadow) / 0.26),
+    0 64px 90px -34px oklch(var(--paper-shadow) / 0.24);
+}
+
+/* The corner: a curve with no join between the side and the arc. The radius grows a little, because
+   a continuous corner of the same radius looks smaller. */
+html[data-b-paper] { --card-r: 14px; --card-r-inner: 10px; }
+html[data-b-paper] :is(.card-stock, .stack-bar, .slot, .pn-clip, .open, .fr-card),
+html[data-b-paper] .card-stock::before,
+html[data-b-paper] .card-stock::after,
+html[data-b-paper] .pn-sheet::before { corner-shape: squircle; }
+
+/* The sheet. The rim and the face are its own, so wear and every state's background colour still work. */
+html[data-b-paper] .card-stock { background-image: var(--paper-face); }
+html[data-b-paper] .card-stock::before {
+  border: 1px solid transparent;
+  background: var(--paper-rim) border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) padding-box exclude, linear-gradient(#000 0 0);
+}
+@media (min-resolution: 2dppx) { html[data-b-paper] .card-stock::before { border-width: 0.5px; } }
+/* What stands quiet stays flat: a blocked card is an outline with no sheet, and a landed one only words. */
+html[data-b-paper] :is(.card[data-state="blocked"], .card[data-state="landed"], .card.is-skeleton, .card.is-away) .card-stock { background-image: none; }
+html[data-b-paper] .card[data-state="blocked"] .card-stock { box-shadow: inset 0 0 0 0.75px var(--stock-rim-flat); }
+html[data-b-paper]:is([data-theme="whitehaven"], [data-theme="styles"]) .card[data-state="blocked"] .card-stock { box-shadow: inset 0 0 0 0.75px oklch(0.34 0.02 80 / 0.16); }
+
+/* A stack's under-sheet is the same paper, one step down. */
+html[data-b-paper] .stack-bar { background-image: var(--paper-face); }
+
+/* The Inbox's requests stand half way between desk and sheet, and take the same face. */
+html[data-b-paper] .card--compact > .card-stock { background-image: var(--paper-face); }
+html[data-b-paper] .pn-sheet::before { background-image: var(--paper-face); }
+
+/* The Inbox's surfaces: a place and what Hercule noticed are the same sheet at a larger size. */
+html[data-b-paper] :is(.block, .noticed) > .card-stock { --card-r: 14px; }

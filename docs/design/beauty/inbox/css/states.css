@@ -1,0 +1,121 @@
+/* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
+
+/* Loading: the real cards, with their words held back. Every line keeps its height, so nothing shifts when the words arrive. */
+.is-loading .c-title, .is-loading .pl-title, .is-loading .pl-why { color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); border-radius: 4px; }
+.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-rail > *, .is-loading .c-end, .is-loading .c-context, .is-loading .c-under, .is-loading .part, .is-loading .hint { visibility: hidden; }
+.sk { display: inline-block; vertical-align: middle; border-radius: 4px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
+.sk--title { width: 68%; height: 11px; }
+
+/* The empty Inbox: a sunrise, and the numeral as its sun. */
+.ib-page[data-mode="zero"] { display: block; padding: 0; }
+.zero.zero--small { padding-top: 24px; }
+.zero--small .zero-sun { width: 240px; }
+.zero--small .zero-n { width: 52px; height: 41px; margin-top: -45px; }
+.zero--small .zero-s { margin-top: 12px; font-size: var(--t-12); }
+.zero { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 17vh; }
+.zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
+.zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.zero-sun .ray-h { stroke: var(--brass); stroke-width: 1.5; opacity: 0.85; }
+.zero-n { position: relative; width: 96px; height: 76px; margin-top: -83px; margin-bottom: 7px; overflow: hidden; line-height: 0; }
+.zero-n .cr { display: block; }
+.zero-t { margin: 30px 0 6px; font-size: var(--t-20); font-weight: var(--w-bold); letter-spacing: -0.008em; }
+.zero-s { margin: 0; color: var(--muted); font-size: var(--t-14); }
+@media (prefers-reduced-motion: no-preference) {
+  .zero-sun .ray { animation: ray-draw 700ms var(--m-ease) calc(420ms + var(--d)) backwards; }
+  .zero-sun .ray-h { animation: rule-draw 700ms var(--m-ease) backwards; transform-origin: center; }
+  .zero-n { animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) backwards; }
+  .zero-t, .zero-s { animation: fade-up 500ms var(--m-ease) 900ms backwards; }
+}
+@keyframes ray-draw { from { stroke-dashoffset: 1; } }
+@keyframes rule-draw { from { transform: scaleX(0); opacity: 0; } }
+@keyframes sun-rise { from { transform: translateY(76px); clip-path: inset(0 0 76px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
+@keyframes fade-up { from { transform: translateY(6px); opacity: 0; } }
+
+/* First run: the page itself, with the first cards inviting you to connect. No dialog. */
+.fr-card { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; width: 100%; min-height: 84px; padding: 12px; border-radius: var(--card-r); background: var(--stock); box-shadow: var(--h-rest); text-align: left; transition: box-shadow var(--m-quick) var(--m-ease); }
+.fr-card:hover { box-shadow: var(--h-hover); }
+.fr-go { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: var(--type-summary); }
+.fr-card:hover .fr-go { color: var(--ink); }
+.fr-card b { display: block; font: var(--type-card); font-size: 15px; line-height: 21px; }
+.fr-card small { color: var(--muted); font: var(--type-summary); }
+.fr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fr-list { display: flex; flex-direction: column; gap: 8px; }
+.fr-welcome { font: var(--type-card); font-size: var(--t-14); }
+.fr-welcome { margin: 0; padding: 8px 56px 8px 16px; color: var(--ink); }
+.fr-welcome small { display: block; color: var(--muted); font: var(--type-summary); }
+
+/* Intake, grouped by entity: the noisy layer, kept plain, and still not a table. */
+.ib-page[data-mode="intake"], .ib-page[data-mode="work"] { display: block; overflow: auto; padding: 16px 32px 24px; }
+.in-list { list-style: none; margin: 0; padding: 0; }
+.in-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; min-height: 38px; column-gap: 8px; padding: 0; border-bottom: 1px solid color-mix(in oklab, var(--ink) 6%, transparent); transition: background var(--m-quick); }
+.in-row:hover, .in-row.is-at { background: var(--hover); }
+.in-row.is-at { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.in-mark { display: inline-grid; place-items: center; }
+.in-t { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.in-t b { font: var(--type-card); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.in-t small { flex: none; color: var(--faint); font: var(--type-meta); }
+.in-row.is-quiet .in-t b { color: var(--muted); font-weight: var(--w-regular); }
+.in-t em { flex: none; color: var(--muted); font: var(--type-meta); font-style: normal; }
+.in-end { display: grid; grid-template-columns: 72px 44px 40px; align-items: center; justify-items: end; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
+.in-state { color: var(--muted); }
+.in-n { color: var(--muted); }
+.in-more { display: flex; align-items: center; min-height: 38px; padding: 0 0 0 34px; color: var(--muted); font: var(--type-summary); }
+.in-raise { opacity: 0; transition: opacity var(--m-quick); }
+.in-row:hover .in-raise, .in-raise:focus-visible { opacity: 1; }
+.in-signals { display: none; grid-column: 2 / -1; margin: 0 0 8px; padding: 0 0 0 14px; color: var(--muted); font: var(--type-summary); }
+.in-row.is-open .in-signals { display: block; }
+
+/* A stand-in for Work. */
+.work-note { color: var(--faint); font: var(--type-summary); margin: 4px 0 14px; }
+.work-cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.work-col h3 { margin: 0 0 10px; font: var(--type-summary); font-weight: var(--w-medium); color: var(--muted); }
+.work-card { margin-bottom: var(--card-gap); height: 76px; }
+
+/* The rail that rises while a card is carried. */
+.rail {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
+  transform: translate(-50%, 24px);
+  opacity: 0;
+  transition: transform var(--m-slow) var(--spring-travel, var(--m-ease)), opacity var(--m-base) var(--m-ease);
+}
+.rail.is-on { transform: translate(-50%, 0); opacity: 1; }
+.rail[hidden] { display: none; }
+.rail-t { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 96px; padding: 6px 8px 4px; border-radius: 12px; color: var(--muted); font: var(--type-summary); transition: background var(--m-quick), color var(--m-quick); }
+.rail-t > :first-child { transition: transform var(--m-base) var(--spring-hand, var(--m-ease)); }
+.rail.is-on .rail-t { animation: fade-up var(--m-base) var(--m-ease) calc(var(--i, 0) * 28ms) backwards; }
+.rail-t.is-near { background: var(--hover); color: var(--ink); }
+.rail-t.is-near > :first-child { transform: scale(1.16); }
+.rail-rule { width: 1px; height: 44px; background: var(--divider); margin: 0 4px; }
+.rail-x { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--rim); color: var(--muted); }
+.rail .person { font-size: 16px; }
+
+.card.ghost { position: fixed; pointer-events: none; background: var(--stock); border-radius: var(--card-r); box-shadow: var(--h-carry); }
+.card.ghost > .card-stock { box-shadow: var(--h-carry); }
+.card.ghost .c-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.card.ghost .c-acts { display: none; }
+.card.is-lifted { opacity: 0; }
+html[data-dragging] { cursor: grabbing; }
+html[data-dragging] * { cursor: grabbing !important; }
+
+/* A handed segment of the plate steps back, and leaves at the next visit. */
+.plaque.is-handed { opacity: 0.62; transition: opacity var(--m-long) var(--m-ease); }
+
+/* The sheet of keys. */
+.keys { position: absolute; right: 24px; bottom: 54px; z-index: 36; width: 250px; padding: 12px 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry); font: var(--type-summary); }
+.keys[hidden] { display: none; }
+.keys h2 { margin: 0 0 6px; font: var(--type-lane); }
+.keys div { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; min-height: 24px; color: var(--muted); }
+.keys kbd { justify-self: start; }
+
