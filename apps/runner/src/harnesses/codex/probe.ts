@@ -24,6 +24,7 @@ import type { Run } from "../process";
 import { now } from "../../report";
 import { truncateFact } from "../text";
 import type { Rpc, RpcError } from "./rpc";
+import { describePlanType, isUnnamedPlanType } from "./plan";
 import { buildUsageReadings, pickCodexSnapshot } from "./usage";
 import type {
   GetAccountRateLimitsParams,
@@ -122,6 +123,17 @@ const parseVersion = (userAgent: string): string | null =>
   USER_AGENT.exec(userAgent)?.[1]?.slice(0, MAX_FACT_LENGTH) ?? null;
 
 /**
+ * Logs a warning when the ChatGPT account has a plan id with no display name
+ * in the plan table, so a name can be added. Never fails.
+ */
+const warnOnUnnamedPlan = ({ account }: GetAccountResponse): Effect.Effect<void> =>
+  account?.type === "chatgpt" && isUnnamedPlanType(account.planType)
+    ? Effect.logWarning(
+        `Codex reported the plan "${account.planType}", which has no display name: add it to the plan table`,
+      )
+    : Effect.void;
+
+/**
  * Returns the auth of the probe. An account with an API key is `ok` with no
  * identity: the app-server reports no account for a key given through a model
  * provider, and the key works wherever Codex is installed (spec 06 section
@@ -131,10 +143,12 @@ const buildAuth = ({ account }: GetAccountResponse, hasApiKey: boolean): ProbeRe
   if (hasApiKey) return { status: "ok", backend: "apiKey" };
   if (account === null) return { status: "unauthenticated" };
   if (account.type !== "chatgpt") return { status: "ok", backend: account.type };
+  const planLabel = describePlanType(account.planType);
   return {
     status: "ok",
     ...(account.email === null ? {} : { identity: truncateFact(account.email) }),
-    planLabel: account.planType,
+    // A plan with no display name is left out: the raw id is not text to show.
+    ...(planLabel === undefined ? {} : { planLabel: truncateFact(planLabel) }),
     backend: account.type,
   };
 };
@@ -249,6 +263,7 @@ export const makeProbe =
               Effect.match(
                 Effect.gen(function* () {
                   const account = yield* readAccount(host);
+                  yield* warnOnUnnamedPlan(account);
                   const hasApiKey = ctx.credential !== undefined;
                   // Only a ChatGPT sign-in has rate limits to read.
                   const canReadUsage =
