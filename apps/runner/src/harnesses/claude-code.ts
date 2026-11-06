@@ -2,10 +2,11 @@
  * The Claude Code harness adapter, and the only file that calls the vendor
  * SDK. The other `claude-code-*` files import only its types.
  *
- * The probe sends no prompt and uses the SDK's control requests instead,
- * because a real prompt would bill the user's account just for opening a Fleet
- * page. The adapter uses only the account's own Harness Home, never the
- * user's `~/.claude`.
+ * The probe sends no message and uses the SDK's control requests instead,
+ * because a real message would bill the user's account just for opening a Fleet
+ * page. Its prompt stays open and empty until the probe closes, because the SDK
+ * closes the query as soon as the prompt ends. The adapter uses only the
+ * account's own Harness Home, never the user's `~/.claude`.
  */
 import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -490,13 +491,6 @@ const buildProbeOptions = (ctx: HarnessRunnerContext, binary: string): Options =
   strictMcpConfig: true,
   persistSession: false,
   env: buildEnv(ctx),
-});
-
-/** Returns an empty prompt. The SDK requires a prompt, and an empty one costs nothing. */
-const buildEmptyPrompt = (): AsyncIterable<never> => ({
-  [Symbol.asyncIterator]: () => ({
-    next: () => Promise.resolve({ done: true, value: undefined as never }),
-  }),
 });
 
 /**
@@ -2065,7 +2059,12 @@ export const claudeCode: HarnessAdapter = makeClaudeCodeAdapter({
     };
   },
   query: ({ options }) => {
-    const session: Query = sdkQuery({ prompt: buildEmptyPrompt(), options });
+    // The SDK requires a prompt. This one never yields a message, so no model
+    // turn runs and nothing is billed. It must also stay open: when the prompt
+    // ends, the SDK closes the query, and the usage read below needs a live
+    // query to send its request on. `close` ends it.
+    const prompt = createPushable<SDKUserMessage>();
+    const session: Query = sdkQuery({ prompt, options });
     return {
       accountInfo: () => session.accountInfo(),
       supportedModels: () => session.supportedModels(),
@@ -2074,6 +2073,7 @@ export const claudeCode: HarnessAdapter = makeClaudeCodeAdapter({
       readUsage: () =>
         session.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
       close: () => {
+        prompt.end();
         // The child is usually already gone when close runs, and an unhandled
         // rejection would take the whole daemon down because of one bad probe.
         session.return(undefined).catch(() => undefined);
