@@ -101,7 +101,7 @@ window.Drag = (function () {
     stage.el.classList.add("is-target");
     var rule = document.getElementById("rule").getBoundingClientRect();
     var r = stage.el.getBoundingClientRect();
-    Motion.body(document.getElementById("rule-mark")).to({ x: r.left - rule.left + 3 }, "hand");
+    Motion.body(document.getElementById("rule-mark")).to({ x: r.left - rule.left }, "hand");
     work().dataset.dragStage = stage.id;
   }
 
@@ -110,7 +110,7 @@ window.Drag = (function () {
     if (carry.merge) {
       carry.merge.classList.remove("is-merge-target");
       Motion.body(carry.merge).to({ s: 1 }, "hand");
-      carry.catchUntil = performance.now() + 160;
+      carry.catchUntil = performance.now() + 200;
     }
     carry.merge = target;
     carry.slot.classList.toggle("is-shut", !!target);
@@ -132,6 +132,7 @@ window.Drag = (function () {
     var dt = Math.max(8, now - c.lastT);
     // Lean comes from smoothed speed, so a shaky hand does not make the card shiver.
     c.vx = c.vx * 0.7 + ((x - c.lastX) / dt) * 0.3;
+    c.vy = c.vy * 0.7 + ((y - c.lastY) / dt) * 0.3;
     c.lastX = x;
     c.lastY = y;
     c.lastT = now;
@@ -198,6 +199,7 @@ window.Drag = (function () {
     var slot = document.createElement("div");
     slot.className = "slot";
     if (fromCell) fromCell.insertBefore(slot, el);
+    var fromRow = fromCell ? Array.prototype.indexOf.call(fromCell.children, slot) : -1;
     var fromFan = !!el.closest(".fan");
     Motion.body(el).clear();
     layer().appendChild(el);
@@ -207,15 +209,15 @@ window.Drag = (function () {
     el.style.width = home.width + "px";
     if (fromFan) Fan.hide();
     carry = {
-      el: el, id: p.id, task: t, home: home, slot: slot,
+      el: el, id: p.id, task: t, home: home, slot: slot, fromCell: fromCell, fromRow: fromRow,
       grabX: p.x - home.left, grabY: p.y - home.top,
-      lastX: p.x, lastY: p.y, lastT: performance.now(), vx: 0, catchUntil: performance.now() + 100,
+      lastX: p.x, lastY: p.y, lastT: performance.now(), vx: 0, vy: 0, catchUntil: 0,
       stage: null, merge: null, hoverCard: null, zone: null, followers: [],
       zones: readDropZones(), stages: readStages(),
     };
     var rule = document.getElementById("rule").getBoundingClientRect();
     var own = carry.stages.filter(function (s) { return s.id === t.stage; })[0];
-    Motion.body(document.getElementById("rule-mark")).set({ x: own.left - rule.left + 3 });
+    Motion.body(document.getElementById("rule-mark")).set({ x: own.left - rule.left });
     work().classList.add("is-carrying");
     gatherSelection();
     track(e.clientX, e.clientY);
@@ -288,14 +290,16 @@ window.Drag = (function () {
     else if (a !== null) rank = a + 0.5;
     else if (b !== null) rank = b - 0.5;
     var owner = cell.dataset.owner;
-    return { stage: cell.dataset.stage, project: owner.indexOf("lane-") === 0 ? owner.slice(5) : carry.task.project, before: rank };
+    var row = Array.prototype.indexOf.call(cell.children, slot);
+    return { cell: cell, row: row, stage: cell.dataset.stage, project: owner.indexOf("lane-") === 0 ? owner.slice(5) : carry.task.project, before: rank };
   }
 
   /** Ends the carry. Keeps how the card looks right now, because the landing starts from there. */
   function finish() {
     var c = carry;
     var b = Motion.body(c.el);
-    c.look = { rect: c.el.getBoundingClientRect(), s: b.value.s, r: b.value.r, l: b.value.l, vx: b.speed.x, vy: b.speed.y };
+    // The landing starts with the speed of the hand, in pixels a second, so a thrown card lands thrown.
+    c.look = { rect: c.el.getBoundingClientRect(), s: b.value.s, r: b.value.r, l: b.value.l, vx: c.vx * 600, vy: c.vy * 600 };
     carry = null;
     clearTimeout(c.dwell);
     clearTimeout(c.upright);
@@ -379,6 +383,8 @@ window.Drag = (function () {
     var c = finish();
     if (!landing) return settle(c, "travel", function () { releaseFollowers(c); });
     var moved = landing.stage !== c.task.stage || landing.project !== c.task.project;
+    // Put back where it was picked up, a drop changes nothing at all.
+    if (!moved && landing.cell === c.fromCell && landing.row === c.fromRow && !c.followers.length) return settle(c, "hand");
     settle(c, "hand", function () {
       Store.moveTask(c.id, landing);
       if (c.followers.length) {
@@ -403,24 +409,22 @@ window.Drag = (function () {
     var c = finish();
     releaseFollowers(c);
     settleFollowers(c);
-    var el = c.el;
-    var ghost = Motion.ghost(el, layer());
-    ghost.style.position = "fixed";
-    ghost.style.left = c.look.rect.left + "px";
-    ghost.style.top = c.look.rect.top + "px";
-    Motion.body(ghost).clear();
+    var flight = document.getElementById("flight");
+    var ghost = Motion.ghost(c.el, flight);
+    var at = ghost.getBoundingClientRect();
     takeOutOfHand(c);
     var into;
+    target.classList.add("has-merged");
     Board.change(function () {
       c.slot.remove();
       into = Store.mergeTasks(c.id, id);
     }, { spring: "hand" });
-    // The carried card slides under its new home, then the home takes a small, soft bump.
+    // The carried card slides in under its new home, which then settles with a soft bump.
     var r1 = target.getBoundingClientRect();
-    Motion.body(ghost).to({ x: r1.left - c.look.rect.left, y: r1.top - c.look.rect.top, s: 0.94, o: 0 }, "hand", {
+    var b = Motion.body(ghost);
+    b.to({ x: b.value.x + r1.left - at.left, y: b.value.y + r1.top - at.top, s: 0.97, o: 0.4 }, "hand", {
       done: function () { ghost.remove(); },
     });
-    target.classList.add("has-merged");
     setTimeout(function () { target.classList.remove("has-merged"); }, 620);
     Motion.body(target).set({ s: 1.03 }).to({ s: 1 }, "hand", { delay: 60 });
     Toast.show("Merged into " + into.name + ".", true);

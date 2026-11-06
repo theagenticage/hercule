@@ -129,12 +129,22 @@ window.NW = (function () {
     "cost-logs": ["30 days", "90 days", "Ask legal"],
   };
 
+  function capitalize(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+
+  /** Offers answers a question already holds: its two sides, or yes and not yet. "Which" has none. */
+  function deriveAnswers(ask) {
+    if (!ask || !/\?$/.test(ask) || /^(who|which|how|what|when|anything)\b/i.test(ask)) return [];
+    var sides = ask.replace(/\?$/, "").split(/,? or /i);
+    if (sides.length === 2 && sides[0].length < 34 && sides[1].length < 34) return sides.map(capitalize);
+    return ["Yes", "Not yet"];
+  }
+
   /** Returns a fresh copy of every Task, with its summary and holder merged in. */
   function buildTasks() {
     return WORK.map(function (w) {
       var e = ENRICH[w.id] || {};
       var t = Object.assign({}, w, e);
-      t.options = ANSWERS[w.id] || [];
+      t.options = ANSWERS[w.id] || deriveAnswers(w.ask);
       t.age = daysSince(w.lastActivityAt);
       t.ref = (/#\d+/.exec(w.where) || [""])[0];
       if (w.kind === "review" || w.kind === "mention") t.ref = "#" + w.id.split("-")[1];

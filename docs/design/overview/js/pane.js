@@ -47,6 +47,7 @@ window.Pane = (function () {
       return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + esc(label) + '">' + esc(label) + "</button>";
     }).join("");
     var reply = holder.kind === "you" || (holder.kind === "agent" && holder.pose === "waiting") ? '<form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form>' : "";
+    if (!opts && holder.kind === "you" && t.need === "think") opts = '<button class="pn-answer is-suggested" data-act="thread">Think it through in a thread</button>';
     return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + "</p>" + ask + (opts ? '<div class="pn-answers">' + opts + "</div>" : "") + reply + "</section>";
   }
 
@@ -128,11 +129,13 @@ window.Pane = (function () {
   }
 
   /** Opens a Task's details, from its card when the card is on the board. */
-  function show(id) {
+  function show(id, opts) {
+    opts = opts || {};
     var t = Store.task(id);
     if (!t) return;
     var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
     if (openId && openId !== id) {
+      if (opts.followed) trail.push(openId);
       swap(id);
       return;
     }
@@ -144,7 +147,9 @@ window.Pane = (function () {
     inner.innerHTML = drawInner(t);
     drawHolderOnSheet(t);
     to = measureTarget();
-    from = el ? cardRect(el) : { left: to.left + 40, top: to.top + 40, width: to.width - 80, height: 200 };
+    // The sheet grows from wherever the Task lives right now: its card, its pile or its bead.
+    var spot = el || Board.locate(id);
+    from = spot ? cardRect(spot) : { left: to.left + 40, top: to.top + 40, width: to.width - 80, height: 200 };
     pane.style.setProperty("--pn-w", to.width + "px");
     pane.style.setProperty("--pn-h", to.height + "px");
     // A sheet caught closing keeps its ghost and simply turns round.
@@ -170,20 +175,20 @@ window.Pane = (function () {
     var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
     if (el) el.classList.add("is-away");
     awayEl = el;
-    trail.push(openId);
     openId = id;
-    if (el) {
-      from = cardRect(el);
-      if (ghost) {
-        var copy = el.cloneNode(true);
-        copy.classList.remove("is-away");
-        copy.classList.add("pn-ghost");
-        copy.style.cssText = "";
-        ghost.replaceWith(copy);
-        ghost = copy;
-        ghost.style.opacity = "0";
-      }
+    if (ghost) {
+      ghost.remove();
+      ghost = null;
     }
+    if (el) {
+      ghost = el.cloneNode(true);
+      ghost.classList.remove("is-away");
+      ghost.classList.add("pn-ghost");
+      ghost.style.cssText = "opacity:0";
+      clip.appendChild(ghost);
+    }
+    var place = el || Board.locate(id);
+    if (place) from = cardRect(place);
     Motion.body(inner).set({ o: 0, y: 8 });
     inner.innerHTML = drawInner(t);
     drawHolderOnSheet(t);
@@ -234,7 +239,14 @@ window.Pane = (function () {
 
   function swapBack(id) {
     swap(id);
-    trail.pop();
+  }
+
+  /** Sends the suggested answer: what Return does while the details are open. */
+  function acceptSuggested() {
+    var chip = pane.querySelector(".pn-answer.is-suggested");
+    if (chip) return chip.click();
+    var reply = pane.querySelector(".pn-reply input");
+    if (reply) reply.focus();
   }
 
   /** Closes the details: the sheet folds back into its dent on the board. */
@@ -243,9 +255,11 @@ window.Pane = (function () {
       if (done) done();
       return;
     }
+    var closing = openId;
     openId = null;
     trail = [];
-    var el = awayEl && awayEl.isConnected ? awayEl : null;
+    document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
+    var el = awayEl && awayEl.isConnected ? awayEl : Board.locate(closing);
     if (el) from = cardRect(el);
     document.getElementById("work").classList.remove("has-pane");
     drive.to(0, "travel", function () {
@@ -286,7 +300,7 @@ window.Pane = (function () {
       var act = e.target.closest("[data-act]");
       if (act) return Actions.run(act.dataset.act, openId);
       var open = e.target.closest("[data-open]");
-      if (open) return show(open.dataset.open);
+      if (open) return show(open.dataset.open, { followed: true });
       var stage = e.target.closest("[data-stage-to]");
       if (stage) Actions.moveToStage(openId, stage.dataset.stageTo);
     });
@@ -300,5 +314,5 @@ window.Pane = (function () {
     });
   }
 
-  return { mount: mount, show: show, hide: hide, back: back, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
+  return { mount: mount, show: show, hide: hide, back: back, acceptSuggested: acceptSuggested, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
 })();

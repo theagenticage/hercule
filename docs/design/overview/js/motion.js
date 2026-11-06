@@ -148,8 +148,8 @@ window.Motion = (function () {
 
   /** Puts the body exactly here, this frame. A carried card follows the pointer one to one. */
   Body.prototype.follow = function (x, y) {
-    this.speed.x = (x - this.value.x) * 60;
-    this.speed.y = (y - this.value.y) * 60;
+    this.speed.x = 0;
+    this.speed.y = 0;
     this.value.x = x;
     this.value.y = y;
     this.goal.x = x;

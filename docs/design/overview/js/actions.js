@@ -77,6 +77,7 @@ window.Actions = (function () {
 
   /** Answers a Task's question. The card lies down, and the walk moves on to the next thing. */
   function answer(id, words) {
+    Walk.notePlace(id);
     Board.change(function () { Store.answerTask(id, words); });
     Toast.show("Sent: " + words, true);
     handOff(id);
@@ -131,6 +132,13 @@ window.Walk = (function () {
     if (r.bottom > view.bottom - 30) s.scrollTop += r.bottom - view.bottom + 30;
   }
 
+  /** Lists what wants you: cards on the desk first, then what sits in piles and folded lanes. */
+  function readList() {
+    var all = Store.listWanting();
+    function isOnDesk(t) { return !!document.querySelector('#lanes .card[data-id="' + t.id + '"]'); }
+    return all.filter(isOnDesk).concat(all.filter(function (t) { return !isOnDesk(t); }));
+  }
+
   function go(i) {
     if (!list.length) return Toast.show("Nothing wants you right now.", false);
     index = (i + list.length) % list.length;
@@ -143,7 +151,7 @@ window.Walk = (function () {
   /** Steps through what wants you, by = 1 or -1. Starts from the open card, or the first. */
   function step(by) {
     var open = Pane.currentId();
-    list = Store.listWanting();
+    list = readList();
     if (open) {
       var at = list.findIndex(function (t) { return t.id === open; });
       if (at >= 0) return go(at + by);
@@ -151,16 +159,22 @@ window.Walk = (function () {
     go(by > 0 ? 0 : -1);
   }
 
-  function afterAnswer(id) {
-    list = Store.listWanting();
+  /** Remembers where a Task stands in the walk, just before it leaves the list. */
+  function notePlace(id) {
+    index = Math.max(0, readList().findIndex(function (t) { return t.id === id; }));
+  }
+
+  function afterAnswer() {
+    list = readList();
     if (!list.length) {
       Pane.hide();
+      Toast.show("That was the last one.", true);
       return;
     }
     go(Math.min(index, list.length - 1));
   }
 
-  return { step: step, afterAnswer: afterAnswer };
+  return { step: step, notePlace: notePlace, afterAnswer: afterAnswer };
 })();
 
 // PROTOTYPE - merging without a pointer: pick the card to merge into with the arrows and Return.

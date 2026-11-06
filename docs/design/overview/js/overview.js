@@ -192,7 +192,10 @@ window.Overview = (function () {
     });
     document.getElementById("switcher").addEventListener("click", function (e) {
       var tab = e.target.closest(".switch-tab");
-      if (tab) show(tab.dataset.view);
+      if (!tab) return;
+      show(tab.dataset.view);
+      // A click leaves the board's keys live. A keyboard user stays on the tab.
+      if (e.detail > 0) tab.blur();
     });
     window.addEventListener("keydown", function (e) {
       if (!(e.metaKey || e.ctrlKey)) return;

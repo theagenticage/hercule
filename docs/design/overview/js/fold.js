@@ -107,6 +107,14 @@ window.Fold = (function () {
   function fold(roots, mutate) {
     var groups = launch(roots);
     Board.change(mutate, { spring: "travel", quietExits: true, stagger: function () { return 70; } });
+    // A wire is new on the page. It starts where its lane's name starts, and travels with it.
+    roots.forEach(function (root) {
+      var head = root.querySelector(".lane-head");
+      var wire = root.querySelector(":scope > .wire");
+      if (!head || !wire) return;
+      var y = Motion.body(head).value.y;
+      if (y) Motion.body(wire).set({ y: y }).to({ y: 0 }, "travel", { delay: 70 });
+    });
     groups.forEach(flyHome);
   }
 

@@ -150,6 +150,10 @@ window.Keys = (function () {
       return;
     }
     if (key === "Enter" || key === " ") {
+      if (Pane.currentId()) {
+        e.preventDefault();
+        return Pane.acceptSuggested();
+      }
       if (!focused) return;
       e.preventDefault();
       if (focused.dataset.id) return Pane.show(focused.dataset.id);
@@ -165,6 +169,8 @@ window.Keys = (function () {
       var plan = focused.closest(".plan");
       if (plan) Fold.togglePlan(plan.dataset.plan);
       else if (lane) Fold.toggleLane(lane.dataset.lane);
+      // The card may have folded away. Focus stays on the lane, so a second F opens it again.
+      if (lane && !focused.isConnected) focusCard(lane.querySelector(".lane-btn"));
       return;
     }
     if (key === "F") return Fold.toggleAll();
@@ -302,10 +308,15 @@ window.Find = (function () {
     }).join("") + (all.length > hits.length ? '<p class="find-more">' + all.length + " in all</p>" : "");
   }
 
-  function openHit(id) {
+  /** Ends a search. A lens that was pinned stays pinned. */
+  function clearQuery() {
     close();
     Store.state.query = "";
     Board.draw();
+  }
+
+  function openHit(id) {
+    clearQuery();
     Pane.show(id);
   }
 
@@ -323,9 +334,9 @@ window.Find = (function () {
       drawList();
     });
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") {
+ if (e.key === "Escape") {
         e.stopPropagation();
-        Lens.clear();
+        clearQuery();
       }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -343,7 +354,7 @@ window.Find = (function () {
       if (row) openHit(row.dataset.openTask);
     });
   }
-  return { open: open, close: close, mount: mount };
+  return { open: open, close: close, clearQuery: clearQuery, mount: mount };
 })();
 
 // PROTOTYPE - selecting several cards: X or ⌘-click marks a card, and a quiet line says what you can

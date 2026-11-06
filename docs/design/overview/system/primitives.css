@@ -102,7 +102,7 @@
   border-radius: var(--card-r);
   background: var(--stock);
   box-shadow: var(--h-stand);
-  transition: box-shadow var(--m-base) var(--m-ease), background-color var(--m-base) var(--m-ease);
+  transition: box-shadow 260ms var(--m-ease), background-color 260ms var(--m-ease);
 }
 .card[data-height="flat"] .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
 .card[data-height="press"] .card-stock { background: var(--stock-press); box-shadow: var(--h-press); }

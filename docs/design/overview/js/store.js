@@ -114,28 +114,26 @@ window.Store = (function () {
       var tickets = tasks.filter(function (t) { return t.kind === "ticket"; });
       if (tickets.length >= 3) fold("tickets", "Tickets", tickets);
     }
-    // A card you just put down stays a card, wherever it was: it never vanishes into a pile
-    // under your hand. It joins the rest on the next visit.
+    // A card you just put down stays a card, on the row you chose. It takes no room from the others,
+    // and joins the rest on the next visit.
     var held = tasks.filter(function (t) { return t.held; });
     held.forEach(function (t) {
       piles.forEach(function (p) {
         p.tasks = p.tasks.filter(function (x) { return x !== t; });
       });
-      used[t.id] = false;
+      used[t.id] = true;
     });
     piles = piles.filter(function (p) { return p.tasks.length > 1 || p.kind === "landed"; });
     var cards = tasks.filter(function (t) { return !used[t.id]; });
-    var loose = cards.filter(function (t) { return !t.held; });
     // The cards already showing stay. What does not fit waits in a pile on the row after them, so
     // an arrival can never swallow the card you are looking at.
-    var room = Math.max(0, MOST_ROWS - piles.length - held.length);
-    if (loose.length > room + 1) {
-      var over = loose.slice(room);
-      over.forEach(function (t) { used[t.id] = true; });
-      cards = cards.filter(function (t) { return !used[t.id]; });
+    var room = Math.max(0, MOST_ROWS - piles.length);
+    if (cards.length > room + 1) {
+      var over = cards.slice(room);
+      cards = cards.slice(0, room);
       piles.push({ key: owner + "/" + stage + "/more", kind: "more", title: over.length + " more", tasks: over });
     }
-    return { cards: cards, piles: piles };
+    return { cards: cards, piles: piles, held: held.slice().sort(function (a, b) { return (a.heldRow || 0) - (b.heldRow || 0); }) };
   }
 
   /** Returns the line under a pile's title: what it holds that needs you, or how it stands. */
@@ -200,12 +198,12 @@ window.Store = (function () {
   var batch = null;
 
   /** Keeps one way back. Inside a batch, all the ways back become one undo. */
-  function remember(label, restore) {
+  function remember(label, restore, hint) {
     if (batch) {
       batch.steps.unshift(restore);
       return;
     }
-    undoStack.push({ label: label, restore: restore });
+    undoStack.push({ label: label, restore: restore, hint: hint });
     if (undoStack.length > 50) undoStack.shift();
   }
 
@@ -218,16 +216,19 @@ window.Store = (function () {
     if (steps.length) undoStack.push({ label: label, restore: function () { steps.forEach(function (r) { r(); }); } });
   }
 
-  /** Puts the last change back, and only that change. Returns its label, or null when there is none. */
+  /** Returns the last change's way back, without taking it. */
+  function peekUndo() { return undoStack[undoStack.length - 1] || null; }
+
+  /** Puts the last change back, and only that change. Returns it, or null when there is none. */
   function undo() {
     var last = undoStack.pop();
     if (!last) return null;
     last.restore();
-    return last.label;
+    return last;
   }
 
   function snapshot(t) {
-    return { stage: t.stage, project: t.project, rank: t.rank, initiative: t.initiative, movedBy: t.movedBy, held: t.held, age: t.age };
+    return { stage: t.stage, project: t.project, rank: t.rank, initiative: t.initiative, movedBy: t.movedBy, held: t.held, heldRow: t.heldRow, age: t.age, stalled: t.stalled };
   }
 
   /** Moves a Task to a stage and a row of a project, and remembers that a person did it. */
@@ -235,13 +236,19 @@ window.Store = (function () {
     var t = task(id);
     var was = snapshot(t);
     remember(t.name, function () { Object.assign(t, was); });
+    var changedStage = t.stage !== to.stage;
     t.stage = to.stage;
     if (to.project) t.project = to.project;
     if (to.before !== undefined) t.rank = to.before;
     if (to.plan !== undefined) t.initiative = to.plan;
     t.movedBy = "you";
     t.held = true;
-    t.age = 0;
+    t.heldRow = to.row === undefined ? 0 : to.row;
+    // A new stage is real activity. Tidying a column is not, so a reorder leaves the age alone.
+    if (changedStage) {
+      t.age = 0;
+      t.stalled = false;
+    }
     if (state.offline) t.pendingSync = true;
   }
 
@@ -257,7 +264,7 @@ window.Store = (function () {
       b.links = was.links;
       b.mergedCount = was.merged;
       blocks.forEach(function (x) { x.t.blockedBy = x.by; });
-    });
+    }, { id: fromId, from: intoId });
     b.threads = b.threads.concat(a.threads);
     b.links = b.links.concat(a.links);
     b.mergedCount = (b.mergedCount || 0) + 1 + (a.mergedCount || 0);
@@ -274,7 +281,7 @@ window.Store = (function () {
     remember(t.name, function () {
       t.ended = "";
       state.tasks.push(t);
-    });
+    }, { id: id, ended: how });
     t.ended = how;
     state.tasks = state.tasks.filter(function (x) { return x !== t; });
   }
@@ -350,6 +357,7 @@ window.Store = (function () {
     startThread: startThread,
     group: group,
     undo: undo,
+    peekUndo: peekUndo,
     canUndo: function () { return undoStack.length > 0; },
   };
 })();

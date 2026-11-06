@@ -74,7 +74,7 @@ Carrying several cards: the rest of the selection fly in behind the first as a s
 
 ### Merging
 
-1. Rest the carried card over the middle of another for 340ms.
+1. Rest the carried card over the middle 40% of another for 600ms. A shorter wait catches people lining up a reorder.
 2. The target scales to 1.02 on `hand` and takes a focus ring and a "Merge" label on its top edge.
 3. The carried card docks on the target's corner, 10px across and 8px down. It shrinks to 0.96 and tilts 1.6 degrees. The slot closes. Moving away undoes all of it at once.
 4. On release, the carried card slides under the target and fades, on `hand`. 60ms later the target settles from 1.03 to 1 on `hand`, and a brass ring fades over `--m-long`.

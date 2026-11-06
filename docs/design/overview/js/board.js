@@ -104,8 +104,11 @@ window.Board = (function () {
       el.setAttribute("role", "button");
     }
     // The sheet stays the same element for the card's whole life, so a change of height can animate.
-    if (!el.firstChild) el.innerHTML = '<i class="card-stock"></i><span class="card-body"></span>';
-    setHTML(el.lastChild, drawCardInner(t));
+    if (!el._body) {
+      el.innerHTML = '<i class="card-stock"></i><span class="card-body"></span>';
+      el._body = el.querySelector(".card-body");
+    }
+    setHTML(el._body, drawCardInner(t));
     el.setAttribute("aria-label", describeCard(t));
     el.dataset.height = Store.decideHeight(t);
     el.dataset.stalled = t.stalled ? "1" : "";
@@ -176,6 +179,8 @@ window.Board = (function () {
     cell.setAttribute("aria-label", NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ", " + tasks.length + (tasks.length === 1 ? " card" : " cards"));
     var arranged = Store.arrangeCell(tasks, stage, key);
     var kids = arranged.cards.map(drawCard).concat(arranged.piles.map(drawPile));
+    // A card you just put down stays on the row you chose, and nothing is pushed out to make room.
+    arranged.held.forEach(function (t) { kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawCard(t)); });
     cell._piles = arranged.piles;
     if (cell._hold) kids.splice(cell._hold.index, 0, cell._hold.dent);
     place(cell, kids);

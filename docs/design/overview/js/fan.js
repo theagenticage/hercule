@@ -92,6 +92,7 @@ window.Fan = (function () {
     o.pileEl.classList.add("is-fanned");
     o.cards.forEach(function (el) {
       if (el.classList.contains("is-carried")) return;
+      el.classList.remove("is-flying");
       Motion.body(el).to({ x: 0, y: 0, s: 1, r: 0, o: 1 }, "travel");
     });
     Motion.body(o.fan.querySelector(".fan-head")).to({ o: 1 }, "travel");

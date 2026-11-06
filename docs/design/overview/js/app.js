@@ -115,7 +115,9 @@
   });
   function openFromRow(e) {
     var row = e.target.closest("[data-task]");
-    if (row && row.dataset.task) Pane.show(row.dataset.task);
+    if (!row || !row.dataset.task) return;
+    if (Overview.current() !== "work") Overview.show("work");
+    Pane.show(row.dataset.task);
   }
   document.querySelector("[data-side]").addEventListener("click", openFromRow);
   document.querySelector("[data-side]").addEventListener("keydown", function (e) {
@@ -154,6 +156,7 @@
   });
   window.addEventListener("click", function (e) {
     display.classList.remove("is-on");
+    if (Store.state.query && !e.target.closest("#find, #find-list")) Find.clearQuery();
     if (!e.target.closest("#help")) document.getElementById("help").classList.remove("is-on");
   });
 

@@ -156,7 +156,7 @@
 /* The pieces in flight are copies; only the original takes the pointer. */
 .is-ghost { pointer-events: none; z-index: 21; }
 .is-moving { will-change: transform; }
-.card.is-moving { z-index: 3; }
+.card.is-moving { z-index: 3; transition: none; }
 
 /* ---------- The fan ---------- */
 .fan-layer { position: absolute; inset: 0; z-index: 24; pointer-events: none; }
@@ -195,13 +195,14 @@
 .work[data-drag-stage="reviewing"] .cell[data-stage="reviewing"]::before,
 .work[data-drag-stage="landed"] .cell[data-stage="landed"]::before { opacity: 1; }
 
-.rule-mark { position: absolute; left: 0; bottom: -3.5px; width: 7px; height: 7px; background: var(--brass); transform: rotate(45deg); opacity: 0; transition: opacity var(--m-quick); pointer-events: none; }
+.rule-mark { position: absolute; left: 32px; bottom: -3.5px; width: 7px; height: 7px; background: var(--brass); transform: rotate(45deg); opacity: 0; transition: opacity var(--m-quick); pointer-events: none; }
 .is-carrying .rule-mark { opacity: 1; }
 
 /* Merging: the target opens up to receive. */
 .card.is-merge-target { z-index: 5; }
 .card.is-merge-target .card-stock { box-shadow: var(--h-hover), 0 0 0 2px var(--focus); }
 .card.is-merge-target::after { content: "Merge"; position: absolute; z-index: 6; left: 50%; top: -11px; transform: translateX(-50%); padding: 1px 8px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--type-meta); font-weight: var(--w-medium); }
+.card.has-merged { z-index: 25; }
 .card.has-merged .card-stock { animation: merged var(--m-long) var(--m-ease); }
 @keyframes merged { 0% { box-shadow: var(--h-hover), 0 0 0 2px var(--brass); } 100% { box-shadow: var(--h-stand), 0 0 0 0 transparent; } }
 
@@ -209,6 +210,7 @@
 .toast:not(.is-on) { visibility: hidden; transition-delay: 0s, 0s, var(--m-slow); }
 .toast { position: absolute; z-index: 40; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 6px 0 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); white-space: nowrap; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; transition: transform var(--m-slow) var(--m-ease), opacity var(--m-base) var(--m-ease); }
 .toast.is-on { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.has-pane .toast { left: calc((100% - 496px) / 2); }
 .toast-undo { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; font-weight: var(--w-medium); }
 .toast-undo:hover { background: var(--hover); }
 
