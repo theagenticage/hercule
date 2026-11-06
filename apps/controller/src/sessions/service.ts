@@ -171,7 +171,7 @@ import {
   type StoredSubagent,
   type SubagentEventFacts,
 } from "./subagents";
-import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import { hasOtherTurn, omitRawPayload, readAssistantTexts, readOpenTurnId } from "./transcript-log";
 import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
@@ -186,6 +186,7 @@ const TranscriptInput = Schema.Struct({
   id: Id,
   subagentId: Schema.optionalKey(SubagentId),
   after: Schema.optionalKey(TranscriptPosition),
+  includeRaw: Schema.optionalKey(Schema.Boolean),
   ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS),
 });
 
@@ -2126,12 +2127,13 @@ const make = Effect.gen(function* () {
      * `NotFound`. With `after`, only the rows past that position are read;
      * a position beyond the newest row returns an empty page. A cursor from
      * one agent's transcript, or from a listing with another `after`, is
-     * refused.
+     * refused. Each event comes without its `raw` unless `includeRaw` is
+     * true (see `omitRawPayload`).
      */
     transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("transcript.read");
-        const { id, subagentId, after, limit, cursor, sort } = yield* Effect.mapError(
+        const { id, subagentId, after, includeRaw, limit, cursor, sort } = yield* Effect.mapError(
           decodeTranscript(input),
           createDecodeValidationError,
         );
@@ -2147,7 +2149,14 @@ const make = Effect.gen(function* () {
             direction: resolveSortDirection(sort, TRANSCRIPT_DIRECTION),
           }),
         );
-        return toPageOutput(listing);
+        return toPageOutput(
+          includeRaw === true
+            ? listing
+            : {
+                ...listing,
+                items: listing.items.map((row) => ({ ...row, event: omitRawPayload(row.event) })),
+              },
+        );
       }),
 
     /**

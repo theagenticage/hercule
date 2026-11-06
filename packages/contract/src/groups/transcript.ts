@@ -14,10 +14,17 @@
  * It returns passages: the text of one message that matched, with where it
  * came from. An assistant recalls its own conversations with `agentId: "me"`.
  *
- * A row carries the normalized `HarnessEvent` verbatim, which is the same
- * document the runner reported except for `content.delta`, where the controller
- * coalesces a run of deltas into one row ([04-state-store, Streaming deltas are
- * coalesced]). Nothing else is folded, rewritten or dropped.
+ * A row carries the normalized `HarnessEvent`, which is the same document the
+ * runner reported with two exceptions:
+ *
+ * - for `content.delta`, the controller coalesces a run of deltas into one row
+ *   ([04-state-store, Streaming deltas are coalesced]);
+ * - the event's `raw`, the vendor's untouched payload, is left out unless the
+ *   read asks for it with `includeRaw`. It is for debugging, no client draws
+ *   it, and it is most of a transcript's bytes. An `unknown` event's `payload`
+ *   is the event this build could not read, and it is always sent whole.
+ *
+ * Nothing else is folded, rewritten or dropped.
  */
 import { Schema } from "effect";
 import { HarnessEvent, StructuredResult, SubagentId } from "@hercule/protocol";
@@ -110,6 +117,11 @@ export const transcript = HttpApiGroup.make("transcript")
          * only valid for the listing with the same `after`.
          */
         after: Schema.optionalKey(TranscriptPosition),
+        /**
+         * `true` sends each event's `raw`, the vendor's untouched payload,
+         * for debugging an adapter. Absent or `false` leaves it out.
+         */
+        includeRaw: Schema.optionalKey(Schema.Boolean),
         ...pageParams(TRANSCRIPT_SORT_FIELDS).fields,
       }),
       success: page(TranscriptRow),

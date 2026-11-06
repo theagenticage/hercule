@@ -2764,6 +2764,46 @@ describe("transcript.read", () => {
     });
   });
 
+  it("leaves out each event's raw unless includeRaw is true, and keeps an unknown event's payload whole", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      const at = new Date().toISOString();
+      const raw = { source: "codex.app-server.notification", payload: { method: "x", n: 1 } };
+      // An event of a tag this build does not know: its `raw` is part of
+      // what it could not read, so it stays inside the unknown's payload.
+      const received = {
+        _tag: "turn.paused",
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        raw,
+      };
+      reportEvent(arranged.wire, 8, received as never);
+      reportEvent(arranged.wire, 9, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "runtime.notice",
+        message: "with raw",
+        raw,
+      });
+      await waitUntil("wrote the notice", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "runtime.notice") ? found : undefined;
+      });
+
+      const [paused, notice] = (await readTranscript(arranged, session.id)).items.slice(-2);
+      expect(notice!.event).not.toHaveProperty("raw");
+      expect(paused!.event).toMatchObject({ _tag: "unknown", payload: received });
+
+      const [, noticeWithRaw] = (
+        await readTranscript(arranged, session.id, "?includeRaw=true")
+      ).items.slice(-2);
+      expect(noticeWithRaw!.event).toMatchObject({ _tag: "runtime.notice", raw });
+    });
+  });
+
   it("reads a stored event of a type this build does not know as an unknown event", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });

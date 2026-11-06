@@ -145,7 +145,7 @@ import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
 import { operationLayers } from "./routes";
-import { bodyLimits, serve } from "./server";
+import { listenerOptions, serve } from "./server";
 import type { WebBundle } from "./static";
 
 /** The setup token the test server starts with, and the password `completeSetup` sets. */
@@ -723,7 +723,7 @@ export const withServer = (
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.
           Layer.provideMerge(
-            BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits }),
+            BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...listenerOptions }),
           ),
         ),
       ),

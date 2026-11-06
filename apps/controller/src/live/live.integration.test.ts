@@ -1438,6 +1438,7 @@ describe("what a session's stream subscription receives", () => {
             sessionId: session.id,
             at: AT,
             _tag: "session.started",
+            raw: { source: "claude.sdk.message", payload: { type: "system" } },
           });
           expect(
             yield* Effect.promise(() => waitWithin(2000, () => stream.received.length >= 2)),
@@ -1446,6 +1447,9 @@ describe("what a session's stream subscription receives", () => {
           const row = expectPresent(listTranscriptItems(pushed)[0]);
           expect(row.position).toBe(1);
           expect(row.event._tag).toBe("session.started");
+          // The stream never sends the vendor's payload; `transcript.read`
+          // sends it on request, for debugging.
+          expect(row.event).not.toHaveProperty("raw");
           expect(pushed.cursor).toBe("1");
 
           reportEvent(arranged.wire, 2, {

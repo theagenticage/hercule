@@ -246,7 +246,8 @@ const isPage = (
  *   item ids, which a reader cannot look up;
  * - `_tag`, because the line prints it as its own column;
  * - `harnessRefs` and `raw`, the vendor's original data. A line with them
- *   would be a JSON dump; `--json` shows them.
+ *   would be a JSON dump; `--json` shows them, and `raw` only when the read
+ *   asked for it with `--raw true`.
  *
  * What is left is the event's own payload, which is the part that differs
  * from line to line.
