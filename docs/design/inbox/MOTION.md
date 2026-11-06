@@ -95,7 +95,7 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 | The sheet | Grows from the visible part of the card with its shadow, its corner staying put, its radius going from 12 to 14. A sheet changing shape is the one thing a transform cannot do, so its size is set per frame |
 | The title, mark and latest line | The same objects: they grow from where they lay, by transform, on the same number |
 | The rest | Meta, older signals, facts and rows rise 6px and fade in, 240ms, 18ms apart from 140ms, once the title and line have passed |
-| The veil | Fades over `--m-slow`, and is taken away when it has gone |
+| The veil | A flat veil, no blur. Fades over `--m-slow`, and is taken away when it has gone |
 | Walking | J and K keep the sheet where it stands. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
 | Closing | The same number going home, from wherever it is. Asked to open again on the way, it turns round with its speed. The rest fades in 100ms. Near home the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
 

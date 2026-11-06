@@ -18,11 +18,13 @@ window.Pointer = (function () {
     return Math.min(whole, room);
   }
 
-  /** Hides the words of the strip a peek ends on, so no sliced line of a hidden card shows under it. */
+  /** Hides only the lines of a strip that the edge of a peek would cut through. The rest of the strip stays. */
   function markUnder(el, host, height) {
     var bottom = el._plan.y + height;
     [].forEach.call(host.children, function (c) {
-      c.classList.toggle('is-under', !!(c !== el && c._plan && c._plan.y < bottom && c._plan.y + c._plan.show > bottom));
+      var into = c !== el && c._plan ? bottom - c._plan.y : -1;
+      c.classList.toggle('is-under-top', into > 6 && into < 30);
+      c.classList.toggle('is-under-line', into > 28 && into < 49);
     });
   }
 
@@ -50,7 +52,7 @@ window.Pointer = (function () {
     if (el._plan) {
       el.classList.add('is-closing');
       el.style.height = el._plan.show + 'px';
-      [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
+      [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under-top', 'is-under-line'); });
     }
     setTimeout(function () {
       el.classList.remove('is-closing');
@@ -67,7 +69,7 @@ window.Pointer = (function () {
   function forget(el) {
     if (peeked !== el) { unpeek(); return; }
     peeked = null;
-    [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
+    [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under-top', 'is-under-line'); });
   }
 
   /** Tells a card how wide its actions are, so its title can end before them. */

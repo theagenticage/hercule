@@ -127,7 +127,7 @@
       },
       {
         id: 'qs-2', kind: 'quayside/purchase-order', concern: 'signOff', title: 'Spare scanners for returns', since: hoursAgo(30),
-        fields: { key: 'PO-2304', supplier: 'Marlow Supply', state: 'waiting', amount: '€860', due: 'Next week', site: 'Depots' },
+        fields: { key: 'PO-2304', supplier: 'Marlow Supply', state: 'waiting', amount: '€860', due: 'next week', site: 'Depots' },
         signals: [signal('signOff', 30), signal('delayed', 6, null, 'Monday')], task: null, project: 'Depots',
       },
     ];
@@ -135,8 +135,8 @@
 
   var S = { name: 'Sentry', mark: 'sentry', hue: null }, L = { name: 'Linear', mark: 'linear', hue: null }, G = { name: 'GitHub', mark: 'github', hue: null };
   var CLUSTERS = [
-    { id: 'c-coupons', kind: 'hercule/cluster', title: 'Coupons refused since the last release', why: 'Came back on Monday, after being marked fixed', sources: ['sentry'], figures: '212 events · 19 shoppers', detail: 'Marked fixed two weeks ago, and started again on Monday in the step that applies a coupon to a basket.', parts: [{ plugin: S, title: 'CouponRuleError: rule set missing for market', fact: '212 events' }], since: hoursAgo(44), signals: [], fields: {}, concern: 'noticed' },
-    { id: 'c-search', kind: 'hercule/cluster', title: 'Search feed drops unbranded products', why: 'The loudest error in the shop right now', sources: ['sentry', 'linear'], figures: '1,480 events · 73 shoppers', detail: 'It came back when the brand field became required, and every feed run hits it. SHOP-361 reports the same thing from the shop floor.', parts: [{ plugin: S, title: 'FeedRecordError: no brand to fill a required column', fact: '1,480 events' }, { plugin: L, title: 'SHOP-361 Brand filter is empty for own-label goods', fact: 'Triage' }], since: hoursAgo(26), signals: [], fields: {}, concern: 'noticed' },
+    { id: 'c-coupons', kind: 'hercule/cluster', title: 'Coupons refused since the last release', why: 'Came back on Monday, after being marked fixed', sources: ['sentry'], figures: '212 events · 19 shoppers', detail: 'Marked fixed two weeks ago, and started again on Monday in the step that applies a coupon to a basket.', parts: [{ plugin: S, title: 'CouponRuleError: rule set missing for market', fact: 'Came back' }], since: hoursAgo(44), signals: [], fields: {}, concern: 'noticed' },
+    { id: 'c-search', kind: 'hercule/cluster', title: 'Search feed drops unbranded products', why: 'The loudest error in the shop right now', sources: ['sentry', 'linear'], figures: '1,480 events · 73 shoppers', detail: 'It came back when the brand field became required, and every feed run hits it. SHOP-361 reports the same thing from the shop floor.', parts: [{ plugin: S, title: 'FeedRecordError: no brand to fill a required column', fact: 'Came back' }, { plugin: L, title: 'SHOP-361 Brand filter is empty for own-label goods', fact: 'Triage' }], since: hoursAgo(26), signals: [], fields: {}, concern: 'noticed' },
     { id: 'c-photos', kind: 'hercule/cluster', title: 'Photo carousel crashes on old tablets', why: 'Seven errors with one cause', sources: ['sentry', 'github'], figures: '96 events · 1 shopper', detail: 'The carousel assumes a browser feature that old tablets lack. Pull request #6201 added the call.', parts: [{ plugin: S, title: 'TypeError: slideWatcher.observe is not a function', fact: '38 events' }, { plugin: S, title: 'TypeError: carousel.next is not a function', fact: '21 events' }, { plugin: S, title: '5 more with the same cause', fact: '37 events' }, { plugin: G, title: '#6201 Add the photo carousel', fact: 'Merged' }], since: hoursAgo(20), signals: [], fields: {}, concern: 'noticed' },
   ];
 

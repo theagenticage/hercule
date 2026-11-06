@@ -193,7 +193,7 @@
   function drawPlaque(c) {
     var flows = readWorkflows(c);
     var why = c.task ? (c.task.by === 'you' ? 'You took it on' : c.task.by + ' has it') : c.why;
-    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" data-slot="' + c.slot + '" style="grid-column:' + (c.slot + 1) + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
+    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" data-slot="' + c.slot + '" data-end="' + (c.slot + (c.span || 1) === 3) + '" style="grid-column:' + (c.slot + 1) + ' / span ' + (c.span || 1) + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
       '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(why) + '</div>' +

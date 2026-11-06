@@ -7,14 +7,14 @@ window.Pages = (function () {
 
   // Intake's rows: every outside thing that sent a signal, most of which never needed anyone.
   var ROWS = [
-    { id: 'in-coupon', mark: 'sentry', title: 'CouponRuleError: rule set missing for market "default"', ref: 'CHECKOUT-API-3H1', n: 212, last: '4m', state: 'noticed', noticed: 'c-coupons' },
-    { id: 'in-feed', mark: 'sentry', title: 'FeedRecordError: product has no brand to fill a required column', ref: 'SEARCH-API-1Z4', n: 148, last: '12m', state: 'noticed', noticed: 'c-search' },
+    { id: 'in-coupon', mark: 'sentry', title: 'CouponRuleError: rule set missing for market "default"', ref: 'CHECKOUT-API-3H1', n: 14, last: '4m', state: 'noticed', noticed: 'c-coupons' },
+    { id: 'in-feed', mark: 'sentry', title: 'FeedRecordError: product has no brand to fill a required column', ref: 'SEARCH-API-1Z4', n: 23, last: '12m', state: 'noticed', noticed: 'c-search' },
     { id: 'in-6238', mark: 'github', title: 'Retry card payments once on a gateway timeout', ref: '#6238', n: 7, last: '22m', state: 'inbox', signals: ['Ines asked for your review', 'Checks failed', 'CI started', 'CI finished', 'Pushed 2 commits', 'Bot comment: coverage', 'Omar commented'] },
     { id: 'in-bot', mark: 'github', title: 'Bump vite to the next minor', ref: '#6271', n: 3, last: '35m', state: 'quiet' },
-    { id: 'in-tablet', mark: 'sentry', title: 'TypeError: slideWatcher.observe is not a function', ref: 'STOREFRONT-WEB-2K9', n: 38, last: '1h', state: 'noticed', noticed: 'c-photos' },
-    { id: 'in-tax', mark: 'sentry', title: 'RangeError: tax band index out of range', ref: 'CHECKOUT-API-4D1', n: 9, last: '1h', state: 'quiet', can: true },
+    { id: 'in-tablet', mark: 'sentry', title: 'TypeError: slideWatcher.observe is not a function', ref: 'STOREFRONT-WEB-2K9', n: 11, last: '1h', state: 'noticed', noticed: 'c-photos' },
+    { id: 'in-tax', mark: 'sentry', title: 'RangeError: tax band index out of range', ref: 'CHECKOUT-API-4D1', n: 5, last: '1h', state: 'quiet', can: true },
     { id: 'in-ops', mark: 'linear', title: 'Add depot opening hours to the returns page', ref: 'OPS-58', n: 2, last: '2h', state: 'inbox' },
-    { id: 'in-deploy', mark: 'github', title: 'Deploy to staging finished', ref: 'storefront-web', n: 31, last: '2h', state: 'quiet' },
+    { id: 'in-deploy', mark: 'github', title: 'Deploy to staging finished', ref: 'storefront-web', n: 12, last: '2h', state: 'quiet' },
     { id: 'in-slack', mark: 'slack', title: 'Is the depot scanner firmware safe to roll out?', ref: '#depots', n: 6, last: '3h', state: 'quiet', can: true },
     { id: 'in-mail', mark: 'gmail', title: 'Your October invoice from the hosting provider', ref: 'Mail', n: 1, last: '5h', state: 'quiet' },
     { id: 'in-cron', mark: 'sentry', title: 'Nightly rollup took longer than usual', ref: 'INSIGHTS-JOBS-77', n: 4, last: '7h', state: 'quiet', can: true },
@@ -28,9 +28,9 @@ window.Pages = (function () {
     var said = { noticed: 'Noticed', inbox: 'In your Inbox', quiet: '' }[r.state];
     return '<li class="in-row' + (r.state === 'quiet' ? ' is-quiet' : '') + '" data-row="' + r.id + '" tabindex="0"' + (r.signals ? ' aria-expanded="false"' : '') + '>' +
       '<span class="in-mark">' + Card.drawMark(MARKS[r.mark], 16) + '</span>' +
-      '<span class="in-t"><b>' + Card.esc(r.title) + '</b><small>' + Card.esc(r.ref) + '</small></span>' +
-      '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise</button>' : '<span class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</span>') +
-      '<span class="in-n">' + r.n + '</span><span>' + r.last + '</span></span>' +
+      '<span class="in-t"><b>' + Card.esc(r.title) + '</b><small>' + Card.esc(r.ref) + '</small>' + (raised[r.id] || said ? '<em class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</em>' : '') + '</span>' +
+      '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise</button>' : '<i></i>') +
+      '<span class="in-n" title="Signals">' + r.n + '</span><span>' + r.last + '</span></span>' +
       (r.signals ? '<ol class="in-signals">' + r.signals.map(function (s) { return '<li>' + Card.esc(s) + '</li>'; }).join('') + '</ol>' : '') +
       '</li>';
   }
@@ -70,7 +70,7 @@ window.Pages = (function () {
     var hadFocus = document.activeElement && document.activeElement.dataset.view;
     pill.innerHTML = name === 'work'
       ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
-      : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake <small>214</small></button>';
+      : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake</button>';
     var again = hadFocus && pill.querySelector('[data-view="' + hadFocus + '"]');
     if (again) again.focus();
     document.querySelector('.ib-end').hidden = name !== 'inbox';
@@ -88,7 +88,8 @@ window.Pages = (function () {
       Motion.animate(document.querySelector('[data-view="cards"]'), [{ background: 'color-mix(in oklab, var(--accent) 22%, transparent)' }, { background: 'transparent' }], { duration: 700, easing: 'ease-out' });
     });
     App.state.entities.push(Scenes.raisedEntity(r));
-    row.querySelector('.in-raise').outerHTML = '<span class="in-state">In your Inbox</span>';
+    row.querySelector('.in-raise').outerHTML = '<i></i>';
+    row.querySelector('.in-t').insertAdjacentHTML('beforeend', '<em class="in-state">In your Inbox</em>');
     row.focus({ preventScroll: true });
     Landing.announce('In your Inbox: ' + r.title);
     row.classList.remove('is-quiet');

@@ -13,7 +13,10 @@ window.Tray = (function () {
     closing = false;
     var r = el.getBoundingClientRect();
     var main = document.getElementById('main').getBoundingClientRect();
-    var w = Math.min(760, main.width - 64);
+    // The tray lies over the page's last two columns, so its cards land on the grid.
+    var cols = document.querySelectorAll('.col');
+    var isGrid = cols.length === 3;
+    var w = isGrid ? cols[2].getBoundingClientRect().right - cols[1].getBoundingClientRect().left + 28 : Math.min(760, main.width - 64);
     host.hidden = false;
     host.style.width = w + 'px';
     current = members;
@@ -37,7 +40,7 @@ window.Tray = (function () {
       cell.appendChild(card);
     });
     var h = Math.min(host.offsetHeight, innerHeight - 80);
-    var left = Math.max(main.left + 24, Math.min(r.left, main.right - w - 24));
+    var left = isGrid ? cols[1].getBoundingClientRect().left - 14 : Math.max(main.left + 24, Math.min(r.left, main.right - w - 24));
     var top = Math.max(document.querySelector('.ib-page').getBoundingClientRect().top + 80, Math.min(r.top - h + 40, innerHeight - h - 24));
     h = Math.min(h, innerHeight - top - 24);
     host.style.left = left + 'px';

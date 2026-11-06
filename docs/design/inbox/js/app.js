@@ -45,7 +45,7 @@ window.App = (function () {
     var streams = {}, out = [];
     list.forEach(function (e) {
       if (!e.stream) { out.push(e); return; }
-      if (!streams[e.stream]) { streams[e.stream] = { pile: true, id: 'stream-' + e.stream, title: e.stream, members: [], since: e.since, kind: e.kind, note: 'One stream of like things' }; out.push(streams[e.stream]); }
+      if (!streams[e.stream]) { streams[e.stream] = { pile: true, id: 'stream-' + e.stream, title: e.stream, members: [], since: e.since, kind: e.kind, note: '' }; out.push(streams[e.stream]); }
       streams[e.stream].members.push(e);
     });
     return out;
@@ -176,6 +176,11 @@ window.App = (function () {
       for (var i = 0; i < 3; i++) if (!used[i]) { c.slot = i; used[i] = true; return; }
       c.slot = 2;
     });
+    // A thing also takes the free columns after it, so a lone reason is never cut beside an empty plate.
+    state.clusters.forEach(function (c) {
+      c.span = 1;
+      while (c.slot + c.span < 3 && !used[c.slot + c.span]) c.span++;
+    });
   }
 
   function drawNoticed() {
@@ -278,7 +283,7 @@ window.App = (function () {
       var budgets = {};
       var fits = Stacks.planBudgets(clock.map(function (n) {
         var parts = readStackEntities(n);
-        return { count: foldStreams(parts.lying).length, cap: names.length > 1 ? 3 : 5, lead: 106, foot: parts.settled.length && n !== names[names.length - 1] ? FOOT : 0 };
+        return { count: foldStreams(parts.lying).length, cap: 3, lead: 106, foot: parts.settled.length && n !== names[names.length - 1] ? FOOT : 0 };
       }), clock.length === names.length ? depth : Math.floor(depth * 0.6));
       clock.forEach(function (n, i) { budgets[n] = fits[i]; });
       var built = names.map(function (n) {
@@ -360,6 +365,7 @@ window.App = (function () {
           var el = it.el;
           if (!p) { el.style.display = 'none'; el._plan = null; return; }
           el.style.display = '';
+          if (it.tab) lastMark = null;
           var next = b.items[i + 1];
           var endOfRun = i === shown - 1 || (next && next.tab);
           // A card hides behind those in front of it, and must never show past the last of them.
@@ -447,7 +453,7 @@ window.App = (function () {
   function redrawCard(e) {
     var el = els[e.id];
     if (!el) return;
-    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
+    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under-top', 'is-under-line', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
     Card.redrawBody(el, e, readCtx(readStack(e)));

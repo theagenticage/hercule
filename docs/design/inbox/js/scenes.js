@@ -94,10 +94,14 @@ window.Scenes = (function () {
   /** Draws the first run on the page itself: the stacks stand ready, and each first card asks to be connected. */
   function drawFirstRun(page) {
     var connect = function (mark, name, hue, line) {
-      return '<div class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 22) + '<div><b>' + name + '</b><small>' + line + '</small></div><button class="btn btn--sm">Connect</button></div>';
+      return '<button class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 20) + '<div><b>' + name + '</b><small>' + line + '</small></div><span class="fr-go">Connect ' + Crew.icon('arrow', 12) + '</span></button>';
     };
     var next = '<i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i>';
     var head = function (t) { return '<h2 class="stack-h"><span class="stack-n"></span><span class="stack-t">' + t + '</span></h2>'; };
+    // On a first run nothing has happened yet, so the sidebar says so too.
+    var waitingNow = document.querySelector('.side-scroll .side-sec');
+    if (waitingNow) waitingNow.hidden = true;
+    document.querySelector('.side-sum').innerHTML = '<b>0</b> working · <b>0</b> waiting · <b>0</b> idle';
     page.innerHTML = '<div class="noticed"><div class="plate-crest">' + Crew.logo(30, { mono: true }) + '</div><div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +
@@ -113,6 +117,7 @@ window.Scenes = (function () {
   }
 
   function play(name) {
+    Nav.draw();
     Moves.reset();
     if (window.Pages && Pages.current() !== 'inbox') Pages.setView('inbox', true);
     Open.hide(true);
