@@ -29,7 +29,7 @@
 
   <section>
     <h2>What it is</h2>
-    <p>Stages are columns. Projects are lanes. Most Tasks are plain cards, and plans run across them as thin wires. That structure is your Home from the lo-fi, which you called a good default. What changed is how it looks, how it feels, and how it stays quiet.</p>
+    <p>Stages are columns. Projects are lanes. Most Tasks are plain cards, and plans run under them as thin wires. That structure is your Home from the lo-fi, which you called a good default. What changed is how it looks, how it feels, and how it stays quiet.</p>
     <p>Everything on the page answers one of three questions, in this order: <b>what wants me</b>, <b>where does it stand</b>, <b>what is everyone else doing</b>.</p>
   </section>
 
@@ -50,13 +50,14 @@
     <p><b>Height means whose move it is.</b> A card that wants you stands up off the desk. A card someone else holds lies flat. A blocked card is pressed in. A landed card is only an outline. Nothing else on the page has a shadow, so the eye goes to what stands.</p>
     <p><b>The top edge shows who holds it.</b> Card files in the 1930s used small metal signal tabs clipped to the top edge, so a clerk could read a whole drawer at a glance. Here a marigold tab means it is your move: short for a quick call, long for real thinking. A colleague's head peeks over the edge, paws typing on the card, when an agent has it. A grey tab holds a person's initial. Nothing means nobody.</p>
     <figure class="st-frame st-frame--low" data-src="sheet.html" data-w="1000" data-h="420"><figcaption>All card states at rest, in the theme you picked above.</figcaption></figure>
-    <p>All cards are one height. Title and summary share three lines, so a new summary can never push a neighbour. Things stay where they are.</p>
-    <p>On approach the card says what it wants. Rest the pointer on a card and its summary turns into its question, in marigold, with no layout change.</p>
+    <p>All cards are one height, and there is no footer: the tab or the head already says who holds it, so the words go to the summary. A new summary can never push a neighbour. Things stay where they are.</p>
+    <p>On approach the card says what it wants. Rest the pointer on a card and its summary turns into its question, with no layout change.</p>
   </section>
 
   <section>
     <h2>The sentence is the filter</h2>
     <p>There is no filter bar. The first line counts what wants you, and each phrase in it is a lens. Hover "real thinking" and exactly those cards stay lit. Press it to keep it. Press Q, R, S or A from anywhere.</p>
+    <p><b>Then press N.</b> The details open on the first thing that wants you, and N walks to the next, through piles and folded lanes too, with "4 of 23" at the top. Answer, and it moves on. That is the morning: read, answer, next. A lens narrows the walk.</p>
     <figure class="st-frame" data-src="desktop.html?replay=off" data-w="1440" data-h="900"><figcaption>Try hovering the sentence. Press / to find. Fold a lane by clicking its name. Click a plan's name to open it into a band of cards.</figcaption></figure>
   </section>
 
@@ -68,8 +69,8 @@
 
   <section>
     <h2>Dragging is the star</h2>
-    <p>A press dents the card a little. Past five pixels it lifts: it grows, its shadow deepens, and it follows your hand on a stiff spring, a hair behind, leaning the way it moves. A slot opens where it would land, neighbours glide aside, and a brass diamond runs along the stage rule to show the stage it will join. Let go and it settles with a touch of overshoot. Press Esc and it goes home, without bounce.</p>
-    <p><b>Merging</b> is the same gesture, held still. Rest a card on another for a third of a second and they are drawn together: the one in your hand docks on the corner of the other, the target opens up, and letting go merges them. Undo plays it backwards.</p>
+    <p>A press dents the card a little. Past five pixels it lifts: it grows, its shadow deepens on the same spring, and from then on it is exactly under your finger, at any speed. A slot opens where it would land, everything below moves aside, and a brass diamond runs along the stage rule to show the stage it will join. Let go and it comes down from where it is, keeping the speed of your hand. Press Esc and it goes home, without bounce.</p>
+    <p><b>Merging</b> is the same gesture, held still. Rest a card on the middle of another for a little over half a second and they are drawn together: the one in your hand docks on the corner of the other, the target opens up, and letting go merges them. Undo plays it backwards.</p>
     <p>Every action has a key. Arrows walk the desk. Return opens. Shift and an arrow moves a card a stage. M merges. X selects, and dragging any selected card carries them all as a stack.</p>
   </section>
 
@@ -83,7 +84,7 @@
     <h2>Alive, but never restless</h2>
     <p>Facts arrive all day, and the board must never reshuffle what you are looking at. Four rules keep it calm:</p>
     <ul>
-      <li><b>Nothing moves under your hand.</b> A change waits until the pointer has left the area, for at most eight seconds.</li>
+      <li><b>Nothing moves under your hand.</b> A pointer resting on a thing means someone is reading it. A change waits for it to leave, for at most eight seconds.</li>
       <li><b>Cause first.</b> "PR #3331 merged" lands on the card before it moves.</li>
       <li><b>Slowly.</b> Things that move by themselves are slower than things you move.</li>
       <li><b>A dent stays.</b> A card that leaves keeps its place open for a moment, so the cards below do not jump.</li>
@@ -117,7 +118,7 @@
 
   <section>
     <h2>Wear</h2>
-    <p>An optional switch, off by default, in the Display menu. Neglected work ages gracefully: its paper yellows a little and it drifts slightly out of true, as if nobody has touched it. Touch it and it straightens. It is a way to feel neglect rather than read a number.</p>
+    <p>An optional switch, off by default, in the Display menu. Neglected work ages gracefully: its paper yellows and its ink fades a little, as if nobody has touched it. Move it and it is new again. It is a way to feel neglect rather than read a number.</p>
     <figure class="st-still"><img src="screens/wear--whitehaven.jpg" alt="Wear on"></figure>
   </section>
 
@@ -130,7 +131,8 @@
       <li><b>Piles</b>, with flags.</li>
       <li><b>The lens sentence</b>: a page's first line as its filter.</li>
       <li><b>Deco numerals in brass</b> for the five stage counts. This changes one doctrine line: brass may be read here, and nowhere else.</li>
-      <li><b>Springs</b> as named tokens, on one clock, in <code>js/motion.js</code>.</li>
+      <li><b>Three springs</b>, on one clock, in <code>js/motion.js</code>: <code>hand</code>, <code>travel</code> and <code>self</code>, chosen by who caused the change.</li>
+      <li><b>The walk</b>: N through everything that wants you.</li>
     </ul>
     <p>The details: <a href="DESIGN.md">DESIGN.md</a>, <a href="MOTION.md">MOTION.md</a>, <a href="SHARED.md">SHARED.md</a>.</p>
   </section>
