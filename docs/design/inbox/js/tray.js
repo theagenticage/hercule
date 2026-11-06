@@ -56,10 +56,18 @@ window.Tray = (function () {
     void scrim.offsetWidth;
     scrim.classList.add('is-on');
     Motion.knock(el, 145);
-    host.style.overflow = '';
-    Motion.body(host).set({ o: 0 }).to({ o: 1 }, 'hand');
+    // While the cards travel out of the pile the tray does not clip them. Those below its edge wait, because they stay put.
+    var visible = readVisibleCells();
+    host.style.overflow = 'visible';
+    [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell) { if (visible.indexOf(cell) < 0) cell.style.visibility = 'hidden'; });
+    setTimeout(function () {
+      host.style.overflow = '';
+      [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell) { cell.style.visibility = ''; });
+    }, Motion.isReduced() ? 0 : 460);
+    // The veil goes first, so the panel's words never print over the page's.
+    Motion.body(host).set({ o: 0 }).to({ o: 1 }, 'hand', { delay: 80 });
     host.querySelector('[data-close]').focus({ preventScroll: true });
-    readVisibleCells().forEach(function (cell, i) {
+    visible.forEach(function (cell, i) {
       var c = cell.getBoundingClientRect();
       Motion.body(cell).set({ x: r.left - c.left, y: r.top - c.top, s: 0.9 }).to({ x: 0, y: 0, s: 1 }, 'travel', { delay: Math.min(i * 18, 180) });
     });
@@ -100,6 +108,7 @@ window.Tray = (function () {
   function hide() {
     if (!host || host.hidden || closing) return;
     closing = true;
+    host.classList.add('is-closing');
     // A pile has been visited once it has been opened, so its news is no longer news.
     current.forEach(function (e) { e.fresh = false; });
     var r = source.getBoundingClientRect();
@@ -116,9 +125,11 @@ window.Tray = (function () {
     Motion.body(host).to({ o: 0 }, 'travel', { delay: 150, done: function () {
       host.hidden = true;
       closing = false;
+      host.classList.remove('is-closing');
       Motion.body(host).clear();
       if (!Open.isOpen()) scrim.hidden = true;
       App.layOut(true);
+      App.releaseArrivals(null);
     } });
     if (hasHome && source.focus) source.focus({ preventScroll: true });
     else document.getElementById('main').focus({ preventScroll: true });
@@ -135,6 +146,20 @@ window.Tray = (function () {
     var n = host.querySelector('.tray-h small');
     if (n) n.textContent = current.length;
     refresh();
+    // The card that held focus is gone, so the next one takes it and the keys keep working.
+    var next = host.querySelector('.tray-cell:not([hidden]) .card');
+    if (next && !host.hidden && !closing && !host.contains(document.activeElement) && !Open.isOpen()) next.focus({ preventScroll: true });
+  }
+
+  /** Writes a card in the open tray again, after a signal landed on it, and lights its rim. */
+  function drawNews(e) {
+    var seen = host && !host.hidden && host.querySelector('.card[data-id="' + e.id + '"]');
+    if (!seen) return false;
+    Card.redrawBody(seen, e, { now: App.state.now, usual: null });
+    seen.dataset.landed = 'plain';
+    seen.classList.add('is-landed');
+    setTimeout(function () { seen.classList.remove('is-landed'); }, 1300);
+    return true;
   }
 
   /** Keeps the tray true to its cards, and closes it when none are left. */
@@ -217,5 +242,5 @@ window.Tray = (function () {
       [].forEach.call(host.querySelectorAll('.tray-cell .card'), function (c) { c.tabIndex = c === card ? 0 : -1; });
     });
   }
-  return { show: show, hide: hide, isOpen: isOpen, remove: remove, refresh: refresh, onKey: onKey, start: start };
+  return { show: show, hide: hide, drawNews: drawNews, isOpen: isOpen, remove: remove, refresh: refresh, onKey: onKey, start: start };
 })();

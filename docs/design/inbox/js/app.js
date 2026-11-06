@@ -195,11 +195,13 @@ window.App = (function () {
     // Hercule stands behind the top edge, as a colleague does on Work: he is handing you something, not raising an alarm.
     host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34, look: HERCULE }) + '</span></span>' +
       '<span class="card-paws" style="--hue:var(--hue-' + HERCULE.hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.filter(function (c) { return c.slot !== undefined; }).map(Card.drawPlaque).join('');
-    host.hidden = !state.clusters.length;
+    // The row stays when nothing is noticed, so the page never shifts under a resting pointer when something is.
+    var wasEmpty = host.classList.contains('is-empty');
+    host.classList.toggle('is-empty', !state.clusters.length);
+    if (wasEmpty && state.clusters.length) Motion.animate(host, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
     // The card reaches only as far as the last thing on it, so one thing on a light day is not a long empty band.
     var reach = state.clusters.reduce(function (a, c) { return Math.max(a, c.slot === undefined ? 0 : c.slot + 1); }, 1);
     host.style.gridColumn = COLUMNS.length === 4 ? '1 / span ' + reach : '';
-    document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
     var was = Keys.current();
     if (Keys.isUsingKeys() && was && host.querySelector('[data-id="' + was + '"]')) Keys.focus(was);
   }
@@ -211,7 +213,8 @@ window.App = (function () {
   function layOut(still, stagger) {
     if (state.mode !== 'stacks' || document.getElementById('main').classList.contains('is-holding')) return;
     if (still || !hasDrawn) { placeStacks(); flushOffstage(false); hasDrawn = true; return; }
-    var moving = [].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving)')).filter(function (el) { return el._plan; });
+    // A card being dealt is already on its own way, and must keep what it does on arrival.
+    var moving = [].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving):not(.is-dealing)')).filter(function (el) { return el._plan; });
     Motion.flip(moving.concat([].slice.call(page.querySelectorAll('.stack-h, .stack-foot:not([hidden])'))), placeStacks, { spring: 'hand', stagger: stagger });
     flushOffstage(true);
     dealFromPiles(stagger);
@@ -231,7 +234,7 @@ window.App = (function () {
       // While it is dealt it is only as tall as its strip, so it never shows below the pile it comes out of.
       el.classList.add('is-dealing');
       el.style.height = el._plan.show + 'px';
-      Motion.body(el).set({ y: from - el._plan.y }).to({ y: 0 }, 'hand', { delay: (stagger ? Math.min(120, stagger(el)) : 0) + i * 14, done: function () {
+      Motion.body(el).set({ y: from - el._plan.y }).to({ y: 0 }, 'hand', { delay: (stagger ? stagger(el) : 0) + i * 14, done: function () {
         el.classList.remove('is-dealing');
         if (el._rest && !el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
       } });
@@ -252,7 +255,7 @@ window.App = (function () {
     c.classList.add('is-folding');
     if (isPile) { c._wasY = wasY; Motion.body(c).to({ o: 0 }, 'hand', { done: finish }); return; }
     // A card that settled goes down to the foot line, never into the pile of what still waits.
-    if (e && e.settled) { Motion.body(c).to({ y: 8, o: 0 }, 'travel', { done: finish }); return; }
+    if (e && e.settled) { Motion.body(c).to({ y: 8, o: 0 }, 'hand', { done: finish }); return; }
     if (pile && pile._plan) {
       c.style.zIndex = Number(pile.style.zIndex) - 1;
       Motion.body(c).to({ y: pile._plan.y - wasY }, 'hand', { done: finish });
@@ -282,7 +285,7 @@ window.App = (function () {
     if (!shown.length || shown.some(function (e) { return !e.task; })) return false;
     shown.forEach(function (e) { e.settled = true; });
     // The held cards go first, and the pile deals into the room they leave.
-    layOut(false, function () { return 140; });
+    layOut(false, function () { return 240; });
     return true;
   }
 
@@ -292,7 +295,7 @@ window.App = (function () {
       // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
       // Never less than a card and a pile per stack: in a very small window the page scrolls, and no card is ever out of reach.
       var noticed = document.getElementById('noticed');
-      var room = page.clientHeight - 14 - (noticed && !noticed.hidden ? noticed.offsetHeight + NOTICED_AIR : 0);
+      var room = page.clientHeight - 14 - (noticed ? noticed.offsetHeight + NOTICED_AIR : 0);
       var depth = Math.max(room - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT, names.length * 220);
       // With the shelf across the page, the stacks keep one depth whatever they hold, so the shelf never moves on its own.
       if (COLUMNS.length === 4) {
@@ -332,6 +335,8 @@ window.App = (function () {
           }
           if (el.parentNode !== host) host.appendChild(el);
           if (el.classList.contains('is-folding')) { el.classList.remove('is-folding'); Motion.body(el).clear(); }
+          // A card that comes back from a pile says what happened to it while it was out of sight.
+          if (el.style.display === 'none') redrawCard(e);
           var m = Stacks.METRICS[K[e.kind].density];
           it.el = el; it.full = measureWhole(el, e); it.gap = m.gap;
           it.strip = m.strip;
@@ -388,6 +393,7 @@ window.App = (function () {
           el._full = it.full;
           if (!el.classList.contains('is-peek') && !el.classList.contains('is-dealing')) el.style.height = el._rest + 'px';
           var becomesWhole = p.level === 'full' && !el.classList.contains('is-whole') && hasDrawn;
+          var becomesStrip = p.level !== 'full' && el.classList.contains('is-whole') && hasDrawn;
           el.classList.toggle('is-whole', p.level === 'full');
           el.dataset.level = p.level;
           // The next card stepping up to lead grows into its larger title, rather than jumping to it.
@@ -397,6 +403,8 @@ window.App = (function () {
             var foot = el.querySelector('.c-foot');
             if (foot) Motion.animate(foot, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 100, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
           }
+          // A whole card folding to a strip shrinks into its smaller title, so a busier day never cuts.
+          if (becomesStrip && el.querySelector('.c-title')) Motion.animate(el.querySelector('.c-title'), [{ transform: 'scale(1.153)', transformOrigin: '0 0' }, { transform: 'none', transformOrigin: '0 0' }], { duration: Motion.curve('hand').ms, easing: Motion.curve('hand').ease });
           el.classList.toggle('is-run-end', !!endOfRun);
         });
         // The count says what still waits. A card someone holds stays in view, and no longer counts.
@@ -495,7 +503,7 @@ window.App = (function () {
   function redrawCard(e) {
     var el = els[e.id];
     if (!el) return;
-    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
+    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under', 'is-landed', 'is-closing', 'is-folding', 'is-dealing', 'is-rising'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
     Card.redrawBody(el, e, readCtx(readStack(e)));
@@ -526,7 +534,7 @@ window.App = (function () {
     var noticed = document.getElementById('noticed');
     var cols = [].slice.call(page.querySelectorAll('.col'));
     // The last thing leaving takes the whole noticed card with it: a copy fades where it stood while the columns rise.
-    if (!noticed.hidden && !state.clusters.length && !Motion.isReduced()) {
+    if (!noticed.classList.contains('is-empty') && !state.clusters.length && !Motion.isReduced()) {
       var main = document.getElementById('main').getBoundingClientRect(), r = noticed.getBoundingClientRect();
       var copy = noticed.cloneNode(true);
       copy.removeAttribute('id');
@@ -576,6 +584,8 @@ window.App = (function () {
    */
   function arrive(e) {
     var name = readStack(e);
+    // The same thing never arrives twice, whether it lies on the page or still waits at a heading.
+    if (findEntity(e.id) || waiting.some(function (x) { return x.id === e.id; })) return false;
     if (state.mode !== 'stacks') {
       state.entities.push(e);
       if (state.mode === 'zero') {
@@ -586,7 +596,8 @@ window.App = (function () {
       return true;
     }
     // A column shares its depth, so the card waits while the pointer is anywhere in that column. Keys take no notice of a resting pointer.
-    if (isPointerInColumnOf(name) && !Keys.isUsingKeys()) {
+    // An open tray holds its arrivals too, so what it shows and what its pile counts stay the same.
+    if ((isPointerInColumnOf(name) && !Keys.isUsingKeys()) || Tray.isOpen()) {
       waiting.push(e);
       drawWaiting(name);
       return false;

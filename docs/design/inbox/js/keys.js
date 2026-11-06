@@ -99,7 +99,7 @@ window.Keys = (function () {
     Pointer.clearHover();
     marked = id;
     el.classList.add('is-focus');
-    if (el.classList.contains('card') && !el.classList.contains('is-pile')) Pointer.measureActs(el);
+    if (el.classList.contains('card') && !el.classList.contains('is-pile')) { Pointer.measureActs(el); Pointer.clearFresh(el); }
     el.focus({ preventScroll: true });
     if (el.classList.contains('card') && !el.classList.contains('is-pile') && el.dataset.level !== 'full') Pointer.peek(el);
     else Pointer.unpeek();
@@ -154,6 +154,8 @@ window.Keys = (function () {
     var el = id && readEl(id);
     if (!el) return;
     if (el.classList.contains('is-pile')) { Moves.showToast('A pile opens with Enter.'); return; }
+    // The thing may have left already, while its part of the page fades.
+    if (!App.findEntity(id)) return;
     var order = readWaitingOrder(id);
     var anchor = el.querySelector('[data-act="hand"]') || el;
     var moveOn = function () {
@@ -184,7 +186,8 @@ window.Keys = (function () {
     var k = ev.key;
     if ((ev.metaKey || ev.ctrlKey) && k === 'z') { ev.preventDefault(); Moves.undo(); return; }
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (Help.isOpen() && (k === 'Escape' || k === '?')) { ev.preventDefault(); Help.toggle(); return; }
+    // While the help sheet is open, the keys behind it do nothing.
+    if (Help.isOpen()) { if (k === 'Escape' || k === '?') { ev.preventDefault(); Help.toggle(); } return; }
     if (Tray.isOpen() && !Open.isOpen()) { Tray.onKey(ev); return; }
     if (Open.isOpen()) { onKeyInOpenCard(ev, k); return; }
     // The page's keys belong to the page. A control elsewhere, such as the sidebar, keeps its own.
@@ -212,7 +215,12 @@ window.Keys = (function () {
       if (chosen && chosen.classList.contains('is-pile')) Tray.show(chosen);
       else if (chosen) Open.show(current, null, true);
     }
-    else if (k === 'Escape') { var was = current; if (was) { setCurrent(null, 'keys'); } }
+    else if (k === 'Escape') {
+      if (current) setCurrent(null, 'keys');
+      // A pointer resting on a card gets it back, so the next key acts on what is under the hand.
+      var under = Pointer.readHover();
+      if (under) setCurrent(under.dataset.id, 'pointer');
+    }
     else if (k === 'h' && current) act('hand');
     else if (k === 't' && current) act('take');
     else if (k === 'e' && current) act('dismiss');
@@ -220,6 +228,14 @@ window.Keys = (function () {
     else if (k === '?') Help.toggle();
     else handled = false;
     if (handled) ev.preventDefault();
+  }
+
+  /** Moves the current card along with a walk of the open sheet, and takes the ring off the card left behind. */
+  function noteWalk(id) {
+    var was = marked && readEl(marked);
+    if (was) was.classList.remove('is-focus');
+    current = id;
+    marked = null;
   }
 
   /** The keys inside an open card: a walk through the cards in one place, and the moves, each moving on to the next card. */
@@ -233,7 +249,7 @@ window.Keys = (function () {
     if (k === 'j' || k === 'k') {
       ev.preventDefault();
       var to = !inTray && flat[i + (k === 'j' ? 1 : -1)];
-      if (to) { Open.walk(to); current = to; marked = null; }
+      if (to) { Open.walk(to); noteWalk(to); }
       return;
     }
     var e = App.findEntity(id), flows = Card.readWorkflows(e), n = Number(k);
@@ -249,7 +265,7 @@ window.Keys = (function () {
     if (name === 'go') { Open.hide(true); Moves.perform('go', id); return; }
     var next = !inTray && pickNext(readWaitingOrder(id));
     // The next card opens in the same place, and the move plays on the card behind it.
-    if (next) { Open.walk(next); current = next; }
+    if (next) { Open.walk(next); noteWalk(next); }
     else { Open.hide(true); current = null; }
     if (name === 'hand') Moves.hand(e, pick); else Moves.perform(name, id);
   }

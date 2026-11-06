@@ -137,6 +137,8 @@
 }
 .card.is-whole .c-foot,
 .card.is-peek .c-foot { visibility: visible; }
+.card.is-peek .c-foot { transition: opacity 120ms linear; }
+.card.is-rising .c-foot { opacity: 0; transition: none; }
 /* When the second line already says who and what, the facts sit at its end and need no row of their own. */
 .c-foot--facts { grid-column: 3; grid-row: 2; margin-top: 1px; }
 /* Hidden facts must not take room from a one-line title. */
@@ -198,6 +200,8 @@
 .card[data-level="one"].is-hover:not(.is-peek) .c-pace,
 .card[data-level="one"].is-focus:not(.is-peek) .c-pace { visibility: hidden; }
 .card.is-closing .c-foot { opacity: 0; transition: opacity 100ms linear; }
+.c-act--go { animation: act-arrives var(--m-quick) var(--m-ease); }
+@keyframes act-arrives { from { opacity: 0; } }
 .c-act {
   flex: none;
   display: inline-flex;
@@ -270,6 +274,7 @@
   color: var(--ink);
 }
 .noticed[hidden] { display: none; }
+.noticed.is-empty { visibility: hidden; }
 .noticed .card-holder { right: 16px; }
 .noticed .card-paws { right: 19px; }
 .plaque {

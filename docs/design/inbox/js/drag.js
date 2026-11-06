@@ -110,6 +110,7 @@ window.Drag = (function () {
     }
     // One object, one place: the card goes home, and what was chosen comes to it there.
     g.style.height = (s._plan ? s._plan.show : home.height) + 'px';
+    g.classList.add('is-closing');
     var land = function () {
       // The real card takes over from the ghost in mid-air, so the chain plays on something that can be seen.
       var box = g.getBoundingClientRect(), b = Motion.body(g);

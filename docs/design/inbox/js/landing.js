@@ -57,29 +57,49 @@ window.Landing = (function () {
   function land(e, s) {
     var el = App.els()[e.id];
     announce(K[e.kind].noun + ' ' + Card.fill(K[e.kind].identifier, e.fields) + ': ' + Card.sayReason(K[e.kind], s).text);
+    var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     if (!el || !el._plan) {
-      // A card folded in a pile cannot be shown, so the pile takes the knock.
-      e.signals.push(s);
-      e.fresh = true;
-      if (s.state) e.fields.state = s.state;
       var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
-      if (pile) Motion.knock(pile, 145);
-      // The pile says what it holds, so it says this too, until it is opened.
-      App.layOut(true);
+      // In an open tray the card can be seen, so it shows the news itself, and nothing falls across the tray.
+      if (!pile || Motion.isReduced() || Tray.isOpen()) { applyToPile(e, s, pile, tone); return; }
+      var spot = (pile.querySelector('.pile-facts > *') || pile.querySelector('.c-line')).getBoundingClientRect();
+      dropOnto(spot.left + 3, pile.getBoundingClientRect().top - 24, spot.top + spot.height / 2, tone);
+      setTimeout(function () { applyToPile(e, s, pile, tone); }, 281);
       return;
     }
     if (Motion.isReduced()) { apply(e, s, el); return; }
     var line = el.querySelector('.c-line').getBoundingClientRect();
     var r = el.getBoundingClientRect();
-    var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
+    // A one-line row has its news at the end of the line, so the drop falls there.
+    var isRow = el.dataset.level === 'one';
+    dropOnto(isRow ? r.right - 24 : line.left + 3, r.top - 24, isRow ? r.top + 17 : line.top + line.height / 2, tone);
+    setTimeout(function () { apply(e, s, el); }, 281);
+  }
+
+  /** Applies a signal to a card folded in a pile. The pile says what it holds, so its face changes, with the knock and the rim, until it is opened. */
+  function applyToPile(e, s, pile, tone) {
+    e.signals.push(s);
+    e.fresh = true;
+    if (s.state) e.fields.state = s.state;
+    var face = pile && pile.querySelector('.pile-facts, .c-line');
+    var was = face && face.innerHTML;
+    App.layOut(true);
+    Tray.drawNews(e);
+    if (!pile || !pile._plan) return;
+    Motion.knock(pile, 145);
+    pile.dataset.landed = tone;
+    pile.classList.remove('is-landed');
+    void pile.offsetWidth;
+    pile.classList.add('is-landed');
+    setTimeout(function () { pile.classList.remove('is-landed'); }, 1300);
+    if (face && face.innerHTML !== was) Motion.animate(face, [{ transform: 'translateY(5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.22,.9,.24,1)' });
+  }
+
+  /** Lets a small drop fall from `from` onto the point x, y. It falls long enough to be seen, stretching as it goes, and flattens on contact at 281ms. */
+  function dropOnto(x, from, y, tone) {
     var drop = document.createElement('i');
     drop.className = 'drop drop--' + tone;
     document.body.appendChild(drop);
-    // A one-line row has its news at the end of the line, so the drop falls there.
-    var isRow = el.dataset.level === 'one';
-    var x = isRow ? r.right - 24 : line.left + 3, y = isRow ? r.top + 17 : line.top + line.height / 2;
-    // It falls long enough to be seen, stretching as it goes, and flattens on contact. The card reacts at the moment of contact.
-    var from = r.top - 24;
     drop.animate([
       { transform: 'translate3d(' + x + 'px,' + from + 'px,0) scale(.7,1)', opacity: 0 },
       { transform: 'translate3d(' + x + 'px,' + (from + 12) + 'px,0) scale(.85,1.2)', opacity: 1, offset: 0.2 },
@@ -87,7 +107,6 @@ window.Landing = (function () {
       { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.5,.55)', opacity: 1, offset: 0.84 },
       { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.5,.55)', opacity: 0 },
     ], { duration: 360, easing: 'cubic-bezier(.4,0,.9,.8)' }).finished.then(function () { drop.remove(); });
-    setTimeout(function () { apply(e, s, el); }, 281);
   }
 
   /** Brings a new card down into its place, with the rim every arrival gets. */

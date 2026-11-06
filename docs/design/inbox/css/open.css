@@ -22,9 +22,10 @@
 }
 .open[hidden] { display: none; }
 .open.is-walking { transition: height var(--m-base) var(--m-ease), top var(--m-base) var(--m-ease); }
+.open.is-arming * { pointer-events: none; }
 .open kbd { color: var(--ink); }
 .open-in { display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: auto; padding: 12px 0 8px; will-change: transform; }
-.open.is-closing .o-meta, .open.is-closing .o-signal:not(.is-latest), .open.is-closing .o-note, .open.is-closing .o-parts, .open.is-closing .o-facts, .open.is-closing .o-ledger, .open.is-closing .o-close { opacity: 0; transition: opacity 100ms linear; }
+.open.is-closing .o-meta, .open.is-closing .o-signal:not(.is-latest), .open.is-closing .o-note, .open.is-closing .o-parts, .open.is-closing .o-facts, .open.is-closing .o-ledger, .open.is-closing .o-close { opacity: 0; transition: none; }
 .open.paper-manila { --stock: var(--stock-manila); }
 .open.paper-ledger { --stock: var(--stock-ledger); }
 .open.paper-sage { --stock: var(--stock-sage); }
@@ -155,6 +156,7 @@
 .c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you-ink); }
 .card.is-source { opacity: 0; }
 /* The rim follows the strip that can be seen, at the card's own corner, and prints over nothing else. */
+.card.is-peek.is-landed::after { height: 100%; }
 .card.is-landed::after {
   content: "";
   position: absolute;
@@ -204,6 +206,9 @@
   box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
 }
 .tray[hidden] { display: none; }
+/* On the way out the panel goes first, so only the cards travel home. */
+.tray.is-closing { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; transition: background var(--m-quick), box-shadow var(--m-quick); }
+.tray.is-closing .tray-h, .tray.is-closing .tray-none { opacity: 0; transition: opacity var(--m-quick); }
 .tray .card { cursor: pointer; }
 .tray .card:hover > .card-stock { box-shadow: var(--h-hover); }
 .tray-h { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }

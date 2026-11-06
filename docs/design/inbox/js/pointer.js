@@ -6,7 +6,7 @@ window.Pointer = (function () {
   var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
   var hover = null, peeked = null, timer = 0, leaveTimer = 0;
   var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null, settledAt = 0, lastAct = null, keysAtX = 0, keysAtY = 0;
-  var actX = 0, actY = 0, actT = 0, onActions = false;
+  var actX = 0, actY = 0, actT = 0, onActions = false, settleTimer = 0;
 
   /** Returns how tall a card stands in a peek: its whole face at strip size, kept inside the window. */
   function measurePeek(el) {
@@ -37,6 +37,9 @@ window.Pointer = (function () {
     var host = el.parentNode;
     el.querySelector('.c-hit').style.height = el._plan.show + 'px';
     el.classList.add('is-peek');
+    // The foot row is held back until the sheet has grown round it, so no words hang below the edge on the way.
+    el.classList.add('is-rising');
+    setTimeout(function () { el.classList.remove('is-rising'); }, Motion.isReduced() ? 0 : 170);
     var height = measurePeek(el);
     markUnder(el, host, height);
     el.style.height = el._plan.show + 'px';
@@ -146,10 +149,13 @@ window.Pointer = (function () {
       // A pointer resting on the page must not take over from the keys for a nudge of the desk: only real travel does.
       if (Keys.isUsingKeys() && Math.hypot(lastX - keysAtX, lastY - keysAtY) < 12) return;
       // While a stack closes up, what is under the pointer is a moving target, so the card handed over stays current.
-      if (performance.now() < settledAt) return;
+      // Where it came to rest is read as soon as the page has stopped.
+      if (performance.now() < settledAt) { clearTimeout(settleTimer); settleTimer = setTimeout(reread, settledAt - performance.now() + 10); return; }
       var plaque = ev.target.closest('.plaque');
       onActions = !!ev.target.closest('.c-acts');
       setHover(ev.target.closest('.card:not(.is-pile):not(.is-leaving)'));
+      var pile = ev.target.closest('.card.is-pile');
+      if (pile) Keys.setCurrent(pile.dataset.pile || pile.dataset.id, 'pointer');
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { if (p !== plaque) p.classList.remove('is-hover'); });
       if (plaque) { plaque.classList.add('is-hover'); Keys.setCurrent(plaque.dataset.id, 'pointer'); }
       var wrap = ev.target.closest('[data-wrap]');
@@ -176,6 +182,8 @@ window.Pointer = (function () {
       var card = ev.target.closest('.card, .plaque');
       if (!card) return;
       if (act) {
+        // The second click of a double click on Take it must not land on the On Work that replaced it.
+        if (act.dataset.act === 'go' && performance.now() - actT < 400) return;
         lastAct = act.dataset.act === 'dismiss' ? 'dismiss' : null;
         actX = ev.clientX; actY = ev.clientY; actT = performance.now();
         ev.stopPropagation();
@@ -186,5 +194,5 @@ window.Pointer = (function () {
     });
   }
 
-  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, handOver: handOver, forget: forget, noteKeys: noteKeys, reread: reread, takeBack: takeBack, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
+  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, handOver: handOver, forget: forget, noteKeys: noteKeys, reread: reread, takeBack: takeBack, clearFresh: clearFresh, readHover: function () { return hover; }, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
 })();

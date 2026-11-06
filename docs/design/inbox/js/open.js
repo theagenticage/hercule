@@ -109,8 +109,20 @@ window.Open = (function () {
     motion.parts.forEach(function (p) {
       p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
     });
+    // What is not the same object arrives once the title and the line have nearly landed, so nothing prints over them.
+    if (!motion.closing && !motion.restShown && t > 0.8) {
+      motion.restShown = true;
+      [].forEach.call(inner.querySelectorAll(REST), function (el, i) {
+        el.style.opacity = '';
+        el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+      });
+      [].forEach.call(inner.querySelectorAll(OLDER), function (el) {
+        el.style.opacity = '';
+        el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+      });
+    }
     // Near home the card itself comes back under the sheet, so the last frames dissolve into it rather than cut.
-    if (motion.closing && t < 0.05 && !motion.isHome) {
+    if (motion.closing && t < 0.02 && !motion.isHome) {
       motion.isHome = true;
       restoreSource();
       host.style.transition = 'opacity 80ms linear';
@@ -142,12 +154,14 @@ window.Open = (function () {
       host.classList.remove('is-closing');
       showVeil();
       progress.to(1, 'travel');
-      [].forEach.call(inner.querySelectorAll(REST + ', ' + OLDER), function (el) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' }); });
+      [].forEach.call(inner.querySelectorAll(REST + ', ' + OLDER), function (el) { el.style.opacity = ''; el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' }); });
+      motion.restShown = true;
       return;
     }
     if (openId || motion) finish();
     Pointer.setHover(null);
     Pointer.unpeek();
+    if (App.els()[id]) Pointer.clearFresh(App.els()[id]);
     var plaque = e.kind === 'hercule/cluster';
     sourceEl = anchor || (plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id]);
     openId = id;
@@ -182,15 +196,11 @@ window.Open = (function () {
     // Each opening has its own spring. One left over from an earlier opening must never touch this sheet.
     var gen = motion.gen;
     progress = Motion.value(0, function (t) { if (motion && motion.gen === gen) drawFrame(t); });
+    [].forEach.call(inner.querySelectorAll(REST + ', ' + OLDER), function (el) { el.style.opacity = '0'; });
+    // The moves take no pointer until the sheet has stopped: the second click of a double click must never start an agent.
+    host.classList.add('is-arming');
+    setTimeout(function () { host.classList.remove('is-arming'); }, 420);
     progress.to(1, 'travel');
-    // What is not the same object arrives once the title and the line have passed, so nothing prints over them.
-    [].forEach.call(inner.querySelectorAll(REST), function (el, i) {
-      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 140 + i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
-    });
-    // The older signals wait until the latest line has gone past them, so no words cross.
-    [].forEach.call(inner.querySelectorAll(OLDER), function (el) {
-      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 300, fill: 'backwards', easing: 'ease-out' });
-    });
     host.focus({ preventScroll: true });
   }
 
@@ -342,7 +352,7 @@ window.Open = (function () {
   function start() {
     host = document.getElementById('open');
     scrim = document.getElementById('scrim');
-    scrim.addEventListener('click', function () { if (openId) hide(); });
+    scrim.addEventListener('click', function () { if (openId && !host.classList.contains('is-arming')) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
       var b = ev.target.closest('[data-act]');

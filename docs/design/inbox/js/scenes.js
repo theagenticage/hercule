@@ -85,6 +85,8 @@ window.Scenes = (function () {
   function showZero() {
     var page = document.getElementById('page');
     Motion.animate(page, [{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-out' }).then(function () {
+      // An Undo during the fade brought a card back, so the page stays.
+      if (App.countLeft()) return;
       App.load({ name: 'zero', entities: App.state.entities, clusters: [], mode: 'zero', draw: drawZero });
       Landing.announce('All clear. Nothing from outside needs you.');
       document.getElementById('main').focus({ preventScroll: true });

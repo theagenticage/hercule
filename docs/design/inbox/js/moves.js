@@ -3,7 +3,7 @@ window.Moves = (function () {
   var K = Kinds.KINDS;
   var history = [];     // every move of this visit, newest last, so Undo goes as far back as the person likes
   var toastTimer = 0;
-  var turns = {};       // stacks waiting to turn over, by name
+  var turned = null, ringTimer = 0, turns = {};       // stacks waiting to turn over, by name
 
   /** Returns what Undo needs to put everything back exactly: the order of the page, and how each touched thing stood. */
   function takeSnapshot(touched) {
@@ -42,6 +42,8 @@ window.Moves = (function () {
     if (Motion.isReduced()) { receive(row); return Promise.resolve(); }
     var mark = el.querySelector('.c-mark .mark, .pl-mark');
     var target = row.querySelector('.ic').getBoundingClientRect();
+    // With the sidebar hidden, Overview has no place on screen to fly to.
+    if (!target.width) return Promise.resolve();
     return Motion.fly('<span class="token">' + mark.outerHTML + '</span>', mark.getBoundingClientRect(), target).then(function () { receive(row); });
   }
 
@@ -74,6 +76,8 @@ window.Moves = (function () {
     // The wait gives way, and whoever takes the card comes up into its place.
     var wait = el.querySelector('.c-pace');
     if (wait) Motion.animate(wait, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
+    // An undo may still be taking the last holder away.
+    [].forEach.call(el.querySelectorAll('.c-holder, .card-holder, .card-paws'), function (x) { x.remove(); });
     el.insertAdjacentHTML('afterbegin', Card.drawHolder(e));
     var isWhole = el.classList.contains('is-whole');
     var who = el.querySelector(isWhole ? '.card-holder' : '.c-holder-in');
@@ -110,15 +114,27 @@ window.Moves = (function () {
   function runTurn(stack) {
     delete turns[stack];
     if (!App.turnOver(stack)) return false;
-    if (Keys.isUsingKeys() && !Keys.current()) Keys.focusFirstIn(stack);
-    else setTimeout(Pointer.reread, 420);
+    // The ring waits for the dealt card to land, so it is never drawn on a card still rising.
+    turned = stack;
+    ringTimer = setTimeout(placeRing, 520);
     return true;
+  }
+
+  /** Puts the current card back on the stack that just turned over. */
+  function placeRing() {
+    clearTimeout(ringTimer);
+    var stack = turned;
+    turned = null;
+    if (!stack) return;
+    if (!Keys.isUsingKeys()) Pointer.reread();
+    else if (!Keys.current()) Keys.focusFirstIn(stack);
   }
 
   /** Runs a turn that is still waiting, because a key was pressed for the next card. Returns whether there was one. */
   function flushTurn() {
     var names = Object.keys(turns);
     names.forEach(function (n) { clearTimeout(turns[n]); runTurn(n); });
+    placeRing();
     return names.length > 0;
   }
 
@@ -196,6 +212,8 @@ window.Moves = (function () {
     if (!el || !el._plan) { App.layOut(); el = App.els()[e.id]; }
     var stand = function () {
       if (!el) { Nav.hold(false); App.layOut(); return; }
+      // Taken again while the mark flew home: the new hand-off owns the card now.
+      if (e.task) { Nav.hold(false); return; }
       var stands = [].slice.call(el.querySelectorAll('.c-holder, .card-holder, .card-paws'));
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
@@ -212,8 +230,9 @@ window.Moves = (function () {
       App.layOut();
     };
     var row = readWorkRow(), mark = el && el.querySelector('.c-mark .mark');
-    if (!el || !row || !mark || Motion.isReduced()) { stand(); return; }
-    Motion.fly('<span class="token">' + mark.outerHTML + '</span>', row.querySelector('.ic').getBoundingClientRect(), mark.getBoundingClientRect(), { ms: 420, grow: true }).then(stand);
+    var from = row && row.querySelector('.ic').getBoundingClientRect();
+    if (!el || !row || !mark || !from.width || Motion.isReduced()) { stand(); return; }
+    Motion.fly('<span class="token">' + mark.outerHTML + '</span>', from, mark.getBoundingClientRect(), { ms: 240, grow: true }).then(stand);
   }
 
   /**
@@ -241,7 +260,12 @@ window.Moves = (function () {
       document.querySelectorAll('.card.is-leaving[data-id="' + u.e.id + '"]').forEach(function (c) { c.remove(); });
       App.layOut();
       var back = u.e && App.els()[u.e.id];
-      if (back) { back.classList.remove('is-new'); Motion.body(back).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel'); }
+      // The card comes back from where it stepped aside, not out of the pile, so it is not dealt.
+      if (back) {
+        back.classList.remove('is-new', 'is-dealing');
+        if (back._rest) back.style.height = back._rest + 'px';
+        Motion.body(back).set({ x: 14, y: 0, o: 0 }).to({ x: 0, o: 1 }, 'travel');
+      }
     }
     Nav.setCount('inbox', App.countOverdue());
     var backEl = u.e && App.els()[u.e.id];

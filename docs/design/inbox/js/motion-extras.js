@@ -60,6 +60,8 @@
   function knock(el, speed) {
     if (M.isReduced()) return;
     var b = M.body(el);
+    // A body already on its way keeps its goal and what it does on arrival. The knock only adds speed.
+    if (b.onRest || b.pending) { b.speed.y += speed; return; }
     b.to({ y: 0 }, 'hand');
     b.speed.y = speed;
   }
