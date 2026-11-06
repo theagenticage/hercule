@@ -1,26 +1,27 @@
 <!doctype html>
 <html lang="en" data-theme="orient-express">
-<head><meta charset="utf-8"><title>Card sheet</title>
+<head><meta charset="utf-8"><title>Every card state</title>
 <script src="../shared/page.js"></script>
-<link rel="stylesheet" href="system/tokens.css"><link rel="stylesheet" href="system/base.css"><link rel="stylesheet" href="system/primitives.css">
+<link rel="stylesheet" href="system/tokens.css"><link rel="stylesheet" href="system/base.css"><link rel="stylesheet" href="system/primitives.css"><link rel="stylesheet" href="css/work.css">
 <style>
-html,body{overflow:auto;height:auto;background:var(--desk)}
-.wrap{padding:36px 40px;display:grid;grid-template-columns:repeat(4,216px);gap:22px 14px}
-.lab{font:var(--type-meta);color:var(--faint);margin-bottom:12px}
+html,body{overflow:auto;height:auto;background:var(--desk);-webkit-user-select:none;user-select:none}
+.wrap{padding:30px 40px 34px;display:grid;grid-template-columns:repeat(4,216px);gap:30px 18px;justify-content:center}
+.lab{font:var(--type-meta);color:var(--faint);margin-bottom:18px}
 </style></head>
 <body><div class="wrap" id="w"></div>
 <script src="system/brands.js"></script><script src="system/faces.js"></script>
+<script src="../work-views/data.js"></script><script src="js/world.js"></script><script src="js/motion.js"></script><script src="js/store.js"></script><script src="js/board.js"></script>
 <script>
-var peek=function(name,pose){return '<span class="card-head">'+Crew.peek(name,{pose:pose,size:26,crop:34})+'</span>'};
-var S=[
- ['Agent asks you','stand','<span class="card-holder">'+peek('Trace the search feed errors','waiting')+'</span>','Search feed errors after the brand change','Fix the records, or relax the rule?','Quick call','1h'],
- ['Standing, quick call','stand','<span class="card-holder"><i class="card-tab"></i></span>','Basket drawer traps focus','Reproduces in one browser only.','Quick call','5d'],
- ['Standing, thinking','stand','<span class="card-holder"><i class="card-tab" data-need="think"></i></span>','Can coupons stack with loyalty points?','Marketing says yes, finance says only above a minimum.','Real thinking','4w'],
- ['Agent working','flat','<span class="card-holder">'+peek('Fake the clock in order tests','working')+'</span>','Tests that depend on the wall clock','Order tests half done.','Working','12m'],
- ['Person holds it','flat','<span class="card-holder"><i class="card-tab card-tab--person">O</i></span>','Price engine: handle weighed items','With Omar Haddad for review.','Omar','3d'],
- ['Pressed in (blocked)','press','','Run the slow suite in shards','Waits on Stable seed data.','Blocked','2w'],
- ['Agent, other look','flat','<span class="card-holder">'+peek('Replace sleeps in browser tests','working')+'</span>','Browser tests that race the basket API','Four of twelve sleeps replaced.','Working','2m'],
- ['Landed','etch','','Weekly flake report','Posted three weeks running.','Landed','4d'],
-];
-document.getElementById('w').innerHTML=S.map(function(s){return '<div><div class="lab">'+s[0]+'</div><article class="card" data-height="'+s[1]+'">'+s[2]+'<i class="card-stock"></i><div class="card-text"><span class="card-title">'+s[3]+'</span><br>'+s[4]+'</div><footer class="card-foot"><span>'+s[5]+'</span><time>'+s[6]+'</time></footer></article></div>'}).join('');
+// Every card here is drawn by the same code as the board.
+Store.loadWorld(NW.buildToday());
+var t = Store.task;
+t("search-feed-errors").move = "you"; t("search-feed-errors").need = "quick"; t("search-feed-errors").ask = "Fix the records, or relax the rule?"; t("search-feed-errors").now = "Found them. Which way?";
+var S = [["Quick call", "pr-qty-labels"], ["Real thinking", "substitutions"], ["An agent is on it", "flake-clock"], ["An agent asks you", "search-feed-errors"], ["With a person", "pr-font"], ["Blocked", "guest-checkout"], ["Landed", "flake-report"], ["Nobody yet", "t-cancelled"]];
+var w = document.getElementById("w");
+S.forEach(function (s) {
+  var box = document.createElement("div");
+  box.innerHTML = '<div class="lab">' + s[0] + "</div>";
+  box.appendChild(Board.drawCard(t(s[1])));
+  w.appendChild(box);
+});
 </script></body></html>

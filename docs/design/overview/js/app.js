@@ -146,9 +146,12 @@
     if (!act) return;
     if (act.dataset.display === "fold") Fold.toggleAll();
     if (act.dataset.display === "keys") Help.toggle();
-    if (act.dataset.display !== "wear") display.classList.remove("is-on");
+    if (act.dataset.display !== "wear" && act.dataset.display !== "still") display.classList.remove("is-on");
   });
   document.getElementById("wear-switch").addEventListener("change", Display.toggleWear);
+  document.getElementById("still-switch").addEventListener("change", function (e) {
+    root.dataset.still = e.target.checked ? "1" : "";
+  });
   window.addEventListener("click", function (e) {
     display.classList.remove("is-on");
     if (!e.target.closest("#help")) document.getElementById("help").classList.remove("is-on");

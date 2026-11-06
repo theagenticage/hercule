@@ -215,7 +215,7 @@
 @keyframes card-new { 0%, 30% { box-shadow: var(--h-flat), 0 0 0 1px color-mix(in oklab, var(--brass) 80%, transparent); } 100% { box-shadow: var(--h-flat); } }
 .card-signal { position: absolute; z-index: 3; left: 8px; bottom: 7px; padding: 0 7px; height: 18px; display: inline-flex; align-items: center; border-radius: 6px; background: var(--stock); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 60%, transparent); font: var(--type-meta); font-weight: var(--w-medium); color: var(--ink); white-space: nowrap; }
 .card.has-signal .card-meta { visibility: hidden; }
-.slot.dent { background: none; box-shadow: var(--h-etch); opacity: 0.8; }
+.slot.dent { background: color-mix(in oklab, var(--ink) 2%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 8%, transparent); }
 .card-pending { color: var(--faint); }
 @keyframes pending { 50% { opacity: 0.55; } }
 
@@ -302,3 +302,5 @@
 @media (prefers-reduced-motion: reduce) { .roll { animation: none !important; } }
 html[data-motion="reduced"] .roll, html[data-motion="reduced"] .card-paws i, html[data-motion="reduced"] .cr * { animation: none !important; }
 .card-sync { color: var(--faint); line-height: 0; }
+
+html[data-still="1"] .card-paws i, html[data-still="1"] .cr * { animation: none !important; }
