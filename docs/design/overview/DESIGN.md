@@ -50,8 +50,8 @@ The switcher is built for five tabs. Each is an icon and a word, so five read as
 | The second line | 12/16, 6px below |
 | Sentence to stage rule | 20px |
 | Stage rule | 30px tall, 1px brass line at 68%, fading to 26% at the right end |
+| Stage count | Limelight 20px, in `--numeral`, first in the heading, hidden at zero |
 | Stage name | 11px bold, 0.09em tracking, uppercase |
-| Stage count | Limelight 16px, in `--numeral`, hidden at zero |
 | Columns | four at 1fr and Landed at 0.72fr, 14px apart: 222px and 160px at 1440; 188px and 135px at 1280. Minimum 168px and 120px; below that the board scrolls sideways, so summaries never clip at high zoom |
 | Lane name | 15/20 bold, 28px row. No project mark: a name is enough, and ten tints would mean nothing |
 | Space after a lane | 30px, or 12px when folded |

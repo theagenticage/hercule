@@ -326,8 +326,8 @@ window.Board = (function () {
       var n = open.filter(function (t) { return t.stage === s.id; }).length;
       var prev = el._n;
       el._n = n;
-      if (!el.firstChild) el.innerHTML = '<span class="stage-name">' + s.name + '</span><span class="stage-count"></span>';
-      var slot = el.lastChild;
+      if (!el.firstChild) el.innerHTML = '<span class="stage-count"></span><span class="stage-name">' + s.name + "</span>";
+      var slot = el.firstChild;
       el.classList.toggle("is-zero", n === 0);
       if (prev !== undefined && prev !== n) {
         var up = n > prev;
