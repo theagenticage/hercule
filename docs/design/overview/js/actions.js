@@ -2,16 +2,31 @@
 window.Actions = (function () {
   "use strict";
 
-  /** Sends a card off the desk: Done rises and fades toward Landed, Drop sinks and fades. */
-  function animateLeaving(id, how) {
+  /**
+   * Sends a card off the desk. Done shrinks into its number in the sentence, and the number rolls
+   * down: the sentence getting shorter is the reward. Drop sinks and fades.
+   */
+  function animateLeaving(id, how, need) {
     var el = document.querySelector('.card[data-id="' + id + '"]');
     if (!el) return;
     var ghost = Motion.ghost(el, document.getElementById("carry"));
     ghost.classList.remove("is-away");
     ghost.classList.add(how === "Done" ? "is-done" : "is-dropped");
+    var number = how === "Done" && need ? document.querySelector('.lens[data-lens="' + need + '"] .lens-n') : null;
+    if (number) {
+      var a = ghost.getBoundingClientRect();
+      var n = number.getBoundingClientRect();
+      Board.holdLead(true);
+      Motion.body(ghost).to({ x: n.left + n.width / 2 - (a.left + a.width / 2), y: n.top + n.height / 2 - (a.top + a.height / 2), s: 0.08 }, "travel", {
+        done: function () { ghost.remove(); },
+      });
+      ghost.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 380, fill: "forwards" });
+      setTimeout(function () { Board.holdLead(false); }, 340);
+      return;
+    }
     var goal = how === "Done" ? { x: 26, y: -14, s: 1.02, r: 0, o: 0 } : { x: 0, y: 12, s: 0.97, r: -1.6, o: 0 };
-    Motion.body(ghost).to(goal, how === "Done" ? "travel" : "travel", {
-      delay: how === "Done" ? 240 : 0,
+    Motion.body(ghost).to(goal, "travel", {
+      delay: how === "Done" ? 120 : 0,
       done: function () { ghost.remove(); },
     });
   }
@@ -27,8 +42,9 @@ window.Actions = (function () {
     var t = Store.task(id);
     if (!t) return;
     var next = pickNeighbour(id);
+    var need = Store.wantsYou(t) ? t.need : null;
     var finish = function () {
-      animateLeaving(id, how);
+      animateLeaving(id, how, need);
       Board.change(function () { Store.endTask(id, how); }, { spring: "hand" });
       Fan.dropCard(id);
       if (!quiet) Toast.show(how + (Store.state.offline ? ". It will sync when you are back." : ". " + t.name + " has left the board."), true);

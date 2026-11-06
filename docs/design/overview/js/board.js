@@ -367,6 +367,15 @@ window.Board = (function () {
     }));
   }
 
+  var leadHeld = false;
+  var lastCounts = {};
+
+  /** Holds the sentence still for a moment, so a card flying to its number arrives first. */
+  function holdLead(on) {
+    leadHeld = on;
+    if (!on) drawLead();
+  }
+
   function drawLead() {
     var c = Store.countAttention();
     var st = Store.state;
@@ -380,7 +389,7 @@ window.Board = (function () {
       return;
     }
     if (scene === "empty" && !st.tasks.length) {
-      setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span><b>12</b> things landed this week.</span></p>');
+      setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span>12 things landed this week. The crew is at rest.</span></p>');
       return;
     }
     if (c.quick && c.think) line = lens("quick",  '<span class="lens-n">' + c.quick + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + c.think + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
@@ -392,7 +401,15 @@ window.Board = (function () {
     if (c.stalled) sub.push(lens("stalled", "<b>" + c.stalled + "</b> stalled"));
     if (c.blocked) sub.push("<span><b>" + c.blocked + "</b> blocked</span>");
     if (scene === "offline") sub.unshift('<span class="lead-offline">Offline since 09:12. Moves wait until you are back.</span>');
-    setHTML(leadEl, "<h2>" + line + '</h2><p class="lead-sub">' + sub.join('<i class="sep"></i>') + "</p>");
+    if (leadHeld) return;
+    var door = c.quick + c.think ? '<button class="lead-door" data-walk title="Walk through what wants you (N)"><span>Start</span><kbd>N</kbd></button>' : "";
+    setHTML(leadEl, "<h2>" + line + door + '</h2><p class="lead-sub">' + sub.join('<i class="sep"></i>') + "</p>");
+    // A number that went down rolls, because the sentence getting shorter is the reward.
+    ["quick", "think"].forEach(function (key) {
+      var n = leadEl.querySelector('.lens[data-lens="' + key + '"] .lens-n');
+      if (n && lastCounts[key] !== undefined && c[key] < lastCounts[key]) n.classList.add("is-rolling");
+      lastCounts[key] = c[key];
+    });
   }
 
   /** Redraws everything from the Store. Keeps every element that still stands for the same thing. */
@@ -559,5 +576,5 @@ window.Board = (function () {
     return { key: "stack:" + cell._owner + ":" + cell._stage, kind: "stack", title: (project ? project.name : plan.name) + ", " + stage, tasks: cell._behind.slice() };
   }
 
-  return { mount: mount, locate: locate, readStack: readStack, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  return { mount: mount, locate: locate, readStack: readStack, holdLead: holdLead, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

@@ -242,8 +242,7 @@
 .card--ghost .card-title { color: var(--ink); font-weight: var(--w-medium); }
 .welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 22px; }
 .welcome--clear { align-items: center; padding-top: 96px; }
-.welcome-landed { position: absolute; left: 32px; right: 32px; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); pointer-events: none; color: var(--muted); font: var(--type-card); }
-.welcome-landed span { grid-column: 5; }
+
 .welcome-line { margin: 0; color: var(--muted); }
 .welcome-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: var(--r-btn); background: var(--accent); color: var(--accent-fg); font-weight: var(--w-medium); }
 .welcome-btn kbd { background: color-mix(in oklab, var(--accent-fg) 16%, transparent); color: inherit; }
@@ -340,3 +339,32 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .card:hover .pile-sheet { transform: translateY(calc(var(--n) * 4.5px)) scaleX(calc(1 - var(--n) * 0.018)); }
 .grid.is-empty { height: 0; }
 .grid.is-empty + .plans { margin-top: 0; }
+
+/* The door to the walk: a keycap after the sentence, with its word on approach. */
+.lead-door { display: inline-flex; align-items: center; gap: 6px; height: 22px; margin-left: 10px; vertical-align: 4px; color: var(--faint); font: var(--type-summary); letter-spacing: 0; }
+.lead-door span { opacity: 0; transform: translateX(4px); transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
+.lead:hover .lead-door span, .lead-door:focus-visible span { opacity: 1; transform: none; }
+.lead-door:hover { color: var(--ink); }
+.lead-door { flex-direction: row-reverse; }
+.lens-n { display: inline-block; }
+.lens-n.is-rolling { animation: number-down var(--m-slow) var(--m-ease); }
+@keyframes number-down { from { transform: translateY(-9px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lens-n.is-rolling { animation: none; } }
+
+/* ---------- The clear desk: a sunrise, with the stage rule as its horizon ---------- */
+[data-scene="empty"] .lead-row { position: absolute; left: 32px; right: 32px; top: calc(66px + 244px + 34px + 26px); display: block; text-align: center; padding: 0; }
+[data-scene="empty"] .lead-row h2 { font-size: var(--t-20); line-height: 28px; font-weight: var(--w-bold); letter-spacing: -0.008em; }
+[data-scene="empty"] .lead-sub { position: static; justify-content: center; margin-top: 4px; font-size: var(--t-14); line-height: 21px; }
+[data-scene="empty"] .rule-wrap { position: relative; top: 0; margin-top: 244px; }
+[data-scene="empty"] .stage { opacity: 0; }
+.sunrise { position: absolute; left: 50%; bottom: 100%; width: 720px; height: 240px; margin-left: -360px; margin-bottom: -5px; pointer-events: none; }
+.sunrise svg { position: absolute; inset: 0; overflow: visible; }
+.sunrise .ray { stroke: var(--rule-ink); stroke-width: 1.5; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.sunrise-head { position: absolute; left: 50%; bottom: 0; width: 96px; height: 62px; margin-left: -48px; overflow: hidden; line-height: 0; }
+.sunrise-head .cr { display: block; }
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion="reduced"]) .sunrise .ray { animation: ray-draw 700ms var(--m-ease) calc(420ms + var(--d)) backwards; }
+  html:not([data-motion="reduced"]) .sunrise-head .cr { animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) backwards; }
+}
+@keyframes ray-draw { from { stroke-dashoffset: 1; } }
+@keyframes sun-rise { from { transform: translateY(62px); } }

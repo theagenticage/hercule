@@ -9,10 +9,35 @@ window.Welcome = (function () {
       return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder">' + Board.drawHead("Hercule", "idle").head + "</span>" + Board.drawHead("Hercule", "idle").paws + '<i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task lands here.</p></div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
-    return '<div class="welcome-landed"><span>12 this week</span></div><div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';
+    return "";
   }
 
   var started = false;
+
+  /** Returns the rays behind the sun, fanning up from the middle of the horizon. */
+  function drawRays() {
+    var out = "";
+    var cx = 360;
+    var cy = 240;
+    var n = 31;
+    for (var i = 0; i < n; i++) {
+      var a = Math.PI * (i / (n - 1));
+      var r0 = 126;
+      var r1 = i % 2 === 0 ? 226 : 182;
+      var d = Math.abs(i - (n - 1) / 2);
+      out += '<line class="ray" pathLength="1" style="--d:' + d * 26 + 'ms" x1="' + (cx - Math.cos(a) * r0).toFixed(1) + '" y1="' + (cy - Math.sin(a) * r0).toFixed(1) + '" x2="' + (cx - Math.cos(a) * r1).toFixed(1) + '" y2="' + (cy - Math.sin(a) * r1).toFixed(1) + '"/>';
+    }
+    return out;
+  }
+
+  /** Draws the sunrise on the stage rule: Hercule himself, coming up over the edge. */
+  function drawSunrise() {
+    var wrap = document.querySelector(".rule-wrap");
+    var sun = document.createElement("div");
+    sun.className = "sunrise";
+    sun.innerHTML = '<svg viewBox="0 0 720 240" aria-hidden="true">' + drawRays() + '</svg><div class="sunrise-head">' + Crew.face("Hercule", { pose: "idle", size: 96 }) + "</div>";
+    wrap.appendChild(sun);
+  }
 
   function startFirst() {
     if (started) return;
@@ -47,5 +72,5 @@ window.Welcome = (function () {
     }, Number(new URLSearchParams(location.search).get("hold")) || 1600);
   }
 
-  return { drawEmpty: drawEmpty, startFirst: startFirst, playLoading: playLoading };
+  return { drawEmpty: drawEmpty, drawSunrise: drawSunrise, startFirst: startFirst, playLoading: playLoading };
 })();

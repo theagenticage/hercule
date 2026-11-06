@@ -4,6 +4,7 @@ window.Keys = (function () {
   "use strict";
 
   var focused = null;
+  var hovered = null;
   var singleKeys = true;
 
   function walkable() {
@@ -76,6 +77,7 @@ window.Keys = (function () {
   }
 
   function currentCardId() {
+    if (hovered && hovered.isConnected) return hovered.dataset.id;
     return focused && focused.isConnected && focused.dataset.id ? focused.dataset.id : null;
   }
 
@@ -216,11 +218,12 @@ window.Keys = (function () {
     var id3 = Pane.currentId() || currentCardId();
     if (!id3) return;
     // With a fan open, a key can only mean a card in that fan.
-    if (Fan.isOpen() && !Pane.currentId() && !(focused && focused.closest(".fan"))) return;
+    if (Fan.isOpen() && !Pane.currentId() && !((hovered || focused) && (hovered || focused).closest(".fan"))) return;
     if (key === "x") return Select.toggle(id3);
-    if (key === "e" && focused) {
-      var stackOf = Board.readStack(focused);
-      if (stackOf) Fan.show(focused, stackOf);
+    if (key === "e") {
+      var host = (hovered && hovered.isConnected ? hovered : focused);
+      var stackOf = host && Board.readStack(host);
+      if (stackOf) Fan.show(host, stackOf);
       return;
     }
     if (key === "d") return Actions.run("done", id3);
@@ -270,7 +273,7 @@ window.Keys = (function () {
     });
   }
 
-  return { mount: mount, focusCard: focusCard, clearFocus: clearFocus, setSingleKeys: function (on) { singleKeys = on; } };
+  return { mount: mount, focusCard: focusCard, clearFocus: clearFocus, setSingleKeys: function (on) { singleKeys = on; }, setHover: function (el) { hovered = el; } };
 })();
 
 // PROTOTYPE - the sentence is the filter. Hovering a phrase lights what it counts; pressing keeps it.

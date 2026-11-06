@@ -67,6 +67,7 @@
     var pile = e.target.closest(".pile");
     if (pile) return Fan.show(pile);
     if (Fan.isOpen() && !e.target.closest(".card")) return Fan.hide();
+    if (e.target.closest("[data-walk]")) return Walk.step(1);
     var lens = e.target.closest(".lens[data-lens]");
     if (lens) return Lens.toggle(lens.dataset.lens);
     var bead = e.target.closest(".bead[data-id]");
@@ -84,6 +85,12 @@
     if (e.target.closest("[data-first-thread]")) return Welcome.startFirst();
     if (Pane.currentId()) Pane.hide();
   });
+  // The current card follows the pointer as well as the keys, as it does in the Inbox.
+  work.addEventListener("pointerover", function (e) {
+    Keys.setHover(e.target.closest(".card[data-id]"));
+  });
+  work.addEventListener("pointerleave", function () { Keys.setHover(null); });
+
   var lead = document.getElementById("lead");
   lead.addEventListener("pointerover", function (e) {
     var lens = e.target.closest(".lens[data-lens]");
@@ -189,6 +196,7 @@
   var firstCard = document.querySelector("#lanes .card");
   if (firstCard) firstCard.tabIndex = 0;
 
+  if (scene === "empty") Welcome.drawSunrise();
   if (scene === "loading") Welcome.playLoading();
   if (replay) {
     if (Motion.isReduced()) Live.skipToMorning();
