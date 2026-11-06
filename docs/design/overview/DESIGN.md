@@ -18,7 +18,7 @@ Three real sketches on the same 69 Tasks, in `sketches/` (`index.html?d=a|b|c`):
 |---|---|---|
 | A. Open desk | No trays. Lanes as space. Plans inside their lane | The quietest. Chosen as the ground |
 | B. Drawers | Projects as trays, with a folded front of beads | Too boxy, and the opposite of "remove until it hurts". Its folded front became the fold grammar |
-| C. Horizon and slips | All plans as a band on top, thin slips below | The band was lovely, but it split a project's plans from its work, and slips were the tiny cells Rogier rejected |
+| C. Horizon and slips | All plans as a band on top, thin slips below | The band was lovely, but it split a project's plans from its work, and slips were the tiny cells that were rejected |
 
 ## The Overview
 
