@@ -117,10 +117,8 @@
 html[data-dragging] { cursor: grabbing; }
 html[data-dragging] * { cursor: grabbing !important; }
 
-/* A handed plaque lies flat. */
-.plaque.is-handed { background: transparent; box-shadow: inset 0 0 0 1px var(--stock-rim-flat); color: var(--muted); transition: background var(--m-long) var(--m-ease), color var(--m-long) var(--m-ease); }
-.plaque.is-handed .pl-why { color: var(--muted); }
-.plaque.is-handed .pl-src { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--stock-rim-flat); }
+/* A handed segment of the plate steps back, and leaves at the next visit. */
+.plaque.is-handed { opacity: 0.62; transition: opacity var(--m-long) var(--m-ease); }
 
 /* The sheet of keys. */
 .keys { position: absolute; right: 24px; bottom: 54px; z-index: 36; width: 250px; padding: 12px 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry); font: var(--type-summary); }

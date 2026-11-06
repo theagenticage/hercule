@@ -56,7 +56,9 @@ window.Tray = (function () {
     scrim = document.getElementById('scrim');
     scrim.addEventListener('click', hide);
     host.addEventListener('click', function (ev) {
-      if (ev.target.closest('[data-close]')) hide();
+      if (ev.target.closest('[data-close]')) { hide(); return; }
+      var card = ev.target.closest('.card');
+      if (card) Open.show(card.dataset.id, card);
     });
   }
   return { show: show, hide: hide, isOpen: isOpen, start: start };

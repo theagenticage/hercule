@@ -199,6 +199,8 @@
   box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
 }
 .tray[hidden] { display: none; }
+.tray .card { cursor: pointer; }
+.tray .card:hover > .card-stock { box-shadow: var(--h-hover); }
 .tray-h { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }
 .tray-h h2 { margin: 0; font: var(--type-lane); }
 .tray-h small { color: var(--faint); font: var(--type-summary); }

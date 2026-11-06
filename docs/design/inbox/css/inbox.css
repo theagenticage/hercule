@@ -6,7 +6,7 @@
 .main {
   height: 100vh;
   overflow: hidden;
-  background: var(--desk);
+  background: radial-gradient(1100px 620px at 26% -8%, var(--lamp, transparent), transparent 72%), var(--desk);
 }
 
 .ib-bar {
@@ -117,3 +117,4 @@
 .nav-new { flex: none; width: 6px; height: 6px; margin-right: -2px; border-radius: 50%; background: var(--you); }
 .nav-new[hidden] { display: none; }
 .ib-sum[hidden] { display: none; }
+.ib-end[hidden] { display: none; }

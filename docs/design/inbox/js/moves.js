@@ -27,7 +27,14 @@ window.Moves = (function () {
     undoable = { type: 'assign', id: e.id };
     e.task = { by: by, startedAt: App.state.now };
     if (e.kind === 'hercule/cluster') { assignPlaque(e, by); return; }
-    if (!el) { App.layOut(); return; }
+    if (!el || !el._plan) {
+      // A card from a tray has no place in a stack: it says what happened where it is seen.
+      var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
+      if (seen) { seen.dataset.height = 'flat'; seen.innerHTML = Card.drawCardBody(e, { now: App.state.now, usual: null }); }
+      App.layOut();
+      showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, true);
+      return;
+    }
     Pointer.setHover(null);
     Pointer.unpeek();
     el.classList.add('is-handing');
@@ -109,6 +116,7 @@ window.Moves = (function () {
     var e = App.findEntity(u.id);
     if (u.type === 'assign' && e) {
       e.task = null;
+      if (e.kind === 'hercule/cluster') { App.drawNoticed(); App.drawBar(); return; }
       App.redrawCard(e);
       App.layOut();
       return;

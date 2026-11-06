@@ -44,6 +44,13 @@
 
   function buildEntities() {
     uid = 0;
+    var list = buildList();
+    // What arrived since the last look carries a small mark, so a night's news can be found without anything moving.
+    list.forEach(function (e) { if (e.id === 'mail-1' || e.id === 'pr-6255') e.fresh = true; });
+    return list;
+  }
+
+  function buildList() {
     return [
       // To review. Oldest first, as a person waits.
       pr(6204, 'storefront-web', 'Cache delivery slot lookups for five minutes', 'juno-park', 131.4, 'passing', { diff: [142, 38], files: 6 }),

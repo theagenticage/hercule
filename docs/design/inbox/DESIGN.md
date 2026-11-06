@@ -174,6 +174,13 @@ Inbox takes Intake's row in the sidebar's Work section. Intake moves behind it, 
 
 The row shows a plain grey number, not a badge. It counts what has outlasted its patience, plus what Hercule noticed. A signal landing on a card you already have never raises it. Something new while you are elsewhere adds one 6px marigold dot, gone when you come back.
 
+## Tried and dropped
+
+- **Cuts.** A letter's fold and a ticket's notches on whole cards. At full size they read as glitches, and they could not show on a strip, where cards spend most of their time. Mark, stock and density carry the identity.
+- **The riffle.** Cards parting under the pointer like a fisheye. It moved targets under the pointer. The peek gives the same reading with nothing moving.
+- **Three separate triage cards.** They read as a row of KPI tiles, and each seemed to belong to the column under it.
+- **A heavy logo in full ink on every row.** At 19 rows it was the heaviest thing on the page. Solid marks are now drawn at 90% and in `--mark-ink`.
+
 ## New in the design system
 
 | Name | What | Where |

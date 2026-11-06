@@ -45,6 +45,7 @@ window.Pages = (function () {
     document.querySelectorAll('[data-view]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.view === (name === 'intake' ? 'intake' : 'cards')); });
     document.querySelectorAll('[data-nav]').forEach(function (r) { r.classList.toggle('is-on', r.dataset.nav === (name === 'work' ? 'overview' : 'inbox')); });
     document.getElementById('main').dataset.view = name;
+    drawPill(name);
     if (name === 'intake') { drawIntake(); App.state.mode = 'intake'; return; }
     if (name === 'work') { Work.draw(); App.state.mode = 'work'; return; }
     Nav.setNew(false);
@@ -54,6 +55,16 @@ window.Pages = (function () {
     App.redraw();
   }
   function page() { return document.getElementById('page'); }
+
+  /** Sets the pill for the place on screen: the Inbox's own, or the one Overview draws. */
+  function drawPill(name) {
+    var pill = document.getElementById('pill');
+    pill.innerHTML = name === 'work'
+      ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
+      : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards">Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake">Intake <small>214</small></button>';
+    document.querySelector('.ib-end').hidden = name !== 'inbox';
+    document.getElementById('sum').hidden = name !== 'inbox';
+  }
 
   /** Raises a row of Intake to the Inbox: the row lifts, a token flies to the Cards tab, and a card waits there. */
   function raise(id) {
@@ -122,7 +133,7 @@ window.Work = (function () {
       var dx = from.left - to.left, dy = from.top - to.top;
       el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('open').ms, easing: Motion.curve('open').ease });
     }
-    el.animate([{ boxShadow: '0 0 0 0 transparent' }, { boxShadow: '0 0 0 3px color-mix(in oklab, var(--accent) 30%, transparent)', offset: 0.2 }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1400, delay: 200 });
+    el.querySelector('.card-stock').animate([{ outline: '0 solid transparent' }, { outline: '3px solid color-mix(in oklab, var(--accent) 34%, transparent)', offset: 0.2 }, { outline: '0 solid transparent' }], { duration: 1400, delay: 200 });
   }
   return { draw: draw, reveal: reveal };
 })();

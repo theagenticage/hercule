@@ -70,14 +70,14 @@ window.Open = (function () {
   }
 
   /** Opens a card where it lies. */
-  function show(id) {
+  function show(id, anchor) {
     var e = App.findEntity(id);
     if (!e) return;
     if (openId) hide(true);
     Pointer.setHover(null);
     Pointer.unpeek();
     var plaque = e.kind === 'hercule/cluster';
-    sourceEl = plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id];
+    sourceEl = anchor || (plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id]);
     openId = id;
     var r = sourceEl.getBoundingClientRect();
     var main = document.getElementById('main').getBoundingClientRect();

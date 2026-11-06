@@ -311,6 +311,7 @@ window.App = (function () {
   /** Lets every card someone holds settle at the foot of its stack. It runs when you come back, never while you watch. */
   function settle() {
     state.entities.forEach(function (e) { if (e.task || e.quiet) e.settled = true; });
+    state.clusters = state.clusters.filter(function (c) { return !c.task; });
   }
 
   /** Draws the page again from state, after another view held it. */

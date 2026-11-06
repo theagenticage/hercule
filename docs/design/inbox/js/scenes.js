@@ -4,14 +4,17 @@ window.Scenes = (function () {
   var K = Kinds.KINDS;
   var ONLY = ['pr-6238', 'pr-6252', 'pr-6204', 'mail-1', 'pr-6195', 'ln-OPS-47', 'ln-SHOP-360', 'qs-1'];
 
-  function morning() { return { name: 'morning', entities: W.buildEntities(), clusters: W.CLUSTERS.slice() }; }
+  /** Returns fresh copies of what Hercule noticed, so a scene never inherits moves from the last one. */
+  function readClusters() { return W.CLUSTERS.map(function (c) { return Object.assign({}, c); }); }
+
+  function morning() { return { name: 'morning', entities: W.buildEntities(), clusters: readClusters() }; }
 
   var defs = {
     morning: morning,
     light: function () {
-      return { name: 'light', entities: W.buildEntities().filter(function (e) { return ONLY.indexOf(e.id) >= 0; }), clusters: W.CLUSTERS.slice(0, 1) };
+      return { name: 'light', entities: W.buildEntities().filter(function (e) { return ONLY.indexOf(e.id) >= 0; }), clusters: readClusters().slice(0, 1) };
     },
-    volume: function () { return { name: 'volume', entities: W.buildVolume(), clusters: W.CLUSTERS.slice() }; },
+    volume: function () { return { name: 'volume', entities: W.buildVolume(), clusters: readClusters() }; },
     handed: function () {
       var s = morning();
       ['pr-6204', 'pr-6213', 'pr-6241'].forEach(function (id, i) {
