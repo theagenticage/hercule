@@ -13,7 +13,7 @@ window.Keys = (function () {
         var host = document.querySelector('[data-stack="' + n + '"]');
         if (!host) return;
         var cards = [].slice.call(host.querySelectorAll('.card')).filter(function (el) { return el._plan && !el.classList.contains('is-leaving'); });
-        cards.sort(function (a, b) { return a._plan.y - b._plan.y; });
+        cards.sort(function (a, b) { return a._plan.y - b._plan.y || a._plan.x - b._plan.x; });
         cards.forEach(function (el) { cols[c].push(el.dataset.id || el.dataset.pile); });
       });
     });
@@ -120,8 +120,23 @@ window.Keys = (function () {
     if (!current || !readEl(current)) { focus(readFlat()[0]); return; }
     var c = 0, r = 0;
     cols.forEach(function (col, ci) { var i = col.indexOf(current); if (i >= 0) { c = ci; r = i; } });
+    var shelf = App.readColumns().length === 4 ? cols.length - 1 : -1;
+    var nearestIn = function (ids) {
+      var me = readEl(current).getBoundingClientRect(), mid = me.left + me.width / 2;
+      return ids.reduce(function (best, id) {
+        var b = readEl(id).getBoundingClientRect(), d = Math.abs(b.left + b.width / 2 - mid) + Math.abs(b.top - me.top) / 4;
+        return d < best.d ? { id: id, d: d } : best;
+      }, { id: ids[0], d: Infinity }).id;
+    };
+    // The shelf lies across the page, so its projects run left and right, and up leaves it for the stack above.
+    if (c === shelf) {
+      if (dx) focus(cols[c][Math.max(0, Math.min(cols[c].length - 1, r + dx))]);
+      else if (dy < 0) focus(nearestIn([].concat.apply([], cols.slice(0, shelf).map(function (col) { return col.slice(-1); }))));
+      return;
+    }
+    if (dy > 0 && r === cols[c].length - 1 && shelf >= 0 && cols[shelf].length) { focus(nearestIn(cols[shelf])); return; }
     if (dy) { focus(cols[c][Math.max(0, Math.min(cols[c].length - 1, r + dy))]); return; }
-    var nc = Math.max(0, Math.min(cols.length - 1, c + dx));
+    var nc = Math.max(0, Math.min((shelf >= 0 ? shelf : cols.length) - 1, c + dx));
     if (!cols[nc].length) return;
     var me = readEl(current).getBoundingClientRect().top, best = cols[nc][0], gap = Infinity;
     cols[nc].forEach(function (id) { var d = Math.abs(readEl(id).getBoundingClientRect().top - me); if (d < gap) { gap = d; best = id; } });

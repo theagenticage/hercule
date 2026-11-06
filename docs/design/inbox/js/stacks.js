@@ -9,6 +9,7 @@
   var LEAD_GAP = 12;  // the air under a stack's first card, which stands apart from the strips behind it
   var PILE = 52;      // a pile, with its sheets
   var PROJECT = 74;   // a project's card on the shelf, with its sheets
+  var SHELF_GAP = 24; // the space between two projects, which is the space between the page's columns
 
   /**
    * Returns how many cards each stack of a column may show, so that together they fit the depth. A stack's depth is a hard limit,
@@ -70,5 +71,31 @@
     return needs.map(function (n) { return Math.floor((depth * n.asks) / total); });
   }
 
-  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, PROJECT: PROJECT, planBudgets: planBudgets, layOut: layOut, shareDepth: shareDepth };
+  /**
+   * Returns how many projects stand side by side on a shelf laid across the page. Up to three keep to the page's columns, and
+   * more than four share out over rows of nearly equal length, so a row never ends in one card alone.
+   */
+  function readShelfAcross(count) {
+    return Math.max(3, Math.min(4, Math.ceil(count / Math.ceil(count / 4))));
+  }
+
+  /** Returns the height of a shelf laid across the page, under its heading. */
+  function measureShelfRows(count) {
+    var rows = Math.max(1, Math.ceil(count / readShelfAcross(count)));
+    return rows * PROJECT + (rows - 1) * 12;
+  }
+
+  /** Returns where each project lies on a shelf laid across the page: rows of equal cards, in the order the projects came. */
+  function layOutShelfRow(items, width) {
+    var across = readShelfAcross(items.length);
+    var cell = (width - (across - 1) * SHELF_GAP) / across;
+    return {
+      items: items.map(function (m, i) {
+        return { x: (i % across) * (cell + SHELF_GAP), w: cell, y: Math.floor(i / across) * (PROJECT + 12), show: PROJECT, level: 'two' };
+      }),
+      used: measureShelfRows(items.length),
+    };
+  }
+
+  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, PROJECT: PROJECT, planBudgets: planBudgets, layOut: layOut, shareDepth: shareDepth, layOutShelfRow: layOutShelfRow, measureShelfRows: measureShelfRows };
 })();

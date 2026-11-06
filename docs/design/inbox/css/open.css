@@ -240,7 +240,7 @@
 
 /* The pile: sheets under a card. It says how many it holds, the worst thing inside and how fresh it is, because a stack may fold
    things but may never hide them. It lies under the strips, with their height and no more. */
-.stack .card.is-pile { width: auto; text-align: left; cursor: pointer; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; align-content: center; padding: 0 var(--card-pad-x) 12px; }
+.stack .card.is-pile { width: 100%; text-align: left; cursor: pointer; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; align-content: center; padding: 0 var(--card-pad-x) 12px; }
 .stack .card.is-pile > .card-stock { box-shadow: var(--h-stack); bottom: 12px; }
 .stack .card.is-pile:hover > .card-stock { box-shadow: var(--h-hover); }
 .stack .card.is-pile.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-hover); }
@@ -256,7 +256,7 @@
 
 /* A project on the shelf: one card, however much it holds. */
 .stack .card.is-project { grid-template-columns: 22px minmax(0, 1fr) auto; align-content: start; padding-top: 10px; }
-.stack .card.is-project > .card-stock { box-shadow: var(--h-stand); }
+.stack .card.is-project > .card-stock { box-shadow: var(--h-stack); }
 .card.is-project .c-mark { grid-row: 1; height: 18px; }
 .card.is-project .c-title { color: var(--ink); font: var(--type-card); }
 .pile-count { grid-column: 3; grid-row: 1; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }

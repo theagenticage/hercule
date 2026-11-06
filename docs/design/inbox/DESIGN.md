@@ -22,24 +22,24 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 ┌────────────────────────────────────────────────┐
 │ noticed      noticed      noticed              │   the noticed card: 60px
 └────────────────────────────────────────────────┘
-  12 TO REVIEW      4 TO ANSWER      12 ON THE SHELF   Deco counts, double brass rule
-  lead card         lead card        Returns      4
-                                     Shop         5
-  strip             strip            Platform     1
-  strip             strip            Depots       2
-  strip             6 TO FINISH
-  pile              lead card
-                    strip ...
-  1 on Work         13 with reviewers                  the foot row: what settled, and Undo
+  12 TO REVIEW      4 TO ANSWER      6 TO FINISH      Deco counts, double brass rule
+  lead card         lead card        lead card
+  strip             strip            strip
+  strip             strip            strip
+  pile              strip            pile
+  1 on Work                          13 with reviewers  the foot row, shown only under the pointer
+
+  12 ON THE SHELF
+  Returns 4     Shop 5     Platform 1     Depots 2      one card per project, side by side
 ```
 
-Three equal columns, 24px apart, 32px from the window's edges, and what Hercule noticed lies on the same columns, so one grid runs from the top card to the foot. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 820px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, the noticed card 14 + 60 + 8, stack heading 46 + 10, foot row 26.
+Three equal columns, 24px apart, 32px from the window's edges, and what Hercule noticed lies on the same columns, so one grid runs down the page. The three stacks on the clock stand side by side, so their three counts read as one line and add up to the number in the sidebar. They share one depth of at most 360px, whatever they hold, so the shelf under them lies at the same height all day and never moves on its own. Up to three projects keep to the page's columns; four stand four across; more share out over rows of nearly equal length. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 820px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, the noticed card 14 + 60 + 18, stack heading 46 + 18, foot row 26. The 18px under a heading is what a colleague's head rises into, so it never touches the rule.
 
 | Was | Now | Where | Behaviour |
 |---|---|---|---|
-| Triage | **Noticed** | One wide card across the top | Hercule's own. One short reason each, and the logo of what each combines, with a second as a badge. Up to three, each on its column of the page. A thing keeps its column, so one leaving never moves the others |
-| Fast | **On the clock**: To review, To answer, To finish | Columns one and two | Oldest first. The wait leads. Named for your next move |
-| Slow | **On the shelf** | Column three | No clock. One card per project, at any volume |
+| Triage | **Noticed** | One wide card across the top | Hercule's own. One short reason each, and the logo of what each combines, with a second as a badge. Up to three, each on its column of the page. A thing keeps its column, so one leaving never moves the others. The card reaches only as far as the last thing on it, so one thing on a light day is one column wide, not a long empty band |
+| Fast | **On the clock**: To review, To answer, To finish | One column each | Oldest first. The wait leads. Named for your next move |
+| Slow | **On the shelf** | Across the page, under the stacks | No clock. One card per project, at any volume, one step lower than a card that wants you |
 
 A kind maps how an entity concerns you to a stack, in its `stacks` field: `reviewRequested` to To review, `opened` to To finish. The set of stacks belongs to the core.
 
@@ -54,9 +54,9 @@ What Hercule noticed lies on one wide card of the page's own stock, with ink wor
 | Lead | The whole card, 12px apart from the rest | Measured: about 104 |
 | Strip, on the clock | Title and one line | 52 |
 | Pile | A 20px Deco count, the word "more", then the worst thing inside and how fresh it is: `8 more  ⊗ 2  newest 2h`. A dot while it holds news. One to three sheets under it by how many it holds. It has the strips' height and no more | 52 |
-| Project, on the shelf | Mark, project name, a small count, and one line: its newest news, otherwise its first title | 74 |
+| Project, on the shelf | Mark, project name, a small count when it holds more than one, and one line: its newest news, otherwise its first title | 74 |
 
-1. A stack on the clock shows the oldest few: a lead and up to three strips. **Its depth is a hard limit, and the pile is the only thing that gives**: in a shorter window the tallest stack gives up a strip until the column fits. Everything newer waits in one pile. A pile of one is only a card, so it is never drawn.
+1. A stack on the clock shows the oldest few: a lead, two strips and a pile, or a lead and three strips when only one more would have gone in the pile. Either way the three stacks end on one line. **Its depth is a hard limit, and the pile is the only thing that gives**: in a shorter window a stack gives up a strip until it fits. Everything newer waits in one pile. A pile of one is only a card, so it is never drawn.
 2. Every card that joins the page rises out of the pile. Dismiss a card and the stack closes up and deals the next. A card someone holds keeps its place for the visit and still counts against the depth, so handing a card on moves nothing.
 3. When nothing in view waits any more, the stack **turns over**: the held cards settle to the foot line and the pile deals the next few. A stack can be worked through to its end by rhythm alone.
 4. With three or fewer cards and no pile, each is whole. A light day reads as proper cards with air around them.
@@ -157,7 +157,7 @@ Customization grows by adding to these sets, never by a kind drawing itself. The
 | Hand to an agent | The workflow by name on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The colleague rises over the top edge, the card lies flat, the sentence rolls to "Agent review has it", and its mark flies to Overview |
 | Take it on myself | Your monogram | T | Creates a Task with no run. The marigold tab stands behind the top edge |
 | Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next, for as long as the pointer stays there. Plugins are not told |
-| Undo | The undo line, in the foot of the column where you acted | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
+| Undo | The undo line, at the foot of the window under the column where you acted | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
 | Open | Click | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next card in the same place |
 | See its Task | On Work | G | Goes through to the Task on Work |
 | Carry | Drag | | Lifting a card raises the rail. Esc or letting go elsewhere sends it home |
@@ -181,7 +181,7 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 | No person, no status | The slot closes up. Sentry has no person, Gmail has no status |
 | Very long title | One line in a strip, two when whole, all of it when open |
 | Huge counts | Grouped digits with tabular figures |
-| 300 cards | The same page with larger numbers: a thicker pile at the foot of each stack on the clock, and the same one card per project on the shelf |
+| 300 cards | The same page with larger numbers: a thicker pile at the foot of each stack on the clock, and the same one card per project on the shelf, three to a row |
 
 ## Where it lives
 
@@ -200,6 +200,7 @@ The row shows a plain grey number, not a badge: the cards on the clock, the sum 
 - **A piled number with nothing to say.** "8 more" hid a failed check entirely. A stack may fold things, but it may not hide them.
 - **Stepping back repeated logos.** It read as read and unread, on the very thing that was praised.
 - **Flat shelf rows.** Twelve identical lines, the design called "a lot of text". One card per project replaced them.
+- **The shelf as a third column.** To answer and To finish shared the middle column, which rose 292px above the first and 348px above the third, with empty pockets beside it. With the three clock stacks side by side and the shelf under them, the morning has one clear line of counts and every stack ends together. A critic drew it and it won on sight.
 - **Hiding the author on a strip, and the reasons of what Hercule noticed until hover.** A critic asked for both, to halve the words. The founder asked for "pr name, author", and the brief for "one short reason", so both stay.
 - **Blur behind a sheet.** It read as stock, and it mirrored text at the edges of a scaled frame. The veil is flat.
 - **The page sentence.** "Juno has waited longest" repeated what the lead card already said.
@@ -221,7 +222,7 @@ The row shows a plain grey number, not a badge: the cards on the clock, the sum 
 | Peek | A whole card raised over the others, inert below its strip | `js/pointer.js` |
 | The noticed card | What Hercule noticed, on the page's own stock, with him over the top edge | `css/card.css` |
 | The stack count | The Deco count at 36px, the page's one voice, in a 44px slot | `css/inbox.css` |
-| The foot row | The last 26px of every column, for what settled and for Undo, so neither ever covers a card | `js/app.js` |
+| The foot row | The 26px under a stack, for what settled. It shows only under the pointer or the keyboard: the page says less at rest | `js/app.js` |
 | Stock with a hue | `--stock-manila`, `--stock-ledger`, `--stock-sage` | `css/tokens.css` |
 | Stacked height | `--h-stack`, `--h-stack-shade`. On dark themes it adds a lit top edge and a stronger upward shadow, so strips stay separate | `css/tokens.css` |
 | Mark in a declared hue | `--mark-ink`, `--mark-l`, `--mark-c` | `css/tokens.css` |

@@ -18,12 +18,12 @@ const click = async (page, id) => { const p = await inPlace(page, id); await pag
 
 const STATES = {
   "01-morning": { q: "" },
-  "02-peek": { q: "", run: async (p) => { await hover(p, "pr-6238"); await p.waitForTimeout(650); } },
+  "02-peek": { q: "", run: async (p) => { await hover(p, "pr-6209"); await p.waitForTimeout(650); } },
   "03-open": { q: "", run: async (p) => { await click(p, "pr-6213"); await p.waitForTimeout(800); } },
   "04-open-noticed": { q: "", run: async (p) => { await click(p, "c-search"); await p.waitForTimeout(800); } },
   "05-menu": { q: "", run: async (p) => { await hover(p, "pr-6118"); await p.waitForTimeout(120); const b = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6118"] [data-act="hand"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 10 }; }); await p.mouse.move(b.x, b.y); await p.mouse.click(b.x, b.y); await p.waitForTimeout(400); } },
   "06-handed": { q: "scene=handed" },
-  "07-signal-landing": { q: "", run: async (p) => { await p.evaluate(() => Landing.land(App.findEntity("pr-6238"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(430); } },
+  "07-signal-landing": { q: "", run: async (p) => { await p.evaluate(() => Landing.land(App.findEntity("pr-6213"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(430); } },
   "08-carrying": { q: "", run: async (p) => { const a = await inPlace(p, "pr-6213"); await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 40, a.y + 20, { steps: 4 }); await p.mouse.move(760, 760, { steps: 12 }); await p.waitForTimeout(500); } },
   "09-light-day": { q: "scene=light" },
   "10-300-cards": { q: "scene=volume" },

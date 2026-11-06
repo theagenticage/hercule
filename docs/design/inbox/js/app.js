@@ -6,19 +6,23 @@ window.App = (function () {
 
   var STACKS = {
     review: { title: 'To review', usual: 'reviewRequested', empty: 'Nobody is waiting for a review.' },
-    answer: { title: 'To answer', usual: null, empty: 'Nothing to answer.' },
+    answer: { title: 'To answer', usual: 'concern', empty: 'Nothing to answer.' },
     finish: { title: 'To finish', usual: null, empty: 'Nothing of yours needs a move.' },
     shelf: { title: 'On the shelf', usual: 'concern', empty: 'The shelf is clear.' },
   };
-  // Three columns where they fit, then two, then one. At high zoom the window is small, and the stacks still share their depth.
-  var LAYOUTS = { 3: [['review'], ['answer', 'finish'], ['shelf']], 2: [['review'], ['answer', 'finish', 'shelf']], 1: [['review', 'answer', 'finish', 'shelf']] };
+  // The three stacks on the clock stand side by side, so their counts read as one line that adds up to the sidebar's number, and
+  // the shelf lies across the page under them. In a narrow window the stacks fall to two columns, then one, and share their depth.
+  var LAYOUTS = { 3: [['review'], ['answer'], ['finish'], ['shelf']], 2: [['review'], ['answer', 'finish', 'shelf']], 1: [['review', 'answer', 'finish', 'shelf']] };
   function readColumns() {
     var w = document.getElementById('main').clientWidth;
     return LAYOUTS[w >= 820 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
   var HERCULE = { hue: 'lime', shape: 'egg', acc: 'tache' };
-  var HEAD = 56;       // a stack's heading, with the space under it
+  var HEAD = 64;       // a stack's heading, with the space under it, which a colleague's head rises into without touching the rule
+  var CLOCK_DEPTH = 360; // how deep the stacks on the clock may go: three whole cards, the most a light day shows
+  var SHELF_GAP = 20;  // the space above the shelf's heading
+  var NOTICED_AIR = 32; // the margins of the noticed card, so the big counts under it have room
   var BETWEEN = 14;    // the space between two stacks of one column
   var FOOT = 26;       // the line under a stack that counts what settled
 
@@ -152,13 +156,16 @@ window.App = (function () {
     Nav.setCount('inbox', countOverdue());
   }
 
+  /** Returns whether a column of the page is the shelf laid across it. */
+  function isShelfRow(names) { return COLUMNS.length === 4 && names[0] === 'shelf'; }
+
   function drawFrame() {
     COLUMNS = readColumns();
-    page.dataset.cols = COLUMNS.length;
+    page.dataset.cols = Math.min(3, COLUMNS.length);
     page.innerHTML =
       '<h2 class="sr">Hercule noticed</h2><div class="noticed" id="noticed" role="list"></div>' +
       COLUMNS.map(function (names) {
-        return '<div class="col">' + names.map(function (n) {
+        return '<div class="col' + (isShelfRow(names) ? ' col--shelf' : '') + '">' + names.map(function (n) {
           return '<section class="stack-wrap" data-wrap="' + n + '" aria-label="' + STACKS[n].title + '">' +
             '<h2 class="stack-h"><span class="stack-n" data-count="' + n + '"></span><span class="stack-t">' + STACKS[n].title + '</span></h2>' +
             '<div class="stack" data-stack="' + n + '" role="list" aria-label="' + STACKS[n].title + '"></div>' +
@@ -179,11 +186,6 @@ window.App = (function () {
       // With all three columns taken, a thing waits for one to come free.
       for (var i = 0; i < 3; i++) if (!used[i]) { c.slot = i; used[i] = true; return; }
     });
-    // A thing also takes the free columns after it, so a lone reason is never cut beside an empty column.
-    state.clusters.forEach(function (c) {
-      c.span = 1;
-      while (c.slot !== undefined && c.slot + c.span < 3 && !used[c.slot + c.span]) c.span++;
-    });
   }
 
   function drawNoticed() {
@@ -194,6 +196,9 @@ window.App = (function () {
     host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34, look: HERCULE }) + '</span></span>' +
       '<span class="card-paws" style="--hue:var(--hue-' + HERCULE.hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.filter(function (c) { return c.slot !== undefined; }).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
+    // The card reaches only as far as the last thing on it, so one thing on a light day is not a long empty band.
+    var reach = state.clusters.reduce(function (a, c) { return Math.max(a, c.slot === undefined ? 0 : c.slot + 1); }, 1);
+    host.style.gridColumn = COLUMNS.length === 4 ? '1 / span ' + reach : '';
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
     var was = Keys.current();
     if (Keys.isUsingKeys() && was && host.querySelector('[data-id="' + was + '"]')) Keys.focus(was);
@@ -287,13 +292,19 @@ window.App = (function () {
       // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
       // Never less than a card and a pile per stack: in a very small window the page scrolls, and no card is ever out of reach.
       var noticed = document.getElementById('noticed');
-      var room = page.clientHeight - 14 - (noticed && !noticed.hidden ? noticed.offsetHeight + 22 : 0);
+      var room = page.clientHeight - 14 - (noticed && !noticed.hidden ? noticed.offsetHeight + NOTICED_AIR : 0);
       var depth = Math.max(room - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT, names.length * 220);
+      // With the shelf across the page, the stacks keep one depth whatever they hold, so the shelf never moves on its own.
+      if (COLUMNS.length === 4) {
+        var projects = buildItems('shelf', readStackEntities('shelf').lying).length;
+        depth = Math.max(220, Math.min(CLOCK_DEPTH, depth - HEAD - Stacks.measureShelfRows(projects) - SHELF_GAP - FOOT));
+        page.style.setProperty('--clock-row', depth + HEAD + FOOT + 'px');
+      }
       var clock = names.filter(function (n) { return n !== 'shelf'; });
       var budgets = {};
       var fits = Stacks.planBudgets(clock.map(function (n) {
         var parts = readStackEntities(n);
-        return { count: foldStreams(parts.lying).length, cap: 3, lead: 106, foot: parts.settled.length && n !== names[names.length - 1] ? FOOT : 0 };
+        return { count: foldStreams(parts.lying).length, cap: 2, lead: 106, foot: parts.settled.length && n !== names[names.length - 1] ? FOOT : 0 };
       }), clock.length === names.length ? depth : Math.floor(depth * 0.6));
       clock.forEach(function (n, i) { budgets[n] = fits[i]; });
       var built = names.map(function (n) {
@@ -345,7 +356,7 @@ window.App = (function () {
       var leftover = depth - depths.reduce(function (a, b) { return a + b; }, 0);
       built.forEach(function (b, bi) {
         var d = depths[bi] - b.foot;
-        var plan = Stacks.layOut(b.items, b.hasLead ? d : 0, b.hasLead);
+        var plan = isShelfRow(names) ? Stacks.layOutShelfRow(b.items, b.host.clientWidth) : Stacks.layOut(b.items, b.hasLead ? d : 0, b.hasLead);
         // A stack that is not the last of its column closes up on what follows; the last takes what is left.
         var isLast = bi === built.length - 1;
         var used = plan.used;
@@ -369,6 +380,8 @@ window.App = (function () {
           el._plan = p;
           el.style.zIndex = i + 1;
           el.style.top = p.y + 'px';
+          el.style.left = p.x === undefined ? '' : p.x + 'px';
+          el.style.width = p.w === undefined ? '' : p.w + 'px';
           el.style.setProperty('--shown', p.show + 'px');
           el._rest = p.level === 'full' ? it.full : Math.min(it.full, runEnd - p.y);
           if (it.pile) el._rest = p.show;
@@ -447,14 +460,17 @@ window.App = (function () {
     var dot = hasNews ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '';
     if (pile.isProject) {
       el.querySelector('.c-title').textContent = pile.title;
-      el.querySelector('.pile-count').textContent = n;
+      el.querySelector('.pile-count').textContent = n > 1 ? n : '';
       el.querySelector('.c-line').innerHTML = dot + '<span class="c-roll">' + Card.esc(pile.note) + '</span>';
     } else {
       var count = el.querySelector('.pile-n');
       rollText(count, String(n), n < Number(count.textContent));
       el.querySelector('.c-title').textContent = pile.title;
       var worst = readWorst(pile.members);
-      var newest = pile.members.reduce(function (a, e) { return e.since > a ? e.since : a; }, pile.members[0].since);
+      var newest = pile.members.reduce(function (a, e) {
+        var latest = e.signals[e.signals.length - 1];
+        return Math.max(a, e.since, latest ? latest.at : 0);
+      }, 0);
       el.querySelector('.pile-facts').innerHTML = dot + (worst ? '<span class="pile-worst">' + Card.drawShape(worst.status, 14) + worst.count + '</span>' : '') + '<span>newest ' + Card.sayWait(newest, state.now) + '</span>';
     }
     el.dataset.depth = n > 40 ? 3 : n > 8 ? 2 : n > 1 ? 1 : 0;
@@ -479,7 +495,7 @@ window.App = (function () {
   function redrawCard(e) {
     var el = els[e.id];
     if (!el) return;
-    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under-top', 'is-under-line', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
+    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
     Card.redrawBody(el, e, readCtx(readStack(e)));

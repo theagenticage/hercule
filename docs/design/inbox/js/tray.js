@@ -14,7 +14,7 @@ window.Tray = (function () {
     var r = el.getBoundingClientRect();
     var main = document.getElementById('main').getBoundingClientRect();
     // The tray lies over the page's last two columns, so its cards land on the grid.
-    var cols = document.querySelectorAll('.col');
+    var cols = document.querySelectorAll('.col:not(.col--shelf)');
     var isGrid = cols.length === 3;
     var w = isGrid ? cols[2].getBoundingClientRect().right - cols[1].getBoundingClientRect().left + 28 : Math.min(760, main.width - 64);
     host.hidden = false;

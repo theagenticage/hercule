@@ -3,7 +3,7 @@ window.Director = (function () {
   var THEMES = [['whitehaven', 'Whitehaven'], ['styles', 'Styles'], ['orient-express', 'Orient Express'], ['nile', 'Nile'], ['end-house', 'End House'], ['blue-train', 'Blue Train']];
   // What the story page's buttons can ask of a framed window.
   var SIGNALS = {
-    comment: ['pr-6238', function () { return World.signal('commented', 0.02, 'omar-haddad', null, 'Should the retry wait for the gateway\'s own timeout?'); }],
+    comment: ['pr-6213', function () { return World.signal('commented', 0.02, 'omar-haddad', null, 'Should the unit price round before tax?'); }],
     fail: ['pr-6266', function () { var s = World.signal('checksFailed', 0.01); s.state = 'failing'; return s; }],
     mail: ['mail-1', function () { return World.signal('replied', 0.01, 'felix-marsh', null, 'Thursday works for the depots.'); }],
   };

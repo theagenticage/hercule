@@ -352,7 +352,10 @@ window.Menu = (function () {
     draw();
     host.hidden = false;
     var r = anchor.getBoundingClientRect(), m = host.getBoundingClientRect();
-    var x = Math.min(r.left, innerWidth - m.width - 16), y = r.bottom + 6;
+    // The menu opens under the card, so its edge never cuts through the card's last line.
+    var card = anchor.closest && anchor.closest('.card');
+    var under = card && card._plan && !card.classList.contains('is-peek') ? card.getBoundingClientRect().top + card._plan.show : r.bottom;
+    var x = Math.min(r.left, innerWidth - m.width - 16), y = under + 6;
     if (y + m.height > innerHeight - 12) y = r.top - m.height - 6;
     host.style.left = x + 'px';
     host.style.top = y + 'px';

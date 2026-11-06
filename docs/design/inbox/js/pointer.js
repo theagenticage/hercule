@@ -19,13 +19,12 @@ window.Pointer = (function () {
     return Math.min(whole, room);
   }
 
-  /** Hides only the lines of a strip that the edge of a peek would cut through. The rest of the strip stays. */
+  /** Hides the words of any strip the edge of a peek would reach, so no line is cut and none is left to read as the peek's own. */
   function markUnder(el, host, height) {
     var bottom = el._plan.y + height;
     [].forEach.call(host.children, function (c) {
       var into = c !== el && c._plan ? bottom - c._plan.y : -1;
-      c.classList.toggle('is-under-top', into > 6 && into < 30);
-      c.classList.toggle('is-under-line', into > 28 && into < 49);
+      c.classList.toggle('is-under', into > 6 && c._plan && into < c._plan.show);
     });
   }
 
@@ -53,7 +52,7 @@ window.Pointer = (function () {
     if (el._plan) {
       el.classList.add('is-closing');
       el.style.height = el._plan.show + 'px';
-      [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under-top', 'is-under-line'); });
+      [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
     }
     setTimeout(function () {
       el.classList.remove('is-closing');
@@ -82,13 +81,14 @@ window.Pointer = (function () {
   function forget(el) {
     if (peeked !== el) { unpeek(); return; }
     peeked = null;
-    [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under-top', 'is-under-line'); });
+    [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
   }
 
   /** Tells a card how wide its actions are, so its title can end before them. */
   function measureActs(el) {
     var acts = el.querySelector('.c-acts');
-    if (acts) el.style.setProperty('--acts-w', acts.offsetWidth + 'px');
+    // The actions overflow a box of no width, so their width is the sum of the buttons, and 8px of air before them.
+    if (acts) el.style.setProperty('--acts-w', [].reduce.call(acts.children, function (sum, b) { return sum + b.offsetWidth + 2; }, 8) + 'px');
   }
 
   /** Takes away a card's new mark, once the person has seen what landed on it. */

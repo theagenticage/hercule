@@ -42,11 +42,11 @@ const assert = (c, m) => { if (!c) throw new Error(m); };
 
 await check("a click on a title opens the card and starts nothing", async () => {
   const p = await open("");
-  const a = await point(p, "pr-6238");
+  const a = await point(p, "pr-6209");
   await p.mouse.move(a.x, a.y); await p.waitForTimeout(120); await p.mouse.click(a.x + 40, a.y);
   await p.waitForTimeout(500);
   assert(await p.evaluate(() => Open.isOpen()), "the card did not open");
-  assert(!(await p.evaluate(() => App.findEntity("pr-6238").task)), "a click on the title handed the card on");
+  assert(!(await p.evaluate(() => App.findEntity("pr-6209").task)), "a click on the title handed the card on");
   return p;
 });
 await check("Enter Enter never starts an agent", async () => {
@@ -69,7 +69,7 @@ await check("the same spot dismisses card after card", async () => {
 });
 await check("E works through by keys without touching the parked pointer's card", async () => {
   const p = await open("");
-  await hover(p, "pr-6238");
+  await hover(p, "pr-6209");
   await p.mouse.move(120, 700);
   await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown");
   const first = await p.evaluate(() => Keys.current());
@@ -141,7 +141,7 @@ await check("views can be left and clicks still work", async () => {
   const p = await open("");
   await p.click('[data-view="intake"]'); await p.waitForTimeout(200);
   await p.click('[data-view="cards"]'); await p.waitForTimeout(300);
-  const a = await point(p, "pr-6238");
+  const a = await point(p, "pr-6209");
   await p.mouse.click(a.x, a.y); await p.waitForTimeout(500);
   assert(await p.evaluate(() => Open.isOpen()), "the card did not open after visiting Intake");
   return p;
@@ -153,10 +153,10 @@ await check("a card can be carried, dropped and cancelled", async () => {
   const t = await p.evaluate(() => { const r = document.querySelector('.rail-t[data-target="take"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await p.mouse.move(t.x, t.y, { steps: 10 }); await p.waitForTimeout(120); await p.mouse.up(); await p.waitForTimeout(900);
   assert(await p.evaluate(() => !!App.findEntity("pr-6213").task), "the drop did nothing");
-  const b = await point(p, "pr-6238");
+  const b = await point(p, "pr-6209");
   await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + 30, b.y + 60, { steps: 4 }); await p.keyboard.press("Escape"); await p.mouse.up(); await p.waitForTimeout(600);
   assert(!(await p.evaluate(() => Open.isOpen())), "a cancelled drag opened the card");
-  assert(!(await p.evaluate(() => App.findEntity("pr-6238").task)), "a cancelled drag handed the card on");
+  assert(!(await p.evaluate(() => App.findEntity("pr-6209").task)), "a cancelled drag handed the card on");
   return p;
 });
 
@@ -179,12 +179,16 @@ await check("stacks never cover each other, at any height", async () => {
   for (const [w, h] of [[1440, 900], [1280, 800], [1280, 720], [1000, 700]]) {
     const p = await open("", w, h);
     const bad = await p.evaluate(() => {
-      const wraps = [].slice.call(document.querySelectorAll('[data-wrap="answer"], [data-wrap="finish"]'));
-      const a = wraps[0].querySelector('.stack'), b = wraps[1].querySelector('.stack-h');
-      const last = Math.max.apply(null, [].map.call(a.querySelectorAll('.card'), (c) => c._plan ? c.getBoundingClientRect().bottom : 0));
-      return last > b.getBoundingClientRect().top + 2;
+      // Whatever the layout, the last card of a stack on the clock ends above any heading under it in the same part of the page.
+      const headings = [].slice.call(document.querySelectorAll('.stack-h'));
+      return [].map.call(document.querySelectorAll('[data-wrap="review"], [data-wrap="answer"], [data-wrap="finish"]'), (wrap) => {
+        const box = wrap.getBoundingClientRect();
+        const last = Math.max.apply(null, [].map.call(wrap.querySelectorAll('.card'), (c) => c._plan ? c.getBoundingClientRect().top + c._plan.show : 0));
+        const under = headings.filter((h) => { const r = h.getBoundingClientRect(); return r.top > box.top + 10 && r.left < box.right && r.right > box.left; });
+        return under.some((h) => last > h.getBoundingClientRect().top + 2) ? wrap.dataset.wrap : null;
+      }).filter(Boolean).join();
     });
-    assert(!bad, `${w}x${h}: To answer runs into To finish`);
+    assert(!bad, `${w}x${h}: ${bad} runs into the heading under it`);
     await p.context().close();
   }
 });
