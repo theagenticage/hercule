@@ -74,10 +74,15 @@ window.Moves = (function () {
     // The wait gives way, and whoever takes the card comes up into its place.
     var wait = el.querySelector('.c-pace');
     if (wait) Motion.animate(wait, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
-    el.insertAdjacentHTML('beforeend', Card.drawHolder(e));
-    var who = el.querySelector('.c-holder-in');
+    el.insertAdjacentHTML('afterbegin', Card.drawHolder(e));
+    var isWhole = el.classList.contains('is-whole');
+    var who = el.querySelector(isWhole ? '.card-holder' : '.c-holder-in');
+    var paws = isWhole && el.querySelector('.card-paws');
     var reduced = Motion.isReduced();
-    if (!reduced) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
+    if (!reduced) {
+      Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
+      if (paws) Motion.body(paws).set({ o: 0, y: 4 }).to({ o: 1, y: 0 }, 'hand', { delay: 30 });
+    }
     setTimeout(function () {
       if (!e.task) return;
       var line = el.querySelector('.c-line');
@@ -87,6 +92,7 @@ window.Moves = (function () {
       // The colleague takes the weight: on one frame the card sinks under the handing over, and whoever took it dips and recovers.
       Motion.knock(el, 110);
       Motion.knock(who, 150);
+      if (paws) Motion.knock(paws, 110);
       flyToWork(el);
       App.layOut();
       showToast(said, undoWord);
@@ -190,15 +196,16 @@ window.Moves = (function () {
     if (!el || !el._plan) { App.layOut(); el = App.els()[e.id]; }
     var stand = function () {
       if (!el) { Nav.hold(false); App.layOut(); return; }
-      var who = el.querySelector('.c-holder');
+      var stands = [].slice.call(el.querySelectorAll('.c-holder, .card-holder, .card-paws'));
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
-      if (who) who.remove();
+      stands.forEach(function (x) { x.remove(); });
       App.redrawCard(e);
-      if (who) {
-        el.appendChild(who);
-        Motion.body(who.firstChild).to({ y: 26 }, 'travel', { done: function () { who.remove(); } });
-      }
+      stands.forEach(function (x) {
+        el.insertBefore(x, el.firstChild);
+        var part = x.classList.contains('c-holder') ? x.firstChild : x;
+        Motion.body(part).to(x.classList.contains('card-paws') ? { o: 0 } : { y: 26 }, 'travel', { done: function () { x.remove(); } });
+      });
       if (old) Landing.rollLine(el, old);
       Motion.knock(el, -90);
       Nav.hold(false);

@@ -148,8 +148,8 @@ window.Motion = (function () {
 
   /** Puts the body exactly here, this frame. A carried card follows the pointer one to one. */
   Body.prototype.follow = function (x, y) {
-    this.speed.x = (x - this.value.x) * 60;
-    this.speed.y = (y - this.value.y) * 60;
+    this.speed.x = 0;
+    this.speed.y = 0;
     this.value.x = x;
     this.value.y = y;
     this.goal.x = x;
@@ -281,7 +281,8 @@ window.Motion = (function () {
         if (b.value.x !== 0 || b.value.y !== 0) b.to({ x: 0, y: 0 }, opts.spring || "hand");
         return;
       }
-      if (isReduced()) {
+      // A move of more than a screen is a jump in place, not a journey anyone could follow.
+      if (isReduced() || Math.abs(dy) > 1400) {
         b.set({ x: 0, y: 0 });
         return;
       }

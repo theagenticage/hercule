@@ -64,6 +64,8 @@ window.Landing = (function () {
       if (s.state) e.fields.state = s.state;
       var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
       if (pile) Motion.knock(pile, 145);
+      // The pile says what it holds, so it says this too, until it is opened.
+      App.layOut(true);
       return;
     }
     if (Motion.isReduced()) { apply(e, s, el); return; }

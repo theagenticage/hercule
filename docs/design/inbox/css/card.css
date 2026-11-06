@@ -24,6 +24,9 @@
 .card.paper-ledger { --stock: var(--stock-ledger); }
 .card.paper-sage { --stock: var(--stock-sage); }
 
+/* A strip is shorter than a card on Work, so the shared minimum does not apply here. */
+.stack .card, .tray .card, .card.ghost, .card--loose { min-height: 0; }
+
 /* A card clips its own words, not what stands behind its top edge. */
 .c-clip { display: contents; }
 .stack .card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
@@ -35,7 +38,6 @@
 .card.is-whole.density-open .c-mark { height: 21px; }
 .card.is-whole.density-open .c-pace { font-size: var(--t-14); line-height: 21px; height: 21px; }
 .card.is-whole.density-open .c-line { margin-top: 5px; }
-.card.is-whole.density-open .c-status { margin-top: 5px; }
 
 .mark { display: inline-grid; place-items: center; color: var(--mark-ink); }
 .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
@@ -77,7 +79,6 @@
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
 .c-pace[data-ramp="overdue"] { color: var(--wait-over); font-weight: var(--w-bold); }
-.card.is-repeat:not(.is-hover):not(.is-peek):not(.is-focus) .c-mark .mark { opacity: 0.72; }
 
 .c-line {
   grid-column: 2;
@@ -95,9 +96,6 @@
 .card.is-whole .c-line.tone-usual, .card.is-peek .c-line.tone-usual { color: var(--muted); }
 .c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
-.c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 16px; margin-top: 3px; display: flex; align-items: center; }
-/* The usual state of a kind says nothing at rest. */
-.c-status.is-norm { display: none; }
 
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
@@ -160,11 +158,9 @@
 
 /* At one line a card shows its title and nothing else. */
 .card[data-level="one"]:not(.is-peek) .c-line,
-.card[data-level="one"]:not(.is-peek) .c-status { visibility: hidden; }
-
+.card[data-level="one"]:not(.is-peek) 
 /* A slow kind shows no wait, so its status takes the place of the wait. */
-.card.pace-slow .c-status { grid-row: 1; height: 18px; margin-top: 0; }
-
+.card.pace-slow 
 /* Tight: a Linear issue. A little closer, and the mark a little smaller. */
 .stack .card.density-tight { padding-top: 8px; }
 .card.density-tight .mark svg { width: 17px; height: 17px; }
@@ -193,8 +189,7 @@
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 /* The actions take the end of the second line, where the status was. The title and the wait never move. */
 .card.is-hover .c-status,
-.card.is-focus .c-status { visibility: hidden; }
-/* The sentence ends before the actions, so nothing prints over it. */
+.card.is-focus /* The sentence ends before the actions, so nothing prints over it. */
 .stack .card.is-hover .c-line, .stack .card.is-focus .c-line { margin-right: var(--acts-w, 90px); }
 .stack .card.is-hover .c-more, .stack .card.is-focus .c-more { display: none; }
 .card.is-whole.density-open .c-acts { margin-top: 5px; }
@@ -207,23 +202,25 @@
 .card[data-level="one"].is-focus:not(.is-peek) .c-pace { visibility: hidden; }
 .card.is-closing .c-foot { opacity: 0; transition: opacity 100ms linear; }
 .c-act {
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 5px;
   min-width: 26px;
   height: 26px;
-  padding: 0 3px;
+  padding: 0 6px;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
   border-radius: var(--r-xs);
   color: var(--muted);
   transition: background var(--m-quick), color var(--m-quick), transform var(--m-press);
 }
 .c-act:hover { background: color-mix(in oklab, var(--ink) 6%, var(--stock)); color: var(--ink); }
 .c-act:active { transform: scale(0.94); }
-.c-act--hand .cr + .cr { margin-left: -13px; }
-/* A move says its name only when the pointer is on it. At rest the actions stay small, at the far right, so a click on a title can never hit one. */
-.c-act-word { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); opacity: 0; transition: max-width var(--m-base) var(--m-ease), opacity var(--m-quick) var(--m-ease), margin var(--m-base) var(--m-ease); }
-.c-act:hover .c-act-word, .c-act:focus-visible .c-act-word, .c-act--hand .c-act-word { max-width: 170px; margin: 0 5px 0 4px; opacity: 1; }
+.c-act--hand, .c-act--take { color: var(--ink); }
+.c-act--hand .cr + .cr { margin-left: -12px; }
 .c-act--go { flex: none; white-space: nowrap; padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
@@ -231,8 +228,7 @@
 .stack .card.is-dealing { transition: none; }
 /* The edge of a peek never slices a line of words: a line it would cut is hidden, and the rest of the strip stays. */
 .card.is-under-top .c-title, .card.is-under-top .c-mark, .card.is-under-top .c-pace, .card.is-under-top .c-holder { visibility: hidden; }
-.card.is-under-line .c-line, .card.is-under-line .c-status { visibility: hidden; }
-/* In a peek the title reads in full, up to three lines. */
+.card.is-under-line .c-line, .card.is-under-line /* In a peek the title reads in full, up to three lines. */
 .stack .card.is-peek .c-title { -webkit-line-clamp: 3; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
@@ -253,48 +249,31 @@
 .card[data-height="flat"] .c-pace { display: none; }
 
 /* Who holds a card now stands where the wait was. */
+.stack .card:not(.is-whole) > .card-holder, .stack .card:not(.is-whole) > .card-paws, .tray .card > .card-holder, .tray .card > .card-paws, .work-card > .c-holder { display: none; }
+.stack .card.is-whole > .c-holder { display: none; }
 .c-holder { position: absolute; top: 8px; right: 12px; width: 22px; height: 22px; overflow: hidden; }
 .c-holder-in { display: block; line-height: 0; }
 .c-holder .cr { filter: saturate(0.8); }
 .c-holder .person { margin: 2px 0 0 2px; }
 
-/* The shelf lies flat. A slow thing is filed, not waiting: a row of words on the desk until the pointer stands it up. */
-.stack-wrap[data-slow="true"] .card:not(.is-whole):not(.is-pile):not(.is-peek):not(.is-focus):not(.is-hover) > .card-stock { background: transparent; box-shadow: none; }
-.stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus):not(.is-hover) .c-title { color: color-mix(in oklab, var(--ink) 78%, var(--muted)); font-weight: var(--w-regular); }
-.card.pace-slow .c-pace { display: inline-flex; align-items: center; gap: 6px; max-width: 130px; min-width: 0; font: var(--type-summary); }
-.card.is-whole .c-news, .card.is-peek .c-news { display: none; }
-.c-news { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
-.card.pace-slow .shape svg { width: 14px; height: 14px; }
 
-.noticed, .open--plaque { --focus: var(--plate-ink); }
 
-/* The plate: one band across the page, Hercule's own. It is the one object opposite the page: lacquer on a light desk, and
-   brass on a dark one. What Hercule noticed lies on it in the page's own columns, so one grid runs from the plate to the foot. */
+/* What Hercule noticed: one wide card of the page's own stock, with him behind its top edge, handing it to you. Each thing on
+   it lies on one of the page's columns, so one grid runs from here to the foot. */
 .noticed {
   grid-column: 1 / -1;
   position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: subgrid;
   align-items: stretch;
   height: 60px;
-  margin-bottom: 22px;
-  border-radius: var(--card-r);
-  background:
-    linear-gradient(180deg, color-mix(in oklab, var(--plate-lit) 46%, transparent) 0, transparent 22%),
-    linear-gradient(180deg, transparent 60%, color-mix(in oklab, var(--plate-ink) 12%, transparent) 100%),
-    var(--plate);
-  box-shadow: inset 0 0 0 1px var(--plate-rim), inset 0 1px 0 color-mix(in oklab, var(--plate-lit) 90%, transparent), var(--plate-shadow);
-  color: var(--plate-ink);
+  margin: 14px 0 8px;
+  color: var(--ink);
 }
 .noticed[hidden] { display: none; }
-/* When Hercule notices something new, one glint of light crosses the plate. It is the only time the plate moves. */
-.noticed::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(105deg, transparent 42%, color-mix(in oklab, white 34%, transparent) 50%, transparent 58%) no-repeat; background-size: 240% 100%; background-position: 130% 0; opacity: 0; }
-.noticed.is-glint::after { animation: plate-glint 1200ms cubic-bezier(0.4, 0, 0.2, 1); }
-@keyframes plate-glint { 0% { background-position: 130% 0; opacity: 1; } 100% { background-position: -40% 0; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .noticed.is-glint::after { animation: none; } }
-/* Hercule signs the plate at its right end, like a maker's mark, so what it noticed starts on the same line as the titles below. */
-.plate-crest { position: absolute; right: 13px; top: 0; bottom: 0; display: grid; place-items: center; width: 30px; color: var(--plate-ink); }
-.plate-crest .logo g { fill: var(--plate); }
+.noticed .card-holder { right: 16px; }
+.noticed .card-paws { right: 19px; }
 .plaque {
   position: relative;
   min-width: 0;
@@ -303,15 +282,16 @@
   column-gap: 10px;
   align-content: center;
   padding: 0 12px;
-  color: var(--plate-ink);
+  border-radius: var(--card-r);
+  color: var(--ink);
   cursor: default;
   outline: none;
   transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
-.plaque.is-hover { background: color-mix(in oklab, var(--plate-ink) 7%, transparent); }
-.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 22px; height: 20px; color: var(--plate-ink); }
+.plaque.is-hover { background: var(--hover); }
+.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 22px; height: 20px; }
 .pl-mark { display: block; line-height: 0; }
-.pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--plate); box-shadow: 0 0 0 1px var(--plate-rim); }
+.pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--stock); box-shadow: 0 0 0 1px var(--stock-rim); }
 .pl-title {
   margin: 0;
   font: var(--type-card);
@@ -321,20 +301,15 @@
   text-overflow: ellipsis;
 }
 .pl-why {
-  color: var(--plate-sub);
+  color: var(--muted);
   font: var(--type-summary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.plaque[data-end="true"] { padding-right: 52px; }
-.plaque .pl-acts { position: absolute; top: 50%; right: 6px; width: auto; height: auto; margin: 0; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--plate) 14px); }
-.plaque[data-end="true"] .pl-acts { right: 48px; }
+.plaque .pl-acts { position: absolute; top: 50%; right: 6px; width: auto; height: auto; margin: 0; transform: translateY(-50%); padding-left: 18px; background: linear-gradient(90deg, transparent, var(--stock) 14px); }
 .plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
-.plaque .c-act { color: var(--plate-sub); }
-.plaque .c-act-word { color: var(--plate-ink); }
-.plaque .c-act:hover { background: color-mix(in oklab, var(--plate-ink) 12%, var(--plate)); color: var(--plate-ink); }
-.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--plate-ink); border-radius: 6px; }
+.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
 
 /* The lift: a sheet rising towards the pointer, on the same spring as its scale. */
 .card-stock::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-carry); box-shadow: var(--h-carry); opacity: var(--lift, 0); pointer-events: none; }

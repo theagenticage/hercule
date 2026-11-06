@@ -4,7 +4,8 @@ window.Open = (function () {
   var K = Kinds.KINDS, W = World;
   var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
   var motion = null, progress = null, generation = 0;
-  var REST = '.o-meta, .o-signal:not(.is-latest), .o-note, .o-parts, .o-facts, .o-ledger, .o-row';
+  var REST = '.o-meta, .o-note, .o-parts, .o-facts, .o-ledger, .o-row';
+  var OLDER = '.o-signal:not(.is-latest)';
 
   function saySince(d, now) {
     var h = (now - d) / 36e5;
@@ -59,7 +60,7 @@ window.Open = (function () {
     var flows = K['hercule/cluster'].workflows.noticed;
     var head = c.task ? drawLedger(c) : null;
     return '<div class="o-head o-head--plaque">' +
-      '<div class="c-mark">' + Crew.logo(24, { mono: true }) + '</div>' +
+      '<div class="c-mark">' + Crew.face('Hercule', { pose: 'idle', size: 24, look: App.HERCULE }) + '</div>' +
       '<h2 class="o-title">' + Card.esc(c.title) + '</h2>' +
       '<button class="icon-btn icon-btn--sm o-close" data-close title="Close (Esc)">' + Crew.icon('close', 13) + '</button>' +
       '<div class="o-meta"><span>Noticed by Hercule</span><i>·</i><span>' + Card.esc(c.figures) + '</span></div></div>' +
@@ -103,7 +104,7 @@ window.Open = (function () {
     host.style.top = top + 'px';
     host.style.width = f.width + (to.width - f.width) * t + 'px';
     host.style.height = f.height + (to.height - f.height) * t + 'px';
-    host.style.borderRadius = 12 + 2 * t + 'px';
+    host.style.borderRadius = 12 + 4 * t + 'px';
     inner.style.transform = 'translate(' + (to.left - left) + 'px,' + (to.top - top) + 'px)';
     motion.parts.forEach(function (p) {
       p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
@@ -141,7 +142,7 @@ window.Open = (function () {
       host.classList.remove('is-closing');
       showVeil();
       progress.to(1, 'travel');
-      [].forEach.call(inner.querySelectorAll(REST), function (el) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' }); });
+      [].forEach.call(inner.querySelectorAll(REST + ', ' + OLDER), function (el) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' }); });
       return;
     }
     if (openId || motion) finish();
@@ -185,6 +186,10 @@ window.Open = (function () {
     // What is not the same object arrives once the title and the line have passed, so nothing prints over them.
     [].forEach.call(inner.querySelectorAll(REST), function (el, i) {
       el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 140 + i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+    });
+    // The older signals wait until the latest line has gone past them, so no words cross.
+    [].forEach.call(inner.querySelectorAll(OLDER), function (el) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 300, fill: 'backwards', easing: 'ease-out' });
     });
     host.focus({ preventScroll: true });
   }

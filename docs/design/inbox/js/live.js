@@ -21,10 +21,9 @@ window.Live = (function () {
       noticedLater = true;
       App.state.clusters.push(Object.assign({}, LATER));
       App.reflowNoticed();
-      var plate = document.getElementById('noticed');
-      plate.classList.remove('is-glint');
-      void plate.offsetWidth;
-      plate.classList.add('is-glint');
+      // Hercule looks up over the edge. It is the only time he moves.
+      var head = document.querySelector('.noticed .card-holder');
+      if (head) Motion.knock(head, -130);
       Landing.announce('Hercule noticed: ' + LATER.title);
       return true;
     }

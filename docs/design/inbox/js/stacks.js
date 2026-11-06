@@ -1,14 +1,14 @@
 // The stack: the one rule behind the page. A stack shows the oldest few, and everything else waits in a pile under them. More
 // volume makes the pile thicker, not the page busier, so the page looks the same at 30 cards and at 300.
 (function () {
-  // A strip's height, by density. An open strip shows a title and a line. A tight strip is one line, with any news at its end.
+  // A strip's height, by density: a title and a line.
   var METRICS = {
     open: { strip: 52, gap: 12 },
-    tight: { strip: 34, gap: 8 },
+    tight: { strip: 52, gap: 12 },
   };
   var LEAD_GAP = 12;  // the air under a stack's first card, which stands apart from the strips behind it
-  var PILE = 56;      // a pile, with its sheets
-  var TAB = 28;       // a group's heading on the shelf
+  var PILE = 52;      // a pile, with its sheets
+  var PROJECT = 74;   // a project's card on the shelf, with its sheets
 
   /**
    * Returns how many cards each stack of a column may show, so that together they fit the depth. A stack's depth is a hard limit,
@@ -70,5 +70,5 @@
     return needs.map(function (n) { return Math.floor((depth * n.asks) / total); });
   }
 
-  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, TAB: TAB, planBudgets: planBudgets, layOut: layOut, shareDepth: shareDepth };
+  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, PROJECT: PROJECT, planBudgets: planBudgets, layOut: layOut, shareDepth: shareDepth };
 })();

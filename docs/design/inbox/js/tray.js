@@ -95,6 +95,8 @@ window.Tray = (function () {
   function hide() {
     if (!host || host.hidden || closing) return;
     closing = true;
+    // A pile has been visited once it has been opened, so its news is no longer news.
+    current.forEach(function (e) { e.fresh = false; });
     var r = source.getBoundingClientRect();
     // The pile may have run out while the tray was open. Then the cards have nowhere to fold to, and the tray only fades.
     var hasHome = r.width > 0;
@@ -111,6 +113,7 @@ window.Tray = (function () {
       closing = false;
       Motion.body(host).clear();
       if (!Open.isOpen()) scrim.hidden = true;
+      App.layOut(true);
     } });
     if (hasHome && source.focus) source.focus({ preventScroll: true });
     else document.getElementById('main').focus({ preventScroll: true });

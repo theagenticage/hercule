@@ -37,24 +37,10 @@
   --count-ink: oklch(0.52 0.095 80);
   --rule-ink: oklch(0.72 0.09 82);
 
-  /* The plate: Hercule's own material, for what Hercule noticed, and used for nothing else. It is the one object opposite the
-     page: green-black lacquer on a light desk, polished brass on a dark one. */
-  --plate: oklch(0.255 0.024 165);
-  --plate-lit: oklch(0.31 0.03 165);
-  --plate-ink: oklch(0.965 0.012 90);
-  --plate-sub: oklch(0.82 0.022 110);
-  --plate-rim: oklch(0.72 0.085 85 / 0.5);
-  --plate-shadow: 0 1px 2px oklch(0.2 0.03 165 / 0.2), 0 12px 28px -14px oklch(0.2 0.03 165 / 0.5);
 }
 
 [data-theme="styles"] {
   --recede: oklch(0.53 0.03 60);
-  --plate: oklch(0.28 0.036 48);
-  --plate-lit: oklch(0.335 0.042 48);
-  --plate-ink: oklch(0.965 0.02 85);
-  --plate-sub: oklch(0.83 0.035 75);
-  --plate-rim: oklch(0.72 0.09 80 / 0.55);
-  --plate-shadow: 0 1px 2px oklch(0.25 0.04 45 / 0.22), 0 12px 28px -14px oklch(0.25 0.05 45 / 0.5);
   --mark-l: 0.43;
 }
 
@@ -66,6 +52,7 @@
   --stock-ledger: color-mix(in oklab, var(--stock) 92%, oklch(0.62 0.05 245));
   --stock-sage: color-mix(in oklab, var(--stock) 91%, oklch(0.6 0.08 150));
   --h-stack-shade: oklch(0 0 0 / 0.34);
+  --h-stack: inset 0 1px 0 color-mix(in oklab, white 11%, transparent), inset 0 0 0 1px var(--stock-rim), 0 -1px 0 oklch(0 0 0 / 0.5), 0 -7px 12px -6px oklch(0 0 0 / 0.55);
   --count-ink: oklch(0.76 0.09 82);
   --rule-ink: oklch(0.62 0.075 82);
   --mark-l: 0.8;
@@ -75,39 +62,15 @@
 }
 
 [data-theme="orient-express"] {
-  --plate: oklch(0.62 0.08 82);
-  --plate-lit: oklch(0.73 0.075 84);
-  --plate-ink: oklch(0.18 0.03 70);
-  --plate-sub: oklch(0.23 0.04 72);
-  --plate-rim: oklch(0.8 0.07 84 / 0.7);
-  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="nile"] {
   --recede: oklch(0.75 0.018 130);
-  --plate: oklch(0.62 0.08 82);
-  --plate-lit: oklch(0.73 0.075 84);
-  --plate-ink: oklch(0.18 0.03 95);
-  --plate-sub: oklch(0.23 0.04 90);
-  --plate-rim: oklch(0.8 0.07 84 / 0.7);
-  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="end-house"] {
   --recede: oklch(0.75 0.02 10);
-  --plate: oklch(0.62 0.08 82);
-  --plate-lit: oklch(0.73 0.075 84);
-  --plate-ink: oklch(0.18 0.03 40);
-  --plate-sub: oklch(0.23 0.04 50);
-  --plate-rim: oklch(0.8 0.07 84 / 0.7);
-  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="blue-train"] {
   --recede: oklch(0.8 0.014 250);
-  --plate: oklch(0.62 0.08 82);
-  --plate-lit: oklch(0.73 0.075 84);
-  --plate-ink: oklch(0.19 0.03 250);
-  --plate-sub: oklch(0.23 0.04 240);
-  --plate-rim: oklch(0.8 0.07 84 / 0.7);
-  --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 
 /* In the dark themes the stock is lighter than --faint was set for, so words on a card take a step more ink. */
