@@ -4,7 +4,7 @@ window.Tray = (function () {
   "use strict";
   var THEMES = [["whitehaven", "Whitehaven"], ["styles", "Styles"], ["orient-express", "Orient Express"], ["nile", "Nile"], ["end-house", "End House"], ["blue-train", "Blue Train"]];
   var SCENES = [["today", "This morning"], ["many", "300 cards"], ["one", "One card"], ["first", "First run"], ["empty", "Desk clear"], ["loading", "Loading"], ["offline", "Offline"], ["quiet", "Nothing asks"], ["failed", "A run failed"], ["awkward", "Awkward data"]];
-  var EVENTS = [["thread", "A thread starts"], ["merge", "A pull request merges"], ["fail", "The next move fails"], ["run-fails", "A run fails"], ["replay", "Replay the morning"]];
+  var EVENTS = [["thread", "A thread starts"], ["merge", "A pull request merges"], ["fail", "The next move fails"], ["run-fails", "A run fails"], ["replay", "Replay the morning"], ["add-words", "Add: search for \"gift\""], ["add-link", "Add: paste a link"], ["add-locked", "Add: a link you cannot open"], ["add-none", "Add: nothing found"]];
 
   function link(key, value) {
     var q = new URLSearchParams(location.search);
@@ -33,6 +33,10 @@ window.Tray = (function () {
       if (name === "merge") Tray.mergeNext();
       if (name === "fail") { Store.failNext = true; Toast.show("The next move will fail.", false); }
       if (name === "run-fails") Tray.failNextRun();
+      if (name === "add-words") Adder.demo("gift");
+      if (name === "add-link") Adder.demo("https://linear.example/northwind/issue/WEB-301");
+      if (name === "add-locked") Adder.demo("https://linear.example/northwind/issue/FIN-12");
+      if (name === "add-none") Adder.demo("toaster");
       if (name === "replay") location.href = link("scene", "today");
       if (name === "reduced") { document.documentElement.dataset.motion = document.documentElement.dataset.motion ? "" : "reduced"; Toast.show("Reduced motion " + (document.documentElement.dataset.motion ? "on." : "off."), false); }
     });

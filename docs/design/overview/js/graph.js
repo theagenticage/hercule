@@ -173,6 +173,88 @@ window.Graph = (function () {
     partOf(ref, [s[2]], "Sentry");
   });
 
+  /* ---------- What only the source knows ---------- */
+
+  // Things Hercule has never seen. A real plugin finds these by asking the source. They become
+  // records here only when someone adds one.
+  define("proj/gifts", "linear/project", "Gift cards", { state: "In progress", progress: [2, 9] });
+  partOf("proj/gifts", ["init/baskets", "team/web"], "Linear");
+  var UNSEEN = [
+    ["issue/WEB-301", "linear/issue", "WEB-301", "Gift message is cut off at 140 characters", "Backlog", "storefront", ["team/web", "proj/gifts"]],
+    ["issue/WEB-302", "linear/issue", "WEB-302", "Gift wrap option on the basket page", "Todo", "storefront", ["team/web", "proj/gifts", "proj/basket"]],
+    ["issue/WEB-305", "linear/issue", "WEB-305", "Basket total flickers on a slow connection", "In progress", "storefront", ["team/web", "proj/basket"]],
+    ["issue/WEB-309", "linear/issue", "WEB-309", "Delivery slot picker skips Sundays", "Todo", "storefront", ["team/web", "proj/checkout"]],
+    ["issue/DEP-70", "linear/issue", "DEP-70", "Refund note prints twice", "Todo", "ops", ["team/dep", "proj/returns"]],
+    ["issue/PLT-380", "linear/issue", "PLT-380", "Scheduler drops jobs at the clock change", "Backlog", "platform", ["team/plt", "proj/scheduler"]],
+    ["pull/storefront-web#6290", "github/pull", "#6290", "Remove the old gift card banner", "Open", "storefront", ["repo/storefront-web"]],
+    ["pull/platform-core#3351", "github/pull", "#3351", "Retry webhook delivery twice", "Open", "platform", ["repo/platform-core"]],
+    ["sentry/SF-1204", "sentry/issue", "SF-1204", "Basket total is NaN after undo", "Unresolved", "storefront", ["sentry/storefront"]],
+    ["sentry/SF-1211", "sentry/issue", "SF-1211", "Gift card page times out", "Unresolved", "storefront", ["sentry/storefront"]],
+  ].map(function (u) { return { ref: u[0], kind: u[1], label: u[2], title: u[3], state: u[4], project: u[5], parents: u[6] }; });
+
+  // Things that exist but that this Connection may not read. Their titles are never known here.
+  var LOCKED = { "issue/FIN-12": "linear/issue", "pull/finance-core#77": "github/pull" };
+
+  // The links each plugin recognises. Recognising fetches nothing. Only a link works from anywhere:
+  // a bare identifier means nothing until you say which source it is from.
+  var LINKS = [
+    { form: /linear\.example\/northwind\/issue\/([A-Z]+-\d+)/i, source: "linear", ref: function (m) { return "issue/" + m[1].toUpperCase(); } },
+    { form: /github\.example\/northwind\/([\w-]+)\/pull\/(\d+)/i, source: "github", ref: function (m) { return "pull/" + m[1] + "#" + m[2]; } },
+    { form: /sentry\.example\/northwind\/issues\/([A-Z]+-\d+)/i, source: "sentry", ref: function (m) { return "sentry/" + m[1].toUpperCase(); } },
+  ];
+
+  /** Works out which source a pasted link belongs to. Returns its source and ref, or null. */
+  function recognizeLink(text) {
+    for (var i = 0; i < LINKS.length; i++) {
+      var m = LINKS[i].form.exec(text);
+      if (m) return { source: LINKS[i].source, ref: LINKS[i].ref(m) };
+    }
+    return null;
+  }
+
+  function readKnownItem(ref) {
+    var e = entities[ref];
+    return { ref: ref, kind: e.kind, label: e.label, title: e.title, state: e.state, project: e.project, parents: readParents(ref), known: true };
+  }
+
+  /** Asks a source what it says about one thing. Returns the thing, `{ locked: kind }`, or null. */
+  function readFromSource(ref) {
+    if (LOCKED[ref]) return { locked: LOCKED[ref] };
+    if (entities[ref] && KINDS[entities[ref].kind].stages && entities[ref].access !== "restricted") return readKnownItem(ref);
+    return UNSEEN.filter(function (u) { return u.ref === ref; })[0] || null;
+  }
+
+  /** Asks a source for what matches these words, by title or identifier, whether or not Hercule has seen it. */
+  function searchSource(source, words) {
+    var needle = words.toLowerCase();
+    var known = Object.keys(entities).filter(function (r) {
+      return KINDS[entities[r].kind].source === source && KINDS[entities[r].kind].stages && entities[r].access !== "restricted";
+    }).map(readKnownItem);
+    var unseen = UNSEEN.filter(function (u) { return KINDS[u.kind].source === source && !entities[u.ref]; });
+    return known.concat(unseen).filter(function (i) { return (i.label + " " + i.title).toLowerCase().indexOf(needle) >= 0; });
+  }
+
+  /** Records a thing Hercule had not seen. You did not get it through a concern, so it is one you follow. */
+  function follow(item) {
+    if (entities[item.ref]) return;
+    define(item.ref, item.kind, item.title, { label: item.label, state: item.state, project: item.project, concern: "following" });
+    partOf(item.ref, item.parents, SOURCES[KINDS[item.kind].source]);
+  }
+
+  /** Checks whether a thing from a source sits anywhere under one of its contexts. */
+  function isUnder(item, ref) {
+    return item.parents.indexOf(ref) >= 0 || readAncestors(item.parents).indexOf(ref) >= 0;
+  }
+
+  /** Lists the contexts of a source that can narrow a search, by kind and then by title. */
+  function listContexts(source) {
+    return Object.keys(entities).filter(function (r) {
+      return KINDS[entities[r].kind].source === source && KINDS[entities[r].kind].group;
+    }).sort(function (a, b) {
+      return entities[a].kind.localeCompare(entities[b].kind) || entities[a].title.localeCompare(entities[b].title);
+    });
+  }
+
   /* ---------- Reading the graph ---------- */
 
   function entity(ref) { return entities[ref]; }
@@ -265,6 +347,6 @@ window.Graph = (function () {
 
   return {
     SOURCES: SOURCES, KINDS: KINDS, attach: attach, linkPeers: linkPeers, entity: entity, kindOf: kindOf, sourceOf: sourceOf, readParents: readParents, readAncestors: readAncestors,
-    readAncestorsOfKind: readAncestorsOfKind, listGroupKinds: listGroupKinds, readLinks: readLinks, isConfirmedPeer: isConfirmedPeer, isLead: isLead, readSearchWords: readSearchWords, listOffered: listOffered,
+    readAncestorsOfKind: readAncestorsOfKind, listGroupKinds: listGroupKinds, readLinks: readLinks, isConfirmedPeer: isConfirmedPeer, isLead: isLead, readSearchWords: readSearchWords, listOffered: listOffered, recognizeLink: recognizeLink, readFromSource: readFromSource, searchSource: searchSource, follow: follow, isUnder: isUnder, listContexts: listContexts,
   };
 })();

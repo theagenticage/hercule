@@ -115,7 +115,7 @@ A thread starts, so a Task appears. It waits for a still hand. It rises at the e
 
 ### Add to Work
 
-The sheet slides in 18px on `hand`, and the board stays in view beside it. A Task you add fades into its cell on `travel`, and the board does not scroll. The row in the list turns to a check at once, and nothing else in the list moves.
+The sheet slides in 18px on `hand`, and the board stays in view beside it. A search waits 180ms for typing to stop, then quiet bars hold the place until the source answers, with no spinner. Results replace the bars in place, and an answer that a newer search has replaced is thrown away. A pasted link changes the source tab at once. A Task you add fades into its cell on `travel`, and the board does not scroll. The row in the list turns to a check at once, and nothing else in the list moves.
 
 ### A card moving by itself
 

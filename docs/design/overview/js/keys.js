@@ -102,7 +102,7 @@ window.Keys = (function () {
   function onKey(e) {
     // The Add sheet and the menus keep their keys to themselves. Esc still steps back from anywhere.
     if (e.target.closest("#adder")) {
-      if (e.key === "Escape") Adder.hide();
+      if (e.key === "Escape") Adder.stepBack();
       // Undo reaches the board from an empty box, because the line at the foot offers it.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.target.value) {
         e.preventDefault();
@@ -252,7 +252,7 @@ window.Keys = (function () {
     var menu = document.getElementById("display");
     if (menu.classList.contains("is-on")) return menu.classList.remove("is-on");
     if (Toolbar.closeMenu()) return;
-    if (Adder.hide()) return;
+    if (Adder.isOpen()) return Adder.stepBack();
     if (MergePick.isActive()) return MergePick.cancel();
     if (Pane.currentId()) {
       var id = Pane.currentId();

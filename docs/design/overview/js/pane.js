@@ -71,7 +71,7 @@ window.Pane = (function () {
     if (e.access === "restricted") {
       return '<div class="pn-row is-restricted" tabindex="0">' + Crew.icon("lock", 14) + '<span class="pn-row-text">A ' + esc(Graph.SOURCES[kind.source]) + " " + esc(kind.word.toLowerCase()) + " you cannot open</span>" + says + "</div>";
     }
-    return '<a class="pn-row" href="#">' + Crew.brand(kind.source, 14) + '<span class="pn-row-text">' + esc(e.label ? e.label + "  " : "") + esc(e.title) + '</span><small class="pn-state">' + esc(e.state || "") + "</small>" + says + "</a>";
+    return '<a class="pn-row" href="#">' + Crew.brand(kind.source, 14) + '<span class="pn-row-text">' + esc(e.label ? e.label + "  " : "") + esc(e.title) + '</span><small class="pn-state">' + esc([e.state, e.concern === "following" ? "Following" : ""].filter(Boolean).join(" · ")) + "</small>" + says + "</a>";
   }
 
   /** Draws what a Task is, and what it is directly linked to. A reference found in text is a weaker row. */

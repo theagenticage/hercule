@@ -42,6 +42,13 @@ const STATES = {
   "filter-question": { q: "replay=off", run: async (p) => { await p.evaluate(() => Filters.toggle("state", "question")); await rest(p, 1000); } },
   add: { q: "replay=off&group=linear/project", run: async (p) => { await p.evaluate(() => Adder.show("ctx:proj/basket")); await p.waitForTimeout(600); } },
   "add-all": { q: "replay=off", run: async (p) => { await p.click("#add-btn"); await p.waitForTimeout(600); } },
+  "add-searching": { q: "replay=off&hold=20000", run: async (p) => { await p.evaluate(() => Adder.demo("gift")); await p.waitForTimeout(500); } },
+  "add-results": { q: "replay=off", run: async (p) => { await p.evaluate(() => { Adder.show("storefront"); Adder.demo("gift"); }); await p.waitForTimeout(1000); } },
+  "add-link": { q: "replay=off", run: async (p) => { await p.evaluate(() => { Adder.show(); Adder.demo("https://github.example/northwind/storefront-web/pull/6290"); }); await p.waitForTimeout(1000); } },
+  "add-followed": { q: "replay=off", run: async (p) => { await p.evaluate(() => { Adder.show("storefront"); Adder.demo("gift"); }); await p.waitForTimeout(900); await p.click('[data-add-ref="issue/WEB-301"]'); await p.waitForTimeout(700); } },
+  "add-none": { q: "replay=off", run: async (p) => { await p.evaluate(() => { Adder.show("storefront"); Adder.demo("toaster"); }); await p.waitForTimeout(1000); } },
+  "add-locked": { q: "replay=off", run: async (p) => { await p.evaluate(() => { Adder.show(); Adder.demo("https://linear.example/northwind/issue/FIN-12"); }); await p.waitForTimeout(1000); } },
+  "add-offline": { q: "scene=offline", run: async (p) => { await p.click("#add-btn"); await p.waitForTimeout(600); } },
   drag: { q: "replay=off", run: async (p) => {
     const c = await card(p, "substitutions");
     await p.mouse.move(c.x + 60, c.y + 40); await p.mouse.down();

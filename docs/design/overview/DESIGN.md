@@ -233,17 +233,39 @@ Gone. The founder's note was right: an unrelated top card hid things, and nobody
 
 ### Add to Work
 
-Starting work from this page, because going to the Inbox for "that one extra ticket" would be a shame. `A`, the Add button, or the `+` on a lane's head.
+Starting work from this page, because going to the Inbox for "that one extra ticket" would be a shame. That ticket may be one Hercule has never seen, so the sheet's main action reaches the source itself. `A`, the Add button, or the `+` on a lane's head.
 
 A sheet opens at the right, the size of the details pane, and the board stays in view beside it. The board does not scroll while the sheet is open. The row and the line at the foot say where a new Task went.
 
-- **New Task** is the first thing in it: type, Return. A line says where it will land. From a lane for an outside thing it joins the project most of that lane is in, and the line says it shows under "No Linear team" until a source says otherwise.
-- **From a source:** a segmented control for each source, a scope, and Find. The list shows outside things that concern you and have no Task yet. Fetched context records are never listed.
-- **It opens on what you were looking at.** From a Linear project's lane it opens on that project. From a project lane, on that project. With a filter on a context, on that context. The scope is one normal select, and "Everywhere" is always there.
-- **The list is organised by what the source reports:** a heading per project or repository, with its title and what it says about itself. A thing in two projects is listed once, and says "Also in Pricing rules".
-- **One click adds it.** The row turns to a check, shows the stage it went to, and stays exactly where it is, so nothing slides under your pointer and you can add another. A line offers Undo. A new Task starts at the stage its source state maps to, as the kind declares: Todo is Planned, In progress is Building.
+**New Task** is first: type, Return. A line says where it will land. From a lane for an outside thing it joins the project most of that lane is in, and the line says it shows under "No Linear team" until a source says otherwise.
 
-Choosing a context never creates Tasks for its children. Adding is always one thing at a time.
+**From a source** is a segmented control for each source, then the search.
+
+- **The search is as wide as the sheet, and keys go there first.** It says what it reaches: "Search Linear, or paste a link". Results come live from that system through its plugin, not from what Hercule holds. They are headed "From Linear".
+- **Words or an identifier** search the selected source. An identifier means nothing without a source, so `WEB-301` only ever searches the tab you are on.
+- **A pasted link works from any source.** The plugins recognise their own links, so the tab changes by itself and the line says "Reading this link from GitHub." Nobody has to choose first.
+- **The scope is a quiet word in a sentence under the search:** "Searches Web (team) in Linear", or "Searches all of Linear". It is one small select, it is never wider than the search, and a person can always read exactly what is being searched. It holds contexts of that source only, because a source cannot be searched by a Hercule project.
+- **It opens on what you were looking at.** From a Linear project's lane, on that project. From a Hercule lane, on the context most of that lane sits under, such as its Linear team or its repository, or on everything when there is none. With a filter on a context, on that context.
+
+**Before you type**, the list shows suggestions, labelled as exactly that: "Suggestions. Things that concern you, with no Task yet. Search to reach everything else." They sit under a heading per project or repository, with its title and what it says about itself. A thing in two projects is listed once, and says "Also in Pricing rules". Fetched context records are never listed.
+
+**What a result says.** Its identifier, title, where it sits, and the state the source reports. Something Hercule has not seen says "New to Hercule". Something that already has a Task says "On Work", and a click opens it.
+
+**One click adds it,** and so does Return in the search, for the first result. The row turns to a check, shows the stage it went to, and stays exactly where it is, so nothing slides under your pointer. The keys go back to the search, ready for the next one. A line offers Undo. A new Task starts at the stage its source state maps to, as the kind declares: Todo is Planned, In progress is Building.
+
+**Adding something Hercule has not seen** creates its record first, with "following" as its concern, then the Task. The line at the foot says so: "Added to Exploring. Hercule now follows WEB-301." Its Linked row in the details says "Backlog · Following". Choosing a context never creates Tasks for its children. Adding is always one thing at a time.
+
+| State | What shows |
+|---|---|
+| Searching | "Searching Linear…" over three quiet bars, a moment after typing stops. No spinner |
+| No results | "Linear has nothing that matches "toaster"." |
+| No results in a scope | "Nothing in Basket rebuild matches "toaster"." and one button: Search all of Linear |
+| A link you cannot open | "You cannot open this Linear issue." It exists, your connection has no access, and what to do. A lock, and no title, because none was read. Nothing to add |
+| A link to nothing | "Linear found nothing at this link. It may be wrong, or the thing may be gone." |
+| A link from elsewhere | "This link is not from a connected source. Hercule can read links from Linear, GitHub, Sentry." |
+| Offline | "You are offline, so Linear cannot be searched. Typing only narrows the suggestions." Suggestions still add, and sync when you are back |
+
+Esc clears what is typed, then closes the sheet.
 
 ### The details pane
 

@@ -59,20 +59,36 @@
 .ad-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .ad-head h2 { margin: 0; font-size: var(--t-20); line-height: 26px; font-weight: var(--w-bold); letter-spacing: -0.014em; }
 .ad-new { position: relative; display: flex; align-items: center; }
-.ad-new input, .ad-find, .ad-scope { height: 34px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px var(--divider); }
-.ad-new input { flex: 1; padding: 0 40px 0 11px; }
+.ad-new input { flex: 1; height: 34px; padding: 0 40px 0 11px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px var(--divider); }
 .ad-new kbd { position: absolute; right: 8px; }
-.ad-new input:focus, .ad-find:focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.ad-new input:focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .ad-landing { margin: 5px 0 0; color: var(--faint); font: var(--type-meta); }
 .ad-from { margin: 18px 0 8px; color: var(--muted); font: var(--w-medium) var(--t-12) / 16px var(--font-ui); }
 .ad-sources { display: grid; grid-template-columns: repeat(3, 1fr); }
 .ad-sources button { justify-content: center; }
-.ad-narrow { display: flex; gap: 6px; margin: 8px 0 10px; }
-.ad-scope { flex: 1; position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 8px 0 11px; color: var(--muted); }
-.ad-scope:has(option[value=""]:checked) .ad-in { display: none; }
-.ad-scope select { flex: 1; min-width: 0; appearance: none; height: 100%; border: 0; outline: none; background: none; color: var(--ink); font: inherit; }
-.ad-scope .ic { flex: none; color: var(--faint); pointer-events: none; }
-.ad-find { width: 128px; padding: 0 11px; }
+/* The sheet's main action: as wide as the sheet, and it says which source it reaches. */
+.ad-search { display: flex; align-items: center; gap: 8px; height: 38px; margin-top: 8px; padding: 0 11px; border-radius: var(--r-btn); background: var(--field); box-shadow: inset 0 0 0 1px var(--divider); color: var(--muted); }
+.ad-search:focus-within { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.ad-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none; color: var(--ink); }
+/* What it reaches, in words, with the scope as one quiet word in the sentence. */
+.ad-reach { display: flex; align-items: center; gap: 4px; min-height: 20px; margin: 6px 0 8px; color: var(--muted); font: var(--type-meta); }
+.ad-reach-pick { position: relative; display: inline-flex; align-items: center; gap: 2px; border-radius: 4px; color: var(--ink); }
+.ad-reach-pick:hover { background: var(--hover); }
+.ad-reach-pick select { field-sizing: content; appearance: none; max-width: 240px; padding: 0 0 0 3px; border: 0; outline: none; background: none; color: inherit; font: inherit; }
+.ad-reach-pick select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 4px; }
+.ad-reach-pick .ic { color: var(--faint); pointer-events: none; margin-right: 2px; }
+.ad-label { display: flex; flex-direction: column; margin: 6px 8px 2px; color: var(--ink); font: var(--w-medium) var(--t-12) / 16px var(--font-ui); }
+.ad-label small { color: var(--muted); font: var(--type-meta); }
+.ad-reach.is-off { color: var(--ink); }
+.ad-bar { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; align-items: center; height: 34px; padding: 0 8px; }
+.ad-bar i { height: 9px; border-radius: 3px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
+.ad-bar i + i { width: 70%; }
+.ad-locked { display: flex; gap: 10px; margin: 8px 8px 0; color: var(--muted); }
+.ad-locked .ic { flex: none; margin-top: 2px; color: var(--faint); }
+.ad-locked b { display: block; color: var(--ink); font: var(--type-card); }
+.ad-locked small { display: block; margin-top: 2px; font: var(--type-summary); }
+.ad-widen { height: 30px; margin: 0 8px; padding: 0 10px; border-radius: var(--r-btn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); font-weight: var(--w-medium); }
+.ad-widen:hover { background: var(--hover); }
 .ad-list { flex: 1; min-height: 0; margin: 0 -24px; padding: 0 16px 18px; overflow-y: auto; }
 .ad-h { display: flex; align-items: baseline; gap: 8px; margin: 12px 8px 4px; font: var(--type-summary); }
 .ad-h b { font-weight: var(--w-medium); }
@@ -88,4 +104,6 @@
 .ad-row:hover .ad-go { color: var(--ink); }
 .ad-row.is-added { color: var(--muted); }
 .ad-row.is-added .ad-go { color: var(--ok); }
-.ad-none { margin: 22px 8px; color: var(--muted); }
+.ad-none { margin: 10px 8px 12px; color: var(--muted); }
+.ad-row.is-on-work { color: var(--muted); }
+.ad-row.is-on-work .ad-state { color: var(--ink); }
