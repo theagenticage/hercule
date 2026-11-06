@@ -177,13 +177,16 @@
     }
     var e = part.e, kind = K.KINDS[e.kind], line = describeLine(e);
     var status = kind.status && kind.status[e.fields.state];
-    var who = e.concern ? line.text : (status ? status.word : '');
-    return '<button class="part' + (e.concern && !e.task ? ' is-asking' : '') + '" data-id="' + e.id + '" tabindex="-1" title="' + esc(Relations.sayClaim(part.link.claim)) + '">' +
+    // A part that asks something of the person says what it asks. The rest say how they stand.
+    var asks = e.concern && !e.task;
+    var first = asks ? e.signals.filter(function (s) { return s.key === e.concern; })[0] : null;
+    var said = first ? sayReason(kind, first).text : (asks ? line.text : (e.task ? line.text : (status ? status.word : '')));
+    var news = asks && first && line.text !== said ? line.text : '';
+    return '<div class="part' + (asks ? ' is-asking' : '') + '" role="button" data-id="' + e.id + '" tabindex="-1" title="' + esc(Relations.sayClaim(part.link.claim)) + '">' +
       '<span class="p-mark">' + drawMark(kind.plugin, 14) + '</span>' +
-      '<span class="p-title">' + esc(e.title) + '</span>' +
-      (e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '') +
-      '<span class="p-line tone-' + line.tone + '">' + (status && !status.norm ? drawShape(status, 12) : '') + '<span class="p-said">' + esc(who) + '</span></span>' +
-      drawWait(e, ctx.now) + '</button>';
+      '<span class="p-title">' + esc(e.title) + '</span>' + drawWait(e, ctx.now) +
+      '<span class="p-line">' + (e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '') + (status && !status.norm ? drawShape(status, 12) : '') + '<span class="p-said">' + esc(said) + '</span>' + (news ? '<span class="p-news tone-' + line.tone + '">' + esc(news) + '</span>' : '') + '</span>' +
+      (asks ? '<span class="c-acts">' + drawActs(e) + '</span>' : '') + '</div>';
   }
 
   /** Returns who holds the card now: a colleague behind the top edge with its paws on it, as on Work, or the person's own tab. */

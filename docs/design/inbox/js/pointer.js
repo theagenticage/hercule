@@ -84,7 +84,7 @@ window.Pointer = (function () {
       var echo = ev.target.closest('.echo');
       if (echo) { Moves.reveal(echo.dataset.id); return; }
       var act = ev.target.closest('[data-act]');
-      var card = ev.target.closest('.card[data-id], .plaque');
+      var card = ev.target.closest('.part[data-id], .card[data-id], .plaque');
       if (act && card) {
         // The second click of a double click on Take it must not land on the On Work that replaced it.
         if (act.dataset.act === 'go' && performance.now() - actT < 400) return;

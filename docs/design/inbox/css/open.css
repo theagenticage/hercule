@@ -202,7 +202,7 @@
 .o-signal.is-linked { color: var(--muted); }
 .o-from { position: absolute; left: -18px; top: 6px; display: grid; place-items: center; width: 13px; height: 13px; background: var(--stock); }
 .o-h { margin: 0 0 4px; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--muted); }
-.o-links { padding: 0 12px 8px 41px; }
+.o-links { margin-top: 8px; padding: 0 12px 8px 41px; }
 .o-links ul { list-style: none; margin: 0; padding: 0; }
 .o-link { position: relative; display: flex; align-items: center; gap: 8px; min-height: 28px; border-radius: var(--r-xs); font: var(--type-summary); }
 .o-link-go { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; min-height: 28px; padding: 0 4px; border-radius: var(--r-xs); text-align: left; color: inherit; }

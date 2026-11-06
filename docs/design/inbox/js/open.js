@@ -23,7 +23,7 @@ window.Open = (function () {
     var mine = e.signals.map(function (s) { return { s: s, e: e }; });
     var linked = [].concat.apply([], Relations.readConfirmed(e).filter(function (l) { return l.other; }).map(function (l) { return l.other.signals.map(function (s) { return { s: s, e: l.other }; }); }));
     var all = mine.concat(linked).sort(function (a, b) { return a.s.at - b.s.at; });
-    var latest = mine[mine.length - 1];
+    var latest = all[all.length - 1];
     return '<ol class="o-signals">' + all.map(function (x) {
       var r = Card.sayReason(K[x.e.kind], x.s);
       var other = x.e !== e;

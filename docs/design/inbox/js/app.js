@@ -128,7 +128,7 @@ window.App = (function () {
     var byPlace = {}, order = [];
     bundles.forEach(function (b) {
       var places = readPlaces(b.lead);
-      if (!places.length) places = [{ id: 'elsewhere', title: 'Not in any ' + (K[state.grouping] ? K[state.grouping].noun.toLowerCase() : 'place'), isPlain: true, rank: 1000 }];
+      if (!places.length) places = [{ id: 'elsewhere', title: 'Not in any ' + (K[state.grouping] ? K[state.grouping].noun.toLowerCase() : 'place'), isPlain: true, rank: 90000 }];
       places.forEach(function (p, i) {
         if (!byPlace[p.id]) { byPlace[p.id] = { place: p, work: [] }; order.push(p.id); }
         byPlace[p.id].work.push({ b: b, also: places.filter(function (x) { return x !== p; }), echo: i > 0 });

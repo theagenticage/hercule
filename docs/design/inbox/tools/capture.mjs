@@ -16,7 +16,7 @@ const inPlace = async (page, id) => page.evaluate((id) => { const r = document.q
 const hover = async (page, id) => { const p = await inPlace(page, id); await page.mouse.move(p.x, p.y, { steps: 3 }); };
 const click = async (page, id) => { const p = await inPlace(page, id); await page.mouse.move(p.x, p.y); await page.mouse.click(p.x, p.y); };
 
-const box = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); const g = document.getElementById("page"); const r0 = e.getBoundingClientRect(); g.scrollTop += r0.top - 300; const r = e.getBoundingClientRect(); return { x: r.left + r.width * 0.5, y: r.top + 14 }; }, sel);
+const box = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); const g = document.getElementById("page"); const r0 = e.getBoundingClientRect(); if (r0.bottom > innerHeight - 60) g.scrollTop += r0.top - 300; const t = e.querySelector(".c-title, .b-title") || e; const r = t.getBoundingClientRect(); return { x: r.left + 40, y: r.top + 8 }; }, sel);
 const clickOn = async (p, sel) => { const c = await box(p, sel); await p.waitForTimeout(60); await p.mouse.move(c.x, c.y); await p.mouse.click(c.x, c.y); };
 const STATES = {
   "01-morning": { q: "" },

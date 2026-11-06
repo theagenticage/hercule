@@ -51,7 +51,7 @@
 .sec h2 { margin: 0; font: var(--type-lane); letter-spacing: -0.005em; color: var(--ink); }
 .sec-note { color: var(--faint); font: var(--type-summary); }
 .sec-pick { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--faint); font: var(--type-summary); }
-.sec-pick select { height: 26px; padding: 0 22px 0 8px; border: 0; border-radius: var(--r-xs); appearance: none; -webkit-appearance: none; color: var(--muted); font: var(--type-summary); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 7px center; cursor: pointer; }
+.sec-pick select { field-sizing: content; height: 26px; padding: 0 22px 0 8px; border: 0; border-radius: var(--r-xs); appearance: none; -webkit-appearance: none; color: var(--muted); font: var(--type-summary); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 7px center; cursor: pointer; }
 .sec-pick select:hover { color: var(--ink); background-color: var(--hover); }
 
 /* One place on the wide side: its head, then the work in it, in as many columns as fit. */
