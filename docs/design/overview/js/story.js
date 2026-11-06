@@ -3,6 +3,7 @@
   "use strict";
   var q = new URLSearchParams(location.search);
   var theme = document.documentElement.dataset.theme;
+  document.getElementById("go-window").href = "desktop.html?theme=" + theme;
 
   document.querySelectorAll(".st-frame").forEach(function (fig) {
     var w = Number(fig.dataset.w);

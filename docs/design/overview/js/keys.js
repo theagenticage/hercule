@@ -14,10 +14,9 @@ window.Keys = (function () {
   }
 
   function clearFocus() {
-    if (focused) {
-      focused.classList.remove("is-focus");
-      if (focused.classList.contains("card")) focused.tabIndex = -1;
-    }
+    // Only one thing can hold focus, so whatever else still wears the ring lets go of it.
+    document.querySelectorAll(".is-focus").forEach(function (el) { el.classList.remove("is-focus"); });
+    if (focused && focused.classList.contains("card")) focused.tabIndex = -1;
     focused = null;
   }
 
@@ -197,7 +196,7 @@ window.Keys = (function () {
       var plan = focused.closest(".plan");
       if (!lane && !plan) return;
       if (plan) Fold.togglePlan(plan.dataset.plan);
-      else if (lane) Fold.toggleLane(lane.dataset.lane);
+      else if (lane) Fold.toggleRows(lane.dataset.lane);
       // The card may have folded away. Focus stays on its plan or lane, so a second F opens it again.
       if (!focused.isConnected) focusCard(plan ? plan.querySelector(".plan-head") : lane.querySelector(".lane-btn"));
       return;
@@ -219,6 +218,11 @@ window.Keys = (function () {
     // With a fan open, a key can only mean a card in that fan.
     if (Fan.isOpen() && !Pane.currentId() && !(focused && focused.closest(".fan"))) return;
     if (key === "x") return Select.toggle(id3);
+    if (key === "e" && focused) {
+      var stackOf = Board.readStack(focused);
+      if (stackOf) Fan.show(focused, stackOf);
+      return;
+    }
     if (key === "d") return Actions.run("done", id3);
     if (key === "Backspace") return Actions.run("drop", id3);
     if (key === "m") return Actions.run("merge", id3);
@@ -259,7 +263,10 @@ window.Keys = (function () {
     // Focus can reach a card by Tab too. The board always knows which card has it.
     document.getElementById("work").addEventListener("focusin", function (e) {
       var spot = e.target.closest(".card, .lane-btn, .plan-head");
-      if (spot) focused = spot;
+      if (spot && spot !== focused) {
+        document.querySelectorAll(".is-focus").forEach(function (el) { el.classList.remove("is-focus"); });
+        focused = spot;
+      }
     });
   }
 
@@ -441,7 +448,7 @@ window.Select = (function () {
 // PROTOTYPE - the keys, shown on request.
 window.Help = (function () {
   "use strict";
-  var ROWS = [["N", "Next thing that wants you"], ["↑ ↓ ← →", "Walk the desk"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "Fold this lane or plan"], ["⇧F", "Fold everything"], ["Q R S A", "Lens: quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
+  var ROWS = [["N", "Next thing that wants you"], ["↑ ↓ ← →", "Walk the desk"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["E", "Fan out what lies behind a card"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "One row or all of this lane"], ["⇧F", "Fold everything to a score"], ["Q R S A", "Lens: quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
   function toggle() {
     var el = document.getElementById("help");
     if (!el.firstChild) el.innerHTML = "<h3>Keys</h3>" + ROWS.map(function (r) { return "<div><kbd>" + r[0] + "</kbd><span>" + r[1] + "</span></div>"; }).join("");

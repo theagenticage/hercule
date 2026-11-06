@@ -25,16 +25,22 @@
   --answer-fg: var(--accent-fg);
 
   /* ---- Brass that may be read: the stage counts. Brass itself is too pale on a light desk. */
-  --numeral: var(--brass);
+  --numeral: var(--count-ink);
   --underline: var(--you);
+  /* Stage and stack counts, and the double rule under them. Brass that can be read. */
+  --count-ink: oklch(0.76 0.09 82);
+  --rule-ink: oklch(0.62 0.075 82);
 
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
-  --stock: oklch(from var(--raised) calc(l + 0.068) c h);
-  --stock-carry: oklch(from var(--raised) calc(l + 0.1) c h);
+  --stock: oklch(0.345 0.022 62);
+  --stock-carry: oklch(from var(--stock) calc(l + 0.03) c h);
+  /* On a near-black desk a shadow says little. A standing card reads by what light does to it: a
+     lit top edge, and a sheen falling from above and fading out before the middle. */
+  --stock-sheen: linear-gradient(oklch(1 0 0 / 0.035), oklch(1 0 0 / 0) 45%);
   --stock-flat: color-mix(in oklab, var(--raised) 38%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 62%, transparent);
-  --stock-lit: color-mix(in oklab, white 7%, transparent);
+  --stock-lit: color-mix(in oklab, white 13%, transparent);
   --stock-press: color-mix(in oklab, var(--sunken) 42%, var(--desk));
 
   /* ---- Heights: the box-shadow of each. Dark values; the light themes follow below. */
@@ -79,11 +85,13 @@
   --desk: var(--bg);
   --stock: var(--raised);
   --stock-carry: var(--raised);
+  --stock-sheen: none;
   --lamp: oklch(1 0 0 / 0.5);
-  --numeral: color-mix(in oklab, var(--brass) 52%, var(--ink));
+  --count-ink: oklch(0.52 0.095 80);
+  --rule-ink: oklch(0.72 0.09 82);
   --tab-ring: inset 0 0 0 1px var(--you-ink);
   --underline: var(--you-ink);
-  --stock-flat: color-mix(in oklab, var(--raised) 32%, var(--desk));
+  --stock-flat: color-mix(in oklab, var(--raised) 58%, var(--desk));
   --word-flat: color-mix(in oklab, var(--ink) 80%, var(--muted));
   --word-flat-2: var(--muted);
   --word-press: var(--muted);
@@ -99,9 +107,12 @@
 }
 
 [data-theme="nile"] {
+  --stock: oklch(0.335 0.026 172);
   --answer: oklch(0.76 0.1 162);
   --answer-fg: oklch(0.2 0.035 165);
 }
+[data-theme="end-house"] { --stock: oklch(0.345 0.03 352); }
+[data-theme="blue-train"] { --stock: oklch(0.385 0.034 250); }
 
 /* ---------- The card ----------
    Three layers in one stacking context, back to front: what stands behind the top edge (.card-holder),
@@ -125,6 +136,8 @@
   box-shadow: var(--h-stand);
   transition: box-shadow 260ms var(--m-ease), background-color 260ms var(--m-ease);
 }
+.card-stock::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-sheen); opacity: 0; transition: opacity 260ms var(--m-ease); pointer-events: none; }
+.card[data-height="stand"] .card-stock::before { opacity: 1; }
 .card[data-height="flat"] .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
 .card[data-height="press"] .card-stock { background: var(--stock-press); box-shadow: var(--h-press); }
 .card[data-height="etch"] .card-stock { background: transparent; box-shadow: var(--h-etch); }
@@ -164,7 +177,8 @@
 }
 .card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
 .card-tab[data-need="think"] { width: 40px; }
-.card-tab--person { display: grid; place-items: start center; width: 18px; height: 16px; padding-top: 1px; background: var(--faint); box-shadow: none; color: var(--desk); font-size: 11px; font-weight: var(--w-bold); line-height: 12px; }
+/* A person is a round monogram behind the edge, so it can never be read as a key. */
+.card-tab--person { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; margin-bottom: -5px; border-radius: 50%; background: var(--faint); box-shadow: none; color: var(--desk); font-size: 10px; font-weight: var(--w-bold); line-height: 1; }
 /* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
    on the edge in front of the sheet. While it works, the paws type on the card itself. */
 .card-head { display: block; width: 30px; height: 23px; line-height: 0; margin-bottom: 1px; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }

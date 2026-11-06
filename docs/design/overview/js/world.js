@@ -182,9 +182,7 @@ window.NW = (function () {
       projects: PROJECTS.slice(),
       plans: INITIATIVES.map(function (i) { return Object.assign({}, i); }),
       tasks: tasks,
-      // Lanes keep whatever you leave them as. A first visit opens the first lane and folds the rest, so
-      // every project is on the first screen.
-      folded: { platform: true, ops: true, "field-app": true, Insights: true },
+      folded: {},
       openPlans: {},
     };
   }

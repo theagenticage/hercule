@@ -9,7 +9,7 @@
 
   var work = document.getElementById("work");
   Shell.drawSidebar(document.querySelector("[data-side]"), {
-    inboxCount: scene === "first" || scene === "empty" ? 0 : 6,
+    inboxCount: scene === "first" || scene === "empty" ? 0 : 22,
     waiting: scene === "first" || scene === "empty" ? [] : undefined,
     sum: scene === "first" || scene === "empty" ? "Nothing running" : undefined,
   });
@@ -53,8 +53,15 @@
   }, { passive: true });
 
   work.addEventListener("click", function (e) {
+    var more = e.target.closest(".card-more");
+    if (more) {
+      var host = more.closest(".card");
+      var stack = Board.readStack(host);
+      if (stack) Fan.show(host, stack);
+      return;
+    }
     var fold = e.target.closest("[data-fold-lane]");
-    if (fold) return Fold.toggleLane(fold.dataset.foldLane);
+    if (fold) return Fold.toggleRows(fold.dataset.foldLane);
     var plan = e.target.closest("[data-fold-plan]");
     if (plan) return Fold.togglePlan(plan.dataset.foldPlan);
     var pile = e.target.closest(".pile");

@@ -36,7 +36,7 @@ window.Live = (function () {
     whenStill(function () { return null; }, function () {
       Board.change(function () { Store.addTask(t); }, { spring: "self" });
       var el = cardEl(t.id);
-      if (!el) return;
+      if (!el) return tuckIn(t);
       var b = Motion.body(el);
       if (Motion.isReduced()) {
         b.set({ o: 0 }).to({ o: 1 }, "travel");
@@ -50,6 +50,30 @@ window.Live = (function () {
       el.classList.add("is-new");
       if (!opts.quiet) note("New: " + t.name);
     });
+  }
+
+  /**
+   * Shows an arrival landing on a stack: it rises on top for a moment, so it is seen, then slides in
+   * underneath. Nothing moves, and only the count beside the age changes.
+   */
+  function tuckIn(t) {
+    var top = Board.locate(t.id);
+    if (!top) return;
+    var r = top.getBoundingClientRect();
+    var host = document.getElementById("carry");
+    var copy = Board.drawCard(t).cloneNode(true);
+    copy.classList.add("is-ghost", "is-new");
+    copy.style.cssText = "position:absolute;margin:0;left:" + r.left + "px;top:" + r.top + "px;width:" + r.width + "px;height:" + r.height + "px";
+    host.appendChild(copy);
+    var b = Motion.body(copy);
+    if (Motion.isReduced()) {
+      setTimeout(function () { copy.remove(); }, 1600);
+      return;
+    }
+    b.set({ y: 10, s: 0.98, o: 0 }).to({ y: 0, s: 1, o: 1 }, "self");
+    setTimeout(function () {
+      b.to({ y: 8, s: 0.97, o: 0 }, "self", { done: function () { copy.remove(); } });
+    }, 2600);
   }
 
   /** A card moving by itself because a fact arrived, such as a pull request merging. */
@@ -76,7 +100,9 @@ window.Live = (function () {
         // The hand may have arrived during the hold. A card in the hand is not moved by anything.
         if (Drag.isActive()) return setTimeout(move, 300);
         var inCell = card.parentElement && card.parentElement.classList.contains("cell");
-        if (!inCell) {
+        var stacked = inCell && card.parentElement._behind && card.parentElement._behind.length;
+        // On a stack there is no hole to hold: the next card is already there, under this one.
+        if (!inCell || stacked) {
           sig.remove();
           card.classList.remove("has-signal");
           Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
@@ -140,7 +166,7 @@ window.Live = (function () {
   function summarizeNight() {
     var el = document.getElementById("since-line");
     if (!el) return;
-    el.innerHTML = '<span class="since-item">Since last night: one landed, one picked up, one new</span><button class="since-replay" title="Replay the night">' + Crew.icon("undo", 12) + "</button>";
+    el.innerHTML = '<span class="since-item">Since last night: two landed, one new</span><button class="since-replay" title="Replay the night">' + Crew.icon("undo", 12) + "</button>";
     Motion.body(el.firstChild).set({ o: 0 }).to({ o: 1 }, "travel");
     el.querySelector(".since-replay").addEventListener("click", function () {
       var q = new URLSearchParams(location.search);

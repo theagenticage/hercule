@@ -86,13 +86,15 @@ window.Board = (function () {
     return esc(t.now || "");
   }
 
-  function drawCardInner(t) {
+  function drawCardInner(t, stack) {
     var holder = Store.decideHolder(t);
-    var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 11) + "</span>" : "";
+    var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 13) + "</span>" : "";
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
-    var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
+    var more = stack && stack.count ? '<button class="card-more" tabindex="-1" title="' + stack.count + " more here" + (stack.wants ? ", " + stack.wants + (stack.wants === 1 ? " wants" : " want") + " you" : "") + ' (E)">+' + stack.count + "</button>" : "";
+    var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time>" + more + "</span>";
     var ask = t.ask && t.move === "you" && !Store.isBlocked(t) ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
-    return drawHolder(holder) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
+    var also = stack && stack.wants ? '<span class="card-holder card-holder--also"><i class="card-tab card-tab--count">' + stack.wants + "</i></span>" : "";
+    return drawHolder(holder) + also + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
       '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
   }
 
@@ -105,7 +107,7 @@ window.Board = (function () {
   }
 
   /** Draws or updates one Task's card and returns its element. */
-  function drawCard(t) {
+  function drawCard(t, stack) {
     var el = node("card:" + t.id, "div", "card");
     if (!el.dataset.id) {
       el.dataset.id = t.id;
@@ -114,10 +116,16 @@ window.Board = (function () {
     }
     // The sheet stays the same element for the card's whole life, so a change of height can animate.
     if (!el._body) {
-      el.innerHTML = '<i class="card-stock"></i><span class="card-body"></span>';
+      el.innerHTML = '<span class="card-sheets"></span><i class="card-stock"></i><span class="card-body"></span>';
       el._body = el.querySelector(".card-body");
+      el._sheets = el.querySelector(".card-sheets");
     }
-    setHTML(el._body, drawCardInner(t));
+    setHTML(el._body, drawCardInner(t, stack));
+    // What waits behind this card shows as sheets under it: one, two or three, by how much there is.
+    var sheets = !stack || !stack.count ? 0 : stack.count >= 8 ? 3 : stack.count >= 3 ? 2 : 1;
+    var html = "";
+    for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
+    setHTML(el._sheets, html);
     el.setAttribute("aria-label", describeCard(t));
     el.dataset.height = Store.decideHeight(t);
     el.dataset.stalled = t.stalled ? "1" : "";
@@ -187,26 +195,32 @@ window.Board = (function () {
     cell._hold = null;
   }
 
-  function drawCell(key, stage, tasks) {
+  function drawCell(key, stage, tasks, full) {
     var cell = node("cell:" + key + ":" + stage, "div", "cell");
     cell.dataset.stage = stage;
     cell.dataset.owner = key;
     cell.setAttribute("role", "group");
     cell.setAttribute("aria-label", NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ", " + tasks.length + (tasks.length === 1 ? " card" : " cards"));
-    var arranged = Store.arrangeCell(tasks, stage, key);
-    var kids = arranged.cards.map(drawCard).concat(arranged.piles.map(drawPile));
+    var arranged = Store.arrangeCell(tasks, stage, key, full);
+    var behind = arranged.behind;
+    var stack = behind.length ? { count: behind.length, wants: behind.filter(Store.wantsYou).length } : null;
+    var kids = arranged.cards.map(function (t) { return drawCard(t, stack); }).concat(arranged.piles.map(drawPile));
     // A card you just put down stays on the row you chose, and nothing is pushed out to make room.
     arranged.held.forEach(function (t) { kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawCard(t)); });
     cell._piles = arranged.piles;
+    cell._behind = behind;
+    cell._stage = stage;
+    cell._owner = key;
     if (cell._hold) kids.splice(cell._hold.index, 0, cell._hold.dent);
     place(cell, kids);
     return cell;
   }
 
-  function drawGrid(key, tasks) {
+  function drawGrid(key, tasks, full) {
     var grid = node("grid:" + key, "div", "grid");
+    grid.classList.toggle("is-empty", !tasks.length);
     place(grid, Store.STAGE_IDS.map(function (s) {
-      return drawCell(key, s, tasks.filter(function (t) { return t.stage === s; }));
+      return drawCell(key, s, tasks.filter(function (t) { return t.stage === s; }), full);
     }));
     return grid;
   }
@@ -287,7 +301,7 @@ window.Board = (function () {
     var kids = [head];
     if (open) {
       var band = node("band:" + plan.id, "div", "plan-band");
-      place(band, [drawGrid("plan-" + plan.id, tasks)]);
+      place(band, [drawGrid("plan-" + plan.id, tasks, !!Store.state.full[plan.project])]);
       kids.push(band);
     } else {
       kids.push(drawWire("plan-" + plan.id, tasks));
@@ -308,14 +322,17 @@ window.Board = (function () {
     var all = Store.tasksIn(function (t) { return t.project === p.id; });
     var loose = all.filter(function (t) { return !t.initiative; });
     var plans = st.plans.filter(function (i) { return i.project === p.id; });
-    var mine = all.filter(function (t) { return t.move === "you" && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
+    var mine = all.filter(Store.wantsYou).length;
+    var full = !!st.full[p.id];
+    lane.classList.toggle("is-full", full);
+    var hasMore = all.length > 0;
     var head = node("lanehead:" + p.id, "h3", "lane-head");
-    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + all.length + " in all</small>" + '<span class="chev">' + Crew.icon("chev-d", 12) + "</span></button>");
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? all.length + " in all" : full ? "One row" : "Show all " + all.length) + "</small>" + "</button>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
     } else {
-      kids.push(drawGrid("lane-" + p.id, loose));
+      kids.push(drawGrid("lane-" + p.id, loose, full));
       if (plans.length) {
         var box = node("plans:" + p.id, "div", "plans");
         place(box, plans.map(drawPlan));
@@ -527,9 +544,20 @@ window.Board = (function () {
       (cell._piles || []).forEach(function (p) {
         if (p.tasks.some(function (t) { return t.id === id; })) found = cell.querySelector('[data-pile="' + p.key + '"]');
       });
+      if ((cell._behind || []).some(function (t) { return t.id === id; })) found = cell.querySelector(".card");
     });
     return found;
   }
 
-  return { mount: mount, locate: locate, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  /** Finds the Task cards behind a card on the desk, as a pile a fan can open. */
+  function readStack(card) {
+    var cell = card.closest(".cell");
+    if (!cell || !cell._behind || !cell._behind.length) return null;
+    var project = Store.state.projects.filter(function (p) { return "lane-" + p.id === cell._owner; })[0];
+    var plan = Store.state.plans.filter(function (p) { return "plan-" + p.id === cell._owner; })[0];
+    var stage = NW.STAGES.filter(function (s) { return s.id === cell._stage; })[0].name;
+    return { key: "stack:" + cell._owner + ":" + cell._stage, kind: "stack", title: (project ? project.name : plan.name) + ", " + stage, tasks: cell._behind.slice() };
+  }
+
+  return { mount: mount, locate: locate, readStack: readStack, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

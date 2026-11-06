@@ -132,7 +132,7 @@ window.Walk = (function () {
     document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
     var el = Board.locate(id);
     if (!el) return;
-    if (!el.dataset.id || el.classList.contains("bead")) el.classList.add("is-called");
+    if (el.dataset.id !== id || el.classList.contains("bead")) el.classList.add("is-called");
     var s = document.getElementById("scroll");
     var r = el.getBoundingClientRect();
     var view = s.getBoundingClientRect();

@@ -40,7 +40,7 @@ window.Shell = (function () {
       navRow("fleet", "Fleet", "fleet", selected) +
       navRow("connections", "Connections", "connections", selected) +
       "</section></div>" +
-      '<div class="side-foot"><div class="side-sum">' + (opts.sum || '<b>5</b> working · <b class="you-ink">2</b> waiting · <b>3</b> idle') + "</div>" +
+      '<div class="side-foot"><div class="side-sum">' + (opts.sum || '<b>16</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle') + "</div>" +
       '<div class="side-me">' + Crew.you(24) + '<span class="side-name">Noa</span><a class="icon-btn" style="width:24px;height:24px" href="#" title="Settings">' + I("sliders", 14) + "</a></div></div>";
   }
 
@@ -65,7 +65,7 @@ window.Shell = (function () {
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;
     if (!working && !waiting) sum.textContent = "Nothing running";
-    else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting";
+    else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting · <b>2</b> idle";
   }
 
   return { drawSidebar: drawSidebar, syncWithBoard: syncWithBoard };

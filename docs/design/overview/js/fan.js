@@ -10,9 +10,9 @@ window.Fan = (function () {
   function layer() { return document.getElementById("fan-layer"); }
 
   /** Opens the pile drawn by this element. */
-  function show(pileEl) {
+  function show(pileEl, given) {
     var cell = pileEl.parentElement;
-    var pile = (cell._piles || []).find(function (p) { return p.key === pileEl.dataset.pile; });
+    var pile = given || (cell._piles || []).find(function (p) { return p.key === pileEl.dataset.pile; });
     if (!pile) return;
     if (open && open.pile.key === pile.key) return hide();
     if (closing && closing.pile.key === pile.key) return reopen();
@@ -43,6 +43,7 @@ window.Fan = (function () {
     var grid = fan.querySelector(".fan-cards");
     var wants = function (t) { return t.move === "you" && !Store.isBlocked(t) ? 0 : 1; };
     var ordered = pile.tasks.slice().sort(function (a, b) { return wants(a) - wants(b) || a.rank - b.rank; });
+    pile.tasks = ordered;
     var cards = ordered.map(function (t) {
       var el = Board.drawCard(t);
       grid.appendChild(el);
@@ -53,7 +54,7 @@ window.Fan = (function () {
     host.appendChild(fan);
     host.classList.add("is-open");
     pileEl.classList.add("is-fanned");
-    pileEl.setAttribute("aria-expanded", "true");
+    if (pile.kind !== "stack") pileEl.setAttribute("aria-expanded", "true");
     document.getElementById("scroll").inert = true;
     if (cards[0]) {
       cards[0].tabIndex = 0;

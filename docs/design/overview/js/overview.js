@@ -23,7 +23,7 @@ window.Overview = (function () {
     var el = document.getElementById("switcher");
     el.innerHTML = '<h1 class="pill-title">Overview</h1><div class="switch" role="tablist" aria-label="Views"><i class="puck" id="puck"></i>' +
       allViews().map(function (v, i) {
-        return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" tabindex="' + (v.id === current ? 0 : -1) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + Crew.icon(v.icon, 14) + v.name + "</button>";
+        return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" tabindex="' + (v.id === current ? 0 : -1) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + v.name + "</button>";
       }).join("") + "</div>";
     puck = document.getElementById("puck");
     puckBody = null;

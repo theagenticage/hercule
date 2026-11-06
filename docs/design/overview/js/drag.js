@@ -7,7 +7,7 @@
 window.Drag = (function () {
   "use strict";
 
-  var MERGE_DWELL = 600; // how long a card must rest over another before they are drawn together
+  var MERGE_DWELL = 1000; // how long a card must rest over another before they are drawn together
   var START_DISTANCE = 5;
   var press = null;
   var carry = null;
@@ -517,7 +517,7 @@ window.Drag = (function () {
     var beadEl = e.target.closest(".bead[data-id]");
     if (beadEl) return beginBead(e, beadEl);
     var el = e.target.closest(".card[data-id]");
-    if (!el || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
+    if (!el || e.target.closest(".card-more") || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
     press = { el: el, id: el.dataset.id, x: e.clientX, y: e.clientY };
   }
 

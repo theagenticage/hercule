@@ -115,6 +115,10 @@ window.Pane = (function () {
     inner.style.opacity = words.toFixed(3);
     inner.style.transform = "translateY(" + ((1 - words) * 10).toFixed(2) + "px)";
     if (ghost) ghost.style.opacity = clamp(1 - p / 0.55).toFixed(3);
+    // A tab rides the sheet's edge while it opens, then goes: "Next move" says it in words. A
+    // colleague stays, because there the head is the person, not a label.
+    var tab = sheet.querySelector(":scope > .card-holder .card-tab");
+    if (tab) tab.style.opacity = clamp((0.92 - p) / 0.3).toFixed(3);
     pane.style.setProperty("--pn-dim", clamp(p).toFixed(3));
   }
 
@@ -244,7 +248,8 @@ window.Pane = (function () {
     var spot = Board.locate(openId);
     var title = spot && spot.classList.contains("pile") ? spot.querySelector(".pile-text b") : null;
     var folded = spot && spot.classList.contains("bead");
-    var where = title ? "in " + esc(title.textContent) + ", " : folded ? "folded, " : "";
+    var behind = spot && spot.dataset.id && spot.dataset.id !== openId;
+    var where = title ? "in " + esc(title.textContent) + ", " : folded ? "folded, " : behind ? "under a card, " : "";
     el.innerHTML = where + at + " of " + of + '<kbd title="Next (N)">N</kbd>';
   }
 

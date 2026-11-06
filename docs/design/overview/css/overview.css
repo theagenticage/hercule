@@ -1,7 +1,7 @@
 /* PROTOTYPE - the Overview: its switcher, the Office beside Work, the later views, the tray. */
 .switch { position: relative; display: inline-flex; gap: 2px; }
 .puck { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 8px; background: var(--selected); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); pointer-events: none; }
-.switch-tab.ptab { position: relative; gap: 6px; padding: 0 10px 0 8px; }
+.switch-tab.ptab { position: relative; gap: 6px; padding: 0 10px; }
 .switch-tab.ptab.is-on { background: none; color: var(--ink); }
 .switch-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .switch-tab .ic { color: var(--faint); transition: color var(--m-quick); }

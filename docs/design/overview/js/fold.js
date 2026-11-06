@@ -129,6 +129,40 @@ window.Fold = (function () {
     if (after) after();
   }
 
+  /**
+   * Shows a lane in full, or back to one row. The cards behind each top card come out from under it,
+   * and go back the same way. This is what clicking a lane's name does.
+   */
+  function toggleRows(id) {
+    var st = Store.state;
+    if (st.folded[id]) return toggleLane(id);
+    if (Fan.isOpen()) Fan.hide(true);
+    var lane = Board.node("lane:" + id);
+    var goingFull = !st.full[id];
+    var tops = new Map();
+    lane.querySelectorAll(".cell").forEach(function (cell) {
+      var top = cell.querySelector(".card");
+      if (top) tops.set(cell, top.getBoundingClientRect());
+    });
+    var piles = goingFull ? [] : Array.prototype.map.call(lane.querySelectorAll(".cell > .pile:not([data-kind='landed'])"), function (el) {
+      return { cell: el.parentElement, rect: Motion.layoutRect(el), ghost: Motion.ghost(el, flight()) };
+    });
+    Board.change(function () { st.full[id] = goingFull; }, { spring: "travel", quietExits: !goingFull ? false : true });
+    piles.forEach(function (p) {
+      var top = p.cell.querySelector(".card");
+      var r = top ? top.getBoundingClientRect() : p.rect;
+      Motion.body(p.ghost).to({ x: r.left - p.rect.left, y: r.top - p.rect.top, s: 0.96, o: 0 }, "travel", { done: function () { p.ghost.remove(); } });
+    });
+    if (!goingFull || Motion.isReduced()) return;
+    tops.forEach(function (from, cell) {
+      Array.prototype.forEach.call(cell.children, function (el, i) {
+        if (i === 0 || !el.classList.contains("card")) return;
+        var r = Motion.layoutRect(el);
+        Motion.body(el).set({ x: from.left - r.left, y: from.top - r.top, s: 0.97, o: 0 }).to({ x: 0, y: 0, s: 1, o: 1 }, "travel", { delay: 20 + i * 26 });
+      });
+    });
+  }
+
   /** Folds or opens a project's lane. */
   function toggleLane(id) {
     var st = Store.state;
@@ -161,5 +195,5 @@ window.Fold = (function () {
     else fold(roots, function () { list.forEach(function (p) { st.folded[p.id] = true; }); });
   }
 
-  return { toggleLane: toggleLane, togglePlan: togglePlan, toggleAll: toggleAll };
+  return { toggleLane: toggleLane, toggleRows: toggleRows, togglePlan: togglePlan, toggleAll: toggleAll };
 })();

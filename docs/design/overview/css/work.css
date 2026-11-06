@@ -33,8 +33,8 @@
 .rule-wrap { position: sticky; z-index: 12; top: 52px; margin: 0 -32px 16px; padding: 0 32px; }
 .rule-wrap::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; top: -52px; background: var(--desk); pointer-events: none; opacity: 0; transition: opacity var(--m-quick); }
 .rule-wrap.is-stuck::before { opacity: 1; }
-.rule { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); height: 30px; }
-.rule::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, color-mix(in oklab, var(--brass) 68%, transparent), color-mix(in oklab, var(--brass) 68%, transparent) 72%, color-mix(in oklab, var(--brass) 26%, transparent)); }
+.rule { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); height: 34px; }
+.rule::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px; border-top: 2px solid var(--rule-ink); border-bottom: 1px solid var(--rule-ink); }
 .stage { display: flex; align-items: center; gap: 8px; height: 22px; font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); transition: color var(--m-quick); }
 /* The five stage counts are the one place the Deco face speaks on this page, in brass ink. */
 .stage-count { position: relative; display: inline-block; min-width: 1ch; font-family: var(--font-deco); font-feature-settings: normal; font-size: 20px; font-weight: 400; letter-spacing: 0; line-height: 1; color: var(--numeral); }
@@ -52,7 +52,7 @@
 .lane.is-folded { padding-bottom: 16px; }
 .lane.is-folded > .lane-head { margin-bottom: -4px; }
 .lane-head { margin: 0 0 10px; font: inherit; }
-.lane-btn { display: flex; align-items: baseline; gap: 10px; height: 28px; width: 100%; text-align: left; border-radius: var(--r-xs); }
+.lane-btn { display: inline-flex; align-items: baseline; gap: 10px; height: 28px; text-align: left; border-radius: var(--r-xs); }
 .lane-name { font: var(--type-lane); color: var(--ink); }
 .lane-need { color: var(--muted); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .lane-total { color: var(--faint); font: var(--type-summary); opacity: 0; transition: opacity var(--m-quick); }
@@ -63,7 +63,6 @@
 .proj--ops { background: var(--proj-ops); }
 .chev { display: grid; place-items: center; width: 16px; height: 16px; color: var(--faint); opacity: 0; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
 .lane-btn:hover .chev, .plan-head:hover .chev, .lane-btn:focus-visible .chev, .plan-head:focus-visible .chev { opacity: 1; }
-.lane.is-folded > .lane-head .chev { transform: rotate(-90deg); }
 .lane-btn:focus-visible, .plan-head:focus-visible, .lens:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .plan.is-open > .plan-head .chev { transform: rotate(90deg); opacity: 1; }
 
@@ -98,10 +97,9 @@
 .bead { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--desk); box-shadow: inset 0 0 0 1.25px color-mix(in oklab, var(--faint) 75%, transparent); }
 .bead[data-kind="quick"], .bead[data-kind="think"] { background: var(--ink); box-shadow: none; }
 .bead[data-kind="think"] { width: 11px; border-radius: 3.5px; }
-.bead[data-kind="agent"] { background: var(--faint); box-shadow: none; }
+
 .is-filtering .bead:not(.is-off) { box-shadow: 0 0 0 1.5px var(--you); }
-.bead[data-kind="done"] { background: var(--faint); box-shadow: none; }
-.bead[data-kind="held"] { background: var(--desk); box-shadow: inset 0 0 0 1.25px var(--faint); }
+
 .wire-cell.is-dense { gap: 2px; }
 .wire-cell.is-dense .bead { width: 3px; height: 10px; border-radius: 1.5px; box-shadow: none; background: var(--faint); }
 .wire-cell.is-dense .bead[data-kind="quick"], .wire-cell.is-dense .bead[data-kind="think"] { background: var(--ink); width: 3px; }
@@ -126,7 +124,7 @@
 .card:not(.is-carried):has(.card-words--ask):hover .card-words--rest, .card:has(.card-words--ask):focus-visible .card-words--rest,
 .card:not(.is-carried):has(.card-words--ask):hover .card-meta, .card:has(.card-words--ask):focus-visible .card-meta { opacity: 0; transition-delay: 160ms; }
 .card-meta { transition: opacity var(--m-quick) var(--m-ease); }
-.card-src { flex: none; color: var(--faint); opacity: 0.85; line-height: 0; }
+.card-src { flex: none; color: var(--muted); line-height: 0; }
 .card-meta time[data-tone="stale"] { color: var(--muted); }
 .card-meta time[data-tone="old"] { color: var(--ink); font-weight: var(--w-medium); }
 
@@ -147,7 +145,8 @@
 .pile[data-height="etch"] .pile-text { color: var(--muted); }
 .pile[data-height="etch"] .pile-sheet { display: none; }
 .pile-sheet { position: absolute; z-index: -2; top: 0; left: 0; right: 0; bottom: 0; border-radius: var(--card-r); background: var(--stock); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 1px 2px oklch(0 0 0 / 0.1); transform: translateY(calc(var(--n) * 3px)) scaleX(calc(1 - var(--n) * 0.026)); transition: transform var(--m-base) var(--m-ease); }
-.pile[data-height="flat"] .pile-sheet { background: var(--stock-flat); box-shadow: none; }
+.card[data-height="flat"] .pile-sheet { background: var(--stock-flat); box-shadow: none; }
+.card[data-height="press"] .pile-sheet { background: var(--stock-press); box-shadow: none; }
 .pile:hover .pile-sheet { transform: translateY(calc(var(--n) * 4.5px)) scaleX(calc(1 - var(--n) * 0.018)); }
 .pile:hover { z-index: 2; }
 .card-tab--count { display: grid; place-items: start center; min-width: 20px; width: auto; height: 15px; padding: 1px 5px 0; color: var(--face-ink); font-size: 10px; font-weight: var(--w-bold); line-height: 11px; font-variant-numeric: tabular-nums; }
@@ -157,8 +156,9 @@
 .has-wear .card:not(.pile)[data-height="flat"] .card-stock { background: color-mix(in oklab, var(--stock-flat) calc(100% - var(--wear) * 18%), var(--paper)); }
 .has-wear .card .card-title { opacity: calc(1 - var(--wear) * 0.2); }
 
-/* The pieces in flight are copies; only the original takes the pointer. */
+/* The pieces in flight are copies; only the original takes the pointer, and only it shows focus. */
 .is-ghost { pointer-events: none; z-index: 21; }
+.is-ghost .card-stock { outline: none !important; }
 .is-moving { will-change: transform; }
 .card.is-moving { z-index: 3; transition: none; }
 
@@ -199,13 +199,13 @@
 .work[data-drag-stage="reviewing"] .cell[data-stage="reviewing"]::before,
 .work[data-drag-stage="landed"] .cell[data-stage="landed"]::before { opacity: 1; }
 
-.rule-mark { position: absolute; left: 32px; bottom: -3.5px; width: 7px; height: 7px; background: var(--brass); transform: rotate(45deg); opacity: 0; transition: opacity var(--m-quick); pointer-events: none; }
+.rule-mark { position: absolute; left: 32px; bottom: -1px; width: 7px; height: 7px; background: var(--brass); transform: rotate(45deg); opacity: 0; transition: opacity var(--m-quick); pointer-events: none; }
 .is-carrying .rule-mark { opacity: 1; }
 
 /* Merging: the target opens up to receive. */
 .card.is-merge-target { z-index: 5; }
 .card.is-merge-target .card-stock { box-shadow: var(--h-hover), 0 0 0 2px var(--focus); }
-.card.is-merge-target::after { content: attr(data-merge-label); position: absolute; z-index: 6; left: 50%; top: -12px; transform: translateX(-50%); max-width: 100%; white-space: nowrap; padding: 1px 8px; border-radius: var(--r-pill); background: var(--answer); color: var(--answer-fg); font: var(--type-meta); font-weight: var(--w-medium); }
+.card.is-merge-target::after { content: attr(data-merge-label); position: absolute; z-index: 6; left: 50%; top: -12px; transform: translateX(-50%); max-width: 100%; white-space: nowrap; padding: 1px 8px; border-radius: var(--r-pill); background: var(--stock-carry); box-shadow: inset 0 0 0 1px var(--stock-rim), var(--shadow-1); color: var(--ink); font: var(--type-meta); font-weight: var(--w-medium); }
 .card.has-merged { z-index: 25; }
 .card.has-merged .card-stock { animation: merged var(--m-long) var(--m-ease); }
 @keyframes merged { 0% { box-shadow: var(--h-hover), 0 0 0 2px var(--brass); } 100% { box-shadow: var(--h-stand), 0 0 0 0 transparent; } }
@@ -308,7 +308,7 @@
 .blocker-line circle { fill: var(--brass); }
 .card.is-blocker .card-stock { box-shadow: var(--h-hover), 0 0 0 1px var(--brass); }
 
-.stage.is-zero .stage-count { visibility: hidden; }
+.stage.is-zero .stage-count { display: none; }
 
 /* A card's height while in the hand rides the same spring as its scale: --lift goes from 0 to 1, and
    this layer crossfades on top of the sheet, so it visibly rises and comes down. */
@@ -327,3 +327,16 @@ html[data-still="1"] .card-paws i, html[data-still="1"] .cr * { animation: none 
 
 @media (prefers-reduced-motion: reduce) { .card.is-skeleton::after { animation: none; } }
 html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
+
+/* ---------- A stack: a real card with more behind it ---------- */
+.card-sheets { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
+.card-more { min-width: 22px; height: 16px; padding: 0 4px; margin: 0 -4px 0 2px; border-radius: 5px; color: var(--muted); font: var(--type-meta); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; pointer-events: auto; transition: background var(--m-quick), color var(--m-quick); }
+.card-more:hover { background: var(--hover); color: var(--ink); }
+.card-meta { pointer-events: none; }
+.card-holder--also { right: 40px; }
+.card[data-height="stand"] .card-holder--also { right: 40px; }
+.card:has(.card-tab[data-need="think"]) .card-holder--also { right: 62px; }
+.card:has(.card-head) .card-holder--also { right: 50px; }
+.card:hover .pile-sheet { transform: translateY(calc(var(--n) * 4.5px)) scaleX(calc(1 - var(--n) * 0.018)); }
+.grid.is-empty { height: 0; }
+.grid.is-empty + .plans { margin-top: 0; }
