@@ -130,7 +130,7 @@ window.Fold = (function () {
   }
 
   /**
-   * Shows a lane in full, or back to one row. The cards behind each top card come out from under it,
+   * Shows a lane in full, or back to its rows at rest. The cards behind come out from under the last,
    * and go back the same way. This is what clicking a lane's name does.
    */
   function toggleRows(id) {
@@ -141,7 +141,7 @@ window.Fold = (function () {
     var goingFull = !st.full[id];
     var tops = new Map();
     lane.querySelectorAll(".cell").forEach(function (cell) {
-      var top = cell.querySelector(".card");
+      var top = cell.querySelector(":scope > .card:last-of-type") || cell.querySelector(".card");
       if (top) tops.set(cell, top.getBoundingClientRect());
     });
     var piles = goingFull ? [] : Array.prototype.map.call(lane.querySelectorAll(".cell > .pile:not([data-kind='landed'])"), function (el) {
@@ -156,7 +156,7 @@ window.Fold = (function () {
     if (!goingFull || Motion.isReduced()) return;
     tops.forEach(function (from, cell) {
       Array.prototype.forEach.call(cell.children, function (el, i) {
-        if (i === 0 || !el.classList.contains("card")) return;
+        if (i < (st.rows[id] || 1) || !el.classList.contains("card")) return;
         var r = Motion.layoutRect(el);
         Motion.body(el).set({ x: from.left - r.left, y: from.top - r.top, s: 0.97, o: 0 }).to({ x: 0, y: 0, s: 1, o: 1 }, "travel", { delay: 20 + i * 26 });
       });

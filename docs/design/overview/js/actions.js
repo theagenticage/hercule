@@ -13,6 +13,12 @@ window.Actions = (function () {
     ghost.classList.remove("is-away");
     ghost.classList.add(how === "Done" ? "is-done" : "is-dropped");
     var number = how === "Done" && need ? document.querySelector('.lens[data-lens="' + need + '"] .lens-n') : null;
+    // Scrolled down, the sentence is out of sight, so the card lands on its stage's count instead.
+    var stuck = document.getElementById("scroll").scrollTop > 40;
+    if (stuck && how === "Done") {
+      var t = Store.task(id);
+      number = t ? document.querySelector('.stage[data-stage="' + t.stage + '"] .stage-count') : null;
+    }
     if (number) {
       var a = ghost.getBoundingClientRect();
       var n = number.getBoundingClientRect();
@@ -174,12 +180,18 @@ window.Walk = (function () {
   function step(by) {
     var open = Pane.currentId();
     list = readList();
-    if (open) {
-      var at = list.findIndex(function (t) { return t.id === open; });
-      if (at >= 0) return go(at + by);
-    }
+    var at = open ? list.findIndex(function (t) { return t.id === open; }) : -1;
     // Closed in the middle of a walk, the walk picks up where it stopped.
-    go(index >= 0 ? index + by : by > 0 ? 0 : -1);
+    var from = at >= 0 ? at : index;
+    var next = from >= 0 ? from + by : by > 0 ? 0 : list.length - 1;
+    // The end of the walk is an end, and it says so. It does not start again by itself.
+    if (next >= list.length || next < 0) {
+      index = -1;
+      Pane.hide();
+      Toast.show(list.length ? "That was all " + list.length + "." : "Nothing wants you right now.", false);
+      return;
+    }
+    go(next);
   }
 
   /** Reopens a Task in the walk: what Undo does after an answer. */

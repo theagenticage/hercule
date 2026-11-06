@@ -9,6 +9,7 @@ window.Store = (function () {
   // A cell never holds more than this many rows at rest, so a lane has the same height at 60
   // Tasks as at 300. Past it, the rest wait in a pile on the last row.
   var MOST_ROWS = 3;
+  var BUSY_LANE = 10;
 
   var state = {
     tasks: [],
@@ -19,6 +20,7 @@ window.Store = (function () {
     openPlans: {},
     wear: false,
     selected: {},
+    lifted: null,
     lens: null,
     query: "",
   };
@@ -42,6 +44,7 @@ window.Store = (function () {
     state.folded = world.folded || {};
     state.openPlans = world.openPlans || {};
     state.full = {};
+    state.rows = {};
     cellMemo = {};
     // A lane whose Tasks all sit in one plan shows that plan's band, not a name and a hole.
     state.projects.forEach(function (p) {
@@ -50,6 +53,9 @@ window.Store = (function () {
       inLane.forEach(function (t) { plans[t.initiative || ""] = true; });
       var keys = Object.keys(plans);
       if (keys.length === 1 && keys[0]) state.openPlans[keys[0]] = true;
+      // A lane with a lot that wants you shows two rows. Decided once a visit, so a lane never
+      // changes height because something was answered.
+      state.rows[p.id] = inLane.filter(wantsYou).length >= BUSY_LANE ? 2 : 1;
     });
     undoStack = [];
   }
@@ -117,7 +123,7 @@ window.Store = (function () {
    * Picks the card that lies on top of a stack: the oldest that wants you, then an agent's, then a
    * person's, then the oldest. A blocked card comes last, because nobody can do anything with it.
    */
-  function pickTop(tasks) {
+  function sortForDesk(tasks) {
     function rankOf(t) {
       if (wantsYou(t)) return 0;
       if (isBlocked(t)) return 4;
@@ -125,28 +131,40 @@ window.Store = (function () {
       if (t.person) return 2;
       return 3;
     }
-    return tasks.slice().sort(function (a, b) { return rankOf(a) - rankOf(b); })[0];
+    return tasks.slice().sort(function (a, b) { return rankOf(a) - rankOf(b) || a.rank - b.rank; });
+  }
+
+  function pickTop(tasks) {
+    return sortForDesk(tasks)[0];
   }
 
   /**
-   * Arranges a cell at rest: one row. One real card lies on top, and the rest wait behind it. Under
-   * a lens the top card is one that matches, so a lens never lights an empty row.
+   * Arranges a cell at rest: a set number of rows. Real cards lie on top, and the rest wait behind
+   * the last one. Who is on top stays the same for the visit. Under a lens the cards that match come
+   * to the top, so a lens never lights an empty row.
    */
-  function arrangeOneRow(tasks, stage, owner, held) {
-    var memoKey = owner + "/" + stage + "/one";
+  function arrangeRows(tasks, stage, owner, held, lifting, rows) {
+    var memoKey = owner + "/" + stage + "/rows";
     if (stage === "landed" && tasks.length + held.length) {
       return { cards: [], piles: [{ key: owner + "/" + stage + "/landed", kind: "landed", title: "Landed", tasks: tasks.concat(held) }], behind: [], held: [] };
     }
     if (!tasks.length) return { cards: [], piles: [], behind: [], held: held };
-    // A card you just put down lies on top of the stack. Nothing moves to make room for it.
-    if (held.length) return { cards: [], piles: [], behind: tasks, held: held };
-    var shown = tasks.filter(function (t) { return t.id === cellMemo[memoKey]; })[0];
-    if (!shown) {
-      shown = pickTop(tasks);
-      cellMemo[memoKey] = shown.id;
+    var byId = {};
+    tasks.forEach(function (t) { byId[t.id] = t; });
+    var shown = (cellMemo[memoKey] || []).map(function (id) { return byId[id]; }).filter(Boolean);
+    var waiting = sortForDesk(tasks).filter(function (t) { return shown.indexOf(t) < 0; });
+    while (shown.length < rows && waiting.length) shown.push(waiting.shift());
+    // While a card is in the hand the one under it shows, but it has not taken its place for good.
+    if (!lifting) cellMemo[memoKey] = shown.map(function (t) { return t.id; });
+    // A card you just put down takes a row, so a lane at rest never changes height.
+    var room = Math.max(0, rows - held.length);
+    var cards = shown;
+    if (isFiltering()) {
+      var hits = tasks.filter(matches);
+      cards = hits.concat(shown.filter(function (t) { return hits.indexOf(t) < 0; }));
     }
-    if (isFiltering() && !matches(shown)) shown = tasks.filter(matches)[0] || shown;
-    return { cards: [shown], piles: [], behind: tasks.filter(function (t) { return t !== shown; }), held: held };
+    cards = cards.slice(0, room);
+    return { cards: cards, piles: [], behind: tasks.filter(function (t) { return cards.indexOf(t) < 0; }), held: held };
   }
 
   /** Works out a full cell for the first time this visit. */
@@ -173,7 +191,8 @@ window.Store = (function () {
         piles = [{ key: owner + "/" + stage + "/streams", kind: "streams", title: "Reviews and PRs", tasks: shared }];
       }
     }
-    var cards = tasks.filter(function (t) { return !used[t.id]; });
+    // One order on every view, so showing a lane's rows leaves its top card on top.
+    var cards = sortForDesk(tasks.filter(function (t) { return !used[t.id]; }));
     var room = Math.max(0, MOST_ROWS - piles.length);
     if (cards.length > room + 1) {
       var over = cards.slice(room);
@@ -221,12 +240,15 @@ window.Store = (function () {
   }
 
   /** Splits one cell into what lies on the desk and what waits behind it or in piles. */
-  function arrangeCell(tasks, stage, owner, full) {
+  function arrangeCell(tasks, stage, owner, rows) {
     // A card you just put down stays a card, on the row you chose, until the next visit. It takes no
     // room from the others.
+    var lifted = state.lifted;
+    var lifting = !!lifted && tasks.some(function (t) { return t.id === lifted; });
+    tasks = tasks.filter(function (t) { return t.id !== lifted; });
     var held = tasks.filter(function (t) { return t.held; }).sort(function (a, b) { return (a.heldRow || 0) - (b.heldRow || 0); });
     var rest = tasks.filter(function (t) { return !t.held; });
-    return full ? arrangeFullCell(rest, stage, owner, held) : arrangeOneRow(rest, stage, owner, held);
+    return rows ? arrangeRows(rest, stage, owner, held, lifting, rows) : arrangeFullCell(rest, stage, owner, held);
   }
 
   /** Returns the line under a pile's title: what it holds that needs you, or how it stands. */

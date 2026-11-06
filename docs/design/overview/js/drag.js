@@ -80,6 +80,15 @@ window.Drag = (function () {
     return !Store.state.full[project];
   }
 
+  /** Returns the card on the row the pointer is over, or the last one. */
+  function pickRowCard(cell, y) {
+    var cards = cell.querySelectorAll(":scope > .card");
+    for (var i = 0; i < cards.length; i++) {
+      if (y < cards[i].getBoundingClientRect().bottom + 11) return cards[i];
+    }
+    return cards[cards.length - 1] || null;
+  }
+
   function clearUnder() {
     if (carry && carry.under) carry.under.classList.remove("is-under");
     if (carry) carry.under = null;
@@ -87,25 +96,21 @@ window.Drag = (function () {
 
   /** Puts the slot at the row the pointer is over. Everything below moves aside, and nothing jumps. */
   function moveSlot(cell, y, middle) {
-    var top = isOneRow(cell) ? cell.querySelector(".card") : null;
+    var top = isOneRow(cell) ? pickRowCard(cell, y) : null;
     if (top) {
-      // On a stack the card lands on top. The top card slips down a little to take it, and nothing
-      // else on the desk moves: a lane at one row never changes height.
+      // At rest a card lands on a row. The card there slips down a little to take it, and nothing
+      // else on the desk moves: a lane at rest never changes height.
       if (carry.under !== top) clearUnder();
-      var was = carry.slot.parentElement;
-      if (was !== cell) {
-        Motion.flip(Board.movables(), function () {
-          carry.slot.classList.add("is-over");
-          cell.insertBefore(carry.slot, cell.firstChild);
-        }, { spring: "hand" });
-        carry.zones = readDropZones();
-      }
+      carry.slot.classList.add("is-over");
+      if (carry.slot.nextElementSibling !== top) cell.insertBefore(carry.slot, top);
+      carry.slot.style.top = top.offsetTop + "px";
       top.classList.add("is-under");
       carry.under = top;
       return;
     }
     clearUnder();
     carry.slot.classList.remove("is-over");
+    carry.slot.style.top = "";
     var kids = Array.prototype.filter.call(cell.children, function (c) { return !c.classList.contains("slot"); });
     var before = null;
     // Arriving on a card's middle, the slot opens after it, so the card stays under the pointer.
@@ -212,12 +217,19 @@ window.Drag = (function () {
     if (!cell) return;
     c.zone = zone;
     var middle = findCardMiddle(x, y, cell);
-    if (middle !== c.hoverCard) {
+    // Only a hand held still over a card's middle means merge, or the Option key at once. Passing
+    // over a card, or still deciding where to put it, starts nothing.
+    var moved = Math.hypot(x - c.restX, y - c.restY) > 6;
+    if (middle !== c.hoverCard || moved) {
       c.hoverCard = middle;
+      c.restX = x;
+      c.restY = y;
       clearTimeout(c.dwell);
       if (!middle) {
         setMerge(null);
-      } else {
+      } else if (c.alt) {
+        setMerge(middle);
+      } else if (!c.merge) {
         c.dwell = setTimeout(function () {
           if (carry && carry.hoverCard === middle) {
             setMerge(middle);
@@ -250,6 +262,8 @@ window.Drag = (function () {
     }
     var moreChip = el.querySelector(".card-more");
     if (moreChip) moreChip.remove();
+    if (el._body) el._body._html = "";
+    var liftedOffStack = !!(fromCell && isOneRow(fromCell) && fromCell.querySelectorAll(":scope > .card").length + (fromCell._behind || []).length > 1);
     layer().appendChild(el);
     el.classList.add("is-carried");
     el.style.left = home.left + "px";
@@ -259,7 +273,7 @@ window.Drag = (function () {
     carry = {
       el: el, id: p.id, task: t, home: home, slot: slot, fromCell: fromCell, fromRow: fromRow,
       grabX: p.x - home.left, grabY: p.y - home.top,
-      lastX: p.x, lastY: p.y, lastT: performance.now(), vx: 0, vy: 0, catchUntil: 0,
+      lastX: p.x, lastY: p.y, lastT: performance.now(), vx: 0, vy: 0, catchUntil: 0, restX: p.x, restY: p.y, alt: e.altKey,
       stage: null, merge: null, hoverCard: null, zone: null, followers: [],
       zones: readDropZones(), stages: readStages(),
     };
@@ -267,6 +281,13 @@ window.Drag = (function () {
     var own = carry.stages.filter(function (s) { return s.id === t.stage; })[0];
     Motion.body(document.getElementById("rule-mark")).set({ x: own.left - rule.left });
     work().classList.add("is-carrying");
+    // Lifting the top of a stack shows the next card, already there underneath.
+    if (liftedOffStack) {
+      Store.state.lifted = p.id;
+      slot.classList.add("is-over");
+      Board.draw();
+      el.classList.add("is-carried");
+    }
     gatherSelection();
     track(e.clientX, e.clientY);
   }
@@ -352,6 +373,7 @@ window.Drag = (function () {
     var c = carry;
     var b = Motion.body(c.el);
     // The landing starts with the speed of the hand, in pixels a second, so a thrown card lands thrown.
+    Store.state.lifted = null;
     c.look = { rect: c.el.getBoundingClientRect(), s: b.value.s, r: b.value.r, l: b.value.l, vx: c.vx * 600, vy: c.vy * 600 };
     carry = null;
     clearTimeout(c.dwell);
@@ -572,6 +594,7 @@ window.Drag = (function () {
     }
     if (carry) {
       e.preventDefault();
+      carry.alt = e.altKey;
       track(e.clientX, e.clientY);
       autoScroll();
     }

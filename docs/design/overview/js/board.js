@@ -222,13 +222,13 @@ window.Board = (function () {
     return (project ? project.name : plan ? plan.name : "") + ", " + NW.STAGES.filter(function (s) { return s.id === stage; })[0].name;
   }
 
-  function drawCell(key, stage, tasks, full) {
+  function drawCell(key, stage, tasks, rows) {
     var cell = node("cell:" + key + ":" + stage, "div", "cell");
     cell.dataset.stage = stage;
     cell.dataset.owner = key;
     cell.setAttribute("role", "group");
     cell.setAttribute("aria-label", NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ", " + tasks.length + (tasks.length === 1 ? " card" : " cards"));
-    var arranged = Store.arrangeCell(tasks, stage, key, full);
+    var arranged = Store.arrangeCell(tasks, stage, key, rows);
     var kids = [];
     var hidden = [];
     /** Draws one Task on top of the rest, and remembers what lies behind it for the fan. */
@@ -241,7 +241,7 @@ window.Board = (function () {
       hidden = hidden.concat(rest.map(function (t) { return { task: t, card: el }; }));
       return el;
     }
-    arranged.cards.forEach(function (t, i) { kids.push(drawStack(t, i === 0 ? arranged.behind : [])); });
+    arranged.cards.forEach(function (t, i) { kids.push(drawStack(t, i === arranged.cards.length - 1 ? arranged.behind : [])); });
     var landed = arranged.piles.filter(function (p) { return p.kind === "landed"; });
     arranged.piles.forEach(function (p) {
       if (p.kind === "landed") return;
@@ -263,11 +263,11 @@ window.Board = (function () {
     return cell;
   }
 
-  function drawGrid(key, tasks, full) {
+  function drawGrid(key, tasks, rows) {
     var grid = node("grid:" + key, "div", "grid");
     grid.classList.toggle("is-empty", !tasks.length);
     place(grid, Store.STAGE_IDS.map(function (s) {
-      return drawCell(key, s, tasks.filter(function (t) { return t.stage === s; }), full);
+      return drawCell(key, s, tasks.filter(function (t) { return t.stage === s; }), rows);
     }));
     return grid;
   }
@@ -348,7 +348,7 @@ window.Board = (function () {
     var kids = [head];
     if (open) {
       var band = node("band:" + plan.id, "div", "plan-band");
-      place(band, [drawGrid("plan-" + plan.id, tasks, !!Store.state.full[plan.project])]);
+      place(band, [drawGrid("plan-" + plan.id, tasks, Store.state.full[plan.project] ? 0 : 1)]);
       kids.push(band);
     } else {
       kids.push(drawWire("plan-" + plan.id, tasks));
@@ -374,12 +374,12 @@ window.Board = (function () {
     lane.classList.toggle("is-full", full);
     var hasMore = all.length > 0;
     var head = node("lanehead:" + p.id, "h3", "lane-head");
-    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? "Open" : full ? "One row" : "More rows") + "</small>" + "</button>");
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? "Open" : full ? "Fewer rows" : "More rows") + "</small>" + "</button>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
     } else {
-      kids.push(drawGrid("lane-" + p.id, loose, full));
+      kids.push(drawGrid("lane-" + p.id, loose, full ? 0 : st.rows[p.id] || 1));
       if (plans.length) {
         var box = node("plans:" + p.id, "div", "plans");
         place(box, plans.map(drawPlan));

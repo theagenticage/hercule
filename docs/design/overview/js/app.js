@@ -86,7 +86,13 @@
     if (Pane.currentId()) Pane.hide();
   });
   // The current card follows the pointer as well as the keys, as it does in the Inbox.
-  work.addEventListener("pointerover", function (e) {
+  // It needs a real move: a card sliding under a still pointer must not take over from the keys.
+  var pointerX = 0;
+  var pointerY = 0;
+  work.addEventListener("pointermove", function (e) {
+    if (Math.hypot(e.clientX - pointerX, e.clientY - pointerY) < 4) return;
+    pointerX = e.clientX;
+    pointerY = e.clientY;
     Keys.setHover(e.target.closest(".card[data-id]"));
   });
   work.addEventListener("pointerleave", function () { Keys.setHover(null); });

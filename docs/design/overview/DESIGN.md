@@ -4,7 +4,7 @@ The place where a person sees all their work. It is the view opened every mornin
 
 ## The idea in five lines
 
-1. **An open desk.** No boxes. Lanes and stages are space, type and one double rule. Every lane opens, one row each, so the first screen is proper cards.
+1. **An open desk.** No boxes. Lanes and stages are space, type and one double rule. Every lane opens, so the first screen is proper cards.
 2. **Height means whose move it is.** A card that wants you stands. A card someone else holds lies flat. A blocked card is pressed in. A landed card is an outline.
 3. **The top edge shows who holds it.** A signal tab, a colleague's head, a person's tab, or nothing.
 4. **A horizontal line means a plan.** A plan is a wire with one bead per piece, on the same stage axis as the cards. Folding a whole board to wires is the score: something you ask for, never the default.
@@ -63,7 +63,7 @@ The switcher is built for five tabs. Each is an icon and a word, so five read as
 
 The stage rule sticks under the top pill while the board scrolls. At rest the stages are only alignment: no column lines. While carrying a card, the target column shows a faint aisle.
 
-A first visit opens every lane at one row: a short scroll, and every project shows proper cards. The whole board at one row is about 1.3 screens. Folding lanes to wires was tried as the default and rejected: it hid 61 of 70 Tasks behind dots, which is the tiny cells he said no to.
+A first visit opens every lane: a short scroll, and every project shows proper cards. A lane shows one row, or two when ten or more of its Tasks want you, so the busiest lanes are the fullest. That is decided once a visit, so a lane never changes height because something was answered. Folding lanes to wires was tried as the default and rejected: it hid 61 of 70 Tasks behind dots, which is the tiny cells he said no to.
 
 ### The sentence
 
@@ -73,7 +73,7 @@ The three counts a person sees mean different things, on purpose. The sidebar's 
 
 ### The morning's walk
 
-`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
+`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). At the end it stops and says "That was all 33." It does not start again by itself. Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
 
 ### The card
 
@@ -104,7 +104,7 @@ Words at the card's hover: after 160ms the summary becomes the need and the ques
 | State | How it reads |
 |---|---|
 | Standing (wants you) | `--stock`, `--h-stand`, a marigold tab, ink title. On dark desks shadows say little, so a standing card has a material: a warm stock per theme, a lit top edge and a sheen falling from above (`--stock-sheen`) |
-| Flat (someone else) | `--stock-flat`, no rim, no shadow, a head or person tab, words in `--word-flat` |
+| Flat (someone else) | `--stock-flat`, no rim, a 6% lit top edge on dark desks, a head or monogram, words in `--word-flat` |
 | Pressed (blocked) | `--stock-press`, `--h-press`, no holder, words in `--word-press`, summary reads "Waits on *blocker*" |
 | Etched (landed) | only words: no sheet, faint regular title. On the board Landed is one line; a landed card shows only inside its fan |
 | Hover | standing rises to `--h-hover`; flat comes up to `--h-stand`. After 160ms the summary becomes the question, in `--you-ink`. Heads return to full colour |
@@ -130,17 +130,17 @@ A blocked card is pressed into the desk. Its tab is gone because nobody can move
 
 Off by default. Display menu, or `W`. Neglected work ages from 6 days to 30: the stock takes up to 18% of an old paper colour, and the title loses up to 20% of its strength. Agents' cards and landed cards never wear. Moving a card clears its age. (A tilt was tried and cut: at 1x it read as a rendering bug.)
 
-### One row, and stacks
+### Rows at rest, and stacks
 
-At rest a lane shows one row. Per stage, one real card lies on top, in this order: the oldest that wants you, then an agent's, then a person's, then the oldest, and a blocked card only if nothing else is there. What lies behind it shows as sheets under that same card, with `+3` beside the age. The card has one tab: when more than one thing here wants you, the tab carries that number. A stack with agents on it shows one head beside the tab, so the crew is always on the board.
+At rest a lane shows one or two rows. Per stage, real cards lie on top, in this order: the oldest that want you, then agents', then people's, then the oldest, and blocked cards last. The same order holds when the lane shows all its rows, so the top card stays on top. What lies behind shows as sheets under the last card, with `+3` beside the age. The card has one tab: when more than one thing here wants you, the tab carries that number. A stack with agents on it shows one head beside the tab, so the crew is always on the board.
 
-- The top card stays the same for the visit. Under a lens, a card that matches comes to the top, so a lens never lights an empty row.
+- Who is on top stays the same for the visit. Under a lens, cards that match come to the top, so a lens never lights an empty row.
 - `+3`, or `E`, fans out what lies behind.
-- Clicking the lane's name shows all of it, up to three rows and piles. Clicking again goes back to one row. The cards come out from under the top card, and go back the same way.
-- A card dropped on a stack lands on top. The top card slips down 6px to take it, and nothing else moves: a lane at one row never changes height.
-- A card leaving a stack shows the next one, already there underneath. There is no hole to hold.
+- Clicking the lane's name shows more rows. Clicking again goes back. The cards come out from under the last card, and go back the same way.
+- A card dropped at rest lands on the row you chose. The card there slips down 6px to take it, and nothing else moves: a lane at rest never changes height.
+- Lifting a card shows the next one at once, already there underneath. A card leaving by itself does the same. There is no hole to hold.
 - An arrival on a stack rises on top for a moment, so it is seen, then slides underneath, and only `+3` changes.
-- A lane whose Tasks all sit in one plan shows that plan's band, not a name and a hole. Bands follow the same one-row rule.
+- A lane whose Tasks all sit in one plan shows that plan's band, not a name and a hole. A band shows one row.
 
 ### Plans
 
@@ -197,7 +197,7 @@ Answering sends it: the card lies down, a line offers Undo, and a walk moves on.
 | T | start a thread |
 | X | select |
 | E | fan out what lies behind a card |
-| F, ⇧F | one row or all of this lane, fold everything to the score |
+| F, ⇧F | more or fewer rows in this lane, fold everything to the score |
 | Q R S A | lenses |
 | / | find |
 | W | Wear |
@@ -226,7 +226,7 @@ Measured in all six themes.
 | First run | The sentence says nothing is here yet. A real standing card in Exploring, with Hercule looking over its edge, says where the first Task will land. One filled button: Start a thread |
 | Desk clear | A sunrise. The stage rule is the horizon, and Hercule himself comes up over it, with rays, as a sibling of the Inbox's empty page. "The desk is clear." under the rule |
 | One card | One card, in its place. No special layout |
-| 300 cards | Ten lanes at one row, every one showing real cards. ⇧F folds all of them into the score: ten projects on one screen |
+| 300 cards | Ten lanes at rest, every one showing real cards. ⇧F folds all of them into the score: ten projects on one screen |
 | Loading | The rule and lanes are there at once. Cards show two quiet bars, and words fade in from the top left. No spinners, no shift |
 | Partial data | A card with no summary yet says so. A missing age shows nothing |
 | Offline | A line says since when. Moves still work, marked with a clock until they sync. Answers say they will send when you are back |

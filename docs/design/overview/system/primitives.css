@@ -37,7 +37,7 @@
   /* On a near-black desk a shadow says little. A standing card reads by what light does to it: a
      lit top edge, and a sheen falling from above and fading out before the middle. */
   --stock-sheen: linear-gradient(oklch(1 0 0 / 0.035), oklch(1 0 0 / 0) 45%);
-  --stock-flat: color-mix(in oklab, var(--raised) 38%, var(--desk));
+  --stock-flat: color-mix(in oklab, var(--raised) 70%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 62%, transparent);
   --stock-lit: color-mix(in oklab, white 13%, transparent);
@@ -47,7 +47,7 @@
   --h-stand: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
   --h-hover: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 6px 10px -3px oklch(0 0 0 / 0.3), 0 16px 28px -12px oklch(0 0 0 / 0.42);
   --h-carry: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0 0 0 / 0.26), 0 14px 20px -6px oklch(0 0 0 / 0.36), 0 36px 56px -18px oklch(0 0 0 / 0.56);
-  --h-flat: none;
+  --h-flat: inset 0 1px 0 oklch(1 0 0 / 0.06);
   --h-press: inset 0 1px 3px oklch(0 0 0 / 0.16);
   --h-etch: none;
 
@@ -91,6 +91,7 @@
   --rule-ink: oklch(0.72 0.09 82);
   --tab-fill: oklch(0.74 0.15 72);
   --underline: var(--you-ink);
+  --h-flat: none;
   --stock-flat: color-mix(in oklab, var(--raised) 58%, var(--desk));
   --word-flat: color-mix(in oklab, var(--ink) 80%, var(--muted));
   --word-flat-2: var(--muted);
