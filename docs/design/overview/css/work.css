@@ -314,3 +314,5 @@ html[data-motion="reduced"] .roll, html[data-motion="reduced"] .card-paws i, htm
 .card-sync { color: var(--faint); line-height: 0; }
 
 html[data-still="1"] .card-paws i, html[data-still="1"] .cr * { animation: none !important; }
+
+.card-body { display: contents; }

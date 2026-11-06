@@ -71,9 +71,7 @@ window.Actions = (function () {
 
   function startThread(id, prompt) {
     Board.change(function () { Store.startThread(id, prompt); });
-    var card = document.querySelector('.card[data-id="' + id + '"]');
-    var head = card && card.querySelector(".card-head");
-    if (head) Motion.body(head).set({ y: 18 }).to({ y: 0 }, "travel", { delay: 80 });
+    handOff(id);
     Toast.show("A thread started on this Task.", true);
   }
 
@@ -81,10 +79,25 @@ window.Actions = (function () {
   function answer(id, words) {
     Board.change(function () { Store.answerTask(id, words); });
     Toast.show("Sent: " + words, true);
-    var card = document.querySelector('.card[data-id="' + id + '"]');
-    var head = card && card.querySelector(".card-head");
-    if (head) Motion.body(head).set({ y: 18 }).to({ y: 0 }, "travel", { delay: 80 });
+    handOff(id);
     Walk.afterAnswer(id);
+  }
+
+  /**
+   * Plays a hand-off as one chain: the colleague's head rises while the card still stands, its paws
+   * reach the edge, and only then does the card give up its height.
+   */
+  function handOff(id) {
+    var card = document.querySelector('.card[data-id="' + id + '"]');
+    if (!card) return;
+    var head = card.querySelector(".card-head");
+    var paws = card.querySelector(".card-paws");
+    if (!head || Motion.isReduced()) return;
+    var settled = card.dataset.height;
+    card.dataset.height = "stand";
+    Motion.body(head).set({ y: 18 }).to({ y: 0 }, "travel");
+    if (paws) Motion.body(paws).set({ o: 0 }).to({ o: 1 }, "travel", { delay: 90 });
+    setTimeout(function () { card.dataset.height = settled; }, 130);
   }
 
   function run(act, id) {

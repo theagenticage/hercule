@@ -83,7 +83,7 @@ window.Board = (function () {
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
     var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
     var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
-    return drawHolder(holder) + '<i class="card-stock"></i><i class="card-check">' + Crew.icon("check", 12) + "</i>" +
+    return drawHolder(holder) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
       '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
   }
 
@@ -103,7 +103,9 @@ window.Board = (function () {
       el.tabIndex = -1;
       el.setAttribute("role", "button");
     }
-    setHTML(el, drawCardInner(t));
+    // The sheet stays the same element for the card's whole life, so a change of height can animate.
+    if (!el.firstChild) el.innerHTML = '<i class="card-stock"></i><span class="card-body"></span>';
+    setHTML(el.lastChild, drawCardInner(t));
     el.setAttribute("aria-label", describeCard(t));
     el.dataset.height = Store.decideHeight(t);
     el.dataset.stalled = t.stalled ? "1" : "";
