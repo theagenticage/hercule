@@ -1,24 +1,20 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
 /* Loading: the real cards, with their words held back. */
-.is-loading .c-title, .is-loading .c-line, .is-loading .pl-title, .is-loading .pl-why { color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); border-radius: 4px; }
+.is-loading .c-title, .is-loading .pl-title, .is-loading .pl-why { color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); border-radius: 4px; }
 .is-loading .c-title { -webkit-line-clamp: 1; width: 72%; }
-.is-loading .c-line { width: 44%; height: 10px; }
-.is-loading .c-line * { visibility: hidden; }
 .is-loading .pl-title { width: 70%; height: 12px; margin-bottom: 8px; }
 .is-loading .pl-why { width: 52%; height: 10px; }
-.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-status, .is-loading .c-id, .is-loading .c-where, .is-loading .c-facts, .is-loading .part > *, .is-loading .b-head > * { visibility: hidden; }
+.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-rail, .is-loading .c-end, .is-loading .c-context, .is-loading .c-under, .is-loading .part, .is-loading .hint { visibility: hidden; }
 .sk { display: inline-block; vertical-align: middle; border-radius: 4px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
 .sk--title { width: 68%; height: 11px; }
 
 /* The empty Inbox: a sunrise, and the numeral as its sun. */
 .ib-page[data-mode="zero"] { display: block; padding: 0; }
-.zero--small { padding-top: 18px; }
+.zero.zero--small { padding-top: 24px; }
 .zero--small .zero-sun { width: 240px; }
 .zero--small .zero-n { width: 52px; height: 41px; margin-top: -45px; }
-.zero--small .zero-n .cr { width: 52px; height: 52px; }
-.zero--small .zero-t { margin-top: 14px; font-size: var(--t-14); }
-.zero--small .zero-s { font-size: var(--t-12); text-align: center; }
+.zero--small .zero-s { margin-top: 12px; font-size: var(--t-12); }
 .zero { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 17vh; }
 .zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
@@ -108,7 +104,7 @@
 .rail-x { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--rim); color: var(--muted); }
 .rail .person { font-size: 16px; }
 
-.card.ghost { transition: height var(--m-base) var(--m-ease); position: fixed; pointer-events: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 0; will-change: transform; }
+.card.ghost { background: var(--stock); border-radius: var(--card-r); box-shadow: var(--h-carry); transition: height var(--m-base) var(--m-ease); position: fixed; pointer-events: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 0; will-change: transform; }
 .card.ghost > .card-stock { box-shadow: var(--h-carry); }
 .card.ghost .c-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card.ghost .c-acts { display: none; }

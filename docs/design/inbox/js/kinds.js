@@ -33,8 +33,6 @@
       card: 'compact',
       noun: 'Pull request',
       plugin: { name: 'GitHub', mark: 'github', hue: null, solid: true },
-      paper: 'bond',
-      density: 'open',
       pace: 'fast',
       patience: 24,
       identifier: '#{number}',
@@ -78,10 +76,7 @@
       card: 'rich',
       noun: 'Issue',
       plugin: { name: 'Linear', mark: 'linear', hue: 277 },
-      paper: 'ledger',
-      density: 'tight',
-      leadsWithIdentifier: true,
-      pace: 'slow',
+            pace: 'slow',
       patience: 336,
       identifier: '{key}',
       person: 'assignee',
@@ -113,8 +108,6 @@
       card: 'compact',
       noun: 'Mail thread',
       plugin: { name: 'Gmail', mark: 'gmail', hue: 25 },
-      paper: 'manila',
-      density: 'open',
       pace: 'fast',
       patience: 48,
       identifier: '{messages} messages',
@@ -134,8 +127,6 @@
       card: 'compact',
       noun: 'Slack thread',
       plugin: { name: 'Slack', mark: 'slack', hue: 330, solid: true },
-      paper: 'bond',
-      density: 'open',
       pace: 'fast',
       patience: 8,
       identifier: '{channel}',
@@ -152,8 +143,6 @@
       card: 'rich',
       noun: 'Error',
       plugin: { name: 'Sentry', mark: 'sentry', hue: 300 },
-      paper: 'bond',
-      density: 'open',
       pace: 'fast',
       patience: 12,
       identifier: '{key}',
@@ -172,7 +161,7 @@
       reasons: {
         assigned: { say: 'Assigned to you', tone: 'plain' },
         cameBack: { say: 'Came back after the fix', tone: 'bad' },
-        spiked: { say: 'Tripled in the last hour', tone: 'bad' },
+        spiked: { say: 'Tripled', tone: 'bad' },
       },
       workflows: { assigned: [INVESTIGATE, REPAIR] },
     },
@@ -182,18 +171,15 @@
       card: 'rich',
       noun: 'Purchase order',
       plugin: { name: 'Quayside', mark: 'quayside', hue: 205 },
-      paper: 'sage',
-      density: 'tight',
-      leadsWithIdentifier: true,
-      pace: 'slow',
+            pace: 'slow',
       patience: 120,
       identifier: '{key}',
       person: null,
       owner: 'assignee',
       home: 'quayside/round',
       status: {
-        waiting: { shape: 'ring', tone: 'quiet', word: 'Waiting for your sign-off', norm: true },
-        held: { shape: 'dashed', tone: 'quiet', word: 'Held at the quay' },
+        waiting: { shape: 'ring', tone: 'quiet', word: 'Sign-off' },
+        held: { shape: 'dashed', tone: 'quiet', word: 'Held' },
       },
       facts: [
         { field: 'amount', form: 'money' },
@@ -207,8 +193,6 @@
     'hercule/cluster': {
       noun: 'Noticed',
       plugin: { name: 'Hercule', mark: 'hercule', hue: null },
-      paper: 'bond',
-      density: 'open',
       pace: 'noticed',
       patience: 0,
       identifier: '',
@@ -226,7 +210,7 @@
    * A plugin declares them like any kind, so a new hierarchy needs a table and no new code.
    */
   function addContextKind(id, plugin, noun, status, reasons) {
-    KINDS[id] = { noun: noun, plugin: plugin, paper: 'bond', density: 'open', pace: 'context', patience: 0, identifier: '', person: null, owner: null, status: status || null, facts: [], reasons: reasons || {}, workflows: {} };
+    KINDS[id] = { noun: noun, plugin: plugin, pace: 'context', patience: 0, identifier: '', person: null, owner: null, status: status || null, facts: [], reasons: reasons || {}, workflows: {} };
   }
   var HEALTH = {
     onTrack: { shape: 'check', tone: 'good', word: 'On track' },

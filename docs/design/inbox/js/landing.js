@@ -8,8 +8,8 @@ window.Landing = (function () {
    * line clips them, so the two sentences never show at once. `old` is a copy of the old line.
    */
   function rollLine(el, old) {
-    var line = el.querySelector('.c-line');
-    var roll = line && line.querySelector('.c-roll');
+    var line = el.querySelector('.c-under, .c-context');
+    var roll = line && (line.querySelector('.c-roll') || line.querySelector('.c-news') || line);
     if (!roll || Motion.isReduced()) return;
     var clip = document.createElement('div');
     clip.className = 'c-line-clip';
@@ -32,7 +32,8 @@ window.Landing = (function () {
 
   /** Applies a signal to its card: the line rolls, the count ticks, the rim lights, and the card takes the knock. */
   function apply(e, s, el) {
-    var old = el.querySelector('.c-line') ? el.querySelector('.c-line').cloneNode(true) : null;
+    var words = el.querySelector('.c-under, .c-context');
+    var old = words ? words.cloneNode(true) : null;
     e.signals.push(s);
     e.fresh = true;
     if (s.state) e.fields.state = s.state;
@@ -45,8 +46,6 @@ window.Landing = (function () {
     el.classList.add('is-landed');
     setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
     Motion.knock(el, 145);
-    var n = el.querySelector('.c-more');
-    if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
   }
 
   /**
@@ -59,7 +58,7 @@ window.Landing = (function () {
     var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     var row = !el && document.querySelector('.part[data-id="' + e.id + '"]');
     if (Motion.isReduced() || (!el && !row)) { if (el) apply(e, s, el); else applyToRow(e, s, tone); return; }
-    var spot = (el ? el.querySelector('.c-line') : row.querySelector('.p-line')).getBoundingClientRect();
+    var spot = (el ? el.querySelector('.c-under, .c-context') : row.querySelector('.p-line, .p-said')).getBoundingClientRect();
     dropOnto(spot.left + 3, (el || row).getBoundingClientRect().top - 24, spot.top + spot.height / 2, tone);
     setTimeout(function () { if (el) apply(e, s, el); else applyToRow(e, s, tone); }, 281);
   }
@@ -76,7 +75,7 @@ window.Landing = (function () {
     row.dataset.landed = tone;
     row.classList.add('is-landed');
     setTimeout(function () { row.classList.remove('is-landed'); }, 1300);
-    var said = row.querySelector('.p-line');
+    var said = row.querySelector('.p-line, .p-said');
     if (said && !Motion.isReduced()) Motion.animate(said, [{ transform: 'translateY(5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.22,.9,.24,1)' });
   }
 

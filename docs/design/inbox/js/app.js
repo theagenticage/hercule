@@ -30,8 +30,8 @@ window.App = (function () {
   function countLeft() { return waiting.length + readLying().filter(function (e) { return !e.task; }).length + state.clusters.filter(function (c) { return !c.task; }).length; }
 
   /** Returns the card of an entity, making it the first time. */
-  function readCard(e) {
-    if (!els[e.id]) els[e.id] = Card.createCard(e, { now: state.now });
+  function readCard(e, place) {
+    if (!els[e.id]) els[e.id] = Card.createCard(e, { now: state.now, place: place });
     return els[e.id];
   }
 
@@ -50,14 +50,20 @@ window.App = (function () {
     var hints = Relations.readHints(e);
     if (!hints.length) return;
     var other = hints[0].other, kind = K[other.kind];
-    host.insertAdjacentHTML('beforeend', '<button class="hint" data-hint="' + e.id + '" data-other="' + other.id + '" tabindex="-1" title="' + Card.esc(Relations.sayClaim(hints[0].claim)) + '">' + Crew.icon('link', 12) + '<span>Mentions ' + Card.esc(Card.fill(kind.identifier, other.fields)) + '</span><b>Link them</b></button>');
+    var word = Relations.isMentioner(hints[0], e) ? 'Mentions ' : 'Mentioned in ';
+    host.insertAdjacentHTML('beforeend', '<button class="hint" data-hint="' + e.id + '" data-other="' + other.id + '" tabindex="-1" title="' + Card.esc(Relations.sayClaim(hints[0].claim)) + '">' + Crew.icon('link', 12) + '<span>' + word + Card.esc(Card.fill(kind.identifier, other.fields)) + '</span><b>Link them</b></button>');
   }
 
   /** Returns the wrapper of a card and what rides on it. */
-  function readBundle(bundle) {
-    var card = readCard(bundle.lead);
+  function readBundle(bundle, place) {
+    var card = readCard(bundle.lead, place);
+    if (card._place !== place) {
+      card._place = place;
+      var context = card.querySelector('.c-context');
+      if (context) context.outerHTML = Card.drawContext(bundle.lead, { now: state.now, place: place });
+    }
     var host = card.parentNode && card.parentNode.classList.contains('bundle') ? card.parentNode : document.createElement('div');
-    host.className = 'bundle' + (bundle.parts.length ? ' has-parts' : '');
+    host.className = 'bundle';
     if (card.parentNode !== host) host.appendChild(card);
     drawParts(card, bundle.parts, host);
     drawHint(bundle.lead, host);
@@ -71,8 +77,7 @@ window.App = (function () {
       homes[K[K[e.kind].home].noun] = true;
       Relations.readAncestors(e).forEach(function (p) { kinds[p.kind] = true; });
     });
-    var names = Object.keys(homes).map(function (n, i) { return i ? n.toLowerCase() : n; });
-    var out = [['home', names.join(' or ')]];
+    var out = [['home', 'Place']];
     Object.keys(kinds).forEach(function (id) {
       if (Object.keys(homes).indexOf(K[id].noun) < 0) out.push([id, K[id].noun]);
     });
@@ -102,8 +107,8 @@ window.App = (function () {
     if (place.isPlain) return '<header class="b-head b-head--plain"><h3 class="b-title">' + Card.esc(place.title) + '</h3></header>';
     var kind = K[place.kind];
     var above = Relations.readParents(place);
-    return '<header class="b-head"><button class="b-open" data-id="' + place.id + '" tabindex="-1"><span class="b-mark">' + Card.drawMark(kind.plugin, 15) + '</span><h3 class="b-title">' + Card.esc(place.title) + '</h3></button>' +
-      Card.drawStatus(place, 14) + '<span class="b-end">' + drawProgress(place) + (place.fields.target ? '<span class="b-target">' + Card.esc(place.fields.target) + '</span>' : '') + '</span>' +
+    return '<header class="b-head"><button class="b-open" data-id="' + place.id + '" tabindex="-1"><span class="b-mark">' + Card.drawMark(kind.plugin, 16) + '</span><h3 class="b-title">' + Card.esc(place.title) + '</h3></button>' +
+      Card.drawStatus(place, 15) + '<span class="b-end">' + drawProgress(place) + (place.fields.target ? '<span class="b-target">' + Card.esc(place.fields.target) + '</span>' : '') + '</span>' +
       (above.length ? '<p class="b-above">' + above.map(function (p) { return Card.esc(p.title); }).join('<i>·</i>') + '</p>' : '') + '</header>';
   }
 
@@ -131,7 +136,7 @@ window.App = (function () {
       if (!places.length) places = [{ id: 'elsewhere', title: 'Not in any ' + (K[state.grouping] ? K[state.grouping].noun.toLowerCase() : 'place'), isPlain: true, rank: 90000 }];
       places.forEach(function (p, i) {
         if (!byPlace[p.id]) { byPlace[p.id] = { place: p, work: [] }; order.push(p.id); }
-        byPlace[p.id].work.push({ b: b, also: places.filter(function (x) { return x !== p; }), echo: i > 0 });
+        byPlace[p.id].work.push({ b: b, also: places.filter(function (x) { return x !== p; }), echo: i > 0 ? 1 : 0 });
       });
     });
     var sorted = order.map(function (id) { return byPlace[id]; }).sort(function (a, c) { return rankPlace(a.place) - rankPlace(c.place); });
@@ -144,20 +149,17 @@ window.App = (function () {
         block = blocks[id] = document.createElement('section');
         block.className = 'block';
         block.dataset.place = id;
+        block.innerHTML = '<i class="card-stock"></i>';
       }
       var head = block.querySelector(':scope > .b-head');
       if (head) head.remove();
-      block.insertAdjacentHTML('afterbegin', drawBlockHead(entry.place));
+      block.firstChild.insertAdjacentHTML('afterend', drawBlockHead(entry.place));
       var grid = block.querySelector(':scope > .b-work');
       if (!grid) { grid = document.createElement('div'); grid.className = 'b-work'; block.appendChild(grid); }
-      entry.work.sort(function (a, c) { return rankWork(a.b) - rankWork(c.b); }).forEach(function (w) {
+      entry.work.sort(function (a, c) { return (a.echo - c.echo) || rankWork(a.b) - rankWork(c.b); }).forEach(function (w) {
         // The same thing under a second place is a plain pointer, so it is never two cards to act on.
-        if (w.echo) { grid.insertAdjacentHTML('beforeend', '<button class="echo" data-id="' + w.b.lead.id + '" tabindex="-1">' + Crew.icon('link', 12) + '<span>' + Card.esc(w.b.lead.title) + '</span><small>Also in ' + Card.esc(Relations.readHomes(w.b.lead)[0].title) + '</small></button>'); return; }
-        var wrap = readBundle(w.b);
-        var also = wrap.querySelector(':scope > .also');
-        if (also) also.remove();
-        if (w.also.length) wrap.insertAdjacentHTML('beforeend', '<p class="also">Also in ' + w.also.map(function (x) { return Card.esc(x.title); }).join(', ') + '</p>');
-        grid.appendChild(wrap);
+        if (w.echo) { grid.insertAdjacentHTML('beforeend', '<button class="echo" data-id="' + w.b.lead.id + '" tabindex="-1"><span></span><span class="echo-t">' + Card.esc(w.b.lead.title) + '</span><small>Also in ' + Card.esc(w.also[0].title) + '</small></button>'); return; }
+        grid.appendChild(readBundle(w.b, entry.place));
       });
       host.appendChild(block);
     });
@@ -180,7 +182,7 @@ window.App = (function () {
     sorted.forEach(function (b) {
       var name = readPlaceName(b.lead);
       if (state.order === 'place' && name !== label) { label = name; host.insertAdjacentHTML('beforeend', '<h3 class="r-label">' + Card.esc(name) + '</h3>'); }
-      host.appendChild(readBundle(b));
+      host.appendChild(readBundle(b, null));
     });
   }
 
@@ -219,6 +221,10 @@ window.App = (function () {
     drawGrouping(work);
     drawClear(work, requests);
     Nav.setCount('inbox', countOverdue());
+    var riding = countOverdue() - requests.filter(function (b) { return !b.lead.task; }).length;
+    page.querySelector('[data-count="requests"]').textContent = requests.length || '';
+    page.querySelector('[data-count="work"]').textContent = riding > 0 ? riding + ' waiting' : '';
+    page.dataset.by = state.grouping;
     var entry = page.querySelector('.plaque, .card');
     if (entry) entry.tabIndex = 0;
   }
@@ -246,13 +252,13 @@ window.App = (function () {
     page.dataset.mode = 'cards';
     els = {}; blocks = {};
     page.innerHTML =
-      '<h2 class="sr">Hercule noticed</h2><div class="noticed" id="noticed" role="list"></div>' +
       '<div class="ib-wide">' +
-        '<header class="sec"><h2>Ongoing</h2><label class="sec-pick"><span>Group by</span><select data-grouping aria-label="Group by"></select></label></header>' +
+        '<header class="sec sec--noticed"><h2>Hercule noticed</h2></header><div class="noticed" id="noticed" role="list"></div>' +
+        '<header class="sec"><h2>Ongoing</h2><span class="sec-n" data-count="work"></span><label class="sec-pick"><span>Group by</span><select data-grouping aria-label="Group by"></select></label></header>' +
         '<div id="work"></div><p class="work-empty" hidden>Nothing ongoing concerns you.</p>' +
       '</div>' +
       '<aside class="ib-narrow" aria-label="Requests">' +
-        '<header class="sec"><h2>Requests</h2><label class="sec-pick"><select data-order aria-label="Order"><option value="oldest">Oldest first</option><option value="mine">Mine first</option><option value="place">By place</option></select></label></header>' +
+        '<header class="sec"><h2>Requests</h2><span class="sec-n" data-count="requests"></span><label class="sec-pick"><select data-order aria-label="Order"><option value="oldest">Oldest first</option><option value="mine">Mine first</option><option value="place">By place</option></select></label></header>' +
         '<div id="requests" role="list"></div><div id="clear" hidden></div>' +
         '<section class="parked" id="parked" hidden><button class="parked-t" data-parked></button><div class="parked-cards"></div></section>' +
       '</aside>';
@@ -267,6 +273,7 @@ window.App = (function () {
     host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span>' +
       '<span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
+    host.previousElementSibling.hidden = host.hidden;
     var was = Keys.current();
     if (Keys.isUsingKeys() && was && host.querySelector('[data-id="' + was + '"]')) Keys.focus(was);
   }
@@ -287,7 +294,7 @@ window.App = (function () {
     var keep = ['is-hover', 'is-focus', 'is-source', 'is-lifted', 'is-landed', 'is-leaving'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
-    Card.redrawBody(el, e, { now: state.now });
+    Card.redrawBody(el, e, { now: state.now, place: el._place });
     el.setAttribute('aria-label', Card.sayCard(e));
   }
 

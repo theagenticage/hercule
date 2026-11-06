@@ -30,7 +30,6 @@
 .icon-pill { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-md); color: var(--muted); background: var(--glass-fill); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow); }
 .icon-pill:hover { color: var(--ink); }
 .ib-fix { margin-left: 4px; text-decoration: underline; color: inherit; font: inherit; }
-.ptab.is-on { box-shadow: inset 0 0 0 1px var(--rim), inset 0 -2px 0 var(--ink); font-weight: var(--w-bold); }
 
 .ib-page {
   display: grid;
@@ -46,41 +45,40 @@
 }
 .ib-wide, .ib-narrow { min-width: 0; }
 
-/* A section title is plain words. */
-.sec { display: flex; align-items: center; gap: 10px; min-height: 28px; margin: 0 0 10px; }
-.sec h2 { margin: 0; font: var(--type-lane); letter-spacing: -0.005em; color: var(--ink); }
+/* A section title is plain words over one hairline, as a stage heading is on Work. */
+.sec { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--divider); }
+.sec[hidden] { display: none; }
+.sec h2 { margin: 0; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--ink); }
+.sec-n { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .sec-note { color: var(--faint); font: var(--type-summary); }
 .sec-pick { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--faint); font: var(--type-summary); }
-.sec-pick select { field-sizing: content; height: 26px; padding: 0 22px 0 8px; border: 0; border-radius: var(--r-xs); appearance: none; -webkit-appearance: none; color: var(--muted); font: var(--type-summary); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 7px center; cursor: pointer; }
+.sec-pick select { field-sizing: content; height: 24px; padding: 0 20px 0 6px; border: 0; border-radius: var(--r-xs); appearance: none; -webkit-appearance: none; color: var(--muted); font: var(--type-summary); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 6px center; cursor: pointer; }
 .sec-pick select:hover { color: var(--ink); background-color: var(--hover); }
 
-/* One place on the wide side: its head, then the work in it, in as many columns as fit. */
-.block { margin: 0 0 28px; }
-.b-head { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 2px; min-height: 22px; margin: 0 0 10px; }
-.b-open { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: inherit; border-radius: var(--r-xs); }
+/* One place is one surface: its head, then its work as rows. */
+.block { position: relative; isolation: isolate; margin: 0 0 16px; color: var(--ink); }
+.b-head { position: relative; display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 1px; padding: 12px 16px 11px; border-bottom: 1px solid var(--line-soft); }
+.b-head--plain { padding-bottom: 10px; }
+.b-open { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: inherit; border-radius: var(--r-xs); }
 .b-mark { display: inline-grid; place-items: center; width: 16px; }
-.b-title { margin: 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.003em; color: var(--ink); }
+.b-title { margin: 0; font: 600 var(--t-16, 16px) / 22px var(--font-ui); letter-spacing: -0.008em; color: var(--ink); }
 .b-open:hover .b-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.b-head .c-status { color: var(--muted); font: var(--type-summary); }
 .b-end { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .b-progress { position: relative; width: 72px; height: 4px; overflow: hidden; border-radius: 2px; background: color-mix(in oklab, var(--ink) 10%, transparent); }
 .b-progress i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: color-mix(in oklab, var(--ink) 55%, transparent); }
-.b-above { flex-basis: 100%; margin: 0 0 0 23px; color: var(--faint); font: var(--type-summary); }
+.b-above { flex-basis: 100%; margin: 0 0 0 24px; color: var(--faint); font: var(--type-summary); }
 .b-above i { margin: 0 6px; font-style: normal; }
-.b-work { columns: 2 320px; column-gap: 14px; }
-.b-work > * { break-inside: avoid; margin-bottom: 12px; }
 
 .work-empty { color: var(--muted); font: var(--type-summary); }
 
-/* A pointer to a thing that also lives in another place. */
-.echo { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 34px; padding: 6px 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--muted); font: var(--type-summary); text-align: left; }
+/* A pointer to a thing that lives under another place too. */
+.echo { display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; width: 100%; min-height: 38px; padding: 8px 16px; color: var(--muted); font: var(--type-summary); text-align: left; }
 .echo:hover { color: var(--ink); background: var(--hover); }
-.echo span { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.echo small { flex: none; color: var(--faint); font: inherit; }
-.also { margin: 5px 2px 0; color: var(--faint); font: var(--type-meta); }
+.echo-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.echo small { color: var(--faint); font: inherit; white-space: nowrap; }
 
 /* The narrow column. */
-#requests { display: flex; flex-direction: column; gap: 8px; }
+#requests { display: flex; flex-direction: column; gap: 6px; }
 .r-label { margin: 10px 2px 0; color: var(--faint); font: var(--type-summary); }
 .parked { margin-top: 18px; }
 .parked[hidden] { display: none; }

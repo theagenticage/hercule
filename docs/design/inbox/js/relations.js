@@ -65,6 +65,14 @@ window.Relations = (function () {
   /** Returns the references found in text that nobody has confirmed. */
   function readHints(e) { return readLinks(e).filter(function (l) { return l.claim.type === 'text' && l.other; }); }
 
+  /** Returns whether a hint runs from this thing, which is the one whose text holds the reference. */
+  function isMentioner(hint, e) { return hint.relation.from === e.id; }
+
+  /** Returns the places directly under a place, for the bigger picture. */
+  function readChildPlaces(place) {
+    return claims.filter(function (c) { return c.rel === 'part-of' && c.to === place.id && things[c.from] && !things[c.from].concern; }).map(function (c) { return things[c.from]; });
+  }
+
   /** Returns a sentence saying who claims a link. */
   function sayClaim(claim) {
     if (claim.type === 'person') return (claim.by === 'you' ? 'You' : World.PEOPLE[claim.by].short) + ' linked these';
@@ -121,5 +129,5 @@ window.Relations = (function () {
     return out;
   }
 
-  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isConfirmed: isConfirmed, sayClaim: sayClaim, linkByHand: linkByHand, drop: drop, restore: restore, buildBundles: buildBundles };
+  return { load: load, note: note, find: find, readParents: readParents, readAncestors: readAncestors, readChildren: readChildren, readHomes: readHomes, readLinks: readLinks, readConfirmed: readConfirmed, readHints: readHints, isMentioner: isMentioner, readChildPlaces: readChildPlaces, isConfirmed: isConfirmed, sayClaim: sayClaim, linkByHand: linkByHand, drop: drop, restore: restore, buildBundles: buildBundles };
 })();

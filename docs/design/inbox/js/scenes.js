@@ -78,6 +78,8 @@ window.Scenes = (function () {
     var line = handed || mine
       ? [handed ? handed + ' with agents' : '', mine ? mine + ' with you' : ''].filter(Boolean).join(' · ') + '. Their Tasks are on Work.'
       : 'Anything from outside that concerns you will land here.';
+    var small = className.indexOf('small') >= 0;
+    if (small) return '<div class="' + className + '"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg><div class="zero-n" aria-hidden="true">' + Crew.face('Hercule', { pose: 'idle', size: 52 }) + '</div><p class="zero-s">No requests left.</p></div>';
     return '<div class="' + className + '"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg>' +
       '<div class="zero-n" aria-hidden="true">' + Crew.face('Hercule', { pose: 'idle', size: 96 }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
   }
@@ -108,7 +110,7 @@ window.Scenes = (function () {
     page.innerHTML = '<div class="ib-wide"><div class="noticed"><span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' +
       '<p class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></p></div>' +
       '<header class="sec"><h2>Ongoing</h2></header><div class="fr-grid">' + connect('linear', 'Linear', 277, 'Tickets, with their projects and milestones') + connect('sentry', 'Sentry', 300, 'Errors assigned to you') + '</div></div>' +
-      '<aside class="ib-narrow"><header class="sec"><h2>Requests</h2></header><div class="fr-list">' + connect('github', 'GitHub', null, 'Reviews people ask of you') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + '</div></aside>';
+      '<aside class="ib-narrow"><header class="sec"><h2>Requests</h2></header><div class="fr-list">' + connect('github', 'GitHub', null, 'Reviews people ask of you') + connect('gmail', 'Gmail', 25, 'Mail') + '</div></aside>';
   }
 
   /** Returns the card of something raised from Intake. */

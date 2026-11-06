@@ -107,16 +107,8 @@
       ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="' + esc(flows.length === 1 ? 'Hand to ' + flows[0].name : 'Hand to an agent') + ' (H)">' +
         flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 18 }); }).join('') + '<span>' + esc(handName) + '</span></button>'
       : '';
-    return hand + '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)">Take it</button>' +
+    return hand + '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it (T)">Take it</button>' +
       '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
-  }
-
-  /** Returns the sentence of a card with its news mark, and the count of what sits behind it. */
-  function drawLine(e) {
-    var line = describeLine(e);
-    if (!line.text) return '';
-    return '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') +
-      '<span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + (line.more ? '<span class="c-more">+' + line.more + '</span>' : '') + '</div>';
   }
 
   /** Returns the wait of a card that has one. */
@@ -138,69 +130,90 @@
     return !!kind.owner && e.fields[kind.owner] === 'you';
   }
 
-  /** Returns a compact card: everything a person needs to deal with a small thing fast, in four words and a name. */
-  function drawCompactBody(e, ctx) {
-    var kind = K.KINDS[e.kind], f = e.fields;
+  /** Returns what a compact card says under its title: who, and only what is unusual, with where it belongs. */
+  function drawUnder(e) {
+    var kind = K.KINDS[e.kind], f = e.fields, line = describeLine(e);
     var status = kind.status && kind.status[f.state];
+    var latest = e.signals[e.signals.length - 1];
+    // The column's title already says these are requests, so the usual one needs only a name.
+    var isUsual = !e.task && latest && latest.key === e.concern && latest.who;
+    var said = isUsual ? W.PEOPLE[latest.who].short : line.text;
     var where = (Relations.readHomes(e)[0] || {}).title;
-    var id = fill(kind.identifier, f);
+    return '<div class="c-under">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') +
+      (status && !status.norm && !e.task ? '<span class="c-shape">' + drawShape(status, 13) + '</span>' : '') +
+      '<span class="c-roll tone-' + (isUsual ? 'plain' : line.tone) + '"><span class="c-said">' + esc(said) + '</span></span>' +
+      (where ? '<span class="c-where">' + esc(where) + (isMine(e) ? ' · yours' : '') + '</span>' : '') + '</div>';
+  }
+
+  /** Returns a compact card: a title and one line, built to be dealt with fast. */
+  function drawCompactBody(e, ctx) {
+    var kind = K.KINDS[e.kind];
     return '<div class="c-mark">' + drawMark(kind.plugin, 16) + '</div>' +
       '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
-      drawWait(e, ctx.now) +
-      '<div class="c-under">' + (status && !status.norm ? '<span class="c-shape">' + drawShape(status, 13) + '</span>' : '') + drawLine(e) + '</div>' +
-      '<div class="c-where">' + esc(id) + (where && where !== id ? ' · ' + esc(where) : '') + (isMine(e) ? ' · yours' : '') + '</div>' +
+      drawWait(e, ctx.now) + drawUnder(e) +
       '<div class="c-acts">' + drawActs(e) + '</div>';
   }
 
-  /** Returns a rich card: status first, then the title, then what it is part of and its facts. */
+  /** Returns what a row says under its title: where it sits below the place it is shown under, its facts, and the latest thing that happened. */
+  function drawContext(e, ctx) {
+    var kind = K.KINDS[e.kind], f = e.fields, parts = [];
+    var near = Relations.readParents(e).filter(function (p) { return p !== ctx.place && (p.kind === kind.home || p.kind === kind.section); });
+    near.forEach(function (p) { parts.push(esc(p.title) + (p.fields.target ? ', ' + esc(p.fields.target) : '')); });
+    kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).forEach(function (x) { parts.push(FORMS[x.form](f[x.field], x)); });
+    var line = describeLine(e);
+    var latest = e.signals[e.signals.length - 1];
+    var news = line.text ? '<span class="c-news tone-' + line.tone + '">' + esc(line.text) + (latest && !e.task ? ' <small>' + sayWait(latest.at, ctx.now) + '</small>' : '') + '</span>' : '';
+    return '<div class="c-context">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + parts.map(function (p) { return '<span>' + p + '</span>'; }).join('') + news + '</div>';
+  }
+
+  /** Returns a row of lasting work: status in a fixed place at the left, because here status is the point, then the title and what happened. */
   function drawRichBody(e, ctx) {
     var kind = K.KINDS[e.kind], f = e.fields;
-    var bars = kind.facts.filter(function (x) { return x.form === 'bars' && f[x.field]; }).map(function (x) { return FORMS.bars(f[x.field]); }).join('');
-    var facts = kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).map(function (x) { return '<span class="fact">' + FORMS[x.form](f[x.field], x) + '</span>'; });
-    // What the card is part of, below the place it is shown under, so the block's head is never repeated on every card.
-    var section = kind.section && Relations.readParents(e).filter(function (p) { return p.kind === kind.section; }).map(function (p) { return esc(p.title) + (p.fields.target ? ', ' + esc(p.fields.target) : ''); });
-    var under = (section || []).concat(facts);
-    return '<div class="c-head"><span class="c-mark">' + drawMark(kind.plugin, 16) + '</span>' + drawStatus(e, 15) + bars + '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span>' + drawWait(e, ctx.now) + '</div>' +
-      '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
-      drawLine(e) +
-      (under.length ? '<div class="c-facts">' + under.join('<i>·</i>') + '</div>' : '') +
+    var hasMark = ctx.place && ctx.place.kind && K.KINDS[ctx.place.kind].plugin === kind.plugin;
+    return '<div class="c-rail">' + (hasMark ? '' : '<span class="c-mark">' + drawMark(kind.plugin, 15) + '</span>') + drawStatus(e, 15) + '</div>' +
+      '<div class="c-main"><h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' + drawContext(e, ctx) + '</div>' +
+      '<div class="c-end"><span class="c-id">' + esc(fill(kind.identifier, f)) + '</span>' + drawWait(e, ctx.now) + '</div>' +
       '<div class="c-acts">' + drawActs(e) + '</div>';
   }
 
-  /** Returns the HTML inside a card, in the shape its kind declares. `ctx` holds the world's clock. */
+  /** Returns the HTML inside a card, in the shape its kind declares. `ctx` holds the world's clock and the place it is shown under. */
   function drawCardBody(e, ctx) { return K.KINDS[e.kind].card === 'compact' ? drawCompactBody(e, ctx) : drawRichBody(e, ctx); }
 
-  /** Returns a thing that rides on a card, as one row of the sheet tucked under it. The row says what the part asks, if it asks anything. */
+  /** Returns a thing that rides on a row. A part that asks something says what it asks and has its moves. Anything else is one quiet line. */
   function drawPart(part, ctx) {
     if (part.restricted) {
-      return '<div class="part part--closed" title="' + esc(Relations.sayClaim(part.link.claim)) + '"><span class="p-mark">' + Crew.icon('lock', 13) + '</span><span class="p-title">Something you do not have access to</span></div>';
+      var source = readPluginByName(part.link.claim.by);
+      return '<div class="part part--closed" title="' + esc(Relations.sayClaim(part.link.claim)) + '"><span class="p-mark">' + drawMark(source, 14) + '</span><span class="p-title">You cannot open this</span></div>';
     }
     var e = part.e, kind = K.KINDS[e.kind], line = describeLine(e);
     var status = kind.status && kind.status[e.fields.state];
-    // A part that asks something of the person says what it asks. The rest say how they stand.
-    var asks = e.concern && !e.task;
-    var first = asks ? e.signals.filter(function (s) { return s.key === e.concern; })[0] : null;
-    var said = first ? sayReason(kind, first).text : (asks ? line.text : (e.task ? line.text : (status ? status.word : '')));
-    var news = asks && first && line.text !== said ? line.text : '';
-    return '<div class="part' + (asks ? ' is-asking' : '') + '" role="button" data-id="' + e.id + '" tabindex="-1" title="' + esc(Relations.sayClaim(part.link.claim)) + '">' +
-      '<span class="p-mark">' + drawMark(kind.plugin, 14) + '</span>' +
+    var title = esc(Relations.sayClaim(part.link.claim));
+    var mark = '<span class="p-mark">' + drawMark(kind.plugin, 14) + '</span>';
+    var fresh = e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '';
+    if (!e.concern || e.task) {
+      return '<div class="part part--quiet" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark + '<span class="p-title">' + esc(e.title) + '</span><span class="p-said">' + fresh + (e.task ? esc(line.text) : (status ? esc(status.word) : '')) + '</span></div>';
+    }
+    // The ask comes first. What has happened since follows, with its shape beside its words.
+    var ask = e.signals.filter(function (s) { return s.key === e.concern; })[0];
+    var said = isMine(e) ? 'Yours' : (ask ? sayReason(kind, ask).text : line.text);
+    var news = line.text && line.text !== said ? '<span class="p-news tone-' + line.tone + '">' + (status && !status.norm ? drawShape(status, 12) : '') + esc(line.text) + '</span>' : '';
+    return '<div class="part is-asking" role="button" data-id="' + e.id + '" tabindex="-1" title="' + title + '">' + mark +
       '<span class="p-title">' + esc(e.title) + '</span>' + drawWait(e, ctx.now) +
-      '<span class="p-line">' + (e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '') + (status && !status.norm ? drawShape(status, 12) : '') + '<span class="p-said">' + esc(said) + '</span>' + (news ? '<span class="p-news tone-' + line.tone + '">' + esc(news) + '</span>' : '') + '</span>' +
-      (asks ? '<span class="c-acts">' + drawActs(e) + '</span>' : '') + '</div>';
+      '<span class="p-line">' + fresh + '<span class="p-said">' + esc(said) + '</span>' + news + '</span>' +
+      '<span class="c-acts">' + drawActs(e) + '</span></div>';
   }
 
-  /** Returns who holds the card now: a colleague behind the top edge with its paws on it, as on Work, or the person's own tab. */
+  /** Returns who holds the card now. They stand at the end of its first line, in the place of the wait: rows have no free edge. */
   function drawHolder(e) {
     if (!e.task) return '';
-    if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab"></i></span>';
-    return '<span class="card-holder"><span class="card-head" data-pose="working">' + Crew.peek(e.task.by, { pose: 'working', size: 30, crop: 34 }) + '</span></span>' +
-      '<span class="card-paws" data-pose="working" style="--hue:var(--hue-' + Crew.lookFor(e.task.by).hue + ')"><i></i><i></i></span>';
+    var title = esc(e.task.by === 'you' ? 'You have it' : e.task.by + ' has it');
+    return '<span class="c-holder" title="' + title + '"><span class="c-holder-in">' + (e.task.by === 'you' ? drawPerson('you', 18) : Crew.face(e.task.by, { pose: 'working', size: 22 })) + '</span></span>';
   }
 
   /** Returns the class list of a card for its kind and its state. */
   function cardClasses(e) {
     var kind = K.KINDS[e.kind];
-    return ['card', 'card--' + kind.card, 'paper-' + kind.paper].join(' ');
+    return ['card', 'card--' + kind.card].join(' ');
   }
 
   /** Returns what a screen reader says for a card: the kind, the title, why it is here, and how long it has waited. */
@@ -216,10 +229,10 @@
    */
   function redrawBody(el, e, ctx) {
     [].slice.call(el.children).forEach(function (c) {
-      if (!c.matches('.card-stock, .card-holder, .card-paws')) c.remove();
+      if (!c.matches('.card-stock, .c-holder')) c.remove();
     });
     el.insertAdjacentHTML('beforeend', drawCardBody(e, ctx));
-    if (!e.task) [].forEach.call(el.querySelectorAll('.card-holder, .card-paws'), function (c) { c.remove(); });
+    if (!e.task) [].forEach.call(el.querySelectorAll('.c-holder'), function (c) { c.remove(); });
     if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
   }
 
@@ -232,8 +245,14 @@
     el.tabIndex = -1;
     el.setAttribute('role', 'listitem');
     el.setAttribute('aria-label', sayCard(e));
-    el.innerHTML = drawHolder(e) + '<i class="card-stock"></i>' + drawCardBody(e, ctx);
+    el.innerHTML = drawHolder(e) + (K.KINDS[e.kind].card === 'compact' ? '<i class="card-stock"></i>' : '') + drawCardBody(e, ctx);
     return el;
+  }
+
+  /** Returns the plugin of a name, for a claim that says who reported something. */
+  function readPluginByName(name) {
+    var id = Object.keys(K.KINDS).filter(function (k) { return K.KINDS[k].plugin.name === name; })[0];
+    return id ? K.KINDS[id].plugin : { name: name, mark: 'link', hue: null };
   }
 
   /** Returns the plugin that owns a mark. */
@@ -258,13 +277,13 @@
       '<div class="c-acts pl-acts">' + (c.task
         ? '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
         : '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 18 }); }).join('') + '<span>Hand to…</span></button>' +
-          '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">Take it</button>' +
+          '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it (T)">Take it</button>' +
           '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button>') + '</div>' +
       '</div>';
   }
 
   window.Card = {
-    createCard: createCard, drawPart: drawPart, drawStatus: drawStatus, drawLine: drawLine, isMine: isMine, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, drawContext: drawContext, drawPart: drawPart, drawStatus: drawStatus, isMine: isMine, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();

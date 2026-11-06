@@ -12,7 +12,7 @@ window.Drag = (function () {
       return '<button class="rail-t" data-target="hand" data-i="' + i + '">' + Crew.face(w.name, { pose: 'idle', size: 40 }) + '<span>' + Card.esc(w.name) + '</span></button>';
     }).join('');
     rail.innerHTML = who +
-      '<button class="rail-t" data-target="take">' + Card.drawPerson('you', 40) + '<span>Take it on</span></button>' +
+      '<button class="rail-t" data-target="take">' + Card.drawPerson('you', 40) + '<span>Take it</span></button>' +
       '<i class="rail-rule"></i>' +
       '<button class="rail-t rail-t--plain" data-target="dismiss"><i class="rail-x">' + Crew.icon('close', 18) + '</i><span>Dismiss</span></button>';
   }

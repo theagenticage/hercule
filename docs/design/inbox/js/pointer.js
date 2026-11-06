@@ -20,6 +20,12 @@ window.Pointer = (function () {
   /** Lets go of a card that is leaving. */
   function forget(el) { if (hover === el) hover = null; }
 
+  /** Tells a card how wide its moves are, so its words can end before them. */
+  function measureActs(el) {
+    var acts = el.querySelector('.c-acts');
+    if (acts) el.style.setProperty('--acts-w', [].reduce.call(acts.children, function (sum, b) { return sum + b.offsetWidth + 2; }, 6) + 'px');
+  }
+
   /** Takes away a thing's new mark, once the person has seen what landed on it. */
   function clearFresh(el) {
     var e = App.findEntity(el.dataset.id);
@@ -33,6 +39,7 @@ window.Pointer = (function () {
     if (!el) { Keys.setCurrent(null, 'pointer'); return; }
     if (el.classList.contains('is-source')) return;
     el.classList.add('is-hover');
+    measureActs(el);
     clearFresh(el);
     Keys.setCurrent(el.dataset.id, 'pointer');
   }
@@ -50,6 +57,7 @@ window.Pointer = (function () {
     hover = el || null;
     if (!el) { Keys.setCurrent(null, 'pointer'); return; }
     el.classList.add('is-hover');
+    measureActs(el);
     Keys.setCurrent(el.dataset.id, 'pointer');
   }
 
@@ -99,5 +107,5 @@ window.Pointer = (function () {
     });
   }
 
-  return { start: start, setHover: setHover, clearHover: clearHover, handOver: handOver, forget: forget, noteKeys: noteKeys, reread: reread, takeBack: takeBack, clearFresh: clearFresh, readHover: function () { return hover; } };
+  return { start: start, setHover: setHover, clearHover: clearHover, handOver: handOver, forget: forget, noteKeys: noteKeys, reread: reread, measureActs: measureActs, takeBack: takeBack, clearFresh: clearFresh, readHover: function () { return hover; } };
 })();

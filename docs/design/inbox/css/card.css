@@ -1,59 +1,61 @@
-/* The two shapes of card. A rich card has room for status, place and what rides on it. A compact card is built to be dealt with fast.
-   Both are the shared .card and .card-stock of Work, so height means the same thing on both pages. */
+/* The two shapes of card. Lasting work is a row on the surface of its place: status at the left, then the title and what happened.
+   A request is a small card of its own, a title and one line. The shape says how much attention a thing deserves. */
 
 .card { display: block; min-height: 0; color: var(--ink); cursor: default; outline: none; }
-.card.paper-manila { --stock: var(--stock-manila); }
-.card.paper-ledger { --stock: var(--stock-ledger); }
-.card.paper-sage { --stock: var(--stock-sage); }
-.card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
-.card.is-hover > .card-stock { box-shadow: var(--h-hover); }
-.card.is-focus > .card-stock, .card:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
-
 .mark { display: inline-grid; place-items: center; color: var(--mark-ink); }
 .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
 
-/* A rich card: status first, because on lasting work it is the point. */
-.card--rich { position: relative; padding: 12px 14px 12px; }
-.c-head { position: relative; display: flex; align-items: center; gap: 8px; min-height: 20px; transition: opacity var(--m-quick) var(--m-ease); }
+/* A row of lasting work. */
+.card--rich { position: relative; display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; padding: 11px 16px; }
+.card--rich.is-hover { background: var(--hover); }
+.card--rich.is-focus, .card--rich:focus-visible { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.c-rail { display: flex; align-items: center; gap: 7px; min-width: 0; height: 20px; }
 .c-mark { display: inline-grid; place-items: center; flex: none; }
-.c-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--ink); white-space: nowrap; }
-.c-id { margin-left: auto; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.card--rich .c-title { margin: 7px 0 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.card--rich .c-line { margin-top: 5px; }
-.c-facts { margin-top: 4px; color: var(--faint); font: var(--type-summary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-facts i { margin: 0 6px; font-style: normal; }
-.c-head .f-bars { margin-left: 2px; }
+.c-status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: var(--w-medium) var(--t-13) / 20px var(--font-ui); color: var(--ink); white-space: nowrap; }
+.c-status > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.card--rich .c-title { margin: 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.c-context { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin-top: 2px; color: var(--muted); font: var(--type-summary); }
+.c-context > span + span::before { content: "·"; margin-right: 10px; color: var(--faint); }
+.c-news small { color: var(--faint); font: inherit; font-variant-numeric: tabular-nums; }
+.c-news.tone-bad { color: var(--fail-ink); }
+.c-news.tone-good { color: var(--ok); }
+.c-end { display: flex; align-items: center; gap: 10px; height: 20px; }
+.c-id { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; transition: opacity var(--m-quick) var(--m-ease); }
 
-.c-line { display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; color: var(--muted); font: var(--type-summary); }
-.c-line.tone-you { color: var(--ink); }
-.c-line.tone-bad { color: var(--fail-ink); }
-.c-line.tone-good { color: var(--ok); }
-.c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
-.c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
-
-.c-pace { flex: none; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); font-variant-numeric: tabular-nums; }
+.c-pace { flex: none; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); font-variant-numeric: tabular-nums; transition: opacity var(--m-quick) var(--m-ease); }
 .c-pace[data-ramp="fresh"] { color: var(--wait-fresh); }
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
 .c-pace[data-ramp="overdue"] { color: var(--wait-over); font-weight: var(--w-bold); }
 
-/* A compact card: logo, title, wait, and one line under it. */
-.card--compact { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 8px; padding: 9px 12px 9px 10px; }
+/* A request: a title and one line. It is the small card, built to be dealt with fast. */
+.card--compact { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; padding: 9px 12px 9px 10px; }
 .card--compact .c-mark { grid-column: 1; grid-row: 1; height: 18px; }
 .card--compact .c-title { grid-column: 2; grid-row: 1; margin: 0; font: var(--type-card); letter-spacing: -0.003em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .card--compact .c-pace { grid-column: 3; grid-row: 1; line-height: 18px; }
-.card--compact .c-under { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 2px; }
-.card--compact .c-shape { display: inline-flex; flex: none; }
-.card--compact .c-where { grid-column: 2 / -1; grid-row: 3; color: var(--faint); font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity var(--m-quick) var(--m-ease); }
+.card--compact > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
+.card--compact.is-hover > .card-stock { box-shadow: var(--h-hover); }
+.card--compact.is-focus > .card-stock, .card--compact:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
+.c-under { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; margin-top: 1px; color: var(--muted); font: var(--type-summary); }
+.c-shape { display: inline-flex; flex: none; }
+.c-roll { position: relative; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.c-roll.tone-bad { color: var(--fail-ink); }
+.c-roll.tone-good { color: var(--ok); }
+.c-roll.tone-you { color: var(--ink); }
+.c-where { flex: 0 1000 auto; min-width: 0; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-where::before { content: "·"; margin-right: 5px; }
+.c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
 
-/* The moves: on a rich card they take the head line, on a compact card the foot line, so what it says stays readable. */
+/* The moves. On a row they take the end of the first line. On a request they take the end of the line under the title, and the
+   words there end with an ellipsis, so the title and the reason stay readable. */
 .c-acts { position: absolute; display: flex; align-items: center; justify-content: flex-end; gap: 2px; opacity: 0; pointer-events: none; transition: opacity var(--m-quick) var(--m-ease); }
-.card--rich .c-acts { top: 8px; right: 8px; }
-.card--compact .c-acts { left: 34px; right: 6px; bottom: 4px; justify-content: flex-start; }
+.card--rich .c-acts { top: 8px; right: 10px; }
+.card--compact .c-acts { right: 6px; bottom: 4px; }
 .card.is-hover .c-acts, .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
-.card--rich.is-hover .c-id, .card--rich.is-focus .c-id, .card--rich.is-hover .c-head > .c-pace, .card--rich.is-focus .c-head > .c-pace { opacity: 0; }
-.card--compact.is-hover .c-where, .card--compact.is-focus .c-where { opacity: 0; }
+.card--rich.is-hover .c-end, .card--rich.is-focus .c-end { opacity: 0; }
+.card--rich.is-hover .c-title, .card--rich.is-focus .c-title { margin-right: var(--acts-w, 190px); -webkit-line-clamp: 1; }
+.card--compact.is-hover .c-under, .card--compact.is-focus .c-under { margin-right: var(--acts-w, 190px); }
+.card--compact.is-hover .c-where, .card--compact.is-focus .c-where { display: none; }
 
 .c-act {
   flex: none;
@@ -87,45 +89,58 @@
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
 
-/* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
-.card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
+/* Someone holds it now: they stand at the end of its first line, in the place of the wait, and the words step back. */
 .card[data-height="flat"] .c-title { color: color-mix(in oklab, var(--ink) 74%, var(--muted)); }
-.card[data-height="flat"] .c-line { color: var(--muted); }
 .card[data-height="flat"] .c-pace { display: none; }
-.card--compact > .card-holder { top: auto; }
+.card--compact[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
+.c-holder { position: absolute; top: 8px; right: 12px; z-index: 1; width: 22px; height: 22px; overflow: hidden; }
+.card--rich > .c-holder { top: 10px; right: 16px; }
+.card--rich:has(> .c-holder) .c-end { margin-right: 30px; }
+.card--compact:has(> .c-holder) .c-title { margin-right: 26px; }
+.c-holder-in { display: block; line-height: 0; }
+.c-holder .person { margin: 2px 0 0 2px; }
 
-/* What rides on a card: a sheet tucked under it, one row for each linked thing. It is a stack with its reason showing: every row is
-   there to read, the card opens the card, and a row opens that row's thing. */
+/* A bundle is a thing and what rides on it. Rows on a place are split by a hairline. */
 .bundle { position: relative; min-width: 0; }
-.tucked { position: relative; z-index: 0; margin: -10px 8px 0; padding: 14px 4px 4px; border-radius: 0 0 var(--card-r) var(--card-r); background: var(--stock-flat); box-shadow: inset 0 0 0 1px var(--stock-rim); }
-.bundle .card { z-index: 1; }
-.part { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 6px; row-gap: 1px; width: 100%; padding: 5px 8px 5px 6px; border-radius: var(--r-xs); text-align: left; color: var(--muted); font: var(--type-summary); outline: none; cursor: default; }
+.b-work > .bundle + .bundle, .b-work > .echo { border-top: 1px solid var(--line-soft); }
+
+/* What rides on a card: the things directly linked to it, set in under its title. The reason shows, every row is there to read, the
+   card opens the card, and a row opens that row's thing. */
+.tucked { position: relative; display: flex; flex-direction: column; gap: 2px; margin: -5px 0 0 136px; padding: 0 12px 10px 16px; }
+#requests .tucked { margin: 2px 8px 0; padding: 6px 4px 4px; }
+.part { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 6px; width: 100%; padding: 3px 4px; margin-left: -4px; border-radius: var(--r-xs); text-align: left; color: var(--muted); font: var(--type-summary); outline: none; cursor: default; }
 .part[data-id]:hover, .part.is-hover { background: var(--hover); }
 .part.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .p-mark { display: inline-grid; place-items: center; height: 16px; }
-.p-title { min-width: 0; color: var(--ink); font-weight: var(--w-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.part--closed { color: var(--faint); }
+.p-title { min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.part.is-asking .p-title { font-weight: var(--w-medium); }
+.part--quiet { grid-template-columns: 16px minmax(0, 1fr) auto; }
+.part--quiet .p-title { color: var(--muted); }
+.part--quiet .p-said { flex: none; color: var(--faint); white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.part--closed { padding: 3px 4px; color: var(--faint); }
 .part--closed .p-title { color: var(--faint); }
-.part--closed .p-mark { color: var(--faint); }
-.p-line { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
-.p-said { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.p-news { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.p-news::before { content: "·"; margin-right: 5px; color: var(--faint); }
+.p-line { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.p-line .p-said { flex: 0 1 auto; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.p-news { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .p-news.tone-bad { color: var(--fail-ink); }
-.p-news.tone-you { color: var(--ink); }
+.p-news.tone-good { color: var(--ok); }
 .part .c-pace { grid-column: 3; grid-row: 1; }
-.part .c-acts { right: 4px; bottom: 1px; top: auto; }
+.part .c-acts { top: 0; right: 4px; }
 .part.is-hover .c-acts, .part.is-focus .c-acts { opacity: 1; pointer-events: auto; }
-.part.is-hover .p-line, .part.is-focus .p-line { opacity: 0; }
+.part.is-hover .c-pace, .part.is-focus .c-pace { opacity: 0; }
+.part.is-hover .p-title, .part.is-focus .p-title { margin-right: var(--acts-w, 190px); }
 
-/* A reference found in text: only a hint, until a person says so. */
-.hint { display: flex; align-items: center; gap: 5px; margin: 4px 2px 0; color: var(--faint); font: var(--type-meta); }
+/* A reference found in text: only a hint, until a person says so. It sits inside what it belongs to. */
+.hint { display: flex; align-items: center; gap: 5px; margin: -5px 0 0 136px; padding: 0 16px 10px 16px; color: var(--faint); font: var(--type-meta); }
+#requests .hint { margin: 0; padding: 3px 12px 0 34px; }
 .hint b { font-weight: var(--w-medium); color: var(--muted); opacity: 0; transition: opacity var(--m-quick); }
 .hint:hover, .hint:focus-visible { color: var(--muted); }
 .hint:hover b, .hint:focus-visible b { opacity: 1; color: var(--ink); }
 
 /* A card held over another shows the two will be linked. */
-.card.is-link-target > .card-stock { box-shadow: inset 0 0 0 1.5px var(--accent), var(--h-hover); }
+.card.is-link-target { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.card--compact.is-link-target { box-shadow: none; }
+.card--compact.is-link-target > .card-stock { box-shadow: inset 0 0 0 1.5px var(--accent), var(--h-hover); }
 
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
@@ -171,8 +186,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
   min-height: 60px;
-  grid-column: 1 / -1;
-  margin: 14px 0 24px;
+  margin: 0 0 26px;
   color: var(--ink);
 }
 .noticed[hidden] { display: none; }
@@ -184,8 +198,8 @@
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   column-gap: 10px;
-  align-content: center;
-  padding: 0 12px;
+  align-content: start;
+  padding: 10px 12px;
   border-radius: var(--card-r);
   color: var(--ink);
   cursor: default;
@@ -193,16 +207,14 @@
   transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
 .plaque.is-hover { background: var(--hover); }
-.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 22px; height: 20px; }
+.pl-marks { position: relative; grid-row: 1 / 3; align-self: start; width: 22px; height: 20px; }
 .pl-mark { display: block; line-height: 0; }
 .pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--stock); box-shadow: 0 0 0 1px var(--stock-rim); }
 .pl-title {
   margin: 0;
   font: var(--type-card);
   letter-spacing: -0.003em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-wrap: pretty;
 }
 .pl-why {
   color: var(--muted);

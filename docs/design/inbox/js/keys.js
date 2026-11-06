@@ -41,6 +41,7 @@ window.Keys = (function () {
     Pointer.clearHover();
     marked = id;
     el.classList.add('is-focus');
+    Pointer.measureActs(el);
     Pointer.clearFresh(el);
     el.focus({ preventScroll: true });
   }

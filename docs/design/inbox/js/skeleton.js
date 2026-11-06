@@ -18,7 +18,7 @@ window.Skeleton = (function () {
       if (Motion.isReduced()) return;
       parts().forEach(function (part, si) {
         [].forEach.call(part.querySelectorAll('.plaque, .card'), function (card, ri) {
-          var words = card.querySelectorAll('.c-title, .c-line, .c-pace, .c-head, .c-where, .c-under, .c-mark, .pl-title, .pl-why, .pl-marks');
+          var words = card.querySelectorAll('.c-title, .c-pace, .c-rail, .c-end, .c-context, .c-under, .c-mark, .pl-title, .pl-why, .pl-marks');
           [].forEach.call(words, function (w) {
             w.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, delay: si * 60 + Math.min(ri, 16) * 14, fill: 'backwards', easing: 'ease-out' });
           });

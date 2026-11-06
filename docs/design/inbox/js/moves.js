@@ -39,7 +39,7 @@ window.Moves = (function () {
     var row = readWorkRow();
     if (!row) return Promise.resolve();
     if (Motion.isReduced()) { receive(row); return Promise.resolve(); }
-    var mark = el.querySelector('.c-mark .mark, .pl-mark');
+    var mark = el.querySelector('.c-mark .mark, .pl-mark') || el.closest('.block, .bundle').querySelector('.mark');
     var target = row.querySelector('.ic').getBoundingClientRect();
     // With the sidebar hidden, Overview has no place on screen to fly to.
     if (!target.width) return Promise.resolve();
@@ -64,25 +64,18 @@ window.Moves = (function () {
     var wait = el.querySelector('.c-pace');
     if (wait) Motion.animate(wait, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
     // An undo may still be taking the last holder away.
-    [].forEach.call(el.querySelectorAll('.card-holder, .card-paws'), function (x) { x.remove(); });
+    [].forEach.call(el.querySelectorAll('.c-holder'), function (x) { x.remove(); });
     el.insertAdjacentHTML('afterbegin', Card.drawHolder(e));
-    var who = el.querySelector('.card-holder');
-    var paws = el.querySelector('.card-paws');
+    var who = el.querySelector('.c-holder-in');
     var reduced = Motion.isReduced();
-    if (!reduced) {
-      Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
-      if (paws) Motion.body(paws).set({ o: 0, y: 4 }).to({ o: 1, y: 0 }, 'hand', { delay: 30 });
-    }
+    if (!reduced) Motion.body(who).set({ y: 22 }).to({ y: 0 }, 'hand');
     setTimeout(function () {
       if (!e.task) return;
-      var line = el.querySelector('.c-line');
+      var line = el.querySelector('.c-under, .c-context');
       var old = line && line.cloneNode(true);
       App.redrawCard(e);
       if (old) Landing.rollLine(el, old);
-      // The colleague takes the weight: on one frame the card sinks under the handing over, and whoever took it dips and recovers.
-      Motion.knock(el, 110);
       Motion.knock(who, 150);
-      if (paws) Motion.knock(paws, 110);
       flyToWork(el);
       showToast(said, undoWord);
       noteLast();
@@ -195,21 +188,21 @@ window.Moves = (function () {
       if (!el) { Nav.hold(false); App.layOut(); return; }
       // Taken again while the mark flew home: the new hand-off owns the card now.
       if (e.task) { Nav.hold(false); return; }
-      var stands = [].slice.call(el.querySelectorAll('.card-holder, .card-paws'));
-      var line = el.querySelector('.c-line');
+      var stands = [].slice.call(el.querySelectorAll('.c-holder'));
+      var line = el.querySelector('.c-under, .c-context');
       var old = line && line.cloneNode(true);
       stands.forEach(function (x) { x.remove(); });
       App.redrawCard(e);
       stands.forEach(function (x) {
         el.insertBefore(x, el.firstChild);
-        Motion.body(x).to(x.classList.contains('card-paws') ? { o: 0 } : { y: 26 }, 'travel', { done: function () { x.remove(); } });
+        Motion.body(x.firstChild).to({ y: 22 }, 'travel', { done: function () { x.remove(); } });
       });
       if (old) Landing.rollLine(el, old);
       Motion.knock(el, -90);
       Nav.hold(false);
       App.layOut();
     };
-    var row = readWorkRow(), mark = el && el.querySelector('.c-mark .mark');
+    var row = readWorkRow(), mark = el && (el.querySelector('.c-mark .mark') || el.closest('.block, .bundle').querySelector('.mark'));
     var from = row && row.querySelector('.ic').getBoundingClientRect();
     if (!el || !row || !mark || !from.width || Motion.isReduced()) { stand(); return; }
     Motion.fly('<span class="token">' + mark.outerHTML + '</span>', from, mark.getBoundingClientRect(), { ms: 240, grow: true }).then(stand);

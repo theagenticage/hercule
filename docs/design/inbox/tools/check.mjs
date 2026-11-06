@@ -141,7 +141,7 @@ await check("taking a card again during an undo keeps who holds it", async () =>
   const p = await open("");
   await p.evaluate(() => Keys.focus("pr-6204"));
   await p.keyboard.press("t"); await p.waitForTimeout(200); await p.keyboard.press("Control+z"); await p.waitForTimeout(150); await p.keyboard.press("t"); await p.waitForTimeout(1200);
-  const holders = await p.evaluate(() => document.querySelectorAll('.card[data-id="pr-6204"] .card-holder').length);
+  const holders = await p.evaluate(() => document.querySelectorAll('.card[data-id="pr-6204"] .c-holder').length);
   assert(holders === 1, `${holders} holders drawn`);
   return p;
 });
@@ -182,7 +182,7 @@ await check("a carry raises the rail, and a drop on a card links the two", async
   await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x - 30, a.y + 40, { steps: 4 }); await p.waitForTimeout(450);
   const o = await p.evaluate(() => getComputedStyle(document.getElementById("rail")).opacity);
   assert(Number(o) > 0.9, `the rail is at opacity ${o}`);
-  const t = await p.evaluate(() => { const r = document.querySelector('.card[data-id="ln-OPS-44"]').getBoundingClientRect(); return { x: r.left + 90, y: r.top + 20 }; });
+  const t = await p.evaluate(() => { const r = document.querySelector('.card[data-id="ln-PLAT-131"]').getBoundingClientRect(); return { x: r.left + 90, y: r.top + 20 }; });
   await p.mouse.move(t.x, t.y, { steps: 8 }); await p.waitForTimeout(200);
   await p.mouse.up(); await p.waitForTimeout(700);
   assert(await p.evaluate(() => !!document.querySelector('.bundle .part[data-id="pr-6213"]')), "the drop did not link them");

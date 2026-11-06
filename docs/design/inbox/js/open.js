@@ -28,7 +28,7 @@ window.Open = (function () {
       var r = Card.sayReason(K[x.e.kind], x.s);
       var other = x.e !== e;
       return '<li class="o-signal' + (x === latest ? ' is-latest' : '') + (other ? ' is-linked' : '') + ' tone-' + r.tone + '">' + (other ? '<span class="o-from" title="' + Card.esc(x.e.title) + '">' + Card.drawMark(K[x.e.kind].plugin, 12) + '</span>' : '<span class="o-dot"></span>') +
-        '<span class="o-text">' + Card.esc(r.text) + (x.s.note ? '<q>' + Card.esc(x.s.note) + '</q>' : '') + '</span>' +
+        '<span class="o-text">' + Card.esc(r.text) + (other ? ' <small>' + Card.esc(Card.fill(K[x.e.kind].identifier, x.e.fields)) + '</small>' : '') + (x.s.note ? '<q>' + Card.esc(x.s.note) + '</q>' : '') + '</span>' +
         '<time>' + saySince(x.s.at, now) + '</time></li>';
     }).join('') + '</ol>';
   }
@@ -58,7 +58,7 @@ window.Open = (function () {
 
   /** Returns one linked thing as a row. Who claims the link stays quiet until the row is reached for. */
   function drawLinkRow(l) {
-    if (!l.other) return '<li class="o-link o-link--closed">' + Crew.icon('lock', 13) + '<span class="o-link-t">Something you do not have access to</span><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small></li>';
+    if (!l.other) return '<li class="o-link o-link--closed">' + Crew.icon('lock', 13) + '<span class="o-link-t">You cannot open this</span><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small></li>';
     var kind = K[l.other.kind], status = kind.status && kind.status[l.other.fields.state];
     return '<li class="o-link"><button class="o-link-go" data-walk="' + l.other.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(l.other.title) + '</span>' +
       (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small>' +
@@ -75,14 +75,26 @@ window.Open = (function () {
       '<div class="o-add"><input class="o-find" data-find placeholder="Link something: search by title or number" aria-label="Link something"><ul class="o-found" data-found hidden></ul></div></section>';
   }
 
-  /** Returns the things under a place that concern the person, for the bigger picture. */
+  /** Returns one thing that concerns the person, as a row of a place's details. */
+  function drawYours(c) {
+    var kind = K[c.kind], status = kind.status && kind.status[c.fields.state];
+    return '<li class="o-link"><button class="o-link-go" data-walk="' + c.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(c.title) + '</span>' + (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button></li>';
+  }
+
+  /** Returns the bigger picture under a place: the places inside it with how they stand, and under each what concerns the person. */
   function drawConcerns(e) {
-    var list = Relations.readChildren(e);
-    if (!list.length) return '';
-    return '<section class="o-sec o-links"><h3 class="o-h">What concerns you here</h3><ul>' + list.map(function (c) {
-      var kind = K[c.kind], status = kind.status && kind.status[c.fields.state];
-      return '<li class="o-link"><button class="o-link-go" data-walk="' + c.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(c.title) + '</span>' + (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button></li>';
-    }).join('') + '</ul></section>';
+    var inner = Relations.readChildPlaces(e), shown = {};
+    var rows = inner.map(function (p) {
+      var mine = Relations.readChildren(p);
+      mine.forEach(function (c) { shown[c.id] = true; });
+      var status = K[p.kind].status && K[p.kind].status[p.fields.state];
+      return '<li class="o-inner"><button class="o-inner-go" data-walk="' + p.id + '"><span class="o-inner-t">' + Card.esc(p.title) + '</span>' + (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') +
+        (p.progress ? '<span class="o-inner-n">' + p.progress.done + ' of ' + p.progress.total + '</span>' : '') + (p.fields.target ? '<span class="o-inner-n">' + Card.esc(p.fields.target) + '</span>' : '') + '</button>' +
+        (mine.length ? '<ul>' + mine.map(drawYours).join('') + '</ul>' : '') + '</li>';
+    });
+    var rest = Relations.readChildren(e).filter(function (c) { return !shown[c.id]; });
+    if (!rows.length && !rest.length) return '';
+    return '<section class="o-sec o-links"><h3 class="o-h">Yours here</h3><ul>' + rows.join('') + rest.map(drawYours).join('') + '</ul></section>';
   }
 
   function drawLedger(e) {
@@ -94,7 +106,7 @@ window.Open = (function () {
       return '<button class="o-row' + (i === 0 ? ' is-first' : '') + '" data-act="hand-to" data-i="' + i + '"><span class="o-label">' + Crew.face(w.name, { pose: 'idle', size: 22 }) + Card.esc(w.name) + '</span><span class="o-says">' + Card.esc(w.says) + '</span><kbd>' + (flows.length === 1 ? 'H' : i + 1) + '</kbd></button>';
     }).join('');
     return '<div class="o-ledger">' + rows +
-      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run.</span><kbd>T</kbd></button>' +
+      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it</span><span class="o-says">You do it. No agent runs.</span><kbd>T</kbd></button>' +
       '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Dismiss</span><span class="o-says">Takes it off your Inbox. ' + Card.esc(K[e.kind].plugin.name) + ' is not told.</span><kbd>E</kbd></button>' +
       '</div>';
   }
@@ -132,7 +144,7 @@ window.Open = (function () {
       (head || '<div class="o-ledger">' + flows.map(function (w, i) {
         return '<button class="o-row' + (i === 0 ? ' is-first' : '') + '" data-act="hand-to" data-i="' + i + '"><span class="o-label">' + Crew.face(w.name, { pose: 'idle', size: 22 }) + Card.esc(w.name) + '</span><span class="o-says">' + Card.esc(w.says) + '</span><kbd>' + (i + 1) + '</kbd></button>';
       }).join('') +
-      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run.</span><kbd>T</kbd></button>' +
+      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it</span><span class="o-says">You do it. No agent runs.</span><kbd>T</kbd></button>' +
       '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule should not have raised this.</span><kbd>E</kbd></button></div>');
   }
 
@@ -229,7 +241,7 @@ window.Open = (function () {
     keyed = !!byKeyboard;
     var from = readFrom(sourceEl);
     var main = document.getElementById('main').getBoundingClientRect();
-    host.className = 'open' + (plaque ? ' open--plaque' : ' paper-' + K[e.kind].paper);
+    host.className = 'open' + (plaque ? ' open--plaque' : '');
     host.innerHTML = '<div class="open-in">' + (plaque ? drawOpenPlaque(e) : drawOpen(e)) + '</div>';
     inner = host.firstChild;
     host.hidden = false;
@@ -268,7 +280,7 @@ window.Open = (function () {
   /** Returns the parts of the sheet that are the same objects as parts of the card: the title, the mark and the latest line. */
   function measureParts(source) {
     var parts = [];
-    [['.c-title, .pl-title, .p-title, .b-title', '.o-title'], ['.c-mark, .pl-marks, .p-mark, .b-mark', '.c-mark'], ['.c-line', '.o-signal.is-latest']].forEach(function (pair) {
+    [['.c-title, .pl-title, .p-title, .b-title', '.o-title'], ['.c-mark, .pl-marks, .p-mark, .b-mark', '.c-mark'], ['.c-context, .c-under', '.o-signal.is-latest']].forEach(function (pair) {
       var a = source.querySelector(pair[0]), b = inner.querySelector(pair[1]);
       if (!a || !b || !a.getClientRects().length) return;
       b.style.transform = '';
@@ -298,7 +310,7 @@ window.Open = (function () {
     var down = readOrder(id) > readOrder(openId);
     openId = id;
     App.state.open = id;
-    host.className = 'open' + (plaque ? ' open--plaque' : ' paper-' + K[e.kind].paper);
+    host.className = 'open' + (plaque ? ' open--plaque' : '');
     inner.innerHTML = plaque ? drawOpenPlaque(e) : drawOpen(e);
     var h = inner.offsetHeight;
     motion.to.height = h;

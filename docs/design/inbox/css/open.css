@@ -26,9 +26,6 @@
 .open kbd { color: var(--ink); }
 .open-in { display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: auto; padding: 12px 0 8px; will-change: transform; }
 .open.is-closing .o-meta, .open.is-closing .o-signal:not(.is-latest), .open.is-closing .o-note, .open.is-closing .o-parts, .open.is-closing .o-facts, .open.is-closing .o-ledger, .open.is-closing .o-close { opacity: 0; transition: none; }
-.open.paper-manila { --stock: var(--stock-manila); }
-.open.paper-ledger { --stock: var(--stock-ledger); }
-.open.paper-sage { --stock: var(--stock-sage); }
 
 .o-head {
   display: grid;
@@ -225,3 +222,11 @@ button.o-link-go:hover { background: var(--hover); }
 .o-find::placeholder { color: var(--faint); }
 .o-found { margin-top: 4px !important; }
 .o-found[hidden] { display: none; }
+.o-place { color: var(--ink); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--ink) 25%, transparent); text-underline-offset: 2px; }
+.o-text small { color: var(--faint); font: var(--type-meta); }
+.o-inner { margin-top: 4px; }
+.o-inner-go { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 26px; padding: 0 4px; border-radius: var(--r-xs); font: var(--type-summary); text-align: left; }
+.o-inner-go:hover { background: var(--hover); }
+.o-inner-t { min-width: 0; flex: 1; color: var(--ink); font-weight: var(--w-medium); }
+.o-inner-n { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.o-inner ul { margin-left: 8px; }
