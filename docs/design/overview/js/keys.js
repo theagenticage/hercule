@@ -75,6 +75,7 @@ window.Keys = (function () {
   function jumpLane(by) {
     var lanes = Array.prototype.slice.call(document.querySelectorAll("#lanes .lane"));
     var here = focused ? lanes.indexOf(focused.closest(".lane")) : -1;
+    if (!lanes.length) return;
     var i = Math.max(0, Math.min(lanes.length - 1, here + by));
     focusCard(lanes[i].querySelector(".card") || lanes[i].querySelector(".lane-btn"));
   }
@@ -91,13 +92,29 @@ window.Keys = (function () {
     if (!t) return;
     var i = STAGE_IDS.indexOf(t.stage) + by;
     if (i < 0 || i >= STAGE_IDS.length) return;
+    // A Task under two lanes has two cards. The keys stay with the one they were on.
+    var home = focused && focused.isConnected ? focused.closest(".lane") : null;
     Actions.moveToStage(id, STAGE_IDS[i]);
-    var el = document.querySelector('.card[data-id="' + id + '"]');
+    var el = (home || document).querySelector('.card[data-id="' + id + '"]');
     if (el) focusCard(el);
   }
 
   function onKey(e) {
-    if (e.target.matches("input, textarea")) {
+    // The Add sheet and the menus keep their keys to themselves. Esc still steps back from anywhere.
+    if (e.target.closest("#adder")) {
+      if (e.key === "Escape") Adder.hide();
+      // Undo reaches the board from an empty box, because the line at the foot offers it.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.target.value) {
+        e.preventDefault();
+        Toast.undo();
+      }
+      return;
+    }
+    if (e.target.closest("#tool-menu")) {
+      if (e.key === "Escape") Toolbar.closeMenu(true);
+      return;
+    }
+    if (e.target.matches("input, textarea, select")) {
       if (e.key === "Escape") {
         e.target.blur();
         if (e.target.closest(".pn-thread")) Pane.refresh();
@@ -209,7 +226,10 @@ window.Keys = (function () {
       return Find.open();
     }
     if (key === "?") return Help.toggle();
-    if (key === "a") return Adder.show();
+    if (key === "a") {
+      e.preventDefault();
+      return Adder.show();
+    }
     if (key === "w") return Display.toggleWear();
     if (key === "o") return Overview.show("office");
     var id3 = Pane.currentId() || currentCardId();
@@ -237,7 +257,7 @@ window.Keys = (function () {
     if (Pane.currentId()) {
       var id = Pane.currentId();
       return Pane.back(function () {
-        var el = document.querySelector('.card[data-id="' + id + '"]');
+        var el = focused && focused.isConnected && focused.dataset.id === id ? focused : document.querySelector('.card[data-id="' + id + '"]');
         if (el) focusCard(el);
       });
     }

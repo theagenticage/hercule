@@ -10,13 +10,13 @@ html,body{overflow:auto;height:auto;background:var(--desk);-webkit-user-select:n
 </style></head>
 <body><div class="wrap" id="w"></div>
 <script src="system/brands.js"></script><script src="system/faces.js"></script>
-<script src="../work-views/data.js"></script><script src="js/world.js"></script><script src="js/motion.js"></script><script src="js/store.js"></script><script src="js/board.js"></script>
+<script src="../work-views/data.js"></script><script src="js/graph.js"></script><script src="js/world.js"></script><script src="js/motion.js"></script><script src="js/store.js"></script><script src="js/board.js"></script>
 <script>
 // Every card here is drawn by the same code as the board.
 Store.loadWorld(NW.buildToday());
 var t = Store.task;
-t("search-feed-errors").move = "you"; t("search-feed-errors").need = "quick"; t("search-feed-errors").ask = "Fix the records, or relax the rule?"; t("search-feed-errors").now = "Found them. Which way?";
-var S = [["Quick call", "pr-qty-labels"], ["Real thinking", "substitutions"], ["An agent is on it", "flake-clock"], ["An agent asks you", "search-feed-errors"], ["With a person", "pr-font"], ["Blocked", "guest-checkout"], ["Landed", "flake-report"], ["Nobody yet", "t-cancelled"]];
+Store.failRun("flake-clock", { action: "Review PR", cause: "the branch changed mid-run" });
+var S = [["At rest", "substitutions"], ["A Thread is working", "flake-browser"], ["A Thread has a question", "basket-restore"], ["A run failed", "flake-clock"], ["A person at the source", "pr-font"], ["Blocked", "guest-checkout"], ["From an outside source", "pr-qty-labels"], ["Landed", "gift-receipt"]];
 var w = document.getElementById("w");
 S.forEach(function (s) {
   var box = document.createElement("div");

@@ -22,9 +22,14 @@ window.Store = (function () {
     selected: {},
     query: "",
     filters: {},
+    // What was folded or closed by hand while a filter is on. A filter opens everything else.
+    filterFolds: {},
+    // Where a merged Task went, so what points at it can follow.
+    mergedInto: {},
     groupBy: "project",
     planPlace: "top",
-    laneStyle: "gutter",
+    laneStyle: "band",
+    plansHidden: false,
   };
   var undoStack = [];
 
@@ -40,6 +45,7 @@ window.Store = (function () {
       t.entities = t.entities || [];
       return t;
     });
+    state.plans.forEach(function (p, i) { p.hue = NW.HUES[i % NW.HUES.length]; });
     state.folded = world.folded || {};
     state.openPlans = world.openPlans || {};
     undoStack = [];
@@ -91,6 +97,16 @@ window.Store = (function () {
   /** Checks whether a Task must never wait out of sight: a Thread has a question, or a run failed. */
   function isLoud(t) { return !!(t.question || t.failed); }
 
+  /** Checks whether a lane is folded right now. A filter opens lanes, unless folded again by hand. */
+  function isLaneFolded(id) {
+    return isFiltering() ? !!state.filterFolds["lane:" + id] : !!state.folded[id];
+  }
+
+  /** Checks whether an initiative shows its cards. A filter opens them, unless closed again by hand. */
+  function isPlanOpen(id) {
+    return isFiltering() ? !state.filterFolds["plan:" + id] : !!state.openPlans[id];
+  }
+
   /* ---------- Lanes ---------- */
 
   function tint(project) {
@@ -137,8 +153,9 @@ window.Store = (function () {
       lanes = readContextLanes(state.groupBy);
     }
     lanes.forEach(function (l) {
-      l.tasks = sortByRank(l.tasks.filter(matches));
-      l.loose = sortByRank(l.loose.filter(matches));
+      l.tasks = sortByRank(l.tasks.filter(function (t) { return matches(t); }));
+      l.loose = sortByRank(l.loose.filter(function (t) { return matches(t); }));
+      l.plans = l.plans.filter(function (p) { return !isFiltering() || l.tasks.some(function (t) { return t.initiative === p.id; }); });
     });
     // A lane with nothing to show goes, unless its initiatives are drawn inside it.
     return lanes.filter(function (l) { return l.tasks.length || (l.plans.length && !isFiltering()); });
@@ -188,17 +205,17 @@ window.Store = (function () {
     return items.reduce(function (n, i) { return n + 1 + i.members.length; }, 0);
   }
 
-  function isItemLoud(item) { return isLoud(item.lead) || item.members.some(isLoud); }
+  /** Checks whether something in a cell must stay in view: it is loud, or you just added it. */
+  function isItemLoud(item) { return isLoud(item.lead) || item.lead.fresh || item.members.some(isLoud); }
 
-  /** Checks whether a stack shows what it holds. One with a question or a failure inside opens by itself. */
+  /** Checks whether a stack shows what it holds. One with a question or a failure inside always does. */
   function isStackOpen(item) {
-    var chosen = state.openStacks[item.lead.id];
-    return chosen === undefined ? item.members.some(isLoud) : chosen;
+    return item.members.some(isLoud) || !!state.openStacks[item.lead.id];
   }
 
   /**
    * Arranges a cell: what shows now, and how many more open in place under it. A failed Task comes
-   * first. Nothing that has a question or a failure ever waits out of sight.
+   * first. Nothing that has a question or a failure ever waits out of sight, nor what you just added.
    */
   function arrangeCell(tasks, stage, key) {
     var items = groupLinked(tasks);
@@ -229,7 +246,7 @@ window.Store = (function () {
   function readSearchText(t) {
     var project = state.projects.filter(function (p) { return p.id === t.project; })[0];
     var links = (t.links || []).map(function (l) { return l.label; }).join(" ");
-    return [t.name, t.now, t.where, t.ref, t.agent, t.person, project && project.name, links, t.failed ? describeFailure(t) : "", t.question ? t.question.text : ""].join(" ").toLowerCase();
+    return [t.name, t.now, t.where, t.ref, t.agent, t.person, project && project.name, links, t.failed ? describeFailure(t) : "", t.question ? t.question.text : "", Graph.readSearchWords(t)].join(" ").toLowerCase();
   }
 
   /** Checks whether a Task has one facet's value. */
@@ -264,7 +281,7 @@ window.Store = (function () {
     var sources = Object.keys(Graph.SOURCES).map(function (id) { return { id: id, name: Graph.SOURCES[id], source: id }; }).concat([{ id: "", name: "No source" }]);
     var facets = [
       { id: "state", name: "State", icon: "filter", values: values("state", STATES) },
-      { id: "project", name: "Project", icon: "office", values: values("project", state.projects.map(function (p) { return { id: p.id, name: p.name, tint: p.tint }; })) },
+      { id: "project", name: "Project", icon: "folder", values: values("project", state.projects.map(function (p) { return { id: p.id, name: p.name, tint: p.tint }; })) },
       { id: "initiative", name: "Initiative", icon: "flag", values: values("initiative", state.plans.map(function (i) { return { id: i.id, name: i.name, hue: i.hue }; })) },
       { id: "source", name: "Source", icon: "connections", values: values("source", sources) },
     ];
@@ -296,6 +313,7 @@ window.Store = (function () {
 
   /** Turns one filter value on or off. */
   function toggleFilter(facet, value) {
+    state.filterFolds = {};
     var f = state.filters[facet] = state.filters[facet] || {};
     if (f[value]) delete f[value];
     else f[value] = true;
@@ -307,9 +325,12 @@ window.Store = (function () {
     return { failed: state.tasks.filter(function (t) { return t.failed; }).length, question: state.tasks.filter(function (t) { return t.question; }).length };
   }
 
-  /** Lists the choices of Group by: Hercule's own, then what the sources report. */
+  /** Lists the choices of Group by: Hercule's own, then what the sources report, and always the current one. */
   function listGroupings() {
-    return [{ id: "project", name: "Project", icon: "office" }, { id: "initiative", name: "Initiative", icon: "flag" }].concat(Graph.listGroupKinds(state.tasks));
+    var all = [{ id: "project", name: "Project", icon: "folder" }, { id: "initiative", name: "Initiative", icon: "flag" }].concat(Graph.listGroupKinds(state.tasks));
+    var kind = Graph.KINDS[state.groupBy];
+    if (kind && !all.some(function (g) { return g.id === state.groupBy; })) all.push({ id: state.groupBy, name: kind.group, word: kind.word, source: kind.source });
+    return all;
   }
 
   /* ---------- Undo ---------- */
@@ -372,7 +393,7 @@ window.Store = (function () {
   function mergeTasks(fromId, intoId) {
     var a = task(fromId);
     var b = task(intoId);
-    var was = { threads: b.threads, links: b.links, entities: b.entities, merged: b.mergedCount, failed: b.failed, question: b.question, agent: b.agent };
+    var was = { threads: b.threads, links: b.links, entities: b.entities, merged: b.mergedCount, failed: b.failed, question: b.question, nextQuestions: b.nextQuestions, agent: b.agent };
     var blocks = state.tasks.map(function (t) { return { t: t, by: t.blockedBy }; });
     remember(a.name, function () {
       state.tasks.push(a);
@@ -382,17 +403,23 @@ window.Store = (function () {
       b.mergedCount = was.merged;
       b.failed = was.failed;
       b.question = was.question;
+      b.nextQuestions = was.nextQuestions;
       b.agent = was.agent;
+      delete state.mergedInto[fromId];
       blocks.forEach(function (x) { x.t.blockedBy = x.by; });
     }, { id: fromId, from: intoId });
     b.threads = b.threads.concat(a.threads);
     b.links = b.links.concat(a.links);
     b.entities = b.entities.concat(a.entities);
     b.mergedCount = (b.mergedCount || 0) + 1 + (a.mergedCount || 0);
-    // A failure or a question goes with its thread. Merging must not make one disappear.
+    // A failure or a question goes with its Thread. Merging must not make one disappear: a second
+    // question waits its turn, and comes up when the first is answered.
     b.failed = b.failed || a.failed;
-    b.question = b.question || a.question;
+    var questions = [b.question].concat(b.nextQuestions || [], [a.question], a.nextQuestions || []).filter(Boolean);
+    b.question = questions[0] || null;
+    b.nextQuestions = questions.slice(1);
     b.agent = b.agent || a.agent;
+    state.mergedInto[fromId] = intoId;
     state.tasks = state.tasks.filter(function (t) { return t !== a; });
     state.tasks.forEach(function (t) {
       t.blockedBy = t.blockedBy.map(function (x) { return x === fromId ? intoId : x; }).filter(function (x) { return x !== t.id; });
@@ -414,9 +441,10 @@ window.Store = (function () {
   /** Records your answer to a Thread's question: the Thread carries on with it. */
   function answerTask(id, answer) {
     var t = task(id);
-    var was = { question: t.question, now: t.now, age: t.age, pendingSync: t.pendingSync };
+    var was = { question: t.question, nextQuestions: t.nextQuestions, now: t.now, age: t.age, pendingSync: t.pendingSync };
     remember(t.name, function () { Object.assign(t, was); }, { id: id, reopen: true });
-    t.question = null;
+    t.question = (t.nextQuestions || [])[0] || null;
+    t.nextQuestions = (t.nextQuestions || []).slice(1);
     t.now = "You said: " + answer + ".";
     t.age = 0;
     if (state.offline) t.pendingSync = true;
@@ -490,6 +518,8 @@ window.Store = (function () {
     tasksIn: tasksIn,
     isBlocked: isBlocked,
     isLoud: isLoud,
+    isLaneFolded: isLaneFolded,
+    isPlanOpen: isPlanOpen,
     decideState: decideState,
     describeBlocker: describeBlocker,
     describeFailure: describeFailure,

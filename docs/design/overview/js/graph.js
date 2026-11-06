@@ -18,9 +18,9 @@ window.Graph = (function () {
     "linear/project": { source: "linear", word: "Project", group: "Linear project", listBy: true },
     "linear/initiative": { source: "linear", word: "Initiative", group: "Linear initiative" },
     "linear/team": { source: "linear", word: "Team", group: "Linear team" },
-    "linear/milestone": { source: "linear", word: "Milestone" },
+    "linear/milestone": { source: "linear", word: "Milestone", caption: "Linear milestone" },
     "github/pull": { source: "github", word: "Pull request", stages: { Open: "reviewing", Draft: "building" } },
-    "github/repo": { source: "github", word: "Repository", group: "GitHub repository", listBy: true },
+    "github/repo": { source: "github", word: "Repository", plural: "repositories", group: "GitHub repository", listBy: true },
     "sentry/issue": { source: "sentry", word: "Issue", stages: { Unresolved: "exploring" } },
     "sentry/project": { source: "sentry", word: "Project", group: "Sentry project", listBy: true },
   };
@@ -250,15 +250,21 @@ window.Graph = (function () {
     return (t.entities || []).some(function (r) { return kindOf(r).leads; });
   }
 
-  /** Lists what can still become a Task: offered things that no Task on the board carries. */
-  function listOffered(tasks) {
+  /** Returns everything a person might type to find a Task through what it carries. */
+  function readSearchWords(t) {
+    var refs = (t.entities || []).concat(readAncestors(t.entities || []));
+    return refs.map(function (r) { return (entities[r].label || "") + " " + entities[r].title; }).join(" ");
+  }
+
+  /** Lists what can still become a Task: offered things no Task carries, plus any `keep` asks for. */
+  function listOffered(tasks, keep) {
     var taken = {};
     tasks.forEach(function (t) { (t.entities || []).forEach(function (r) { taken[r] = true; }); });
-    return Object.keys(entities).filter(function (r) { return entities[r].offered && !taken[r]; }).map(function (r) { return entities[r]; });
+    return Object.keys(entities).filter(function (r) { return entities[r].offered && (!taken[r] || keep[r]); }).map(function (r) { return entities[r]; });
   }
 
   return {
     SOURCES: SOURCES, KINDS: KINDS, attach: attach, linkPeers: linkPeers, entity: entity, kindOf: kindOf, sourceOf: sourceOf, readParents: readParents, readAncestors: readAncestors,
-    readAncestorsOfKind: readAncestorsOfKind, listGroupKinds: listGroupKinds, readLinks: readLinks, isConfirmedPeer: isConfirmedPeer, isLead: isLead, listOffered: listOffered,
+    readAncestorsOfKind: readAncestorsOfKind, listGroupKinds: listGroupKinds, readLinks: readLinks, isConfirmedPeer: isConfirmedPeer, isLead: isLead, readSearchWords: readSearchWords, listOffered: listOffered,
   };
 })();

@@ -11,7 +11,7 @@
   --desk: color-mix(in oklab, var(--bg) 70%, var(--surface));
 
   /* ---- A blocked card goes quiet: its words step back. */
-  --word-press: color-mix(in oklab, var(--faint) 80%, var(--desk));
+  --word-press: var(--faint);
   --paper: oklch(0.36 0.05 76);
   /* The one suggested answer. Each theme's --accent, except where --accent is not green. */
   --answer: var(--accent);

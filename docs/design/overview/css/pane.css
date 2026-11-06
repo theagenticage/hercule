@@ -3,8 +3,8 @@
 .pane.is-on::before { content: ""; position: absolute; inset: 0; background: var(--desk); opacity: calc(var(--pn-dim) * 0.34); }
 .pn-sheet { position: absolute; isolation: isolate; display: flex; flex-direction: column; pointer-events: auto; --pn-r: 12px; }
 .pn-sheet::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: var(--pn-r); background: var(--stock); box-shadow: var(--h-carry); }
-.pn-sheet > .card-holder { z-index: -2; right: 22px; }
-.pn-sheet > .card-paws { right: 25px; }
+.pn-sheet > .card-holder { z-index: -2; right: var(--pn-head, 22px); }
+.pn-sheet > .card-paws { right: calc(var(--pn-head, 22px) + 3px); }
 .pn-clip { position: absolute; inset: 0; overflow: hidden; border-radius: var(--pn-r); }
 /* The words are laid out once at the sheet's final size, and the growing sheet reveals them, so a
    paragraph never rewraps during the opening. */
@@ -47,7 +47,6 @@
 .pn-btn:hover { background: var(--hover); color: var(--ink); }
 .pn-btn kbd { background: none; color: var(--faint); padding: 0; min-width: 0; }
 .pn-btn--end { margin-left: auto; color: var(--faint); }
-.pn-walk { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .pn-title:focus { outline: none; }
 .pn-reply { margin-top: 10px; }
 .pn-reply input, .pn-thread input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 55%, transparent); transition: box-shadow var(--m-quick); -webkit-user-select: text; user-select: text; }
@@ -93,4 +92,3 @@
 .pn-row.is-restricted { color: var(--muted); }
 .pn-row.is-restricted .ic { color: var(--faint); }
 .pn-row--hint { color: var(--muted); }
-button.pn-row { width: 100%; text-align: left; }

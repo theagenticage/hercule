@@ -149,9 +149,10 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 
 /* ---------- The stage headers ---------- */
 .work { --gutter: 210px; --band: color-mix(in oklab, var(--ink) 5%, var(--desk)); }
+[data-theme="orient-express"] .work, [data-theme="nile"] .work, [data-theme="end-house"] .work, [data-theme="blue-train"] .work { --band: color-mix(in oklab, var(--ink) 8%, var(--desk)); }
 .work[data-lanes="band"] { --gutter: 0px; }
-.work-canvas { position: relative; min-height: 100%; max-width: 1480px; margin: 0 auto; padding: 54px 32px 72px; --col-gap: 14px; --cols: repeat(4, minmax(150px, 1fr)) minmax(112px, 0.72fr); }
-.rule-wrap { position: sticky; z-index: 12; top: 50px; margin: 0 -32px; padding: 0 32px; background: var(--desk); }
+.work-canvas { position: relative; min-height: 100%; max-width: 1480px; margin: 0 auto; padding: 0 32px 72px; --col-gap: 14px; --cols: repeat(4, minmax(150px, 1fr)) minmax(112px, 0.72fr); }
+.rule-wrap { position: sticky; z-index: 12; top: 0; margin: 0 -32px; padding: 54px 32px 0; background: var(--desk); }
 .rule { display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); align-items: center; height: 32px; padding-left: var(--gutter); border-bottom: 1px solid var(--divider); }
 .stage { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--ink); font: var(--w-medium) var(--t-12) / 16px var(--font-ui); transition: color var(--m-quick); }
 .stage-count { position: relative; display: inline-block; min-width: 1ch; color: var(--faint); font-weight: var(--w-regular); font-variant-numeric: tabular-nums; }
@@ -169,9 +170,13 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .cell[data-stage="landed"] .cell-more { margin-top: 0; }
 
 /* ---------- A card's small marks ---------- */
+/* A raised palm is the one place a colleague carries marigold, so it keeps its full colour. */
+.card-head[data-pose="waiting"], .card-head[data-pose="failed"] { filter: none; }
 .card-now .ic { display: inline-block; }
 .card-person { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 11%, transparent); color: var(--muted); font-size: 9px; font-style: normal; font-weight: var(--w-bold); line-height: 1; }
-.card-plan { width: 8px; height: 8px; border-radius: 50%; background: var(--plan-ink); }
+.card-also { position: absolute; left: var(--card-pad-x); bottom: 8px; color: var(--faint); font: var(--type-meta); }
+.card-plan { display: grid; place-items: center; color: var(--plan-ink); line-height: 0; }
+.card-plan svg { width: 11px; height: 11px; }
 .card-sync { color: var(--faint); line-height: 0; }
 .card-pending { color: var(--faint); }
 
@@ -187,24 +192,36 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .stack-bar span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stack-bar .ic { color: var(--faint); transition: rotate var(--m-base) var(--m-ease); }
 .stack.is-open > .stack-bar .ic { rotate: 180deg; }
-.stack-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
+.stack-bar:disabled { color: var(--muted); cursor: default; }
+.stack-bar:disabled:hover::after { display: none; }
 .stack-members { display: flex; flex-direction: column; gap: var(--card-gap); margin: 14px 0 0 8px; padding-left: 10px; border-left: 1px solid var(--divider); }
 
 /* ---------- Lanes ---------- */
 #lanes { padding-top: 6px; }
 .lane { display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); align-items: start; padding: 22px 0 18px; border-top: 1px solid var(--divider); }
-.block-title + .lane { border-top: 0; }
-.lane-head { position: sticky; z-index: 8; top: 94px; display: flex; align-items: center; gap: 4px; min-width: 0; margin: 0; padding-right: 14px; font: inherit; }
+.block-title + .lane, #lanes > .lane:first-child { border-top: 0; }
+.lane-head { position: sticky; z-index: 8; top: 96px; display: flex; align-items: center; gap: 4px; min-width: 0; margin: 0; padding-right: 14px; font: inherit; }
 .lane > .grid, .lane > .lane-fold { grid-column: 2; }
 .lane > .plans { grid-column: 1 / -1; margin-top: 12px; }
 .lane > .grid.is-empty + .plans { margin-top: 0; }
 .lane-btn { flex: 1; display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 28px; text-align: left; border-radius: var(--r-xs); }
 .lane-btn:focus-visible, .plan-head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .lane-words { display: flex; flex-direction: column; min-width: 0; }
+.lane-line { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .lane-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: var(--type-lane); color: var(--ink); }
+.lane-folder { flex: none; color: var(--muted); }
+.lane-line .lane-flag { align-self: center; width: 14px; margin-right: -3px; }
 .lane-facts { color: var(--muted); font: var(--type-meta); }
+.ctx-progress { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ctx-bar { display: inline-block; width: 36px; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in oklab, var(--ink) 11%, transparent); }
+.ctx-bar i { display: block; height: 100%; background: color-mix(in oklab, var(--ink) 55%, transparent); }
 .lane-total { flex: none; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
 .lane-flag, .lane-brand { flex: none; display: grid; place-items: center; width: 16px; }
+.block-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 24px; color: var(--muted); font: inherit; border-radius: var(--r-xs); }
+.block-btn:hover { color: var(--ink); }
+.block-btn small { color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
+.block-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.block-btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .lane-flag { color: var(--plan-ink); }
 .lane-add { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-btn); color: var(--faint); opacity: 0; transition: opacity var(--m-quick); }
 .lane-head:hover .lane-add, .lane-add:focus-visible { opacity: 1; }
@@ -215,7 +232,8 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .block-title { margin: 0; padding: 18px 0 6px; color: var(--muted); font: var(--w-medium) var(--t-12) / 16px var(--font-ui); }
 
 /* A folded lane is one line: how much sits in each stage, under that stage. No beads, no line. */
-.lane.is-folded { padding: 10px 0; }
+.lane.is-folded { align-items: center; min-height: 44px; padding: 8px 0; }
+.lane.is-folded .lane-head { position: static; }
 .lane-fold { display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); align-items: center; min-height: 28px; color: var(--muted); font: var(--type-summary); font-variant-numeric: tabular-nums; cursor: default; }
 .fold-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fold-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
@@ -224,15 +242,16 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 
 /* Bands: a lane's head is a full-width strip, and everything under it belongs to it. */
 .work[data-lanes="band"] .lane { display: block; padding: 0 0 22px; border-top: 0; }
-.work[data-lanes="band"] .lane-head { top: 84px; min-height: 36px; margin: 0 -12px 22px; padding: 0 8px 0 12px; border-radius: var(--r-sm); background: var(--band); }
+.work[data-lanes="band"] .lane-head { top: 86px; min-height: 36px; margin: 0 -12px 22px; padding: 0 8px 0 12px; border-radius: var(--r-sm); background: var(--band); }
 .work[data-lanes="band"] .lane-words { flex-direction: row; align-items: baseline; gap: 8px; }
 .work[data-lanes="band"] .lane-name { white-space: nowrap; }
-.work[data-lanes="band"] .lane.is-folded { position: relative; padding: 0 0 8px; }
+/* Folded, the counts take their own line on the desk, so each stands under its own stage. */
+.work[data-lanes="band"] .lane.is-folded { display: block; min-height: 0; padding: 0 0 10px; }
 .work[data-lanes="band"] .lane.is-folded .lane-head { margin-bottom: 0; }
-.work[data-lanes="band"] .lane-fold { position: absolute; z-index: 9; left: 0; right: 0; top: 0; min-height: 36px; pointer-events: none; }
-.work[data-lanes="band"] .fold-cell { justify-content: flex-end; }
+.work[data-lanes="band"] .lane-fold { min-height: 24px; }
 .work[data-lanes="band"] #lanes { padding-top: 14px; }
-.work[data-lanes="band"] .block-title + .lane { border-top: 0; }
+.top-plans > .block-title { padding-top: 4px; }
+.work[data-lanes="band"] .block-title + .lane, #lanes > .lane:first-child { border-top: 0; }
 
 /* ---------- Initiatives ---------- */
 .plans { display: flex; flex-direction: column; }
@@ -248,8 +267,9 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .plan-head:hover .plan-name { color: var(--ink); }
 .lane > .plans .plan-head { padding-left: 14px; }
 
-.work[data-lanes="band"] .plan { display: block; margin-bottom: 8px; }
-.work[data-lanes="band"] .plan-head { min-height: 24px; width: 100%; padding: 0; }
+.work[data-lanes="band"] .plan { display: block; min-height: 0; margin-bottom: 2px; }
+.work[data-lanes="band"] .plan-head { min-height: 22px; width: 100%; padding: 0; }
+.work[data-lanes="band"] .wire { height: 18px; }
 .work[data-lanes="band"] .plan-words { flex-direction: row; align-items: baseline; gap: 8px; }
 .work[data-lanes="band"] .lane > .plans .plan-head { padding-left: 0; }
 .work[data-lanes="band"] .plan-band { margin: 6px 0 0 -12px; }
@@ -282,8 +302,9 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 /* The one tomato on the page, at word scale. The words beside it are ink: they carry the meaning. */
 .failed-mark { display: inline-block; vertical-align: -3px; margin-right: 3px; color: var(--fail-ink); }
 .card-now.card-failed { color: var(--ink); }
-.card:has(.card-failed) .card-title { -webkit-line-clamp: 1; }
-.card.has-long-title .card-now.card-failed { -webkit-line-clamp: 2; }
+/* What broke or what is asked always gets two lines. The title gives one up. */
+.card:has(.card-failed) .card-title, .card:has(.card-question) .card-title { -webkit-line-clamp: 1; }
+.card.has-long-title .card-now.card-failed, .card.has-long-title .card-now.card-question { -webkit-line-clamp: 2; }
 .card-paws[data-pose="failed"] { display: none; }
 .count-failed { flex: none; color: var(--ink); font: var(--type-summary); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
 
@@ -305,6 +326,8 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .card.is-skeleton .card-stock { background: var(--stock-flat); box-shadow: inset 0 0 0 1px var(--stock-rim-flat); }
 .is-offline .card-head, .is-offline .card-paws, .is-offline .bead { filter: saturate(0.2); }
 .is-carrying .cell { position: relative; }
+/* The page must not get shorter under a carried card, or the row under it would jump. */
+.is-carrying .work-canvas { padding-bottom: 340px; }
 .is-carrying .cell::before { content: ""; position: absolute; left: -7px; right: -7px; top: -10px; bottom: -14px; border-radius: var(--r-md); background: color-mix(in oklab, var(--ink) 1.8%, transparent); opacity: 0; pointer-events: none; }
 .work[data-drag-stage="exploring"] .cell[data-stage="exploring"]::before,
 .work[data-drag-stage="planned"] .cell[data-stage="planned"]::before,
@@ -332,3 +355,4 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .welcome--clear { padding-top: 26px; text-align: center; }
 [data-scene="empty"] .rule-wrap { position: relative; top: 0; margin-top: 244px; }
 [data-scene="empty"] .stage { opacity: 0; }
+

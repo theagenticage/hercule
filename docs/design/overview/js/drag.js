@@ -378,6 +378,8 @@ window.Drag = (function () {
     var owner = Store.resolveOwner(zone.key);
     var c = finish();
     var to = { stage: stage, project: owner.project, plan: owner.plan };
+    var sameStage = stage === c.task.stage;
+    if (isSourceLane(owner) && sameStage) return refuseSourceMove(c);
     settle(c, "travel", function () {
       Store.group(c.task.name, function () {
         Store.moveTask(c.id, to);
@@ -389,7 +391,20 @@ window.Drag = (function () {
     settleFollowers(c);
     var bead = document.querySelector('.bead[data-id="' + c.id + '"]');
     if (bead) Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "hand", { delay: 220 });
-    Toast.show("Moved.", true);
+    Actions.reportMove({ stage: stage, project: owner.project, plan: owner.plan, sameStage: sameStage });
+  }
+
+  /** Checks whether a lane belongs to a source: a drop there can change a stage, never a membership. */
+  function isSourceLane(owner) {
+    return owner.project === undefined && owner.plan === undefined;
+  }
+
+  /** Sends a card home from a lane it cannot join, and says why. */
+  function refuseSourceMove(c) {
+    settle(c, "travel", function () { releaseFollowers(c); });
+    settleFollowers(c);
+    var kind = Graph.KINDS[Store.state.groupBy];
+    Toast.show("It stays where it is: " + Graph.SOURCES[kind.source] + " decides what is in each " + kind.word.toLowerCase() + ". Only the stage can change here.", false);
   }
 
   function drop() {
@@ -399,9 +414,12 @@ window.Drag = (function () {
     var landing = readLanding();
     var c = finish();
     if (!landing) return settle(c, "travel", function () { releaseFollowers(c); });
+    var sameStage = landing.stage === c.task.stage;
     var moved = landing.stage !== c.task.stage || (landing.project !== undefined && landing.project !== c.task.project) || (landing.plan !== undefined && landing.plan !== (c.task.initiative || ""));
     // Put back where it was picked up, a drop changes nothing at all.
     if (!moved && landing.cell === c.fromCell && landing.row === c.fromRow && !c.followers.length) return settle(c, "hand");
+    // Dropped in another lane of a source, at the same stage, it would only pretend to move.
+    if (!moved && landing.cell !== c.fromCell && isSourceLane(landing) && landing.cell.dataset.owner !== c.fromCell.dataset.owner) return refuseSourceMove(c);
     settle(c, "hand", function () {
       Store.group(c.task.name, function () {
         Store.moveTask(c.id, landing);
@@ -417,6 +435,7 @@ window.Drag = (function () {
     });
     settleFollowers(c);
     if (!moved) return;
+    landing.sameStage = sameStage;
     Actions.reportMove(landing);
     if (landing.stage === "landed") {
       c.el.classList.add("just-landed");

@@ -50,6 +50,7 @@
   Toolbar.mount();
   Adder.mount();
   Board.draw();
+  if (scene === "offline") Live.note("Offline since 09:12. Moves wait until you are back.");
 
   document.getElementById("find-icon").innerHTML = Crew.icon("search", 16);
   document.getElementById("display-btn").innerHTML = Crew.icon("sliders", 16);
@@ -69,6 +70,7 @@
     if (more) return Fold.toggleCell(more.dataset.more);
     var bar = e.target.closest("[data-stack]");
     if (bar) return Fold.toggleStack(bar.dataset.stack, bar.getAttribute("aria-expanded") !== "true");
+    if (e.target.closest("[data-fold-plans]")) return Fold.togglePlans();
     var fold = e.target.closest("[data-fold-lane]");
     if (fold) return Fold.toggleLane(fold.dataset.foldLane);
     var plan = e.target.closest("[data-fold-plan]");
@@ -82,7 +84,7 @@
       if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
       if (e.metaKey || e.ctrlKey || e.shiftKey) return Select.toggle(card.dataset.id);
       Keys.focusCard(card, true);
-      Pane.show(card.dataset.id);
+      Pane.show(card.dataset.id, { el: card });
       return;
     }
     if (e.target.closest("[data-first-thread]")) return Welcome.startFirst();

@@ -4,30 +4,40 @@ The place where a person sees all their work. It is the view opened every mornin
 
 ## The idea in five lines
 
-1. **An open desk.** No boxes. Lanes and stages are space, type and one double rule. Every lane opens, so the first screen is proper cards.
-2. **Height means whose move it is.** A card that wants you stands. A card someone else holds lies flat. A blocked card is pressed in. A landed card is an outline.
-3. **The top edge shows who holds it.** A signal tab, a colleague's head, a person's tab, or nothing.
-4. **A horizontal line means a plan.** A plan is a wire with one bead per piece, on the same stage axis as the cards. Folding a whole board to wires is the score: something you ask for, never the default.
-5. **The first sentence is the filter.**
+1. **Clean first.** One UI face, one hairline, real cards. The theme shows through restraint, not ornament. Counts are small and useful, and never the page's voice.
+2. **A card is a stage and a sheet.** Every card is the same sheet. Most cards have nothing more to say. Nobody's "move" is drawn, because most cards have none.
+3. **Normal controls.** Group by, Filter, Find, Add. Everybody knows them, and more ways of grouping will need them anyway.
+4. **Lanes and initiatives cannot be confused.** A lane is a label or a band. An initiative is a coloured line with a flag. Only initiatives are lines.
+5. **The outside world is a graph, not a ladder.** A thing can be part of several things. Group by and Filter read whatever the sources report, and no view knows any source by name.
 
 ## Directions explored
 
-Three real sketches on the same 69 Tasks, in `sketches/` (`index.html?d=a|b|c`):
+The first round, three sketches on the same 69 Tasks, in `sketches/` (`index.html?d=a|b|c`):
 
 | Sketch | Idea | Verdict |
 |---|---|---|
 | A. Open desk | No trays. Lanes as space. Plans inside their lane | The quietest. Chosen as the ground |
-| B. Drawers | Projects as trays, with a folded front of beads | Too boxy, and the opposite of "remove until it hurts". Its folded front became the fold grammar |
-| C. Horizon and slips | All plans as a band on top, thin slips below | The band was lovely, but it split a project's plans from its work, and slips were the tiny cells that were rejected |
+| B. Drawers | Projects as trays, with a folded front of beads | Too boxy |
+| C. Horizon and slips | All plans as a band on top, thin slips below | The band was lovely, and it is back as "On top". The slips were the tiny cells that were rejected |
+
+The founder's notes led to three tries at telling a lane from an initiative. All three give lanes a heavier type role and a mark of their own, and give initiatives a coloured flag and line.
+
+| Treatment | Idea | Verdict |
+|---|---|---|
+| Bands | A lane's head is a full-width strip, and all under it belongs to it | Kept, and the default. The strongest separation, and cards stay wide. A label sits above each line, so initiatives take a little more height |
+| Side labels | A left column holds every row's name, as in the lo-fi. Stages start to its right | Kept. Rows read like rows, and an initiative is one line tall. Costs 210px of card width |
+| Surfaces | Each lane is a soft panel with its cards inside | Cut. It reads well, but it nests sheet on panel on desk, and bands do the same job with less |
+
+Both kept treatments, and both places for initiatives, switch in the Display menu on the same data. The default is bands with initiatives on top: the initiatives are the lo-fi the founder liked, and bands keep cards at their full width, which is the clean card he liked too. Below 1320px of window, side labels cannot spare their column, so lanes become bands.
 
 ## The Overview
 
 ### Layout
 
-- The window is the app's: 272px sidebar, main pane with a floating glass pill at 10px from the top and 14px from the left.
-- The pill reads **Overview**, then the view tabs. The selected tab sits on a puck that slides. At the right end, 36px glass buttons for Find and Display. They hide in the Office, which has no use for them.
-- The sidebar's Work section reads: Overview, Inbox, Workflows, Discussions, Wiki. Overview replaces The office. Intake leaves the sidebar and sits behind Inbox, the way the Office sits behind Overview. That was settled with the Inbox session.
-- Rows in Waiting on you point at their card: hover lights it, click opens it.
+- The window is the app's: 272px sidebar, and a main pane with one toolbar row 10px from the top, 14px from the sides.
+- From the left: the glass pill (**Overview**, then the view tabs, with the selected tab on a puck that slides), Group by, Filter and any filter chips. At the right end: Find, Display, and Add. All are 36px glass, and the toolbar hides in the Office, which has no use for it.
+- The sidebar's Work section reads: Overview, Inbox, Workflows, Discussions, Wiki. Overview replaces The office. Intake leaves the sidebar and sits behind Inbox, the way the Office sits behind Overview.
+- Rows in Waiting on you point at their card: hover lights it, click opens it. That section stays exactly as it is in the app.
 
 ### Keys
 
@@ -43,83 +53,95 @@ The switcher is built for five tabs. Each is a word, with no icon, so five read 
 
 | Part | Measure |
 |---|---|
-| Top of canvas to the sentence | 66px, under the glass pill |
+| Toolbar | 36px, 10px from the top. It stays while the board scrolls |
+| Stage headers | 32px, UI type 12/16 medium in ink, the count beside it in `--faint`, over one 1px `--divider`. They stick under the toolbar on solid `--desk`, so no card shows through while the board scrolls |
 | Left and right margin | 32px. Everything on the page starts on this one left edge |
 | Canvas maximum width | 1480px, centred, so cards stay card-shaped on a large window |
-| The sentence | 26/32 medium, tracking -0.022em. Numbers in ink with a 2px marigold underline |
-| The second line | 12/16, in the gap above the rule. Hidden at rest: it shows on approach to the sentence, under a lens and offline, and moves nothing when it does |
-| Sentence to stage rule | 28px |
-| Stage rule | 34px tall, ending in a double rule in `--rule-ink`: 2px over 1px, 5px in all, the same rule as the Inbox's stacks |
-| Stage count | Limelight 20px, in `--count-ink`, first in the heading, gone at zero, so the names keep the page's left edge |
-| Stage name | 11px bold, 0.09em tracking, uppercase |
-| Columns | four at 1fr and Landed at 0.72fr, 14px apart: 222px and 160px at 1440; 188px and 135px at 1280. Minimum 168px and 120px; below that the board scrolls sideways, so summaries never clip at high zoom |
-| Lane name | 15/20 bold, 28px row. "18 want you" beside it in `--muted`, "Show all 41" on hover. No project mark: a name is enough, and ten tints would mean nothing |
-| Space after a lane | 26px. A folded lane has 22px from name to wire and 32px to the next name, so a name clearly owns its wire |
-| Plans | under the lane's cards, 20px below them, so the cards come first |
-| Plan | 20px name row, 13/18 medium, then a 14px wire, 2px to the next plan |
-| Card | 88px tall, 12px corner, padding 10/12 |
-| Pile | same height as a card, with 1 to 3 sheets showing 3px each below it |
-| Row gap | 22px, which leaves room for what stands behind the top edge |
+| Label column | 0 with bands, 210px with side labels |
+| Columns | four at 1fr and Landed at 0.72fr, 14px apart. Minimum 150px and 112px; below that the board scrolls sideways |
+| Lane name | 14/20 bold, with a chevron, a small folder in `--muted` and a count of its Tasks in `--faint`. Colour stays with initiatives |
+| Between lanes | a 36px band in `--band` with bands; one 1px `--divider` with side labels |
+| Initiative row | a 22px name row over an 18px line with bands; 40px with side labels |
+| Card | 88px tall at least, 12px corner, padding 10/12 |
+| Row gap | 20px, which leaves room for a colleague's head behind the top edge |
 
-The stage rule sticks under the top pill while the board scrolls. At rest the stages are only alignment: no column lines. While carrying a card, the target column shows a faint aisle.
+The stage headers stick while the board scrolls, and so do lane names, so a long lane never loses its name. At rest the stages are only alignment: no column lines. While carrying a card, the target column shows a faint aisle.
 
-A first visit opens every lane: a short scroll, and every project shows proper cards. A lane shows one row, or two when ten or more of its Tasks want you, so the busiest lanes are the fullest. That is decided once a visit, so a lane never changes height because something was answered. Folding lanes to wires was tried as the default and rejected: it hid 61 of 70 Tasks behind dots, which is the tiny cells he said no to.
+### The toolbar
 
-### The sentence
+It replaces the sentence that opened this page. A sentence you had to press to filter was clever, and it explained little. These are the controls everybody knows.
 
-It counts what wants you, and each phrase is a lens. A hover of 140ms lights what it counts; pressing keeps it. `Q` quick calls, `R` real thinking, `S` stalled, `A` agents, Esc clears. Blocked work is counted but is not a lens, because there is nothing to act on.
+- **Group by** says what it is set to: "Group by Project". The menu lists Project and Initiative, then "From your sources": every kind that a source reports and that declares itself groupable, such as Linear project, Linear team, GitHub repository. Nothing is hard-coded. A new plugin adds rows by reporting data.
+- **Filter** opens one menu. State comes first, as plain checkboxes: Has a question, Failed, With an agent, Blocked. Under it are Project, Initiative, Source, then what the sources report. A facet opens its values in the same menu, with a Back row, and a Find box past seven values. Each value shows how many Tasks it would leave.
+- **Chips.** What is on sits beside Filter, one chip each, with its caption: "Linear project Returns at the depots". A click removes it. Two or more offer Clear. Esc clears everything.
+- **Find** (`/`) narrows the board as you type, and lists the top matches.
+- **Display** holds the comparison (Initiatives on top or in lanes; side labels or bands), Wear, Still colleagues, Single-key shortcuts, and Fold everything.
+- **Add** is the page's one filled button. See Add to Work.
 
-When a run has failed, the sentence opens with it: "1 failed, 22 quick calls, 11 that need real thinking." That phrase is a lens like the others, on `!`. See A failed run.
+A filter is a question about Tasks, so it answers with cards. What does not match leaves the page, lanes with nothing left go, and closed initiatives and folded lanes open while it is on. Nothing is lost: turn the filter off and everything is where it was. Values of one facet add up, and facets narrow.
 
-The three counts a person sees mean different things, on purpose. The sidebar's Waiting on you counts sessions with an open question, right now. The Inbox counts outside things that concern you. The sentence counts Tasks whose next move is yours.
+### Grouping and lineage
 
-### The morning's walk
+Group by is the lineage control. "Show me everything that came from this Linear project" is Group by Linear project, or Filter on it.
 
-`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. What failed comes before that pass, as it does in the sentence. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). At the end it stops and says "That was all 33." It does not start again by itself. Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
+- A lane for an outside thing shows the source's mark, its title, and what it says about itself: "Linear project · In progress", then a 4px bar and "6 of 14". Words always say whose they are, so a Linear initiative is never mistaken for a Hercule one.
+- **Progress shows only when the source reports it.** It is never worked out from the Tasks you can see. Pricing rules reports none, so it shows none.
+- **A Task can sit under two lanes.** `part of` is a graph, so a ticket in two projects has a card in each, and that card says "In 2 projects" with their names on hover. The stage headers count Tasks, so nothing is counted twice.
+- A last lane holds what has none: "No Linear project".
+- Tasks are matched through their own linked things and upward `part of` paths only. A peer's ancestors are not yours.
+- Hercule's Initiatives stay separate. An outside initiative is only ever a lane or a filter here, and filtering by one never changes a Task's project or initiative.
+- With any grouping but Project, a card shows a small flag in its initiative's colour, so that identity is not lost.
+
+Dragging between lanes changes what you would expect: the project, or the initiative. A lane for an outside thing belongs to the source, so a drop there changes the stage and never the membership.
 
 ### The card
 
 ```
-              [tab or head stands behind this edge]
+                       [a colleague's head, only while a Thread is on it]
 ┌──────────────────────────────┐
 │ Title, 13/18 medium, ink,    │  title: up to two lines
 │ up to two lines              │
 │ Summary, 12/16, muted        │  summary: about six words, 2px below the title
-│                      [m]  5d │  age and mark alone at the bottom right
+│                  [J] [m]  5d │  who at the source, the mark, the age
 └──────────────────────────────┘
 ```
 
-All cards are one height. There is no word for who holds it: the tab or head already says so. Title and summary share three lines: a two-line title leaves the summary one line, with an ellipsis if it must. A new summary can never move a neighbour.
+This is the base: the clean card the founder liked. All cards are one sheet at one height, so a board of them is calm. Title and summary share three lines: a two-line title leaves the summary one line, with an ellipsis if it must. A new summary can never move a neighbour.
 
-**The summary is a design constraint on the writer.** About six words: "Three designs, depots worried." It says where the Task stands, not what happened in detail. That limit is what keeps a board of these from becoming a wall of text, so the model call that writes summaries must be held to it.
+**The summary is a design constraint on the writer.** About six words: "Three designs, depots worried." It says where the Task stands. That limit is what keeps a board of these from becoming a wall of text, so the model call that writes summaries must be held to it.
 
-Words at the card's hover: after 160ms the summary becomes the need and the question, in place: "Real thinking. Which depot should try it first?"
+**The age** is neutral: `--faint`, whatever it says. It is a fact, not a warning.
 
-**The age** darkens as a thing that wants you waits: `--faint`, then `--muted` from 7 days, then ink at weight 500 from 14. Only for what wants you and can be acted on: an agent's age means nothing, and a blocked card's age is not your fault.
-
-**The provenance mark** is 13px, `--muted`, only for an outside source, beside the age.
-
-**Words follow height.** On a dark desk, pale words on an unlit card outshine a lit one, so what lies lower is written dimmer (`--word-flat`, `--word-flat-2`, `--word-press`), and full ink returns on approach. Every step stays above 4.5:1.
+**The provenance mark** is 13px, `--muted`, only for an outside source, beside the age. A person at the source, such as a reviewer, is a 16px monogram beside it.
 
 ### Card states
 
 | State | How it reads |
 |---|---|
-| Standing (wants you) | `--stock`, `--h-stand`, a marigold tab, ink title. On dark desks shadows say little, so a standing card has a material: a warm stock per theme, a lit top edge and a sheen falling from above (`--stock-sheen`) |
-| Flat (someone else) | `--stock-flat`, no rim, a 6% lit top edge on dark desks, a head or monogram, words in `--word-flat` |
-| Pressed (blocked) | `--stock-press`, `--h-press`, no holder, words in `--word-press`, summary reads "Waits on *blocker*" |
-| Etched (landed) | only words: no sheet, faint regular title. On the board Landed is one line; a landed card shows only inside its fan |
-| Hover | standing rises to `--h-hover`; flat comes up to `--h-stand`. After 160ms the summary becomes the question, in `--you-ink`. Heads return to full colour |
-| Focused | a 2px `--focus` ring, 2px out. The question shows, as on hover |
-| Dragging | lifts 3%, `--h-carry` and `--stock-carry` crossfade in on the same spring. A slot stays behind |
+| At rest | `--stock`, `--h-rest`, ink title, `--muted` summary. On dark desks a shadow says little, so the sheet has a lit top edge and a sheen falling from above (`--stock-sheen`) |
+| A Thread is working | a head behind the top edge, paws on the edge, typing in short bursts. Heads rest at 62% saturation |
+| A Thread has a question | the head raises its marigold palm at full colour, and the question takes the second line in `--you-ink`, with up to two lines of its own. Nothing else changes. See Open questions |
+| Failed | the head wears its plaster with its paws off the edge, and the failed mark and "Review PR failed: cause" in ink take the summary's place. It leads its cell. See A failed run |
+| Blocked | `--stock-flat`, a hairline, words in `--word-press`, a small lock, and "Waits on *blocker*" |
+| Landed | only words: no sheet, faint regular title. Landed opens from "3 landed" |
+| Hover | the shadow grows to `--h-hover`. The words never change |
+| Focused | a 2px `--focus` ring, 2px out |
+| Dragging | lifts 3%, and `--h-carry` and `--stock-carry` crossfade in on the same spring. A slot stays behind |
 | Selected | a 1.5px ink ring and a check in the top-left corner |
-| Stalled | the age in ink at weight 500. Wear, when on, adds more. Under a lens it can be seen at once |
-| Blocked, on hover | stays down; a thin brass line draws to the blocker through the gaps, and the blocker lights |
-| Running agent | a head behind the top edge, paws on the edge, typing in short bursts. Heads rest at 62% saturation, so they never outshout a tab |
-| Agent asks you | the head with a raised marigold palm; the card stands |
-| Failed | stands and leads its cell, with the head in its plaster beside a short tab, and the failed mark and "Review PR failed: cause" in ink where the summary was. Hover changes nothing. See A failed run |
 | Summary pending | "Writing a summary", in `--faint` |
-| Offline | tabs, heads and beads lose colour; a line under the sentence says since when; moved cards show a clock until they sync |
+| Offline | heads and beads lose colour; the toolbar says since when; moved cards show a clock until they sync |
+
+### Open questions
+
+"Wants you" has one meaning: a Thread on the Task has an open question. Approvals, signals, summaries and inferred next moves do not set it. Threads should rarely ask, so this is a small mark on the rare card, never a place on the page.
+
+- On the card: the raised palm, and the question as the second line.
+- In a folded lane: a 6px marigold dot beside its stage's count.
+- On an initiative's line: a marigold bead.
+- In Filter: "Has a question".
+- In the sidebar: Waiting on you, as the app has it. Those rows and these cards are the same questions.
+
+There is no count on the board, no lane headline, and no walk from one to the next. The Filter menu shows how many each value would leave, as it does for every value, and the sidebar is the app's own. `?scene=quiet` shows the normal case: nothing asks, and the board is complete.
 
 ### A failed run
 
@@ -129,89 +151,117 @@ The words are always the step and the cause, in ink: "Review PR failed: the bran
 
 | Place | What shows |
 |---|---|
-| Sidebar, Hercule face | A 7px marigold dot at the end of the Overview row, with no number, because the sentence holds the count. One click on the row opens Work with the failed lens on, and brings the first failed Task into view |
+| Sidebar, Hercule face | A 7px marigold dot at the end of the Overview row, with no number, because the lane says how many. One click on the row opens Work filtered to Failed |
 | Sidebar, Threads face | The same dot on the Hercule segment, as a small button of its own with a 26px target. One click on it does the same. A click on the word still only changes the face, so nobody leaves a thread just to glance at the other face |
-| The sentence | Opens with "1 failed", which is a lens, on `!`. A failed Task is not counted again as a quick call |
-| The card | Stands and leads its cell. The colleague's head wears its plaster, with no paws on the edge, beside a short tab: the move is yours and takes a moment. The failed mark and the words take the summary's place. A title keeps one line, so the words always get two |
-| The lane | "1 failed", in ink, before "17 want you", folded or not |
-| A plan | Its head says "1 failed" too, because a Task in a closed plan has no card |
-| A wire | The bead is the failed mark at 12px, first in its cell, even among tally marks |
-| The details | The same words under Next move. See The details pane |
+| The toolbar | Failed is a row in Filter, and a chip while it is on |
+| The card | Leads its cell, with the plaster, the failed mark and the words. A title keeps one line, so the words always get two |
+| The lane | "1 failed", in ink, folded or not |
+| An initiative | Its head says "1 failed" too, because a Task under a closed initiative has no card |
+| A line | The bead is the failed mark at 13px, first in its cell, even among tally marks |
+| The details | The same words at the top. See The details pane |
 
-Why these colours: marigold is the dot because the next move is yours. Tomato is the mark because something got hurt, as in the book. It is the Inbox's `cross` shape in its `bad` tone, so a failure looks the same on both pages.
+Marigold is the dot because something needs you. Tomato is the mark because something got hurt, as in the book. It is the Inbox's `cross` shape in its `bad` tone, so a failure looks the same on both pages.
 
 The rules:
 
-- **It stays until it ends.** Looking at it clears nothing. Try again, Start a thread, Done and Drop end it. Moving the card does not, because a drag does not repair a run. Merging carries the failure to the Task it joins, so a merge can never hide one.
-- **It outranks everything else about a card.** A failed card stands even in Landed, where it lies above the "N this week" line, and even while blocked, because the run needs you either way.
-- **A cell keeps its rows.** More failures than rows lie first in the stack, the tab counts them and the lane says "3 failed". Under another lens failures give way, so that lens never lights an empty row.
-- **Folded stays folded.** Nothing unfolds by itself. The lens lights the bead, the walk goes to it, and a click opens it.
-- **The lens lifts itself.** When the last failure ends the failed lens goes, because a dim desk with nothing lit says nothing. A walk under it stops there.
-- **Waiting on you does not list it.** That section counts sessions with an open question, and a stopped run has none.
-
-Try again keeps the card on its row. It lies down, its colleague starts again, and Undo puts the failure back.
+- **It stays until it ends.** Looking at it clears nothing. Try again, Start a thread, Done and Drop end it. Moving the card does not, because a drag does not repair a run. Merging carries the failure to the Task it joins.
+- **It outranks everything else about a card.** A failed card shows as a card even in Landed, and even while blocked.
+- **The filter lifts itself.** When the last failure ends, the Failed filter goes, because an empty page says nothing. Has a question does the same.
+- **Waiting on you does not list it.** That section counts open questions, and a stopped run has none.
 
 ### The top edge
 
-One slot, 14px from the right edge, drawn behind the sheet. The tab shows 9px above the edge, 18px wide for a quick call and 40px for real thinking. On a light desk the fill is a step deeper (`--tab-fill`). An outline was tried, for contrast, and read as a sticker. A head is 30px wide, cropped below the mouth, with two 7 by 5 paws on the edge in front of the sheet. A person is an 18px round monogram in `--faint`, so it can never be read as a key. Heads and paws are the same everywhere: on piles, on the open sheet and on the first-run card.
+Only a live Thread stands behind the top edge. It is 14px from the right, drawn behind the sheet. A head is 30px wide, cropped below the mouth, with two 7 by 5 paws on the edge in front of the sheet. Most cards have nothing here. The marigold tab and the person's monogram that used to share this slot are gone: they said whose move it was, and most cards have no move.
 
 ### `blockedBy`
 
-A blocked card is pressed into the desk. Its tab is gone because nobody can move it. It does not rise on hover and it asks nothing, because there is nothing to do yet. Its summary names the blocker. When the blocker lands, the card rises by itself. Hover draws a thin brass line to the blocker, through the gaps between cards, so it never crosses anyone's words.
+A blocked card goes quiet. Its summary names the blocker, beside a small lock. Hover draws a thin line to the blocker, through the gaps between cards, so it never crosses anyone's words. When the blocker lands, the card comes back by itself.
 
 ### Wear
 
-Off by default. Display menu, or `W`. Neglected work ages from 6 days to 30: the stock takes up to 18% of an old paper colour, and the title loses up to 20% of its strength. Agents' cards and landed cards never wear. Moving a card clears its age. (A tilt was tried and cut: at 1x it read as a rendering bug.)
+Off by default. Display menu, or `W`. Neglected work ages from 6 days to 30: the stock takes up to 18% of an old paper colour, and the title loses up to 20% of its strength. Agents' cards and landed cards never wear. Moving a card clears its age.
 
 ### Rows at rest, and stacks
 
-At rest a lane shows one or two rows. Per stage, real cards lie on top, in this order: the oldest that want you, then agents', then people's, then the oldest, and blocked cards last. The same order holds when the lane shows all its rows, so the top card stays on top. What lies behind shows as sheets under the last card, with `+3` beside the age. The card has one tab: when more than one thing here wants you, the tab carries that number. A stack with agents on it shows one head beside the tab, so the crew is always on the board.
+A cell shows four rows of real cards, in a stable order, so things stay where you left them. A fifth is shown rather than hidden. Past that, a plain "13 more" under the last card opens the rest **in place**: the lanes below make room, and the page scrolls. "Show fewer" closes it. The limit only stops one busy column from pushing every other lane off the screen. It is not there to hide work: if a count has to say how much is waiting, it has grown too big anyway.
 
-- Who is on top stays the same for the visit. Under a lens, cards that match come to the top, so a lens never lights an empty row.
-- `+3`, the sheets under the card, or `E`, fan out what lies behind. The sheets part on approach, so the door shows itself. Clicking the card itself opens that card.
-- Clicking the lane's name shows more rows. Clicking again goes back. The cards come out from under the last card, and go back the same way.
-- A card dropped at rest lands on the row you chose. The card there slips down 6px to take it, and nothing else moves: a lane at rest never changes height.
-- Lifting a card shows the next one at once, already there underneath. A card leaving by itself does the same. There is no hole to hold.
-- An arrival on a stack rises on top for a moment, so it is seen, then slides underneath, and only `+3` changes.
-- A lane whose Tasks all sit in one plan shows that plan's band, not a name and a hole. A band shows one row.
+- Nothing important waits out of sight. A card with a question or a failure always shows, even past the fourth row.
+- A filter lifts the limit.
+- Landed shows as a line, "3 landed", and opens the same way.
+
+**A stack is only for things that truly belong together:** a ticket and the pull requests its source confirms are its own. Only a direct, confirmed link groups, reported by the source or stated by a person. A reference found in text is a hint in the details and never groups. Sharing a repository or an ancestor never stacks anything. So most cells have no stack at all.
+
+- The lead is a card like any other.
+- What it holds peeks from under it as a sheet, and the sheet carries the reason in words: "2 pull requests".
+- The card opens the card. The sheet opens the stack, in place, with its members as real cards under a thin rail. They are two different things under the pointer, with a chevron on the one that unfolds.
+- A stack with a question or a failure inside opens by itself.
+- Drag a member out and it is simply a card again. Nothing remembers a stack: it follows from the links and the cell.
 
 ### Plans
 
-The name row: a chevron on hover, the name, a bullet graph, "7 of 12 landed" on approach. The wire starts at its first bead and ends 24px past its last. It says how far a plan has come, not how wide the page is. Full-width lines read as the metro map he rejected. Opening every busy plan by default was tried and rejected too: the bands crowded the page, and a thin horizontal line is what he asked for.
+Called Initiatives on screen. A Hercule Initiative is the user's own intent, with a colour of its own. Hues are chosen away from marigold and tomato, which mean things, at one lightness and chroma per theme family, so they read alike in every theme.
 
-**The bullet graph** is 40 by 4: landed in `--muted`, in motion at 42% of that, the rest empty. "7 of 12 landed" shows on hover.
+An initiative is a row: chevron, a flag in its colour, its name, and small facts ("Platform · 2 of 8 landed"). An initiative is your own, so its Tasks are its truth: the count and the beads always agree. Its line runs across the stages, bright as far as its last Task, faint to the end of the board. One bead per Task, at its stage, in its colour.
 
-**Beads** have three forms, nothing to decode: ink round for a quick call, ink long for real thinking, and one faint ring for everything else. A failed Task's bead is the failed mark, the one exception. They are not marigold at rest, so marigold stays rare; under a lens the matching beads take a marigold ring. Past ten in a cell they condense into tally marks, 3 by 10. Click one to open it, or drag it along its wire to change its stage. Clicking the wire itself opens the plan.
+- Filled is open. A ring is landed. A faint ring is blocked. Marigold has a question. The failed mark has failed.
+- Past ten in a cell, beads become tally marks.
+- Click a bead to open that Task, or drag it along its line to change its stage. Click the row's head to open the initiative in place into cards, with a 2px bar in its colour down the left.
 
-Opened, the plan's wire becomes a band of cards, on a faint inlay between two hairlines, with the same cells and piles as a lane.
+**Two places, switched in Display.** On top: all initiatives together above the lanes, as in the lo-fi, and the lanes below hold what is in no initiative, under "Not in an initiative". The heading folds the whole block, for a day with many. In lanes: each initiative under its project's cards.
+
+Most Tasks have no initiative, and that is normal. The design never collapses into a giant "no initiative" group, except when you ask for it with Group by Initiative.
 
 ### Lanes
 
-Lanes keep their order. A folded lane is a name row and a wire holding all its Tasks. Nothing auto-unfolds. A lane with no project is named "No project" and sits last. When a run has failed, the head says "1 failed" in ink before what wants you, folded or not.
+Lanes keep their order. A lane with no project is named "No project" and sits last. A lane has an icon that says what it is: a folder, an initiative's flag, or a source's mark.
+
+What keeps a lane and an initiative apart, in every state:
+
+| | Lane | Initiative |
+|---|---|---|
+| Type | 14/20 bold | 13/18 medium, with facts under it |
+| Icon | folder or source mark, in `--muted` | a flag in its colour |
+| Place | at the margin | indented 14px in a lane |
+| Ground | a hairline, or a band | none |
+| Folded | one line of counts | a coloured line |
+
+**A folded lane is its head and one line of small counts,** each under its stage, with a dot where something has a question or a failure. There are no beads and no line, so a page of folded lanes reads as a plain table, not a metro map. The head keeps a small flag for each initiative it holds, in colour, so nothing vanishes without a trace. `F` folds the current lane, and ⇧F folds them all. Beads stayed only on initiatives, where the colour and the flag make them mean something.
 
 ### Piles
 
-Every pile is a stack: a real card with sheets under it and `+13` beside the age. There are no title-only tiles. When a lane shows all its rows, a stack gathers a stream of similar work (Reviews, Pull requests, Tickets) or the overflow of a cell. The fan names it: "Reviews, 14, 6 want you". Landed is the one exception and the quietest thing on the board: always one line, "2 this week", with no sheet.
+Gone. The founder's note was right: an unrelated top card hid things, and nobody could tell what a pile was. Overflow now opens in place, and a stack means only what a confirmed link says it means. See Rows at rest, and stacks.
 
-Rules:
+### Add to Work
 
-- A cell in a full lane shows at most three rows, plus a fourth when only one card is over. Past that, the rest wait on the last stack. A lane has the same height at 60 Tasks as at 300.
-- Three or more of a kind fold. Two streams beside two or more cards share one stack, "Reviews and PRs", so they do not need a fourth row.
-- **A pile keeps its identity and its place for the visit.** A card leaving can only take something away. It can never split a pile or grow a lane. Regrouping happens on the next visit.
-- Cards already showing stay. What arrives waits in the last row, so an arrival never swallows the card you are looking at.
-- A card you just put down stays a card, on the row you chose, until the next visit. Nothing is pushed out to make room for it.
+Starting work from this page, because going to the Inbox for "that one extra ticket" would be a shame. `A`, the Add button, or the `+` on a lane's head.
 
-Clicking a pile fans it open on the desk's own stage columns, on a desk dimmed 98%, what wants you first, scrolling inside itself past the window's height. Cards in a fan are real: open, drag out, Done. Dragging one out folds the rest back.
+A sheet opens at the right, the size of the details pane, and the board stays in view beside it. The board does not scroll while the sheet is open. The row and the line at the foot say where a new Task went.
+
+- **New Task** is the first thing in it: type, Return. A line says where it will land. From a lane for an outside thing it joins the project most of that lane is in, and the line says it shows under "No Linear team" until a source says otherwise.
+- **From a source:** a segmented control for each source, a scope, and Find. The list shows outside things that concern you and have no Task yet. Fetched context records are never listed.
+- **It opens on what you were looking at.** From a Linear project's lane it opens on that project. From a project lane, on that project. With a filter on a context, on that context. The scope is one normal select, and "Everywhere" is always there.
+- **The list is organised by what the source reports:** a heading per project or repository, with its title and what it says about itself. A thing in two projects is listed once, and says "Also in Pricing rules".
+- **One click adds it.** The row turns to a check, shows the stage it went to, and stays exactly where it is, so nothing slides under your pointer and you can add another. A line offers Undo. A new Task starts at the stage its source state maps to, as the kind declares: Todo is Planned, In progress is Building.
+
+Choosing a context never creates Tasks for its children. Adding is always one thing at a time.
 
 ### The details pane
 
-A sheet 468px wide, 14px from the right, from 66px down to 14px from the bottom. 16px corner, `--h-carry`, floating over the board rather than splitting it: a split would squeeze five columns and move every card.
+A sheet 468px wide, 14px from the right, from 58px down to 14px from the bottom. 16px corner, `--h-carry`, floating over the board rather than splitting it: a split would squeeze five columns and move every card.
 
-From the top: crumbs (project, plan) with "4 of 23" during a walk, title at 20/26, the stage path (click a stage to move there), where it stands at 14/21, Next move (who, the question in `--you-ink`, answers with the suggested one rimmed in `--accent`, and a line to say something else), What is left, Blocked by and Blocks, Threads, Linked. The foot holds Done, Start a thread and Merge on the left, and Drop alone at the right, far from Done.
+From the top: crumbs (project, initiative), title at 20/26, the stage path (click a stage to move there), where it stands at 14/21, then only if there is one, the open question or the failure, then What is left, Blocked by and Blocks, Threads, Part of, Linked, Mentioned. The foot holds Done, Start a thread and Merge on the left, and Drop alone at the right, far from Done.
 
-A failed Task's Next move shows its colleague with the plaster, then the card's words with the failed mark, in the question's voice, then Try again, filled, and Open the run. Return tries again. Done and Drop stay in the foot, where they are on every Task, so the order down the sheet is Try again, Open the run, Done, Drop.
+**A question** shows the Thread that asks, the question at 17/24 bold, answers as compact chips with the suggested one filled in `--answer`, and a line to say something else. Answering sends it: a line offers Undo, and the sheet closes. A colleague on the Task rides the sheet's top edge, and slides clear of the toolbar as it opens.
 
-Answering sends it: the card lies down, a line offers Undo, and a walk moves on. Start a thread asks what the thread should do, on one line, before anything starts. Inside the pane, Esc goes back to the Task you came from, then closes. The question is the page's second voice, at 17/24 bold in ink. Answers are compact chips: the suggested one filled in `--answer`, the rest rimmed. The chips come from the question itself where they can, and a Task that needs real thinking offers a thread instead. `--answer` is each theme's `--accent`, except Nile, whose accent is cream: there it stays green, so "the one suggested answer" means the same in every theme.
+**A failure** shows the colleague with the plaster, the card's words with the failed mark in the same voice, then Try again, filled, and Open the run. Return tries again. Done and Drop stay in the foot, where they are on every Task, so the order down the sheet is Try again, Open the run, Done, Drop.
+
+**Part of** lists every ancestor by every path, each once, nearest first, each with its source's mark, its title and what it says about itself: "Linear initiative · Active". No parent is drawn as the only one. A team is one more path, not a rung. Click a row to see all its Tasks: that is Filter, on that context.
+
+**Linked** lists what the Task carries, then its direct links across sources. Who claims a link stays quiet: on hover or focus the state gives way to "Linear reports this" or "Noa linked this". A link to something you cannot open shows the source's kind and "you cannot open", with a lock and no title, because its title was never read.
+
+**Mentioned** holds references found in text, in muted rows, saying so on hover. They are hints. They group nothing and they prove nothing.
+
+Start a thread asks what the thread should do, on one line, before anything starts. Inside the pane, Esc goes back to the Task you came from, then closes.
 
 ### Selecting and bulk moves
 
@@ -221,8 +271,7 @@ Answering sends it: the card lies down, a line offers Undo, and a walk moves on.
 
 | Key | Does |
 |---|---|
-| N, ⇧N | next and previous thing that wants you, with details open |
-| Arrows, HJKL | walk the desk: up and down stay in the column, left and right go to the nearest height in the next column. On a wire they walk its beads |
+| Arrows, HJKL | walk the board: up and down stay in the column, left and right go to the nearest height in the next column. On a line they walk its beads |
 | [ ] | previous and next lane |
 | Return, Space | open |
 | ⇧← ⇧→ | move a card a stage |
@@ -230,28 +279,28 @@ Answering sends it: the card lies down, a line offers Undo, and a walk moves on.
 | D, ⌫ | Done, Drop |
 | M | merge: pick with arrows, Return to confirm |
 | T | start a thread |
+| A | Add to Work |
 | X | select |
-| E | fan out what lies behind a card |
-| F, ⇧F | more or fewer rows in this lane, fold everything to the score |
-| ! Q R S A | lenses |
+| F, ⇧F | fold this lane or initiative, fold every lane |
 | / | find |
 | W | Wear |
 | ⌘Z | undo: one gesture at a time, and only yours, never a fact that arrived |
 | ? | keys |
 | Esc | steps back, one thing at a time |
 
-Single keys work only with focus on the board, never with a modifier, and can be turned off in Display. With the pane open they act on the open Task, and only on it. While carrying, only Esc means anything. Return and Space belong to whatever has focus.
+Single keys work only with focus on the board, never with a modifier, and can be turned off in Display.
 
 ### Accessibility
 
 Measured in all six themes.
 
-- Text passes 4.5:1 everywhere, including pressed and dimmed cards. The tab reaches 8:1 or more on dark desks. On light desks it is about 2:1, a known miss, which we accepted because an outline looked worse, the tab is never the only signal (the card also stands, and its name says so), and a number on it reads at full contrast.
-- The sheets themselves are not 3:1 against the desk, on purpose: a card is identified by its words, and height is a second channel, not the only one.
-- A card's name reads in the order a person needs: title, who holds it, stage, summary, question, age.
-- A failure never rests on colour: it has a shape, the word "failed", and a card name that starts with the failure. The sidebar's dot names itself to a screen reader.
-- One tab stop leads onto the board, and from there the arrows walk it. A wire is one tab stop too.
-- The fan is a dialog, and the board is inert behind it. The details are a dialog named by the Task, not modal, because you can keep working beside it.
+- Text passes 4.5:1, including blocked cards. Initiative lines and beads reach 3:1 against the desk. Colour is never the only signal: a flag, a name and a place carry the same thing, and a failure has a shape and the word.
+- A card's name reads in the order a person needs: title, what it asks or what broke, stage, summary, age.
+- Lane and initiative heads are buttons in the tab order. One tab stop leads onto the cards, and from there the arrows walk them. A line is one tab stop too.
+- Group by and Filter are menus with radio and checkbox roles. Chips are buttons that say what they remove.
+- A stack's sheet and "13 more" are buttons that say whether they are open.
+- The sidebar's dot names itself to a screen reader.
+- The details are a dialog named by the Task, not modal, because you can keep working beside it.
 - Reduced motion swaps movement for fades. A Still colleagues switch in Display stops paws and blinks for anyone, without touching the system setting.
 - Cards use a minimum height, so text-spacing overrides grow them instead of clipping.
 
@@ -259,31 +308,32 @@ Measured in all six themes.
 
 | State | Treatment |
 |---|---|
-| First run | The sentence says nothing is here yet. A real standing card in Exploring, with Hercule looking over its edge, says where the first Task will land. One filled button: Start a thread |
-| Desk clear | A sunrise. The stage rule is the horizon, and Hercule himself comes up over it, with rays, as a sibling of the Inbox's empty page. "The desk is clear." under the rule |
+| Nothing asks | The normal case: a complete board with no marks, and the sidebar's Waiting on you gone. `?scene=quiet` |
+| First run | A short line says nothing is here yet. A dashed card in Exploring, with Hercule looking over its edge, says where the first Task will land. One filled button: Start a thread |
+| Desk clear | A sunrise over one hairline, with Hercule coming up over it, and "All clear." under it. The stage names stay out of the way |
 | One card | One card, in its place. No special layout |
-| 300 cards | Ten lanes at rest, every one showing real cards. ⇧F folds all of them into the score: ten projects on one screen |
-| Loading | The rule and lanes are there at once. Cards show two quiet bars, and words fade in from the top left. No spinners, no shift |
-| Partial data | A card with no summary yet says so. A missing age shows nothing |
-| Offline | A line says since when. Moves still work, marked with a clock until they sync. Answers say they will send when you are back |
+| 300 cards | Ten lanes, every one showing real cards, and the page scrolls. ⇧F folds them to ten plain rows |
+| Loading | The headers and lanes are there at once. Cards show two quiet bars, and words fade in from the top left. No spinners, no shift |
+| Partial data | A card with no summary yet says so. An outside thing with only an id and a title shows only those |
+| Offline | A quiet line in the toolbar says since when. Moves still work, marked with a clock until they sync. Answers say they will send when you are back |
 | A move fails | The card goes back, and the line at the foot says why and what to do |
-| A run failed | A marigold dot in the sidebar, "1 failed" opening the sentence, the card standing at the top of its cell, and Try again in the details. See A failed run |
+| A run failed | A marigold dot in the sidebar, "1 failed" on the lane, the card at the top of its cell, and Try again in the details. See A failed run |
+| A filter finds nothing | "No Tasks match this filter." The chips stay, so the way out is in view |
 | Stale | Ages keep counting. Nothing else changes |
 | Long titles | Two lines, then an ellipsis. The full title is in the details |
-| Huge counts | Numbers stay in their place; a pile of 1,204 is a pile |
 | No project | A lane called No project, last |
-| Zero plans | No plans drawn. No "no plans" message |
+| Zero initiatives | Nothing drawn. No "no initiatives" message |
 
 ## What would change in the design system
 
-**New tokens**, in `system/primitives.css`: `--desk`, `--lamp`, `--numeral`, `--underline`, `--tab-fill`, `--paper`, `--count-ink`, `--rule-ink`, `--stock-sheen`, `--answer`, `--answer-fg`, `--word-flat`, `--word-flat-2`, `--word-press`, `--stock`, `--stock-carry`, `--stock-flat`, `--stock-rim`, `--stock-rim-flat`, `--stock-lit`, `--stock-press`, `--h-stand`, `--h-hover`, `--h-carry`, `--h-flat`, `--h-press`, `--h-etch`, the `--type-*` roles, `--card-*`, the `--m-*` motion tokens.
+**New tokens**, in `system/primitives.css`: `--desk`, `--paper`, `--answer`, `--answer-fg`, `--word-press`, `--stock`, `--stock-carry`, `--stock-sheen`, `--stock-flat`, `--stock-rim`, `--stock-rim-flat`, `--stock-lit`, `--h-rest`, `--h-hover`, `--h-carry`, `--plan-l`, `--plan-c`, `--plan-soft-a`, the `--type-*` roles and the `--m-*` motion tokens. In `css/overview.css`: `--failed-dot`.
 
-**New components:** card, top edge (tab, head and paws, monogram), stack, wire and bead, pile, lens sentence, stage rule, the walk, the sunrise, the failed mark, the sidebar's failed dot.
+**New components:** card, stack, cell overflow, lane (side label and band), initiative row with its line and beads, toolbar with chips, Group by and Filter menus, Add to Work, the failed mark, the sidebar's failed dot.
 
 **Doctrine changes:**
 
-1. *"Brass is ornament only, never text."* Amended: stage and stack counts are brass that can be read, in the Deco face (`--count-ink`), with the double rule under them. Brass still means nothing. Nowhere else.
-2. *"Depth is a hairline and a crisp shallow shadow."* Amended for cards on the desk: height carries meaning.
-3. *"Motion: interface moves fast and plainly; only characters get a little spring."* Amended: the interface now has three named springs, chosen by who caused the change.
-4. *"Color appears only at word and dot scale."* Holds. Marigold on this page is only on tabs and the underline of the sentence's numbers. Ages and lane counts are neutral. The failed mark is the one tomato, at word scale, and only while a run has failed.
-5. *The split* still holds for Intake and the thread. The details pane on Work is an overlay, because a board must not reflow.
+1. *"Brass is ornament only, never text."* Brass is simply gone from Work. The display face is for the logo and nowhere else.
+2. *"Depth is a hairline and a crisp shallow shadow."* Holds. A card lifts only in your hand.
+3. *"Motion: interface moves fast and plainly; only characters get a little spring."* Amended: the interface has three named springs, chosen by who caused the change.
+4. *"Color appears only at word and dot scale."* Holds. Marigold on this page is a palm, a question's words, and a dot. Initiative colours are lines, flags and dots. The failed mark is the one tomato. Ages and counts are neutral.
+5. *The split* still holds for Intake and the thread. The details pane and Add to Work are overlays, because a board must not reflow.

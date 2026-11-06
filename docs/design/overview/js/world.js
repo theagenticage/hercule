@@ -101,7 +101,7 @@ window.NW = (function () {
   ];
 
   // Each initiative's colour, as an oklch hue. Kept away from marigold and tomato, which mean things.
-  var HUES = [245, 150, 300, 200, 345, 118];
+  var HUES = [245, 150, 300, 200, 345, 118, 270, 175, 325, 222, 135, 100];
 
   var TODAY = Date.parse("2026-11-05");
 
@@ -120,7 +120,7 @@ window.NW = (function () {
   // The open questions of this morning. A question lives in a Thread and nowhere else: these two are
   // the sidebar's Waiting on you, and a Task with no open question asks nothing of anyone.
   var QUESTIONS = {
-    "sched-cutover": { text: "Approve the cutover for Monday?", answers: ["Approve for Monday", "Wait a week"] },
+    "sched-cutover": { text: "Cut over Monday, or wait a week?", answers: ["Monday", "Wait a week"] },
     "basket-restore": { text: "Highest quantity, or add them?", answers: ["Highest quantity", "Add them together"] },
   };
 
@@ -145,8 +145,8 @@ window.NW = (function () {
       t.ref = (/#\d+/.exec(w.where) || [""])[0];
       if (w.kind === "review" || w.kind === "mention") t.ref = "#" + w.id.split("-")[1];
       if (QUESTIONS[w.id]) {
-        t.question = QUESTIONS[w.id];
         t.agent = t.agent || (t.threads[t.threads.length - 1] || { title: t.name }).title;
+        t.question = Object.assign({ from: t.agent }, QUESTIONS[w.id]);
       }
       return Graph.attach(t);
     });
@@ -201,12 +201,12 @@ window.NW = (function () {
     Graph.linkPeers();
     return {
       projects: PROJECTS.slice(),
-      plans: INITIATIVES.map(function (i, n) { return Object.assign({}, i, { hue: HUES[n % HUES.length] }); }),
+      plans: INITIATIVES.map(function (i) { return Object.assign({}, i); }),
       tasks: tasks,
       folded: {},
       openPlans: {},
     };
   }
 
-  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge, sayAge: sayAge, sayAgent: sayAgent };
+  return { HUES: HUES, PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge, sayAge: sayAge, sayAgent: sayAgent };
 })();

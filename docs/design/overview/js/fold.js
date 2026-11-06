@@ -106,17 +106,17 @@ window.Fold = (function () {
     return from;
   }
 
-  /** Folds these roots with one change of the board. */
-  function fold(roots, mutate) {
+  /** Folds these roots with one change of the board. What you clicked stays where it is. */
+  function fold(roots, mutate, anchor) {
     var groups = launch(roots);
-    Board.change(mutate, { spring: "travel", quietExits: true, stagger: function () { return 70; } });
+    Board.change(mutate, { spring: "travel", quietExits: true, anchor: anchor, stagger: function () { return 70; } });
     groups.forEach(flyHome);
   }
 
   /** Opens these roots with one change of the board. */
-  function open(roots, mutate, after) {
+  function open(roots, mutate, after, anchor) {
     var origins = roots.map(recordOrigins);
-    Board.change(mutate, { spring: "travel", quietExits: true });
+    Board.change(mutate, { spring: "travel", quietExits: true, anchor: anchor });
     roots.forEach(function (root, i) { growFrom(root, origins[i]); });
     if (after) after();
   }
@@ -124,7 +124,9 @@ window.Fold = (function () {
   /** Opens the rest of a cell in place, or closes it again. The lanes below make room. */
   function toggleCell(key) {
     var st = Store.state;
-    Board.change(function () { st.openCells[key] = !st.openCells[key]; }, { spring: "travel" });
+    var owner = key.split("/")[0];
+    var cell = document.querySelector('.cell[data-owner="' + owner + '"][data-stage="' + key.split("/").pop() + '"]');
+    Board.change(function () { st.openCells[key] = !st.openCells[key]; }, { spring: "travel", anchor: cell && cell.closest(".lane, .plan") });
   }
 
   /** Opens a stack in place, or closes it again. */
@@ -132,26 +134,39 @@ window.Fold = (function () {
     Board.change(function () { Store.state.openStacks[id] = open; }, { spring: "travel" });
   }
 
+  /** Folds or opens something while a filter is on. That choice lasts as long as the filter does. */
+  function toggleUnderFilter(key, anchor) {
+    var folds = Store.state.filterFolds;
+    Board.change(function () { folds[key] = !folds[key]; }, { spring: "travel", quietExits: true, anchor: anchor });
+  }
+
   /** Folds or opens a lane. */
   function toggleLane(id) {
     var st = Store.state;
     var lane = Board.node("lane:" + id);
-    if (!st.folded[id]) fold([lane], function () { st.folded[id] = true; });
-    else open([lane], function () { st.folded[id] = false; });
+    if (Store.isFiltering()) return toggleUnderFilter("lane:" + id, lane);
+    if (!st.folded[id]) fold([lane], function () { st.folded[id] = true; }, lane);
+    else open([lane], function () { st.folded[id] = false; }, null, lane);
   }
 
   /** Folds or opens a plan: the wire opens into a band of cards, or closes back into a wire. */
   function togglePlan(id) {
     var st = Store.state;
     var plan = Board.node("plan:" + id);
+    if (Store.isFiltering()) return toggleUnderFilter("plan:" + id, plan);
     if (st.openPlans[id]) {
-      fold([plan], function () { delete st.openPlans[id]; });
+      fold([plan], function () { delete st.openPlans[id]; }, plan);
     } else {
       open([plan], function () { st.openPlans[id] = true; }, function () {
         var band = plan.querySelector(".plan-band");
         if (band) Motion.body(band).set({ o: 0 }).to({ o: 1 }, "travel");
-      });
+      }, plan);
     }
+  }
+
+  /** Hides or shows the whole block of initiatives on top. */
+  function togglePlans() {
+    Board.change(function () { Store.state.plansHidden = !Store.state.plansHidden; }, { spring: "travel", quietExits: true, noAnchor: true });
   }
 
   /** Folds every lane, or opens them all when all are folded. One change, however many lanes. */
@@ -161,9 +176,14 @@ window.Fold = (function () {
     var all = lanes.every(function (l) { return st.folded[l.id]; });
     var list = lanes.filter(function (l) { return !!st.folded[l.id] === all; });
     var roots = list.map(function (l) { return Board.node("lane:" + l.id); });
-    if (all) open(roots, function () { list.forEach(function (l) { st.folded[l.id] = false; }); });
-    else fold(roots, function () { list.forEach(function (l) { st.folded[l.id] = true; }); });
+    if (all) return open(roots, function () { list.forEach(function (l) { st.folded[l.id] = false; }); });
+    // Folding everything means everything: what was open among the initiatives closes too.
+    var plans = Object.keys(st.openPlans).map(function (id) { return Board.node("plan:" + id); });
+    fold(roots.concat(plans), function () {
+      list.forEach(function (l) { st.folded[l.id] = true; });
+      st.openPlans = {};
+    });
   }
 
-  return { toggleLane: toggleLane, toggleCell: toggleCell, toggleStack: toggleStack, togglePlan: togglePlan, toggleAll: toggleAll };
+  return { toggleLane: toggleLane, toggleCell: toggleCell, toggleStack: toggleStack, togglePlan: togglePlan, togglePlans: togglePlans, toggleAll: toggleAll };
 })();

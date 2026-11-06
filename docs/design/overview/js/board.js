@@ -8,6 +8,9 @@ window.Board = (function () {
   var FAILED_MARK = '<svg class="failed-mark" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>';
   var FLAG = '<svg class="plan-flag" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M4 2.2a.8.8 0 0 1 .8.8v.3h7.4c.5 0 .8.6.5 1L10.9 7l1.8 2.7c.3.4 0 1-.5 1H4.8V14a.8.8 0 0 1-1.6 0V3a.8.8 0 0 1 .8-.8Z"/></svg>';
 
+  var FOLDER = '<svg class="lane-folder" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 4.4c0-.7.6-1.2 1.2-1.2h2.7c.3 0 .6.1.8.4l1 1.2h4.7c.7 0 1.2.5 1.2 1.2v5.6c0 .7-.5 1.2-1.2 1.2H3.4c-.6 0-1.2-.5-1.2-1.2V4.4Z"/></svg>';
+  var SIDE_LABELS_FROM = 1320;
+
   var nodes = new Map();
   var lanesEl, ruleEl, scrollEl;
 
@@ -64,7 +67,7 @@ window.Board = (function () {
   /** Draws who is on a card right now. Only a live Thread stands behind the edge; most cards have nobody. */
   function drawHolder(t) {
     if (!t.agent || (t.stage === "landed" && !t.failed)) return "";
-    var drawn = drawHead(t.agent, t.failed ? "failed" : t.question ? "waiting" : "working");
+    var drawn = drawHead(t.question ? t.question.from : t.agent, t.failed ? "failed" : t.question ? "waiting" : "working");
     return '<span class="card-holder">' + drawn.head + "</span>" + drawn.paws;
   }
 
@@ -83,16 +86,27 @@ window.Board = (function () {
     return Math.max(0, Math.min(1, (t.age - 6) / 24));
   }
 
+  /** Says when a Task also sits under other lanes of this grouping, so no lane looks like its only home. */
+  function drawAlso(t) {
+    var kind = Store.state.groupBy;
+    if (!Graph.KINDS[kind]) return "";
+    var refs = Graph.readAncestorsOfKind(t, kind);
+    if (refs.length < 2) return "";
+    var names = refs.map(function (r) { return Graph.entity(r).title; }).join(", ");
+    var word = Graph.KINDS[kind].plural || Graph.KINDS[kind].word.toLowerCase() + "s";
+    return '<span class="card-also" title="' + esc(names) + '">In ' + refs.length + " " + esc(word) + "</span>";
+  }
+
   function drawCardInner(t, showPlan) {
     var src = t.source ? '<span class="card-src" title="' + esc(Graph.SOURCES[t.source]) + '">' + Crew.brand(t.source, 13) + "</span>" : "";
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
     var plan = showPlan && planOf(t);
-    var dot = plan ? '<i class="card-plan" style="--plan-hue:' + plan.hue + '" title="' + esc(plan.name) + '"></i>' : "";
+    var dot = plan ? '<span class="card-plan" style="--plan-hue:' + plan.hue + '" title="' + esc(plan.name) + '">' + FLAG + "</span>" : "";
     var person = t.person && !/^the /.test(t.person) ? '<i class="card-person" title="' + esc(t.person) + '">' + esc(t.person.charAt(0)) + "</i>" : "";
     var meta = '<span class="card-meta">' + dot + person + sync + src + "<time>" + NW.formatAge(t.age) + "</time></span>";
     var state = Store.decideState(t);
     return drawHolder(t) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
-      '<div class="card-words" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now' + (state === "failed" ? " card-failed" : state === "question" ? " card-question" : "") + '">' + describeNow(t) + "</p></div>" + meta;
+      '<div class="card-words" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now' + (state === "failed" ? " card-failed" : state === "question" ? " card-question" : "") + '">' + describeNow(t) + "</p></div>" + drawAlso(t) + meta;
   }
 
   /** Returns a card in words, in the order a person needs them, for a screen reader. */
@@ -152,14 +166,16 @@ window.Board = (function () {
   function drawStack(item, key, lane) {
     var lead = item.lead;
     var open = Store.isStackOpen(item);
+    var kept = item.members.some(Store.isLoud);
     var el = node("stack:" + key + ":" + lead.id, "div", "stack");
     el.dataset.id = lead.id;
     el.classList.toggle("is-open", open);
     var bar = node("stackbar:" + key + ":" + lead.id, "button", "stack-bar");
     bar.dataset.stack = lead.id;
     bar.setAttribute("aria-expanded", open);
-    var loud = item.members.filter(Store.isLoud).length;
-    setHTML(bar, "<span>" + esc(describeMembers(item.members)) + "</span>" + (loud ? '<i class="stack-dot"></i>' : "") + Crew.icon("chev-d", 12));
+    // A question or a failure inside keeps a stack open, so there is nothing here to press.
+    bar.disabled = kept;
+    setHTML(bar, "<span>" + esc(describeMembers(item.members)) + "</span>" + (kept ? "" : Crew.icon("chev-d", 12)));
     var kids = [drawCard(lead, lane), bar];
     if (open) {
       var box = node("stackbox:" + key + ":" + lead.id, "div", "stack-members");
@@ -187,7 +203,7 @@ window.Board = (function () {
     var el = node("more:" + key + ":" + stage, "button", "cell-more");
     el.dataset.more = key + "/" + stage;
     el.setAttribute("aria-expanded", open);
-    var words = open ? "Show fewer" : stage === "landed" ? arranged.hidden + " this week" : arranged.hidden + " more";
+    var words = open ? "Show fewer" : stage === "landed" ? arranged.hidden + " landed" : arranged.hidden + " more";
     setHTML(el, "<span>" + words + "</span>" + Crew.icon(open ? "chev-ud" : "chev-d", 12));
     return el;
   }
@@ -270,7 +286,7 @@ window.Board = (function () {
   function drawPlan(plan, showProject) {
     var tasks = Store.tasksIn(function (t) { return t.initiative === plan.id && Store.matches(t); });
     // A filter is a question about Tasks, so what matches shows as cards, not behind a closed row.
-    var open = !!Store.state.openPlans[plan.id] || Store.isFiltering();
+    var open = Store.isPlanOpen(plan.id);
     var rb = node("plan:" + plan.id, "section", "plan");
     rb.dataset.plan = plan.id;
     rb.classList.toggle("is-open", open);
@@ -279,7 +295,10 @@ window.Board = (function () {
     head.dataset.foldPlan = plan.id;
     head.setAttribute("aria-expanded", open);
     var project = showProject ? Store.state.projects.filter(function (p) { return p.id === plan.project; })[0] : null;
-    var facts = [project ? project.name : "", plan.total ? plan.done + " of " + plan.total : ""].filter(Boolean).join(" · ");
+    // An initiative is your own, so its Tasks are its truth: one bead each, and this counts those beads.
+    var all = Store.state.tasks.filter(function (t) { return t.initiative === plan.id; });
+    var landed = all.filter(function (t) { return t.stage === "landed"; }).length;
+    var facts = [project ? project.name : "", all.length ? landed + " of " + all.length + " landed" : ""].filter(Boolean).join(" · ");
     setHTML(head, '<span class="chev">' + Crew.icon("chev-r", 12) + "</span>" + FLAG + '<span class="plan-words"><b class="plan-name">' + esc(plan.name) + "</b>" + (facts ? '<small class="plan-facts">' + esc(facts) + "</small>" : "") + "</span>" + drawFailedCount(tasks));
     var kids = [head];
     if (open) {
@@ -296,27 +315,31 @@ window.Board = (function () {
   /** Draws every initiative together, above the lanes. */
   function drawTopPlans(plans) {
     var box = node("topplans", "section", "top-plans");
+    // A filter is a question about Tasks, so nothing that matches may stay behind a folded heading.
+    var hidden = !!Store.state.plansHidden && !Store.isFiltering();
     var title = node("topplans-title", "h3", "block-title");
-    setHTML(title, "Initiatives");
+    setHTML(title, '<button class="block-btn" data-fold-plans aria-expanded="' + !hidden + '"><span class="chev">' + Crew.icon("chev-r", 12) + "</span>Initiatives<small>" + plans.length + "</small></button>");
     var list = node("topplans-list", "div", "plans");
     place(list, plans.map(function (p) { return drawPlan(p, true); }));
-    place(box, [title, list]);
+    place(box, hidden ? [title] : [title, list]);
     return box;
   }
 
   /* ---------- Lanes ---------- */
 
   function drawLaneIcon(l) {
-    if (l.type === "project") return '<i class="proj proj--' + l.tint + '"></i>';
+    if (l.type === "project") return FOLDER;
     if (l.type === "initiative") return '<span class="lane-flag" style="--plan-hue:' + l.hue + '">' + FLAG + "</span>";
     if (l.type === "context") return '<span class="lane-brand">' + Crew.brand(l.source, 14) + "</span>";
     return '<i class="proj proj--none"></i>';
   }
 
-  /** Lists what an outside thing says about itself. Progress shows only if its source reports it. */
-  function describeContext(e) {
-    var kind = Graph.KINDS[e.kind];
-    return [kind.word, e.state, e.progress ? e.progress[0] + " of " + e.progress[1] : ""].filter(Boolean).join(" · ");
+  /** Draws what an outside thing says about itself. Progress shows only if its source reports it. */
+  function drawContextFacts(e) {
+    var words = esc([Graph.KINDS[e.kind].group || Graph.KINDS[e.kind].caption, e.state].filter(Boolean).join(" · "));
+    if (!e.progress) return words;
+    var share = Math.round((e.progress[0] / e.progress[1]) * 100);
+    return words + ' <span class="ctx-progress"><i class="ctx-bar"><i style="width:' + share + '%"></i></i>' + e.progress[0] + " of " + e.progress[1] + "</span>";
   }
 
   /** Draws a folded lane's one line: how much sits in each stage, under that stage. */
@@ -337,12 +360,14 @@ window.Board = (function () {
     var lane = node("lane:" + l.id, "section", "lane");
     lane.dataset.lane = l.id;
     lane.dataset.type = l.type;
-    var folded = !!st.folded[l.id] && !Store.isFiltering();
+    var folded = Store.isLaneFolded(l.id);
     lane.classList.toggle("is-folded", folded);
     var head = node("lanehead:" + l.id, "h3", "lane-head");
-    var facts = l.entity ? describeContext(l.entity) : "";
+    var facts = l.entity ? drawContextFacts(l.entity) : "";
     var add = l.type === "none" ? "" : '<button class="lane-add" data-add-lane="' + esc(l.id) + '" title="Add to ' + esc(l.name) + '" aria-label="Add to ' + esc(l.name) + '">' + Crew.icon("plus", 14) + "</button>";
-    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(l.id) + '" aria-expanded="' + !folded + '"><span class="chev">' + Crew.icon("chev-r", 12) + "</span>" + drawLaneIcon(l) + '<span class="lane-words"><span class="lane-name">' + esc(l.name) + "</span>" + (facts ? '<small class="lane-facts">' + esc(facts) + "</small>" : "") + '</span><span class="lane-total">' + l.tasks.length + "</span>" + drawFailedCount(l.tasks) + "</button>" + add);
+    // Folded, a lane's initiatives are gone from view, so their flags stay in its head.
+    var flags = folded ? l.plans.map(function (p) { return '<span class="lane-flag" style="--plan-hue:' + p.hue + '" title="' + esc(p.name) + '">' + FLAG + "</span>"; }).join("") : "";
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(l.id) + '" aria-expanded="' + !folded + '"><span class="chev">' + Crew.icon("chev-r", 12) + "</span>" + drawLaneIcon(l) + '<span class="lane-words"><span class="lane-line"><span class="lane-name">' + esc(l.name) + '</span><span class="lane-total">' + l.tasks.length + "</span>" + flags + "</span>" + (facts ? '<small class="lane-facts">' + facts + "</small>" : "") + drawFailedCount(l.tasks) + "</span></button>" + add);
     var kids = [head];
     if (folded) {
       kids.push(drawFoldRow(l));
@@ -392,7 +417,8 @@ window.Board = (function () {
     if (emptyWorld) setHTML(welcome, Welcome.drawEmpty(work.dataset.scene));
     else setHTML(welcome, "");
     work.dataset.planPlace = st.planPlace;
-    work.dataset.lanes = st.laneStyle;
+    // Side labels cost 210px of card width. A narrow window cannot spare it, so lanes become bands.
+    work.dataset.lanes = innerWidth < SIDE_LABELS_FROM ? "band" : st.laneStyle;
     work.dataset.group = st.groupBy === "project" ? "project" : "other";
     var blocks = [];
     if (!emptyWorld) {
@@ -479,12 +505,10 @@ window.Board = (function () {
     // The lane at the top of the view stays exactly where it is, however much changes around it.
     var view = scrollEl.getBoundingClientRect();
     var lanes = lanesEl.querySelectorAll(".lane");
-    var anchor = null;
-    for (var i = 0; i < lanes.length; i++) {
-      if (lanes[i].getBoundingClientRect().bottom > view.top + 120) {
-        anchor = lanes[i];
-        break;
-      }
+    // What you just clicked stays under your pointer, and everything else moves around it.
+    var anchor = opts.anchor || null;
+    for (var i = 0; !anchor && i < lanes.length; i++) {
+      if (lanes[i].getBoundingClientRect().bottom > view.top + 120) anchor = lanes[i];
     }
     var anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     Motion.flip(movables(), function () {
@@ -541,5 +565,5 @@ window.Board = (function () {
     return lane ? lane.querySelector('.fold-cell[data-stage="' + t.stage + '"]') : null;
   }
 
-  return { FAILED_MARK: FAILED_MARK, FLAG: FLAG, mount: mount, locate: locate, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, describeContext: describeContext, holdOpen: holdOpen, releaseHold: releaseHold };
+  return { FAILED_MARK: FAILED_MARK, FLAG: FLAG, FOLDER: FOLDER, mount: mount, locate: locate, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, drawContextFacts: drawContextFacts, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

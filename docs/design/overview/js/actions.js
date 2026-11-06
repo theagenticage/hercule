@@ -60,9 +60,13 @@ window.Actions = (function () {
 
   /** Tells the person what a move really did, and takes it back if the move fails. */
   function reportMove(to) {
-    var stage = NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name;
     var offline = document.getElementById("work").classList.contains("is-offline");
-    Toast.show(offline ? "Moved to " + stage + ". It will sync when you are back." : "Moved to " + stage + ".", true);
+    var plan = Store.state.plans.filter(function (p) { return p.id === to.plan; })[0];
+    var project = Store.state.projects.filter(function (p) { return p.id === to.project; })[0];
+    var stage = NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name;
+    var place = to.sameStage ? (plan || project || {}).name : stage;
+    var words = "Moved" + (place ? " to " + place : "") + ".";
+    Toast.show(offline ? words + " It will sync when you are back." : words, true);
     if (Store.failNext) {
       Store.failNext = false;
       setTimeout(function () {
@@ -92,6 +96,7 @@ window.Actions = (function () {
     Board.change(function () { Store.answerTask(id, words); });
     Toast.show((Store.state.offline ? "Sends when you are back: " : "Sent: ") + words, true);
     Pane.hide();
+    Filters.settle();
   }
 
   /**

@@ -43,12 +43,11 @@ window.Pane = (function () {
     var opts = t.question.answers.map(function (label, i) {
       return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + esc(label) + '">' + esc(label) + "</button>";
     }).join("");
-    return '<section class="pn-sec pn-next"><p class="pn-who">' + Crew.face(t.agent, { pose: "waiting", size: 22 }) + "<span><b>" + esc(NW.sayAgent(t.agent)) + '</b> asks.</span></p><p class="pn-ask">' + esc(t.question.text) + '</p><div class="pn-answers">' + opts + '</div><form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form></section>';
+    return '<section class="pn-sec pn-next"><p class="pn-who">' + Crew.face(t.question.from, { pose: "waiting", size: 22 }) + "<span>" + (t.question.from === t.name ? "A Thread asks." : "<b>" + esc(NW.sayAgent(t.question.from)) + "</b> asks.") + '</span></p><p class="pn-ask">' + esc(t.question.text) + '</p><div class="pn-answers">' + opts + '</div><form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form></section>';
   }
 
   function drawNow(t) {
-    if (t.failed) return drawFailure(t);
-    return t.question ? drawQuestion(t) : "";
+    return (t.failed ? drawFailure(t) : "") + (t.question ? drawQuestion(t) : "");
   }
 
   function drawThreads(t) {
@@ -57,7 +56,9 @@ window.Pane = (function () {
       var live = t.agent && i === t.threads.length - 1;
       var broke = live && t.failed;
       var asks = live && t.question;
-      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: broke ? "failed" : asks ? "waiting" : live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (broke ? "Failed" : asks ? "Asks" : live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
+      // The live Thread is the one on the card, so it wears the same face.
+      var who = asks ? t.question.from : live ? t.agent : th.title + th.id;
+      return '<a class="pn-row" href="#">' + Crew.face(who, { pose: broke ? "failed" : asks ? "waiting" : live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (broke ? "Failed" : asks ? "Asks" : live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
     }).join("") + "</section>";
   }
 
@@ -97,7 +98,7 @@ window.Pane = (function () {
     return '<section class="pn-sec"><h4>Part of</h4>' + refs.map(function (r) {
       var e = Graph.entity(r);
       var shows = Graph.KINDS[e.kind].group;
-      return "<" + (shows ? 'button data-context="' + esc(r) + '" title="Show all its Tasks"' : "div") + ' class="pn-row">' + Crew.brand(Graph.sourceOf(r), 14) + '<span class="pn-row-text">' + esc(e.title) + '</span><small class="pn-state">' + esc(Board.describeContext(e)) + "</small></" + (shows ? "button" : "div") + ">";
+      return "<" + (shows ? 'button data-context="' + esc(r) + '" title="Show all its Tasks"' : "div") + ' class="pn-row">' + Crew.brand(Graph.sourceOf(r), 14) + '<span class="pn-row-text">' + esc(e.title) + '</span><small class="pn-state">' + Board.drawContextFacts(e) + "</small></" + (shows ? "button" : "div") + ">";
     }).join("") + "</section>";
   }
 
@@ -129,7 +130,7 @@ window.Pane = (function () {
     sheet.querySelectorAll(":scope > .card-holder, :scope > .card-paws").forEach(function (old) { old.remove(); });
     if (!t.agent || (t.stage === "landed" && !t.failed)) return;
     var tmp = document.createElement("div");
-    var drawn = Board.drawHead(t.agent, t.failed ? "failed" : t.question ? "waiting" : "working");
+    var drawn = Board.drawHead(t.question ? t.question.from : t.agent, t.failed ? "failed" : t.question ? "waiting" : "working");
     tmp.innerHTML = '<span class="card-holder">' + drawn.head + "</span>" + drawn.paws;
     while (tmp.lastChild) sheet.insertBefore(tmp.lastChild, sheet.firstChild);
   }
@@ -142,6 +143,8 @@ window.Pane = (function () {
     sheet.style.width = lerp(from.width, to.width, q) + "px";
     sheet.style.height = lerp(from.height, to.height, q) + "px";
     sheet.style.setProperty("--pn-r", lerp(12, 16, clamp(p)) + "px");
+    // A colleague rides the top edge, and slides clear of the toolbar's right end as the sheet opens.
+    sheet.style.setProperty("--pn-head", lerp(14, 214, clamp(p)) + "px");
     // The two sets of words overlap, so there is never a blank sheet between them.
     var words = clamp((p - 0.3) / 0.55);
     inner.style.opacity = words.toFixed(3);
@@ -153,7 +156,7 @@ window.Pane = (function () {
   function measureTarget() {
     var host = pane.getBoundingClientRect();
     var w = Math.min(468, host.width - 40);
-    return { left: host.width - w - 14, top: 66, width: w, height: host.height - 66 - 14 };
+    return { left: host.width - w - 14, top: 58, width: w, height: host.height - 58 - 14 };
   }
 
   function cardRect(el) {
@@ -167,7 +170,9 @@ window.Pane = (function () {
     opts = opts || {};
     var t = Store.task(id);
     if (!t) return;
-    var el = document.querySelector('#lanes .card[data-id="' + id + '"]');
+    // A Task under two lanes has two cards. The sheet grows from the one you touched.
+    var el = opts.el || document.querySelector('#lanes .card[data-id="' + id + '"]');
+    if (window.Adder) Adder.hide();
     if (openId && openId !== id) {
       if (opts.followed) trail.push(openId);
       swap(id);

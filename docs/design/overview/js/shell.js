@@ -11,7 +11,7 @@ window.Shell = (function () {
       ["Fix the checks on the multi-buy PR", "Working", "depot-mac"],
     ]],
     ["Platform", "payments", "1 needs you", [
-      ["Cut over the invoice export", "Approval", "Approve the cutover for Monday?", true],
+      ["Cut over the invoice export", "Question", "Cut over Monday, or wait a week?", true],
       ["Fake the clock in order tests", "Working", "depot-mac"],
     ]],
     ["Insights", "ops", "", [
@@ -33,9 +33,11 @@ window.Shell = (function () {
   }
 
   /** Draws the Threads face, as the app draws it: the threads under their projects. */
-  function drawThreadsFace() {
+  function drawThreadsFace(quiet) {
     return THREADS.map(function (g) {
-      return '<section class="side-sec"><h3 class="thread-h"><i class="proj proj--' + g[1] + '"></i><span>' + g[0] + "</span>" + (g[2] ? "<em>" + g[2] + "</em>" : "") + "</h3>" + g[3].map(threadRow).join("") + "</section>";
+      // With nothing asked, a Thread that would ask is simply working.
+      var rows = quiet ? g[3].map(function (t) { return [t[0], "Working", "depot-mac"]; }) : g[3];
+      return '<section class="side-sec"><h3 class="thread-h"><i class="proj proj--' + g[1] + '"></i><span>' + g[0] + "</span>" + (g[2] && !quiet ? "<em>" + g[2] + "</em>" : "") + "</h3>" + rows.map(threadRow).join("") + "</section>";
     }).join("");
   }
 
@@ -44,7 +46,7 @@ window.Shell = (function () {
     opts = opts || {};
     var selected = opts.selected || "overview";
     var waiting = opts.waiting || [
-      ["Cut over the invoice export", "Approve the cutover for Monday?", "sched-cutover"],
+      ["Cut over the invoice export", "Cut over Monday, or wait a week?", "sched-cutover"],
       ["Restore a basket after sign-in", "Highest quantity, or add them?", "basket-restore"],
     ];
     el.classList.add("side");
@@ -66,7 +68,7 @@ window.Shell = (function () {
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3>' +
       navRow("fleet", "Fleet", "fleet", selected) +
       navRow("connections", "Connections", "connections", selected) +
-      '</section></div><div data-side-face="threads" hidden>' + drawThreadsFace() + "</div></div>" +
+      '</section></div><div data-side-face="threads" hidden>' + drawThreadsFace(!waiting.length) + "</div></div>" +
       '<div class="side-foot"><div class="side-sum">' + (opts.sum || '<b>16</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle') + "</div>" +
       '<div class="side-me">' + Crew.you(24) + '<span class="side-name">Noa</span><a class="icon-btn" style="width:24px;height:24px" href="#" title="Settings">' + I("sliders", 14) + "</a></div></div>";
   }
@@ -105,7 +107,7 @@ window.Shell = (function () {
     syncFailedDots();
     var waiting = 0;
     document.querySelectorAll("[data-side] .side-row[data-task]").forEach(function (row) {
-      var t = Store.task(row.dataset.task);
+      var t = Store.task(row.dataset.task) || Store.task(Store.state.mergedInto[row.dataset.task]);
       var waits = t && !!t.question && !t.ended;
       row.hidden = !waits;
       if (waits) waiting++;
@@ -124,7 +126,7 @@ window.Shell = (function () {
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;
     if (!Store.state.tasks.length || (!working && !waiting)) sum.textContent = "Nothing running";
-    else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting · <b>2</b> idle";
+    else sum.innerHTML = "<b>" + working + "</b> working" + (waiting ? ' · <b class="you-ink">' + waiting + "</b> waiting" : "") + " · <b>2</b> idle";
   }
 
   /** Counts a thread that was already running as now being on the board: the total does not change. */

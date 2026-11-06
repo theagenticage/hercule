@@ -13,7 +13,8 @@ window.Toolbar = (function () {
   function drawMark(item) {
     if (item.source) return '<span class="menu-mark">' + Crew.brand(item.source, 14) + "</span>";
     if (item.hue !== undefined) return '<span class="menu-mark menu-mark--plan" style="--plan-hue:' + item.hue + '">' + Board.FLAG + "</span>";
-    if (item.tint) return '<span class="menu-mark"><i class="proj proj--' + item.tint + '"></i></span>';
+    if (item.tint) return '<span class="menu-mark">' + Board.FOLDER + "</span>";
+    if (item.icon === "folder") return '<span class="menu-mark">' + Board.FOLDER + "</span>";
     if (item.icon === "flag") return '<span class="menu-mark">' + Board.FLAG + "</span>";
     if (item.icon) return '<span class="menu-mark">' + Crew.icon(item.icon, 14) + "</span>";
     return '<span class="menu-mark"></span>';
@@ -29,8 +30,8 @@ window.Toolbar = (function () {
     var main = document.getElementById("tools-main");
     if (!main) return;
     var active = Store.readActiveFilters();
-    var html = '<button class="tool" data-tool="group" aria-haspopup="menu" aria-expanded="' + (openMenu === "group") + '"><span class="tool-key">Group by</span><b>' + esc(groupName()) + "</b>" + Crew.icon("chev-d", 12) + "</button>" +
-      '<button class="tool" data-tool="filter" aria-haspopup="menu" aria-expanded="' + (openMenu === "filter") + '">' + Crew.icon("filter", 14) + "<b>Filter</b></button>";
+    var html = '<button class="tool" data-tool="group" aria-haspopup="menu"><span class="tool-key">Group by</span><b>' + esc(groupName()) + "</b>" + Crew.icon("chev-d", 12) + "</button>" +
+      '<button class="tool" data-tool="filter" aria-haspopup="menu">' + Crew.icon("filter", 14) + "<b>Filter</b></button>";
     html += active.map(function (f) {
       return '<button class="chip" data-chip-facet="' + esc(f.facet) + '" data-chip-value="' + esc(f.value) + '" title="Remove this filter">' + (f.caption ? "<small>" + esc(f.caption) + "</small>" : "") + "<b>" + esc(f.name) + "</b>" + Crew.icon("close", 11) + "</button>";
     }).join("");
@@ -39,6 +40,11 @@ window.Toolbar = (function () {
       main.innerHTML = html;
       main._html = html;
     }
+    // Captions go first when room runs out, so a chip always keeps its value.
+    main.classList.toggle("has-many", active.length > 2 || (active.length > 1 && innerWidth < 1400));
+    // The quiet line gives its room to the chips: what is on matters more than what happened.
+    document.getElementById("since-line").hidden = active.length > 0;
+    main.querySelectorAll("[data-tool]").forEach(function (t) { t.setAttribute("aria-expanded", t.dataset.tool === openMenu); });
   }
 
   function drawGroupMenu() {
@@ -91,14 +97,22 @@ window.Toolbar = (function () {
     if (btn) placeMenu(el, btn);
   }
 
-  function closeMenu() {
+  /** Closes the open menu, and says whether one was open. Pass true to hand focus back to its button. */
+  function closeMenu(refocus) {
     var was = openMenu;
     openMenu = "";
     facetId = "";
     facetWords = "";
     drawMenu();
     draw();
+    if (was && refocus === true) document.querySelector('[data-tool="' + was + '"]').focus();
     return !!was;
+  }
+
+  /** Puts keyboard focus on the first thing in the menu. */
+  function focusMenu() {
+    var first = document.querySelector("#tool-menu input, #tool-menu .menu-pick.is-on, #tool-menu button");
+    if (first) first.focus();
   }
 
   function toggleMenu(name) {
@@ -108,6 +122,7 @@ window.Toolbar = (function () {
     openMenu = name;
     draw();
     drawMenu();
+    focusMenu();
   }
 
   /** Changes the grouping. The board animates from what was on screen to the new lanes. */
@@ -137,18 +152,33 @@ window.Toolbar = (function () {
       var open = e.target.closest("[data-open-facet]");
       if (open) {
         facetId = open.dataset.openFacet;
-        return drawMenu();
+        drawMenu();
+        return focusMenu();
       }
       if (e.target.closest("[data-facet-back]")) {
         facetId = "";
         facetWords = "";
-        return drawMenu();
+        drawMenu();
+        return focusMenu();
       }
       var value = e.target.closest("[data-facet]");
       if (value) {
-        Filters.toggle(value.dataset.facet, value.dataset.value);
+        var facet = value.dataset.facet;
+        var picked = value.dataset.value;
+        Filters.toggle(facet, picked);
         drawMenu();
+        var again = menu.querySelector('[data-facet="' + facet + '"][data-value="' + picked + '"]');
+        if (again) again.focus();
       }
+    });
+    // Up and down walk a menu's rows, as in any menu.
+    menu.addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      var rows = Array.prototype.slice.call(menu.querySelectorAll("button"));
+      var at = rows.indexOf(document.activeElement);
+      var next = rows[(at + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length];
+      if (next) next.focus();
     });
     menu.addEventListener("input", function (e) {
       if (!e.target.matches("[data-facet-find]")) return;
@@ -202,7 +232,10 @@ window.Filters = (function () {
     clear: function () {
       Store.state.query = "";
       Find.close();
-      apply(function () { Store.state.filters = {}; });
+      apply(function () {
+        Store.state.filters = {};
+        Store.state.filterFolds = {};
+      });
     },
     /** Shows only the Tasks that are part of one outside thing, wherever they came from. */
     showContext: function (kind, ref) {
@@ -210,16 +243,25 @@ window.Filters = (function () {
       apply(function () { Store.toggleFilter(kind, ref); });
       document.getElementById("scroll").scrollTop = 0;
     },
-    /** Opens Work on what failed, and brings the first failed Task into view. */
+    /** Opens Work on what failed. Filters that are on stay on, unless they would hide every failure. */
     showFailed: function () {
       if (Overview.current() !== "work") Overview.show("work");
-      apply(function () { Store.state.filters = { state: { failed: true } }; });
+      apply(function () {
+        var st = Store.state;
+        var was = st.filters;
+        st.filters = Object.assign({}, was, { state: { failed: true } });
+        st.filterFolds = {};
+        if (!st.tasks.some(function (t) { return t.failed && Store.matches(t); })) st.filters = { state: { failed: true } };
+      });
       document.getElementById("scroll").scrollTop = 0;
     },
-    /** Lifts the failed filter once nothing has failed, so the page does not stay empty. */
+    /** Lifts Failed or Has a question once none is left, so ending the last one never empties the page. */
     settle: function () {
-      var f = Store.state.filters.state;
-      if (f && f.failed && !Store.countStates().failed) apply(function () { Store.toggleFilter("state", "failed"); });
+      var f = Store.state.filters.state || {};
+      var counts = Store.countStates();
+      ["failed", "question"].forEach(function (key) {
+        if (f[key] && !counts[key]) apply(function () { Store.toggleFilter("state", key); });
+      });
     },
   };
 })();
