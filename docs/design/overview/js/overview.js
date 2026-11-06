@@ -21,11 +21,11 @@ window.Overview = (function () {
 
   function drawSwitcher() {
     var el = document.getElementById("switcher");
-    el.innerHTML = '<h1 class="pill-title">Overview</h1><div class="switch" role="tablist" aria-label="Views"><i class="puck" id="puck"></i>' +
+    el.innerHTML = '<h1 class="pill-title">Overview</h1><div class="switch" role="tablist" aria-label="Views"><i class="hand" id="hand"></i>' +
       allViews().map(function (v, i) {
         return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + Crew.icon(v.icon, 14) + v.name + "</button>";
       }).join("") + "</div>";
-    puck = document.getElementById("puck");
+    puck = document.getElementById("hand");
     puckBody = null;
     placePuck(false);
   }
@@ -43,8 +43,8 @@ window.Overview = (function () {
       return;
     }
     if (animate) {
-      puckBody.to(left, "puck");
-      puck._w.to(width, "puck");
+      puckBody.to(left, "hand");
+      puck._w.to(width, "hand");
     } else {
       puckBody.set(left);
       puck._w.set(width);
@@ -68,7 +68,7 @@ window.Overview = (function () {
     el.innerHTML = Crew.face(t.agent, { pose: t.move === "you" ? "waiting" : "working", size: 26 });
     el.style.left = x - 13 + "px";
     el.style.top = y - 13 + "px";
-    document.getElementById("carry").appendChild(el);
+    document.getElementById("hand").appendChild(el);
     return el;
   }
 
@@ -113,7 +113,7 @@ window.Overview = (function () {
         if (!at) return;
         var el = makeTraveller(p.head, p.x, p.y);
         p.head.style.visibility = "hidden";
-        Motion.body(el).to({ x: at.x - p.x, y: at.y - p.y, s: 1.5, o: 0 }, "open", {
+        Motion.body(el).to({ x: at.x - p.x, y: at.y - p.y, s: 1.5, o: 0 }, "travel", {
           delay: i * 50,
           done: function () { el.remove(); p.head.style.visibility = ""; },
         });
@@ -141,7 +141,7 @@ window.Overview = (function () {
       var r = h.getBoundingClientRect();
       var el = makeTraveller(h, at.x, at.y);
       h.style.visibility = "hidden";
-      Motion.body(el).set({ s: 1.5, o: 0 }).to({ x: r.left + r.width / 2 - at.x, y: r.top + r.height / 2 - at.y, s: 1, o: 1 }, "open", {
+      Motion.body(el).set({ s: 1.5, o: 0 }).to({ x: r.left + r.width / 2 - at.x, y: r.top + r.height / 2 - at.y, s: 1, o: 1 }, "travel", {
         delay: 80 + i * 50,
         done: function () { el.remove(); h.style.visibility = ""; },
       });

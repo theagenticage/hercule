@@ -10,7 +10,7 @@ window.Actions = (function () {
     ghost.classList.remove("is-away");
     ghost.classList.add(how === "Done" ? "is-done" : "is-dropped");
     var goal = how === "Done" ? { x: 26, y: -14, s: 1.02, r: 0, o: 0 } : { x: 0, y: 12, s: 0.97, r: -1.6, o: 0 };
-    Motion.body(ghost).to(goal, how === "Done" ? "fold" : "back", {
+    Motion.body(ghost).to(goal, how === "Done" ? "travel" : "travel", {
       delay: how === "Done" ? 240 : 0,
       done: function () { ghost.remove(); },
     });
@@ -21,7 +21,7 @@ window.Actions = (function () {
     if (!t) return;
     var finish = function () {
       animateLeaving(id, how);
-      Board.change(function () { Store.endTask(id, how); }, { spring: "glide" });
+      Board.change(function () { Store.endTask(id, how); }, { spring: "hand" });
       Toast.show(how + ". " + t.name + " has left the board.", true);
     };
     if (Pane.currentId() === id) Pane.hide(finish);
@@ -31,7 +31,7 @@ window.Actions = (function () {
   function moveToStage(id, stage) {
     var t = Store.task(id);
     if (!t || t.stage === stage) return;
-    Board.change(function () { Store.moveTask(id, { stage: stage }); }, { spring: "drop" });
+    Board.change(function () { Store.moveTask(id, { stage: stage }); }, { spring: "hand" });
     Toast.show("Moved to " + NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ".", true);
   }
 
@@ -45,13 +45,13 @@ window.Actions = (function () {
       t.now = "A thread just started.";
     });
     var el = document.querySelector('.card[data-id="' + id + '"] .card-head');
-    if (el) Motion.body(el).set({ y: 16 }).to({ y: 0 }, "drop", { delay: 60 });
+    if (el) Motion.body(el).set({ y: 16 }).to({ y: 0 }, "hand", { delay: 60 });
     Toast.show("A thread started on this Task.", false);
   }
 
   function run(act, id) {
     if (act === "done") return end(id, "Done");
-    if (act === "drop") return end(id, "Dropped");
+    if (act === "hand") return end(id, "Dropped");
     if (act === "merge") return Pane.hide(function () { MergePick.start(id); });
     if (act === "thread") {
       Pane.hide(function () { startThread(id); });
@@ -86,12 +86,12 @@ window.MergePick = (function () {
     var target = document.querySelector('.card[data-id="' + intoId + '"]');
     var into;
     var ghost = el ? Motion.ghost(el, document.getElementById("flight")) : null;
-    Board.change(function () { into = Store.mergeTasks(from, intoId); }, { spring: "glide" });
+    Board.change(function () { into = Store.mergeTasks(from, intoId); }, { spring: "hand" });
     if (ghost && target) {
       var a = ghost.getBoundingClientRect();
       var b = target.getBoundingClientRect();
-      Motion.body(ghost).to({ x: b.left - a.left, y: b.top - a.top, s: 0.92, o: 0 }, "drop", { done: function () { ghost.remove(); } });
-      Motion.body(target).set({ s: 1.035 }).to({ s: 1 }, "bump");
+      Motion.body(ghost).to({ x: b.left - a.left, y: b.top - a.top, s: 0.92, o: 0 }, "hand", { done: function () { ghost.remove(); } });
+      Motion.body(target).set({ s: 1.035 }).to({ s: 1 }, "hand");
       target.classList.add("has-merged");
       setTimeout(function () { target.classList.remove("has-merged"); }, 520);
     }

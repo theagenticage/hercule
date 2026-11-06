@@ -28,9 +28,9 @@ const STATES = {
     await p.mouse.move(c.x + 360, c.y + 150, { steps: 12 }); await p.waitForTimeout(700);
   }, after: async (p) => { await p.keyboard.press("Escape"); await p.mouse.up(); } },
   merge: { q: "replay=off", run: async (p) => {
-    const a = await card(p, "guest-checkout"); const b = await card(p, "search-latency").catch(() => null) || await card(p, "substitutions");
+    const a = await card(p, "image-sizes"); const b = await card(p, "substitutions");
     await p.mouse.move(b.x + 60, b.y + 40); await p.mouse.down();
-    await p.mouse.move(a.x + 110, a.y + 50, { steps: 12 }); await p.waitForTimeout(900);
+    await p.mouse.move(a.x + 110, a.y + 50, { steps: 12 }); await p.waitForTimeout(1000);
   }, after: async (p) => { await p.keyboard.press("Escape"); await p.mouse.up(); } },
   pane: { q: "replay=off", run: async (p) => { await p.click('.card[data-id="substitutions"]'); await p.mouse.move(400, 880); await p.waitForTimeout(1200); } },
   "pane-agent": { q: "replay=off", run: async (p) => { await p.evaluate(() => Pane.show("t-cancelled")); await p.waitForTimeout(1200); } },

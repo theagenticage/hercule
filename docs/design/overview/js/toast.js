@@ -24,7 +24,7 @@ window.Toast = (function () {
   /** Puts the last change back: the board plays the same motion in reverse. */
   function doUndo() {
     var label = null;
-    Board.change(function () { label = Store.undo(); }, { spring: "glide" });
+    Board.change(function () { label = Store.undo(); }, { spring: "hand" });
     hide();
     return label;
   }

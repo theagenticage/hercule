@@ -152,7 +152,7 @@ window.Keys = (function () {
     if (!id3) return;
     if (key === "x") return Select.toggle(id3);
     if (key === "d") return Actions.run("done", id3);
-    if (key === "Backspace") return Actions.run("drop", id3);
+    if (key === "Backspace") return Actions.run("hand", id3);
     if (key === "m") return Actions.run("merge", id3);
     if (key === "t") return Actions.run("thread", id3);
     if (key >= "1" && key <= "5") Actions.moveToStage(id3, STAGE_IDS[Number(key) - 1]);

@@ -4,9 +4,12 @@
 .pn-sheet { position: absolute; isolation: isolate; display: flex; flex-direction: column; pointer-events: auto; --pn-r: 12px; }
 .pn-sheet::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: var(--pn-r); background: var(--stock); box-shadow: var(--h-carry); }
 .pn-sheet > .card-holder { z-index: -2; right: 22px; }
-.pn-inner { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--pn-r); }
+.pn-clip { position: absolute; inset: 0; overflow: hidden; border-radius: var(--pn-r); }
+/* The words are laid out once at the sheet's final size, and the growing sheet reveals them, so a
+   paragraph never rewraps during the opening. */
+.pn-inner { position: absolute; left: 0; top: 0; width: var(--pn-w); height: var(--pn-h); display: flex; flex-direction: column; }
 .pn-ghost { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; }
-.pn-ghost .card-stock, .pn-ghost .card-holder { display: none; }
+.pn-ghost .card-stock, .pn-ghost .card-holder, .pn-ghost .card-paws { display: none; }
 .pn-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 24px 18px; -webkit-user-select: text; user-select: text; }
 .pn-head { margin-bottom: 10px; }
 .pn-crumb { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: var(--muted); font: var(--type-summary); }
@@ -43,6 +46,7 @@
 .pn-btn kbd { background: none; color: var(--faint); padding: 0; min-width: 0; }
 .pn-btn:last-child { margin-left: auto; }
 .card.is-away > * { visibility: hidden; }
+.card.is-away .card-stock { outline: none; }
 .card.is-away > .card-stock { visibility: visible; background: transparent; box-shadow: var(--h-etch); }
 .is-merge-picking .card.is-focus:not(.is-merge-source) .card-stock { outline-color: var(--accent); }
 .card.is-merge-source .card-stock { outline: 1px dashed var(--faint); outline-offset: 2px; }

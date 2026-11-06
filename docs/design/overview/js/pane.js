@@ -5,7 +5,7 @@ window.Pane = (function () {
   "use strict";
 
   var drive = null;
-  var pane, sheet, inner, ghost;
+  var pane, sheet, clip, inner, ghost;
   var openId = null;
   var from = null;
   var to = null;
@@ -83,7 +83,7 @@ window.Pane = (function () {
       drawNextMove(t) +
       (t.left && !/^(nothing|everything)$/i.test(t.left) ? '<section class="pn-sec"><h4>What is left</h4><p class="pn-left">' + esc(t.left) + "</p></section>" : "") +
       drawBlockers(t) + drawThreads(t) + drawLinks(t) + "</div>" +
-      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="drop">Drop<kbd>⌫</kbd></button><button class="pn-btn" data-act="merge">Merge<kbd>M</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button></footer>';
+      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="hand">Drop<kbd>⌫</kbd></button><button class="pn-btn" data-act="merge">Merge<kbd>M</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button></footer>';
   }
 
   function drawHolderOnSheet(t) {
@@ -104,10 +104,11 @@ window.Pane = (function () {
     sheet.style.width = lerp(from.width, to.width, q) + "px";
     sheet.style.height = lerp(from.height, to.height, q) + "px";
     sheet.style.setProperty("--pn-r", lerp(12, 16, clamp(p)) + "px");
-    var words = clamp((p - 0.38) / 0.5);
+    // The two sets of words overlap, so there is never a blank sheet between them.
+    var words = clamp((p - 0.3) / 0.55);
     inner.style.opacity = words.toFixed(3);
     inner.style.transform = "translateY(" + ((1 - words) * 10).toFixed(2) + "px)";
-    if (ghost) ghost.style.opacity = clamp(1 - p / 0.42).toFixed(3);
+    if (ghost) ghost.style.opacity = clamp(1 - p / 0.55).toFixed(3);
     pane.style.setProperty("--pn-dim", clamp(p).toFixed(3));
   }
 
@@ -139,19 +140,20 @@ window.Pane = (function () {
     drawHolderOnSheet(t);
     to = measureTarget();
     from = el ? cardRect(el) : { left: to.left + 40, top: to.top + 40, width: to.width - 80, height: 200 };
-    if (ghost) ghost.remove();
-    ghost = null;
-    if (el) {
+    pane.style.setProperty("--pn-w", to.width + "px");
+    pane.style.setProperty("--pn-h", to.height + "px");
+    // A sheet caught closing keeps its ghost and simply turns round.
+    if (el && !ghost) {
+      el.classList.remove("is-away");
       ghost = el.cloneNode(true);
       ghost.classList.add("pn-ghost");
       ghost.style.cssText = "";
       ghost.removeAttribute("tabindex");
-      sheet.appendChild(ghost);
+      clip.appendChild(ghost);
       el.classList.add("is-away");
     }
-    if (drive.get() < 0.02) drive.set(0);
     paint(drive.get());
-    drive.to(1, "open");
+    drive.to(1, "travel");
     document.getElementById("work").classList.add("has-pane");
   }
 
@@ -192,7 +194,7 @@ window.Pane = (function () {
     var el = document.querySelector('.card[data-id="' + id + '"]');
     if (el) from = cardRect(el);
     document.getElementById("work").classList.remove("has-pane");
-    drive.to(0, "open", function () {
+    drive.to(0, "travel", function () {
       pane.hidden = true;
       pane.classList.remove("is-on");
       if (ghost) ghost.remove();
@@ -207,6 +209,7 @@ window.Pane = (function () {
   function mount() {
     pane = document.getElementById("pane");
     sheet = pane.querySelector(".pn-sheet");
+    clip = pane.querySelector(".pn-clip");
     inner = pane.querySelector(".pn-inner");
     drive = Motion.value(0, paint);
     pane.addEventListener("click", function (e) {
@@ -224,6 +227,8 @@ window.Pane = (function () {
     window.addEventListener("resize", function () {
       if (openId) {
         to = measureTarget();
+        pane.style.setProperty("--pn-w", to.width + "px");
+        pane.style.setProperty("--pn-h", to.height + "px");
         paint(drive.get());
       }
     });

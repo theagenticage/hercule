@@ -363,12 +363,47 @@ window.Board = (function () {
     return Array.prototype.slice.call(lanesEl.querySelectorAll(".card:not(.is-carried), .lane-head, .plan-head, .wire, .plan-band, .bead:not(.is-held)"));
   }
 
-  /** Changes something and animates the board from what was on screen to what is now true. */
+  /** Sends a copy of a card that just left the desk to the pile or bead that now holds it. */
+  function flyInto(card, target) {
+    var flight = document.getElementById("flight");
+    var host = flight.getBoundingClientRect();
+    var copy = card.el.cloneNode(true);
+    copy.classList.add("is-ghost");
+    copy.classList.remove("is-moving");
+    copy.style.cssText = "position:absolute;margin:0;left:" + (card.rect.left - host.left) + "px;top:" + (card.rect.top - host.top) + "px;width:" + card.rect.width + "px;height:" + card.rect.height + "px";
+    flight.appendChild(copy);
+    var r = target.getBoundingClientRect();
+    Motion.body(copy).to({ x: r.left + r.width / 2 - (card.rect.left + card.rect.width / 2), y: r.top + r.height / 2 - (card.rect.top + card.rect.height / 2), s: target.classList.contains("bead") ? 0.1 : 0.94, o: 0 }, "travel", {
+      done: function () { copy.remove(); },
+    });
+  }
+
+  /**
+   * Changes something and animates the board from what was on screen to what is now true.
+   * A card that left the desk but still exists went into a pile or a bead, and is seen going there.
+   * Pass quietExits when the caller draws those flights itself.
+   */
   function change(mutate, opts) {
+    opts = opts || {};
+    var before = {};
+    lanesEl.querySelectorAll(".card[data-id]").forEach(function (el) {
+      before[el.dataset.id] = { el: el, rect: el.getBoundingClientRect() };
+    });
     Motion.flip(movables(), function () {
       if (mutate) mutate();
       draw();
     }, opts);
+    if (opts.quietExits) return;
+    Object.keys(before).forEach(function (id) {
+      var b = before[id];
+      if (b.el.isConnected || !Store.task(id)) return;
+      var target = locate(id);
+      if (target) flyInto(b, target);
+    });
+    lanesEl.querySelectorAll(".card[data-id]").forEach(function (el) {
+      if (before[el.dataset.id] || !Store.task(el.dataset.id)) return;
+      Motion.body(el).set({ o: 0 }).to({ o: 1 }, "travel");
+    });
   }
 
   function mount() {

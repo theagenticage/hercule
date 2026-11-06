@@ -5,6 +5,7 @@ window.Fan = (function () {
   "use strict";
 
   var open = null;
+  var closing = null;
 
   function layer() { return document.getElementById("fan-layer"); }
 
@@ -14,6 +15,7 @@ window.Fan = (function () {
     var pile = (cell._piles || []).find(function (p) { return p.key === pileEl.dataset.pile; });
     if (!pile) return;
     if (open && open.pile.key === pile.key) return hide();
+    if (closing && closing.pile.key === pile.key) return reopen();
     if (open) hide(true);
 
     var host = layer();
@@ -31,7 +33,7 @@ window.Fan = (function () {
     var top = Math.max(main.top + 64, Math.min(from.top - 44, main.bottom - 24 - h));
 
     var fan = document.createElement("div");
-    fan.className = "fan";
+    fan.className = "travel";
     fan.style.left = left - main.left + "px";
     fan.style.top = top - main.top + "px";
     fan.style.width = (stages[cols - 1].right - left) + "px";
@@ -53,20 +55,46 @@ window.Fan = (function () {
     var cx = from.left + from.width / 2;
     var cy = from.top + from.height / 2;
     var half = (cards.length - 1) / 2;
+    var far = 1;
+    var reach = cards.map(function (el) {
+      var r = Motion.layoutRect(el);
+      var d = Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy);
+      far = Math.max(far, d);
+      return d;
+    });
     cards.forEach(function (el, i) {
       var r = Motion.layoutRect(el);
       if (r.top > main.bottom + 40) return;
       var spread = half ? (i - half) / half : 0;
       var b = Motion.body(el);
       if (Motion.isReduced()) {
-        b.set({ o: 0 }).to({ o: 1 }, "back");
+        b.set({ o: 0 }).to({ o: 1 }, "travel");
         return;
       }
-      b.set({ x: cx - (r.left + r.width / 2), y: cy - (r.top + r.height / 2), s: 0.94, r: spread * 7, o: 0 });
-      b.to({ x: 0, y: 0, s: 1, r: 0, o: 1 }, "fan", { delay: Math.min(i * 22, 220) });
+      // The nearest card leaves first and the farthest last, 140ms apart at most. While flying a
+      // card is a bare sheet; its words fade in over the end of the trip, so the pile is never soup.
+      var delay = (reach[i] / far) * 140;
+      el.classList.add("is-flying");
+      b.set({ x: cx - (r.left + r.width / 2), y: cy - (r.top + r.height / 2), s: 0.94, r: spread * 5, o: i === 0 ? 1 : 0.9 });
+      b.to({ x: 0, y: 0, s: 1, r: 0, o: 1 }, "travel", { delay: delay });
+      setTimeout(function () { el.classList.remove("is-flying"); }, delay + 200);
     });
-    Motion.body(fan.querySelector(".fan-head")).set({ o: 0, y: 6 }).to({ o: 1, y: 0 }, "back", { delay: 90 });
+    Motion.body(fan.querySelector(".fan-head")).set({ o: 0, y: 6 }).to({ o: 1, y: 0 }, "travel", { delay: 90 });
     open = { pile: pile, fan: fan, pileEl: pileEl, cards: cards };
+  }
+
+  /** Sends a closing fan back out, from where each card is right now. */
+  function reopen() {
+    var o = closing;
+    closing = null;
+    open = o;
+    layer().classList.add("is-open");
+    o.pileEl.classList.add("is-fanned");
+    o.cards.forEach(function (el) {
+      if (el.classList.contains("is-carried")) return;
+      Motion.body(el).to({ x: 0, y: 0, s: 1, r: 0, o: 1 }, "travel");
+    });
+    Motion.body(o.fan.querySelector(".fan-head")).to({ o: 1 }, "travel");
   }
 
   /** Folds the open fan back into its pile. Pass true to drop it at once for another fan. */
@@ -74,37 +102,37 @@ window.Fan = (function () {
     if (!open) return;
     var o = open;
     open = null;
-    var host = layer();
-    host.classList.remove("is-open");
+    layer().classList.remove("is-open");
     o.pileEl.classList.remove("is-fanned");
+    var grid = o.fan.querySelector(".fan-cards");
+    var inFan = o.cards.filter(function (c) { return c.parentElement === grid; });
+    function cleanUp() {
+      inFan.forEach(function (c) { Motion.body(c).clear(); });
+      o.fan.remove();
+      if (closing === o) closing = null;
+    }
+    if (now || Motion.isReduced()) return cleanUp();
+    closing = o;
     var from = o.pileEl.getBoundingClientRect();
     var cx = from.left + from.width / 2;
     var cy = from.top + from.height / 2;
-    var n = o.cards.length;
-    var finished = 0;
-    function finish() {
-      finished++;
-      if (finished >= n) {
-        o.cards.forEach(function (c) { Motion.body(c).clear(); });
-        o.fan.remove();
-      }
-    }
-    if (now || Motion.isReduced()) {
-      o.cards.forEach(function (c) { Motion.body(c).clear(); });
-      o.fan.remove();
-      return;
-    }
-    Motion.body(o.fan.querySelector(".fan-head")).to({ o: 0 }, "back");
-    var half = (n - 1) / 2;
-    o.cards.forEach(function (el, i) {
-      if (el.parentElement !== o.fan.querySelector(".fan-cards")) return finish();
+    Motion.body(o.fan.querySelector(".fan-head")).to({ o: 0 }, "travel");
+    var left = inFan.length;
+    var half = (inFan.length - 1) / 2;
+    inFan.forEach(function (el, i) {
       var r = Motion.layoutRect(el);
       var spread = half ? (i - half) / half : 0;
-      Motion.body(el).to({ x: cx - (r.left + r.width / 2), y: cy - (r.top + r.height / 2), s: 0.94, r: spread * 7, o: 0 }, "fold", {
-        delay: Math.min((n - 1 - i) * 10, 90),
-        done: finish,
+      el.classList.add("is-flying");
+      Motion.body(el).to({ x: cx - (r.left + r.width / 2), y: cy - (r.top + r.height / 2), s: 0.94, r: spread * 5, o: 0 }, "travel", {
+        delay: Math.min((inFan.length - 1 - i) * 8, 70),
+        done: function () {
+          el.classList.remove("is-flying");
+          left--;
+          if (left <= 0 && closing === o) cleanUp();
+        },
       });
     });
+    if (!inFan.length) cleanUp();
   }
 
   return {

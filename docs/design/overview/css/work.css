@@ -163,15 +163,14 @@
 .carry { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .carry .card { position: absolute; height: var(--card-h); }
 .card:active:not(.is-carried) { scale: 0.992; }
-.card.is-carried .card-stock { box-shadow: var(--h-carry); background: var(--stock-carry); }
 .card.is-carried .card-holder { opacity: 1; }
 .card.is-carried { cursor: grabbing; }
 .is-carrying, .is-carrying * { cursor: grabbing !important; }
 .is-carrying #lanes { pointer-events: none; }
 .card.is-landing { z-index: 8; }
-.card.is-landing .card-stock { transition-duration: var(--m-slow); }
 
-.slot { flex: none; height: var(--card-h); border-radius: var(--card-r); background: color-mix(in oklab, var(--ink) 3.5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent); transition: opacity var(--m-quick), height var(--m-base) var(--m-ease); }
+.slot { flex: none; height: var(--card-h); border-radius: var(--card-r); background: color-mix(in oklab, var(--ink) 3.5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent); transition: opacity var(--m-quick) var(--m-ease); }
+.slot.is-new { opacity: 0; transition: none; }
 .slot.is-shut { opacity: 0; }
 
 /* While carrying, the stages show themselves as faint aisles. At rest they are only alignment. */
@@ -286,3 +285,8 @@
 .card.is-blocker .card-stock { box-shadow: var(--h-hover), 0 0 0 1px var(--brass); }
 
 .stage.is-zero .stage-count { visibility: hidden; }
+
+/* A card's height while in the hand rides the same spring as its scale: --lift goes from 0 to 1, and
+   this layer crossfades on top of the sheet, so it visibly rises and comes down. */
+.card-stock::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--stock-carry); box-shadow: var(--h-carry); opacity: var(--lift, 0); pointer-events: none; }
+.card.is-flying .card-words, .card.is-flying .pile-text, .card.is-flying .pile-line { opacity: 0; }

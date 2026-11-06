@@ -1,35 +1,34 @@
 // PROTOTYPE - carrying a card. The star of the board's motion.
 //
-// A press only dents the card. Past a few pixels it lifts: it grows, its shadow deepens, and it
-// follows the pointer on a stiff spring, a hair behind, leaning into the way it moves. A slot opens
-// where it would land, and neighbours glide aside. Held still over another card's middle, the two
-// are drawn together: let go, and they merge. Esc sends it home.
+// A press only dents the card. Past a few pixels it lifts: it rises on a spring, and from then on it
+// is exactly under your finger. A slot opens where it would land, and everything below it moves
+// aside. Held still over the middle of another card, the two are drawn together: let go, and they
+// merge. Esc sends it home. Nothing is ever a jump: every change starts from what is on screen.
 window.Drag = (function () {
   "use strict";
 
-  var MERGE_DWELL = 340; // how long a card must hover over another before they are drawn together
+  var MERGE_DWELL = 340; // how long a card must rest over another before they are drawn together
   var START_DISTANCE = 5;
   var press = null;
   var carry = null;
+  var scrollFrame = 0;
 
   function layer() { return document.getElementById("carry"); }
   function work() { return document.getElementById("work"); }
   function scroller() { return document.getElementById("scroll"); }
   function isActive() { return !!carry; }
 
-  /** Lists every place a card can land, top to bottom, with the owner each belongs to. */
+  /** Lists every place a card can land, top to bottom. */
   function readDropZones() {
     var zones = [];
     document.querySelectorAll("#lanes .grid").forEach(function (grid) {
       var r = grid.getBoundingClientRect();
-      var key = grid.dataset.key.replace("grid:", "");
-      zones.push({ key: key, grid: grid, top: r.top, bottom: Math.max(r.bottom, r.top + 96) });
+      zones.push({ key: grid.dataset.key.replace("grid:", ""), grid: grid, top: r.top, bottom: Math.max(r.bottom, r.top + 88) });
     });
     // A folded lane or plan is a target too: the card shrinks into a bead on its wire.
     document.querySelectorAll("#lanes .wire").forEach(function (wire) {
       var r = wire.getBoundingClientRect();
-      var key = wire.dataset.key.replace("wire:", "");
-      zones.push({ key: key, wire: wire, top: r.top - 22, bottom: r.bottom + 6 });
+      zones.push({ key: wire.dataset.key.replace("wire:", ""), wire: wire, top: r.top - 22, bottom: r.bottom + 6 });
     });
     return zones;
   }
@@ -41,10 +40,9 @@ window.Drag = (function () {
     });
   }
 
-  function pickStage(x) {
-    var s = carry.stages;
-    var pick = s[0];
-    for (var i = 0; i < s.length; i++) if (x >= s[i].left - 7) pick = s[i];
+  function pickStageAt(stages, x) {
+    var pick = stages[0];
+    stages.forEach(function (s) { if (x >= s.left - 7) pick = s; });
     return pick;
   }
 
@@ -65,19 +63,17 @@ window.Drag = (function () {
     return zone.grid.querySelector('.cell[data-stage="' + stageId + '"]');
   }
 
-  /** Returns the card under the pointer's position when the pointer is over its middle. */
-  function findMergeTarget(x, y, cell) {
+  /** Returns the card whose middle the pointer is over. The middle means merge, and moves no slot. */
+  function findCardMiddle(x, y, cell) {
     var kids = cell.querySelectorAll(".card[data-id]");
     for (var i = 0; i < kids.length; i++) {
       var r = kids[i].getBoundingClientRect();
-      var inX = x > r.left + r.width * 0.12 && x < r.right - r.width * 0.12;
-      var inY = y > r.top + r.height * 0.2 && y < r.bottom - r.height * 0.2;
-      if (inX && inY) return kids[i];
+      if (x > r.left + r.width * 0.1 && x < r.right - r.width * 0.1 && y > r.top + r.height * 0.28 && y < r.bottom - r.height * 0.28) return kids[i];
     }
     return null;
   }
 
-  /** Puts the slot at the row the pointer is over, and glides neighbours out of the way. */
+  /** Puts the slot at the row the pointer is over. Everything below moves aside, and nothing jumps. */
   function moveSlot(cell, y) {
     var kids = Array.prototype.filter.call(cell.children, function (c) { return !c.classList.contains("slot"); });
     var before = null;
@@ -88,15 +84,14 @@ window.Drag = (function () {
         break;
       }
     }
-    if (carry.slot.parentElement === cell && carry.slot.nextElementSibling === before) return;
-    var affected = kids.slice();
-    if (carry.slot.parentElement && carry.slot.parentElement !== cell) {
-      affected = affected.concat(Array.prototype.slice.call(carry.slot.parentElement.children).filter(function (c) { return !c.classList.contains("slot"); }));
-    }
-    var overflow = cell.querySelector(".pile");
-    Motion.flip(affected, function () {
-      cell.insertBefore(carry.slot, before);
-    }, { spring: "glide" });
+    var slot = carry.slot;
+    if (slot.parentElement === cell && slot.nextElementSibling === before) return;
+    Motion.flip(Board.movables(), function () {
+      if (slot.parentElement !== cell) slot.classList.add("is-new");
+      cell.insertBefore(slot, before);
+    }, { spring: "hand" });
+    setTimeout(function () { slot.classList.remove("is-new"); }, 30);
+    carry.zones = readDropZones();
   }
 
   function setTargetStage(stage) {
@@ -105,102 +100,92 @@ window.Drag = (function () {
     carry.stage = stage;
     stage.el.classList.add("is-target");
     var rule = document.getElementById("rule").getBoundingClientRect();
-    var mark = document.getElementById("rule-mark");
     var r = stage.el.getBoundingClientRect();
-    Motion.body(mark).to({ x: r.left - rule.left + 3 }, "carry");
-    var ownStage = stage.id === carry.task.stage;
+    Motion.body(document.getElementById("rule-mark")).to({ x: r.left - rule.left + 3 }, "hand");
     work().dataset.dragStage = stage.id;
-    document.querySelectorAll(".cell.is-target").forEach(function (c) { c.classList.remove("is-target"); });
   }
 
   function setMerge(target) {
     if (carry.merge === target) return;
     if (carry.merge) {
       carry.merge.classList.remove("is-merge-target");
-      Motion.body(carry.merge).to({ s: 1 }, "glide");
+      Motion.body(carry.merge).to({ s: 1 }, "hand");
+      carry.catchUntil = performance.now() + 160;
     }
     carry.merge = target;
-    carry.el.classList.toggle("is-docking", !!target);
     carry.slot.classList.toggle("is-shut", !!target);
     if (target) {
       target.classList.add("is-merge-target");
-      Motion.body(target).to({ s: 1.02 }, "bump");
+      Motion.body(target).to({ s: 1.02 }, "hand");
     }
   }
 
-  function setWireTarget(zone, stage) {
+  function setWireTarget(zone) {
     document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
     if (zone) zone.wire.classList.add("is-target");
-    carry.el.classList.toggle("is-over-wire", !!zone);
   }
 
   /** Follows the pointer: moves the card, then decides where it would land. */
   function track(x, y) {
     var c = carry;
-    var dx = x - c.lastX;
+    var now = performance.now();
+    var dt = Math.max(8, now - c.lastT);
+    // Lean comes from smoothed speed, so a shaky hand does not make the card shiver.
+    c.vx = c.vx * 0.7 + ((x - c.lastX) / dt) * 0.3;
     c.lastX = x;
     c.lastY = y;
-    c.pointerSpeed = dx;
-    var lean = Math.max(-1.2, Math.min(1.2, dx * 0.1));
+    c.lastT = now;
+    var lean = Math.max(-1.2, Math.min(1.2, c.vx * 0.9));
     clearTimeout(c.upright);
     c.upright = setTimeout(function () {
-      if (carry === c && !c.merge) Motion.body(c.el).to({ r: 0 }, "glide");
-    }, 70);
-    var goalX = x - c.grabX;
-    var goalY = y - c.grabY;
-    var scale = 1.035;
+      if (carry === c && !c.merge) Motion.body(c.el).to({ r: 0 }, "hand");
+    }, 60);
+    var b = Motion.body(c.el);
     if (c.merge) {
       // Drawn in: the carried card docks on the target's corner and shrinks a little.
       var m = c.merge.getBoundingClientRect();
-      goalX = m.left + 10 - c.home.left;
-      goalY = m.top + 8 - c.home.top;
-      lean = 1.6;
-      scale = 0.96;
-      goalX = goalX - 0;
+      b.to({ x: m.left + 10 - c.home.left, y: m.top + 8 - c.home.top, s: 0.96, r: 0, l: 0.6 }, "hand");
+    } else if (now < c.catchUntil) {
+      b.to({ x: x - c.grabX - c.home.left, y: y - c.grabY - c.home.top, s: 1.03, r: lean, l: 1 }, "hand");
+    } else {
+      b.follow(x - c.grabX - c.home.left, y - c.grabY - c.home.top);
+      b.to({ s: 1.03, r: lean, l: 1 }, "hand");
     }
-    if (!c.merge) {
-      goalX -= c.home.left;
-      goalY -= c.home.top;
-      goalX += 0;
-    }
-    Motion.body(c.el).to({ x: goalX, y: goalY, s: scale, r: lean }, "carry");
-    if (c.followers && c.followers.length) moveFollowers(goalX, goalY);
+    if (c.followers.length) moveFollowers(x - c.grabX - c.home.left, y - c.grabY - c.home.top);
 
-    var stage = pickStage(x);
+    var stage = pickStageAt(c.stages, x);
     setTargetStage(stage);
     var zone = pickZone(y);
-    setWireTarget(zone.wire ? zone : null, stage);
+    setWireTarget(zone.wire ? zone : null);
     if (zone.wire) {
       setMerge(null);
       c.hoverCard = null;
       c.zone = zone;
       if (c.slot.parentElement) {
-        var left = Array.prototype.slice.call(c.slot.parentElement.children).filter(function (k) { return !k.classList.contains("slot"); });
-        Motion.flip(left, function () { c.slot.remove(); }, { spring: "glide" });
+        Motion.flip(Board.movables(), function () { c.slot.remove(); }, { spring: "hand" });
+        c.zones = readDropZones();
       }
       return;
     }
     var cell = cellIn(zone, stage.id);
     if (!cell) return;
-    var target = findMergeTarget(x, y, cell);
-    if (target !== c.hoverCard) {
-      c.hoverCard = target;
+    c.zone = zone;
+    var middle = findCardMiddle(x, y, cell);
+    if (middle !== c.hoverCard) {
+      c.hoverCard = middle;
       clearTimeout(c.dwell);
-      if (!target) {
+      if (!middle) {
         setMerge(null);
       } else {
         c.dwell = setTimeout(function () {
-          if (carry && carry.hoverCard === target) {
-            setMerge(target);
+          if (carry && carry.hoverCard === middle) {
+            setMerge(middle);
             track(carry.lastX, carry.lastY);
           }
         }, MERGE_DWELL);
       }
     }
-    if (!c.merge) {
-      moveSlot(cell, y);
-      c.zone = zone;
-    }
+    if (!middle) moveSlot(cell, y);
   }
 
   function begin(e) {
@@ -208,65 +193,46 @@ window.Drag = (function () {
     press = null;
     var el = p.el;
     var t = Store.task(p.id);
-    if (Fan.isOpen()) {
-      var host = el.closest(".fan");
-      if (host) {
-        var r0 = el.getBoundingClientRect();
-        Fan.hide(true);
-        p.rect = r0;
-      }
-    }
     var home = el.getBoundingClientRect();
+    var fromCell = el.closest(".cell");
     var slot = document.createElement("div");
     slot.className = "slot";
-    var fromCell = el.closest(".cell");
     if (fromCell) fromCell.insertBefore(slot, el);
-    var lay = layer();
-    lay.appendChild(el);
+    var fromFan = !!el.closest(".fan");
+    Motion.body(el).clear();
+    layer().appendChild(el);
     el.classList.add("is-carried");
     el.style.left = home.left + "px";
     el.style.top = home.top + "px";
     el.style.width = home.width + "px";
-    Motion.body(el).clear();
+    if (fromFan) Fan.hide();
     carry = {
-      el: el,
-      id: p.id,
-      task: t,
-      home: home,
-      from: fromCell,
-      grabX: p.x - home.left,
-      grabY: p.y - home.top,
-      lastX: p.x,
-      lastY: p.y,
-      slot: slot,
-      stage: null,
-      merge: null,
-      hoverCard: null,
-      zone: null,
-      zones: readDropZones(),
-      stages: readStages(),
+      el: el, id: p.id, task: t, home: home, slot: slot,
+      grabX: p.x - home.left, grabY: p.y - home.top,
+      lastX: p.x, lastY: p.y, lastT: performance.now(), vx: 0, catchUntil: performance.now() + 100,
+      stage: null, merge: null, hoverCard: null, zone: null, followers: [],
+      zones: readDropZones(), stages: readStages(),
     };
-    var mark = document.getElementById("rule-mark");
     var rule = document.getElementById("rule").getBoundingClientRect();
     var own = carry.stages.filter(function (s) { return s.id === t.stage; })[0];
-    Motion.body(mark).set({ x: own.left - rule.left + 3 });
+    Motion.body(document.getElementById("rule-mark")).set({ x: own.left - rule.left + 3 });
     work().classList.add("is-carrying");
     gatherSelection();
     track(e.clientX, e.clientY);
   }
 
+  /* ---------- Several cards at once ---------- */
+
   /** Picks up the rest of the selection: each selected card flies in behind the one in hand. */
   function gatherSelection() {
     var c = carry;
-    c.followers = [];
     if (!Store.state.selected[c.id]) return;
-    var host = layer();
-    Object.keys(Store.state.selected).forEach(function (id, i) {
+    Object.keys(Store.state.selected).forEach(function (id) {
       if (id === c.id) return;
       var src = document.querySelector('#lanes .card[data-id="' + id + '"]');
       if (!src) return;
       var r = src.getBoundingClientRect();
-      var ghost = Motion.ghost(src, host);
+      var ghost = Motion.ghost(src, layer());
       ghost.style.position = "fixed";
       ghost.style.left = r.left + "px";
       ghost.style.top = r.top + "px";
@@ -280,90 +246,110 @@ window.Drag = (function () {
 
   function moveFollowers(goalX, goalY) {
     carry.followers.forEach(function (f) {
-      var x = carry.home.left + goalX + f.n * 5 - f.r.left;
-      var y = carry.home.top + goalY + f.n * 5 - f.r.top;
-      Motion.body(f.ghost).to({ x: x, y: y, s: 1 - f.n * 0.02, r: f.n * 1.1 }, "glide");
+      Motion.body(f.ghost).to({ x: carry.home.left + goalX + f.n * 5 - f.r.left, y: carry.home.top + goalY + f.n * 5 - f.r.top, s: 1 - f.n * 0.02 }, "travel");
     });
   }
 
-  function releaseFollowers(c, stageId, project) {
-    if (!c.followers || !c.followers.length) return;
+  function releaseFollowers(c, to) {
     c.followers.forEach(function (f) {
       f.src.classList.remove("is-away");
-      if (stageId) Store.moveTask(f.id, { stage: stageId, project: project });
+      if (to) Store.moveTask(f.id, to);
     });
   }
 
   function settleFollowers(c) {
-    (c.followers || []).forEach(function (f, i) {
+    c.followers.forEach(function (f, i) {
       var r0 = f.ghost.getBoundingClientRect();
       var el = document.querySelector('#lanes .card[data-id="' + f.id + '"]');
       if (el) {
         var r1 = el.getBoundingClientRect();
-        Motion.body(el).set({ x: r0.left - r1.left, y: r0.top - r1.top, r: 2 }).to({ x: 0, y: 0, r: 0 }, "drop", { delay: 40 + i * 40 });
+        Motion.body(el).set({ x: r0.left - r1.left, y: r0.top - r1.top }).to({ x: 0, y: 0 }, "hand", { delay: 40 + i * 40 });
       }
       f.ghost.remove();
     });
   }
+
+  /* ---------- Letting go ---------- */
 
   /** Works out where the card lands from the slot, as a rank between its new neighbours. */
   function readLanding() {
     var slot = carry.slot;
     var cell = slot.parentElement;
     if (!cell) return null;
-    var prev = slot.previousElementSibling;
-    var next = slot.nextElementSibling;
     function rankOf(el) {
       if (!el || !el.dataset.id) return null;
       var t = Store.task(el.dataset.id);
       return t ? t.rank : null;
     }
-    var a = rankOf(prev);
-    var b = rankOf(next);
-    var rank;
+    var a = rankOf(slot.previousElementSibling);
+    var b = rankOf(slot.nextElementSibling);
+    var rank = carry.task.rank;
     if (a !== null && b !== null) rank = (a + b) / 2;
     else if (a !== null) rank = a + 0.5;
     else if (b !== null) rank = b - 0.5;
-    else rank = carry.task.rank;
     var owner = cell.dataset.owner;
-    var project = owner.indexOf("lane-") === 0 ? owner.slice(5) : carry.task.project;
-    return { stage: cell.dataset.stage, project: project, before: rank };
+    return { stage: cell.dataset.stage, project: owner.indexOf("lane-") === 0 ? owner.slice(5) : carry.task.project, before: rank };
   }
 
+  /** Ends the carry. Keeps how the card looks right now, because the landing starts from there. */
   function finish() {
     var c = carry;
+    var b = Motion.body(c.el);
+    c.look = { rect: c.el.getBoundingClientRect(), s: b.value.s, r: b.value.r, l: b.value.l, vx: b.speed.x, vy: b.speed.y };
     carry = null;
     clearTimeout(c.dwell);
+    clearTimeout(c.upright);
     if (c.stage) c.stage.el.classList.remove("is-target");
     work().classList.remove("is-carrying");
     delete work().dataset.dragStage;
-    c.slot.remove();
-    c.el.classList.remove("is-carried", "is-docking", "has-followers");
-    delete c.el.dataset.count;
-    c.el.style.left = "";
-    c.el.style.top = "";
-    c.el.style.width = "";
+    setWireTargetOff();
     return c;
   }
 
-  /** Puts a card back into the page from wherever it was carried, settling on the named spring. */
+  function setWireTargetOff() {
+    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
+  }
+
+  function takeOutOfHand(c) {
+    var el = c.el;
+    Motion.body(el).clear();
+    el.classList.remove("is-carried", "has-followers");
+    delete el.dataset.count;
+    el.style.left = "";
+    el.style.top = "";
+    el.style.width = "";
+    el.remove();
+  }
+
+  /** Returns a card to the page and lets it come down from where it is, on the named spring. */
   function settle(c, spring, mutate) {
     var el = c.el;
-    var r0 = el.getBoundingClientRect();
-    var s0 = Motion.body(el).value.s;
-    var r = Motion.body(el).value.r;
-    var v = Object.assign({}, Motion.body(el).speed);
-    Motion.body(el).clear();
-    el.remove();
-    Board.change(mutate, { spring: "glide" });
-    if (!el.isConnected) return;
-    var r1 = el.getBoundingClientRect();
+    var look = c.look;
+    takeOutOfHand(c);
+    Board.change(function () {
+      c.slot.remove();
+      if (mutate) mutate();
+    }, { spring: "hand" });
+    if (!el.isConnected) {
+      // It belongs to a pile or a folded lane: it is seen going there.
+      var target = Board.locate(c.id);
+      var copy = el.cloneNode(true);
+      copy.classList.add("is-ghost");
+      copy.style.cssText = "position:fixed;margin:0;left:" + look.rect.left + "px;top:" + look.rect.top + "px;width:" + look.rect.width + "px;height:" + look.rect.height + "px";
+      layer().appendChild(copy);
+      var goal = target ? target.getBoundingClientRect() : look.rect;
+      Motion.body(copy).to({ x: goal.left + goal.width / 2 - (look.rect.left + look.rect.width / 2), y: goal.top + goal.height / 2 - (look.rect.top + look.rect.height / 2), s: 0.9, o: 0 }, "travel", {
+        done: function () { copy.remove(); },
+      });
+      return;
+    }
+    var r1 = Motion.layoutRect(el);
     var b = Motion.body(el);
-    b.set({ x: r0.left + r0.width / 2 - (r1.left + r1.width / 2), y: r0.top + r0.height / 2 - (r1.top + r1.height / 2), s: s0, r: r });
-    b.speed.x = v.x;
-    b.speed.y = v.y;
+    b.set({ x: look.rect.left + look.rect.width / 2 - (r1.left + r1.width / 2), y: look.rect.top + look.rect.height / 2 - (r1.top + r1.height / 2), s: look.s, r: look.r, l: look.l });
+    b.speed.x = look.vx;
+    b.speed.y = look.vy;
     el.classList.add("is-landing");
-    b.to({ x: 0, y: 0, s: 1, r: 0 }, spring, {
+    b.to({ x: 0, y: 0, s: 1, r: 0, l: 0 }, spring, {
       done: function () { el.classList.remove("is-landing"); },
     });
   }
@@ -376,64 +362,49 @@ window.Drag = (function () {
     var c = finish();
     releaseFollowers(c);
     settleFollowers(c);
-    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
-    var r0 = c.el.getBoundingClientRect();
-    var ghost = Motion.ghost(c.el, layer());
-    ghost.style.position = "fixed";
-    ghost.style.left = r0.left + "px";
-    ghost.style.top = r0.top + "px";
-    Motion.body(c.el).clear();
-    c.el.remove();
     var to = { stage: stage };
     if (key.indexOf("lane-") === 0) to.project = key.slice(5);
     if (key.indexOf("plan-") === 0) to.plan = key.slice(5);
-    Board.change(function () { Store.moveTask(c.id, to); }, { spring: "glide" });
+    settle(c, "travel", function () { Store.moveTask(c.id, to); });
     var bead = document.querySelector('.bead[data-id="' + c.id + '"]');
-    if (bead) {
-      var b = bead.getBoundingClientRect();
-      Motion.body(ghost).to({ x: b.left + b.width / 2 - (r0.left + r0.width / 2), y: b.top + b.height / 2 - (r0.top + r0.height / 2), s: 0.06, r: 0, o: 0 }, "fold", {
-        done: function () { ghost.remove(); },
-      });
-      Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "drop", { delay: 160 });
-    } else {
-      ghost.remove();
-    }
-    Toast.show("Moved. It is folded away in " + key.slice(5) + ".", true);
+    if (bead) Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "hand", { delay: 220 });
+    Toast.show("Moved, and folded away.", true);
+  }
+
+  function describeMove(to) {
+    return "Moved to " + NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name + ".";
   }
 
   function drop() {
-    var c = carry;
-    if (c.merge) return mergeNow();
-    if (c.zone && c.zone.wire) return dropOnWire();
+    var c0 = carry;
+    if (c0.merge) return mergeNow();
+    if (c0.zone && c0.zone.wire) return dropOnWire();
     var landing = readLanding();
-    var done = finish();
-    if (!landing) return settle(done, "back");
-    var moved = landing.stage !== done.task.stage || landing.project !== done.task.project;
-    settle(done, "drop", function () {
-      Store.moveTask(done.id, landing);
-      releaseFollowers(done, landing.stage, landing.project);
-      if (done.followers && done.followers.length) Store.state.selected = {};
+    var c = finish();
+    if (!landing) return settle(c, "travel", function () { releaseFollowers(c); });
+    var moved = landing.stage !== c.task.stage || landing.project !== c.task.project;
+    settle(c, "hand", function () {
+      Store.moveTask(c.id, landing);
+      if (c.followers.length) {
+        releaseFollowers(c, { stage: landing.stage, project: landing.project });
+        Store.state.selected = {};
+        Select.drawBar();
+      }
     });
-    settleFollowers(done);
-    if (moved) {
-      Toast.show(describeMove(done.task, landing), true);
-      if (landing.stage === "landed") {
-        done.el.classList.add("just-landed");
-        setTimeout(function () { done.el.classList.remove("just-landed"); }, 900);
-      }
-      if (Store.failNext) {
-        Store.failNext = false;
-        setTimeout(function () {
-          Board.change(function () { Store.undo(); }, { spring: "back" });
-          Toast.show("That move did not save, so the card went back. Check the connection and try again.", false);
-        }, 900);
-      }
+    settleFollowers(c);
+    if (!moved) return;
+    Toast.show(describeMove(landing), true);
+    if (landing.stage === "landed") {
+      c.el.classList.add("just-landed");
+      setTimeout(function () { c.el.classList.remove("just-landed"); }, 900);
     }
-  }
-
-  function describeMove(t, to) {
-    var name = NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name;
-    return "Moved to " + name + ".";
+    if (Store.failNext) {
+      Store.failNext = false;
+      setTimeout(function () {
+        Board.change(function () { Store.undo(); }, { spring: "travel" });
+        Toast.show("That move did not save, so the card went back. Check the connection and try again.", false);
+      }, 900);
+    }
   }
 
   function mergeNow() {
@@ -444,36 +415,33 @@ window.Drag = (function () {
     releaseFollowers(c);
     settleFollowers(c);
     var el = c.el;
-    // The carried card slides under its new home, then the home takes a small bump.
-    var r0 = el.getBoundingClientRect();
-    var layerEl = document.getElementById("carry");
-    var ghost = Motion.ghost(el, layerEl);
+    var ghost = Motion.ghost(el, layer());
     ghost.style.position = "fixed";
-    var hostRect = layerEl.getBoundingClientRect();
-    ghost.style.left = r0.left + "px";
-    ghost.style.top = r0.top + "px";
-    el.remove();
+    ghost.style.left = c.look.rect.left + "px";
+    ghost.style.top = c.look.rect.top + "px";
+    Motion.body(ghost).clear();
+    takeOutOfHand(c);
     var into;
-    Board.change(function () { into = Store.mergeTasks(c.id, id); }, { spring: "glide" });
+    Board.change(function () {
+      c.slot.remove();
+      into = Store.mergeTasks(c.id, id);
+    }, { spring: "hand" });
+    // The carried card slides under its new home, then the home takes a small, soft bump.
     var r1 = target.getBoundingClientRect();
-    Motion.body(ghost).to({ x: r1.left - r0.left, y: r1.top - r0.top, s: 0.9, r: 0, o: 0 }, "drop", {
+    Motion.body(ghost).to({ x: r1.left - c.look.rect.left, y: r1.top - c.look.rect.top, s: 0.94, o: 0 }, "hand", {
       done: function () { ghost.remove(); },
     });
     target.classList.add("has-merged");
-    setTimeout(function () { target.classList.remove("has-merged"); }, 520);
-    var b = Motion.body(target);
-    b.set({ s: 1.035 }).to({ s: 1 }, "bump");
+    setTimeout(function () { target.classList.remove("has-merged"); }, 620);
+    Motion.body(target).set({ s: 1.03 }).to({ s: 1 }, "hand", { delay: 60 });
     Toast.show("Merged into " + into.name + ".", true);
   }
 
   function cancel() {
     if (!carry) return;
-    var home = carry.home;
-    var from = carry.from;
-    var slot = carry.slot;
     if (carry.merge) setMerge(null);
     var c = finish();
-    settle(c, "back", function () { releaseFollowers(c); });
+    settle(c, "travel", function () { releaseFollowers(c); });
     settleFollowers(c);
   }
 
@@ -482,8 +450,7 @@ window.Drag = (function () {
   var bead = null;
 
   function beginBead(e, el) {
-    var r = el.getBoundingClientRect();
-    bead = { el: el, id: el.dataset.id, x: e.clientX, home: r.left, moved: false, stages: readStages() };
+    bead = { el: el, id: el.dataset.id, x: e.clientX, home: el.getBoundingClientRect().left, moved: false, stages: readStages() };
   }
 
   function moveBead(e) {
@@ -492,46 +459,41 @@ window.Drag = (function () {
     bead.moved = true;
     bead.el.classList.add("is-held");
     var x = bead.home + dx;
-    // The bead is drawn to the start of a stage as it nears one, like a bead on a wire finding a notch.
+    // The bead is drawn to the start of a stage as it nears one, like a bead finding a notch.
     var pull = 0;
     bead.stages.forEach(function (s) {
       var d = s.left - x;
       if (Math.abs(d) < 26) pull = d * 0.45;
     });
-    Motion.body(bead.el).to({ x: dx + pull, s: 1.5 }, "carry");
+    Motion.body(bead.el).to({ x: dx + pull, s: 1.5 }, "hand");
     bead.target = pickStageAt(bead.stages, e.clientX);
     document.querySelectorAll("#rule .stage").forEach(function (s) { s.classList.toggle("is-target", s.dataset.stage === bead.target.id); });
-  }
-
-  function pickStageAt(stages, x) {
-    var pick = stages[0];
-    stages.forEach(function (s) { if (x >= s.left - 7) pick = s; });
-    return pick;
   }
 
   function endBead() {
     var b = bead;
     bead = null;
     document.querySelectorAll("#rule .stage.is-target").forEach(function (s) { s.classList.remove("is-target"); });
-    if (!b.moved) return false;
+    if (!b.moved) return;
     suppressClick();
     b.el.classList.remove("is-held");
     var t = Store.task(b.id);
     var changed = b.target && b.target.id !== t.stage;
     Board.change(function () {
       if (changed) Store.moveTask(b.id, { stage: b.target.id });
-    }, { spring: "drop" });
-    Motion.body(b.el).to({ s: 1 }, "drop");
-    if (changed) Toast.show(describeMove(t, { stage: b.target.id }), true);
-    return true;
+    }, { spring: "hand" });
+    Motion.body(b.el).to({ s: 1 }, "hand");
+    if (changed) Toast.show(describeMove({ stage: b.target.id }), true);
   }
+
+  /* ---------- Pointer events ---------- */
 
   function onDown(e) {
     if (e.button !== 0) return;
     var beadEl = e.target.closest(".bead[data-id]");
     if (beadEl) return beginBead(e, beadEl);
     var el = e.target.closest(".card[data-id]");
-    if (!el || el.classList.contains("is-ghost")) return;
+    if (!el || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
     press = { el: el, id: el.dataset.id, x: e.clientX, y: e.clientY };
   }
 
@@ -550,17 +512,14 @@ window.Drag = (function () {
     }
   }
 
-  var scrollFrame = 0;
   /** Scrolls the board while the card is held near its top or bottom edge. */
   function autoScroll(y) {
     var s = scroller();
     var r = s.getBoundingClientRect();
-    var band = 70;
     var speed = 0;
-    if (y < r.top + band + 60) speed = -(r.top + band + 60 - y) / 6;
-    if (y > r.bottom - band) speed = (y - (r.bottom - band)) / 6;
-    if (!speed) return;
-    if (scrollFrame) return;
+    if (y < r.top + 130) speed = -(r.top + 130 - y) / 6;
+    if (y > r.bottom - 70) speed = (y - (r.bottom - 70)) / 6;
+    if (!speed || scrollFrame) return;
     scrollFrame = requestAnimationFrame(function () {
       scrollFrame = 0;
       if (!carry) return;
@@ -573,7 +532,6 @@ window.Drag = (function () {
   function onUp(e) {
     if (bead) return endBead();
     if (press) {
-      var p = press;
       press = null;
       return;
     }
@@ -595,8 +553,7 @@ window.Drag = (function () {
   }
 
   function mount() {
-    var w = work();
-    w.addEventListener("pointerdown", onDown);
+    work().addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", cancel);

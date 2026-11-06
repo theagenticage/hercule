@@ -14,11 +14,13 @@ window.Live = (function () {
   /** Checks whether the person is busy near this spot right now. */
   function isHandNear(rect) {
     if (Drag.isActive() || Fan.isOpen()) return true;
-    if (performance.now() - lastMove > 1400) return false;
     if (!rect) return false;
-    var cx = rect.left + rect.width / 2;
-    var cy = rect.top + rect.height / 2;
-    return Math.hypot(cx - lastX, cy - lastY) < 280;
+    // A pointer parked on a card means someone is reading it, however long it has been still.
+    var nearX = Math.max(rect.left - lastX, 0, lastX - rect.right);
+    var nearY = Math.max(rect.top - lastY, 0, lastY - rect.bottom);
+    if (Math.hypot(nearX, nearY) < 120) return true;
+    // A pointer on the move near it means someone is about to.
+    return performance.now() - lastMove < 900 && Math.hypot(nearX, nearY) < 280;
   }
 
   /** Calls fn once the hand has left, or after eight seconds. */
@@ -32,16 +34,18 @@ window.Live = (function () {
   function arrive(t, opts) {
     opts = opts || {};
     whenStill(function () { return null; }, function () {
-      Board.change(function () { Store.addTask(t); }, { spring: "drift" });
+      Board.change(function () { Store.addTask(t); }, { spring: "self" });
       var el = cardEl(t.id);
       if (!el) return;
       var b = Motion.body(el);
       if (Motion.isReduced()) {
-        b.set({ o: 0 }).to({ o: 1 }, "back");
+        b.set({ o: 0 }).to({ o: 1 }, "travel");
       } else {
-        b.set({ y: 12, s: 0.97, o: 0 }).to({ y: 0, s: 1, o: 1 }, "drop");
+        b.set({ y: 12, s: 0.97, o: 0 }).to({ y: 0, s: 1, o: 1 }, "self");
         var head = el.querySelector(".card-head");
-        if (head) Motion.body(head).set({ y: 18 }).to({ y: 0 }, "drop", { delay: 420 });
+        var paws = el.querySelector(".card-paws");
+        if (head) Motion.body(head).set({ y: 18 }).to({ y: 0 }, "travel", { delay: 620 });
+        if (paws) Motion.body(paws).set({ o: 0 }).to({ o: 1 }, "travel", { delay: 760 });
       }
       el.classList.add("is-new");
       if (!opts.quiet) note("New: " + t.name);
@@ -57,7 +61,7 @@ window.Live = (function () {
       var card = cardEl(id);
       if (!card) {
         // It sits in a pile or a folded lane: only the count and the bead change.
-        Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "drift" });
+        Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
         note(words);
         return;
       }
@@ -67,28 +71,26 @@ window.Live = (function () {
       sig.className = "card-signal";
       sig.textContent = words;
       card.appendChild(sig);
-      Motion.body(sig).set({ y: 6, o: 0 }).to({ y: 0, o: 1 }, "drop");
+      Motion.body(sig).set({ y: 6, o: 0 }).to({ y: 0, o: 1 }, "hand");
       setTimeout(function () {
         var dent = document.createElement("div");
         dent.className = "slot dent";
         card.parentElement.insertBefore(dent, card);
         var cell = dent.parentElement;
-        var index = Array.prototype.indexOf.call(cell.children, dent);
-        Board.holdOpen(cell, index, dent);
-        Motion.flip([card], function () {
-          Store.moveByFact(id, toStage, apply);
-          Board.draw();
-        }, { spring: "drift" });
+        var lane = cell.closest(".lane");
+        Board.holdOpen(cell, Array.prototype.indexOf.call(cell.children, dent), dent);
+        Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
+        // Cards moved by a fact fly on the slow spring, and stay above what they pass.
         card.classList.add("is-landing");
         setTimeout(function () {
           card.classList.remove("has-signal", "is-landing");
           sig.remove();
         }, 1400);
-        // The dent closes last, and only when the hand is elsewhere.
-        whenStill(function () { return dent.getBoundingClientRect(); }, function () {
+        // The dent closes last, and only when the hand is out of this lane.
+        whenStill(function () { return lane.getBoundingClientRect(); }, function () {
           setTimeout(function () {
             Board.releaseHold(cell);
-            Board.change(null, { spring: "drift" });
+            Board.change(null, { spring: "self" });
             dent.remove();
           }, 1500);
         });
@@ -106,7 +108,7 @@ window.Live = (function () {
     line.textContent = words;
     el.prepend(line);
     while (el.children.length > 1) el.lastElementChild.remove();
-    Motion.body(line).set({ y: 5, o: 0 }).to({ y: 0, o: 1 }, "back");
+    Motion.body(line).set({ y: 5, o: 0 }).to({ y: 0, o: 1 }, "travel");
   }
 
   /** Plays the night forward: everything that changed since the last look, one thing after another. */
@@ -126,7 +128,7 @@ window.Live = (function () {
     var el = document.getElementById("since-line");
     if (!el) return;
     el.innerHTML = '<span class="since-item">Since last night: one landed, one picked up, one new</span><button class="since-replay" title="Replay the night">' + Crew.icon("undo", 12) + "</button>";
-    Motion.body(el.firstChild).set({ o: 0 }).to({ o: 1 }, "back");
+    Motion.body(el.firstChild).set({ o: 0 }).to({ o: 1 }, "travel");
     el.querySelector(".since-replay").addEventListener("click", function () {
       var q = new URLSearchParams(location.search);
       q.delete("replay");
