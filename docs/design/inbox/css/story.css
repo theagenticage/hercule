@@ -35,7 +35,7 @@ section.ch { margin-top: 88px; }
 
 .anat { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 40px; align-items: center; padding: 36px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--stock-rim); }
 .anat-card { position: relative; width: 360px; zoom: 1.34; }
-.anat-pin { position: absolute; z-index: 5; display: grid; place-items: center; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 9px; font-weight: var(--w-bold); box-shadow: 0 0 0 2px var(--bg); }
+.anat-pin { position: absolute; z-index: 5; display: grid; place-items: center; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 9px; font-style: normal; font-weight: var(--w-bold); box-shadow: 0 0 0 2px var(--bg); }
 .anat ol { list-style: none; margin: 0; padding: 0; }
 .anat li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; padding: 5px 0; font-size: var(--t-13); line-height: 19px; }
 .anat li i { display: grid; place-items: center; width: 17px; height: 17px; margin-top: 1px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 10px; font-style: normal; font-weight: var(--w-bold); }

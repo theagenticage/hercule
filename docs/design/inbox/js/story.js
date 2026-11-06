@@ -56,18 +56,24 @@
     var e = World.buildEntities().filter(function (x) { return x.id === 'pr-6238'; })[0];
     var card = Frames.drawLooseCard(e);
     host.appendChild(card);
-    var pins = [['.c-mark', 0, 10], ['.c-title', 0.12, 0], ['.c-pace', 0.5, 0], ['.c-roll', 0.3, 0], ['.c-more', 0.5, 0], ['.c-status', 0.5, 0], ['.c-id', 0.3, 0], ['.c-facts', 0.3, 0]];
+    // Each pin sits beside its slot, in the card's own margins, so it covers no word.
+    var pins = [['.c-mark', 'top'], ['.c-title', 'top'], ['.c-pace', 'top'], ['.c-roll', 'left'], ['.c-more', 'right'], ['.c-status', 'right'], ['.c-id', 'left'], ['.c-facts', 'bottom']];
     var base = card.getBoundingClientRect();
     var zoom = base.width / card.offsetWidth;
     pins.forEach(function (p, i) {
       var el = card.querySelector(p[0]);
       if (!el) return;
       var r = el.getBoundingClientRect();
+      var x = (r.left - base.left + r.width / 2) / zoom, y = (r.top - base.top + r.height / 2) / zoom;
+      if (p[1] === 'top') y = -2;
+      if (p[1] === 'bottom') y = base.height / zoom + 2;
+      if (p[1] === 'left') x = (r.left - base.left) / zoom - 12;
+      if (p[1] === 'right') x = (r.right - base.left) / zoom + 12;
       var pin = document.createElement('i');
       pin.className = 'anat-pin';
       pin.textContent = i + 1;
-      pin.style.left = ((r.left - base.left + r.width * p[1]) / zoom) + 'px';
-      pin.style.top = ((r.top - base.top) / zoom - 3) + 'px';
+      pin.style.left = x + 'px';
+      pin.style.top = y + 'px';
       host.appendChild(pin);
     });
   }
