@@ -6,7 +6,7 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 
 ## The rules
 
-1. **Two shapes, two weights.** Lasting work lies wide, as rows on the raised surface of its place. Small requests lie in a narrow column of small outlined cards. The shape says how much attention a thing deserves, with no label to read.
+1. **Two shapes, two weights.** Lasting work lies wide, as rows on the raised surface of its place. Small requests lie in a narrow column of small, quieter cards. The shape says how much attention a thing deserves, with no label to read.
 2. **Everything is visible, and the page scrolls.** Nothing is folded to save room. A count never has to say how much is hiding.
 3. **A stack needs a reason you can see.** Only things directly linked by a confirmed claim sit together, and every part is there to read.
 4. **Things stay where they are.** A signal never moves a card. A card someone holds keeps its place until your next visit. Only your own move changes what is under the pointer.
@@ -85,7 +85,7 @@ A place is an ordinary entity that nothing has made a card of. It has a title, a
 
 ## Card anatomy
 
-A place is one raised surface with Work's 12px corner and `--h-rest`, and its work lies on it as rows. Only places stand on the desk. A request has no surface at rest: a hairline round it and a mark at muted strength, and it rises to the stock under the pointer. Type: place 18/24 semibold, status 13/20 medium, row title 15/21 medium, request title 13/18 medium, summary 12/16, meta 11/16.
+A place is one raised surface with Work's 12px corner and `--h-rest`, and its work lies on it as rows. Only places stand raised on the desk. A request has a quiet surface at rest, half way from the desk to the stock, with a hairline and a mark at muted strength, so it reads as a card and stays a step below a place. It rises to the full stock under the pointer. Type: place 18/24 semibold, status 13/20 medium, row title 15/21 medium, request title 13/18 medium, summary 12/16, meta 11/16.
 
 ```
  a row, on the surface of its place             a request
@@ -237,7 +237,8 @@ The row shows a plain grey number, not a badge. A signal landing on a card you a
 - **Big numbers and the double brass rule.** They made the page read like a dashboard, and the display face belongs to the logo. Counts are small and quiet, and only where they help.
 - **What Hercule noticed as three columns.** It read as a row of KPI tiles, its reasons were cut, and it needed a label. Three lines inside one card say the same with no cuts.
 - **A hairline under every section title.** Three grey rules added ornament and no meaning.
-- **One skin on both sides.** With shadows on the requests too, the two shapes were only half different. Now only places stand on the desk.
+- **One skin on both sides.** With full stock and shadows on the requests too, the two shapes were only half different. Now only places stand raised.
+- **Requests with no fill at all.** A bare outline went too far the other way: they stopped reading as cards. A fill half way to the stock keeps them secondary and still cards.
 - **`8 waiting` beside Ongoing.** It made the numbers add up, and pointed at nothing. Nobody needs it.
 - **Tinted stock.** Manila for mail, ledger for tickets, sage for orders. The one cream card read as selected, and the logo already says what a thing is.
 - **Cards on the wide side.** Rich cards side by side were nearly the size of the compact ones, so the page stayed monotone. One surface per place, with work as rows, made the two shapes really different.

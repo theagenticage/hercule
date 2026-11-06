@@ -37,9 +37,10 @@
 .card--compact .c-mark { grid-column: 1; grid-row: 1; height: 18px; }
 .card--compact .c-title { grid-column: 2; grid-row: 1; margin: 0; font: var(--type-card); letter-spacing: -0.003em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .card--compact .c-pace { grid-column: 3; grid-row: 1; line-height: 18px; }
-/* A request has no surface of its own at rest: a line round it, and a mark at muted strength. Only places stand on the desk. */
+/* A request has a quiet surface at rest: half way from the desk to the stock, with a hairline and a mark at muted strength. It reads
+   as a card, and stays a step below the places, which alone stand raised on the desk. */
 .card--compact { --mark-ink: var(--muted); }
-.card--compact > .card-stock { background: transparent; box-shadow: inset 0 0 0 1px var(--line-soft); transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease); }
+.card--compact > .card-stock { background: color-mix(in oklab, var(--stock) 50%, var(--desk)); box-shadow: inset 0 0 0 1px var(--line-soft), 0 1px 2px oklch(0 0 0 / 0.04); transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease); }
 .card--compact > .card-stock::before { display: none; }
 .card--compact.is-hover > .card-stock { background: var(--stock); box-shadow: var(--h-hover); }
 .card--compact.is-focus > .card-stock, .card--compact:focus-visible > .card-stock { background: var(--stock); box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }

@@ -28,7 +28,7 @@ There is no peek any more: every card is whole. The heading stays because other 
 | Part | Trigger | Motion |
 |---|---|---|
 | Actions | Pointer enters a row, a request or an asking linked row | Fade in over `--m-quick`, at the end of a line. On a row they lie over the end of the first line on a soft fade, so no height changes. On a request and a linked row the words end with an ellipsis before them |
-| Surface | The same | A row takes a faint fill. A request rises from its outline to the stock with `--h-hover`, over `--m-quick`. Nothing moves |
+| Surface | The same | A row takes a faint fill. A request rises from its quiet fill to the stock with `--h-hover`, over `--m-quick`. Nothing moves |
 | Who claims a link | Pointer on a link row in the details | The claim fades in over `--m-quick` |
 
 ### A signal landing
