@@ -110,4 +110,6 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card. In the Inbox an overdue wait stays marigold: the wait is the point there. The two pages are never on screen together.
 
+**Inbox page.** Three clock stacks stand side by side, each a lead, two strips and a pile, with the shelf in a row under them, one card per project. The gap under a stage heading is 18px there, so a colleague's head clears the rule. The top bar's right end sits 14px from the window on both pages, so its button never jumps between them.
+
 **Inbox tokens.** `--h-stack` and the stock variants stay in the Inbox's own tokens file. `js/motion-extras.js` on the Inbox adds `curve`, `animate`, `fly` and `knock` on top of the kernel, with no new springs.

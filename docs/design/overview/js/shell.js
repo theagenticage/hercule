@@ -44,6 +44,8 @@ window.Shell = (function () {
       '<div class="side-me">' + Crew.you(24) + '<span class="side-name">Noa</span><a class="icon-btn" style="width:24px;height:24px" href="#" title="Settings">' + I("sliders", 14) + "</a></div></div>";
   }
 
+  var elsewhere = null;
+
   /**
    * Keeps the sidebar true to the board: a waiting row goes when its Task no longer waits, and the
    * foot counts what is on the board.
@@ -61,8 +63,11 @@ window.Shell = (function () {
       count.textContent = waiting;
       count.closest(".side-sec").hidden = waiting === 0;
     }
-    // One more session works on no Task on this board: a workflow step, as the Inbox's sidebar counts it.
-    var working = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length + 1;
+    var onBoard = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length;
+    // The window opens on the fixture both drawings share. Some sessions work on no Task on this
+    // board, such as workflow steps, and from then on the count follows what happens here.
+    if (elsewhere === null) elsewhere = document.getElementById("work").dataset.scene === "today" ? Math.max(0, 16 - onBoard) : 0;
+    var working = onBoard + elsewhere;
     var sum = document.querySelector("[data-side] .side-sum");
     if (!sum) return;
     if (!Store.state.tasks.length || (!working && !waiting)) sum.textContent = "Nothing running";
