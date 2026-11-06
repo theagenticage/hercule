@@ -180,7 +180,7 @@ window.Drag = (function () {
       if (cancelled) { cancelled = false; swallowClick(); }
       pressed = null;
     });
-    document.addEventListener('pointercancel', function () { if (ghost) finish(true); });
+    window.addEventListener('pointercancel', function () { if (ghost) finish(true); });
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); cancelled = true; } }, true);
   }
 

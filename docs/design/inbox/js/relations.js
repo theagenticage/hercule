@@ -25,6 +25,7 @@ window.Relations = (function () {
   /** Returns everything above a thing, on every path, each once, nearest first. */
   function readAncestors(e) {
     var seen = {}, out = [], queue = readParents(e);
+    seen[e.id] = true;  // a bad report can make a loop, and a thing is never its own ancestor
     while (queue.length) {
       var p = queue.shift();
       if (seen[p.id]) continue;

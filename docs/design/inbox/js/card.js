@@ -16,7 +16,8 @@
     // A solid mark carries more weight than a line drawing, so it is drawn a little smaller to look the same size.
     if (plugin.solid) size = Math.round(size * 0.9);
     var style = plugin.hue == null ? '' : ' style="--mark-hue:' + plugin.hue + '"';
-    var svg = plugin.mark === 'hercule' ? Crew.logo(size, { mono: true }) : Crew.brand(plugin.mark, size);
+    // A plugin may arrive with a mark the page does not have yet, and a card must still draw.
+    var svg = plugin.mark === 'hercule' ? Crew.logo(size, { mono: true }) : window.CREW_BRANDS[plugin.mark] ? Crew.brand(plugin.mark, size) : Crew.icon('link', size);
     return '<span class="mark' + (plugin.hue == null ? '' : ' mark--hue') + '"' + style + ' role="img" aria-label="' + esc(plugin.name) + '">' + svg + '</span>';
   }
 
@@ -144,7 +145,7 @@
     // The column's title already says these are requests, so the usual one needs only a name.
     var isUsual = !e.task && latest && latest.key === e.concern && latest.who;
     var said = isUsual ? W.PEOPLE[latest.who].short : line.text;
-    var where = (Relations.readHomes(e)[0] || {}).title;
+    var where = Relations.readHomes(e).map(function (p) { return p.title; }).join(', ');
     return '<div class="c-under">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') +
       (status && !status.norm && !e.task ? '<span class="c-shape">' + drawShape(status, 13) + '</span>' : '') +
       '<span class="c-roll tone-' + (isUsual ? 'plain' : line.tone) + '"><span class="c-said">' + esc(said) + '</span></span>' +

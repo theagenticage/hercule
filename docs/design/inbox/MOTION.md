@@ -91,13 +91,12 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 | Part | Motion |
 |---|---|
 | The sheet | Grows from the visible part of the card with its shadow, its corner staying put, its radius going from 12 to 14. A sheet changing shape is the one thing a transform cannot do, so its size is set per frame |
-| The title, mark and latest line | The same objects: they grow from where they lay, by transform, on the same number |
+| The title and mark | The same objects: they grow from where they lay, by transform, on the same number |
 | The rest | Meta, facts and rows rise 6px and fade in, 240ms, 18ms apart, once the sheet's number passes 0.8, so they follow the spring and not a clock, and nothing prints over the title or the latest line wherever the card lay |
-| Older signals | Fade in over 200ms at the same moment |
-| A title that wraps | When the title takes more lines in the sheet than on the card, the latest line waits until 0.2 and fades in by 0.45, because the title starts over it |
+| The timeline | Fades in over 200ms at the same moment, so no words cross on the way |
 | The moves | Take no pointer for the first 420ms, so the second click of a double click never starts an agent |
 | The veil | A flat veil, no blur. Fades over `--m-slow`, and is taken away when it has gone |
-| Walking | J and K keep the sheet where it stands. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
+| Walking | J and K keep the sheet where it stands, as does a click on a place or a link inside it. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
 | Closing | The same number going home, from wherever it is. Asked to open again on the way, it turns round with its speed. The rest goes at once, so the latest line crosses nothing. At 0.02 the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
 
 ### Carrying a card

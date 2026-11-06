@@ -54,12 +54,14 @@ What Hercule noticed lies on one card of the page's own stock, with ink words an
 
 There is one stack left, and it has a reason: **a thing and what is directly linked to it.** Each linked thing is a row set in under its lead's title, so it reads as riding on it.
 
-1. **Which leads.** The lasting thing leads, so a transient thing rides on what it belongs to: a pull request rides on its ticket. Among equals the most pressing leads, measured against the patience its kind declares. A pull request that stands alone stays in the column.
+1. **Which leads.** The lasting thing, so a small thing rides on what it belongs to: a pull request rides on its ticket. A small thing rides on one lasting thing only, the most pressing, and shows as a quiet row on any other. A pull request that stands alone stays in the column.
 2. **Where it sits.** With its lead. A ticket stays under its project even when a part is urgent, and the part says so on its own row: what it asks, its wait, and its moves. The urgency never moves the ticket out of its project, because its place is what makes it readable.
 3. **How a signal shows.** It lands on the part's row: the drop, the rim, the new words. The row keeps its place, and the lead never changes under you. In a block, a card with a part asking comes first on the next visit.
-4. **What joins.** Only a direct link that the source reports or a person made. A reference found in text is a hint under the card, `Mentions OPS-47`, until someone confirms it. Sharing a repository or a project never joins anything. A chain A to B to C joins only what touches the lead, so a stack never pulls in a neighbourhood.
-5. **Top and stack are different.** A click on the card opens the card. A click on a row opens that row's thing. Every row is always there, so there is nothing to expand.
-6. **A row you cannot see.** A link can point at something you have no access to. Its row says `A Sentry issue you cannot open`, with a lock and no title.
+4. **What joins.** Only a direct link that the source reports or a person made. A reference found in text is a hint, `Mentioned in #6263`, until someone confirms it or says it is wrong. Sharing a repository or a project never joins anything. A chain A to B to C joins only what touches the lead, so a stack never pulls in a neighbourhood.
+5. **Two lasting things.** They stay two rows, each under its own places, and each shows the other as a quiet row. A peer link never pulls lasting work out of the groups it belongs to.
+6. **Top and stack are different.** A click on the card opens the card. A click on a row opens that row's thing. Every row is always there, so there is nothing to expand.
+7. **What is dismissed.** Dismissing a lead lets what rode on it stand alone, and the undo line says so. A dismissed thing stays out of sight, keeps its history, and a new signal does not bring it back. Undo does.
+8. **A row you cannot see.** A link can point at something you have no access to. Its row says `A Sentry issue you cannot open`, with a lock and no title.
 
 ## How things relate
 
@@ -75,7 +77,7 @@ Two relations, and neither knows a system. `js/relations.js` is the whole of it.
 | `person` | You or a colleague linked them | Yes | On hover: `Noa linked this`, and it can be removed |
 | `text` | `#6263` mentions `OPS-47` in its description | No, a hint | `Mentions OPS-47` under the card, and the evidence in the details, with `Link` |
 
-A person links two things three ways: `Link them` on a hint, the search in the card details, or carrying one card onto another. Each is one move with one Undo, and the source is never told. What Hercule noticed is his own kind, and stays apart from all of this.
+A person links two things three ways: `Link them` on a hint, the search in the card details, or carrying one card onto another. Each is one move with one Undo, and the source is never told. A pair can carry several claims and shows once, under the firmest. Removing a link takes back only the person's claim. What Hercule noticed is his own kind, and stays apart from all of this.
 
 A place is an ordinary entity that nothing has made a card of. It has a title, a state, and progress **only if the source reports it**. The page never works progress out from the cards it can see, because those are only what concerns you. Opening a place shows the bigger picture: what it says about itself, how it stands, what is above it, its history, and what in it concerns you.
 
@@ -159,10 +161,10 @@ A plugin reports its relations as data, each one a claim: `{ from, rel: 'part-of
 | Field | Fixed set |
 |---|---|
 | Shape | `ring` open, `dashed` not real yet, `quarter` `half` `most` under way, `fork` a proposed change, `join` merged, `check` finished, `cross` failed or refused, `hold` waits for a change, `alert` burning |
-| Tone | `quiet`, `active`, `you`, `good`, `bad` |
+| Tone | `quiet`, `active`, `attention`, `good`, `bad`. The colour kept for the person is out of a plugin's reach |
 | Card | `rich`, `compact` |
 | Fact form | `delta`, `count`, `word`, `date`, `money`, `bars` |
-| Reason tone | `plain`, `you`, `good`, `bad` |
+| Reason tone | `plain`, `attention`, `good`, `bad` |
 | Claim | `source`, `person`, `text` |
 
 ### Room to grow
@@ -180,14 +182,14 @@ Customization grows by adding to these sets, never by a kind drawing itself. The
 | Take it on myself | `Take it` | T | Creates a Task with no run. The marigold tab stands behind the top edge |
 | Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next, for as long as the pointer stays there. Plugins are not told |
 | Undo | The undo line, at the foot of the window | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
-| Open | Click a card, a row or a place's head | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next thing in the same place, and a place or a link inside the sheet walks there |
+| Open | Click a card, a row or a place's head | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next thing in the same place. A place or a link inside the sheet walks there, and a line at the top goes back |
 | Link | `Link them` on a hint; the search in the details; carry a card onto another | | One move, one Undo. A person's link can be removed from the details |
 | See its Task | On Work | G | Goes through to the Task on Work |
 | Carry | Drag | | Lifting a card raises the rail. Over another card, letting go links them. Esc or letting go elsewhere sends it home |
-| Move | | Arrows, J and K | Arrows follow the page, by where things lie. J and K read through it |
-| Group, order | Two plain menus | | They rearrange what is there, and change no number |
+| Move | | Arrows, J and K | Up and down stay on their side of the page. Left and right cross it at the nearest height, and the opposite key comes straight back. J and K read through the page |
+| Group, filter, order | Plain menus | | They rearrange or narrow what is there, and change no number in the sidebar. A filter shows a bundle when its lead or a part passes, so nothing is torn from what it rides on |
 
-Moves refuse with a reason where they do not apply: a held card says who has it, and G with no Task says so. An open menu owns the keyboard. A held key never runs through the page.
+Moves refuse with a reason where they do not apply: a held card says who has it, G with no Task says so, and a place has no moves at all. An open menu owns the keyboard. A held key never runs through the page.
 
 A card with a Task stays where it is for the rest of the visit. On the next visit it has settled under `With someone else`, at the foot of the column, which opens in place.
 
@@ -202,7 +204,8 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 | Offline | One line in the bar saying what you see and that moves wait |
 | A failing source | One line naming it, and what it means for its cards |
 | No person, no status | The slot closes up. Sentry has no person, Gmail has no status |
-| Very long title | Two lines on a card, all of it when open |
+| Very long title | Two lines at most, all of it when open |
+| A table with gaps | A kind with no card size is rich. An unknown fact form draws as a word, and an unknown mark as a link. A plugin's table should still be checked when it is installed, and refused with a visible notice |
 | Huge counts | Grouped digits with tabular figures |
 | 300 cards | The same page, longer. Nothing folds, and it scrolls |
 
@@ -231,6 +234,7 @@ The row shows a plain grey number, not a badge. A signal landing on a card you a
 - **Cards on the wide side.** Rich cards side by side were nearly the size of the compact ones, so the page stayed monotone. One surface per place, with work as rows, made the two shapes really different.
 - **Pull requests in the big area.** The first reading of sketch A kept the small transient things wide. The founder corrected it: what he liked was the asymmetry and the two card shapes, and pull requests deserve the small one.
 - **Grouping everything connected.** Stacking a whole set of linked things would pull in the neighbourhood. Only direct, confirmed links join.
+- **A lasting thing riding on another.** A linked error or a ticket left its own project, so a project could silently lose work. Lasting things stay where they live and show each other quietly.
 - **Working out progress from what is on screen.** The cards here are only what concerns you, so any sum from them is wrong. A bar appears only where the source reports one.
 
 ## New in the design system
