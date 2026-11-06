@@ -72,11 +72,32 @@ window.Overview = (function () {
     return el;
   }
 
+  var kit = null;
+
+  /** Loads the 3D kit once. It is a megabyte, and most mornings nobody opens the Office. */
+  function loadKit() {
+    if (kit) return kit;
+    kit = new Promise(function (done) {
+      var s = document.createElement("script");
+      s.src = "vendor/office-kit.js";
+      s.onload = done;
+      s.onerror = done;
+      document.body.appendChild(s);
+    });
+    return kit;
+  }
+
   function showOffice() {
+    loadKit().then(function () {
+      if (current === "office") enterOffice();
+    });
+  }
+
+  function enterOffice() {
     var host = document.getElementById("office");
     var work = document.getElementById("work");
-    var ok = Office.ensure(host);
     host.hidden = false;
+    Office.ensure(host);
     Office.resume();
     var travellers = collectTravellers();
     var pairs = travellers.map(function (h) {
@@ -167,16 +188,7 @@ window.Overview = (function () {
     drawSwitcher();
     // The Office is heavy. Hovering its tab is a good sign it is wanted, so start building it then.
     document.getElementById("switcher").addEventListener("pointerover", function (e) {
-      var tab = e.target.closest('.switch-tab[data-view="office"]');
-      if (!tab) return;
-      var host = document.getElementById("office");
-      if (host.hidden) {
-        host.style.visibility = "hidden";
-        host.hidden = false;
-        Office.ensure(host);
-        host.hidden = true;
-        host.style.visibility = "";
-      }
+      if (e.target.closest('.switch-tab[data-view="office"]')) loadKit();
     });
     document.getElementById("switcher").addEventListener("click", function (e) {
       var tab = e.target.closest(".switch-tab");

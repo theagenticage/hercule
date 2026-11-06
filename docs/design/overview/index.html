@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en" data-theme="orient-express">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview and Work: the story</title>
+<script src="../shared/page.js"></script>
+<link rel="stylesheet" href="system/tokens.css">
+<link rel="stylesheet" href="system/base.css">
+<link rel="stylesheet" href="system/primitives.css">
+<link rel="stylesheet" href="css/story.css">
+</head>
+<body>
+<nav class="st-themes" aria-label="Theme">
+  <span>Theme</span>
+  <a href="?theme=whitehaven">Whitehaven</a><a href="?theme=styles">Styles</a><a href="?theme=orient-express">Orient Express</a><a href="?theme=nile">Nile</a><a href="?theme=end-house">End House</a><a href="?theme=blue-train">Blue Train</a>
+</nav>
+<main class="st">
+  <header class="st-open">
+    <p class="st-kicker">Hi-fi design · Overview and Work</p>
+    <h1>The desk you open every morning.</h1>
+    <p class="st-lede">A place to see all your work, where the few things that want you stand up and everything else lies down. Six minutes to read. Everything below is live: click, drag and press keys inside any frame.</p>
+    <p class="st-lede"><a class="st-go" href="desktop.html">Open the full window</a></p>
+  </header>
+
+  <figure class="st-frame" data-src="desktop.html" data-w="1440" data-h="900">
+    <figcaption>Watch for the first ten seconds: the board plays what happened overnight. One card is picked up by an agent, a merged pull request lands, and a new Task rises out of the desk.</figcaption>
+  </figure>
+
+  <section>
+    <h2>What it is</h2>
+    <p>Stages are columns. Projects are lanes. Most Tasks are plain cards, and plans run across them as thin wires. That structure is your Home from the lo-fi, which you called a good default. What changed is how it looks, how it feels, and how it stays quiet.</p>
+    <p>Everything on the page answers one of three questions, in this order: <b>what wants me</b>, <b>where does it stand</b>, <b>what is everyone else doing</b>.</p>
+  </section>
+
+  <section>
+    <h2>Three compositions, and why this one</h2>
+    <p>I drew three real sketches on the same 69 Tasks before building anything.</p>
+    <div class="st-three">
+      <figure><img src="sketches/shot-a-orient-express.png" alt="Sketch A"><figcaption><b>A. Open desk.</b> No boxes at all. Lanes are space and type. The quietest by far.</figcaption></figure>
+      <figure><img src="sketches/shot-b-orient-express.png" alt="Sketch B"><figcaption><b>B. Drawers.</b> Projects as trays. Too boxy, but its folded front held a real idea: a whole project as beads on the stage axis.</figcaption></figure>
+      <figure><img src="sketches/shot-c-orient-express.png" alt="Sketch C"><figcaption><b>C. Horizon and slips.</b> All plans on top, small slips below. The horizon was beautiful, and the slips were the tiny cells you rejected.</figcaption></figure>
+    </div>
+    <p>The design is A's ground with B's folding. One grammar runs through it: <b>anything folded is a wire with one bead per Task, on the same stage axis as the cards.</b> A plan at rest, a folded lane and a whole board folded at 300 cards are the same drawing at different zoom.</p>
+  </section>
+
+  <section>
+    <h2>A card says a lot without words</h2>
+    <p>Two things are new, and both work before you read a word.</p>
+    <p><b>Height means whose move it is.</b> A card that wants you stands up off the desk. A card someone else holds lies flat. A blocked card is pressed in. A landed card is only an outline. Nothing else on the page has a shadow, so the eye goes to what stands.</p>
+    <p><b>The top edge shows who holds it.</b> Card files in the 1930s used small metal signal tabs clipped to the top edge, so a clerk could read a whole drawer at a glance. Here a marigold tab means it is your move: short for a quick call, long for real thinking. A colleague's head peeks over the edge, paws typing on the card, when an agent has it. A grey tab holds a person's initial. Nothing means nobody.</p>
+    <figure class="st-frame st-frame--low" data-src="sheet.html" data-w="1000" data-h="420"><figcaption>All card states at rest, in the theme you picked above.</figcaption></figure>
+    <p>All cards are one height. Title and summary share three lines, so a new summary can never push a neighbour. Things stay where they are.</p>
+    <p>On approach the card says what it wants. Rest the pointer on a card and its summary turns into its question, in marigold, with no layout change.</p>
+  </section>
+
+  <section>
+    <h2>The sentence is the filter</h2>
+    <p>There is no filter bar. The first line counts what wants you, and each phrase in it is a lens. Hover "real thinking" and exactly those cards stay lit. Press it to keep it. Press Q, R, S or A from anywhere.</p>
+    <figure class="st-frame" data-src="desktop.html?replay=off" data-w="1440" data-h="900"><figcaption>Try hovering the sentence. Press / to find. Fold a lane by clicking its name. Click a plan's name to open it into a band of cards.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2>Plans are wires, and beads are Tasks</h2>
+    <p>A plan is a thin wire across the stages, with a bead per piece of work at its stage. You read its shape at a glance, like an abacus. Click its name and the wire opens: each bead grows into its card, in place, in a band. Fold it and the cards shrink back into their beads. Most Tasks have no plan, and nothing about the page apologises for that.</p>
+    <p>Beads are real objects. Rest on one to see what it is. Drag one along its wire to change its stage. Drop a card on a folded lane and it shrinks into a bead there.</p>
+  </section>
+
+  <section>
+    <h2>Dragging is the star</h2>
+    <p>A press dents the card a little. Past five pixels it lifts: it grows, its shadow deepens, and it follows your hand on a stiff spring, a hair behind, leaning the way it moves. A slot opens where it would land, neighbours glide aside, and a brass diamond runs along the stage rule to show the stage it will join. Let go and it settles with a touch of overshoot. Press Esc and it goes home, without bounce.</p>
+    <p><b>Merging</b> is the same gesture, held still. Rest a card on another for a third of a second and they are drawn together: the one in your hand docks on the corner of the other, the target opens up, and letting go merges them. Undo plays it backwards.</p>
+    <p>Every action has a key. Arrows walk the desk. Return opens. Shift and an arrow moves a card a stage. M merges. X selects, and dragging any selected card carries them all as a stack.</p>
+  </section>
+
+  <section>
+    <h2>A card opens into its details</h2>
+    <p>The sheet you clicked is the sheet that grows. Its top edge, and whoever stands behind it, ride along. The board stays where it is, and the card's old place stays open as a dent, so your eye knows where it goes back to. Open and close are one spring, so Esc halfway through just reverses.</p>
+    <figure class="st-still"><img src="screens/pane--orient-express.jpg" alt="An open card"></figure>
+  </section>
+
+  <section>
+    <h2>Alive, but never restless</h2>
+    <p>Facts arrive all day, and the board must never reshuffle what you are looking at. Four rules keep it calm:</p>
+    <ul>
+      <li><b>Nothing moves under your hand.</b> A change waits until the pointer has left the area, for at most eight seconds.</li>
+      <li><b>Cause first.</b> "PR #3331 merged" lands on the card before it moves.</li>
+      <li><b>Slowly.</b> Things that move by themselves are slower than things you move.</li>
+      <li><b>A dent stays.</b> A card that leaves keeps its place open for a moment, so the cards below do not jump.</li>
+    </ul>
+    <p>The first ten seconds of the morning are a replay of the night, so nothing teleports even while you were asleep. The same thing, in the same place, or you saw it move.</p>
+  </section>
+
+  <section>
+    <h2>Calm at 300 cards</h2>
+    <p>A cell holds at most three rows. Past that, streams fold into piles, and the rest wait in "more". Tabs stick out of a pile, so you can see how much in it wants you. Clicking a pile fans it open beside itself, like a hand of cards. At full volume, Shift F folds everything: ten projects fit on one screen as lines of beads, and dense cells turn into tally marks.</p>
+    <div class="st-two">
+      <figure><img src="screens/many--orient-express.jpg" alt="300 cards"><figcaption>300 cards, one project open.</figcaption></figure>
+      <figure><img src="screens/many-folded--orient-express.jpg" alt="300 cards folded"><figcaption>All 300 on one screen.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>The Overview: Office and Work side by side</h2>
+    <p>The Office stays exactly as it is. A puck slides in the switcher, and the change of view carries the one thing the two views share: the colleagues. Switch from Work to the Office and each head on a card leaves it and walks into the room. Switch back and they return to their cards. It says what the two views are: the same crew, seen two ways.</p>
+    <p>The switcher draws Office and Work today. List, One surface and Tracks slot in beside them, in the same pill, with no change of design. The tray at the bottom right can show them at sketch level.</p>
+    <div class="st-two">
+      <figure><img src="screens/office--orient-express.jpg" alt="The Office"><figcaption>The real Office.</figcaption></figure>
+      <figure><img src="screens/later--orient-express.jpg" alt="Later views"><figcaption>A later view, at sketch level.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Every state, drawn</h2>
+    <div class="st-grid" id="grid"></div>
+  </section>
+
+  <section>
+    <h2>Wear</h2>
+    <p>An optional switch, off by default, in the Display menu. Neglected work ages gracefully: its paper yellows a little and it drifts slightly out of true, as if nobody has touched it. Touch it and it straightens. It is a way to feel neglect rather than read a number.</p>
+    <figure class="st-still"><img src="screens/wear--whitehaven.jpg" alt="Wear on"></figure>
+  </section>
+
+  <section>
+    <h2>What is new in the design system</h2>
+    <ul>
+      <li><b>The desk</b> (<code>--desk</code>), and <b>heights</b>: standing, flat, pressed, etched, as meaning, not decoration.</li>
+      <li><b>The top edge</b>: signal tabs, a colleague's head and paws, person tabs.</li>
+      <li><b>Beads and wires</b>, as the folded form of anything.</li>
+      <li><b>Piles</b>, with flags.</li>
+      <li><b>The lens sentence</b>: a page's first line as its filter.</li>
+      <li><b>Deco numerals in brass</b> for the five stage counts. This changes one doctrine line: brass may be read here, and nowhere else.</li>
+      <li><b>Springs</b> as named tokens, on one clock, in <code>js/motion.js</code>.</li>
+    </ul>
+    <p>The details: <a href="DESIGN.md">DESIGN.md</a>, <a href="MOTION.md">MOTION.md</a>, <a href="SHARED.md">SHARED.md</a>.</p>
+  </section>
+
+  <section id="honest">
+    <h2>What is weakest</h2>
+    <div id="weakest"></div>
+  </section>
+</main>
+<script src="js/story.js"></script>
+</body>
+</html>

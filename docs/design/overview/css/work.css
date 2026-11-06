@@ -29,10 +29,11 @@
 .rule-wrap { position: sticky; z-index: 12; top: 52px; margin: 0 -32px 16px; padding: 0 32px; }
 .rule-wrap::before { content: ""; position: absolute; left: 0; right: 0; bottom: -10px; top: -52px; background: linear-gradient(var(--desk) 78%, transparent); pointer-events: none; opacity: 0; transition: opacity var(--m-quick); }
 .rule-wrap.is-stuck::before { opacity: 1; }
-.rule { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); height: 26px; }
+.rule { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); height: 30px; }
 .rule::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, color-mix(in oklab, var(--brass) 68%, transparent), color-mix(in oklab, var(--brass) 68%, transparent) 72%, color-mix(in oklab, var(--brass) 26%, transparent)); }
-.stage { display: flex; align-items: baseline; gap: 7px; font: var(--type-summary); font-weight: var(--w-medium); color: var(--muted); transition: color var(--m-quick); }
-.stage-count { position: relative; display: inline-block; min-width: 1ch; color: var(--faint); font-weight: var(--w-regular); font-variant-numeric: tabular-nums; }
+.stage { display: flex; align-items: center; gap: 8px; height: 22px; font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); transition: color var(--m-quick); }
+/* The five stage counts are the one place the Deco face speaks on this page, in brass ink. */
+.stage-count { position: relative; display: inline-block; min-width: 1ch; font-family: var(--font-deco); font-feature-settings: normal; font-size: 16px; font-weight: 400; letter-spacing: 0; line-height: 1; color: var(--numeral); }
 .stage.is-target { color: var(--ink); }
 .roll { display: inline-block; }
 .roll--out { position: absolute; left: 0; animation: roll-out var(--m-base) var(--m-ease) both; }

@@ -14,6 +14,9 @@
   /* ---- The lamp over the desk: a little warmth in the dark themes, a little daylight in the light. */
   --lamp: color-mix(in oklab, var(--brass) 7%, transparent);
 
+  /* ---- Brass that may be read: the stage counts. Brass itself is too pale on a light desk. */
+  --numeral: var(--brass);
+
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
   --stock: var(--raised);
   --stock-flat: color-mix(in oklab, var(--raised) 42%, var(--desk));
@@ -63,6 +66,7 @@
 :root:not([data-theme]) {
   --desk: var(--bg);
   --lamp: oklch(1 0 0 / 0.5);
+  --numeral: color-mix(in oklab, var(--brass) 52%, var(--ink));
   --stock-flat: color-mix(in oklab, var(--raised) 34%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 72%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
