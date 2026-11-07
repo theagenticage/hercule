@@ -160,7 +160,7 @@ const buildSignalLine = (
  * Filling, cutting and falling back are done by `renderSentence`, as for the
  * words of a timeline.
  */
-export const buildSignalSay = (
+const buildSignalSay = (
   signal: { readonly kind: string; readonly title: string; readonly asker: string | undefined },
   reasonTemplates: string | null,
 ): EntityReason => {

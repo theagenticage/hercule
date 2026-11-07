@@ -74,6 +74,7 @@ import {
 import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
 import { decideRiding, selectInboxPage, type RidingCard } from "./riding";
+import { CURRENT_LINKED_SQL } from "./claim-sql";
 import {
   CURRENT_PART_OF_SQL,
   relationClaimRepository,
@@ -581,10 +582,10 @@ const WANTED_REFS_SQL = `
     -- CROSS JOIN pins the order, so each root seeks its claims by index
     -- instead of SQLite scanning every current claim.
     SELECT c.to_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
-      ON c.from_ref = r.ref AND c.relation = 'linked' AND c.state = 'current' AND c.is_pending = 0
+      ON c.from_ref = r.ref AND ${CURRENT_LINKED_SQL}
     UNION
     SELECT c.from_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
-      ON c.to_ref = r.ref AND c.relation = 'linked' AND c.state = 'current' AND c.is_pending = 0
+      ON c.to_ref = r.ref AND ${CURRENT_LINKED_SQL}
   ),
   wanted(ref) AS (
     SELECT ref FROM wanted_context
@@ -1394,7 +1395,7 @@ const make = Effect.gen(function* () {
       readonly connectionId: string;
       readonly observed: ReadonlyArray<ObservedEntity>;
       readonly environment: EntityEnvironment;
-    }): Effect.Effect<EntityWriteChanges, SqlError> =>
+    }): Effect.Effect<EntityWriteChanges & Pick<ReconcileChanges, "signalIds">, SqlError> =>
       Effect.gen(function* () {
         const { entityIds, affectedTaskIds, signalIds } = yield* writeObservedEntities({
           ...input,

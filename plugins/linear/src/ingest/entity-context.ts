@@ -18,7 +18,7 @@ import {
   MAX_ENTITY_RELATIONS,
   MAX_ENTITY_TEXT_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
-  MAX_EVENT_URL_LENGTH,
+  isHttpUrl,
   type EntityObservation,
 } from "@hercule/plugin-host";
 import { callLinear, type LinearFailure } from "../api";
@@ -119,9 +119,6 @@ export const readIssueContexts = (
     return contexts;
   });
 
-/** Matches a link a person can open. Other attachment links (an app's own scheme) are no claims. */
-const OPENABLE_URL = /^https?:\/\/\S+$/i;
-
 type Relations = NonNullable<EntityObservation["relations"]>;
 
 /**
@@ -154,7 +151,7 @@ export const buildIssueContextFields = (
     ...new Set(
       (context?.attachments.nodes ?? [])
         .map((attachment) => attachment.url)
-        .filter((url) => OPENABLE_URL.test(url) && url.length <= MAX_EVENT_URL_LENGTH),
+        .filter((url) => isHttpUrl(url)),
     ),
   ];
   const relations: Relations = {

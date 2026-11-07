@@ -131,10 +131,16 @@
 .inbox-place[data-by-status] {
   --row-lead: 18px;
 }
-/* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink. */
+/* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink.
+   The two quietest waits are redeclared here: a token that names --faint takes its value where it is declared, so
+   it does not see this one. */
 .inbox-place,
 .inbox-welcome {
   --faint: var(--faint-on-stock);
+}
+.inbox-place {
+  --wait-fresh: var(--faint-on-stock);
+  --wait-recent: var(--faint-on-stock);
 }
 /* Blue Train's stock is lighter still, so a failure takes a lighter tomato. */
 .inbox-place,

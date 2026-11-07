@@ -635,7 +635,7 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
         operation: null,
         primary: true,
         field: { name: "body", placeholder: "Write a reply" },
-        describeLine: [{ kind: "text", text: "Replies on SHOP-142 in Tidewatch." }],
+        describeLine: [{ kind: "text", text: "Replies on SHOP-142 in Tidewatch" }],
       },
       {
         id: "done",

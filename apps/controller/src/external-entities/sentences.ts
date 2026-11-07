@@ -11,7 +11,7 @@ import { MAX_ENTITY_REASON_LENGTH, type EntityReason } from "@hercule/contract";
 import { cutTextAtWord } from "../text";
 
 /** The kind's `reasons` table as copied onto an entity at observation: `{ key: { say, tone } }`. */
-export type ReasonTemplates = Readonly<
+type ReasonTemplates = Readonly<
   Record<string, { readonly say: string; readonly tone: EntityReason["tone"] }>
 >;
 

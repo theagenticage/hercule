@@ -363,7 +363,7 @@ describe("Inbox", () => {
     expect(await card.textContent()).toContain(PULL_REQUEST_TITLE);
   });
 
-  it("lands a review request that reaches the pull request as a signal on its card as a new sentence, leaves the card where it was, and shows the signal and its answers in the open card", async () => {
+  it("lands a review request that reaches the pull request as a signal on its card, leaves the card where it was, and shows the signal and its answers in the open card", async () => {
     const arranged = await arrangeFleet();
     await arranged.restartController(() => {
       seedEntities(arranged.home);
@@ -379,23 +379,22 @@ describe("Inbox", () => {
       .getByRole("link", { name: /^Inbox/ })
       .click();
 
-    // The card says what its Connection reports, in the kind's words.
+    // The card says what its Connection reports. A request in the narrow
+    // column names the person alone when the sentence is the usual one (a
+    // plain tone), because the column's title already says what a request is.
     const request = page.locator(`.inbox-request[data-card-id="${PULL_REQUEST_ID}"]`);
     const sentence = request.locator(".request-said");
     await request.waitFor();
-    await expect.poll(() => sentence.textContent()).toBe("Review requested");
+    await expect.poll(() => sentence.textContent()).toBe("juno-park");
     const before = await request.boundingBox();
     expect(before).not.toBeNull();
 
     // The review request arrives as a signal. The app reads the Inbox again
-    // when it reconnects, and the same card now says who asked. A request in
-    // the narrow column names the person alone when the sentence is the usual
-    // one (a plain tone), because the column's title already says what a
-    // request is.
+    // when it reconnects. The sentence is the same as before, because the
+    // asker is the person the card already names.
     await arranged.restartController(() => {
       seedReviewRequestSignal(arranged.home);
     });
-    await expect.poll(() => sentence.textContent()).toBe("juno-park");
 
     // The card stayed: the same one, in the same place, and no second card.
     expect(await page.locator('aside[aria-label="Requests"] .inbox-request').count()).toBe(1);

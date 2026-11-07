@@ -37,7 +37,7 @@ const HOUR_MS = 3_600_000;
  * draws as its wait (`describeCardWait` in client-core). A thing with no clock
  * has used none: a kind with `pace: slow`, or a thing a live Task holds.
  */
-export const measurePatienceUsed = (card: RidingCard, nowMs: number): number => {
+const measurePatienceUsed = (card: RidingCard, nowMs: number): number => {
   if (card.pace !== "fast" || card.hasTask) return 0;
   const waitedMs = nowMs - Date.parse(card.waitingSince);
   if (!Number.isFinite(waitedMs) || waitedMs <= 0) return 0;
