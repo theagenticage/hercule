@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { EMPTY_FILTER, isFilterOn, type Filter } from "@hercule/client-core/desk";
+import type { CardInLane } from "@hercule/client-core/work";
 import { readSavedWorkView, writeSavedWorkView, type SavedWorkView } from "./work-view-storage";
 
 /** How the lanes label themselves: in a strip at the side, or in a band across the top. */
@@ -41,6 +42,13 @@ const toggleId = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => 
 
 /** How the user looks at the board: what `useWorkView` returns. */
 export interface WorkView {
+  /**
+   * What the lanes group by: `PROJECT_FACET_ID`, or the kind of an outside
+   * place. It may name a kind the board no longer has, which the screen
+   * reads as Project.
+   */
+  readonly groupBy: string;
+  readonly setGroupBy: (groupBy: string) => void;
   readonly display: WorkDisplay;
   readonly setDisplay: (display: WorkDisplay) => void;
   readonly filter: Filter;
@@ -62,8 +70,8 @@ export interface WorkView {
   /** Folds every lane in `laneIds`, or opens them when they are all folded. */
   readonly foldEverything: (laneIds: readonly string[]) => void;
   /** The card the keyboard is on, or `null`. It may be a card that has left the board. */
-  readonly currentCardId: string | null;
-  readonly setCurrentCardId: (cardId: string | null) => void;
+  readonly currentCard: CardInLane | null;
+  readonly setCurrentCard: (card: CardInLane | null) => void;
 }
 
 /**
@@ -71,7 +79,7 @@ export interface WorkView {
  * which lanes are folded, which cells are opened, the Display choices, and
  * the current card.
  *
- * - Folds and Display are kept in `localStorage` under `storageKey` (see
+ * - How the lanes group, folds and Display are kept in `localStorage` under `storageKey` (see
  *   `work-view-storage.ts`). The filter, the Find text, the opened cells and
  *   the current card are not: they are about what the user is doing now.
  * - A fold made while a filter is on lasts as long as the filter does: it is
@@ -84,7 +92,7 @@ export const useWorkView = (storageKey: string): WorkView => {
   const [findText, setFindTextState] = useState("");
   const [filterFolds, setFilterFolds] = useState<ReadonlySet<string>>(new Set());
   const [openedCellIds, setOpenedCellIds] = useState<ReadonlySet<string>>(new Set());
-  const [currentCardId, setCurrentCardId] = useState<string | null>(null);
+  const [currentCard, setCurrentCard] = useState<CardInLane | null>(null);
 
   const isFiltering = isFilterOn(filter) || findText.trim() !== "";
 
@@ -112,6 +120,10 @@ export const useWorkView = (storageKey: string): WorkView => {
   };
 
   return {
+    groupBy: saved.groupBy,
+    setGroupBy: (groupBy) => {
+      save({ ...saved, groupBy });
+    },
     display: saved.display,
     setDisplay: (display) => {
       save({ ...saved, display });
@@ -132,7 +144,7 @@ export const useWorkView = (storageKey: string): WorkView => {
     foldEverything: (laneIds) => {
       changeFolds((ids) => foldOrOpenAll(ids, laneIds));
     },
-    currentCardId,
-    setCurrentCardId,
+    currentCard,
+    setCurrentCard,
   };
 };

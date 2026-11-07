@@ -1,7 +1,9 @@
 import { memo, type JSX } from "react";
+import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
   chooseCardColleaguePose,
   chooseCardSecondLine,
+  type CardInLane,
   describeCardForReader,
   isLoudCard,
 } from "@hercule/client-core/work";
@@ -9,6 +11,7 @@ import { findNextDeskAgeChange } from "@hercule/client-core/desk";
 import type { WorkCard } from "@hercule/contract";
 import { useClockValue } from "../../app/age-clock";
 import { buildLook } from "../../faces";
+import { PluginMark } from "../../marks";
 import { Card, useDeskAgeLabel, type CardColleague } from "../desk";
 
 /** Returns the colleague standing behind the top edge of `card`, or `null` when nobody does. */
@@ -24,6 +27,11 @@ const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null 
       };
 };
 
+/** Returns the plugins that own the outside things a card's Task links, each once, in the order of the card's marks. */
+const listSourcePluginIds = (card: WorkCard): readonly string[] => [
+  ...new Set(card.entityMarks.map((mark) => mark.plugin)),
+];
+
 /**
  * Renders one card of the board: its title, what it asks or what broke on the
  * second line, its age, and the colleague behind its top edge. A card in
@@ -31,9 +39,14 @@ const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null 
  *
  * - `isTabStop` makes this the one card the Tab key leads onto. The arrows
  *   walk the rest from there, so every other card has `tabIndex` -1.
+ * - Beside the age, the card shows a mark for each source its Task links
+ *   outside (`entityMarks`), drawn by the plugin's own mark in `plugins`.
+ * - `laneId` is the lane the card stands in. A Task under two outside places
+ *   has a card in each lane, and `alsoWords` ("In 2 repositories") and
+ *   `alsoNames` (their names, for the hover) say so on each of those cards.
  * - `onOpen` is called with the card when it is pressed: it opens the card's
  *   newest Thread.
- * - `onFocus` is called with the card's id when it takes the focus.
+ * - `onFocus` is called with the card and its lane when it takes the focus.
  *
  * The card is named for a screen reader in the order a person needs: title,
  * what broke, what it asks, stage and age (`describeCardForReader`).
@@ -47,27 +60,36 @@ const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null 
  */
 export const WorkCardView = memo(function WorkCardView({
   card,
+  laneId,
+  plugins,
+  alsoWords,
+  alsoNames,
   isTabStop,
   isStill,
   onOpen,
   onFocus,
 }: {
   readonly card: WorkCard;
+  readonly laneId: string;
+  readonly plugins: readonly PluginIdentity[];
+  readonly alsoWords: string | undefined;
+  readonly alsoNames: string | undefined;
   readonly isTabStop: boolean;
   readonly isStill: boolean;
   readonly onOpen: (card: WorkCard) => void;
-  readonly onFocus: (cardId: string) => void;
+  readonly onFocus: (at: CardInLane) => void;
 }): JSX.Element {
   const age = useDeskAgeLabel(card.lastActivityAt, true);
   const reading = useClockValue(card.lastActivityAt, true, findNextDeskAgeChange, (now) =>
     describeCardForReader(card, now),
   );
+  const label = alsoWords === undefined ? reading : `${reading} ${alsoWords}.`;
   const secondLine = chooseCardSecondLine(card);
   return (
     <Card
       role="button"
       tabIndex={isTabStop ? 0 : -1}
-      aria-label={reading}
+      aria-label={label}
       data-card-id={card.id}
       data-stage={card.stage}
       title={card.title}
@@ -75,12 +97,24 @@ export const WorkCardView = memo(function WorkCardView({
       nowTone={secondLine?.tone ?? "plain"}
       colleague={buildColleague(card, isStill)}
       landed={card.stage === "landed" && !isLoudCard(card)}
-      meta={<time dateTime={card.lastActivityAt}>{age}</time>}
+      {...(alsoWords === undefined || alsoNames === undefined
+        ? {}
+        : { also: { words: alsoWords, names: alsoNames } })}
+      meta={
+        <>
+          {listSourcePluginIds(card).map((pluginId) => (
+            <span key={pluginId} className="card-src" title={namePlugin(pluginId, plugins)}>
+              <PluginMark pluginId={pluginId} plugins={plugins} size={13} />
+            </span>
+          ))}
+          <time dateTime={card.lastActivityAt}>{age}</time>
+        </>
+      }
       onClick={() => {
         onOpen(card);
       }}
       onFocus={() => {
-        onFocus(card.id);
+        onFocus({ laneId, cardId: card.id });
       }}
     />
   );

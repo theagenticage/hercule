@@ -95,7 +95,7 @@ describe("decideCardFace", () => {
     it.each<[EntityFact, object]>([
       [
         { form: "delta", added: 120, removed: 30 },
-        { form: "delta", text: "+120 -30", added: "+120", removed: "-30" },
+        { form: "delta", text: "+120 −30", added: "+120", removed: "−30" },
       ],
       [
         { form: "count", value: 1, unit: "file" },

@@ -1,0 +1,234 @@
+/* The states around the page: loading, an Inbox with nothing at all, the first
+   run, the small sunrise in the column, and the one line in the bar. From the
+   drawing's `css/states.css` and `css/inbox.css`. */
+
+/* ---------- Loading ----------
+   The real cards, laid out with their words and then held back, so every line
+   keeps its height and nothing shifts when the words arrive. */
+.is-holding :is(.row-title, .request-title) {
+  color: transparent;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  border-radius: 4px;
+}
+.is-holding
+  :is(
+    .row-rail > *,
+    .row-end,
+    .row-context,
+    .row-trust,
+    .request-mark,
+    .request-under,
+    .request-trust,
+    .card-wait
+  ) {
+  visibility: hidden;
+}
+/* The first read of a page nothing is known of: bars where the words will be. */
+.loading-bar {
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+.loading-bar--place {
+  width: 180px;
+  height: 14px;
+}
+.loading-bar--title {
+  width: 68%;
+  height: 11px;
+}
+.loading-bar--line {
+  width: 40%;
+  height: 9px;
+}
+.inbox-row > .card-body > .row-main > .loading-bar--title {
+  display: block;
+  margin: 5px 0 5px;
+}
+/* The words fade in once the read arrives, block by block (60ms) and card by card (14ms, up to 16). */
+@media (prefers-reduced-motion: no-preference) {
+  .inbox-desk.is-arriving
+    :is(
+      .row-title,
+      .row-rail,
+      .row-context,
+      .row-end,
+      .row-trust,
+      .request-mark,
+      .request-title,
+      .request-under,
+      .request-trust,
+      .card-wait
+    ) {
+    animation: inbox-words-in 240ms var(--m-ease)
+      calc(var(--arrive-block, 0) * 60ms + min(var(--arrive-step, 0), 16) * 14ms) backwards;
+  }
+}
+@keyframes inbox-words-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- Nothing at all ---------- */
+.inbox-desk[data-state="clear"] .inbox-page {
+  display: block;
+  padding: 0;
+}
+.inbox-clear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 17vh;
+}
+.inbox-clear .sunrise {
+  max-width: 70%;
+}
+.inbox-clear h2 {
+  margin: 37px 0 6px;
+  font: var(--w-bold) var(--t-20) / 28px var(--font-ui);
+  letter-spacing: -0.008em;
+}
+.inbox-clear p {
+  margin: 0;
+  color: var(--muted);
+  font: var(--w-regular) var(--t-14) / 20px var(--font-ui);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .inbox-clear:not(:has([data-still])) :is(h2, p) {
+    animation: inbox-fade-up 500ms var(--m-ease) 900ms backwards;
+  }
+}
+@keyframes inbox-fade-up {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+}
+/* No requests left: the same sunrise, small, in the column, because lasting work never ends. */
+.inbox-requests-clear {
+  padding-top: 24px;
+}
+.inbox-requests-clear p {
+  margin: 16px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+
+/* ---------- First run ----------
+   The page itself. Hercule hands over one line over the top edge of a card of
+   the page's own stock, and each side asks for the sources whose cards will lie there. */
+.inbox-welcome {
+  position: relative;
+  isolation: isolate;
+  margin: 0 0 26px;
+  padding: 5px 0;
+  color: var(--ink);
+}
+.inbox-welcome .card-holder {
+  right: 16px;
+}
+.inbox-welcome .card-paws {
+  right: 19px;
+}
+.inbox-welcome p {
+  margin: 0;
+  padding: 8px 56px 8px 16px;
+  font: var(--type-card);
+  font-size: var(--t-14);
+  color: var(--ink);
+}
+.inbox-welcome small {
+  display: block;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.inbox-offer {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 84px;
+  padding: 12px;
+  border-radius: var(--card-r);
+  background: var(--stock);
+  box-shadow: var(--h-rest);
+  color: var(--ink);
+  text-align: left;
+  transition: box-shadow var(--m-quick) var(--m-ease);
+}
+.inbox-offer:hover {
+  box-shadow: var(--h-hover);
+}
+.inbox-offer:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.inbox-offer b {
+  display: block;
+  font: var(--type-card);
+  font-size: calc(15px + var(--text-size-step));
+  line-height: calc(21px + var(--text-size-step));
+}
+.inbox-offer small {
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.offer-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.inbox-offer:hover .offer-go {
+  color: var(--ink);
+}
+.inbox-offers-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.inbox-offers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------- The one line in the bar ----------
+   Offline, or a source that fails: what the user sees, and what it means for it. */
+.inbox-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--you) 18%, transparent);
+  color: var(--ink);
+  font: var(--type-summary);
+  white-space: nowrap;
+}
+.inbox-notice > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-notice a {
+  flex: none;
+  margin-left: 4px;
+  color: inherit;
+  text-decoration: underline;
+}
+.notice-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--you);
+}

@@ -32,8 +32,12 @@ interface BoardChange {
   readonly anchor: HTMLElement | "top" | "none";
   /** The milliseconds each part waits before it glides. */
   readonly wait?: number | undefined;
-  /** Runs before the change and returns what runs after it. It makes the copies in flight and records where cards grow from. */
-  readonly prepare?: () => () => void;
+  /**
+   * Runs before the change and returns what runs after it, with the parts of
+   * the board that are new. It makes the copies in flight and records where
+   * cards grow from.
+   */
+  readonly prepare?: () => (born: readonly HTMLElement[]) => void;
 }
 
 /** What a fold or an unfold needs to know: the lanes it changes, how to commit it, and the lane that stays still. */
@@ -72,7 +76,7 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
   const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
   const finish = change.prepare?.();
   const wait = change.wait ?? 0;
-  flipBoard(
+  const { born } = flipBoard(
     scroller,
     "travel",
     () => {
@@ -83,7 +87,7 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
     },
     wait > 0 ? () => wait : undefined,
   );
-  finish?.();
+  finish?.(born);
 };
 
 /** Finds the section of a lane. */
@@ -173,6 +177,8 @@ const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
  *   the button.
  * - Filter and Find: one change. What stays glides from where it was; what
  *   leaves just goes; what comes back fades in.
+ * - A new grouping is the same change, and the page returns to its top,
+ *   because the old scroll position means nothing under the new lanes.
  *
  * `scrollRef` holds the element that scrolls the board; it is read when a
  * change is made, never while rendering. Every spring is `travel`: the user asked for these. The change to the screen
@@ -291,8 +297,27 @@ export const useViewMotion = (
     });
   };
 
+  /** Plays a new grouping of the lanes: the cards glide to their new lanes, and a card that has a copy there now fades in. */
+  const setGroupBy = (groupBy: string): void => {
+    const scroller = scrollRef.current;
+    playChange(scroller, {
+      commit: () => {
+        view.setGroupBy(groupBy);
+        if (scroller !== null) scroller.scrollTop = 0;
+      },
+      anchor: "none",
+      prepare: () => (born) => {
+        fadeInCards(
+          born.filter((part) => part.hasAttribute("data-card-id")),
+          "travel",
+        );
+      },
+    });
+  };
+
   return {
     ...view,
+    setGroupBy,
     toggleLane,
     foldEverything,
     toggleCell,

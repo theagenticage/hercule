@@ -1,5 +1,5 @@
 /** Test cards for the Inbox, in the invented Northwind Market world. */
-import type { EntityPlace, Inbox, InboxCard } from "@hercule/contract";
+import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
 
 /**
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
@@ -87,3 +87,64 @@ export const buildInbox = (
 /** Returns the ids of these cards, for a short comparison. */
 export const listCardIds = (cards: readonly { readonly card: InboxCard }[]): readonly string[] =>
   cards.map((row) => row.card.id);
+
+/**
+ * Returns a plugin that declares the given kinds of card, such as
+ * `{ word: "acme/review", card: "compact", connect: "Reviews people ask of you" }`.
+ * A kind is shortened to what a test sets: the rest is a plain kind.
+ */
+export const buildSourcePlugin = (
+  id: string,
+  displayName: string,
+  kinds: ReadonlyArray<{
+    readonly word: string;
+    readonly card?: "rich" | "compact";
+    readonly pace?: "fast" | "slow" | "context";
+    readonly connect?: string;
+  }> = [],
+): PluginDetail => ({
+  id,
+  displayName,
+  hostApi: 8,
+  capabilities: [],
+  enabled: true,
+  status: { _tag: "active" },
+  config: {},
+  contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: kinds.map((kind) => ({
+    word: kind.word,
+    noun: "Thing",
+    refPrefix: `${id}:`,
+    pace: kind.pace ?? "slow",
+    patience: 24,
+    identifier: "#{number}",
+    person: null,
+    owner: null,
+    status: null,
+    facts: [],
+    reasons: {},
+    ...(kind.card === undefined ? {} : { card: kind.card }),
+    ...(kind.connect === undefined ? {} : { connect: kind.connect }),
+  })),
+});
+
+/** Returns a Connection of the given type, such as `acme/account`, in the given status. */
+export const buildSourceConnection = (
+  id: string,
+  type: string,
+  overrides: Partial<Connection> = {},
+): Connection => ({
+  id,
+  type,
+  label: id,
+  displayName: id,
+  status: "connected",
+  labels: [],
+  config: {},
+  feedIntervals: {},
+  credentials: [],
+  createdAt: "2026-10-01T00:00:00.000Z",
+  updatedAt: "2026-10-01T00:00:00.000Z",
+  ...overrides,
+});

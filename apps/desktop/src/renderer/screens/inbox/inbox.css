@@ -1,0 +1,556 @@
+/* The Inbox page: a wide side for lasting work, a narrow column for small
+   requests. It is the drawing's `css/inbox.css` and `css/card.css`, on the app's
+   tokens, value for value (`docs/design/inbox/` on the branch
+   `prototype/inbox-hifi`). The drawing's `.block` is `.inbox-place`, its
+   `.card--rich` is `.inbox-row`, its `.card--compact` is `.inbox-request`, and
+   its `.echo` is `.inbox-pointer`: the app already has global `.card` and
+   `.block` names. The sheet (`.card-stock`) is the desk's own
+   (`screens/desk/card.css`). */
+
+/* ---------- The desk ---------- */
+.inbox-desk {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--desk);
+}
+/* The page lies under the toolbar, which floats 10px down and is 36px high.
+   The page starts there, and keeps 10px of its own before its first line, so
+   what stands up over a card's top edge is not clipped. */
+.inbox-scroll {
+  position: absolute;
+  inset: 46px 0 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+/* A classic scroll bar takes room at the right edge, and the toolbar keeps 14px from it. */
+.inbox-desk.has-scrollbar .desk-toolbar {
+  right: calc(14px + var(--scrollbar-width));
+}
+.inbox-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  column-gap: 32px;
+  align-items: start;
+  padding: 10px 32px 40px;
+}
+.inbox-wide,
+.inbox-narrow {
+  min-width: 0;
+  padding-top: 14px;
+}
+/* Below 1100px the column moves above the work, and takes the page's width. */
+@media (max-width: 1099.98px) {
+  .inbox-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inbox-narrow {
+    order: -1;
+  }
+}
+
+/* A section's title is plain words with a small count, and the control that belongs to it at the end. */
+.inbox-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin: 0 0 8px;
+}
+.inbox-section-head .desk-heading {
+  gap: 8px;
+}
+.inbox-none {
+  margin: 6px 2px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.inbox-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* A line under the work: the Inbox cut short, or a read that failed. */
+.inbox-note {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.inbox-note button {
+  margin-left: 8px;
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* ---------- The order of Requests ---------- */
+.inbox-order {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: var(--type-summary);
+  white-space: nowrap;
+}
+.inbox-order .ic {
+  color: var(--faint);
+}
+.inbox-order:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.inbox-order:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* ---------- A place: one raised surface ---------- */
+.inbox-place {
+  position: relative;
+  isolation: isolate;
+  margin: 0 0 16px;
+  color: var(--ink);
+}
+/* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink. */
+[data-theme="orient-express"] .inbox-place,
+[data-theme="dark"] .inbox-place,
+[data-theme="nile"] .inbox-place,
+[data-theme="end-house"] .inbox-place,
+[data-theme="blue-train"] .inbox-place,
+[data-theme="orient-express"] .inbox-welcome,
+[data-theme="dark"] .inbox-welcome,
+[data-theme="nile"] .inbox-welcome,
+[data-theme="end-house"] .inbox-welcome,
+[data-theme="blue-train"] .inbox-welcome {
+  --faint: var(--faint-on-stock);
+}
+/* Blue Train's stock is lighter still, so a failure takes a lighter tomato. */
+[data-theme="blue-train"] .inbox-place,
+[data-theme="blue-train"] .inbox-request {
+  --fail-ink: oklch(0.82 0.11 30);
+}
+.inbox-place-head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 12px 16px 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.inbox-place-head.is-plain {
+  padding-bottom: 10px;
+}
+.inbox-place-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: var(--r-xs);
+  color: inherit;
+}
+.inbox-place-open.is-locked {
+  color: var(--faint);
+}
+.place-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  color: var(--mark-ink);
+}
+.inbox-place-title {
+  margin: 0;
+  font: var(--w-bold) var(--t-18) / 24px var(--font-ui);
+  letter-spacing: -0.008em;
+  color: var(--ink);
+}
+.inbox-place-open.is-locked .inbox-place-title {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  font-size: var(--t-13);
+}
+.inbox-place-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--faint);
+  font: var(--type-summary);
+  font-variant-numeric: tabular-nums;
+}
+/* What the place is itself part of, under its name and in line with it. */
+.inbox-place-above {
+  flex-basis: 100%;
+  margin: 0 0 0 24px;
+  color: var(--faint);
+  font: var(--type-summary);
+}
+.inbox-place-above span + span::before {
+  content: "\00b7";
+  margin: 0 6px;
+}
+.inbox-place-rows > * + * {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- A row of lasting work ---------- */
+.inbox-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  padding: 11px 16px;
+  color: var(--ink);
+  cursor: default;
+  outline: none;
+  --row-hover: color-mix(in oklab, var(--ink) 5%, var(--stock));
+  transition: background-color var(--m-quick) var(--m-ease);
+}
+.inbox-row:hover {
+  background: var(--row-hover);
+}
+/* The last row's corners follow the sheet's, so its fill never shows square corners over them. */
+.inbox-row:last-child {
+  border-radius: 0 0 var(--card-r) var(--card-r);
+}
+/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
+.inbox-place[data-by-status] .inbox-row,
+.inbox-place[data-by-status] .inbox-pointer {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+.row-rail {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: calc(20px + var(--text-size-step));
+}
+.row-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--mark-ink);
+}
+.card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font: var(--w-medium) var(--t-13) / calc(20px + var(--text-size-step)) var(--font-ui);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.card-status > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-main {
+  min-width: 0;
+}
+.row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  font: var(--w-medium) calc(15px + var(--text-size-step)) / calc(21px + var(--text-size-step))
+    var(--font-ui);
+  letter-spacing: -0.005em;
+  text-wrap: pretty;
+}
+.row-context {
+  display: flex;
+  align-items: center;
+  gap: 0 10px;
+  min-width: 0;
+  margin-top: 2px;
+  color: var(--muted);
+  font: var(--type-summary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.row-context > span {
+  flex: none;
+}
+.row-context > .row-news {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-context > span:not(:last-child)::after {
+  content: "\00b7";
+  flex: none;
+  margin-left: 10px;
+  color: var(--faint);
+}
+.row-news[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.row-news[data-tone="good"] {
+  color: var(--ok);
+}
+.row-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: calc(20px + var(--text-size-step));
+}
+.row-id {
+  color: var(--faint);
+  font: var(--type-summary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A card whose facts may be old says how old, quietly, under its words. */
+.row-trust,
+.request-trust {
+  display: block;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.row-trust {
+  margin-top: 1px;
+}
+/* A card that lost access keeps its last known facts, with its words a step back. */
+.inbox-row[data-access] .row-title,
+.inbox-request[data-access] .request-title {
+  color: var(--muted);
+}
+
+/* The wait of a fast kind: ink and weight only, against the kind's patience. An overdue wait is
+   full ink and bold, with no colour. */
+.card-wait {
+  flex: none;
+  font: var(--w-medium) var(--t-12) / var(--line-16) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.card-wait[data-level="fresh"] {
+  color: var(--wait-fresh);
+}
+.card-wait[data-level="recent"] {
+  color: var(--wait-recent);
+}
+.card-wait[data-level="due"] {
+  color: var(--wait-due);
+}
+.card-wait[data-level="over"] {
+  color: var(--wait-over);
+  font-weight: var(--w-bold);
+}
+
+.card-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.fact-added {
+  color: var(--ok);
+}
+.fact-removed {
+  color: var(--fail-ink);
+}
+
+/* A pointer to a card that lies under another place too: one card, drawn in full once. */
+.inbox-pointer {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: calc(38px + var(--text-size-step));
+  padding: 8px 16px;
+  opacity: 0.86;
+  color: var(--muted);
+  font: var(--type-summary);
+  text-align: left;
+}
+.inbox-pointer:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.inbox-pointer:last-child {
+  border-radius: 0 0 var(--card-r) var(--card-r);
+}
+.pointer-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-pointer small {
+  color: var(--faint);
+  font: inherit;
+  white-space: nowrap;
+}
+
+/* ---------- A request: a small card of its own ---------- */
+.inbox-requests,
+.inbox-requests-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-requests-label {
+  margin: 10px 2px 0;
+  color: var(--faint);
+  font: var(--type-summary);
+}
+/* A request has a quiet surface at rest: half way from the desk to the stock, with a hairline and a
+   mark at muted strength. It reads as a card, and stays a step below the places, which alone stand
+   raised. It rises to the full stock under the pointer. */
+.inbox-request {
+  --mark-ink: var(--muted);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  padding: 9px 12px 9px 10px;
+  color: var(--ink);
+  cursor: default;
+  outline: none;
+}
+.inbox-request > .card-stock {
+  background: color-mix(in oklab, var(--stock) 50%, var(--desk));
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    0 1px 2px oklch(0 0 0 / 0.04);
+  transition:
+    box-shadow var(--m-quick) var(--m-ease),
+    background-color var(--m-quick) var(--m-ease);
+}
+.inbox-request > .card-stock::before {
+  display: none;
+}
+.inbox-request:hover > .card-stock {
+  background: var(--stock);
+  box-shadow: var(--h-hover);
+}
+.request-mark {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-grid;
+  place-items: center;
+  height: calc(18px + var(--text-size-step));
+  color: var(--mark-ink);
+}
+.request-title {
+  grid-column: 2;
+  grid-row: 1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  font: var(--type-card);
+  letter-spacing: -0.003em;
+}
+.inbox-request .card-wait {
+  grid-column: 3;
+  grid-row: 1;
+  line-height: var(--line-18);
+}
+.request-under {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: var(--line-16);
+  margin-top: 1px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.request-trust {
+  grid-column: 2 / -1;
+  grid-row: 3;
+}
+.request-shape {
+  display: inline-flex;
+  flex: none;
+}
+.request-said {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.request-said[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.request-said[data-tone="good"] {
+  color: var(--ok);
+}
+.request-said[data-tone="attention"] {
+  color: var(--ink);
+}
+.request-where {
+  flex: 0 1000 auto;
+  min-width: 0;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.request-said + .request-where::before,
+.request-shape + .request-where::before {
+  content: "\00b7";
+  margin-right: 5px;
+}
+
+/* ---------- With someone else ---------- */
+.inbox-else {
+  margin-top: 18px;
+}
+.inbox-else-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: calc(26px + var(--text-size-step));
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.inbox-else-toggle:hover {
+  color: var(--ink);
+}
+.inbox-else-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+.inbox-else-toggle small {
+  color: var(--faint);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.inbox-else-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--m-quick);
+}
+.inbox-else[data-open] .inbox-else-chevron {
+  transform: rotate(45deg);
+}
+.inbox-else-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}

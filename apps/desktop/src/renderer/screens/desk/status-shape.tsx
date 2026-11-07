@@ -19,7 +19,8 @@ const ringWith = (wedge: string): JSX.Element => (
  * - `quarter`, `half` and `most` are under way;
  * - `fork` is a proposed change and `join` a merged one;
  * - `check` is finished and `cross` failed or refused;
- * - `hold` waits for a change.
+ * - `hold` waits for a change;
+ * - `alert` is burning, a triangle with a bang.
  */
 const SHAPES = {
   ring: RING,
@@ -62,6 +63,13 @@ const SHAPES = {
       <path d="M5.2 8h5.6" />
     </>
   ),
+  alert: (
+    <>
+      <path d="M8 2.6 13.9 13H2.1Z" />
+      <path d="M8 6.6v3" />
+      <circle cx="8" cy="11.2" r=".55" fill="currentColor" stroke="none" />
+    </>
+  ),
 } as const;
 
 /** A shape of a status: a key of `SHAPES`. */
@@ -69,10 +77,11 @@ export type StatusShapeName = keyof typeof SHAPES;
 
 /**
  * The tones a shape can be drawn in, each one colour of the design system:
- * `quiet` is `--faint`, `good` is `--ok` and `bad` is `--fail-ink`. The tones
- * `active` and `attention` come with the Inbox's tokens.
+ * `quiet` is `--faint`, `active` is `--accent-ink`, `attention` is
+ * `--attention-ink` (a status that wants watching, never the colour kept for
+ * the person), `good` is `--ok` and `bad` is `--fail-ink`.
  */
-export type StatusTone = "quiet" | "good" | "bad";
+export type StatusTone = "quiet" | "active" | "attention" | "good" | "bad";
 
 /**
  * Renders a status as a shape in a tone, `size` CSS pixels square. The shape is hidden from assistive technology: the words that
@@ -100,6 +109,7 @@ export function StatusShape({
       stroke="currentColor"
       strokeWidth="1.5"
       strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
     >
       {SHAPES[shape]}

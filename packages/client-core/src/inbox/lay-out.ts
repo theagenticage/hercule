@@ -83,7 +83,15 @@ export interface InboxLayout {
   /** The grouping in use. It is `HOME_GROUPING` when the one asked for has no place left to offer. */
   readonly grouping: string;
   readonly ongoing: ColumnState & { readonly surfaces: readonly InboxSurface[] };
-  readonly requests: ColumnState & { readonly groups: readonly RequestGroup[] };
+  readonly requests: ColumnState & {
+    readonly groups: readonly RequestGroup[];
+    /**
+     * How many of the shown requests wait on the user: those with no live
+     * Task. A card just taken keeps its place for the visit, but no longer
+     * counts. It is the small number beside the heading.
+     */
+    readonly awaitingCount: number;
+  };
   readonly withSomeoneElse: { readonly rows: readonly ColumnRow[] };
 }
 
@@ -206,6 +214,7 @@ export const layOutInbox = (inbox: Inbox, view: InboxView): InboxLayout => {
     },
     requests: {
       groups: groupRequests(requests, view.requestsOrder, context),
+      awaitingCount: requests.filter((card) => card.taskId === undefined).length,
       ...decideColumnState(requests.length, cardsOn("requests", false).length),
     },
     withSomeoneElse: {

@@ -9,12 +9,12 @@ import {
 import { EMPTY_FILTER, isFilterOn } from "@hercule/client-core/desk";
 import {
   buildCellId,
-  chooseLaneId,
   chooseTargetStage,
   describeCardMove,
-  listShownCardIds,
+  listShownCards,
   walkBoard,
   type ArrangedLane,
+  type CardInLane,
   type CardMove,
   type WalkStop,
   type WorkProject,
@@ -22,6 +22,7 @@ import {
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
+import { findCardElement, isSameCardInLane, readCardInLane } from "./card-in-lane";
 import { keepCardInView } from "./keep-in-view";
 import { readBoardKey } from "./read-board-key";
 import type { WorkView } from "./use-work-view";
@@ -101,7 +102,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   const { view, cards, arrangedLanes, findMatches, projects, moves, scrollRef, findRef } = input;
   const [isKeysSheetOpen, setKeysSheetOpen] = useState(false);
   const [chosenMatch, setChosenMatch] = useState<{ text: string; id: string } | null>(null);
-  const hoveredCardId = useRef<string | null>(null);
+  const hoveredCard = useRef<CardInLane | null>(null);
 
   // Find: the first match is active until an arrow key chooses another. A
   // choice belongs to the text it was made for, so typing starts at the top.
@@ -130,14 +131,11 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     }
   };
 
-  const findCardElement = (cardId: string): HTMLElement | null =>
-    scrollRef.current?.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`) ?? null;
-
   /** Moves focus to the card, keeps it in view, and hands the keys over from the pointer. Returns whether the card is on screen. */
-  const focusCard = (cardId: string): boolean => {
-    const element = findCardElement(cardId);
+  const focusCard = (at: CardInLane): boolean => {
+    const element = scrollRef.current === null ? null : findCardElement(scrollRef.current, at);
     if (element === null) return false;
-    hoveredCardId.current = null;
+    hoveredCard.current = null;
     element.focus({ preventScroll: true });
     if (scrollRef.current !== null) keepCardInView(scrollRef.current, element);
     return true;
@@ -149,7 +147,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       `[data-lane-head="${laneId}"] .board-lane-button`,
     );
     if (button === null || button === undefined) return false;
-    hoveredCardId.current = null;
+    hoveredCard.current = null;
     button.focus();
     return true;
   };
@@ -167,15 +165,17 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       ?.focus({ preventScroll: true });
   };
 
-  /** Moves the card to the end of the cell of `stage` in its own lane, and keeps focus on it when it had focus. */
-  const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
-    const hadFocus = document.activeElement === findCardElement(card.id);
-    const laneId = chooseLaneId(card, new Set(projects.map((project) => project.id)));
+  /** Moves the card to the end of the cell of `stage` in the lane it is in, and keeps focus on it when it had focus. */
+  const moveCardToStage = (card: WorkCard, laneId: string, stage: BoardStage): void => {
+    const at = { laneId, cardId: card.id };
+    const hadFocus =
+      scrollRef.current !== null &&
+      document.activeElement === findCardElement(scrollRef.current, at);
     const move: CardMove = { taskId: card.id, stage };
     // The move is committed before it returns: the card is a new element in
     // its new cell, and focus can only go to it once it is there.
     moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
-    if (!hadFocus || focusCard(card.id)) return;
+    if (!hadFocus || focusCard(at)) return;
     // The cell shows only some of its cards, and the moved one is behind its
     // line ("3 landed", "13 more"). Focus goes to that line.
     scrollRef.current
@@ -217,19 +217,17 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     }
     if (!isOnBoard) return;
 
-    const shownIds = new Set(listShownCardIds(arrangedLanes));
+    const shown = listShownCards(arrangedLanes);
     const headLaneId = target?.closest<HTMLElement>("[data-lane-head]")?.dataset.laneHead;
     // The card under a resting pointer, else the one with focus. A lane's head
     // having focus means no card has it, whichever card had it last.
-    const focusedId = headLaneId === undefined ? view.currentCardId : null;
-    const currentId = [hoveredCardId.current, focusedId].find(
-      (id) => id !== null && shownIds.has(id),
+    const focused = headLaneId === undefined ? view.currentCard : null;
+    const current = [hoveredCard.current, focused].find(
+      (each): each is CardInLane =>
+        each !== null && shown.some((card) => isSameCardInLane(card, each)),
     );
-    const currentCard = cards.find((card) => card.id === currentId);
-    const currentLaneId =
-      currentCard === undefined
-        ? headLaneId
-        : chooseLaneId(currentCard, new Set(projects.map((project) => project.id)));
+    const currentCard = cards.find((card) => card.id === current?.cardId);
+    const currentLaneId = current?.laneId ?? headLaneId;
 
     switch (command.kind) {
       case "walk": {
@@ -237,13 +235,13 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         // A lane walk that starts on a lane head goes on from that lane.
         const isLaneWalk = command.walk === "previousLane" || command.walk === "nextLane";
         const from: WalkStop | undefined =
-          currentCard === undefined || (isLaneWalk && headLaneId !== undefined)
+          current === undefined || (isLaneWalk && headLaneId !== undefined)
             ? headLaneId === undefined
               ? undefined
               : { kind: "lane", laneId: headLaneId }
-            : { kind: "card", cardId: currentCard.id };
+            : { kind: "card", ...current };
         const next = walkBoard(arrangedLanes, from, command.walk);
-        if (next?.kind === "card") focusCard(next.cardId);
+        if (next?.kind === "card") focusCard(next);
         else if (next?.kind === "lane") focusLaneHead(next.laneId);
         return;
       }
@@ -259,7 +257,9 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         event.preventDefault();
         const stage =
           currentCard === undefined ? undefined : chooseTargetStage(currentCard, command);
-        if (currentCard !== undefined && stage !== undefined) moveCardToStage(currentCard, stage);
+        if (currentCard !== undefined && currentLaneId !== undefined && stage !== undefined) {
+          moveCardToStage(currentCard, currentLaneId, stage);
+        }
         return;
       }
       case "add":
@@ -318,13 +318,10 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       if (Math.hypot(event.clientX - x, event.clientY - y) < POINTER_MOVE_MIN) return;
       x = event.clientX;
       y = event.clientY;
-      hoveredCardId.current =
-        event.target instanceof Element
-          ? (event.target.closest<HTMLElement>("[data-card-id]")?.dataset.cardId ?? null)
-          : null;
+      hoveredCard.current = event.target instanceof Element ? readCardInLane(event.target) : null;
     };
     const onPointerLeave = (): void => {
-      hoveredCardId.current = null;
+      hoveredCard.current = null;
     };
     scroller.addEventListener("pointermove", onPointerMove);
     scroller.addEventListener("pointerleave", onPointerLeave);

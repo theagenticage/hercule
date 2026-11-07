@@ -8,6 +8,7 @@ import {
   type Velocity,
 } from "../../app/motion";
 import { flyFlightsTo, INTO_PLACE, removeFlight } from "./board-flights";
+import { findCardElement } from "./card-in-lane";
 
 /** How long the thin ring on a card that landed in Landed stays on it, in milliseconds. A little longer than the ring's fade. */
 const LANDED_RING_MS = 600;
@@ -26,6 +27,8 @@ export interface ReleasePose {
 export interface EndedCarry {
   /** The card as it was when it was lifted. */
   readonly card: WorkCard;
+  /** The id of the lane the card was lifted from. A Task under two outside places has a card in each lane. */
+  readonly laneId: string;
   /** The copy in the hand. It is the only child of `layer`. */
   readonly ghost: HTMLElement;
   /** The body of the copy in the hand. */
@@ -57,6 +60,24 @@ const findHidingPlace = (scroller: HTMLElement, carry: EndedCarry): Element | nu
       (cell) => cell instanceof HTMLElement && cell.dataset["stage"] === stage,
     ) ?? scroller.querySelector(`[data-lane-head="${place.laneId}"]`)
   );
+};
+
+/**
+ * Returns the element of the card the carry ended with: the card in the lane
+ * it was dropped on, else the one in the lane it was lifted from (a drop on a
+ * lane of an outside place changes only the stage, so the card stays in the
+ * lane it was in), else any card of that Task. Returns `null` when the card
+ * is not on the page, for example because it went into a folded lane, which
+ * draws no cards.
+ */
+const findLandedCard = (scroller: HTMLElement, carry: EndedCarry): HTMLElement | null => {
+  const { place } = carry;
+  const laneIds = place === null ? [carry.laneId] : [place.laneId, carry.laneId];
+  for (const laneId of laneIds) {
+    const card = findCardElement(scroller, { laneId, cardId: carry.card.id });
+    if (card !== null) return card;
+  }
+  return scroller.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(carry.card.id)}"]`);
 };
 
 /**
@@ -93,7 +114,7 @@ export const landCard = (
   spring: SpringName,
   move: CardMove | undefined,
 ): void => {
-  const card = scroller.querySelector<HTMLElement>(`[data-card-id="${carry.card.id}"]`);
+  const card = findLandedCard(scroller, carry);
   if (card === null) {
     flyAway(scroller, carry);
     return;

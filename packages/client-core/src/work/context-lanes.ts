@@ -34,6 +34,18 @@ export const listBoardGroupings = (board: Pick<WorkBoard, "groupings">): readonl
 const lowerFirst = (word: string): string =>
   /^[A-Z]{2}/.test(word) ? word : word.charAt(0).toLowerCase() + word.slice(1);
 
+const PLACE_LANE_PREFIX = "place:";
+
+/** Returns the id of the lane for the place `ref`. */
+const buildPlaceLaneId = (ref: string): string => `${PLACE_LANE_PREFIX}${ref}`;
+
+/**
+ * Returns the ref of the place a lane is for, or `undefined` for a Project
+ * lane and for the "No <caption>" lane, which stand for no one place.
+ */
+export const readPlaceLaneRef = (laneId: string): string | undefined =>
+  laneId.startsWith(PLACE_LANE_PREFIX) ? laneId.slice(PLACE_LANE_PREFIX.length) : undefined;
+
 /** Returns the name of a place: its title, or a plain sentence for a place the user cannot read. */
 export const readPlaceName = (place: EntityPlace): string =>
   place.title ?? `A ${lowerFirst(place.noun)} you cannot open`;
@@ -108,7 +120,7 @@ export const groupBoardByContext = (
           return places === undefined ? [] : [[card.id, describeCardPlaces(places)] as const];
         }),
       );
-      return buildLane(`place:${place.ref}`, readPlaceName(place), null, cards, {
+      return buildLane(buildPlaceLaneId(place.ref), readPlaceName(place), null, cards, {
         pluginId,
         caption,
         ...(place.status === undefined ? {} : { status: place.status }),

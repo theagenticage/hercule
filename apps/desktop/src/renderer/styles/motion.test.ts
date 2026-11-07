@@ -85,8 +85,8 @@ const ENDLESS_ANIMATIONS = [
 
 /**
  * The stylesheets of the desk (`screens/desk/`), which Work and the Inbox draw,
- * and of the Work board (`screens/work/`) keep the amended motion rule for
- * Work (spec 17 §Performance, rule 2). The drawing's motion tokens run longer
+ * of the Work board (`screens/work/`) and of the Inbox (`screens/inbox/`) keep
+ * the amended motion rule for Work and the Inbox (spec 17 §Performance, rule 2). The drawing's motion tokens run longer
  * than `--dur-3` and are named by who caused the motion, so these stylesheets
  * may transition for a `--m-*` duration, up to `--m-long` (560 ms), which is
  * for a one-off moment such as a landing ring. They may also transition
@@ -96,7 +96,7 @@ const ENDLESS_ANIMATIONS = [
  * new animation that runs forever, and an animation only when Reduce motion
  * is not asked for. Nothing outside these folders gets this.
  */
-const MOTION_FOLDERS = ["screens/desk/", "screens/work/"];
+const MOTION_FOLDERS = ["screens/desk/", "screens/work/", "screens/inbox/"];
 const DESK_DURATIONS = ["--m-press", "--m-quick", "--m-base", "--m-slow", "--m-long"].map(
   (token) => `var(${token})`,
 );

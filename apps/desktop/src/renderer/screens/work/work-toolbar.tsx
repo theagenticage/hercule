@@ -1,16 +1,30 @@
 import type { JSX, KeyboardEvent, ReactNode, Ref } from "react";
-import { buildFilterChips, type Filter, type FilterFacet } from "@hercule/client-core/desk";
-import { PROJECT_FACET_ID, STAGE_NAMES } from "@hercule/client-core/work";
+import type { PluginIdentity } from "@hercule/client-core";
+import {
+  buildFilterChips,
+  FROM_YOUR_SOURCES_HEADING,
+  type Filter,
+  type FilterFacet,
+} from "@hercule/client-core/desk";
+import {
+  PROJECT_FACET_ID,
+  SOURCE_FACET_ID,
+  STAGE_NAMES,
+  type BoardGrouping,
+} from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
+import { ConnectionsIcon } from "../../icons/connections";
 import { FolderIcon } from "../../icons/folder";
 import { PlusIcon } from "../../icons/plus";
 import { SlidersIcon } from "../../icons/sliders";
+import { PluginMark } from "../../marks";
 import {
   FilterChips,
   FilterControl,
   FindBox,
   IconPill,
   MenuAction,
+  MenuHeading,
   MenuLine,
   MenuPick,
   MenuSegment,
@@ -43,22 +57,29 @@ export interface WorkFind {
   readonly onOpen: (id: string) => void;
 }
 
-/** The mark in front of a grouping, a facet or a value, by the id of the grouping or facet. */
+/** The mark in front of Project and Source, by the id of the grouping or facet. */
 const MARKS: Readonly<Record<string, ReactNode>> = {
   [PROJECT_FACET_ID]: <FolderIcon size={14} />,
+  [SOURCE_FACET_ID]: <ConnectionsIcon size={14} />,
 };
 
-/** A way to group the lanes. */
-interface Grouping {
-  readonly id: string;
-  readonly name: string;
-}
-
-/** The grouping the board is in. Project is the only one, so the board is always in it. */
-const PROJECT_GROUPING: Grouping = { id: PROJECT_FACET_ID, name: "Project" };
-
-/** The groupings the Group by menu lists. Each later grouping adds a row here. */
-const GROUPINGS: readonly Grouping[] = [PROJECT_GROUPING];
+/** Returns the mark in front of each kind of outside place, by kind: its plugin's mark. */
+const buildSourceMarks = (
+  groupings: readonly BoardGrouping[],
+  plugins: readonly PluginIdentity[],
+): Readonly<Record<string, ReactNode>> =>
+  Object.fromEntries(
+    groupings.flatMap((grouping) =>
+      grouping.pluginId === null
+        ? []
+        : [
+            [
+              grouping.kind,
+              <PluginMark pluginId={grouping.pluginId} plugins={plugins} size={14} />,
+            ],
+          ],
+    ),
+  );
 
 /** The two ways lanes can label themselves, as the Display menu words them. */
 const LANE_LABEL_CHOICES = [
@@ -67,35 +88,50 @@ const LANE_LABEL_CHOICES = [
 ] as const;
 
 /**
- * Renders the Group by button and its menu. The menu lists `GROUPINGS` as a
- * group of choices, with the board's own on. Picking one closes the menu.
+ * Renders the Group by button and its menu: Project, then under "From your
+ * sources" each kind of outside place the board can group by, with its
+ * plugin's mark. The board's own grouping is on. Picking one closes the menu
+ * and calls `onChange` with the grouping's id (`PROJECT_FACET_ID` or a kind).
  */
-function GroupByControl(): JSX.Element {
+function GroupByControl({
+  groupBy,
+  groupings,
+  marks,
+  onChange,
+}: {
+  readonly groupBy: string;
+  readonly groupings: readonly BoardGrouping[];
+  readonly marks: Readonly<Record<string, ReactNode>>;
+  readonly onChange: (groupBy: string) => void;
+}): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
+  const name = groupings.find((grouping) => grouping.kind === groupBy)?.caption ?? "Project";
+  const renderChoice = (id: string, label: string, mark: ReactNode): JSX.Element => {
+    const isOn = id === groupBy;
+    return (
+      <MenuPick
+        key={id}
+        itemProps={buildItemProps(`group:${id}`, { checked: isOn })}
+        kind="choice"
+        name={label}
+        isOn={isOn}
+        mark={mark}
+        onPick={() => {
+          close();
+          onChange(id);
+        }}
+      />
+    );
+  };
   return (
     <>
-      <ToolButton
-        {...triggerProps}
-        caption="Group by"
-        name={PROJECT_GROUPING.name}
-        hasMenu
-        isFilled={false}
-      />
+      <ToolButton {...triggerProps} caption="Group by" name={name} hasMenu isFilled={false} />
       <ToolMenu menuProps={menuProps} label="Group by" edge="start">
-        {GROUPINGS.map((grouping) => {
-          const isOn = grouping.id === PROJECT_GROUPING.id;
-          return (
-            <MenuPick
-              key={grouping.id}
-              itemProps={buildItemProps(`group:${grouping.id}`, { checked: isOn })}
-              kind="choice"
-              name={grouping.name}
-              isOn={isOn}
-              mark={MARKS[grouping.id]}
-              onPick={close}
-            />
-          );
-        })}
+        {renderChoice(PROJECT_FACET_ID, "Project", MARKS[PROJECT_FACET_ID])}
+        {groupings.length > 0 && <MenuHeading>{FROM_YOUR_SOURCES_HEADING}</MenuHeading>}
+        {groupings.map((grouping) =>
+          renderChoice(grouping.kind, grouping.caption, marks[grouping.kind]),
+        )}
       </ToolMenu>
     </>
   );
@@ -197,6 +233,9 @@ const describeFindMatch = (card: WorkCard, facets: readonly FilterFacet<WorkCard
  * what it knows and hears what the user changes.
  *
  * - `pill` is the view pill at the start.
+ * - `groupings` are the kinds of outside place the board can group by, and
+ *   `groupBy` what it groups by now (`PROJECT_FACET_ID` or one of their
+ *   kinds). A pick goes to `onGroupByChange`. `plugins` give the marks.
  * - `facets` are the Filter menu's facets, and `filter` what is chosen in
  *   them. `cards` are the cards the Find text leaves, so that each value
  *   counts how many it would leave on top of the Find text. A change of
@@ -212,6 +251,10 @@ const describeFindMatch = (card: WorkCard, facets: readonly FilterFacet<WorkCard
  */
 export function WorkToolbar({
   pill,
+  groupings,
+  groupBy,
+  onGroupByChange,
+  plugins,
   facets,
   filter,
   onFilterChange,
@@ -225,6 +268,10 @@ export function WorkToolbar({
   line,
 }: {
   readonly pill: ReactNode;
+  readonly groupings: readonly BoardGrouping[];
+  readonly groupBy: string;
+  readonly onGroupByChange: (groupBy: string) => void;
+  readonly plugins: readonly PluginIdentity[];
   readonly facets: readonly FilterFacet<WorkCard>[];
   readonly filter: Filter;
   readonly onFilterChange: (filter: Filter) => void;
@@ -238,6 +285,7 @@ export function WorkToolbar({
   readonly line: ReactNode;
 }): JSX.Element {
   const chips = buildFilterChips(filter, facets);
+  const sourceMarks = buildSourceMarks(groupings, plugins);
   return (
     <Toolbar
       start={pill}
@@ -274,12 +322,17 @@ export function WorkToolbar({
         </>
       }
     >
-      <GroupByControl />
+      <GroupByControl
+        groupBy={groupBy}
+        groupings={groupings}
+        marks={sourceMarks}
+        onChange={onGroupByChange}
+      />
       <FilterControl
         facets={facets}
         filter={filter}
         items={cards}
-        marks={MARKS}
+        marks={{ ...MARKS, ...sourceMarks }}
         onFilterChange={onFilterChange}
       />
       <FilterChips chips={chips} filter={filter} onFilterChange={onFilterChange} />

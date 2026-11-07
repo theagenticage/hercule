@@ -10,6 +10,7 @@ import {
   keepPreviousData,
   noop,
   queryOptions,
+  skipToken,
   type EnsureInfiniteQueryDataOptions,
   type InfiniteData,
   type EnsureQueryDataOptions,
@@ -45,6 +46,7 @@ import {
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
+  type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
   type Input,
@@ -1078,6 +1080,50 @@ export const inboxCountQuery = (client: HerculeClient) =>
     queryKey: queryKeys.inboxCount(),
     queryFn: () => client.externalEntity.countInbox(),
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads what the Add to Work sheet lists before the user types: the things
+ * that concern them and have no Task yet, under `contextRef` when the sheet
+ * has a context chosen. A push on the `externalEntity` topic reads it again,
+ * so a poll can add to the list while the sheet is open.
+ */
+export const entitySuggestionsQuery = (client: HerculeClient, contextRef: string | undefined) =>
+  queryOptions({
+    queryKey: [...queryKeys.entitySuggestions(), contextRef ?? null],
+    queryFn: () =>
+      client.externalEntity.listSuggestions({
+        query: contextRef === undefined ? {} : { contextRef },
+      }),
+    retry: false,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Searches a source live, for the Add to Work sheet: `search` is the source,
+ * the words (or one pasted link) and the context to search in. With no
+ * `search`, nothing is read.
+ *
+ * Each search has its own key, so an answer belongs to the words it was asked
+ * for. A newer search never shows an older answer, because the sheet reads
+ * only the key of the newest, and no earlier answer stands in for it while
+ * it waits (no placeholder). The answer is kept no longer than the sheet
+ * shows it: a source's answer is never stored, and a thing that was added
+ * since must read as added the next time.
+ */
+export const entitySearchQuery = (client: HerculeClient, search: EntitySearchQuery | undefined) =>
+  queryOptions({
+    queryKey: [
+      "entity-search",
+      search?.source ?? null,
+      search?.text ?? null,
+      search?.scopeRef ?? null,
+    ],
+    queryFn:
+      search === undefined ? skipToken : () => client.externalEntity.search({ query: search }),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
   });
 
 /**

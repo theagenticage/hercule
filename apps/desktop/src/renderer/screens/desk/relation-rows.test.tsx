@@ -99,7 +99,7 @@ describe("RelationRow", () => {
 
   it("draws a place no Connection can read as a lock and words, with no title and no button", () => {
     const locked = buildPlaceRow(
-      place({ restricted: true, title: undefined, noun: "Shipment", kind: "quayside/shipment" }),
+      place({ restricted: true, noun: "Shipment", kind: "quayside/shipment" }),
     );
     render(
       <ul>

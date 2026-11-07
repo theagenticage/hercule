@@ -7,7 +7,7 @@
 import type { EntityFact, EntityReason, EntityStatus, InboxCard } from "@hercule/contract";
 import { readEntityPluginId, formatTargetDate } from "../desk/entity-words";
 
-/** A fact in words. A client makes the plural of a count and the sign of a delta. */
+/** A fact in words. A client makes the plural of a count and the sign of a delta, with a real minus sign. */
 export type CardFact =
   | {
       readonly form: "delta";
@@ -41,9 +41,9 @@ const describeFact = (fact: EntityFact): CardFact => {
     case "delta":
       return {
         form: "delta",
-        text: `+${String(fact.added)} -${String(fact.removed)}`,
+        text: `+${String(fact.added)} −${String(fact.removed)}`,
         added: `+${String(fact.added)}`,
-        removed: `-${String(fact.removed)}`,
+        removed: `−${String(fact.removed)}`,
       };
     case "count":
       return {

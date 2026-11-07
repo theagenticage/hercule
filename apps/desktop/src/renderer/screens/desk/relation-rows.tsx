@@ -50,7 +50,7 @@ function LockedRow({
 }: {
   readonly row: LockedPlaceRow;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly claim?: string;
+  readonly claim?: string | undefined;
 }): JSX.Element {
   return (
     <li className="relation-row is-locked">
@@ -86,8 +86,8 @@ export function RelationRow({
 }: {
   readonly row: PlaceRow;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly onWalk?: (ref: string) => void;
-  readonly claim?: string;
+  readonly onWalk?: ((ref: string) => void) | undefined;
+  readonly claim?: string | undefined;
 }): JSX.Element {
   const claimId = useId();
   if (row.isLocked) return <LockedRow row={row} plugins={plugins} claim={claim} />;
@@ -138,7 +138,7 @@ export function RelationRows({
 }: {
   readonly rows: ReadonlyArray<PlaceRow>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly onWalk?: (ref: string) => void;
+  readonly onWalk?: ((ref: string) => void) | undefined;
 }): JSX.Element {
   return (
     <ul className="relation-rows">

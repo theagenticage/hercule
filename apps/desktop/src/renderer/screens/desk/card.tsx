@@ -95,6 +95,8 @@ function useIsTitleLong(hasSecondLine: boolean): {
  *   `failed` line gets the failed mark in front of it.
  * - `meta` holds what sits at the bottom right beside the age, as the caller
  *   draws it, such as a `<time>`.
+ * - `also` is a short line at the bottom left, such as "In 2 repositories".
+ *   `names` shows on hover.
  * - `colleague` stands behind the top edge. Only a live Thread has one.
  * - `landed` draws the card as only words, with no sheet.
  *
@@ -111,6 +113,7 @@ export function Card({
   now,
   nowTone,
   meta,
+  also,
   colleague,
   landed,
   className,
@@ -121,6 +124,7 @@ export function Card({
   readonly now?: ReactNode;
   readonly nowTone: CardNowTone;
   readonly meta?: ReactNode;
+  readonly also?: { readonly words: string; readonly names: string };
   readonly colleague?: CardColleague | null;
   readonly landed: boolean;
   readonly ref?: Ref<HTMLDivElement>;
@@ -152,6 +156,11 @@ export function Card({
             </p>
           )}
         </div>
+        {also !== undefined && (
+          <span className="card-also" title={also.names}>
+            {also.words}
+          </span>
+        )}
         {meta !== null && meta !== undefined && <span className="card-meta">{meta}</span>}
       </span>
     </div>

@@ -789,3 +789,34 @@
 }
 [data-theme="end-house"] { --stock: oklch(0.345 0.03 352); }
 [data-theme="blue-train"] { --stock: oklch(0.385 0.034 250); }
+
+/* ---------- The Inbox: what it adds to the shared layer ----------
+   From the Inbox drawing's `css/tokens.css`. The mark of a plugin that declares a hue is drawn at
+   --mark-l and --mark-c, which belong to the theme, so no plugin's hue can be louder than a name or
+   unreadable in any theme. --attention-ink is a status that wants watching: plugins reach it, and
+   never the colour kept for the person. The wait ramp is measured against the patience of a kind,
+   in ink and weight only. --mark-ink is declared with the derived tokens above. */
+:root,
+[data-theme] {
+  --mark-l: 0.45;
+  --mark-c: 0.17;
+  --attention-ink: color-mix(in oklab, var(--you-ink) 72%, var(--ink));
+  --wait-fresh: var(--faint);
+  --wait-recent: var(--faint);
+  --wait-due: var(--muted);
+  --wait-over: var(--ink);
+}
+[data-theme="styles"] {
+  --mark-l: 0.43;
+}
+[data-theme="orient-express"],
+[data-theme="dark"],
+[data-theme="nile"],
+[data-theme="end-house"],
+[data-theme="blue-train"] {
+  --mark-l: 0.8;
+  --mark-c: 0.14;
+  /* The stock is lighter than --faint was set for, so words on a place take a step more ink. A
+     place reads this through --faint, which cannot refer to itself. */
+  --faint-on-stock: color-mix(in oklab, var(--muted) 45%, var(--faint));
+}

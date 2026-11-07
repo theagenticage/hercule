@@ -74,6 +74,12 @@ export interface CardMoves {
   readonly moveCardWithMotion: (move: CardMove, words: string, note?: string) => void;
   /** Reverses the newest gesture on the undo stack, and says what happened. */
   readonly undoLastMove: () => void;
+  /**
+   * Adds `gesture`, something the user did that this screen did not make
+   * itself (such as adding a thing from a source), as the newest on the undo
+   * stack, and shows `text` on the undo line with Undo.
+   */
+  readonly recordGesture: (gesture: Gesture<unknown>, text: string) => void;
   /** What the undo line shows. */
   readonly line: UndoLineState;
   /**
@@ -316,6 +322,10 @@ export const useCardMoves = ({
     moveCard,
     moveCardWithMotion,
     undoLastMove,
+    recordGesture: (gesture, text) => {
+      undoStack.push(gesture);
+      say(text, true);
+    },
     line,
     sayWithoutUndo: (text) => {
       say(text, false);

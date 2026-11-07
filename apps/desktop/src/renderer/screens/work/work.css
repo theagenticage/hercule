@@ -178,6 +178,28 @@
   font: var(--type-summary);
   font-variant-numeric: tabular-nums;
 }
+/* The source's mark takes the folder's place on the lane of an outside place. */
+.board-lane-folder.is-brand {
+  width: 16px;
+}
+/* The ring on the lane that collects what has no outside place: the drawing's
+   outlined diamond, the empty version of a project's tile. */
+.board-lane-none {
+  width: 9px;
+  height: 9px;
+  margin: 0 2px 0 1px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+/* What an outside place says about itself, under its name (beside it in bands). */
+.board-lane-facts {
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.board-lane-facts .relation-progress {
+  color: inherit;
+}
 /* A failure is one tomato mark on a card, but the lane's words stay ink: they carry the meaning. */
 .board-failed-count {
   flex: none;

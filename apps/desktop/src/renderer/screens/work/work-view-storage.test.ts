@@ -16,6 +16,7 @@ describe("the saved Work view", () => {
 
   it("returns what was written", () => {
     const view = {
+      groupBy: "github/repository",
       foldedLaneIds: ["lane-1"],
       display: { laneLabels: "bands", isStill: true, hasSingleKeys: false },
     } as const;
@@ -28,6 +29,7 @@ describe("the saved Work view", () => {
     expect(EMPTY_WORK_VIEW.display.laneLabels).toBe("bands");
 
     const view = {
+      groupBy: "project",
       foldedLaneIds: [],
       display: { ...DEFAULT_WORK_DISPLAY, laneLabels: "side-labels" },
     } as const;
@@ -37,11 +39,15 @@ describe("the saved Work view", () => {
   });
 
   it("keeps each user's view apart", () => {
-    writeSavedWorkView(KEY, { foldedLaneIds: ["lane-1"], display: DEFAULT_WORK_DISPLAY });
+    writeSavedWorkView(KEY, {
+      groupBy: "github/repository",
+      foldedLaneIds: ["lane-1"],
+      display: DEFAULT_WORK_DISPLAY,
+    });
 
-    expect(
-      readSavedWorkView(buildWorkViewKey("http://controller.test", "river")).foldedLaneIds,
-    ).toEqual([]);
+    const other = readSavedWorkView(buildWorkViewKey("http://controller.test", "river"));
+    expect(other.foldedLaneIds).toEqual([]);
+    expect(other.groupBy).toBe("project");
   });
 
   it("reads text that is not JSON as empty", () => {
@@ -60,6 +66,7 @@ describe("the saved Work view", () => {
     );
 
     expect(readSavedWorkView(KEY)).toEqual({
+      groupBy: "project",
       foldedLaneIds: ["lane-1"],
       display: { ...DEFAULT_WORK_DISPLAY, isStill: true },
     });

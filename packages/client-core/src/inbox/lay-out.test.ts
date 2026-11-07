@@ -242,6 +242,18 @@ describe("layOutInbox: sides and the visit", () => {
     expect(layout.withSomeoneElse.rows).toEqual([]);
   });
 
+  it("counts the requests that wait on the user, not a card just taken", () => {
+    const before = buildInbox([review("1", [], { side: "requests" }), review("2", [])]);
+    const held = holdInboxSides(new Map(), before);
+    const after = buildInbox([
+      review("1", [], { side: "with-someone-else", taskId: "task-1" }),
+      review("2", []),
+    ]);
+    const layout = layOutInbox(after, view({ heldSides: holdInboxSides(held, after) }));
+    expect(listCardIds(layout.requests.groups.flatMap((group) => group.rows))).toEqual(["1", "2"]);
+    expect(layout.requests.awaitingCount).toBe(1);
+  });
+
   it("holds the side of a new card at its first read, and never changes one it holds", () => {
     const held = holdInboxSides(new Map([["3", "requests"]]), inbox);
     expect([...held]).toEqual([

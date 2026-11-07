@@ -69,3 +69,11 @@ export const describeCardTrust = (card: InboxCard, now: Date): string | undefine
   if (card.access === "inaccessible") return `No account can read this now. ${age}`;
   return card.stale ? age : undefined;
 };
+
+/**
+ * Checks whether anything a card shows depends on the time, so that a screen
+ * draws it again as time passes: a wait that counts hours and days, or the age
+ * of facts that may be old. A card that shows neither never changes by itself.
+ */
+export const isCardTimeDependent = (card: InboxCard): boolean =>
+  (card.pace === "fast" && card.taskId === undefined) || card.stale || card.access !== "ok";

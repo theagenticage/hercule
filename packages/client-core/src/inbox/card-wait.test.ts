@@ -1,7 +1,7 @@
 /** Tests the wait of a card and the line that says its facts may be old. */
 import { describe, expect, it } from "vitest";
 import { buildInboxCard, buildRequestCard } from "./cards.testing";
-import { describeCardTrust, describeCardWait } from "./card-wait";
+import { describeCardTrust, describeCardWait, isCardTimeDependent } from "./card-wait";
 
 const NOW = new Date("2026-11-07T12:00:00.000Z");
 const hoursAgo = (hours: number): string =>
@@ -77,5 +77,18 @@ describe("describeCardTrust", () => {
   ] as const)("says what a %s card shows", (_name, state, line) => {
     const card = buildInboxCard("1", { ...state, observedAt: hoursAgo(80) });
     expect(describeCardTrust(card, NOW)).toBe(line);
+  });
+});
+
+describe("isCardTimeDependent", () => {
+  it("is true for a wait that counts, and for facts that may be old", () => {
+    expect(isCardTimeDependent(buildRequestCard("1"))).toBe(true);
+    expect(isCardTimeDependent(buildInboxCard("2", { stale: true }))).toBe(true);
+    expect(isCardTimeDependent(buildInboxCard("3", { access: "inaccessible" }))).toBe(true);
+  });
+
+  it("is false for a card whose wait ended with a Task, and for one with no clock", () => {
+    expect(isCardTimeDependent(buildRequestCard("1", { taskId: "task-1" }))).toBe(false);
+    expect(isCardTimeDependent(buildInboxCard("2"))).toBe(false);
   });
 });

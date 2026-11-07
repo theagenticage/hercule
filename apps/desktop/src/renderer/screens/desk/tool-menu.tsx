@@ -20,8 +20,9 @@ export type MenuItemProps = ReturnType<PopoverMenu["buildItemProps"]>;
  *
  * `edge` says which edge of the button the menu lines up with: `start` puts
  * its left edge on the button's and it grows to the right, as for Filter.
- * `end` puts its right edge on the button's and it grows to the left, for a
- * button at the right end of the row, such as Display.
+ * `end` puts its right edge on the end of the toolbar's row and grows to the
+ * left, such as Display's. `button-end` puts its right edge on the button's
+ * own, for a button that is not in the toolbar, such as the Requests order.
  */
 export function ToolMenu({
   menuProps,
@@ -31,7 +32,7 @@ export function ToolMenu({
 }: {
   readonly menuProps: PopoverMenu["menuProps"];
   readonly label: string;
-  readonly edge: "start" | "end";
+  readonly edge: "start" | "end" | "button-end";
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -41,9 +42,9 @@ export function ToolMenu({
       role="menu"
       aria-label={label}
       className={
-        edge === "end"
-          ? "pop popover-menu menu--tool menu--tool-end"
-          : "pop popover-menu menu--tool"
+        edge === "start"
+          ? "pop popover-menu menu--tool"
+          : `pop popover-menu menu--tool menu--tool-${edge}`
       }
     >
       {children}

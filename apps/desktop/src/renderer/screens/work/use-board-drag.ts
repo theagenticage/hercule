@@ -5,6 +5,7 @@ import {
   describeCardMove,
   settleDropMove,
   type ArrangedLane,
+  type CardInLane,
   type CardMove,
   type DropPlace,
   type WorkProject,
@@ -27,6 +28,7 @@ import {
   type BoardGeometry,
   type BoardView,
 } from "./board-drag-geometry";
+import { findCardElement, readCardInLane } from "./card-in-lane";
 import { flipBoard } from "./flip-board";
 import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
@@ -103,7 +105,8 @@ interface Hand {
 /** A press on a card that has not moved far enough to be a carry. */
 interface Press {
   readonly pointerId: number;
-  readonly cardId: string;
+  /** The card pressed, and the lane it stands in. */
+  readonly pressed: CardInLane;
   readonly element: HTMLElement;
   readonly startX: number;
   readonly startY: number;
@@ -113,6 +116,8 @@ interface Press {
 interface Carry {
   readonly pointerId: number;
   readonly card: WorkCard;
+  /** The id of the lane the card was lifted from. */
+  readonly laneId: string;
   /** The card's element in the page. It stays mounted and hidden for the whole carry. */
   readonly source: HTMLElement;
   readonly root: HTMLElement;
@@ -448,10 +453,10 @@ const createBoardDrag = (
     const root = scroller.closest<HTMLElement>(".work-desk");
     const source = held.element.isConnected
       ? held.element
-      : scroller.querySelector<HTMLElement>(`[data-card-id="${held.cardId}"]`);
+      : findCardElement(scroller, held.pressed);
     const cell = source?.closest<HTMLElement>(".board-cell") ?? null;
     const options = readOptions();
-    const card = options.cards.find((each) => each.id === held.cardId);
+    const card = options.cards.find((each) => each.id === held.pressed.cardId);
     if (root === null || source === null || cell === null || card === undefined) {
       stopListening();
       return;
@@ -503,6 +508,7 @@ const createBoardDrag = (
     const c: Carry = {
       pointerId: held.pointerId,
       card,
+      laneId: held.pressed.laneId,
       source,
       root,
       layer,
@@ -636,11 +642,11 @@ const createBoardDrag = (
     if (event.button !== 0 || !event.isPrimary || carry !== null || press !== null) return;
     const element =
       event.target instanceof Element ? event.target.closest<HTMLElement>("[data-card-id]") : null;
-    const cardId = element?.dataset["cardId"];
-    if (element === null || cardId === undefined) return;
+    const pressed = element === null ? null : readCardInLane(element);
+    if (element === null || pressed === null) return;
     press = {
       pointerId: event.pointerId,
-      cardId,
+      pressed,
       element,
       startX: event.clientX,
       startY: event.clientY,

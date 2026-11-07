@@ -6,8 +6,9 @@ import { hashSeed } from "../../faces/look";
  * The poses a colleague shows behind the top edge of a card: `working` types
  * with two paws on the edge, `waiting` raises its palm because a Thread asks
  * a question, and `failed` wears a plaster and keeps its paws off the edge.
+ * `idle` has nothing to ask: Hercule handing the Inbox's first-run card over.
  */
-export type ColleaguePose = "working" | "waiting" | "failed";
+export type ColleaguePose = "working" | "waiting" | "failed" | "idle";
 
 /** How long the paws' cycle is, in hundredths of a second, so the start of each cycle can be spread over it. */
 const PAW_CYCLE_HUNDREDTHS = 340;

@@ -14,15 +14,15 @@ import "./relation-rows.css";
 export function ProgressBar({
   fraction,
   words,
-  wide = false,
+  wide,
 }: {
   readonly fraction: number;
-  readonly words?: string;
-  readonly wide?: boolean;
+  readonly words?: string | undefined;
+  readonly wide?: boolean | undefined;
 }): JSX.Element {
   const percent = Math.round(fraction * 100);
   return (
-    <span className={wide ? "relation-progress is-wide" : "relation-progress"}>
+    <span className={wide === true ? "relation-progress is-wide" : "relation-progress"}>
       <span
         className="relation-bar"
         {...(words === undefined

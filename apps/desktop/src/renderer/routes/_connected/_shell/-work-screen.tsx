@@ -6,29 +6,35 @@ import { dropEmptyValues, filterItems } from "@hercule/client-core/desk";
 import {
   arrangeLanes,
   buildLanes,
+  chooseAddOpening,
   buildWorkFacets,
-  chooseLaneId,
   countCardsByStage,
   findCardsByTitle,
-  listShownCardIds,
+  groupBoardByContext,
+  listBoardGroupings,
+  listShownCards,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
+  PROJECT_FACET_ID,
   STAGE_NAMES,
+  type AddOpening,
 } from "@hercule/client-core/work";
-import { BOARD_STAGES, MAX_BOARD_CARDS, type WorkCard } from "@hercule/contract";
+import { BOARD_STAGES, MAX_BOARD_CARDS, type EntityPlace, type WorkCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
-import { projectsQuery, userQuery } from "../../../app/queries";
+import { pluginsQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
+import { AddFromSource } from "../../../screens/work/add-from-source";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
+import { isSameCardInLane } from "../../../screens/work/card-in-lane";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
@@ -51,6 +57,7 @@ const ARRIVAL_MS = 1_200;
 const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
+const EMPTY_PLACES: readonly EntityPlace[] = [];
 
 /** Returns the line that says since when the controller cannot be reached. */
 const describeOffline = (since: Date): string =>
@@ -64,7 +71,9 @@ const describeOffline = (since: Date): string =>
  *
  * - The board is read while the window is visible, and read again on every
  *   `task` push. A move shows at once and is sent in order (`useCardMoves`).
- * - Filtering and Find run over the board already read, in the client.
+ * - Filtering, Find and grouping by an outside place run over the board
+ *   already read, in the client. A grouping the board no longer offers is
+ *   drawn as Project.
  * - A card opens its newest Thread. A Task with no Thread opens nothing yet,
  *   and the undo line says so, because there is no details pane to show it in.
  */
@@ -72,6 +81,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const { client, url, live, undoStack } = controller;
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,11 +109,23 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   usePausePawsOffScreen(scrollRef);
   const shownBoard = reads.board;
   const cards = shownBoard?.cards ?? EMPTY_CARDS;
+  const places = shownBoard?.places ?? EMPTY_PLACES;
+  const groupings = listBoardGroupings({ groupings: shownBoard?.groupings ?? [] });
+  // A saved grouping whose kind the board no longer has (its plugin was
+  // removed, or none of its places is on the board) is drawn as Project, and
+  // stays saved in case the kind comes back.
+  const groupBy = groupings.some((grouping) => grouping.kind === view.groupBy)
+    ? view.groupBy
+    : PROJECT_FACET_ID;
 
   // The lanes of the whole board, for the Filter menu: a Project the filter
   // hides stays in the menu to be chosen again.
   const allLanes = buildLanes({ cards }, projects);
-  const facets = buildWorkFacets(allLanes);
+  const facets = buildWorkFacets(
+    allLanes,
+    { cards, places, groupings: shownBoard?.groupings ?? [] },
+    plugins,
+  );
 
   // Failed and Has a question lift themselves once no card has them, so an
   // empty page never says nothing. Only a board that was read can say so.
@@ -118,18 +140,21 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
 
   const found = findCardsByTitle(cards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
-  const lanes = buildLanes({ cards: visibleCards }, projects);
+  const lanes =
+    groupBy === PROJECT_FACET_ID
+      ? buildLanes({ cards: visibleCards }, projects)
+      : groupBoardByContext(
+          { cards: visibleCards, places, groupings: shownBoard?.groupings ?? [] },
+          groupBy,
+        );
   const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds: view.foldedLaneIds,
     openedCellIds: view.openedCellIds,
     isFiltering: view.isFiltering,
   });
-  const shownIds = listShownCardIds(arrangedLanes);
-  const firstShownId = shownIds[0] ?? null;
-  const tabStopCardId =
-    view.currentCardId !== null && shownIds.includes(view.currentCardId)
-      ? view.currentCardId
-      : firstShownId;
+  const shownCards = listShownCards(arrangedLanes);
+  const tabStop =
+    shownCards.find((card) => isSameCardInLane(card, view.currentCard)) ?? shownCards[0] ?? null;
 
   const isBoardEmpty = shownBoard !== undefined && cards.length === 0;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
@@ -160,11 +185,24 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   // ---------- Add to Work ----------
   const [addLane, setAddLane] = useState<AddTaskLane | null>(null);
   const [addResult, setAddResult] = useState<string | null>(null);
+  const [addOpening, setAddOpening] = useState<AddOpening>({});
   const addOpener = useRef<HTMLElement | null>(null);
-  const openAddSheet = (lane: AddTaskLane): void => {
+  /**
+   * Opens the sheet. `fromLaneId` is the lane whose `+` or key opened it, when
+   * one did: From a source then opens on that lane's context, and otherwise on
+   * the context the filter is on.
+   */
+  const openAddSheet = (lane: AddTaskLane, fromLaneId?: string): void => {
     addOpener.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddResult(null);
+    setAddOpening(
+      chooseAddOpening({
+        places,
+        filter: view.filter,
+        lane: fromLaneId === undefined ? undefined : lanes.find((each) => each.id === fromLaneId),
+      }),
+    );
     setAddLane(lane);
   };
   const closeAddSheet = (): void => {
@@ -172,21 +210,15 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     addOpener.current?.focus({ preventScroll: true });
   };
   const toAddLane = (laneId: string): AddTaskLane => {
-    const lane = allLanes.find((each) => each.id === laneId);
+    const lane =
+      lanes.find((each) => each.id === laneId) ?? allLanes.find((each) => each.id === laneId);
     return lane === undefined
       ? { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null }
       : { id: lane.id, name: lane.name, projectId: lane.projectId };
   };
   /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
-  const chooseAddLane = (): AddTaskLane => {
-    const projectIds = new Set(projects.map((project) => project.id));
-    const current = cards.find((card) => card.id === tabStopCardId);
-    const laneId =
-      current === undefined
-        ? (lanes[0]?.id ?? NO_PROJECT_LANE_ID)
-        : chooseLaneId(current, projectIds);
-    return toAddLane(laneId);
-  };
+  const chooseAddLane = (): AddTaskLane =>
+    toAddLane(tabStop?.laneId ?? lanes[0]?.id ?? NO_PROJECT_LANE_ID);
   const { mutateAsync: createTask } = useMutation({
     mutationFn: ({ title, lane }: { readonly title: string; readonly lane: AddTaskLane }) =>
       client.task.create({
@@ -238,7 +270,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     findRef,
     onOpenCard: openCard,
     onAdd: (laneId) => {
-      openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
+      openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId), laneId);
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
   });
@@ -289,15 +321,16 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
           <BoardLane
             key={each.lane.id}
             arrangedLane={each}
-            tabStopCardId={tabStopCardId}
+            plugins={plugins}
+            tabStop={tabStop}
             isStill={view.display.isStill}
             onToggleLane={view.toggleLane}
             onToggleCell={view.toggleCell}
             onAddTask={(laneId) => {
-              openAddSheet(toAddLane(laneId));
+              openAddSheet(toAddLane(laneId), laneId);
             }}
             onOpenCard={openCard}
-            onFocusCard={view.setCurrentCardId}
+            onFocusCard={view.setCurrentCard}
           />
         ))}
       </div>
@@ -309,6 +342,12 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       toolbar={
         <WorkToolbar
           pill={<OverviewPill />}
+          groupings={groupings}
+          groupBy={groupBy}
+          onGroupByChange={(next) => {
+            if (next !== groupBy) view.setGroupBy(next);
+          }}
+          plugins={plugins}
           facets={facets}
           filter={view.filter}
           onFilterChange={view.setFilter}
@@ -348,6 +387,29 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
               onCreate={async (title) => {
                 await createTask({ title, lane: addLane });
               }}
+              fromSource={
+                <AddFromSource
+                  key={`${addOpening.sourceId ?? ""}|${addOpening.scopeRef ?? ""}`}
+                  client={client}
+                  places={places}
+                  opening={addOpening}
+                  isOffline={offlineSince !== null}
+                  onAdded={({ taskId, line, gesture }) => {
+                    if (gesture === undefined) {
+                      moves.sayWithoutUndo(line);
+                      return;
+                    }
+                    reads.noteAddedTask(taskId);
+                    moves.recordGesture(gesture, line);
+                  }}
+                  onFailed={moves.sayWithoutUndo}
+                  onOpenTask={(taskId) => {
+                    const card = cards.find((each) => each.id === taskId);
+                    if (card === undefined) moves.sayWithoutUndo("That Task is not on this board.");
+                    else openCard(card);
+                  }}
+                />
+              }
             />
           )}
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
