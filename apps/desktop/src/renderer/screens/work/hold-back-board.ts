@@ -34,6 +34,20 @@ const isSameCard = (a: WorkCard, b: WorkCard): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /**
+ * Returns `card` with the failure that `before` shows, or none when `before`
+ * shows none. Everything else stays as `card` has it. The failure is the only
+ * thing that makes `arrangeCell` lead a cell with the card, so holding it
+ * keeps the card where it was and leaves a move the user made.
+ */
+const keepFailureOf = (card: WorkCard, before: WorkCard): WorkCard => {
+  const { failure, ...withoutFailure } = card;
+  void failure;
+  return before.failure === undefined
+    ? withoutFailure
+    : { ...withoutFailure, failure: before.failure };
+};
+
+/**
  * Returns the board to draw, given the board `shown` now and the `latest`
  * board, and the changes of `latest` that it holds back. Everything else in
  * `latest` is shown at once. This is the one place that decides what waits
@@ -42,8 +56,10 @@ const isSameCard = (a: WorkCard, b: WorkCard): boolean =>
  * - A card that is new to `shown` is left out until its `arrival` key is in
  *   `released`.
  * - A card whose run just failed (it shows a failure `shown` does not) keeps
- *   the look it has in `shown` until its `failure` key is in `released`, so it
- *   does not rise to the top of its cell yet.
+ *   the failure it has in `shown` (none, or the one before) until its
+ *   `failure` key is in `released`, so it does not rise to the top of its cell
+ *   yet. Its stage, project and order are the latest: a card the user moved
+ *   stays where the user put it.
  *
  * Returns `shown` itself when nothing differs, so the caller can tell that
  * nothing changed by comparing references.
@@ -69,7 +85,7 @@ export const holdBackBoardChanges = (
       if (released.has(failureKey)) cards.push(card);
       else {
         held.push({ kind: "failure", cardId: card.id, key: failureKey });
-        cards.push(before);
+        cards.push(keepFailureOf(card, before));
       }
       continue;
     }

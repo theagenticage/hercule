@@ -26,10 +26,11 @@ export interface BoardReads {
   readonly noteAddedTask: (taskId: string) => void;
 }
 
-/** What the board has shown, and the read it was made from. */
+/** What the board has shown, the read it was made from, and the changes released when it was made. */
 interface Picture {
   readonly board: WorkBoard;
   readonly server: WorkBoard | undefined;
+  readonly released: ReadonlySet<string>;
 }
 
 /** Returns whether a card is in the hand, from the mark the drag puts on the desk, and re-renders when it changes. */
@@ -92,8 +93,10 @@ const describeChange = (change: HeldChange, card: WorkCard | undefined): string 
  * - Any other change a read brings glides on `self`, because nobody here
  *   caused it. A move the user makes is not a read: the code that makes it
  *   plays it.
- * - While a card is in the hand, a read is not drawn. It shows after the
- *   drop, as one change.
+ * - While a card is in the hand, nothing that nobody caused is drawn: not a
+ *   read, new or old, and not a held change that was released. It all shows
+ *   after the drop, as one change. What the user does themselves, such as the
+ *   move that the drop makes, is drawn at once.
  * - A Task the user added (`noteAddedTask`) fades in on `travel` and waits
  *   for nothing.
  */
@@ -121,11 +124,20 @@ export const useBoardReads = ({
         ? { board, held }
         : holdBackBoardChanges(picture.board, board, released);
     held = decided.held;
-    // A read that lands while a card is in the hand waits for the drop.
-    const isFrozen = picture !== undefined && isCarrying && serverBoard !== picture.server;
+    // A change nobody here caused waits for the drop: a read that landed, or
+    // a held change that was released, whichever read it belongs to.
+    const isFrozen =
+      picture !== undefined &&
+      isCarrying &&
+      (serverBoard !== picture.server || released !== picture.released);
     drawn = isFrozen ? picture.board : decided.board;
-    if (!isFrozen && (decided.board !== picture?.board || serverBoard !== picture?.server)) {
-      setPicture({ board: decided.board, server: serverBoard });
+    if (
+      !isFrozen &&
+      (decided.board !== picture?.board ||
+        serverBoard !== picture?.server ||
+        released !== picture?.released)
+    ) {
+      setPicture({ board: decided.board, server: serverBoard, released });
     }
   }
 
@@ -227,10 +239,11 @@ export const useBoardReads = ({
         else fadeInCards([card], "self");
       }
       isWaitingForDrop.current = false;
-    } else if (wasRead && isCarrying) {
+    } else if ((wasRead || justReleased.current.size > 0) && isCarrying) {
       isWaitingForDrop.current = true;
     }
-    justReleased.current.clear();
+    // A change released during a carry is played after the drop, so it is kept until then.
+    if (!isWaitingForDrop.current) justReleased.current.clear();
     seen.current = { drawn, server: serverBoard };
     layouts.current = scroller === null ? null : measureBoardLayouts(scroller);
   });

@@ -7,17 +7,25 @@
  *   controller last gave it with every pending move applied over it
  *   (`reapplyCardMoves`), so a read that lands while a move is on its way
  *   cannot put the card back. A move leaves the pending list when it fails
- *   (the card goes back, and the line says why) or after the last move has
- *   finished and the board has been read again.
+ *   (the card goes back, and the line says why) or when a read that started
+ *   after its answer has landed.
  * - Each move the user makes is one gesture on the undo stack, holding the
  *   place the card came from. An undo is a move too, but it adds no gesture.
+ *   It joins the queue the moment Undo is pressed, so a move the user makes
+ *   after Undo is sent after it.
  * - A move by key and an undo glide the cards on `hand`, and a card that goes
  *   back after a refused move glides home on `travel`. A move by drag is
  *   played by the drag, as the card lands.
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  matchQuery,
+  notifyManager,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import {
   applyCardMove,
@@ -45,8 +53,14 @@ const CARD_MOVES_KEY = ["card-moves"];
 interface PendingMove {
   readonly id: number;
   readonly move: CardMove;
-  /** True once the controller accepted the move. It stays applied until the board is read again. */
+  /** True once the controller accepted the move. It stays applied until a read shows it. */
   readonly isAnswered: boolean;
+  /**
+   * True once every read that ends from now on started after the answer, so
+   * it shows the move (or whatever changed it since). The next successful read
+   * retires the move.
+   */
+  readonly isCovered: boolean;
 }
 
 /** The pending moves, oldest first, as a store a component can follow. */
@@ -55,8 +69,10 @@ interface PendingMoves {
   readonly add: (pending: PendingMove) => void;
   readonly markAnswered: (id: number) => void;
   readonly remove: (id: number) => void;
-  /** Removes the answered moves: a read that started after their answers now shows them. */
-  readonly removeAnswered: () => void;
+  /** Marks the answered moves covered: no read that is running now may start before their answers. */
+  readonly coverAnswered: () => void;
+  /** Removes the covered moves. Called when a read ends successfully. */
+  readonly removeCovered: () => void;
   readonly hasUnanswered: () => boolean;
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -79,8 +95,13 @@ const createPendingMoves = (): PendingMoves => {
     remove: (id) => {
       change(moves.filter((each) => each.id !== id));
     },
-    removeAnswered: () => {
-      if (moves.some((each) => each.isAnswered)) change(moves.filter((each) => !each.isAnswered));
+    coverAnswered: () => {
+      if (moves.some((each) => each.isAnswered && !each.isCovered)) {
+        change(moves.map((each) => (each.isAnswered ? { ...each, isCovered: true } : each)));
+      }
+    },
+    removeCovered: () => {
+      if (moves.some((each) => each.isCovered)) change(moves.filter((each) => !each.isCovered));
     },
     hasUnanswered: () => moves.some((each) => !each.isAnswered),
     subscribe: (listener) => {
@@ -128,6 +149,8 @@ export interface CardMoves {
   readonly sayFailure: (text: string) => void;
 }
 
+const NOT_SAVED_MESSAGE = "That move did not save, so there is nothing to put back.";
+
 /** Returns the sentence the undo line shows for a move that failed. */
 const describeMoveFailure = (error: unknown): string =>
   `The move did not save, so the card went back: ${readErrorMessage(error).replace(/\.+$/, "")}. Try the move again.`;
@@ -140,14 +163,29 @@ const isSamePlace = (a: CardPlacement, b: CardPlacement | undefined): boolean =>
   a.afterTaskId === b.afterTaskId;
 
 /**
- * Cancels the board's running reads and reads it again, then drops the
- * answered moves. A read that is running now may have started before the last
- * move was answered, so it could show the board without that move.
+ * Makes `putBack` the way gestures put a card back, and returns the function
+ * that takes it out again when the screen leaves.
+ */
+const registerOpenScreen = (undoStack: UndoStack, putBack: OpenScreen["putBack"]): (() => void) => {
+  const openScreen = findOrCreateOpenScreen(undoStack);
+  openScreen.putBack = putBack;
+  return () => {
+    if (openScreen.putBack === putBack) openScreen.putBack = null;
+  };
+};
+
+/**
+ * Cancels the board's running reads, marks the answered moves covered, and
+ * reads the board again. A read that is running now may have started before
+ * the last move was answered, so it could show the board without that move.
+ * Every read that ends after the cancel started after the answers, so the
+ * next successful read, this one or any later one, retires the covered moves
+ * (see `useCardMoves`).
  *
  * The read runs even while the window is hidden: a move the user just made
  * must not show undone when the window comes back. It does not wait for the
- * queue, so the next move is never held up by a slow read. When the read fails,
- * the answered moves stay applied until the next one succeeds.
+ * queue, so the next move is never held up by a slow read. When this read
+ * fails, the answered moves stay applied until a later read succeeds.
  */
 const readBoardAfterMoves = async (
   queryClient: QueryClient,
@@ -157,12 +195,43 @@ const readBoardAfterMoves = async (
   await queryClient.cancelQueries({ queryKey: buildWorkBoardKey() });
   // A move made while the reads were stopping reads again when it finishes.
   if (pending.hasUnanswered()) return;
+  pending.coverAnswered();
   try {
     await queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 });
   } catch {
-    return;
+    // The covered moves stay applied; a later read retires them.
   }
-  pending.removeAnswered();
+};
+
+/**
+ * Hands the undo stack's gestures the Work screen that is open now. A gesture
+ * outlives the screen that made it: leaving Work and coming back mounts
+ * `useCardMoves` again with a new pending list, and an Undo pressed there must
+ * move the card through that list, not through the closed screen's. The
+ * screen puts itself here when it mounts and takes itself out when it leaves.
+ */
+interface OpenScreen {
+  /** The screen's way to put a card back, or `null` while no Work screen is open. */
+  putBack: ((place: CardPlacement) => PutBackRequest | undefined) | null;
+  /** Whether the last card put back went last in its cell because the card it followed had gone. */
+  wasInexact: boolean;
+}
+
+/** A card being put back: whether it went exactly where it was, and the request that moves it. */
+interface PutBackRequest {
+  readonly isExact: boolean;
+  readonly request: Promise<unknown>;
+}
+
+const openScreens = new WeakMap<UndoStack, OpenScreen>();
+
+/** Returns the record of the open Work screen for `undoStack`, creating it on first use. */
+const findOrCreateOpenScreen = (undoStack: UndoStack): OpenScreen => {
+  const found = openScreens.get(undoStack);
+  if (found !== undefined) return found;
+  const created: OpenScreen = { putBack: null, wasInexact: false };
+  openScreens.set(undoStack, created);
+  return created;
 };
 
 /**
@@ -174,10 +243,16 @@ const readBoardAfterMoves = async (
  *   before it, and pushes a gesture on `undoStack`. A move that fails leaves
  *   the pending list, so the card goes back, and the line says why. The
  *   gesture of a failed move is taken off the stack when it is the newest.
- * - A gesture's undo waits for its own request, then moves the card back to
- *   the place it came from. When the card it followed has gone, the card goes
- *   last in that cell, and the line says so.
- * - The last move to finish reads the board again.
+ * - A gesture's undo joins the queue at once, behind the gesture's own
+ *   request, and moves the card back to the place it came from. The place is
+ *   worked out from the gesture and the board on screen when Undo is pressed.
+ *   When the card it followed has gone, the card goes last in that cell, and
+ *   the line says so. When the gesture's request is refused, the card is
+ *   already in that place, which the controller accepts without writing, and
+ *   the line says there was nothing to put back.
+ * - The last move to finish cancels the running reads and reads the board
+ *   again. Every successful read after that retires the moves answered
+ *   before it, whoever started it.
  */
 export const useCardMoves = ({
   client,
@@ -194,7 +269,6 @@ export const useCardMoves = ({
   const [pending] = useState(createPendingMoves);
   const pendingMoves = useSyncExternalStore(pending.subscribe, pending.list);
   const nextId = useRef(1);
-  const wasInexact = useRef(false);
   const [line, setLine] = useState<MoveLine>(QUIET_LINE);
 
   const sayLine = (text: string, canUndo: boolean): void => {
@@ -246,6 +320,26 @@ export const useCardMoves = ({
         );
   };
 
+  // A read that ends after the queue emptied started after the answers of the
+  // covered moves, so it shows them (or what changed them since).
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (
+          event.type !== "updated" ||
+          event.action.type !== "success" ||
+          event.action.manual === true ||
+          !matchQuery({ queryKey: buildWorkBoardKey() }, event.query)
+        ) {
+          return;
+        }
+        // Queued behind the observers of the read, so the screen gets the new
+        // board and the shorter list in one render.
+        notifyManager.schedule(pending.removeCovered);
+      }),
+    [queryClient, pending],
+  );
+
   const { mutateAsync } = useMutation({
     mutationKey: CARD_MOVES_KEY,
     // A move in a scope waits for the one before it to finish before it is sent.
@@ -277,7 +371,12 @@ export const useCardMoves = ({
    * was not. The cards glide on `hand` when `isPlayed` is true.
    */
   const sendMove = (move: CardMove, isPlayed: boolean): Promise<unknown> => {
-    const request: PendingMove = { id: nextId.current++, move, isAnswered: false };
+    const request: PendingMove = {
+      id: nextId.current++,
+      move,
+      isAnswered: false,
+      isCovered: false,
+    };
     if (isPlayed) {
       playBoardChange("hand", () => {
         pending.add(request);
@@ -287,6 +386,19 @@ export const useCardMoves = ({
     }
     return mutateAsync(request);
   };
+
+  /**
+   * Shows the card back at `place`, as Undo does, and queues the move. Returns
+   * `undefined` when the card is no longer on the board.
+   */
+  const putCardBack = (place: CardPlacement): PutBackRequest | undefined => {
+    const board = readShownBoard();
+    const restore = board === undefined ? undefined : buildRestoreMove(board, place);
+    if (restore === undefined) return undefined;
+    return { isExact: restore.exact, request: sendMove(restore.move, true) };
+  };
+
+  useEffect(() => registerOpenScreen(undoStack, putCardBack));
 
   const makeMove = (move: CardMove, words: string, isPlayed: boolean): void => {
     const board = readShownBoard();
@@ -299,26 +411,31 @@ export const useCardMoves = ({
       () => true,
       () => false,
     );
+    let isRefused = false;
     const gesture = {
       words,
       undo: async (): Promise<void> => {
-        if (!(await wasSaved)) {
-          throw new Error("That move did not save, so there is nothing to put back.");
-        }
-        const current = readShownBoard();
-        const restore = current === undefined ? undefined : buildRestoreMove(current, from);
-        if (restore === undefined) throw new Error("The card is no longer on the board.");
-        wasInexact.current = !restore.exact;
-        await sendMove(restore.move, true);
+        if (isRefused) throw new Error(NOT_SAVED_MESSAGE);
+        // The screen that is open now owns the pending list the card moves in,
+        // which may not be the screen that made the gesture.
+        const openScreen = findOrCreateOpenScreen(undoStack);
+        if (openScreen.putBack === null) throw new Error("Open Work to put the card back.");
+        const putBack = openScreen.putBack(from);
+        if (putBack === undefined) throw new Error("The card is no longer on the board.");
+        openScreen.wasInexact = !putBack.isExact;
+        await putBack.request;
+        if (!(await wasSaved)) throw new Error(NOT_SAVED_MESSAGE);
       },
     };
     undoStack.push(gesture);
     sayLine(`${words}.`, true);
     // A move that failed has nothing to undo. Taking its gesture off the stack
     // keeps the next Undo for the move before it. The gesture is removed by
-    // running it: it throws for a move that did not save, and nothing is sent.
+    // running it: it throws for a refused move, and nothing is sent.
     void wasSaved.then((saved) => {
-      if (!saved && undoStack.peek() === gesture) void undoStack.undo();
+      if (saved) return;
+      isRefused = true;
+      if (undoStack.peek() === gesture) void undoStack.undo();
     });
   };
 
@@ -331,7 +448,7 @@ export const useCardMoves = ({
   };
 
   const undoLastMove = (): void => {
-    wasInexact.current = false;
+    findOrCreateOpenScreen(undoStack).wasInexact = false;
     void undoStack.undo().then((outcome) => {
       switch (outcome.kind) {
         case "empty":
@@ -341,7 +458,7 @@ export const useCardMoves = ({
           return;
         case "reversed":
           sayLine(
-            wasInexact.current
+            findOrCreateOpenScreen(undoStack).wasInexact
               ? `Put back: ${outcome.words}. The card it followed has gone, so it went last in its column.`
               : `Put back: ${outcome.words}.`,
             false,

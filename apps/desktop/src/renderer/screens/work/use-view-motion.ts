@@ -127,6 +127,14 @@ const listCardIds = (element: Element): Set<string> =>
     ),
   );
 
+/** Fades in, from 6px above, every card under `root` that is not in `before`: a card the change brought in. */
+const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
+  const born = [...root.querySelectorAll<HTMLElement>("[data-card-id]")].filter(
+    (card) => !before.has(card.dataset["cardId"] ?? ""),
+  );
+  fadeInCards(born, "travel");
+};
+
 /**
  * Returns `view` with each change the user makes played as the board's
  * motion (MOTION.md):
@@ -139,7 +147,7 @@ const listCardIds = (element: Element): Set<string> =>
  *   one, and everything below glides down. "Show fewer" sends each card back to
  *   the button.
  * - Filter and Find: one change. What stays glides from where it was; what
- *   leaves just goes.
+ *   leaves just goes; what comes back fades in.
  *
  * Every spring is `travel`: the user asked for these. The change to the screen
  * is committed at once (`flushSync`), because the board is measured right
@@ -221,18 +229,29 @@ export const useViewMotion = (
             flyFlightsToButton(scroller, cellId, flights);
             return;
           }
-          const born = [...cell.querySelectorAll<HTMLElement>("[data-card-id]")].filter(
-            (card) => !before.has(card.dataset["cardId"] ?? ""),
-          );
-          fadeInCards(born, "travel");
+          fadeInCardsNotIn(cell, before);
         };
       },
     });
   };
 
-  /** Plays a change of what the board filters by: nothing flies and the page does not scroll. */
+  /**
+   * Plays a change of what the board filters by: nothing flies and the page
+   * does not scroll. A card the change brings back fades in; one it takes away
+   * just goes.
+   */
   const playFilterChange = (commit: () => void): void => {
-    playChange(scrollRef.current, { commit, anchor: null });
+    const scroller = scrollRef.current;
+    playChange(scroller, {
+      commit,
+      anchor: null,
+      prepare: () => {
+        const before = scroller === null ? new Set<string>() : listCardIds(scroller);
+        return () => {
+          if (scroller !== null) fadeInCardsNotIn(scroller, before);
+        };
+      },
+    });
   };
 
   return {

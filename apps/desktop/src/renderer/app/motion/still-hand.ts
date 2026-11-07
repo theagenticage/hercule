@@ -1,7 +1,8 @@
 /**
  * Waiting for a still hand: a change the user did not cause must not move
  * what they are reading or about to reach for. `waitForStillHand` holds a
- * change back until the pointer has left the place it would change.
+ * change back until the pointer has left the place it would change, and for
+ * as long as the user carries a card.
  *
  * Nothing runs while nothing waits. The first waiter adds one pointer
  * listener and one polling timer, and the last one to finish removes both.
@@ -16,7 +17,7 @@ const REACHING_DISTANCE = 280;
 /** How long after its last movement a pointer still counts as on the move, in milliseconds. */
 const MOVING_FOR = 900;
 
-/** The longest a change waits, in milliseconds. */
+/** The longest a change waits for a hand that is not dragging, in milliseconds. A drag does not count towards it. */
 const LONGEST_WAIT = 8_000;
 
 /** How often a waiting change looks again, in milliseconds. */
@@ -37,7 +38,8 @@ export interface StillHandOptions {
 
 interface Waiter {
   readonly options: StillHandOptions;
-  readonly startedAt: number;
+  /** When the wait began, or when the last drag it saw ended. The longest wait counts from here. */
+  startedAt: number;
   readonly finish: (isStill: boolean) => void;
 }
 
@@ -85,6 +87,12 @@ const check = (): void => {
   timer = null;
   const now = performance.now();
   for (const waiter of [...waiters]) {
+    // A drag vetoes every change, however long it lasts, and the longest wait
+    // starts again when it ends: the hand is only still after the drop.
+    if (waiter.options.isDragging()) {
+      waiter.startedAt = now;
+      continue;
+    }
     if (now - waiter.startedAt >= LONGEST_WAIT || !isHandNear(waiter.options, now)) {
       waiter.finish(true);
     }
@@ -101,8 +109,10 @@ const check = (): void => {
  *   because a parked pointer means someone is reading;
  * - the pointer moved in the last 900ms within 280px of the target.
  *
- * It resolves at once when the hand is already still, and never later than 8
- * seconds after the call. When `signal` aborts first, it resolves with
+ * It resolves at once when the hand is already still. A pointer that stays
+ * near the target holds it for 8 seconds at most. A drag holds it for as long
+ * as it lasts, and the 8 seconds count from the drop: they cover a hand that
+ * rests, not a card in the hand. When `signal` aborts first, it resolves with
  * `false` and the change should not happen.
  */
 export const waitForStillHand = (options: StillHandOptions): Promise<boolean> =>

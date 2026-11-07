@@ -1,7 +1,7 @@
 /** Tests the line a failed card shows and the name a screen reader reads for a card. */
 import { describe, expect, it } from "vitest";
 import { buildCard, FAILURE, QUESTION } from "./cards.testing";
-import { describeCardForReader, describeCardFailure } from "./card-words";
+import { describeCardForReader, describeCardFailure, describeCardQuestion } from "./card-words";
 
 describe("describeCardFailure", () => {
   it.each([
@@ -26,12 +26,33 @@ describe("describeCardFailure", () => {
   });
 });
 
+describe("describeCardQuestion", () => {
+  it.each([
+    ["the question", "Which refund window?", "Which refund window?"],
+    ["a blank question", "", "Has a question"],
+    ["a question of only whitespace", " \n ", "Has a question"],
+  ])("returns %s", (_, text, expected) => {
+    expect(describeCardQuestion({ ...QUESTION, text })).toBe(expected);
+  });
+});
+
 describe("describeCardForReader", () => {
   const NOW = new Date("2026-11-04T09:00:00.000Z");
 
   it("reads the title, the stage and the age for a plain card", () => {
     const card = buildCard("a", { title: "Add a refund button", stage: "in-review" });
     expect(describeCardForReader(card, NOW)).toBe("Add a refund button, In review, 3 days ago");
+  });
+
+  it("reads a blank question as Has a question", () => {
+    const card = buildCard("a", {
+      title: "Add a refund button",
+      stage: "building",
+      openQuestion: { ...QUESTION, text: "" },
+    });
+    expect(describeCardForReader(card, NOW)).toBe(
+      "Add a refund button, Has a question, Building, 3 days ago",
+    );
   });
 
   it("reads what broke before what it asks, and both before the stage", () => {

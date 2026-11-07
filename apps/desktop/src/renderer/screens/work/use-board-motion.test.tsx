@@ -1,7 +1,7 @@
 /**
  * Tests what the Work board does with a read that brings an arrival or a
- * failure, with a fake clock: the change waits for a still hand and never
- * more than eight seconds, a Task that lies past the shown rows moves
+ * failure, with a fake clock: the change waits for a still hand, and for a
+ * pointer that rests near it never more than eight seconds, a Task that lies past the shown rows moves
  * nothing, and the toolbar's line says what happened.
  *
  * jsdom has no layout, so these tests check what is drawn and what the motion
@@ -203,7 +203,8 @@ describe("a read while a card is in the hand", () => {
       desk.removeAttribute("data-carrying");
       await Promise.resolve();
     });
-    await pass(0);
+    // The hand is still the moment the card is dropped, and the wait looks again at its next check.
+    await pass(240);
 
     expect(findCard("c")).not.toBeNull();
   });

@@ -64,11 +64,13 @@ export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readon
   }));
 
 /**
- * Returns the ids of the cards on screen, by lane and column, for the
- * keyboard walk. A folded lane shows no card. A card hidden behind "13 more"
- * is not on screen either.
+ * Returns what is on screen, by lane and column, for the keyboard walk. A
+ * folded lane shows no card. A card hidden behind "13 more" is not on screen
+ * either.
  */
 export const listShownCards = (arranged: readonly ArrangedLane[]): ShownBoard =>
-  arranged.map(({ isFolded, cells }) =>
-    cells.map(({ arranged: cell }) => (isFolded ? [] : cell.cards.map((card) => card.id))),
-  );
+  arranged.map(({ lane, isFolded, cells }) => ({
+    id: lane.id,
+    isFolded,
+    columns: cells.map(({ arranged: cell }) => (isFolded ? [] : cell.cards.map((card) => card.id))),
+  }));

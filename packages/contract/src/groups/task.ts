@@ -724,8 +724,13 @@ export const WorkCard = Schema.Struct({
     Schema.Struct({
       sessionId: Id,
       requestId: Fact,
-      /** The first question of the Request, cut to `MAX_CARD_QUESTION` characters. */
-      text: bounded(1, MAX_CARD_QUESTION),
+      /**
+       * The first question of the Request, cut to `MAX_CARD_QUESTION`
+       * characters. It may be empty: the protocol lets an agent ask an empty
+       * question, and one such Thread must not make the board unreadable for
+       * everyone. A client words a blank question itself.
+       */
+      text: bounded(0, MAX_CARD_QUESTION),
     }),
   ),
   /**

@@ -47,8 +47,10 @@ describe("listShownCards", () => {
       arrangeLanes(lanes, { ...CLOSED, foldedLaneIds: new Set(["storefront"]) }),
     );
 
-    expect(open[0]![0]).toEqual(["t9"]);
-    expect(open[0]![2]).toEqual(["t0", "t1", "t2", "t3"]);
-    expect(folded[0]!.every((column) => column.length === 0)).toBe(true);
+    expect(open[0]!.columns[0]).toEqual(["t9"]);
+    expect(open[0]!.columns[2]).toEqual(["t0", "t1", "t2", "t3"]);
+    expect(open[0]).toMatchObject({ id: "storefront", isFolded: false });
+    expect(folded[0]).toMatchObject({ id: "storefront", isFolded: true });
+    expect(folded[0]!.columns.every((column) => column.length === 0)).toBe(true);
   });
 });

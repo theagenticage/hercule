@@ -151,8 +151,11 @@
     var(--shadow-2);
 }
 /* A menu for a button at the right end of the row opens toward the left, so it
-   stays inside the window. */
+   stays inside the window, and lines its right edge up with the end of the
+   row (the Add button's), not with its own button's. */
 .pop.popover-menu.menu--tool.menu--tool-end {
+  width: 264px;
+  position-anchor: --tools-end;
   position-area: block-end span-inline-start;
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -165,6 +168,22 @@
     opacity: 0;
     transform: translateY(-4px);
   }
+}
+/* A toggle row is a `menuitemcheckbox`, which the shared popover menu rules
+   (thread/menus.css) do not lay out as a row, so this menu lays it out. */
+.menu--tool [role="menuitemcheckbox"] {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.menu--tool [role="menuitemcheckbox"].is-active {
+  background: var(--hover);
+}
+.menu--tool [role="menuitemcheckbox"]:focus-visible {
+  outline: none;
 }
 .menu--tool .menu-pick {
   justify-content: flex-start;
@@ -287,6 +306,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  anchor-name: --tools-end;
 }
 
 /* ---------- Find ---------- */
@@ -414,6 +434,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.menu-switch-words b {
+  font-weight: var(--w-medium);
 }
 .menu-switch small {
   color: var(--muted);

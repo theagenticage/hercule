@@ -46,6 +46,14 @@ export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): 
 };
 
 /**
+ * Returns the words a card shows for its open question: the question itself,
+ * or "Has a question" when the agent asked an empty one or one of only
+ * whitespace.
+ */
+export const describeCardQuestion = (question: NonNullable<WorkCard["openQuestion"]>): string =>
+  question.text.trim() === "" ? "Has a question" : question.text;
+
+/**
  * Returns the name a screen reader reads for a card, in this order: the
  * title, what broke, what it asks, the stage, the age. What broke comes
  * before what it asks because a failure outranks everything else on a card.
@@ -53,7 +61,7 @@ export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): 
  */
 export const describeCardForReader = (card: WorkCard, now: Date): string => {
   const failure = card.failure === undefined ? [] : [describeCardFailure(card.failure).text];
-  const question = card.openQuestion === undefined ? [] : [card.openQuestion.text];
+  const question = card.openQuestion === undefined ? [] : [describeCardQuestion(card.openQuestion)];
   return [
     card.title,
     ...failure,

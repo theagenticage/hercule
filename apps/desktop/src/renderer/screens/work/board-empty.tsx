@@ -32,6 +32,7 @@ export function FirstRun({ onStartThread }: { readonly onStartThread: () => void
       <button type="button" className="board-start-button" onClick={onStartThread}>
         <ComposeIcon size={14} />
         Start a thread
+        <kbd>⌘N</kbd>
       </button>
     </div>
   );

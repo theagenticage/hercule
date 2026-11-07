@@ -8,6 +8,7 @@ import {
   buildWorkFacets,
   chooseLaneId,
   findCardsByTitle,
+  listShownCardIds,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
   STAGE_NAMES,
@@ -118,10 +119,10 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const visibleCards = filterItems(found.matches, view.filter, facets);
   const lanes = buildLanes({ cards: visibleCards }, projects);
   const arranged = arrangeLanes(lanes, view);
-  const shownIds = listShownCards(arranged);
-  const firstShownId = shownIds.flat(2)[0] ?? null;
+  const shownIds = listShownCardIds(listShownCards(arranged));
+  const firstShownId = shownIds[0] ?? null;
   const tabStopCardId =
-    view.currentCardId !== null && shownIds.flat(2).includes(view.currentCardId)
+    view.currentCardId !== null && shownIds.includes(view.currentCardId)
       ? view.currentCardId
       : firstShownId;
 

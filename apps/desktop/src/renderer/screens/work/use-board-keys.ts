@@ -8,7 +8,13 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { EMPTY_FILTER, isFilterOn } from "@hercule/client-core/desk";
-import { walkBoard, type CardMove, type WorkProject } from "@hercule/client-core/work";
+import {
+  listShownCardIds,
+  walkBoard,
+  type CardMove,
+  type WalkStop,
+  type WorkProject,
+} from "@hercule/client-core/work";
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
@@ -148,6 +154,17 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     return true;
   };
 
+  /** Moves focus to the head button of the lane, which has no card to take it, and hands the keys over from the pointer. Returns whether the lane is on screen. */
+  const focusLaneHead = (laneId: string): boolean => {
+    const button = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-lane-head="${laneId}"] .board-lane-button`,
+    );
+    if (button === null || button === undefined) return false;
+    hoveredCardId.current = null;
+    button.focus();
+    return true;
+  };
+
   /** Folds or opens lanes with `change`, and keeps focus on the lane's head when the focused card folds away with it. */
   const changeFoldsKeepingFocus = (change: () => void, laneId: string | undefined): void => {
     const scroller = scrollRef.current;
@@ -213,7 +230,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     if (!isOnBoard) return;
 
     const shown = listShownCards(arranged);
-    const shownIds = new Set(shown.flat(2));
+    const shownIds = new Set(listShownCardIds(shown));
     const hoveredId = hoveredCardId.current;
     // The card under a resting pointer, else the one with focus.
     const currentId =
@@ -227,8 +244,18 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     switch (command.kind) {
       case "walk": {
         event.preventDefault();
-        const next = walkBoard(shown, currentId ?? undefined, command.walk);
-        if (next !== undefined) focusCard(next);
+        // A lane walk that starts on a lane head goes on from that lane.
+        const headLaneId = target?.closest<HTMLElement>("[data-lane-head]")?.dataset.laneHead;
+        const isLaneWalk = command.walk === "previousLane" || command.walk === "nextLane";
+        const from: WalkStop | undefined =
+          isLaneWalk && headLaneId !== undefined
+            ? { kind: "lane", laneId: headLaneId }
+            : currentId === null
+              ? undefined
+              : { kind: "card", cardId: currentId };
+        const next = walkBoard(shown, from, command.walk);
+        if (next?.kind === "card") focusCard(next.cardId);
+        else if (next?.kind === "lane") focusLaneHead(next.laneId);
         return;
       }
       case "open-card":

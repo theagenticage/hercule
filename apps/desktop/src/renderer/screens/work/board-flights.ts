@@ -21,8 +21,13 @@ const FLIGHT_LAYER_CLASS = "board-flights";
 const FOLD_GAP = 12;
 const UNFOLD_GAP = 16;
 
-/** How many cards a closed cell shows before it hides any; the ones after them are the ones that may leave when it closes. */
+/**
+ * How many cards a closed cell shows before it hides any; the ones after them
+ * are the ones that may leave when it closes. The Landed cell shows none: all
+ * its cards may leave.
+ */
 const CARDS_BEFORE_MORE = 4;
+const CARDS_BEFORE_LANDED = 0;
 
 /** When a card flying into a count starts to fade, and how long the fade takes, in milliseconds after it left. It stays solid until it is small. */
 const FADE_AFTER = 210;
@@ -234,16 +239,16 @@ export const growCardsFromOrigins = (
 };
 
 /**
- * Makes a copy of each card of `cell` past the fourth, which may leave when
- * the cell closes. The copies of cards that stay are thrown away by
- * `flyFlightsToButton`. Call it before the change.
+ * Makes a copy of each card of `cell` past the fourth (past none, in the
+ * Landed cell), which may leave when the cell closes. The copies of cards that
+ * stay are thrown away by `flyFlightsToButton`. Call it before the change.
  */
 export const launchCloseFlights = (scroller: HTMLElement, cell: HTMLElement): readonly Flight[] => {
   const layer = isMotionReduced() ? null : findFlightLayer(scroller);
   if (layer === null) return [];
   const view = scroller.getBoundingClientRect();
   return [...cell.querySelectorAll<HTMLElement>("[data-card-id]")]
-    .slice(CARDS_BEFORE_MORE)
+    .slice(cell.dataset["stage"] === "landed" ? CARDS_BEFORE_LANDED : CARDS_BEFORE_MORE)
     .filter((card) => isInView(card, view))
     .map((card) => ({
       ghost: ghostElement(card, layer),

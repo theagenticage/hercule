@@ -10,13 +10,14 @@
  * `board.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import {
   MAX_BOARD_CARDS,
   MAX_CARD_QUESTION,
   MAX_TRACKING_FAILURE_CAUSE,
+  WorkCard,
   type Grant,
   type SessionRequest,
 } from "@hercule/contract";
@@ -204,6 +205,20 @@ describe("buildWorkCard", () => {
       expect(card.openQuestion).toMatchObject({ sessionId: first.id, requestId: "q1" });
     });
 
+    // The protocol lets an agent ask an empty question. One such Thread must not
+    // make the board unreadable for everyone, so the card keeps the question.
+    it.each([
+      ["empty", ""],
+      ["only whitespace", "  \n "],
+    ])("stays on the card, and decodes, when the question is %s", (_name, text) => {
+      const thread = buildSession({ openRequests: [askQuestion("q1", text)] });
+
+      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] });
+
+      expect(card.openQuestion).toEqual({ sessionId: thread.id, requestId: "q1", text });
+      expect(Schema.is(WorkCard)(card)).toBe(true);
+    });
+
     it("cuts a long question to the bound, ellipsis included", () => {
       const thread = buildSession({
         openRequests: [askQuestion("q1", "Should the refund window be longer? ".repeat(30))],
@@ -288,6 +303,8 @@ describe("buildWorkCard", () => {
 
       expect(withoutMessage.failure?.cause).toBe("workspace failed");
       expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_TRACKING_FAILURE_CAUSE);
+      expect(Schema.is(WorkCard)(withoutMessage)).toBe(true);
+      expect(Schema.is(WorkCard)(longMessage)).toBe(true);
     });
 
     it("shows beside an open question and a busy Thread, and hides neither of them", () => {

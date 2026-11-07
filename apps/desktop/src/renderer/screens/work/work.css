@@ -448,12 +448,17 @@
   align-items: center;
   gap: 8px;
   height: 34px;
-  margin-top: 12px;
+  margin-top: 22px;
   padding: 0 12px;
   border-radius: var(--r-btn);
   background: var(--accent);
   color: var(--accent-fg);
   font-weight: var(--w-medium);
+}
+/* The key takes the button's ink on a tint of that ink: the global key's faint ink reads poorly on the fill. */
+.board-start-button kbd {
+  background: color-mix(in oklab, var(--accent-fg) 16%, transparent);
+  color: inherit;
 }
 .board-start-button:focus-visible {
   outline: 2px solid var(--focus);

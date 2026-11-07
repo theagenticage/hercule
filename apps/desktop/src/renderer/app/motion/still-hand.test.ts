@@ -104,12 +104,44 @@ describe("waitForStillHand", () => {
     expect(result.value).toBe(true);
   });
 
-  it("never waits longer than 8 seconds", async () => {
-    const { result } = startWait(makeTarget(), { isDragging: () => true });
+  it("never waits longer than 8 seconds for a pointer that rests near the target", async () => {
+    const dragging = { value: true };
+    const { result } = startWait(makeTarget(), { isDragging: () => dragging.value });
+    movePointer(450, 550);
+    dragging.value = false;
     await vi.advanceTimersByTimeAsync(7_700);
     expect(result.value).toBeNull();
 
     await vi.advanceTimersByTimeAsync(500);
+
+    expect(result.value).toBe(true);
+  });
+
+  it("does not end while the user is dragging, however long the drag lasts", async () => {
+    const dragging = { value: true };
+    const { result } = startWait(makeTarget(), { isDragging: () => dragging.value });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(result.value).toBeNull();
+
+    dragging.value = false;
+    await vi.advanceTimersByTimeAsync(240);
+
+    expect(result.value).toBe(true);
+  });
+
+  it("counts its 8 seconds from the end of a drag, not from the start of the wait", async () => {
+    const dragging = { value: true };
+    const { result } = startWait(makeTarget(), { isDragging: () => dragging.value });
+    movePointer(450, 550);
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    dragging.value = false;
+    await vi.advanceTimersByTimeAsync(7_500);
+    // The pointer rests where the card was dropped, next to the target: someone is reading.
+    expect(result.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(700);
 
     expect(result.value).toBe(true);
   });
@@ -127,7 +159,10 @@ describe("waitForStillHand", () => {
   it("runs no timer and listens to no pointer while nothing waits", async () => {
     const add = vi.spyOn(window, "addEventListener");
     const remove = vi.spyOn(window, "removeEventListener");
-    const { result } = startWait(null, { isDragging: () => true });
+    const dragging = { value: true };
+    const { result } = startWait(makeTarget(), { isDragging: () => dragging.value });
+    movePointer(450, 550);
+    dragging.value = false;
     expect(vi.getTimerCount()).toBe(1);
     expect(add).toHaveBeenCalledWith("pointermove", expect.any(Function), { passive: true });
 

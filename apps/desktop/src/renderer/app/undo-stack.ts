@@ -25,9 +25,10 @@ export interface Gesture {
    * Reverses this one gesture. It resolves when the reversal is done and
    * rejects, with an error that says why, when it cannot be.
    *
-   * It runs only once the gesture's own request has finished, so the function
-   * itself waits for that request before it sends the inverse. The stack just
-   * awaits it.
+   * It runs the moment the user asks for it, not once the gesture's own
+   * request has finished. A gesture whose request may still be queued must
+   * therefore queue its inverse behind that request itself, so a gesture the
+   * user makes after Undo is sent after the inverse. The stack just awaits it.
    */
   readonly undo: () => Promise<void>;
 }

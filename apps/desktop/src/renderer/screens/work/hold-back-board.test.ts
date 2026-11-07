@@ -53,6 +53,23 @@ describe("holdBackBoardChanges", () => {
     expect(released.held).toEqual([]);
   });
 
+  it("keeps a card the user moved in its new place while its failure is held", () => {
+    const shown = buildBoard(
+      buildCard("a", { stage: "building" }),
+      buildCard("b", { stage: "building" }),
+    );
+    const latest = buildBoard(
+      buildCard("a", { stage: "building" }),
+      buildCard("b", { stage: "in-review", failure: FAILURE }),
+    );
+
+    const result = holdBackBoardChanges(shown, latest, NOTHING);
+
+    expect(result.board.cards[1]).toMatchObject({ id: "b", stage: "in-review" });
+    expect(result.board.cards[1]!.failure).toBeUndefined();
+    expect(result.held).toEqual([{ kind: "failure", cardId: "b", key: "failure:run-1" }]);
+  });
+
   it("holds a second failure of the same Task even after the first was released", () => {
     const shown = buildBoard(buildCard("b"));
     const latest = buildBoard(buildCard("b", { failure: { ...FAILURE, runId: "run-2" } }));

@@ -1,5 +1,10 @@
 import type { JSX } from "react";
-import { describeCardFailure, describeCardForReader, isLoudCard } from "@hercule/client-core/work";
+import {
+  describeCardFailure,
+  describeCardForReader,
+  describeCardQuestion,
+  isLoudCard,
+} from "@hercule/client-core/work";
 import { findNextDeskAgeChange } from "@hercule/client-core/desk";
 import type { WorkCard } from "@hercule/contract";
 import { useClockValue, useDeskAgeLabel } from "../../app/age-clock";
@@ -33,7 +38,8 @@ const chooseSecondLine = (
 ): { readonly now: string; readonly tone: CardNowTone } | null => {
   if (card.failure !== undefined)
     return { now: describeCardFailure(card.failure).text, tone: "failed" };
-  if (card.openQuestion !== undefined) return { now: card.openQuestion.text, tone: "question" };
+  if (card.openQuestion !== undefined)
+    return { now: describeCardQuestion(card.openQuestion), tone: "question" };
   return null;
 };
 
