@@ -41,6 +41,13 @@ import type { SubagentId } from "@hercule/protocol";
  *   workflow, how many runs a trigger used of its spawn bound and how many
  *   events it holds. These counts can change with almost every event, so the
  *   change is sent at a slower pace than other changes.
+ * - A `record` change on the `task` topic with `derived` says that a fact a
+ *   Task's card shows changed (a session of the Task started or stopped
+ *   working, a question opened or closed, a run ended), not a field of the
+ *   Task itself. A working agent causes these changes in bursts, so they are
+ *   sent at the slower pace. A change a person makes to a Task is not
+ *   `derived` and keeps the short window. The two paces collect independently,
+ *   so one Task can be named by one push of each in the same moment.
  * - A `record` change on the `session` topic names the conversation the
  *   session answers, or `null` for a session in none, so the push can tell a
  *   client which conversations it touches. A session's conversation is set
@@ -52,10 +59,17 @@ import type { SubagentId } from "@hercule/protocol";
 export type Change =
   | {
       readonly _tag: "record";
-      readonly topic: Exclude<MutableLiveTopic, "session">;
+      readonly topic: Exclude<MutableLiveTopic, "session" | "task">;
       readonly id: string;
       readonly kind: InvalidateKind;
       readonly countsOnly?: true;
+    }
+  | {
+      readonly _tag: "record";
+      readonly topic: "task";
+      readonly id: string;
+      readonly kind: InvalidateKind;
+      readonly derived?: true;
     }
   | {
       readonly _tag: "record";
@@ -187,3 +201,13 @@ export const withAnnouncements = <A, E, R>(
         }),
     }),
   );
+
+/**
+ * Records that a fact shown on the card of the Task `taskId` changed, to
+ * announce once the transaction commits: one of its sessions started or
+ * stopped working, a question opened or closed, or a run ended. It writes no
+ * platform event, because the Task's own fields did not change and a
+ * `task.updated` event would start workflows.
+ */
+export const announceTaskCardChange = (taskId: string): Effect.Effect<void> =>
+  announce({ _tag: "record", topic: "task", id: taskId, kind: "updated", derived: true });

@@ -45,6 +45,7 @@ import { CONNECTION_PARAM, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
+import { TaskService } from "../tasks";
 import {
   readConnectionInputName,
   workflowRepository,
@@ -212,6 +213,7 @@ export const makeRunStart = (
     const runs = yield* runRepository;
     const storedWorkflows = yield* workflowRepository;
     const workflows = yield* WorkflowService;
+    const tasks = yield* TaskService;
     const host = yield* PluginHost;
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
@@ -387,6 +389,9 @@ export const makeRunStart = (
             },
             at,
           );
+          // In the same transaction as the insert, so a start that is refused
+          // above, or rolled back, never ends a failure the Task shows.
+          if (taskId !== undefined) yield* tasks.recordRunStart({ taskId, runId });
           yield* runHeld.open(runId, plan, at);
           // After the commit, so the execution reads the rows this
           // transaction wrote. It runs even if the caller disconnects after

@@ -85,6 +85,7 @@ import {
   RunExecutorLayer,
   RunServiceReferenceFill,
   RunTargetsLayer,
+  TaskBoardFactsLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
@@ -121,7 +122,14 @@ import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { RunnerMetricsService, RunnerMetricsServiceLayer } from "../runner-metrics";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
-import { TaskService, TaskServiceLayer, TaskTracking, TaskTrackingLayer } from "../tasks";
+import {
+  TaskBoard,
+  TaskBoardLayer,
+  TaskService,
+  TaskServiceLayer,
+  TaskTracking,
+  TaskTrackingLayer,
+} from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
@@ -275,8 +283,10 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
     const tracking = yield* TaskTracking;
+    const board = yield* TaskBoard;
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
+      .handle("queryBoard", () => withApiErrors(board.query()))
       .handle("queryTracking", () => withApiErrors(tracking.query()))
       .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
       .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
@@ -284,6 +294,9 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(tasks.update({ id: params.id, ...payload })),
+      )
+      .handle("move", ({ params, payload }) =>
+        withApiErrors(tasks.move({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
   }),
@@ -978,6 +991,8 @@ const operationServices = Layer.mergeAll(
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
+  // The board's read gets each Task's sessions and runs the same way.
+  TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
   YourWorkLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner

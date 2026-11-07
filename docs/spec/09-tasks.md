@@ -248,6 +248,29 @@ The migration that adds `taskId` to sessions gives the Threads that are neither 
 - Done and Archived Threads stay without a Task. Reopening one joins by the rules above.
 - The migration emits no events, so no workflow starts for an old Thread and the event log gains no false `task.created`.
 
+## The board
+
+*(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* Work draws every unfinished Task as a card: a Task at one of the five stages from `exploring` to `landed`, not deleted. `done` and `dropped` are ends, and the board has no column for them.
+
+**A cell and `boardRank`.** A cell is one project and one stage (a Task with no project is in the "No project" lane). The Task has a `boardRank`, a string that orders its cell: compare it as a string, and never show it. It is a fractional index, so a move normally writes one row: `chooseRankBetween(before, after)` returns a rank strictly between two others, and a cell whose ranks grow too long is spread again inside the move that needs it. The rules:
+
+- A Task that arrives by itself (a new Task, a Thread that makes one) goes last in its cell, so nothing the user is looking at moves.
+- A stage change by anything but `task.move` (`task.update`, a workflow) also puts the Task last in its new cell.
+- `task.move` is the one operation that picks a place. It writes the stage, the project and the rank in one `task.updated`, so `changes.boardRank` is reported beside `changes.stage` and `changes.projectId`. A move inside a column reports `changes.boardRank` alone, so a trigger on `changes.stage` or `changes.status` does not see it.
+- The board reads in order of project, then stage, then `boardRank`. Nothing on Work sorts by recent activity, and a card stays where the user left it.
+
+**What a card shows.** Three facts, each worked out on the controller from real rows. They are independent: a card can hold all three, there is no precedence between them, and no field combines them.
+
+- **`openQuestion`, the one meaning of "wants you".** A session of the Task with kind `thread` has an open Request of kind `question`, asked by the Thread's own agent or by a subagent inside the Thread, parked or async. With several, the session opened first wins, then the first question in its open Requests. The card holds the session, the Request and the first question's text, cut to `MAX_CARD_QUESTION` (300 characters).
+- **`failure`.** The Task's stored failed run is set. It stays until it ends and is never hidden by an open question or a live session.
+- **`workingSessionId`.** A session of the Task, of any kind, is `queued`, `starting` or `busy`.
+
+Nothing else sets `openQuestion`. An approval, a Permission Request, a signal, a summary, a finished run, and a question in a session of kind `agent` or `run` leave it unset. They keep the surfaces they already have. A finished or stopped run is not a state of the card.
+
+`openSessionId` is the session a click opens: the Thread with the open question, else the Task's newest session. It is for navigation only, never the destination of an answer.
+
+Reads and moves: `task.queryBoard` and `task.move` ([./11](./11-public-api-and-agent-surface.md#task)).
+
 ## Platform events
 
 Task mutations emit platform events into the one persisted event pipeline ([./08](./08-events-and-connections.md)). They are the trigger surface for work workflows. The actor of the mutation is carried once, on the event envelope's `actor` field ([./08](./08-events-and-connections.md)); the payloads below do not duplicate it.
@@ -270,7 +293,7 @@ interface TaskCreatedPayload {
 interface TaskUpdatedPayload {
   taskId: string;
   changes: {
-    // scalar fields: title, description, stage, status, priority, projectId
+    // scalar fields: title, description, stage, status, priority, projectId, boardRank
     [field: string]: { old: unknown; new: unknown };
   } & {
     // array fields: labels, provenance
@@ -335,6 +358,8 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hercule task read <id>` | one task, full row including provenance |
 | `hercule task create` | creates a task; emits `task.created` |
 | `hercule task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
+| `hercule task board` | every unfinished Task as a card for Work ([The board](#the-board)); needs `task.read`, `session.read` and `run.read` |
+| `hercule task move <id>` | moves a Task to a stage, a project or a place in its cell; grant `task.update`; emits one `task.updated` |
 | `hercule task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
 
 Every mutation is stamped with the calling actor (`user`, `session:<id>`, `run:<id>` or `plugin:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.

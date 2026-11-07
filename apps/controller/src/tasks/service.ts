@@ -48,6 +48,7 @@ import {
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskFilter,
+  TaskMoveInput,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
   refuseStageWithStatus,
@@ -76,8 +77,10 @@ import {
 } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
+import { chooseRankBetween } from "./board-rank";
 import {
   taskRepository,
+  type BoardCell,
   type NewTask,
   type ProvenanceInput,
   type TaskEdit,
@@ -107,9 +110,15 @@ const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
+/** The input of `task.move`: the Task's id and where it goes. */
+const MoveInput = Schema.Struct({ id: Id, ...TaskMoveInput.fields });
+
+export type MoveInput = Schema.Schema.Type<typeof MoveInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+const decodeMove = Schema.decodeUnknownEffect(MoveInput);
 
 /** The fields `updateTask` changes: an update after decoding. */
 interface TaskPatch {
@@ -119,6 +128,12 @@ interface TaskPatch {
   readonly stage?: TaskStage;
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
+  /**
+   * The rank the Task takes in its cell, chosen by the caller (`task.move`).
+   * When it is absent and the patch moves the Task to another cell, the Task
+   * goes last in the new cell.
+   */
+  readonly boardRank?: string;
   readonly addLabels?: ReadonlyArray<string>;
   readonly removeLabels?: ReadonlyArray<string>;
   readonly provenance?: ReadonlyArray<ProvenanceInput>;
@@ -133,6 +148,23 @@ export interface HandoffEntry {
   /** The signal's origin event, when it has one. */
   readonly eventId?: number;
 }
+
+/** Why `restoreRecoveredFailure` left the Task as it was. */
+export type FailureRestoreRefusal =
+  /** The run start ended no failure, so it left no row to restore from. */
+  | "no-such-start"
+  /** The failure was already restored once. */
+  | "already-restored"
+  | "task-deleted"
+  /** The Task is at `done` or `dropped`. */
+  | "task-finished"
+  /** Something changed who handles the failure since the start: a newer failure, run start, Done or Drop. */
+  | "handled-since";
+
+/** The result of `restoreRecoveredFailure`. */
+export type FailureRestoration =
+  | { readonly restored: true; readonly taskId: string }
+  | { readonly restored: false; readonly reason: FailureRestoreRefusal };
 
 /** The refusal of `recordHandoff` for a caller who is not the user. */
 const ONLY_THE_USER_RECORDS_HANDOFF =
@@ -306,6 +338,24 @@ const make = Effect.gen(function* () {
           changes.projectId = { old: project, new: patch.projectId };
           edit.projectId = patch.projectId;
         }
+        if (patch.boardRank !== undefined) {
+          // The caller chose the rank, so it is kept even when the Task also
+          // changes cell. It is a change of its own only when it differs.
+          edit.boardRank = patch.boardRank;
+          const held = Option.getOrThrow(yield* tasks.readBoardRank(id));
+          if (patch.boardRank !== held) {
+            changes.boardRank = { old: held, new: patch.boardRank };
+          }
+        } else if (edit.stage !== undefined || edit.projectId !== undefined) {
+          // A Task that changes cell by anything other than `task.move` goes
+          // last in the new cell, so nothing the user is looking at moves. The
+          // event reports the stage or the project, which is why the move to
+          // the end is not listed as a change of its own.
+          edit.boardRank = yield* tasks.chooseLastRankOfCell({
+            projectId: (edit.projectId === undefined ? before.projectId : edit.projectId) ?? null,
+            stage: edit.stage ?? before.stage,
+          });
+        }
 
         // A label in both lists is added and removed in one call, so the
         // task keeps it. Reporting it as removed would trigger every
@@ -359,6 +409,132 @@ const make = Effect.gen(function* () {
         // Read back rather than merged in memory, so the caller gets the
         // row that was written, whatever the edit changed.
         return yield* readLiveTaskOrFail(id);
+      }),
+    );
+
+  /**
+   * Returns the rank that puts the Task `movingId` right after the card
+   * `afterTaskId` in `cell`: first when `afterTaskId` is null, last when it is
+   * absent. The moving Task is not one of the cards it is placed among, so a
+   * Task is never its own neighbour. When the Task already stands in that place,
+   * it keeps its rank, so a drop that changes nothing writes nothing. Fails
+   * with `Validation` when `afterTaskId` is not a card of `cell`.
+   *
+   * When no rank fits between the neighbours, because ranks have grown to the
+   * length limit or the neighbours share a rank, the ranks of the cell are
+   * spread again and the rank is chosen once more. A respread is rank
+   * maintenance: it keeps the order of the cards and writes only their rank
+   * column, so it is not a placement event. Only the moved Task gets a
+   * `task.updated`, and the other cards stay where they are.
+   */
+  const chooseRankAfter = (
+    cell: BoardCell,
+    movingId: string,
+    afterTaskId: string | null | undefined,
+  ): Effect.Effect<string, Validation | SqlError> => {
+    const attempt = Effect.gen(function* () {
+      const inCell = yield* tasks.listCellRanks(cell);
+      const others = inCell.filter((card) => card.id !== movingId);
+      let next = 0;
+      if (afterTaskId === undefined) next = others.length;
+      else if (afterTaskId !== null) {
+        const position = others.findIndex((card) => card.id === afterTaskId);
+        if (position < 0) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["afterTaskId"],
+                message:
+                  "afterTaskId is not a card of the cell the Task moves to; " +
+                  "name a card at that stage and in that project, or null to put the Task first",
+              },
+            ]),
+          );
+        }
+        next = position + 1;
+      }
+      const lower = others[next - 1]?.boardRank;
+      const upper = others[next]?.boardRank;
+      const held = inCell.find((card) => card.id === movingId)?.boardRank;
+      if (
+        held !== undefined &&
+        (lower === undefined || lower < held) &&
+        (upper === undefined || held < upper)
+      ) {
+        return held;
+      }
+      return chooseRankBetween(lower, upper);
+    });
+    return Effect.gen(function* () {
+      const rank = yield* attempt;
+      if (rank !== undefined) return rank;
+      yield* tasks.respreadCell(cell);
+      // A spread cell has room between every pair of cards and at both ends.
+      return (yield* attempt)!;
+    });
+  };
+
+  /**
+   * Moves the Task `id` as `task.move` describes, in the caller's
+   * transaction. The write goes through `updateTask`, so one `task.updated`
+   * reports what changed and the actor is stamped.
+   */
+  const moveTask = (
+    id: string,
+    placement: Omit<MoveInput, "id">,
+    actor: string,
+  ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const before = yield* readLiveTaskOrFail(id);
+        yield* ensureProjectExists(placement.projectId);
+        const { afterTaskId } = placement;
+        if (afterTaskId === id) {
+          return yield* Effect.fail(
+            createValidationError([
+              { path: ["afterTaskId"], message: "a Task cannot be placed after itself" },
+            ]),
+          );
+        }
+        if (afterTaskId !== undefined && afterTaskId !== null) {
+          yield* readLiveTaskOrFail(afterTaskId);
+        }
+        const stage = placement.stage ?? before.stage;
+        if (stage === "done" || stage === "dropped") {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["stage"],
+                message:
+                  `the task is at the stage ${stage}, which is not a column of the board; ` +
+                  "name the stage to move it to",
+              },
+            ]),
+          );
+        }
+        // A project that was deleted is the "No project" cell, as in every client.
+        const cell: BoardCell = yield* tasks.resolveCell({
+          projectId:
+            placement.projectId === undefined ? (before.projectId ?? null) : placement.projectId,
+          stage,
+        });
+        const stays = (yield* tasks.listCellRanks(cell)).find((card) => card.id === id);
+        // Without `afterTaskId`, a Task goes last in the cell it arrives in and
+        // keeps its place in the cell it is already in.
+        const boardRank =
+          afterTaskId === undefined && stays !== undefined
+            ? stays.boardRank
+            : yield* chooseRankAfter(cell, id, afterTaskId);
+        return yield* updateTask(
+          id,
+          {
+            ...(placement.stage === undefined ? {} : { stage: placement.stage }),
+            ...(placement.projectId === undefined ? {} : { projectId: placement.projectId }),
+            boardRank,
+          },
+          actor,
+        );
       }),
     );
 
@@ -638,6 +814,39 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Moves a Task on the Work board and returns it as stored: to another
+     * stage, to another project (`null` is "No project"), or to another place
+     * in its cell. A cell is the Tasks of one project at one stage.
+     *
+     * - `afterTaskId` is the card the Task now follows in its cell, in stored
+     *   rank order. `null` puts it first. Absent puts it last in a cell it
+     *   arrives in, and leaves it where it is in the cell it is already in.
+     * - It fails with `NotFound` for a Task, a project or an `afterTaskId` that
+     *   does not exist, and with `Validation` when `afterTaskId` is the Task
+     *   itself or is not a card of the cell the Task goes to. A move to
+     *   `done` or `dropped` fails to decode: the board has no such column.
+     * - A Task whose project was deleted is in the "No project" cell, as every
+     *   client shows it.
+     * - A move that changes nothing writes nothing, like `update`.
+     *
+     * One transaction reads the neighbours, chooses the rank and writes it. It
+     * writes one `task.updated`, which lists `boardRank` beside whatever else
+     * changed. Filters on `changes.stage` or `changes.status` do not see a
+     * move inside a column.
+     */
+    move: (
+      input: MoveInput,
+    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.update");
+        const { id, ...placement } = yield* Effect.mapError(
+          decodeMove(input),
+          createDecodeValidationError,
+        );
+        return yield* moveTask(id, placement, yield* currentStamp);
+      }),
+
+    /**
      * Returns the Task a session being written joins, or `undefined` when it
      * joins none. `created` is true when the join made the Task for this
      * session, and false when the session joined an existing one. The first
@@ -731,6 +940,117 @@ const make = Effect.gen(function* () {
           });
           if (taskId !== undefined) return taskId;
           return (yield* makeThreadTask(input, input.workspaceId, input.actor)).id;
+        }),
+      ),
+
+    /**
+     * Records that the run `runId` started on the Task `taskId`, in the
+     * caller's transaction, which is the transaction that inserts the run. So
+     * a start that is refused, and rolls back, ends no failure.
+     *
+     * - It raises the Task's `failure_revision`, whether or not the Task shows
+     *   a failure, because it changes who is handling the Task's failure.
+     * - When the Task shows a failure, it clears it, and keeps a row so that
+     *   `restoreRecoveredFailure` can bring it back. A second start finds no
+     *   failure and writes no row.
+     * - A Task with no row yet has nothing to clear, as in a handoff that
+     *   starts its run before it creates the Task. It does nothing.
+     *
+     * It checks no grant: whoever may start the run may start it on the Task.
+     */
+    recordRunStart: (input: {
+      readonly taskId: string;
+      readonly runId: string;
+    }): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const clearedFailure = yield* tasks.recordRunStart(input.taskId, input.runId);
+          if (clearedFailure === true) {
+            yield* announce({
+              _tag: "record",
+              topic: "task",
+              id: input.taskId,
+              kind: "updated",
+              derived: true,
+            });
+          }
+        }),
+      ),
+
+    /**
+     * Makes the run `runId` the failure the Task `taskId` shows, in the
+     * caller's transaction, which is the one that writes the run's ending. It
+     * raises the Task's `failure_revision`. Does nothing for a Task that is
+     * deleted or missing. A failure stays until a run starts on the Task, so a
+     * Task at any stage keeps it, and so does one that has a newer completed
+     * run.
+     *
+     * It writes no `task.updated` event: the failure is not a field of the
+     * Task that a trigger can watch. It announces the change so that clients
+     * read the Task again.
+     */
+    recordRunFailure: (input: {
+      readonly taskId: string;
+      readonly runId: string;
+    }): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (yield* tasks.setFailedRun(input.taskId, input.runId)) {
+            yield* announce({
+              _tag: "record",
+              topic: "task",
+              id: input.taskId,
+              kind: "updated",
+              derived: true,
+            });
+          }
+        }),
+      ),
+
+    /**
+     * Puts back the failure that the start of the run `runId` ended: the
+     * Undo of Try again, and of a Thread started by name. Runs in the
+     * caller's transaction, and checks everything in one statement. It
+     * restores only when the start left a row not used before, the Task is
+     * not deleted or finished, and the Task's `failure_revision` is still the
+     * one right after that start. A newer failure, a newer run start, Done and
+     * Drop all raise the revision, so none of them is ever overwritten.
+     *
+     * Returns `{ restored: true }`, or `{ restored: false, reason }` having
+     * changed nothing.
+     */
+    restoreRecoveredFailure: (input: {
+      readonly runId: string;
+    }): Effect.Effect<FailureRestoration, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const taskId = yield* tasks.restoreFailure(input.runId, yield* nowIso);
+          if (Option.isSome(taskId)) {
+            yield* announce({
+              _tag: "record",
+              topic: "task",
+              id: taskId.value,
+              kind: "updated",
+              derived: true,
+            });
+            return { restored: true, taskId: taskId.value } as const;
+          }
+          const recovery = yield* tasks.readFailureRecovery(input.runId);
+          if (Option.isNone(recovery)) return { restored: false, reason: "no-such-start" } as const;
+          if (recovery.value.restoredAt !== undefined) {
+            return { restored: false, reason: "already-restored" } as const;
+          }
+          const state = yield* tasks.readFailureState(recovery.value.taskId);
+          if (Option.isNone(state) || state.value.deleted) {
+            return { restored: false, reason: "task-deleted" } as const;
+          }
+          if (isFinishedStage(state.value.stage)) {
+            return { restored: false, reason: "task-finished" } as const;
+          }
+          return { restored: false, reason: "handled-since" } as const;
         }),
       ),
 

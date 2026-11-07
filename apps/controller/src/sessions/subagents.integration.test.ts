@@ -294,6 +294,44 @@ describe("the one rule: the session reads only its own agent", () => {
     });
   });
 
+  it("records the end of the session's own turn, and not activity or a subagent's turn", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const readTurnEndedAt = async (): Promise<string | null | undefined> =>
+        (
+          await Effect.runPromise(
+            Effect.orDie(
+              arranged.harness.sql<{ readonly last_turn_ended_at: string | null }>`
+                SELECT last_turn_ended_at FROM sessions WHERE id = unhex(replace(${id}, '-', ''))`,
+            ),
+          )
+        )[0]?.last_turn_ended_at;
+
+      const seq = reportEvents(arranged, 2, [
+        { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
+        ...buildAssistantMessage(id, "t1", "main-text", "Working."),
+        {
+          ...buildBase(id),
+          _tag: "subagent.started",
+          subagentId: "a1",
+          itemId: "call-1",
+          description: "Review the diff",
+        },
+        { ...buildBase(id, "a1"), _tag: "turn.started", turnId: "s1", model: "sonnet" },
+        { ...buildBase(id, "a1"), _tag: "turn.completed", turnId: "s1", state: "completed" },
+      ]);
+      await waitForSubagent(arranged, id, "a1", (one) => one.status === "completed");
+      expect(await readTurnEndedAt()).toBeNull();
+
+      reportEvents(arranged, seq, [
+        { ...buildBase(id), _tag: "turn.completed", turnId: "t1", state: "completed" },
+      ]);
+      await waitForSession(arranged, id, (one) => one.status === "idle");
+      expect(await readTurnEndedAt()).toEqual(expect.any(String));
+    });
+  });
+
   it("writes no reply and no notice for a subagent's messages and its failed turn", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);

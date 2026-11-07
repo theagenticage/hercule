@@ -11,6 +11,7 @@
  * out of `query` and search, and there is no option to include deleted tasks.
  */
 import { TaskPriority } from "@hercule/plugin-host";
+import { Fact } from "@hercule/protocol";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -65,20 +66,26 @@ export const TaskStatus = Schema.Literals(TASK_STATUSES);
 
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
-/** Where a Task stands. Five stages are columns on Work; `done` and `dropped` are the ends. */
-export const TASK_STAGES = [
-  "exploring",
-  "planned",
-  "building",
-  "in-review",
-  "landed",
-  "done",
-  "dropped",
-] as const;
+/** The five stages that are columns on Work, in the order the columns stand. */
+export const BOARD_STAGES = ["exploring", "planned", "building", "in-review", "landed"] as const;
+
+/**
+ * Where a Task stands. The five board stages are columns on Work; `done` and
+ * `dropped` are the ends.
+ */
+export const TASK_STAGES = [...BOARD_STAGES, "done", "dropped"] as const;
 
 export const TaskStage = Schema.Literals(TASK_STAGES);
 
 export type TaskStage = Schema.Schema.Type<typeof TaskStage>;
+
+/**
+ * A stage that is a column on Work: any stage but `done` and `dropped`. The
+ * board shows no Task at an end, and `task.move` refuses to put one there.
+ */
+export const BoardStage = Schema.Literals(BOARD_STAGES);
+
+export type BoardStage = Schema.Schema.Type<typeof BoardStage>;
 
 /**
  * The stages at which a Task is finished: `done` and `dropped`. A Task at one
@@ -219,7 +226,8 @@ const buildValueChange = <Value extends Schema.Top>(value: Value) =>
  * changed. A field that did not change has no entry, so a trigger can filter
  * on `has(event.payload.changes.status)`.
  *
- * - A field that holds one value reports `{ old, new }`.
+ * - A field that holds one value reports `{ old, new }`. `boardRank` is one
+ *   of them: the string that orders the cards of a cell.
  * - `labels` reports the labels `added` and `removed`.
  * - `provenance` reports the entries `added`. Provenance is only ever
  *   appended to, so `removed` is always empty.
@@ -236,6 +244,12 @@ export const TaskUpdatedEventPayload = Schema.Struct({
     priority: Schema.optionalKey(buildValueChange(TaskPriority)),
     /** `null` when the task had, or now has, no project. */
     projectId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
+    /**
+     * The Task's place in its cell of the board. A move inside a column reports
+     * only this, so a trigger on `changes.stage` or `changes.status` does not
+     * see it.
+     */
+    boardRank: Schema.optionalKey(buildValueChange(Schema.String)),
     labels: Schema.optionalKey(
       Schema.Struct({ added: Schema.Array(Label), removed: Schema.Array(Label) }),
     ),
@@ -361,6 +375,21 @@ export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(
 );
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
+
+/**
+ * The input of `task.move`: where the user drops a card. A field that is
+ * absent keeps its value. `stage` is a board stage, so a move to `done` or
+ * `dropped` fails as invalid input; Done and Drop go through `task.update`.
+ */
+export const TaskMoveInput = Schema.Struct({
+  stage: Schema.optionalKey(BoardStage),
+  /** `null` moves the Task to the "No project" lane. */
+  projectId: Schema.optionalKey(Schema.NullOr(Id)),
+  /** The card this one now follows in its cell. `null` puts it first. Absent keeps it last in the new cell. */
+  afterTaskId: Schema.optionalKey(Schema.NullOr(Id)),
+});
+
+export type TaskMoveInput = Schema.Schema.Type<typeof TaskMoveInput>;
 
 /**
  * One call of `task.update` as a single object: the task's id, which an HTTP
@@ -662,6 +691,86 @@ export const HandoffLegs = Schema.Struct({ legs: Schema.Array(HandoffLeg) });
 
 export type HandoffLegs = Schema.Schema.Type<typeof HandoffLegs>;
 
+/** The most cards one board read returns. The reply says when there were more. */
+export const MAX_BOARD_CARDS = 1000;
+
+/**
+ * The most characters of a question on a card. A longer question is cut to this
+ * many, "…" included.
+ */
+export const MAX_CARD_QUESTION = 300;
+
+/**
+ * One Task as a card on Work: the Task's place and the three facts a card
+ * shows, each worked out on the controller from real rows. The facts are
+ * independent: a card can have all three, and none hides another.
+ */
+export const WorkCard = Schema.Struct({
+  id: Id,
+  title: TaskTitle,
+  /** One of the five board stages: never `done` or `dropped`. */
+  stage: BoardStage,
+  priority: TaskPriority,
+  projectId: Schema.optionalKey(Id),
+  /** Orders the cards of one cell. Compare as a string. Never shown. */
+  boardRank: Schema.String,
+  /**
+   * A question a Thread of this Task has open, asked by the Thread's agent or
+   * by a subagent inside it, parked or async. This is the only thing that
+   * means "wants you": an approval, a Permission Request, a signal and a
+   * question in a session that is not a Thread leave it unset.
+   */
+  openQuestion: Schema.optionalKey(
+    Schema.Struct({
+      sessionId: Id,
+      requestId: Fact,
+      /** The first question of the Request, cut to `MAX_CARD_QUESTION` characters. */
+      text: bounded(1, MAX_CARD_QUESTION),
+    }),
+  ),
+  /**
+   * The failure this Task shows, read from the Task's stored failed run.
+   * Present until the failure ends, beside anything else: an open question or
+   * a busy Thread can sit beside a failed run, and neither hides it.
+   */
+  failure: Schema.optionalKey(
+    Schema.Struct({
+      runId: Id,
+      workflowName: Schema.String,
+      cause: bounded(0, MAX_TRACKING_FAILURE_CAUSE),
+    }),
+  ),
+  /**
+   * The session a click opens: the Thread with the open question, else the
+   * newest Thread, else the newest session of any kind. Absent only when the
+   * Task has no session. For navigation only: never a destination for an
+   * answer.
+   */
+  openSessionId: Schema.optionalKey(Id),
+  threadCount: Schema.Int,
+  /** A live session of this Task, for the head behind the top edge. Absent when no session is live. */
+  workingSessionId: Schema.optionalKey(Id),
+  createdAt: Timestamp,
+  stageChangedAt: Timestamp,
+  /** The last time a session of the Task ended a turn, or a run of it ended. For the age a card shows. */
+  lastActivityAt: Timestamp,
+});
+
+export type WorkCard = Schema.Schema.Type<typeof WorkCard>;
+
+/**
+ * What `task.queryBoard` returns: the cards of every unfinished Task. They
+ * come ordered by project, then stage, then `boardRank`. Nothing sorts by
+ * recent activity, so a card stays where the user left it.
+ */
+export const WorkBoard = Schema.Struct({
+  cards: atMost(WorkCard, MAX_BOARD_CARDS),
+  /** True when more Tasks exist than `MAX_BOARD_CARDS`. The screen says so; it never hides it. */
+  truncated: Schema.Boolean,
+});
+
+export type WorkBoard = Schema.Schema.Type<typeof WorkBoard>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -676,6 +785,20 @@ export const task = HttpApiGroup.make("task")
     // is not an id.
     HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
       success: TaskTracking,
+      error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Returns every unfinished Task as a card, at the five board stages, with
+     * what each card shows: an open question, a failure, a live session. A
+     * dedicated read, because `task.query` loads each Task's whole description
+     * and provenance and sorts by recent update, which would reshuffle a board.
+     * The reply is capped at `MAX_BOARD_CARDS`, and `truncated` says when
+     * Tasks were left out.
+     */
+    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
+    // the router prefers it, and "board" is not an id.
+    HttpApiEndpoint.get("queryBoard", "/tasks/board", {
+      success: WorkBoard,
       error: [Unauthenticated, Forbidden, Internal],
     }),
     /**
@@ -717,6 +840,19 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.patch("update", "/tasks/:id", {
       params: { id: Id },
       payload: TaskUpdateInput,
+      success: Task,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Moves a Task to a place on the board: another stage, another project, or
+     * another position in its cell. Returns the Task. A move that changes
+     * nothing writes nothing.
+     */
+    // `/tasks/:id/move` has one more segment than `/tasks/:id`, so the router
+    // never takes it for that route.
+    HttpApiEndpoint.post("move", "/tasks/:id/move", {
+      params: { id: Id },
+      payload: TaskMoveInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

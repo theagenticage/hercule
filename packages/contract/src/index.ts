@@ -516,9 +516,13 @@ export {
   RunnerMetricsResolution,
 } from "./groups/runner-metrics";
 export {
+  BOARD_STAGES,
+  BoardStage,
   HandoffLeg,
   HandoffLegs,
   Label,
+  MAX_BOARD_CARDS,
+  MAX_CARD_QUESTION,
   MAX_FILTER_VALUES,
   MAX_LEG_LIVE_RUNS,
   MAX_LEG_QUERY_RUNS,
@@ -540,6 +544,7 @@ export {
   TaskCreateInput,
   TaskCreatedEventPayload,
   TaskFilter,
+  TaskMoveInput,
   TaskPriority,
   TaskStage,
   TaskStatus,
@@ -564,6 +569,8 @@ export {
   TrackingOutputValue,
   TrackingRun,
   TrackingTask,
+  WorkBoard,
+  WorkCard,
   refuseEmptyTaskUpdate,
   refuseStageWithStatus,
 } from "./groups/task";

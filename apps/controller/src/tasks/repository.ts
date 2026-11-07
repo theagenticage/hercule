@@ -29,7 +29,13 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import { FINISHED_STAGES, MAX_TRACKING_HANDOFFS } from "@hercule/contract";
+import {
+  BOARD_STAGES,
+  type BoardStage,
+  FINISHED_STAGES,
+  isFinishedStage,
+  MAX_TRACKING_HANDOFFS,
+} from "@hercule/contract";
 import type { SqlError } from "effect/sql/SqlError";
 import type {
   ExternalRef,
@@ -54,6 +60,7 @@ import {
   type ResolvedSortKey,
   type SortColumn,
 } from "../db";
+import { chooseRankBetween, spreadBoardRanks } from "./board-rank";
 
 /**
  * The filter of a listing. A task matches a field if it has any of the
@@ -134,6 +141,24 @@ export interface TrackedTask {
   readonly handoffs: ReadonlyArray<TrackedHandoff>;
 }
 
+/**
+ * A Task as the Work board reads it: its place and the columns a card shows,
+ * and none of the Task's description or provenance.
+ */
+export interface BoardTask {
+  readonly id: string;
+  readonly title: string;
+  readonly stage: BoardStage;
+  readonly priority: TaskPriority;
+  /** The Task's project, or `undefined` for the "No project" lane, which a deleted project is. */
+  readonly projectId: string | undefined;
+  readonly boardRank: string;
+  readonly createdAt: string;
+  readonly stageChangedAt: string;
+  /** The run whose failure the Task shows, if any. */
+  readonly failedRunId: string | undefined;
+}
+
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
   /** The task's id, when the caller chose it; a new one is made when absent. */
@@ -151,6 +176,47 @@ export interface NewTask {
   readonly actor: string;
 }
 
+/**
+ * A cell of the Work board: the Tasks of one project, or of no project, at
+ * one stage. The cards of a cell are ordered by their `boardRank`.
+ */
+export interface BoardCell {
+  /** `null` is the "No project" lane. */
+  readonly projectId: string | null;
+  readonly stage: BoardStage;
+}
+
+/** A Task's place in its cell. */
+export interface RankedTask {
+  readonly id: string;
+  readonly boardRank: string;
+}
+
+/**
+ * What the Task row says about its failure, and the two facts that decide
+ * whether a failure may be restored to it.
+ */
+export interface TaskFailureState {
+  /** The run whose failure the Task shows, or `undefined` when it shows none. */
+  readonly failedRunId: string | undefined;
+  /** Rises on every change to who is handling the failure (`failure_revision`). */
+  readonly failureRevision: number;
+  readonly stage: TaskStage;
+  readonly deleted: boolean;
+}
+
+/** One row of `task_failure_recoveries`: a run start that ended a failure. */
+export interface FailureRecovery {
+  readonly runId: string;
+  readonly taskId: string;
+  /** The run the Task was showing when the start ended its failure. */
+  readonly failedRunId: string;
+  /** The Task's `failure_revision` right after the start. */
+  readonly revisionAfter: number;
+  /** When the failure was restored, or `undefined` while it is not. */
+  readonly restoredAt: string | undefined;
+}
+
 /** The columns an edit may set. An absent one is left as it was. */
 export interface TaskEdit {
   readonly title?: string;
@@ -161,6 +227,8 @@ export interface TaskEdit {
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
   readonly labels?: ReadonlyArray<string>;
+  /** The rank in the Task's cell after the edit; see `chooseLastRankOfCell`. */
+  readonly boardRank?: string;
 }
 
 interface TaskRow {
@@ -270,6 +338,34 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
     },
   ],
 });
+
+/**
+ * The condition that the partial index `tasks_board_rank` carries, written as
+ * the index writes it. SQLite uses a partial index only for a query whose
+ * `WHERE` holds the index's own condition, character for character, so every
+ * read of that index repeats this text. The index leaves out Tasks at `done`
+ * and `dropped`, so its size follows the board and not the history.
+ */
+const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+
+/** Returns true if the stage is a column of the board. */
+const isBoardStage = (stage: TaskStage): stage is BoardStage =>
+  (BOARD_STAGES as ReadonlyArray<string>).includes(stage);
+
+/**
+ * Orders cards by project (none first), then by stage in the order of the
+ * board's columns, then by rank, then by id. Ids and ranks sort as text.
+ */
+const compareBoardOrder = (left: BoardTask, right: BoardTask): number => {
+  const leftProject = left.projectId ?? "";
+  const rightProject = right.projectId ?? "";
+  if (leftProject !== rightProject) return leftProject < rightProject ? -1 : 1;
+  if (left.stage !== right.stage) {
+    return BOARD_STAGES.indexOf(left.stage) - BOARD_STAGES.indexOf(right.stage);
+  }
+  if (left.boardRank !== right.boardRank) return left.boardRank < right.boardRank ? -1 : 1;
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -404,6 +500,136 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
+  /** Returns true if a project exists and has not been deleted. */
+  const isLiveProject = (id: string): Effect.Effect<boolean, SqlError> =>
+    Effect.map(
+      sql<{ readonly id: Uint8Array }>`SELECT id FROM projects
+                                       WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+      (rows) => rows.length === 1,
+    );
+
+  /**
+   * Returns the cell the board draws a Task of `cell` in. A Task whose project
+   * was deleted keeps its `project_id`, and every client draws it in the "No
+   * project" lane. So the board treats it as in that lane, and the cell of a
+   * deleted project is the cell of no project. This is the one place that says
+   * so; `listCellRanks`, `respreadCell` and the board read all follow it.
+   */
+  const resolveCell = (cell: BoardCell): Effect.Effect<BoardCell, SqlError> =>
+    cell.projectId === null
+      ? Effect.succeed(cell)
+      : Effect.map(isLiveProject(cell.projectId), (live) =>
+          live ? cell : { projectId: null, stage: cell.stage },
+        );
+
+  /** Orders ranks as the database does: by rank, then by id. Ids sort the same as text and as bytes. */
+  const compareRanked = (left: RankedTask, right: RankedTask): number => {
+    if (left.boardRank !== right.boardRank) return left.boardRank < right.boardRank ? -1 : 1;
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  };
+
+  /**
+   * Returns the live Tasks of a cell with their ranks, in rank order. The cell
+   * must be one `resolveCell` returned. A project cell reads `tasks_board_rank`
+   * in rank order. The cell of no project reads the same way, then adds the
+   * Tasks of deleted projects, which are none unless a project was deleted.
+   */
+  const listCellRanks = (cell: BoardCell): Effect.Effect<ReadonlyArray<RankedTask>, SqlError> =>
+    Effect.gen(function* () {
+      const readRanked = (
+        rows: ReadonlyArray<{ readonly id: Uint8Array; readonly board_rank: string }>,
+      ): ReadonlyArray<RankedTask> =>
+        rows.map((row) => ({ id: uuidToString(row.id), boardRank: row.board_rank }));
+      if (cell.projectId !== null) {
+        return readRanked(
+          yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
+            SELECT id, board_rank FROM tasks
+            WHERE project_id = ${uuidFromString(cell.projectId)} AND stage = ${cell.stage}
+              AND deleted_at IS NULL AND ${sql.literal(ON_BOARD)}
+            ORDER BY board_rank`,
+        );
+      }
+      const own = readRanked(
+        yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
+          SELECT id, board_rank FROM tasks
+          WHERE project_id IS NULL AND stage = ${cell.stage} AND deleted_at IS NULL
+            AND ${sql.literal(ON_BOARD)}
+          ORDER BY board_rank`,
+      );
+      const ofDeletedProjects = readRanked(
+        yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
+          SELECT tasks.id, tasks.board_rank FROM projects
+          CROSS JOIN tasks ON tasks.project_id = projects.id AND tasks.stage = ${cell.stage}
+                          AND tasks.deleted_at IS NULL AND tasks.${sql.literal(ON_BOARD)}
+          WHERE projects.deleted_at IS NOT NULL`,
+      );
+      return ofDeletedProjects.length === 0
+        ? own
+        : [...own, ...ofDeletedProjects].toSorted(compareRanked);
+    });
+
+  /**
+   * Gives the live Tasks of a cell new ranks, spread evenly and in the order
+   * they have now. Only the rank column of the rows that need it is written.
+   * The cell must be one `resolveCell` returned.
+   */
+  const respreadCell = (cell: BoardCell): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const ranked = yield* listCellRanks(cell);
+      const spread = spreadBoardRanks(ranked.length);
+      for (const [index, task] of ranked.entries()) {
+        if (task.boardRank === spread[index]) continue;
+        yield* sql`UPDATE tasks SET board_rank = ${spread[index]!} WHERE id = ${uuidFromString(task.id)}`;
+      }
+    });
+
+  /**
+   * Returns the greatest rank of a cell `resolveCell` returned, or `undefined`
+   * when it has no card. It reads one row from the end of `tasks_board_rank`,
+   * not the whole cell.
+   */
+  const readLastRank = (cell: BoardCell): Effect.Effect<string | undefined, SqlError> =>
+    Effect.gen(function* () {
+      const own = (yield* sql<{ readonly board_rank: string }>`
+        SELECT board_rank FROM tasks
+        WHERE project_id IS ${cell.projectId === null ? null : uuidFromString(cell.projectId)}
+          AND stage = ${cell.stage} AND deleted_at IS NULL AND ${sql.literal(ON_BOARD)}
+        ORDER BY board_rank DESC LIMIT 1`)[0]?.board_rank;
+      if (cell.projectId !== null) return own;
+      const ofDeletedProjects = (yield* sql<{ readonly board_rank: string | null }>`
+        SELECT MAX(tasks.board_rank) AS board_rank FROM projects
+        CROSS JOIN tasks ON tasks.project_id = projects.id AND tasks.stage = ${cell.stage}
+                        AND tasks.deleted_at IS NULL AND tasks.${sql.literal(ON_BOARD)}
+        WHERE projects.deleted_at IS NOT NULL`)[0]?.board_rank;
+      // An aggregate over no rows gives one row holding null.
+      const found = [own, ofDeletedProjects ?? undefined].filter((rank) => rank !== undefined);
+      return found.length === 0 ? undefined : found.reduce((a, b) => (a > b ? a : b));
+    });
+
+  /**
+   * Returns a rank that puts a card last in the cell. When the last rank is
+   * too long to go after, the cell is spread again first, which keeps the
+   * order of its cards.
+   *
+   * A cell at `done` or `dropped` is never shown in rank order, and
+   * `tasks_board_rank` leaves its Tasks out. So a Task going there takes the
+   * rank of an empty cell and nothing is read. A Task that comes back to a
+   * board stage takes a new last rank in that cell.
+   */
+  const chooseLastRankOfCell = (cell: {
+    readonly projectId: string | null;
+    readonly stage: TaskStage;
+  }): Effect.Effect<string, SqlError> =>
+    Effect.gen(function* () {
+      if (!isBoardStage(cell.stage)) return chooseRankBetween(undefined, undefined)!;
+      const resolved = yield* resolveCell({ projectId: cell.projectId, stage: cell.stage });
+      const rank = chooseRankBetween(yield* readLastRank(resolved), undefined);
+      if (rank !== undefined) return rank;
+      yield* respreadCell(resolved);
+      // A spread cell has room after its last rank, so this always gives one.
+      return chooseRankBetween(yield* readLastRank(resolved), undefined)!;
+    });
+
   return {
     /** Returns the task with that id, or none if it does not exist or has been deleted. */
     live: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
@@ -424,6 +650,152 @@ const make = Effect.gen(function* () {
                                            WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
         (rows) => Option.fromNullishOr(rows[0]?.stage),
       ),
+
+    /**
+     * Returns the cell the board draws a Task of the given cell in: the same
+     * cell, except that a cell of a deleted project is the cell of no project.
+     */
+    resolveCell,
+
+    /**
+     * Returns the live Tasks of a cell with their ranks, in rank order. The
+     * cell must come from `resolveCell`.
+     */
+    listCellRanks,
+
+    /**
+     * Gives the live Tasks of a cell new ranks, spread evenly, keeping their
+     * order. `task.move` calls it when a rank would pass the length limit.
+     * The cell must come from `resolveCell`.
+     * It writes only the rank column, so it reports no change.
+     */
+    respreadCell,
+
+    /**
+     * Returns a rank that puts a card last in the cell, spreading the cell
+     * again first when its last rank is too long to go after.
+     */
+    chooseLastRankOfCell,
+
+    /** Returns the rank of the live Task with that id, or none. */
+    readBoardRank: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly board_rank: string }>`SELECT board_rank FROM tasks
+                                             WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+        (rows) => Option.fromNullishOr(rows[0]?.board_rank),
+      ),
+
+    /** Returns the failure state of the Task with that id, deleted or not, or none if there is no row. */
+    readFailureState: (id: string): Effect.Effect<Option.Option<TaskFailureState>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly failed_run_id: Uint8Array | null;
+          readonly failure_revision: number;
+          readonly stage: TaskStage;
+          readonly deleted_at: string | null;
+        }>`SELECT failed_run_id, failure_revision, stage, deleted_at FROM tasks
+           WHERE id = ${uuidFromString(id)}`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined
+            ? Option.none()
+            : Option.some({
+                failedRunId:
+                  row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
+                failureRevision: row.failure_revision,
+                stage: row.stage,
+                deleted: row.deleted_at !== null,
+              });
+        },
+      ),
+
+    /**
+     * Makes the run the failure the live Task shows, and raises its failure
+     * revision. Does nothing for a Task that is deleted or has no row.
+     * Returns true when a Task changed.
+     */
+    setFailedRun: (taskId: string, runId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`UPDATE tasks SET failed_run_id = ${uuidFromString(runId)},
+                             failure_revision = failure_revision + 1
+            WHERE id = ${uuidFromString(taskId)} AND deleted_at IS NULL RETURNING id`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Records that the run `runId` started on the Task: raises the Task's
+     * failure revision, and when the Task shows a failure, clears it and
+     * writes the row an Undo restores it from. Does nothing, and returns
+     * `undefined`, when the Task has no row yet. Otherwise returns true when a
+     * failure was cleared.
+     */
+    recordRunStart: (taskId: string, runId: string): Effect.Effect<boolean | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const rows = yield* sql<{
+          readonly failed_run_id: Uint8Array | null;
+          readonly failure_revision: number;
+        }>`SELECT failed_run_id, failure_revision FROM tasks WHERE id = ${key}`;
+        const row = rows[0];
+        if (row === undefined) return undefined;
+        const revision = row.failure_revision + 1;
+        yield* sql`UPDATE tasks SET failure_revision = ${revision}, failed_run_id = NULL
+                   WHERE id = ${key}`;
+        if (row.failed_run_id === null) return false;
+        yield* sql`
+          INSERT INTO task_failure_recoveries (run_id, task_id, failed_run_id, revision_after)
+          VALUES (${uuidFromString(runId)}, ${key}, ${row.failed_run_id}, ${revision})`;
+        return true;
+      }),
+
+    /** Returns the row of the run start that ended a failure, or none. */
+    readFailureRecovery: (runId: string): Effect.Effect<Option.Option<FailureRecovery>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly task_id: Uint8Array;
+          readonly failed_run_id: Uint8Array;
+          readonly revision_after: number;
+          readonly restored_at: string | null;
+        }>`SELECT task_id, failed_run_id, revision_after, restored_at
+           FROM task_failure_recoveries WHERE run_id = ${uuidFromString(runId)}`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined
+            ? Option.none()
+            : Option.some({
+                runId,
+                taskId: uuidToString(row.task_id),
+                failedRunId: uuidToString(row.failed_run_id),
+                revisionAfter: row.revision_after,
+                restoredAt: row.restored_at ?? undefined,
+              });
+        },
+      ),
+
+    /**
+     * Puts back the failure that the start of the run `runId` ended, in one
+     * statement that checks everything it depends on: the recovery row was
+     * not used, the Task is not deleted or finished, and its failure revision
+     * is still the one right after that start. Then it raises the revision
+     * and stamps the row. Returns the Task's id, or none when it changed
+     * nothing.
+     */
+    restoreFailure: (runId: string, at: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(runId);
+        const rows = yield* sql<{ readonly id: Uint8Array }>`
+          UPDATE tasks SET failed_run_id = r.failed_run_id,
+                           failure_revision = tasks.failure_revision + 1
+          FROM task_failure_recoveries r
+          WHERE r.run_id = ${key} AND r.restored_at IS NULL AND tasks.id = r.task_id
+            AND tasks.deleted_at IS NULL AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}
+            AND tasks.failure_revision = r.revision_after
+          RETURNING tasks.id`;
+        const row = rows[0];
+        if (row === undefined) return Option.none();
+        yield* sql`UPDATE task_failure_recoveries SET restored_at = ${at} WHERE run_id = ${key}`;
+        return Option.some(uuidToString(row.id));
+      }),
 
     /**
      * Returns the oldest handoff entry of a Task: the provenance entry that
@@ -527,19 +899,73 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns every in-progress task that has a handoff entry, the most
-     * recently updated task first. Each task holds its newest handoff entries,
-     * at most `MAX_TRACKING_HANDOFFS`, newest first: by time, then by the
-     * order they were appended, as in `readFirstHandoff` and
-     * `listLegHandoffs`. A deleted task is left out.
+     * Returns the cards of the Work board: the live Tasks at a board stage,
+     * ordered by project (none first), then stage in the order of the columns,
+     * then rank. It returns one Task more than `limit` at most, so the caller
+     * can tell that there were more.
      *
-     * One statement, and its work follows the in-progress tasks, not the
-     * handoffs ever made. It walks the in-progress tasks on the status index,
-     * and for each one looks up the end of its range in
-     * `task_provenance_handoff` (task, then time), so a task that has no
-     * handoff costs one probe, and a task with thousands reads ten entries.
-     * The handoffs of tasks that are done are never touched. `CROSS JOIN`
-     * makes SQLite keep that order, because it never reorders one.
+     * A Task of a deleted project is returned with no `projectId` and ordered
+     * with the Tasks that have none, as `resolveCell` explains.
+     *
+     * One statement. It walks `tasks_board_rank` in its own order, which is
+     * project, stage, rank, so it sorts nothing and stops after `limit + 1`
+     * Tasks. It looks at the index entries of finished Tasks too, but never at
+     * their rows. The index order puts stages in alphabetical order, so the
+     * rows are put in column order afterwards, in memory. It reads no
+     * description and no provenance. The statement names the index, because
+     * left to itself the planner reads `tasks_stage` and sorts.
+     */
+    listBoardTasks: (limit: number): Effect.Effect<ReadonlyArray<BoardTask>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly title: string;
+          readonly stage: BoardStage;
+          readonly priority: TaskPriority;
+          readonly project_id: Uint8Array | null;
+          readonly board_rank: string;
+          readonly created_at: string;
+          readonly stage_changed_at: string;
+          readonly failed_run_id: Uint8Array | null;
+        }>`
+          SELECT t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank,
+                 t.created_at, t.stage_changed_at, t.failed_run_id
+          FROM tasks t INDEXED BY tasks_board_rank
+          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+          WHERE t.stage NOT IN ('done', 'dropped') AND t.deleted_at IS NULL
+          ORDER BY t.project_id, t.stage, t.board_rank
+          LIMIT ${limit + 1}`,
+        (rows) =>
+          rows
+            .map((row) => ({
+              id: uuidToString(row.id),
+              title: row.title,
+              stage: row.stage,
+              priority: row.priority,
+              projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
+              boardRank: row.board_rank,
+              createdAt: row.created_at,
+              stageChangedAt: row.stage_changed_at,
+              failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
+            }))
+            .toSorted(compareBoardOrder),
+      ),
+
+    /**
+     * Returns every Task that is not finished and has a handoff entry, the
+     * most recently updated Task first. A Task is finished at `done` or
+     * `dropped`; the other five stages are the board stages. Each Task holds
+     * its newest handoff entries, at most `MAX_TRACKING_HANDOFFS`, newest
+     * first: by time, then by the order they were appended, as in
+     * `readFirstHandoff` and `listLegHandoffs`. A deleted Task is left out.
+     *
+     * One statement, and its work follows the unfinished Tasks, not the
+     * handoffs ever made. It walks them on the stage index (one range per
+     * stage), and for each one looks up the end of its range in
+     * `task_provenance_handoff` (task, then time), so a Task that has no
+     * handoff costs one probe, and a Task with thousands reads ten entries.
+     * The handoffs of finished Tasks are never touched. `CROSS JOIN` makes
+     * SQLite keep that order, because it never reorders one.
      */
     listTracked: (): Effect.Effect<ReadonlyArray<TrackedTask>, SqlError> =>
       Effect.map(
@@ -558,7 +984,7 @@ const make = Effect.gen(function* () {
             SELECT rowid FROM task_provenance
             WHERE task_id = t.id AND signal_id IS NOT NULL
             ORDER BY at DESC, rowid DESC LIMIT ${MAX_TRACKING_HANDOFFS})
-          WHERE t.status = 'in-progress' AND t.deleted_at IS NULL`,
+          WHERE t.stage IN ${sql.in(BOARD_STAGES)} AND t.deleted_at IS NULL`,
         (rows) => {
           const byTask = new Map<
             string,
@@ -686,26 +1112,26 @@ const make = Effect.gen(function* () {
                                                  joined_at = excluded.joined_at`),
 
     /** Returns true if a project exists and has not been deleted. */
-    projectExists: (id: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`SELECT id FROM projects
-                                         WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
-        (rows) => rows.length === 1,
-      ),
+    projectExists: isLiveProject,
 
     /** Writes a new task and its first provenance entries. */
     insert: (task: NewTask): Effect.Effect<Task, SqlError> =>
       Effect.gen(function* () {
         const id = task.id === undefined ? mintUuid() : uuidFromString(task.id);
+        // A new Task goes last in its cell, so no card the user is looking at moves.
+        const boardRank = yield* chooseLastRankOfCell({
+          projectId: task.projectId ?? null,
+          stage: task.stage,
+        });
         yield* sql`
           INSERT INTO tasks
             (id, title, description, status, stage, priority, labels, project_id,
-             created_at, updated_at, status_changed_at, stage_changed_at)
+             created_at, updated_at, status_changed_at, stage_changed_at, board_rank)
           VALUES
             (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.stage}, ${task.priority},
              ${JSON.stringify(task.labels)},
              ${task.projectId === undefined ? null : uuidFromString(task.projectId)},
-             ${task.at}, ${task.at}, ${task.at}, ${task.at})
+             ${task.at}, ${task.at}, ${task.at}, ${task.at}, ${boardRank})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
         return {
@@ -758,7 +1184,11 @@ const make = Effect.gen(function* () {
         }
         if (edit.stage !== undefined) {
           sets.push(sql`stage = ${edit.stage}`, sql`stage_changed_at = ${at}`);
+          // Done and Drop change who handles a failure: the board stops
+          // listing the Task, and no earlier Undo may bring a failure back.
+          if (isFinishedStage(edit.stage)) sets.push(sql`failure_revision = failure_revision + 1`);
         }
+        if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);
       }),

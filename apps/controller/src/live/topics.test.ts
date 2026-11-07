@@ -111,6 +111,87 @@ describe("the pace of record changes", () => {
   });
 });
 
+describe("the pace of a change to a Task's card", () => {
+  const TASK = "0199e0e7-0000-7000-8000-0000000000a1";
+  const cardChange = {
+    _tag: "record",
+    topic: "task",
+    id: TASK,
+    kind: "updated",
+    derived: true,
+  } as const;
+
+  it("collects a burst into one push a second, and sends no push for a token", async () => {
+    const received = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        const sent: Array<ReadonlyArray<LiveMessage>> = [];
+
+        // A busy agent: a change every 50 ms for 900 ms, with a token between each.
+        for (let step = 0; step < 18; step++) {
+          yield* topics.publish([
+            cardChange,
+            {
+              _tag: "tap",
+              sessionId: SESSION,
+              item: { turnId: "t", itemId: "i", streamKind: "assistant_text", delta: "hi" },
+            },
+          ]);
+          yield* advance(COALESCE_WINDOW_MS);
+          sent.push(yield* Queue.clear(queue));
+        }
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        sent.push(yield* Queue.clear(queue));
+        return sent;
+      }),
+    );
+
+    // Nothing within the short window, then one push when the first change's
+    // second is over.
+    const sendSteps = received.flatMap((messages, step) => (messages.length > 0 ? [step] : []));
+    expect(sendSteps).toEqual([18]);
+    expect(received.flat()).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+  });
+
+  it("sends a person's change at once and the agent's change a second later, so one Task can get both", async () => {
+    const [afterShortWindow, afterLongWindow] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        yield* topics.publish([
+          cardChange,
+          { _tag: "record", topic: "task", id: TASK, kind: "updated" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        const early = yield* Queue.clear(queue);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [early, yield* Queue.clear(queue)] as const;
+      }),
+    );
+
+    expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+    expect(afterLongWindow).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+  });
+
+  it("names no ids in the first push of a new subscription, however many card changes are waiting", async () => {
+    const [firstAfterReconnect, later] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        yield* topics.publish([cardChange]);
+        const reconnected = yield* topics.subscribe("task");
+        const first = yield* Queue.clear(reconnected);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [first, yield* Queue.clear(reconnected)] as const;
+      }),
+    );
+
+    expect(firstAfterReconnect).toEqual([{ _tag: "invalidate", ids: [], kind: "updated" }]);
+    // The change made while the client was away is still pushed, after the first push.
+    expect(later).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+  });
+});
+
 describe("the conversation of a session change", () => {
   it("is sent with each session id, through a batch of several changes, and only on the session topic", async () => {
     const [sessionMessages, taskMessages] = await run(

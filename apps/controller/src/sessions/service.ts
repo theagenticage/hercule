@@ -93,6 +93,7 @@ import { providerAccountRepository } from "../provider-accounts";
 import {
   afterCommit,
   announce,
+  announceTaskCardChange,
   buildMatchExpression,
   nowIso,
   buildPageInputFields,
@@ -1201,6 +1202,15 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* sessions.setOpenRequests(session.id, after);
       const { closed, opened } = compareOpenRequests(session.openRequests, after);
+      // Only a question in a Thread shows on its Task's card. An approval
+      // does not, and neither does a question in another kind of session.
+      if (
+        session.taskId !== null &&
+        session.kind === "thread" &&
+        [...closed, ...opened].some((request) => request.kind === "question")
+      ) {
+        yield* announceTaskCardChange(session.taskId);
+      }
       // A new Request never closes an older one, so only the other events
       // can have closed any.
       if (closed.length > 0 && event._tag !== "request.opened") {
@@ -3774,6 +3784,16 @@ const make = Effect.gen(function* () {
         // session becomes unfinished.
         if (event._tag === "item.completed" && event.editedFiles !== undefined) {
           yield* editObserver.filesEdited(id, event.editedFiles);
+        }
+        // Only the session's own agent's turn counts, not a subagent's, and
+        // only while the session accepts changes. The time is the one the
+        // board shows as the end of the turn.
+        if (
+          sessionAcceptsChanges &&
+          event._tag === "turn.completed" &&
+          attributeEvent(event) === undefined
+        ) {
+          yield* sessions.turnEnded(id, at);
         }
         // Written together with the status change from the same event, so a
         // session that reads `idle` already has its harness-native id.

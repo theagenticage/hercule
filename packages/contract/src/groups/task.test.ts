@@ -5,9 +5,12 @@ import {
   HandoffLeg,
   MAX_LEG_LIVE_RUNS,
   MAX_LEG_QUERY_RUNS,
+  TASK_STAGES,
   TaskCreateInput,
   TaskFilter,
+  TaskMoveInput,
   TaskUpdateInput,
+  BOARD_STAGES,
   task,
 } from "./task";
 
@@ -149,5 +152,23 @@ describe("the leg of a handoff", () => {
     expect(decodeOutcome(query, { runIds: ids(1) })).toBe("Success");
     expect(decodeOutcome(query, { runIds: ids(MAX_LEG_QUERY_RUNS) })).toBe("Success");
     expect(decodeOutcome(query, { runIds: ids(MAX_LEG_QUERY_RUNS + 1) })).toBe("Failure");
+  });
+});
+
+describe("the stages of the board", () => {
+  it("are the first five stages, and task.move takes each of them", () => {
+    expect(TASK_STAGES.slice(0, BOARD_STAGES.length)).toEqual(BOARD_STAGES);
+    for (const stage of BOARD_STAGES) {
+      expect(decodeOutcome(TaskMoveInput, { stage })).toBe("Success");
+    }
+  });
+
+  it("are refused as a place to move a Task to when they are done or dropped", () => {
+    expect(decodeOutcome(TaskMoveInput, { stage: "done" })).toBe("Failure");
+    expect(decodeOutcome(TaskMoveInput, { stage: "dropped" })).toBe("Failure");
+  });
+
+  it("let a move name a project and a card to follow, or null for none", () => {
+    expect(decodeOutcome(TaskMoveInput, { projectId: null, afterTaskId: null })).toBe("Success");
   });
 });

@@ -30,7 +30,12 @@ import {
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
-import { createInvalidStateError, createNotFoundError, type Passage } from "@hercule/contract";
+import {
+  createInvalidStateError,
+  createNotFoundError,
+  type InvalidState,
+  type Passage,
+} from "@hercule/contract";
 import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
@@ -51,13 +56,13 @@ import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer } from "../plugins";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture, USER } from "../plugins/testing";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
-import { TaskServiceLayer } from "../tasks";
+import { TaskService, TaskServiceLayer } from "../tasks";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { providerAccountRepository } from "../provider-accounts";
@@ -213,6 +218,8 @@ const insertQueuedSession = (
     readonly permissionProfileId?: string;
     /** The Agent the session runs as. Without it the session is a Thread. */
     readonly agentId?: string;
+    /** The Task the session belongs to. Without it the session has none. */
+    readonly taskId?: string | undefined;
     /** The actor stamp of whoever created the session. Without it, the user. */
     readonly createdBy?: string;
     /**
@@ -243,7 +250,7 @@ const insertQueuedSession = (
           runnerId,
           workspaceId: null,
           projectId: undefined,
-          taskId: undefined,
+          taskId: options.taskId,
           checkoutBranch: options.checkoutBranch,
           githubConnectionId: options.githubConnectionId,
           requestedAccessMode: "approval-required",
@@ -1039,6 +1046,7 @@ const insertRunningSession = (
   runnerId: string,
   status: "starting" | "idle" | "busy",
   heardAgoMs: number,
+  taskId?: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -1052,6 +1060,7 @@ const insertRunningSession = (
           providerAccountId,
           spec: buildSpec(providerAccountId, "clever"),
           permissionProfileId: yield* aProfile,
+          taskId,
         });
         const [claim] = yield* claimStarting(runnerId, 1);
         if (status !== "starting") {
@@ -1062,7 +1071,7 @@ const insertRunningSession = (
         yield* sql`
       UPDATE sessions SET last_activity_at = ${heardAt} WHERE id = ${uuidFromString(sessionId)}
     `;
-        return { sessionId, tokenHash: hashToken(claim!.frame.token) };
+        return { sessionId, tokenHash: hashToken(claim!.frame.token), claim: claim! };
       }),
     );
   });
@@ -2436,5 +2445,308 @@ describe("SessionService.queryPassages", () => {
     const page = await runSeeded(() => queryAs(USER, { text: "?!" }));
 
     expect(page).toEqual({ items: [] });
+  });
+});
+
+describe("the card of a Task", () => {
+  const cardChangeOf = (taskId: string): Change => ({
+    _tag: "record",
+    topic: "task",
+    id: taskId,
+    kind: "updated",
+    derived: true,
+  });
+
+  /**
+   * Creates a Task and a runner, lets `arrange` write what the case needs and
+   * return the action to test, then runs the action and returns the Task and
+   * the changes to `task` records that the action announced. Whatever
+   * `arrange` wrote is not part of it.
+   */
+  const announcedByAction = (
+    arrange: (
+      runnerId: string,
+      taskId: string,
+    ) => Effect.Effect<
+      Effect.Effect<unknown, SqlError | InvalidState, SessionService | SqlClient.SqlClient>,
+      SqlError,
+      SessionService | SqlClient.SqlClient
+    >,
+  ) =>
+    run(
+      Effect.gen(function* () {
+        const taskId = (yield* Effect.provideService(
+          (yield* TaskService).create({ title: "Add a refund button", description: "" }),
+          CurrentActor,
+          USER,
+        )).id;
+        const action = yield* arrange(mintId(), taskId);
+        const published: Array<Change> = [];
+        yield* action.pipe(
+          Effect.provide(
+            Layer.succeed(AfterCommit, {
+              publish: (changes: ReadonlyArray<Change>) =>
+                Effect.sync(() => {
+                  published.push(...changes);
+                }),
+            }),
+          ),
+        );
+        return {
+          taskId,
+          changes: published.filter(
+            (change) => change._tag === "record" && change.topic === "task",
+          ),
+        };
+      }),
+    );
+
+  /** Folds and applies one report from the runner in a transaction, as ingest does. */
+  const report = (runnerId: string, sessionId: string, seq: number, event: object) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const harnessEvent = {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        ...event,
+      } as HarnessEvent;
+      const folded = yield* sessions.foldReport(runnerId, seq, harnessEvent);
+      yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
+    });
+
+  const insertQueuedSessionOf = (runnerId: string, taskId: string) => {
+    const providerAccountId = mintId();
+    return Effect.flatMap(aProfile, (permissionProfileId) =>
+      insertQueuedSession(runnerId, {
+        providerAccountId,
+        spec: buildSpec(providerAccountId, "clever"),
+        permissionProfileId,
+        taskId,
+      }),
+    );
+  };
+
+  const questionRequest = {
+    requestId: "q-1",
+    itemId: "i1",
+    kind: "question",
+    detail: {
+      questions: [{ question: "Which size?", header: "Size", options: [], multiSelect: false }],
+    },
+  };
+
+  const approvalRequest = {
+    requestId: "a-1",
+    itemId: "i1",
+    kind: "command_approval",
+    decisions: ["allow", "deny"],
+    detail: { command: "ls -la" },
+  };
+
+  it("is announced when a session joins the Task", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.succeed(Effect.asVoid(insertQueuedSessionOf(runnerId, taskId))),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when dispatch starts a session of the Task", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.as(insertQueuedSessionOf(runnerId, taskId), claimStarting(runnerId, 1)),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced once when a report changes the status of a session of the Task, and not by the reports that follow", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "idle", 0, taskId), ({ sessionId }) =>
+        Effect.gen(function* () {
+          yield* report(runnerId, sessionId, 1, { _tag: "turn.started", turnId: "t1" });
+          // A token, a finished item and a tool call change no status.
+          yield* report(runnerId, sessionId, 2, {
+            _tag: "content.delta",
+            turnId: "t1",
+            itemId: "i1",
+            streamKind: "assistant_text",
+            delta: "Hello",
+          });
+          yield* report(runnerId, sessionId, 3, {
+            _tag: "item.started",
+            turnId: "t1",
+            itemId: "i1",
+            kind: "command_execution",
+            detail: {},
+          });
+        }),
+      ),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when the runner of a session of the Task is retired", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "busy", 0, taskId), () =>
+        Effect.flatMap(SessionService, (sessions) =>
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            withTransaction(sql, sessions.endOnRunner(runnerId)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when a queued session of the Task is cancelled", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertQueuedSessionOf(runnerId, taskId), (sessionId) =>
+        Effect.flatMap(SessionService, (sessions) =>
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            withTransaction(sql, sessions.endQueued(sessionId, at)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when a start that could not be sent puts the session back on the queue", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "starting", 0, taskId), ({ claim }) =>
+        Effect.flatMap(SessionService, (sessions) => sessions.requeue(claim)),
+      ),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when an exited session of the Task is resumed", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sessionRepository;
+        // Resuming checks that the session's account still exists.
+        const accounts = yield* providerAccountRepository;
+        const { id: providerAccountId } = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "a-provider",
+            kind: "a-kind",
+            label: null,
+            defaultHarnessId: HARNESS_ID,
+            at,
+          }),
+        );
+        // Exited with its first input still waiting, as the resume tests above arrange it.
+        yield* withTransaction(
+          sql,
+          sql`
+            INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                 credential_hash, created_at, updated_at)
+            VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                    'a hash', ${at}, ${at})
+          `,
+        );
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+          taskId,
+        });
+        yield* withTransaction(
+          sql,
+          Effect.andThen(
+            rows.bind(sessionId, runnerId, providerAccountId, "native-1"),
+            rows.moved(sessionId, "exited", at),
+          ),
+        );
+        return Effect.flatMap(SessionService, (sessions) =>
+          withTransaction(
+            sql,
+            sessions.resume(
+              sessionId,
+              () =>
+                Effect.succeed(JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")))),
+              at,
+              false,
+            ),
+          ),
+        );
+      }),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId)]);
+  });
+
+  it("is announced when a question opens and when it closes, and for an approval neither time", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "busy", 0, taskId), ({ sessionId }) =>
+        Effect.gen(function* () {
+          yield* report(runnerId, sessionId, 1, {
+            _tag: "request.opened",
+            request: approvalRequest,
+          });
+          yield* report(runnerId, sessionId, 2, {
+            _tag: "request.resolved",
+            requestId: "a-1",
+            decision: "allow",
+          });
+          yield* report(runnerId, sessionId, 3, {
+            _tag: "request.opened",
+            request: questionRequest,
+          });
+          yield* report(runnerId, sessionId, 4, {
+            _tag: "request.resolved",
+            requestId: "q-1",
+            answers: { Size: "Large" },
+          });
+        }),
+      ),
+    );
+
+    // One for the question opening and one for it closing. The coalescing
+    // window merges them for the client.
+    expect(changes).toEqual([cardChangeOf(taskId), cardChangeOf(taskId)]);
+  });
+
+  it("is announced for both Tasks when a session moves from one to the other, as a reopened Thread does", async () => {
+    const otherTaskId = await run(
+      Effect.provideService(
+        Effect.map(
+          Effect.flatMap(TaskService, (tasks) =>
+            tasks.create({ title: "Fix the login redirect", description: "" }),
+          ),
+          (task) => task.id,
+        ),
+        CurrentActor,
+        USER,
+      ),
+    );
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertQueuedSessionOf(runnerId, taskId), (sessionId) =>
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          Effect.flatMap(sessionRepository, (rows) =>
+            withTransaction(sql, rows.setTaskId(sessionId, otherTaskId)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([cardChangeOf(taskId), cardChangeOf(otherTaskId)]);
+  });
+
+  it("is not announced for a session with no Task", async () => {
+    const { changes } = await announcedByAction((runnerId) =>
+      Effect.map(insertRunningSession(runnerId, "idle", 0), ({ sessionId }) =>
+        report(runnerId, sessionId, 1, { _tag: "turn.started", turnId: "t1" }),
+      ),
+    );
+
+    expect(changes).toEqual([]);
   });
 });

@@ -287,6 +287,8 @@ const withLegacyController = async (
       // - its role: no old session was given one, so it stays null;
       // - its kind: computed from the ids, and no old session has an Agent, so
       //   each is a Thread;
+      // - when its last turn ended: each session is exited, so the migration
+      //   took the time of its last activity;
       // - its Task: each is an unfinished Thread, so the migration gave it a
       //   Task. The Task id is minted at migration time, so the test only checks
       //   that there is one.
@@ -321,6 +323,7 @@ const withLegacyController = async (
             library_skills: null,
             role: null,
             kind: "thread",
+            last_turn_ended_at: (row as { last_activity_at: string }).last_activity_at,
           };
         }),
       );

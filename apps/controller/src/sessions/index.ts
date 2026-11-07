@@ -35,6 +35,8 @@ export { isResumeHeld } from "./resume-hold";
 export {
   readSessionOrFail,
   sessionRepository,
+  type BoardSession,
+  type BoardSessionTotals,
   type SessionAccess,
   type SessionRows,
   type StoredSession,

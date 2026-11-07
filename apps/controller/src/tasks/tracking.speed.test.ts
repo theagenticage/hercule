@@ -157,10 +157,11 @@ const seedHistory = (count: number, history: History) =>
     yield* sql`
       WITH RECURSIVE n(i) AS (SELECT ${count + 1} UNION ALL SELECT i + 1 FROM n
                               WHERE i < ${count + 1 + unrelatedActive})
-      INSERT INTO tasks (id, title, description, status, priority, labels, created_at, updated_at,
-                         status_changed_at)
+      INSERT INTO tasks (id, title, description, status, stage, priority, labels, created_at,
+                         updated_at, status_changed_at)
       SELECT ${sql.literal(`unhex(${TASK_ID})`)}, 'Other ' || i, '',
-             CASE WHEN i = ${count + 1} THEN 'done' ELSE 'in-progress' END, 'normal', '[]',
+             CASE WHEN i = ${count + 1} THEN 'done' ELSE 'in-progress' END,
+             CASE WHEN i = ${count + 1} THEN 'done' ELSE 'building' END, 'normal', '[]',
              '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z'
       FROM n`;
     // The handoffs of the done Task and the extra ones of the first tracked
