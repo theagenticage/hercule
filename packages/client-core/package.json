@@ -31,6 +31,8 @@
     "./workspace-threads": "./src/threads/workspace-threads.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./wiki-history": "./src/wiki-history.ts",
+    "./work": "./src/work/index.ts",
+    "./work/testing": "./src/work/cards.testing.ts",
     "./workflow-rows": "./src/workflow-rows.ts",
     "./testing": "./src/testing.ts",
     "./threads/testing": "./src/threads/workspaces.testing.ts",
