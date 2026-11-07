@@ -13,6 +13,8 @@ import {
 } from "@hercule/plugin-host";
 import { GITHUB_WORKFLOW_ACTIONS } from "./actions";
 import { connectionType, GITHUB_CONNECTION_TYPE } from "./connection-type";
+import { githubEntityLookup } from "./entity-lookup";
+import { GITHUB_ENTITY_KINDS } from "./entity-kinds";
 import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 import { GITHUB_SIGNAL_KINDS } from "./signal-kinds";
@@ -31,7 +33,7 @@ const GITHUB_MARK_PATH =
  *
  * The default intervals are spec 08 section 5.1's. The floors are this
  * plugin's: the notifications feed may not go below its default because
- * GitHub's `X-Poll-Interval` is 60 seconds, and the other two stay well
+ * GitHub's `X-Poll-Interval` is 60 seconds, and the others stay well
  * inside the hourly quota at their floor.
  */
 const eventSource: EventSourceContribution = {
@@ -42,8 +44,11 @@ const eventSource: EventSourceContribution = {
     notifications: { defaultIntervalSeconds: 60 },
     repos: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     checks: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+    entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
   },
   signalKinds: GITHUB_SIGNAL_KINDS,
+  entityKinds: GITHUB_ENTITY_KINDS,
+  entityLookup: githubEntityLookup,
   open: openGithubIngest,
 };
 
@@ -52,7 +57,14 @@ export const github: Plugin = {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
+    capabilities: [
+      "connections",
+      "event-sources",
+      "events",
+      "resources",
+      "entities",
+      "workflow-actions",
+    ],
     configSchema: Schema.Struct({}),
     mark: { paths: [GITHUB_MARK_PATH] },
   },

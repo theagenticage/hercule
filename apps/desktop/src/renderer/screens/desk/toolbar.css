@@ -158,6 +158,10 @@
   position-anchor: --tools-end;
   position-area: block-end span-inline-start;
 }
+.pop.popover-menu.menu--tool.menu--tool-button-end {
+  width: 200px;
+  position-area: block-end span-inline-start;
+}
 @media (prefers-reduced-motion: no-preference) {
   .menu--tool:popover-open {
     animation: tool-menu-arrive var(--m-base) var(--m-ease) both;

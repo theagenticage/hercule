@@ -38,6 +38,16 @@ export const MAX_EXTERNAL_REF_LENGTH = 512;
  */
 export const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
 
+/** The schema of an External Ref: the grammar above, at most `MAX_EXTERNAL_REF_LENGTH` characters. */
+export const ExternalRef = Schema.String.check(
+  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
+  Schema.isPattern(EXTERNAL_REF_PATTERN),
+);
+
+/** Builds the schema of a string of at least `minimum` and at most `maximum` characters. */
+export const buildBoundedString = (minimum: number, maximum: number) =>
+  Schema.String.check(Schema.isBetweenLength(minimum, maximum));
+
 /**
  * The form the host requires of an event's `occurredAt`: an ISO 8601 date and
  * time with an explicit time zone, such as `2026-01-31T09:30:00Z`. Without a

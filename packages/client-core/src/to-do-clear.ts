@@ -7,14 +7,14 @@ import {
 } from "./time-context";
 
 /** The line under "Inbox zero", and when it next may read differently. */
-export interface InboxZeroLine {
+export interface ToDoClearLine {
   readonly text: string;
   /** The next of 12:00, 18:00 and midnight after `now`, when the line is worked out again. */
   readonly changesAt: Date;
 }
 
 /**
- * Describes the line inbox zero shows under its heading, for `now` in
+ * Describes the line To do clear shows under its heading, for `now` in
  * `timezone`, the user's timezone setting (spec 17 §Motion):
  *
  * - "Nothing needs you this weekend." all day on Saturday and Sunday;
@@ -28,7 +28,7 @@ export interface InboxZeroLine {
  * `resolveDisplayTimezone` never returns, gives the morning's line, worked
  * out again an hour later.
  */
-export const describeInboxZeroLine = (now: Date, timezone: string): InboxZeroLine => {
+export const describeToDoClearLine = (now: Date, timezone: string): ToDoClearLine => {
   const clock = readWallClock(now, timezone);
   if (clock === undefined) {
     return {
@@ -49,7 +49,7 @@ export const describeInboxZeroLine = (now: Date, timezone: string): InboxZeroLin
   };
 };
 
-/** Returns the line's text for the date and time `clock` reads, by the rules on `describeInboxZeroLine`. */
+/** Returns the line's text for the date and time `clock` reads, by the rules on `describeToDoClearLine`. */
 const chooseLineText = (clock: WallClock): string => {
   const weekday = computeWeekday(clock);
   if (weekday === 0 || weekday === 6) return "Nothing needs you this weekend.";

@@ -9,13 +9,14 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   MAX_EMITTED_FIELD_BYTES,
   type EmittedEvent,
+  type EntityKindDeclaration,
   type IngestContext,
   type PluginCapability,
 } from "@hercule/plugin-host";
 import { connectionRepository, ConnectionNotIngesting } from "../connections";
 import { nowIso, uuidToString } from "../db";
 import { resourceRepository } from "../resources";
-import { PluginHost } from "./index";
+import { PluginHost, Plugins } from "./index";
 import { ingestContexts } from "./ingest-context";
 import {
   asUser,
@@ -34,14 +35,18 @@ const runWithContext = <A, E>(
   body: (
     context: IngestContext,
     connectionId: string,
-  ) => Effect.Effect<A, E, SqlClient.SqlClient | PluginHost>,
+  ) => Effect.Effect<A, E, SqlClient.SqlClient | PluginHost | Plugins>,
   capabilities?: ReadonlyArray<PluginCapability>,
+  entityKinds?: ReadonlyArray<EntityKindDeclaration>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const host = yield* PluginHost;
       yield* host.boot([
-        createEventSourceFixture(capabilities === undefined ? {} : { capabilities }).plugin,
+        createEventSourceFixture({
+          ...(capabilities === undefined ? {} : { capabilities }),
+          ...(entityKinds === undefined ? {} : { entityKinds }),
+        }).plugin,
       ]);
       const connection = yield* insertFixtureConnection();
       const source = (yield* host.listActiveEventSources())[0];
@@ -296,5 +301,63 @@ describe("IngestContext.resources", () => {
     const resources = await runWithContext((context) => Effect.succeed(context.resources));
 
     expect(resources).toBeUndefined();
+  });
+});
+
+const THING_KIND: EntityKindDeclaration = {
+  word: "thing",
+  noun: "Thing",
+  refPrefix: "acme:thing:",
+  pace: "fast",
+  patience: 24,
+  identifier: "{key}",
+  person: null,
+  owner: null,
+  status: null,
+  facts: [],
+  reasons: {},
+};
+
+describe("IngestContext.entities", () => {
+  it("is absent when the manifest did not request the entities capability", async () => {
+    const entities = await runWithContext((context) => Effect.succeed(context.entities));
+
+    expect(entities).toBeUndefined();
+  });
+
+  it("reports through the port, and what it stored stays after the plugin is disabled", async () => {
+    const counts = await runWithContext(
+      (context) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const countEntities = Effect.map(
+            sql<{ readonly n: number }>`SELECT count(*) AS n FROM external_entities`,
+            (rows) => rows[0]!.n,
+          );
+          yield* context.entities!.reconcile({
+            kind: "thing",
+            complete: true,
+            observations: [
+              {
+                kind: "thing",
+                ref: "acme:thing:1",
+                title: "A thing",
+                url: "https://acme.example/things/1",
+                lifecycle: "open",
+                fields: { key: "T-1" },
+                concerns: ["assigned"],
+                sourceUpdatedAt: "2026-09-01T10:00:00Z",
+              },
+            ],
+          });
+          const stored = yield* countEntities;
+          yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("acme"));
+          return { stored, afterDisable: yield* countEntities };
+        }),
+      ["connections", "event-sources", "events", "entities"],
+      [THING_KIND],
+    );
+
+    expect(counts).toEqual({ stored: 1, afterDisable: 1 });
   });
 });

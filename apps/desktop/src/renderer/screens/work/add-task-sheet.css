@@ -26,3 +26,11 @@
   flex: none;
   color: var(--ok);
 }
+/* The sheet's body is a column, so From a source can take the room that is
+   left and scroll its list inside it. */
+.add-task {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}

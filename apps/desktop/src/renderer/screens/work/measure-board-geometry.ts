@@ -2,7 +2,7 @@ import type { ArrangedLane } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect } from "../../app/motion";
 import type { BoardGeometry, BoardView, CellBox, LaneBox, StageEdge } from "./board-drag-geometry";
-import { buildCardKey } from "./flip-board";
+import { buildCardKeys } from "./flip-board";
 
 /** The measurements of the board a carry needs: the geometry, and the scroller it was measured in. */
 export interface MeasuredBoard {
@@ -23,7 +23,7 @@ const readStage = (value: string | undefined): BoardStage | undefined =>
  * away, so the answer is the same whether or not a spring is running.
  *
  * `places` are card places that a flip just measured (`flipBoard`), by card
- * key. A card found in them is not measured again. Without them, every card is
+ * key (`buildCardKeys`). A card found in them is not measured again. Without them, every card is
  * measured.
  */
 export const measureBoardGeometry = (
@@ -39,6 +39,7 @@ export const measureBoardGeometry = (
     scrollLeft: scroller.scrollLeft,
     scrollTop: scroller.scrollTop,
   };
+  const cardKeys = places === undefined ? undefined : buildCardKeys(scroller);
   const toBoardLeft = (left: number): number => left - view.left + view.scrollLeft;
   const toBoardTop = (top: number): number => top - view.top + view.scrollTop;
 
@@ -66,7 +67,7 @@ export const measureBoardGeometry = (
         const rows = shownCards.flatMap((child) => {
           const { cardId, dragged } = child.dataset;
           if (cardId === undefined || dragged !== undefined) return [];
-          const place = places?.get(buildCardKey(cardId)) ?? measureLayoutRect(child);
+          const place = places?.get(cardKeys?.get(child) ?? "") ?? measureLayoutRect(child);
           return [{ id: cardId, element: child, middle: toBoardTop(place.top + place.height / 2) }];
         });
         // The card in the hand still counts as shown: it leaves a place that a drop may take again.

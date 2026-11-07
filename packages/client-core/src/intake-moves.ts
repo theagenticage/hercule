@@ -518,7 +518,7 @@ export interface PluginClearedToday {
 
 /**
  * Counts the signals among `done` cleared today, as `countClearedToday`
- * counts them, per plugin that raised them. Inbox zero shows one pill per
+ * counts them, per plugin that raised them. To do clear shows one pill per
  * plugin with these numbers (spec 17 §Motion).
  *
  * Each entry carries the plugin's name, for the pill's label. Returns only

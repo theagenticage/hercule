@@ -38,7 +38,7 @@ const findMenuItem = (menuBar: MenuTemplate, name: string, label: string) =>
 /**
  * Returns whether each item only a signed-in user can choose is enabled in
  * `menuBar`: Settings…, Sign Out, New Thread, View's Threads, Hercule and
- * Toggle Sidebar, Office, Intake and Workflows, in that order.
+ * Toggle Sidebar, Office, Inbox, Intake and Workflows, in that order.
  */
 const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefined> =>
   [
@@ -49,6 +49,7 @@ const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefi
     findMenuItem(menuBar, "View", "Hercule"),
     findMenuItem(menuBar, "View", "Toggle Sidebar"),
     findMenuItem(menuBar, "Go", "Office"),
+    findMenuItem(menuBar, "Go", "Inbox"),
     findMenuItem(menuBar, "Go", "Intake"),
     findMenuItem(menuBar, "Go", "Workflows"),
   ].map((item) => item?.enabled);
@@ -191,22 +192,22 @@ describe("MainMenu", () => {
     [
       "enabled when a login token is stored",
       { controllerUrl: CONTROLLER_URL, token: "AAEC" },
-      [true, true, true, true, true, true, true, true, true],
+      [true, true, true, true, true, true, true, true, true, true],
     ],
     [
       "disabled when none is stored",
       null,
-      [false, false, false, false, false, false, false, false, false],
+      [false, false, false, false, false, false, false, false, false, false],
     ],
   ])(
-    "starts with Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Intake and Workflows %s",
+    "starts with Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Inbox, Intake and Workflows %s",
     async (_case, settings, enabled) => {
       if (settings !== null) writeFileSync(settingsFile.path, JSON.stringify(settings));
       expect(readSignedInItemsEnabled(await readFirstMenuBar())).toEqual(enabled);
     },
   );
 
-  it("enables Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Intake and Workflows when the user signs in, and disables them when the user signs out", async () => {
+  it("enables Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Inbox, Intake and Workflows when the user signs in, and disables them when the user signs out", async () => {
     const readEnabled = async (use: (menu: MainMenu["Service"]) => Effect.Effect<unknown>) =>
       readSignedInItemsEnabled((await runWithMenu(use)).menuBar);
     expect(await readEnabled((menu) => menu.setSignedIn(true))).toEqual([
@@ -219,10 +220,11 @@ describe("MainMenu", () => {
       true,
       true,
       true,
+      true,
     ]);
     expect(
       await readEnabled((menu) => Effect.all([menu.setSignedIn(true), menu.setSignedIn(false)])),
-    ).toEqual([false, false, false, false, false, false, false, false, false]);
+    ).toEqual([false, false, false, false, false, false, false, false, false, false]);
   });
 
   it("shows the window and sends the page signOut when Sign Out is chosen", async () => {
@@ -272,10 +274,11 @@ describe("MainMenu", () => {
     },
   );
 
-  it("holds Office with ⌘⇧O, Intake with ⌘⇧I, Workflows with ⌘⇧W, then a separator and one dimmed No Threads, in Go at start", async () => {
+  it("holds Office with ⌘⇧O, Inbox with no shortcut, Intake with ⌘⇧I, Workflows with ⌘⇧W, then a separator and one dimmed No Threads, in Go at start", async () => {
     const items = listMenuItems(await readFirstMenuBar(), "Go");
     expect(items.map((item) => [item.label ?? item.type, item.accelerator, item.enabled])).toEqual([
       ["Office", "CmdOrCtrl+Shift+O", false],
+      ["Inbox", undefined, false],
       ["Intake", "CmdOrCtrl+Shift+I", false],
       ["Workflows", "CmdOrCtrl+Shift+W", false],
       ["separator", undefined, undefined],
@@ -285,6 +288,7 @@ describe("MainMenu", () => {
 
   it.each([
     ["Office", "openOffice"],
+    ["Inbox", "openInbox"],
     ["Intake", "openIntake"],
     ["Workflows", "openWorkflows"],
   ])(
@@ -303,6 +307,7 @@ describe("MainMenu", () => {
     );
     expect(listMenuItems(menuBar, "Go").map((item) => [item.label, item.accelerator])).toEqual([
       ["Office", "CmdOrCtrl+Shift+O"],
+      ["Inbox", undefined],
       ["Intake", "CmdOrCtrl+Shift+I"],
       ["Workflows", "CmdOrCtrl+Shift+W"],
       [undefined, undefined],
@@ -338,6 +343,7 @@ describe("MainMenu", () => {
     );
     expect(listMenuItems(menuBar, "Go").map((item) => item.label)).toEqual([
       "Office",
+      "Inbox",
       "Intake",
       "Workflows",
       undefined,

@@ -150,6 +150,7 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "assistant",
   "signal",
   "plugin",
+  "externalEntity",
 ];
 
 /**

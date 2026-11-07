@@ -19,6 +19,7 @@ const buildPlugin = (id: string, contributions: PluginDetail["contributions"]): 
   config: {},
   contributions,
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 const PAPER = {

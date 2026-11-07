@@ -1,9 +1,29 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { isId } from "@hercule/contract";
 import { projectsQuery } from "../../../app/queries";
 import { isWindowVisible } from "../../../app/window-visibility";
 import { WorkScreen } from "./-work-screen";
 import { workBoardQuery } from "./-work-board";
+
+/**
+ * The search params of Work: `task` names a Task whose card the board brings
+ * into view and puts the keyboard on, as when the Inbox's See its Task goes
+ * here.
+ */
+export interface WorkSearch {
+  readonly task?: string | undefined;
+}
+
+/**
+ * Returns Work's search params from the URL's. A `task` that is not an id is
+ * dropped, so the screen never acts on a malformed link. A dropped param is
+ * returned as `undefined` rather than left out, because the router lays the
+ * returned params over the URL's.
+ */
+const validateWorkSearch = (search: Record<string, unknown>): WorkSearch => ({
+  task: isId(search.task) ? search.task : undefined,
+});
 
 /**
  * Work: every unfinished Task as a card, placed by stage in a lane per
@@ -20,6 +40,7 @@ import { workBoardQuery } from "./-work-board";
  */
 export const Route = createFileRoute("/_connected/_shell/work")({
   staticData: { title: "Work" },
+  validateSearch: validateWorkSearch,
   loader: ({ context: { controller, queryClient } }) => {
     const { client } = controller;
     if (isWindowVisible()) void queryClient.prefetchQuery(workBoardQuery(client));
@@ -30,5 +51,6 @@ export const Route = createFileRoute("/_connected/_shell/work")({
 
 function WorkRoute(): JSX.Element {
   const { controller } = Route.useRouteContext();
-  return <WorkScreen controller={controller} />;
+  const { task } = Route.useSearch();
+  return <WorkScreen controller={controller} taskToShow={task} />;
 }

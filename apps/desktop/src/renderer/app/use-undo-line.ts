@@ -3,8 +3,8 @@
  * goes, and what Undo says it did. Work and the Inbox share it, because they
  * share the undo stack (`undo-stack.ts`).
  */
-import { useEffect, useState } from "react";
-import type { UndoStack } from "./undo-stack";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { describeUndoOutcome, type UndoStack } from "./undo-stack";
 
 /** How long the undo line stays after a move, and after a failure, which takes longer to read. */
 const MOVE_LINE_MS = 5_200;
@@ -22,24 +22,32 @@ export interface UndoLineState {
 const QUIET_LINE: UndoLineState = { text: "", canUndo: false, isShown: false, serial: 0 };
 
 /** What `useUndoLine` returns. */
-export interface UndoLineControls<Page> {
+export interface UndoLineControls {
   readonly line: UndoLineState;
   /** Shows `text` on the line, with Undo when `canUndo` is true, and starts its timer again. */
   readonly say: (text: string, canUndo: boolean) => void;
   /**
-   * Reverses the newest gesture of the stack, passing `page` to the gesture
-   * (see `Gesture.undo`), and says what happened. An undo that is already
-   * running makes this do nothing.
+   * Reverses the newest gesture of the stack, passing the page that
+   * `useUndoLine` was given to the gesture (see `Gesture.undo`), and says what
+   * happened. An undo that is already running makes this do nothing.
    */
-  readonly undo: (page: Page) => void;
+  readonly undo: () => void;
 }
 
 /**
- * Holds the undo line for `undoStack`. The line hides itself 5.2 seconds
- * after a gesture and 8 seconds after a failure, and starts again on every new
- * line.
+ * Holds the undo line for `undoStack`, for as long as the page that calls it
+ * is mounted. The line hides itself 5.2 seconds after a gesture and 8 seconds
+ * after a failure, and starts again on every new line.
+ *
+ * `buildPage` returns what this page lends to a gesture when it is undone (see
+ * `Gesture.undo`). It is called when Undo is pressed, so it may use the
+ * newest state of the page. While the page is mounted, the stack knows a page
+ * undoes by itself (`UndoStack.registerOpenPage`).
  */
-export function useUndoLine<Page>(undoStack: UndoStack<Page>): UndoLineControls<Page> {
+export function useUndoLine<Page>(
+  undoStack: UndoStack<Page>,
+  buildPage: () => Page,
+): UndoLineControls {
   const [line, setLine] = useState<UndoLineState>(QUIET_LINE);
 
   const say = (text: string, canUndo: boolean): void => {
@@ -59,23 +67,17 @@ export function useUndoLine<Page>(undoStack: UndoStack<Page>): UndoLineControls<
     };
   }, [line.serial, line.isShown, line.canUndo]);
 
-  const undo = (page: Page): void => {
-    void undoStack.undo(page).then((outcome) => {
-      switch (outcome.kind) {
-        case "empty":
-          say("Nothing to undo.", false);
-          return;
-        case "busy":
-          return;
-        case "reversed":
-          say(
-            `Put back: ${outcome.words}.${outcome.note === undefined ? "" : ` ${outcome.note}`}`,
-            false,
-          );
-          return;
-        case "failed":
-          say(`Could not put back: ${outcome.words}. ${outcome.reason}`, false);
-      }
+  // The newest builder, so a later render's state is what a gesture is lent.
+  const buildPageRef = useRef(buildPage);
+  useLayoutEffect(() => {
+    buildPageRef.current = buildPage;
+  });
+  useEffect(() => undoStack.registerOpenPage(), [undoStack]);
+
+  const undo = (): void => {
+    void undoStack.undo(buildPageRef.current()).then((outcome) => {
+      const report = describeUndoOutcome(outcome);
+      if (report !== undefined) say(report.text, false);
     });
   };
 

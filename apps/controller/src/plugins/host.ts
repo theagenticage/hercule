@@ -36,6 +36,7 @@ import {
   type PluginCapability,
   type PluginMark,
   type PluginSecrets,
+  type QualifiedEntityKindDeclaration,
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import {
@@ -77,6 +78,7 @@ import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
+import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
 import { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
@@ -102,6 +104,7 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "event-sources",
   "events",
   "resources",
+  "entities",
   "workflow-actions",
 ];
 
@@ -380,6 +383,7 @@ const buildRegistrationHost = (
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
+  otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("harnesses")
     ? {
@@ -486,7 +490,14 @@ const buildRegistrationHost = (
     ? {
         eventSources: {
           register: (contribution) =>
-            registerEventSourceContribution(manifest, contribution, declared, kinds, sources),
+            registerEventSourceContribution(
+              manifest,
+              contribution,
+              declared,
+              kinds,
+              sources,
+              otherPluginsSources,
+            ),
         },
       }
     : {}),
@@ -705,6 +716,7 @@ const make = Effect.gen(function* () {
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
+    otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
       plugin.register(
@@ -717,6 +729,7 @@ const make = Effect.gen(function* () {
           kinds,
           sources,
           actions,
+          otherPluginsSources,
         ),
       ),
     ).pipe(
@@ -946,6 +959,7 @@ const make = Effect.gen(function* () {
             kinds,
             sources,
             actions,
+            registeredSources,
           );
           const registered = status._tag !== "errored";
           if (registered) {
@@ -1039,6 +1053,21 @@ const make = Effect.gen(function* () {
       ),
 
     readDefaultIntakeSettings,
+
+    /**
+     * Returns the entity kinds a plugin declares, qualified, in the order it
+     * declares them, whatever the status of the plugin. They are empty for a
+     * plugin whose registration failed or was refused, because none of its
+     * sources was registered.
+     */
+    listEntityKinds: (
+      pluginId: string,
+    ): Effect.Effect<ReadonlyArray<QualifiedEntityKindDeclaration>> =>
+      Effect.map(Ref.get(eventSources), (sources) =>
+        sources
+          .filter((source) => source.pluginId === pluginId)
+          .flatMap((source) => source.entityKinds),
+      ),
 
     /**
      * Returns the Intake settings in effect at the plugin's level: the
@@ -1215,6 +1244,7 @@ export const PluginHostLayer: Layer.Layer<
   | ConnectionTypes
   | IngestExecutor
   | OpenSignals
+  | EntityObservations
   | PromotionState
 > = Layer.mergeAll(ActivePluginsLayer, PluginIntakeLayer).pipe(
   Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),

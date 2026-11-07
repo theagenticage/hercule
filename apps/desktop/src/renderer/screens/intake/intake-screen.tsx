@@ -42,7 +42,7 @@ import {
 import { useTrackingRows } from "../../app/tracking";
 import { createHandoffFlights } from "./handoff-flight";
 import { IntakeDock } from "./intake-dock";
-import { InboxZero } from "./inbox-zero";
+import { ToDoClear } from "./to-do-clear";
 import { IntakeFoot } from "./intake-foot";
 import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
 import { IntakeList, type BulkHighlight, type SignalRowAction } from "./intake-list";
@@ -99,8 +99,8 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * On To do, Tracking lies under the list, folded, or opened over the whole
  * list column (`trackingOpen`, which `onTrackingOpenChange` changes; opening
  * it clears the selected signal). The rows of Tracking that wait on the user
- * count in To do, so a list with no signal but such rows is not at inbox
- * zero. While Tracking is open, the split follows its selected row
+ * count in To do, so a list with no signal but such rows is not at To do
+ * clear. While Tracking is open, the split follows its selected row
  * (`selectedTaskId`, which `onSelectTask` changes): the pane shows that row,
  * and the pane's links call `onOpenDestination` with where they go: a run, the
  * thread whose Request waits, or the signal that waits. A click on a row of
@@ -164,7 +164,7 @@ export function IntakeScreen({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   // Tracking as last read gives what follows each read at once: the counts of
-  // the Hercule segment, Intake's row and the tabs, and inbox zero. The rows
+  // the Hercule segment, Intake's row and the tabs, and To do clear. The rows
   // Tracking draws, its head's counts and the keys' walk use the held rows,
   // which lag the read while the pointer is on the list column.
   const readTrackingRows = useTrackingRows();
@@ -604,9 +604,9 @@ export function IntakeScreen({
     },
     confirmHandoff: heldTracking.confirmHandoff,
   };
-  // Inbox zero takes the place of the empty To do list on the All tab, and
+  // To do clear takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
-  const inboxZero =
+  const toDoClear =
     view === "to-do" &&
     pluginId === null &&
     listedSignals.length === 0 &&
@@ -666,8 +666,8 @@ export function IntakeScreen({
                 timezone={timezone}
                 focusSelectedRow={focusSelectedRow}
                 empty={
-                  inboxZero ? (
-                    <InboxZero
+                  toDoClear ? (
+                    <ToDoClear
                       timezone={timezone}
                       arriving={held.arriving}
                       paneShown={paneShown}
@@ -687,7 +687,7 @@ export function IntakeScreen({
                 }
                 foot={
                   <>
-                    {view === "to-do" && pluginId === null && !inboxZero && (
+                    {view === "to-do" && pluginId === null && !toDoClear && (
                       <IntakeFoot timezone={timezone} />
                     )}
                     <IntakeDock

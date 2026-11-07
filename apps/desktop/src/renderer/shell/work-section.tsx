@@ -1,6 +1,10 @@
-import { useSyncExternalStore, type JSX } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore, type JSX } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
+import { readAcknowledgedInboxArrival, subscribeInboxArrival } from "../app/inbox-arrival";
 import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
+import { trackBody } from "../app/motion";
+import { inboxCountQuery, userQuery } from "../app/queries";
 import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
 import { IntakeIcon } from "../icons/intake";
@@ -17,16 +21,21 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   Office or Work. It is selected on Work only: the Office has its own row
  *   just below, which stays selected on the Office as before. With no count.
  * - The office, with no count.
- * - Intake, ending in its To do count in marigold: the open signals and the
- *   rows of Tracking that wait on the user. The count is hidden at 0.
+ * - The Inbox, ending in a plain grey count of the cards with a clock on them,
+ *   hidden at 0, and one small marigold dot while the Inbox holds an arrival
+ *   this client has not shown the user yet (see `InboxRow`).
+ * - Intake, which keeps its row until the Inbox takes it, ending in its To do
+ *   count in marigold: the open signals and the rows of Tracking that wait on
+ *   the user. The count is hidden at 0.
  * - Workflows, with no count: a total of the user's workflows gives the user
  *   nothing to act on. What a run waits on the user for shows in Waiting on
  *   you instead. The row is also selected on a run's page, because a run
  *   belongs to its workflow, as the book draws it.
  * - Discussions and Wiki, with no count either.
  *
- * The shell's loader reads the To do list and Tracking's reads, and keeps
- * them cached for the life of the window, so nothing here waits in practice.
+ * The shell's loader reads the To do list, Tracking's reads and the Inbox's
+ * counts, and keeps them cached for the life of the window, so nothing here
+ * waits in practice.
  */
 export function WorkSection(): JSX.Element {
   const toDoCount = useToDoCount();
@@ -63,6 +72,7 @@ export function WorkSection(): JSX.Element {
         <OfficeIcon />
         <span>The office</span>
       </Link>
+      <InboxRow />
       {/* A screen reader reads the count with what it counts, as it does the
           Hercule segment's: "Intake, 8 to do". */}
       <Link
@@ -93,5 +103,71 @@ export function WorkSection(): JSX.Element {
         <span>Wiki</span>
       </Link>
     </section>
+  );
+}
+
+/** How far the Inbox's count sits below its place before it rolls into it, in pixels. */
+const COUNT_ROLL_DEPTH = 4;
+
+/**
+ * Renders the Inbox's count, and rolls it 4px into place on `hand` when the
+ * number changes, so the eye sees that a move or an arrival changed it. The
+ * first number it shows does not roll.
+ */
+function InboxCount({ value }: { readonly value: number }): JSX.Element {
+  const element = useRef<HTMLElement>(null);
+  const shown = useRef(value);
+  useLayoutEffect(() => {
+    if (shown.current === value) return;
+    shown.current = value;
+    if (element.current === null) return;
+    const body = trackBody(element.current);
+    body.set({ y: COUNT_ROLL_DEPTH });
+    body.to({ y: 0 }, "hand");
+  }, [value]);
+  return (
+    <b ref={element} className="count">
+      {value}
+    </b>
+  );
+}
+
+/**
+ * Renders the Inbox's row: the count of cards with a clock on them
+ * (`onTheClock`), in the plain grey `.count` and hidden at 0, and a 6px
+ * marigold dot while `newestArrival` is above the arrival this client last
+ * acknowledged (see `acknowledgeInboxArrival`). The dot says something new
+ * came while the user was elsewhere. An update to a card the user already
+ * has never raises it, because only an arrival moves `newestArrival`.
+ *
+ * It is its own component, so a change of the count draws this row alone.
+ * A screen reader reads the dot and the count with the name: "Inbox, 22
+ * waiting, something new".
+ */
+function InboxRow(): JSX.Element {
+  const { controller } = useRouteContext({ from: "/_connected/_shell" });
+  const { client } = controller;
+  const { username } = useSuspenseQuery(userQuery(client)).data;
+  const { onTheClock, newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
+  const acknowledgedArrival = useSyncExternalStore(subscribeInboxArrival, () =>
+    readAcknowledgedInboxArrival(controller.url, username),
+  );
+  const hasNewArrival = newestArrival > acknowledgedArrival;
+  const description = [
+    onTheClock > 0 ? `${String(onTheClock)} waiting` : null,
+    hasNewArrival ? "something new" : null,
+  ].filter((part) => part !== null);
+  return (
+    <Link
+      to="/inbox"
+      className="nav-row"
+      activeProps={SELECTED_LINK_PROPS}
+      aria-label={description.length > 0 ? `Inbox, ${description.join(", ")}` : undefined}
+    >
+      <IntakeIcon />
+      <span>Inbox</span>
+      {hasNewArrival && <i className="nav-new" />}
+      {onTheClock > 0 && <InboxCount value={onTheClock} />}
+    </Link>
   );
 }

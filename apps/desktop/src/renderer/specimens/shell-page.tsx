@@ -17,6 +17,7 @@
  * - workflows.tsx, which opens Workflows;
  * - fleet.tsx, which opens the Fleet page or a machine's page;
  * - work.tsx, which opens the Work board;
+ * - inbox.tsx, which opens the Inbox;
  * - run.tsx, which opens a run's page;
  * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
  *   list with an open Discussion or page.
@@ -65,6 +66,7 @@ import type {
   HandoffLeg,
   Harness,
   IgnoreRuleWithCatches,
+  Inbox,
   Input,
   MemoryDocument,
   MemoryEntry,
@@ -132,6 +134,8 @@ import {
   profilesQuery,
   projectsQuery,
   harnessesQuery,
+  inboxCountQuery,
+  inboxQuery,
   providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
@@ -202,6 +206,7 @@ import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
+import { Route as InboxRoute } from "../routes/_connected/_shell/inbox";
 import { Route as WorkRoute } from "../routes/_connected/_shell/work";
 import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
 import { Route as MachineRoute } from "../routes/_connected/_shell/fleet/$runnerId";
@@ -469,6 +474,8 @@ interface OpenScreens {
   readonly workflows?: WorkflowsRecords;
   readonly fleet?: FleetRecords;
   readonly work?: WorkRecords;
+  /** What `externalEntity.queryInbox` returns. */
+  readonly inbox?: Inbox;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
@@ -632,6 +639,7 @@ const seedQueryCache = (
     workflows,
     fleet,
     work,
+    inbox,
     run,
     discussions,
     wiki,
@@ -870,6 +878,14 @@ const seedQueryCache = (
   }
   if (work !== undefined) {
     queryClient.setQueryData(queryKeys.workBoard(), work.board);
+  }
+  // The sidebar's Inbox row reads the counts on every screen. Without an Inbox, nothing is on the clock.
+  queryClient.setQueryData(
+    inboxCountQuery(client).queryKey,
+    inbox?.counts ?? { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
+  );
+  if (inbox !== undefined) {
+    queryClient.setQueryData(inboxQuery(client).queryKey, inbox);
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1153,6 +1169,13 @@ const buildRouter = (
     // cache already holds both.
     loader: undefined,
   } as never);
+  const inboxRoute = InboxRoute.update({
+    id: "/inbox",
+    path: "/inbox",
+    getParentRoute: () => shellRoute,
+    // The real loader starts the Inbox's read, and the cache already holds it.
+    loader: undefined,
+  } as never);
   const fleetRoute = FleetRoute.update({
     id: "/fleet/",
     path: "/fleet/",
@@ -1227,6 +1250,7 @@ const buildRouter = (
         intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
         workRoute,
+        inboxRoute,
         fleetRoute,
         machineRoute,
         machineActivityRoute,
@@ -1293,6 +1317,9 @@ const findFleetDrawnSelector = (path: string): string => {
 
 /** The selector of what the Work board draws last: a card, which the lanes draw after the first render. */
 const WORK_DRAWN_SELECTOR = ".board-lanes .desk-card";
+
+/** The selector of what the Inbox draws last: a row on a place's surface, or the page of an Inbox with no card. */
+const INBOX_DRAWN_SELECTOR = ".inbox-place .inbox-row, .inbox-clear, .inbox-welcome";
 
 /**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
@@ -1413,6 +1440,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   if (screens.work !== undefined && document.querySelector(WORK_DRAWN_SELECTOR) === null) {
     throw new Error("Work drew no card. Check the page's console for the error.");
   }
+  if (screens.inbox !== undefined && document.querySelector(INBOX_DRAWN_SELECTOR) === null) {
+    throw new Error(
+      "The Inbox drew no row and no empty page. Check the page's console for the error.",
+    );
+  }
   if (
     screens.discussions !== undefined &&
     document.querySelector(findListDrawnSelector(path, OPEN_DISCUSSION_PART)) === null
@@ -1530,6 +1562,7 @@ async function mountShellSpecimen(
   }
   if (screens.fleet !== undefined) await waitForElement(findFleetDrawnSelector(path));
   if (screens.work !== undefined) await waitForElement(WORK_DRAWN_SELECTOR);
+  if (screens.inbox !== undefined) await waitForElement(INBOX_DRAWN_SELECTOR);
   if (screens.discussions !== undefined) {
     await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
   }
@@ -1761,10 +1794,23 @@ export async function mountWorkflowsSpecimen(
  */
 export async function mountWorkSpecimen(records: SidebarRecords, work: WorkRecords): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
+    groupBy: "project",
     foldedLaneIds: work.foldedLaneIds,
     display: DEFAULT_WORK_DISPLAY,
   });
   await mountShellSpecimen(records, "/work", { work });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Inbox open: the main pane shows the app's real Inbox screen, drawn
+ * from `inbox`, with the grouping and the order of Requests the user has not
+ * changed. Returns once a row is in the document. Fails when the page has no
+ * `#root`, draws no sidebar row and no Inbox row, or tries to read a record the
+ * cache does not hold.
+ */
+export async function mountInboxSpecimen(records: SidebarRecords, inbox: Inbox): Promise<void> {
+  await mountShellSpecimen(records, "/inbox", { inbox });
 }
 
 /**

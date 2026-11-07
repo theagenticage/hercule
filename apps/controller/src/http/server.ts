@@ -108,6 +108,7 @@ import {
   runAttachmentSweepLoop,
   runIngestReconciler,
   runHarnessReleaseCheckLoop,
+  runEntityPruneLoop,
   runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
   runScheduler,
@@ -485,6 +486,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(runAttachmentSweepLoop);
     // Runner Metrics rows older than the retention window are deleted once an hour.
     yield* Effect.forkScoped(runRunnerMetricsPruneLoop);
+    // External Entities nothing needs are deleted once a day.
+    yield* Effect.forkScoped(runEntityPruneLoop);
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);

@@ -1,23 +1,49 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { chooseLaneId, type HeldChange, type WorkProject } from "@hercule/client-core/work";
+import {
+  chooseLaneId,
+  listContextLaneIds,
+  type HeldChange,
+  type WorkProject,
+} from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import { waitForStillHand } from "../../app/motion";
 
 /** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
 const NOTE_SHOWN_MS = 10_000;
 
-/** Returns the element a held change would happen at: the failing card, or the cell where the new Task would land. */
-const findChangeTarget = (
+/** Returns the ids of the lanes the board draws `card` in, given how it is grouped. */
+const listDrawnLaneIds = (
+  card: WorkCard,
+  board: WorkBoard,
+  projects: readonly WorkProject[],
+  groupBy: string,
+): readonly string[] =>
+  board.groupings.some((grouping) => grouping.kind === groupBy)
+    ? listContextLaneIds(card, board.places, groupBy)
+    : [chooseLaneId(card, new Set(projects.map((project) => project.id)))];
+
+/**
+ * Returns every element a held change would happen at: all drawn copies of
+ * the failing card (a Task under two places has a card in each lane), or the
+ * cell of each lane where the new Task would land. Returns none when the
+ * change has no place on the page, for example under a filter.
+ */
+const findChangeTargets = (
   scroller: HTMLElement | null,
   change: HeldChange,
   card: WorkCard | undefined,
+  board: WorkBoard | undefined,
   projects: readonly WorkProject[],
-): Element | null => {
-  if (scroller === null) return null;
-  if (change.kind === "failure") return scroller.querySelector(`[data-card-id="${change.cardId}"]`);
-  if (card === undefined) return null;
-  const laneId = chooseLaneId(card, new Set(projects.map((project) => project.id)));
-  return scroller.querySelector(`[data-lane-id="${laneId}"][data-stage="${card.stage}"]`);
+  groupBy: string,
+): readonly Element[] => {
+  if (scroller === null) return [];
+  if (change.kind === "failure")
+    return [...scroller.querySelectorAll(`[data-card-id="${CSS.escape(change.cardId)}"]`)];
+  if (card === undefined || board === undefined) return [];
+  const cells = listDrawnLaneIds(card, board, projects, groupBy).map(
+    (laneId) => `[data-lane-id="${CSS.escape(laneId)}"][data-stage="${card.stage}"]`,
+  );
+  return [...scroller.querySelectorAll(cells.join(","))];
 };
 
 /** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */
@@ -37,6 +63,8 @@ const describeChange = (change: HeldChange, card: WorkCard | undefined): string 
  * seconds.
  *
  * `board` is the board as read, not as drawn: a held card is only in this one.
+ * `groupBy` is how the board is grouped, so that a change is waited for at
+ * the lanes that are drawn: a Project lane, or a lane for an outside place.
  * A change that waits for a drag to end is released after the drop, not
  * during it.
  */
@@ -44,6 +72,7 @@ export const useHeldChanges = ({
   held,
   board,
   projects,
+  groupBy,
   isCarrying,
   scrollRef,
   release,
@@ -51,14 +80,15 @@ export const useHeldChanges = ({
   readonly held: readonly HeldChange[];
   readonly board: WorkBoard | undefined;
   readonly projects: readonly WorkProject[];
+  readonly groupBy: string;
   readonly isCarrying: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly release: (key: string) => void;
 }): string | null => {
   const [note, setNote] = useState<{ readonly text: string } | null>(null);
-  const latest = useRef({ held, board, projects, isCarrying, release });
+  const latest = useRef({ held, board, projects, groupBy, isCarrying, release });
   useEffect(() => {
-    latest.current = { held, board, projects, isCarrying, release };
+    latest.current = { held, board, projects, groupBy, isCarrying, release };
   });
   const waits = useRef(new Map<string, AbortController>());
 
@@ -77,8 +107,15 @@ export const useHeldChanges = ({
       const findCard = (): WorkCard | undefined =>
         latest.current.board?.cards.find((each) => each.id === change.cardId);
       void waitForStillHand({
-        target: () =>
-          findChangeTarget(scrollRef.current, change, findCard(), latest.current.projects),
+        targets: () =>
+          findChangeTargets(
+            scrollRef.current,
+            change,
+            findCard(),
+            latest.current.board,
+            latest.current.projects,
+            latest.current.groupBy,
+          ),
         isDragging: () => latest.current.isCarrying,
         signal: controller.signal,
       }).then((isStill) => {

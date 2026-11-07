@@ -279,7 +279,7 @@ export interface IntakeMoves {
   /**
    * Records that the user's own action changes `signalIds`, such as an
    * answer from the pane, so the list applies the change at once, even under
-   * the pointer, and inbox zero arrives when it empties To do. Call it when
+   * the pointer, and To do clear arrives when it empties To do. Call it when
    * the action starts, before it is sent.
    */
   readonly registerOwnChanges: (signalIds: ReadonlyArray<string>) => void;

@@ -8,6 +8,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { createUndoStack, type Gesture } from "./undo-stack";
 import { useUndoLine } from "./use-undo-line";
 
+const SAVED = Promise.resolve(true);
+
 const reversing = (words: string, note?: string): Gesture<string> => ({
   words,
   undo: () => Promise.resolve(note),
@@ -15,10 +17,10 @@ const reversing = (words: string, note?: string): Gesture<string> => ({
 
 describe("useUndoLine", () => {
   it("says nothing was there to undo", async () => {
-    const { result } = renderHook(() => useUndoLine(createUndoStack<string>()));
+    const { result } = renderHook(() => useUndoLine(createUndoStack<string>(), () => "page"));
 
     act(() => {
-      result.current.undo("page");
+      result.current.undo();
     });
 
     await waitFor(() => {
@@ -30,20 +32,30 @@ describe("useUndoLine", () => {
     });
   });
 
+  it("lets the stack know a page is open while the page is mounted", () => {
+    const stack = createUndoStack<string>();
+    const { unmount } = renderHook(() => useUndoLine(stack, () => "page"));
+    expect(stack.hasOpenPage()).toBe(true);
+
+    unmount();
+
+    expect(stack.hasOpenPage()).toBe(false);
+  });
+
   it("says what was put back, with the note the gesture gives", async () => {
     const stack = createUndoStack<string>();
-    stack.push(reversing("Moved A"));
-    stack.push(reversing("Moved B", "It went last."));
-    const { result } = renderHook(() => useUndoLine(stack));
+    stack.reserve(reversing("Moved A"), SAVED);
+    stack.reserve(reversing("Moved B", "It went last."), SAVED);
+    const { result } = renderHook(() => useUndoLine(stack, () => "page"));
 
     act(() => {
-      result.current.undo("page");
+      result.current.undo();
     });
     await waitFor(() => {
       expect(result.current.line.text).toBe("Put back: Moved B. It went last.");
     });
     act(() => {
-      result.current.undo("page");
+      result.current.undo();
     });
     await waitFor(() => {
       expect(result.current.line.text).toBe("Put back: Moved A.");
@@ -52,11 +64,14 @@ describe("useUndoLine", () => {
 
   it("says why a gesture could not be put back", async () => {
     const stack = createUndoStack<string>();
-    stack.push({ words: "Moved A", undo: () => Promise.reject(new Error("The Task is gone.")) });
-    const { result } = renderHook(() => useUndoLine(stack));
+    stack.reserve(
+      { words: "Moved A", undo: () => Promise.reject(new Error("The Task is gone.")) },
+      SAVED,
+    );
+    const { result } = renderHook(() => useUndoLine(stack, () => "page"));
 
     act(() => {
-      result.current.undo("page");
+      result.current.undo();
     });
 
     await waitFor(() => {
@@ -73,7 +88,7 @@ describe("useUndoLine", () => {
     });
 
     it("hides a line after 5.2 seconds, and a line without Undo after 8", () => {
-      const { result } = renderHook(() => useUndoLine(createUndoStack<string>()));
+      const { result } = renderHook(() => useUndoLine(createUndoStack<string>(), () => "page"));
 
       act(() => {
         result.current.say("Moved A.", true);
@@ -103,7 +118,7 @@ describe("useUndoLine", () => {
     });
 
     it("starts the timer again when a new line comes", () => {
-      const { result } = renderHook(() => useUndoLine(createUndoStack<string>()));
+      const { result } = renderHook(() => useUndoLine(createUndoStack<string>(), () => "page"));
 
       act(() => {
         result.current.say("Moved A.", true);

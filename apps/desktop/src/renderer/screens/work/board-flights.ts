@@ -7,6 +7,7 @@
  */
 import {
   computeCenter,
+  ensureOverlayLayer,
   findBody,
   ghostElement,
   isMotionReduced,
@@ -38,17 +39,9 @@ const HEAD_DEPTH = 18;
  * the desk and sits over the board, so a copy flying across a scroll that the
  * change itself causes is not carried off with the page.
  */
-const findFlightLayer = (scroller: HTMLElement): HTMLElement | null => {
+const ensureFlightLayer = (scroller: HTMLElement): HTMLElement | null => {
   const desk = scroller.closest<HTMLElement>(".work-desk");
-  if (desk === null) return null;
-  let layer = desk.querySelector<HTMLElement>(`:scope > .${FLIGHT_LAYER_CLASS}`);
-  if (layer === null) {
-    layer = document.createElement("div");
-    layer.className = FLIGHT_LAYER_CLASS;
-    layer.setAttribute("aria-hidden", "true");
-    desk.append(layer);
-  }
-  return layer;
+  return desk === null ? null : ensureOverlayLayer(desk, FLIGHT_LAYER_CLASS);
 };
 
 /** Takes the layer away when no copy is left in it. */
@@ -95,18 +88,24 @@ export const launchFlights = (
   cards: readonly HTMLElement[],
   gap: number,
 ): readonly CardFlight[] => {
-  const layer = isMotionReduced() ? null : findFlightLayer(scroller);
+  const layer = isMotionReduced() ? null : ensureFlightLayer(scroller);
   if (layer === null) return [];
   const view = scroller.getBoundingClientRect();
   return cards
     .filter((card) => isInView(card, view))
-    .map((card, index) => ({
-      ghost: ghostElement(card, layer),
-      delay: staggerDelay(index, gap),
-      cardId: card.dataset["cardId"] ?? "",
-      laneId: card.closest<HTMLElement>("[data-lane-id]")?.dataset["laneId"] ?? "",
-      stage: card.dataset["stage"] ?? "",
-    }));
+    .map((card, index) => {
+      const laneId = card.closest<HTMLElement>("[data-lane-id]")?.dataset["laneId"] ?? "";
+      const ghost = ghostElement(card, layer);
+      // The copy lives outside the lane, so it keeps which lane its card was in.
+      ghost.dataset["fromLane"] = laneId;
+      return {
+        ghost,
+        delay: staggerDelay(index, gap),
+        cardId: card.dataset["cardId"] ?? "",
+        laneId,
+        stage: card.dataset["stage"] ?? "",
+      };
+    });
 };
 
 /** How a copy looks when it arrives at its target. */
@@ -169,9 +168,14 @@ export const TO_BUTTON: FlightEnd = { scale: 0.9, staysSolidUntilSmall: false };
 /** Where a card dropped on something that now stands for it ends: tiny, fading all the way. */
 export const INTO_PLACE: FlightEnd = { scale: 0.1, staysSolidUntilSmall: false };
 
-/** Returns the key of the count a card grows from (`laneId` and `stage`), or of its copy in flight (`""` and the card's id). */
-const buildGrowthKey = (laneId: string, stageOrCardId: string): string =>
-  `${laneId}/${stageOrCardId}`;
+/** Returns the key of the count a card grows from (`laneId` and `stage`). */
+const buildCountGrowthKey = (laneId: string, stage: string): string => `${laneId}/${stage}`;
+
+/**
+ * Returns the key of the copy in flight that a card grows from. A Task under
+ * two outside places has a card in each lane, so the lane is part of the key.
+ */
+const buildCopyGrowthKey = (laneId: string, cardId: string): string => `card:${laneId}/${cardId}`;
 
 /** Where a card that is about to grow out of a count starts: the center and size of the count, or of the copy still flying there. */
 interface GrowthOrigin {
@@ -189,7 +193,7 @@ interface GrowthOrigin {
  * flying from an earlier fold, that copy as it looks now. The copies are
  * removed, because their cards take over. Call it before the change.
  *
- * Returns the origins by a key built with `buildGrowthKey`.
+ * Returns the origins by a key built with `buildCountGrowthKey` or `buildCopyGrowthKey`.
  */
 export const recordGrowthOrigins = (
   scroller: HTMLElement,
@@ -200,7 +204,7 @@ export const recordGrowthOrigins = (
     const laneId = lane.dataset["laneId"] ?? "";
     for (const count of lane.querySelectorAll<HTMLElement>("[data-fold-row] [data-stage]")) {
       const place = computeCenter(count.getBoundingClientRect());
-      origins.set(buildGrowthKey(laneId, count.dataset["stage"] ?? ""), {
+      origins.set(buildCountGrowthKey(laneId, count.dataset["stage"] ?? ""), {
         ...place,
         scale: 0.1,
         opacity: 0,
@@ -211,12 +215,15 @@ export const recordGrowthOrigins = (
   const layer = scroller.closest(".work-desk")?.querySelector(`:scope > .${FLIGHT_LAYER_CLASS}`);
   for (const ghost of layer?.querySelectorAll<HTMLElement>("[data-card-id]") ?? []) {
     const place = computeCenter(ghost.getBoundingClientRect());
-    origins.set(buildGrowthKey("", ghost.dataset["cardId"] ?? ""), {
-      ...place,
-      scale: findBody(ghost)?.values.s ?? 1,
-      opacity: 1,
-      isLive: true,
-    });
+    origins.set(
+      buildCopyGrowthKey(ghost.dataset["fromLane"] ?? "", ghost.dataset["cardId"] ?? ""),
+      {
+        ...place,
+        scale: findBody(ghost)?.values.s ?? 1,
+        opacity: 1,
+        isLive: true,
+      },
+    );
     for (const animation of ghost.getAnimations()) animation.cancel();
     removeFlight(ghost);
   }
@@ -238,8 +245,8 @@ export const growCardsFromOrigins = (
     const laneId = lane.dataset["laneId"] ?? "";
     for (const card of lane.querySelectorAll<HTMLElement>("[data-card-id]")) {
       const origin =
-        origins.get(buildGrowthKey("", card.dataset["cardId"] ?? "")) ??
-        origins.get(buildGrowthKey(laneId, card.dataset["stage"] ?? ""));
+        origins.get(buildCopyGrowthKey(laneId, card.dataset["cardId"] ?? "")) ??
+        origins.get(buildCountGrowthKey(laneId, card.dataset["stage"] ?? ""));
       if (origin === undefined) continue;
       const body = trackBody(card);
       if (reduced) {

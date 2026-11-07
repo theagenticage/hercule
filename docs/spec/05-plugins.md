@@ -278,6 +278,90 @@ interface EmittedEvent {
 - **`openSignals()`** lists the open signals of this Connection, so a source can watch the threads that have one: for example, read a pull request's reviews only while a review request on it is open. *(Amended 2026-10-13, [#655](https://github.com/theagenticage/hercule/issues/655).)* Each signal carries `event`, the `dedupKey` and `occurredAt` of the event it was raised from, as the source emitted them; for a signal that replaced an older one, those of the event that replaced it. A source tells which of its events a signal stands for by `dedupKey`, such as the Linear notification behind a mention, and compares `occurredAt` with times on its own system's clock. It never compares its own times with `raisedAt`, or orders signals by it: `raisedAt` is the controller's clock, which can differ from the system's and can be set back, and a rule that catches a newer event leaves the older signal open.
 - **`title` and `author`** are new envelope fields, set at emit and never changed ([./08-events-and-connections.md](./08-events-and-connections.md) section 2).
 
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)* **Entity kinds, the poll's report and lookups.** An event source gains the parts below. All are optional and additive. The rules the core applies to them are in [./20-external-entities.md](./20-external-entities.md).
+
+```ts
+interface EventSourceContribution {
+  // ...the fields above, plus:
+  entityKinds?: EntityKindDeclaration[]       // the kinds of External Entity this source reports; none when left out
+  entityLookup?: EntityLookup                  // recognize, search and resolve, for the Add button on Work
+}
+
+interface EntityKindDeclaration {
+  word: string                                 // "pull-request"; identified as "github/pull-request"
+  noun: string                                 // "Pull request", the word the UI uses; at most 40 characters
+  refPrefix: string                            // "github:pr:"; every ref of this kind starts with it
+  card?: "rich" | "compact"                    // how much room it deserves; left out means rich. A context kind has no card
+  pace: "fast" | "slow" | "context"            // fast has a clock, slow has none, context is a place with no card
+  patience: number                             // hours before a wait counts as due
+  identifier: string                           // template over the observation's fields: "#{number}"
+  reference?: string                           // a field name: how a line points at it when the identifier is not a name
+  person: string | null                        // the field holding the person it is about
+  owner: string | null                         // the field that says it is yours
+  home?: string                                // the word of the kind of place it is usually grouped under
+  section?: string                             // the word of the level shown on a row, below its home
+  connect?: string                             // what first run says this kind brings; at most 120 characters
+  groupable?: { caption: string }              // present when this kind can be a lane or a filter: "Linear project"
+  status: Record<string, EntityStatusDeclaration> | null  // each status by key; null for a kind with no status
+  facts: EntityFactDeclaration[]               // at most 3
+  reasons: Record<string, { say: string; tone: "plain" | "attention" | "good" | "bad" }>  // the sentence for each reason a card is here
+}
+
+interface EntityStatusDeclaration {
+  shape: "ring" | "dashed" | "quarter" | "half" | "most" | "fork" | "join" | "check" | "cross" | "hold" | "alert"
+  tone: "quiet" | "active" | "attention" | "good" | "bad"
+  word: string                                 // "Changes requested"
+  norm?: boolean                               // the usual state of the kind
+  stage?: TaskStage                            // the stage a Task starts at when its entity has this status
+}
+interface EntityFactDeclaration { field: string; form: "delta" | "count" | "word" | "date" | "money" | "bars"; unit?: string }
+
+// What the core hands the ingest handle of one Connection.
+interface IngestContext {
+  // ...the members above, plus:
+  entities?: {                                 // the `entities` capability; present only with it
+    reconcile(inventory: { kind: string; complete: boolean; observations: EntityObservation[] }): Effect<void, PluginError>
+    refresh(observations: EntityObservation[]): Effect<void, PluginError>
+    listWanted(kind: string, limit: number): Effect<string[]>
+    reportMissing(ref: string, reason: "inaccessible" | "deleted"): Effect<void, PluginError>
+  }
+}
+
+interface EntityObservation {                  // a full one; a partial one (partial: true) needs only kind, ref and title
+  kind: string; ref: string; title: string; partial?: boolean
+  url?: string; lifecycle?: "open" | "completed" | "abandoned"; status?: string; reason?: string
+  fields: Record<string, string | number | null>
+  concerns: ("assigned" | "opened" | "review-requested" | "mentioned")[]   // `following` is refused
+  ownedByYou?: boolean
+  repository?: { target: { remote: string }; head?: { remote: string; branch: string } }
+  progress?: { fraction: number; done?: number; total?: number }; targetDate?: string
+  relations?: { complete: boolean; partOf: string[]; linked: string[] }
+  waitingSince?: string; sourceUpdatedAt: string; sourceRevision?: string
+}
+
+interface EntityLookup {
+  recognize(text: string): EntityRecognition[]                    // pure: no fetch, no credentials, no redirect; at most 20
+  search(connection: IngestConnection, ctx: EntityLookupContext,
+         query: { text: string; scopeRef?: string; limit: number }): Effect<EntityObservation[], AuthError | PluginError>
+  resolve(connection: IngestConnection, ctx: EntityLookupContext,
+          target: EntityRecognition): Effect<EntityResolution, AuthError | PluginError>
+}
+type EntityRecognition =
+  | { recognized: "ref"; form: "url" | "identifier"; ref: string; kind: string }
+  | { recognized: "scoped"; form: "url" | "identifier"; kind?: string; identifier: string; scopeHint?: string }
+type EntityResolution = { found: EntityObservation } | { missing: "inaccessible" | "not-found" | "unknown" } | { outOfScope: true }
+interface EntityLookupContext { credentials(): Effect<Record<string, string>, ConnectionUnavailable> }
+```
+
+- **An entity kind is a facet of the event source,** as a signal kind is. It is not a contribution and not a fifth extension point. The host qualifies `word`, `home` and `section` to `<pluginId>/<word>` (section 1). A kind is not a signal kind: `linear/issue` can be both, in two namespaces.
+- **Everything is data.** A declaration is serializable and bounded: no callback, no markup, nothing that draws. The desktop never imports a plugin. A kind declares no membership: which side a card lies on comes from `card`, its clock from `pace`, and its places from relations. The prototype's `workflows` field is not declared, because a workflow declares the kinds it takes.
+- **The host validates it at load** and refuses the source, naming the kind, for: a duplicate word; a `refPrefix` that equals or overlaps another kind's, in any plugin; an `identifier` template with no `{field}` placeholder or with a stray brace; a status shape or tone outside the fixed sets; a `stage` that is not a Task stage; more than three facts; a `home` or `section` that names no kind of the same source. The catalog keeps the declarations for a disabled plugin (section 3), and `PluginDetail` returns them beside `intake`.
+- **The poll reports what it read.** A poll returns no data, so `entities` is how a feed says what is true now. A plugin reads its whole inventory of one kind, then calls `reconcile` once. The core refuses a bad inventory before it writes anything ([./20-external-entities.md](./20-external-entities.md#51-reconcile)). `entities` is present only with the `entities` capability. The core applies the kind table to the raw `fields` and a status key and stores the result, so a plugin never draws.
+- **`reconcile` emits no event and raises no signal.** Its writes are stamped `plugin:<id>`. Its transaction uses `assertConnectionIngesting`, as `emit` does.
+- **Lookups run outside any transaction.** `EntityLookupContext` holds `credentials` only, read at the moment of the call. The host gives each call a timeout of 8 seconds and fails it with `PluginError`. Recognition is the plugin's own and credential-free. Resolution always uses the target plugin's eligible Connection ([./20-external-entities.md](./20-external-entities.md#10-search-recognition-and-resolution)).
+- **The manifest's `mark`** gains optional `hue` and `solid` beside it, for a mark drawn in a declared hue.
+- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **A plugin declares at most one `entityLookup`.** The host reaches a plugin's lookup by plugin id, through the Connections of that source's type. A second source of the same plugin that declares a lookup is refused at load, naming both sources. A plugin with several sources puts the lookup on one of them.
+
 ### 4.4 Workflow action
 
 A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md); step semantics in [./07-workflows.md](./07-workflows.md)).
@@ -420,6 +504,7 @@ V1 plugin capabilities:
 | `events` | activate | emit events into the pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)) |
 | `notifications` | activate | emit a Notification, withdraw one of its own ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
 | `resources` | activate | read Resources (repos, mailboxes) relevant to the plugin's connection types, e.g. to ~~seed~~ build a watch list *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* As built, an ingest handle lists the Resources linked to its Connection through `ctx.resources` (section 4.3) |
+| `entities` | activate *(added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032))* | report External Entities from a poll: `reconcile`, `refresh`, `listWanted` and `reportMissing` on the ingest handle's context (section 4.3). The kinds themselves are declared on the event source, which needs `event-sources` |
 | `secrets` | activate | plugin-scoped secrets service (section 7) |
 | `kv` | activate | plugin-scoped state (section 6) |
 | `public-api` | activate | a client for the public API (below) |
@@ -428,7 +513,7 @@ Rules:
 
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
-- *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **~~Three~~ ~~Six~~ ~~Eight~~ Nine of the ~~eleven~~ twelve exist so far**: `harnesses`, `kv` and `secrets` ([#63](https://github.com/theagenticage/hercule/issues/63)), `connections` ([#71](https://github.com/theagenticage/hercule/issues/71)), `event-sources` ([#77](https://github.com/theagenticage/hercule/issues/77)), ~~and~~ `workflow-actions` ([#78](https://github.com/theagenticage/hercule/issues/78), registration only; executed since [#79](https://github.com/theagenticage/hercule/issues/79)), and `events` and `resources` ([#89](https://github.com/theagenticage/hercule/issues/89)), and `providers` *(amended 2026-10-31, [#933](https://github.com/theagenticage/hercule/issues/933): `registerProvider`; `hostApi` is 3, section 9)*. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the count was not updated when `connections` and `event-sources` shipped.)* All ~~eleven~~ twelve names *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406): `providers` joined `harnesses`)* are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
+- *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **~~Three~~ ~~Six~~ ~~Eight~~ Nine of the ~~eleven~~ twelve exist so far**: `harnesses`, `kv` and `secrets` ([#63](https://github.com/theagenticage/hercule/issues/63)), `connections` ([#71](https://github.com/theagenticage/hercule/issues/71)), `event-sources` ([#77](https://github.com/theagenticage/hercule/issues/77)), ~~and~~ `workflow-actions` ([#78](https://github.com/theagenticage/hercule/issues/78), registration only; executed since [#79](https://github.com/theagenticage/hercule/issues/79)), and `events` and `resources` ([#89](https://github.com/theagenticage/hercule/issues/89)), and `providers` *(amended 2026-10-31, [#933](https://github.com/theagenticage/hercule/issues/933): `registerProvider`; `hostApi` is 3, section 9)*. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the count was not updated when `connections` and `event-sources` shipped.)* All ~~eleven~~ twelve names *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406): `providers` joined `harnesses`)* are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* `entities` joins them: ten of thirteen exist.
 - *(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* **Text generation is not a capability yet.** The controller's `TextGeneration` service exists ([./06-providers.md](./06-providers.md) section 14), but the capability that hands it to a plugin is [#285](https://github.com/theagenticage/hercule/issues/285), so it is not in the table above. How a plugin may use it, once it can, is in section 8.
 - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Signals need no capability of their own.** A plugin's signal kinds are part of its event source, so `event-sources` declares them and the core raises them (section 4.3). A Signal is not a Notification, so `notifications` plays no part in it (section 11).
 - Everything crossing a capability API is plain serializable data.
@@ -583,6 +668,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* **`hostApi` is 6.** ~~`hostApi` is 5.~~ `modelArgument` moves from the provider entry of a harness's `runs` onto each account kind in it, and is required there. A harness plugin built against 5 is refused at load. The reason is in [./06-providers.md](./06-providers.md) section 2.
 - *(Amended 2026-10-31, [#940](https://github.com/theagenticage/hercule/issues/940).)* **`hostApi` is 7.** ~~`hostApi` is 6.~~ `catalogSource` is now `{ kind: "harness-probe", harnessId }` or `{ kind: "provider-api", url, headers }`, where `url` and `headers` follow the rules of `keyCheck`: the controller reads the catalog with the account's key, and the plugin passes `parseCatalogBody` beside the definition when it registers the provider (`ProviderRegistrationOptions`). A usage parser may also return `expiresAt` (absent: the body says nothing about expiry; `null`: the credential does not expire). A plugin built against 6 is refused at load ([./06-providers.md](./06-providers.md) sections 16 and 18).
 - *(Amended 2026-11-03, [#985](https://github.com/theagenticage/hercule/issues/985).)* **`hostApi` is 8.** ~~`hostApi` is 7.~~ `HarnessDefinition` gains a required `releaseSource`, `{ kind: "npm", package }`, the place where the harness's releases are published. A harness plugin built against 7 declares none, so it is refused at load ([./06-providers.md](./06-providers.md) section 2).
+- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **External Entities add to the host contract and leave `hostApi` at 8.** A new capability name, `entities`, and the optional `entityKinds` and `entityLookup` on an event source, `IngestContext.entities`, and `hue` and `solid` on the manifest's `mark` are all new optional facets, so by the rules above a plugin built against 8 loads and runs unchanged. A plugin that requests `entities` has it granted, and one that does not gets no `entities` member on its context.
 
 ## 10. Connections and plugin-defined connection types
 

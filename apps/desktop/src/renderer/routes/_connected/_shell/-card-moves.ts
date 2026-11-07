@@ -33,7 +33,11 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
-import type { CardMover, PutBackRequest } from "../../../app/card-mover";
+import {
+  buildCachedInboxWriter,
+  type CardMover,
+  type PutBackRequest,
+} from "../../../app/card-mover";
 import type { Gesture, UndoStack } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { flipBoard } from "../../../screens/work/flip-board";
@@ -74,6 +78,14 @@ export interface CardMoves {
   readonly moveCardWithMotion: (move: CardMove, words: string, note?: string) => void;
   /** Reverses the newest gesture on the undo stack, and says what happened. */
   readonly undoLastMove: () => void;
+  /**
+   * Adds `gesture`, something the user did that this screen did not make
+   * itself (such as adding a thing from a source), as the newest on the undo
+   * stack at once. See `UndoStack.reserve` for `willHold`.
+   */
+  readonly reserveGesture: (gesture: Gesture<unknown>, willHold: Promise<boolean>) => void;
+  /** Shows `text` on the undo line with Undo, for a gesture that was reserved and has now been saved. */
+  readonly sayWithUndo: (text: string) => void;
   /** What the undo line shows. */
   readonly line: UndoLineState;
   /**
@@ -102,7 +114,7 @@ const isSamePlace = (a: CardPlacement, b: CardPlacement | undefined): boolean =>
  * the board, which the motion of a move measures.
  *
  * - `moveCard` shows the move at once, sends `task.move` after the moves
- *   before it, and pushes a gesture on `undoStack`. A move that fails leaves
+ *   before it, and reserves a gesture on `undoStack` at once. A move that fails leaves
  *   the pending list, so the card goes back, and the line says why. The
  *   gesture of a failed move is taken off the stack.
  * - When the controller accepts a move, the board in the query cache is
@@ -147,7 +159,6 @@ export const useCardMoves = ({
     setPendingMoves(pendingRef.current);
   };
   const nextId = useRef(1);
-  const { line, say, undo } = useUndoLine(undoStack);
 
   /**
    * Makes `change` and glides every part of the board that moves because of
@@ -258,6 +269,11 @@ export const useCardMoves = ({
     return { isExact: restore.exact, request: sendMove(restore.move, true, isUndoWanted) };
   };
 
+  const { line, say, undo } = useUndoLine(undoStack, () => ({
+    putCardBack,
+    writeInboxEdit: buildCachedInboxWriter(queryClient),
+  }));
+
   const makeMove = (
     move: CardMove,
     words: string,
@@ -274,23 +290,20 @@ export const useCardMoves = ({
       () => true,
       () => false,
     );
-    const gesture: Gesture<CardMover> = {
-      words,
-      undo: async (mover) => {
-        const putBack = mover.putCardBack(from, wasSaved);
-        if (putBack === undefined) throw new Error("The card is no longer on the board.");
-        await putBack.request;
-        if (!(await wasSaved)) throw new Error(NOT_SAVED_MESSAGE);
-        return putBack.isExact ? undefined : CARD_NOT_EXACT_NOTE;
+    undoStack.reserve(
+      {
+        words,
+        undo: async (mover) => {
+          const putBack = mover.putCardBack(from, wasSaved);
+          if (putBack === undefined) throw new Error("The card is no longer on the board.");
+          await putBack.request;
+          if (!(await wasSaved)) throw new Error(NOT_SAVED_MESSAGE);
+          return putBack.isExact ? undefined : CARD_NOT_EXACT_NOTE;
+        },
       },
-    };
-    undoStack.push(gesture);
+      wasSaved,
+    );
     say(note === undefined ? `${words}.` : `${words}. ${note}`, true);
-    // A move that failed has nothing to undo. Taking its gesture off the stack
-    // keeps the next Undo for the move before it.
-    void wasSaved.then((saved) => {
-      if (!saved) undoStack.remove(gesture);
-    });
   };
 
   const moveCard = (move: CardMove, words: string, note?: string): void => {
@@ -299,10 +312,6 @@ export const useCardMoves = ({
 
   const moveCardWithMotion = (move: CardMove, words: string, note?: string): void => {
     makeMove(move, words, note, true);
-  };
-
-  const undoLastMove = (): void => {
-    undo({ putCardBack });
   };
 
   return {
@@ -315,7 +324,13 @@ export const useCardMoves = ({
           ),
     moveCard,
     moveCardWithMotion,
-    undoLastMove,
+    undoLastMove: undo,
+    reserveGesture: (gesture, willHold) => {
+      undoStack.reserve(gesture, willHold);
+    },
+    sayWithUndo: (text) => {
+      say(text, true);
+    },
     line,
     sayWithoutUndo: (text) => {
       say(text, false);

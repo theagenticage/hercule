@@ -407,7 +407,7 @@ describe.each(["hand-off", "act"] as const)("handing a plugin signal off with %s
 });
 
 describe("which Task a handoff continues", () => {
-  it("continues the most recently updated open Task of the thread, sets it in-progress, and passes over done and other threads", async () => {
+  it("continues the open Task with the oldest link to the thread, whatever was updated since, sets it in-progress, and passes over done and other threads", async () => {
     await withServer(async (harness) => {
       const { base } = harness;
       const token = await completeSetup(base);
@@ -420,8 +420,9 @@ describe("which Task a handoff continues", () => {
       await updateTask(base, token, done.id, { status: "done" });
       await createTaskWithRef(base, token, "Other thread", OTHER_ISSUE_REF);
       await tick();
-      // Touching the older Task makes it the most recently updated open one.
-      await updateTask(base, token, older.id, { title: "Older open Task, edited" });
+      // Touching the newer Task makes it the most recently updated open one.
+      // The oldest link still decides.
+      await updateTask(base, token, newer.id, { title: "Newer open Task, edited" });
       await tick();
       const signalId = await insertPluginSignal(harness, {
         threadRef: ISSUE_REF,
@@ -433,7 +434,7 @@ describe("which Task a handoff continues", () => {
       });
       const open = await readSignal(base, token, signalId);
       expect(joinLine(open, `hand-to-${workflow.id}`)).toBe(
-        "Starts Implement on acme/api#7, continues Older open Task, edited",
+        "Starts Implement on acme/api#7, continues Older open Task",
       );
 
       await handOff("hand-off", base, token, signalId, workflow.id);

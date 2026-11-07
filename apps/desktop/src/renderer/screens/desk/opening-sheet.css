@@ -1,0 +1,74 @@
+/* The sheet a card opens into: the drawing's `.open` (`css/open.css` of the
+   Inbox). Its bounds and corner are written per frame by
+   `opening-sheet-controller.ts`, because a sheet that changes shape is the one
+   thing a transform cannot do. The sheet is drawn in a portal on the page, so
+   it lies over the whole window. */
+.opening-sheet-fade {
+  /* No box of its own: it carries the sheet's opacity under Reduce motion. */
+  position: static;
+}
+.opening-sheet {
+  position: fixed;
+  z-index: 60;
+  color: var(--ink);
+  outline: none;
+}
+/* The moves take no pointer while the sheet opens, so the second click of a
+   double click never starts anything. */
+.opening-sheet[data-arming] * {
+  pointer-events: none;
+}
+/* Paper and shadow come in as the card's words go, so the sheet grows out of
+   the card and does not appear over it. */
+.opening-sheet-paper {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--stock);
+  box-shadow: var(--h-carry);
+}
+.opening-sheet-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--stock-sheen);
+  pointer-events: none;
+}
+/* Rides the top edge, outside the clip, so a part of it may stand over the edge. */
+.opening-sheet-head {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+}
+.opening-sheet-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  /* `--sheet-progress` is written on the sheet for every frame. Left to
+     inherit, an unregistered custom property restyles every element inside the
+     sheet on every frame. Resetting it here stops that at the clip, so the
+     words inside cannot read it: anything driven by it lies outside the clip. */
+  --sheet-progress: 0;
+}
+/* The words lie at the destination in the page while the window grows round
+   them, so they never reflow during the opening. */
+.opening-sheet-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.opening-sheet-content,
+.opening-sheet-words {
+  display: flow-root;
+}
+@media (forced-colors: active) {
+  .opening-sheet-paper {
+    border: 1px solid CanvasText;
+  }
+}

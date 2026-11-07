@@ -20,7 +20,7 @@ const SCREENS = join(HERE, "../../../screens");
 /**
  * The folders and single files whose sources are compiled: the route folders
  * of the three pages, of a run's page and of Fleet, the screens they draw, the folders
- * they share, the desk's parts that Work and the Inbox draw, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, the Work board's screen, its parts, its read and its moves with their undo line and offline time, and the Done moves' queue and toast. A folder is compiled
+ * they share, the desk's parts that Work and the Inbox draw, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, the Work board's screen, its parts, its read and its moves with their undo line and offline time, the Inbox's screen, its parts, its read and its moves, and the Done moves' queue and toast. A folder is compiled
  * without its tests.
  */
 const PATHS = [
@@ -57,6 +57,11 @@ const PATHS = [
   join(SCREENS, "intake/use-take-off-tracking.ts"),
   join(SCREENS, "intake/use-tracking-controls.ts"),
   join(SCREENS, "work"),
+  join(SCREENS, "inbox"),
+  join(HERE, "inbox.tsx"),
+  join(HERE, "-inbox-screen.tsx"),
+  join(HERE, "-inbox-read.ts"),
+  join(HERE, "-inbox-moves.ts"),
   join(HERE, "work.tsx"),
   join(HERE, "-work-screen.tsx"),
   join(HERE, "-work-board.ts"),

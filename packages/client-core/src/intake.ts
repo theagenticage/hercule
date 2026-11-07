@@ -720,14 +720,16 @@ export const moveSignalSelection = (
   );
 
 /**
- * Returns the initials a message's author shows in place of an avatar: the
- * first letter of the first and the last word of `name`, in capitals, such
- * as "MV" for "Marta de Vries", or one letter for a one-word name.
+ * Returns the initials that stand in for a person's avatar everywhere: the
+ * first letter of the first and the last word of `name`, in capitals, such as
+ * "MV" for "Marta de Vries", or one letter for a one-word name. A space, a
+ * dot, a dash or an underscore ends a word, so a username such as
+ * "marta.devries" gives "MD". Returns "" when `name` has no letter.
  */
 export const buildInitials = (name: string): string => {
-  const words = name.split(/\s+/).filter((word) => word !== "");
-  const first = words[0]?.charAt(0) ?? "";
-  const last = words.length > 1 ? words.at(-1)!.charAt(0) : "";
+  const words = name.split(/[\s._-]+/).filter((word) => word !== "");
+  const first = Array.from(words[0] ?? "")[0] ?? "";
+  const last = words.length > 1 ? (Array.from(words.at(-1)!)[0] ?? "") : "";
   return (first + last).toUpperCase();
 };
 

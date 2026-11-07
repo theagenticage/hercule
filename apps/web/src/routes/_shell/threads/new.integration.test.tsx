@@ -1115,6 +1115,7 @@ describe("Composer: model menu shapes", () => {
               config: {},
               contributions: [],
               intake: { eventKinds: [], signalKinds: [] },
+              entityKinds: [],
             },
           ],
         },

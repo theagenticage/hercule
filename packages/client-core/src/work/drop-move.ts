@@ -49,12 +49,19 @@ export interface DropRequest {
  *   card floats to the top of its cell. A slot after the last card shown goes
  *   before the first hidden card, so the card does not jump over cards the
  *   user has not seen.
+ * - On a lane for an outside place the drop changes the stage only: no
+ *   `projectId` and no `afterTaskId`, because the lane belongs to the source
+ *   and a cell is still a Project and a stage. The card goes last in its
+ *   stored cell, and the lane shows it by that order.
  * - On a folded lane there is no slot, so `afterTaskId` is absent and the
  *   card goes last in its cell.
  */
 export const buildDropMove = (request: DropRequest): DropMove => {
   const { movingCard, lane, beforeCardId } = request;
   const stage = request.stage ?? movingCard.stage;
+  if (lane.lane.outside !== undefined) {
+    return { move: { taskId: movingCard.id, stage }, targetProjectId: null };
+  }
   const isOwnLane = lane.lane.cells.some((cell) =>
     cell.cards.some((card) => card.id === movingCard.id),
   );

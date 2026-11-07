@@ -8,6 +8,12 @@
  * run that failed. So Undo puts back what the user did, one gesture at a time,
  * and nothing else.
  *
+ * The order of the stack is the order of the user's gestures, not the order in
+ * which the controller answers. A gesture takes its place when the user makes
+ * it (`reserve`), while its request is still running, and its inverse waits for
+ * that request itself. A request that fails, or that changes nothing, takes
+ * its gesture off again and leaves every other gesture where it was.
+ *
  * The stack belongs to one controller and one user. The owner creates a new
  * stack, or calls `clear`, when either changes and when the user signs out.
  * Nothing is saved: closing the window drops it.
@@ -54,15 +60,55 @@ export type UndoOutcome =
    */
   | { readonly kind: "failed"; readonly words: string; readonly reason: string };
 
+/** What the user is told about an undo: the sentence, and whether it reports a failure. */
+export interface UndoReport {
+  readonly text: string;
+  readonly isFailure: boolean;
+}
+
+/**
+ * Returns the sentence that tells the user what `outcome` did, or `undefined`
+ * for `busy`, which did nothing and needs no words.
+ */
+export const describeUndoOutcome = (outcome: UndoOutcome): UndoReport | undefined => {
+  switch (outcome.kind) {
+    case "empty":
+      return { text: "Nothing to undo.", isFailure: false };
+    case "busy":
+      return undefined;
+    case "reversed":
+      return {
+        text: `Put back: ${outcome.words}.${outcome.note === undefined ? "" : ` ${outcome.note}`}`,
+        isFailure: false,
+      };
+    case "failed":
+      return {
+        text: `Could not put back: ${outcome.words}. ${outcome.reason}`,
+        isFailure: true,
+      };
+  }
+};
+
 export interface UndoStack<Page> {
-  /** Adds the gesture the user just made as the newest. Drops the oldest past `MAX_GESTURES`. */
-  readonly push: (gesture: Gesture<Page>) => void;
   /**
-   * Takes `gesture` off the stack wherever it is, for a gesture whose request
-   * failed and so has nothing to reverse. Does nothing when it is not on the
-   * stack, such as when an undo has already taken it.
+   * Adds the gesture the user just made as the newest, before its request has
+   * answered. Drops the oldest past `MAX_GESTURES`.
+   *
+   * `willHold` resolves to whether the request changed something that can be
+   * reversed. When it resolves to false (the request failed, or changed
+   * nothing), the gesture leaves the stack wherever it then is, and the
+   * gestures around it keep their order. Does nothing at that point when an
+   * undo has already taken the gesture. `willHold` must not reject.
    */
-  readonly remove: (gesture: Gesture<Page>) => void;
+  readonly reserve: (gesture: Gesture<Page>, willHold: Promise<boolean>) => void;
+  /**
+   * Notes that a page that undoes by itself is open, until the returned
+   * function is called. While one is open, that page listens for the Undo key,
+   * so nobody else should.
+   */
+  readonly registerOpenPage: () => () => void;
+  /** Returns whether a page that undoes by itself is open (see `registerOpenPage`). */
+  readonly hasOpenPage: () => boolean;
   /**
    * Reverses the newest gesture and removes it. Never rejects: a failure is
    * an outcome the screen can say. `page` goes to the gesture (see
@@ -80,13 +126,24 @@ export interface UndoStack<Page> {
 export const createUndoStack = <Page>(): UndoStack<Page> => {
   let gestures: readonly Gesture<Page>[] = [];
   let running = false;
+  let openPages = 0;
   return {
-    push: (gesture) => {
+    reserve: (gesture, willHold) => {
       gestures = [...gestures, gesture].slice(-MAX_GESTURES);
+      void willHold.then((isHeld) => {
+        if (!isHeld) gestures = gestures.filter((each) => each !== gesture);
+      });
     },
-    remove: (gesture) => {
-      gestures = gestures.filter((each) => each !== gesture);
+    registerOpenPage: () => {
+      openPages += 1;
+      let isRegistered = true;
+      return () => {
+        if (!isRegistered) return;
+        isRegistered = false;
+        openPages -= 1;
+      };
     },
+    hasOpenPage: () => openPages > 0,
     undo: async (page) => {
       if (running) return { kind: "busy" };
       const newest = gestures.at(-1);

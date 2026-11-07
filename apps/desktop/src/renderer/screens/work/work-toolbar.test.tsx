@@ -11,24 +11,24 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EMPTY_FILTER, type Filter } from "@hercule/client-core/desk";
-import { buildLanes, buildWorkFacets } from "@hercule/client-core/work";
-import type { WorkCard } from "@hercule/contract";
+import {
+  buildLanes,
+  buildWorkFacets,
+  listBoardGroupings,
+  PROJECT_FACET_ID,
+} from "@hercule/client-core/work";
+import {
+  buildBoard,
+  buildCard as buildBoardCard,
+  buildPlace,
+} from "@hercule/client-core/work/testing";
+import type { EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
 import type { WorkDisplay } from "./use-work-view";
 import { WorkToolbar } from "./work-toolbar";
 
 /** Returns a card in the invented Northwind Market world, at Exploring, with no facts. */
-const buildCard = (id: string, title: string, overrides: Partial<WorkCard> = {}): WorkCard => ({
-  id,
-  title,
-  stage: "exploring",
-  priority: "normal",
-  boardRank: id,
-  threadCount: 1,
-  createdAt: "2026-11-01T09:00:00.000Z",
-  stageChangedAt: "2026-11-01T09:00:00.000Z",
-  lastActivityAt: "2026-11-01T09:00:00.000Z",
-  ...overrides,
-});
+const buildCard = (id: string, title: string, overrides: Partial<WorkCard> = {}): WorkCard =>
+  buildBoardCard(id, { title, ...overrides });
 
 const STOREFRONT = { id: "storefront", name: "Storefront" };
 const DEPOT_OPS = { id: "depot-ops", name: "Depot ops" };
@@ -50,12 +50,19 @@ const CARDS: readonly WorkCard[] = [
   buildCard("order-history", "Order history hides cancelled items", { projectId: STOREFRONT.id }),
 ];
 
+/** The invented source of the outside places: its mark is one square on the 16 by 16 grid. */
+const PLUGINS = [{ id: "acme", displayName: "Acme Tracker", mark: { paths: ["M2 2h12v12H2z"] } }];
+
+const RETURNS = buildPlace("acme:project:returns", "Returns at the depots");
+const PRICING = buildPlace("acme:project:pricing", "Pricing rules");
+
 const DISPLAY: WorkDisplay = { laneLabels: "side-labels", isStill: false, hasSingleKeys: true };
 
 interface Spies {
   readonly onFoldEverything: () => void;
   readonly onShowKeys: () => void;
   readonly onDisplayChange: (display: WorkDisplay) => void;
+  readonly onGroupByChange: (groupBy: string) => void;
 }
 
 /**
@@ -69,6 +76,8 @@ function Harness({
   spies,
   findValue = "",
   findMatches = [],
+  places = [],
+  groupBy = PROJECT_FACET_ID,
 }: {
   readonly cards?: readonly WorkCard[];
   readonly projects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -76,13 +85,24 @@ function Harness({
   readonly spies?: Partial<Spies>;
   readonly findValue?: string;
   readonly findMatches?: readonly WorkCard[];
+  readonly places?: readonly EntityPlace[];
+  readonly groupBy?: string;
 }): JSX.Element {
   const [filter, setFilter] = useState(initialFilter);
   const [display, setDisplay] = useState(DISPLAY);
-  const facets = buildWorkFacets(buildLanes({ cards }, projects));
+  const board: WorkBoard = {
+    ...buildBoard(...cards),
+    places,
+    groupings: places.length === 0 ? [] : [{ kind: "acme/project", caption: "Acme project" }],
+  };
+  const facets = buildWorkFacets(buildLanes({ cards }, projects), board, PLUGINS);
   return (
     <WorkToolbar
       pill={<span>Overview</span>}
+      groupings={listBoardGroupings(board)}
+      groupBy={groupBy}
+      onGroupByChange={spies?.onGroupByChange ?? vi.fn()}
+      plugins={PLUGINS}
       facets={facets}
       filter={filter}
       onFilterChange={setFilter}
@@ -125,11 +145,17 @@ const getRow = (name: RegExp | string): HTMLElement => {
   return row;
 };
 
+/** Returns the menu that the toolbar button named `name` opens. jsdom has no popover API, so the menu is always in the page but not in the accessibility tree. */
+const getMenu = (name: RegExp | string): HTMLElement =>
+  document.getElementById(
+    screen.getByRole("button", { name }).getAttribute("popovertarget") ?? "",
+  )!;
+
 /** Returns the name of a row that ends in the number of cards it would leave. */
 const withCount = (name: string, count: number): RegExp => new RegExp(`^${name}\\s*${count}$`);
 
 describe("WorkToolbar", () => {
-  it("groups by Project, the one grouping for now", () => {
+  it("groups by Project, and offers no other grouping when no source reports a place", () => {
     render(<Harness />);
 
     const groupBy = screen.getByRole("button", { name: /^Group by\s*Project$/ });
@@ -139,6 +165,61 @@ describe("WorkToolbar", () => {
         .getByRole("menuitemradio", { name: "Project", hidden: true })
         .getAttribute("aria-checked"),
     ).toBe("true");
+    expect(screen.getAllByRole("menuitemradio", { hidden: true })).toHaveLength(1);
+    expect(screen.queryAllByText("From your sources")).toHaveLength(0);
+  });
+
+  it("lists each kind of outside place under From your sources, with its plugin's mark, and reports a pick", async () => {
+    const user = userEvent.setup();
+    const onGroupByChange = vi.fn();
+    render(<Harness places={[RETURNS]} spies={{ onGroupByChange }} />);
+
+    const menu = getMenu(/^Group by/);
+    expect(within(menu).getByText("From your sources")).toBeTruthy();
+    const row = screen.getByRole("menuitemradio", { name: "Acme project", hidden: true });
+    expect(row.querySelector("svg path")).not.toBeNull();
+
+    await user.click(row);
+
+    expect(onGroupByChange).toHaveBeenCalledWith("acme/project");
+  });
+
+  it("says what it groups by on the button", () => {
+    render(<Harness places={[RETURNS]} groupBy="acme/project" />);
+
+    expect(screen.getByRole("button", { name: /^Group by\s*Acme project$/ })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Acme project", hidden: true })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("offers Source and each kind of outside place in the Filter menu, and filters by a place with a captioned chip", async () => {
+    const user = userEvent.setup();
+    const cards = [
+      buildCard("returns-card", "Show depot staff why an item came back", {
+        entityMarks: [{ plugin: "acme", kind: "acme/project" }],
+        contextRefs: [RETURNS.ref],
+      }),
+      buildCard("pricing-card", "Round prices to the cent", {
+        entityMarks: [{ plugin: "acme", kind: "acme/project" }],
+        contextRefs: [PRICING.ref],
+      }),
+      buildCard("plain-card", "Tidy the depot labels"),
+    ];
+    render(<Harness cards={cards} places={[RETURNS, PRICING]} />);
+
+    const menu = getMenu("Filter");
+    expect(within(menu).getByText("From your sources")).toBeTruthy();
+    expect(getRow("Source")).toBeTruthy();
+    await user.click(getRow("Acme project"));
+    await user.click(getRow(withCount("Returns at the depots", 1)));
+
+    expect(
+      screen.getByRole("button", { name: "Remove filter Acme project Returns at the depots" }),
+    ).toBeTruthy();
+    expect(getRow(withCount("Pricing rules", 1))).toBeTruthy();
   });
 
   it("counts, for each state, the cards it would leave", () => {

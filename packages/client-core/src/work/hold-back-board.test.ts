@@ -3,7 +3,7 @@
  * that everything else shows at once.
  */
 import { describe, expect, it } from "vitest";
-import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
+import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
 import { holdBackBoardChanges, buildArrivalKey } from "./hold-back-board";
 
 const NOTHING = new Set<string>();
@@ -100,5 +100,33 @@ describe("holdBackBoardChanges", () => {
 
     expect(listIds(result.board.cards)).toEqual(["a"]);
     expect(result.held).toEqual([]);
+  });
+
+  it("shows a changed place and context flag at once, even when no card changed", () => {
+    const shown = { ...buildBoard(buildCard("a")), places: [buildPlace("acme:r", "Old")] };
+    const latest = {
+      ...buildBoard(buildCard("a")),
+      places: [buildPlace("acme:r", "New")],
+      contextComplete: false,
+    };
+
+    const result = holdBackBoardChanges(shown, latest, NOTHING);
+
+    expect(result.board.places[0]!.title).toBe("New");
+    expect(result.board.contextComplete).toBe(false);
+  });
+
+  it("shows a changed place while it holds a Task that arrived", () => {
+    const shown = { ...buildBoard(buildCard("a")), places: [buildPlace("acme:r", "Old")] };
+    const latest = {
+      ...buildBoard(buildCard("a"), buildCard("new")),
+      places: [buildPlace("acme:r", "New")],
+    };
+
+    const result = holdBackBoardChanges(shown, latest, NOTHING);
+
+    expect(listIds(result.board.cards)).toEqual(["a"]);
+    expect(result.board.places[0]!.title).toBe("New");
+    expect(result.held).toHaveLength(1);
   });
 });

@@ -101,6 +101,18 @@
   padding-top: 8px;
 }
 
+/* Not in the book. The Inbox row's dot: something new came while the user was
+   elsewhere. 6px, in marigold's ink, drawn before the count and pulled 2px
+   toward it so the two read as one. */
+.nav-row > .nav-new {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: -2px;
+  border-radius: 50%;
+  background: var(--you-ink);
+}
+
 .side-h {
   display: flex;
   align-items: center;

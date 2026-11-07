@@ -11,6 +11,11 @@
  * another. They are worked out here, from rows, so no client joins them
  * again.
  *
+ * A card also carries the outside things its Task links (`entityMarks`) and
+ * the refs it sits under (`contextRefs`), and the board carries the records
+ * of those refs (`places`, `edges`, `groupings`), so Work groups and filters
+ * with no further read.
+ *
  * The Task rows are this domain's. The sessions and runs of each Task belong
  * to domains that depend on this one, so this domain declares what it needs
  * as the `TaskBoardFacts` port and the controller daemon implements it
@@ -24,8 +29,14 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   describeFailureCause,
   MAX_BOARD_CARDS,
+  MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
+  MAX_ENTITY_MARKS,
   MAX_TRACKING_FAILURE_CAUSE,
+  type EntityEdge,
+  type EntityGrouping,
+  type EntityMark,
+  type EntityPlace,
   type FailureReason,
   type Forbidden,
   type SessionKind,
@@ -80,6 +91,31 @@ export interface BoardCardFacts {
   readonly lastRunEndedAt: string | undefined;
   /** The failure of the run `tasks.failed_run_id` names, when the Task has one. */
   readonly failure: BoardFailureFact | undefined;
+  /** One mark per kind of the Task's linked things that have a record, in the order they were linked. */
+  readonly entityMarks: ReadonlyArray<EntityMark>;
+  /**
+   * The refs the Task links, then everything above them by `part of`, each
+   * once, nearest first. A linked peer adds nothing.
+   */
+  readonly contextRefs: ReadonlyArray<string>;
+}
+
+/** What the board reads of the outside things its Tasks link and sit under. */
+export interface BoardEntityContext {
+  /** The record of each linked ref and each ref above one, once. Refs with no record are left out. */
+  readonly places: ReadonlyArray<EntityPlace>;
+  /** The current `part of` steps the walk up crossed. */
+  readonly edges: ReadonlyArray<EntityEdge>;
+  /** The groupable kinds that have a place, each with its caption. */
+  readonly groupings: ReadonlyArray<EntityGrouping>;
+  /** False when a limit cut the walk up, or a ref above a link has no record. */
+  readonly contextComplete: boolean;
+}
+
+/** The facts of the Tasks on a board: one set for each Task, and the context all of them share. */
+export interface BoardFacts {
+  readonly cards: ReadonlyArray<BoardCardFacts>;
+  readonly context: BoardEntityContext;
 }
 
 /** The Task a board read asks the facts of. */
@@ -93,7 +129,8 @@ export class TaskBoardFacts extends Context.Service<
   {
     /**
      * Returns the facts of each Task in `tasks`, in the same order, with a
-     * Task that has no session and no run getting empty facts.
+     * Task that has no session and no run getting empty facts, and the
+     * context of the things the Tasks link.
      *
      * The number of statements is fixed, whatever the number of Tasks. It
      * reads no transcript, and the run a Task shows as failed is the one
@@ -102,7 +139,7 @@ export class TaskBoardFacts extends Context.Service<
      */
     readonly readFacts: (
       tasks: ReadonlyArray<BoardFactsRequest>,
-    ) => Effect.Effect<ReadonlyArray<BoardCardFacts>, SqlError>;
+    ) => Effect.Effect<BoardFacts, SqlError>;
   }
 >()("hercule/controller/tasks/TaskBoardFacts") {}
 
@@ -146,6 +183,8 @@ const findOpenQuestion = (
  *   Thread, else the newest session of any kind. It is for navigation only.
  * - `lastActivityAt`: the latest of the Task's creation, the last time a
  *   session of it ended a turn and the last time a run of it ended.
+ * - `entityMarks` and `contextRefs`: copied from the facts, cut to what a
+ *   card can hold (`MAX_ENTITY_MARKS`, `MAX_CARD_CONTEXTS`).
  */
 export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard => {
   const threads = facts.sessions
@@ -197,6 +236,8 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     createdAt: task.createdAt,
     stageChangedAt: task.stageChangedAt,
     lastActivityAt,
+    entityMarks: facts.entityMarks.slice(0, MAX_ENTITY_MARKS),
+    contextRefs: facts.contextRefs.slice(0, MAX_CARD_CONTEXTS),
   };
 };
 
@@ -220,6 +261,11 @@ const make = Effect.gen(function* () {
      * connection and never waits for a writer. A Task may change between two
      * statements, and the push that change makes brings the next read.
      *
+     * The board's `places` are cut at `MAX_BOARD_PLACES` by the read of the
+     * entity records, which then reports an incomplete context. When that, or
+     * a card's `MAX_CARD_CONTEXTS`, cuts anything, or the walk up was cut,
+     * `contextComplete` is false.
+     *
      * The number of statements is fixed, whatever the number of cards.
      */
     query: (): Effect.Effect<WorkBoard, Unauthenticated | Forbidden | SqlError> =>
@@ -229,10 +275,16 @@ const make = Effect.gen(function* () {
         yield* requireGrant("run.query");
         const read = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
         const listed = read.slice(0, MAX_BOARD_CARDS);
-        const cardFacts = yield* facts.readFacts(listed);
+        const { cards, context } = yield* facts.readFacts(listed);
         return {
-          cards: listed.map((task, index) => buildWorkCard(task, cardFacts[index]!)),
+          cards: listed.map((task, index) => buildWorkCard(task, cards[index]!)),
           truncated: read.length > MAX_BOARD_CARDS,
+          places: context.places,
+          edges: context.edges,
+          groupings: context.groupings,
+          contextComplete:
+            context.contextComplete &&
+            cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
         };
       }),
   };

@@ -154,6 +154,29 @@ Relationships: `eventId` points into the event log (the referenced event may be 
 
 An entry MUST carry at least one of `ref`, `eventId`, `runId` (`validation` otherwise; resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `{at, actor}` alone says nothing the actor-stamped `task.updated` event does not. A hand-made task simply has an empty provenance list.
 
+### External Entity
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)*
+
+Purpose: a durable record of one outside thing, such as a pull request or a ticket, kept true by a plugin's polls. It is what the Inbox lists and what Work groups by. It is never a copy of the thing.
+
+Fields: owned by [20 section 1](./20-external-entities.md#1-the-model). One row per canonical External Ref, holding the rendered slots a card draws (identifier, title, status, person, facts) and copies of the kind's `noun`, `card`, `pace` and `patience`, so a card draws after its plugin is gone.
+
+Relationships, all by ref and never by the entity's id, so each outlives pruning:
+
+- **Observation**: one row per ref and Connection. It holds the concerns that Connection reported, whether it can read the ref, and its read bookkeeping. An entity's concern, access and freshness are derived from its observations.
+- **Scan**: one row per Connection and kind, `last_complete_at`.
+- **Relation Claim**: one row per claim that one ref is `part-of` or `linked` to another, by a source, a person or a text, and `current` or `conflicted`. `part-of` is a graph and stays acyclic.
+- **Task link** (`task_entity_links`): one row per Task and ref, written with the Task's provenance and by `takeOn` and `addToWork`. `following` on a link says the user added the thing to Work from nothing that concerned them. The link is the relation and provenance stays the history ([09-tasks.md](./09-tasks.md#entity-links)).
+
+Status axes: none stored. `lifecycle` (`open`, `completed`, `abandoned`) is the source's word and Hercule never sets it. Whether a card is on the Inbox, its `access` and `stale` are worked out on read. A card is dismissed by `dismissed_at`, undone by `restore`.
+
+Identity: Hercule id, and `UNIQUE (ref)`. Two Connections that see one thing share one entity. A ref is not unique across Tasks.
+
+Platform events: none. A poll that changes an entity emits no event and raises no signal. The live topic `externalEntity` nudges clients ([14-web-app.md](./14-web-app.md#wire-format)).
+
+Deletion: no operation deletes an entity. A daily sweep prunes one with no concern, no Task link, no open signal and no dismissal after 30 days without change ([20 section 4.3](./20-external-entities.md#43-pruning)). Claims, links and signals key on the ref, so they stay readable.
+
 ### Run
 
 Purpose: one execution of a frozen Execution Plan, the only thing called a run ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)).
@@ -903,6 +926,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Harness-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `harnessRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
+- **An External Entity is unique on its ref.** *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* One row per canonical ref, so two Connections that see one thing share one record. This is about entities only: the same ref is still carried by many Tasks. Observations, claims and Task links key on the ref, not on the entity's id.
 - ~~**`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **`providerAccountId` with `harnessId`** routes sessions; a Capability Snapshot is keyed by (Provider Account, harness, runner). Harness and provider ids are qualified ids `<pluginId>/<word>` ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
 - **Controller identity** is logical (id plus key material), never an address.
@@ -923,7 +947,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Permission Request *(added 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86))* | `permission.decided` | `{requestId, sessionId, grant, outcome, operation?}`; a platform event, not an audit entry only, so the asking session's `request` subscription receives it ([13-security.md](./13-security.md) section 11) |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised~~/decided~~ *(amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): decided is the platform event above)*, secret created/rotated | [13-security.md](./13-security.md) |
 
-No other entity emits platform events in v1; the set grows additively. Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
+No other entity emits platform events in v1; the set grows additively. *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* External Entities emit none: `reconcile` writes records and announces on the live topic only. Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
 
 ## Post-v1
 

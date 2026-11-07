@@ -22,7 +22,7 @@ import {
   type LinkedResource,
   type OpenSignal,
 } from "@hercule/plugin-host";
-import { TEST_TOKEN } from "./actions/testing";
+import { readJsonBody, TEST_TOKEN } from "./actions/testing";
 import type { GithubIdentity } from "./identity";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
@@ -87,6 +87,49 @@ export const stubGithub = (
 /** Builds a stub client that answers every request with this status and body. */
 export const stubAnswer = (status: number, body: unknown): GithubStub =>
   stubGithub(() => ({ status, body }));
+
+/**
+ * Checks the fragment rules of GraphQL that GitHub enforces and a stub does
+ * not, on every GraphQL document the stub received. Throws an error naming
+ * the first problem:
+ *
+ * - every spread fragment (`...Name`) is defined in the document;
+ * - every defined fragment is reachable from the operation, through spreads,
+ *   because GraphQL refuses a document with a fragment nothing uses
+ *   ("Fragments Must Be Used").
+ *
+ * The documents of this plugin put the operation first and the fragments
+ * after it, each starting with `fragment Name on`. The `graphql` package is
+ * not a dependency of the repository, so this reads just that shape.
+ */
+export const expectValidGraphqlFragments = (stub: GithubStub): void => {
+  for (const request of stub.requests) {
+    const body = readJsonBody(request) as { readonly query?: string } | undefined;
+    if (body?.query === undefined) continue;
+    const definitions = [...body.query.matchAll(/^fragment (\w+) on /gm)];
+    const operation = body.query.slice(0, definitions[0]?.index ?? body.query.length);
+    const bodies = new Map<string, string>(
+      definitions.map((definition, index) => [
+        definition[1]!,
+        body.query!.slice(definition.index, definitions[index + 1]?.index),
+      ]),
+    );
+    const spreadsOf = (text: string): Array<string> =>
+      [...text.matchAll(/\.\.\.(\w+)/g)].map((spread) => spread[1]!);
+    const reachable = new Set<string>();
+    const pending = spreadsOf(operation);
+    while (pending.length > 0) {
+      const name = pending.pop()!;
+      if (reachable.has(name)) continue;
+      if (!bodies.has(name)) throw new Error(`The fragment ${name} is spread but not defined.`);
+      reachable.add(name);
+      pending.push(...spreadsOf(bodies.get(name)!));
+    }
+    for (const name of bodies.keys()) {
+      if (!reachable.has(name)) throw new Error(`The fragment ${name} is defined but never used.`);
+    }
+  }
+};
 
 /**
  * Runs an effect that calls GitHub against a stub client, and returns its

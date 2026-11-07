@@ -105,7 +105,8 @@ import {
   YourWorkLayer,
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
-import { EventKindCatalogLayer, Plugins } from "../plugins";
+import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
+import { ExternalEntityService, ExternalEntityServiceLayer } from "../external-entities";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
@@ -299,6 +300,25 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
+  }),
+);
+
+const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handlers) =>
+  Effect.gen(function* () {
+    const entities = yield* ExternalEntityService;
+    return handlers
+      .handle("queryInbox", () => withApiErrors(entities.queryInbox()))
+      .handle("countInbox", () => withApiErrors(entities.countInbox()))
+      .handle("search", ({ query }) => withApiErrors(entities.search(query)))
+      .handle("listSuggestions", ({ query }) => withApiErrors(entities.listSuggestions(query)))
+      .handle("read", ({ params }) => withApiErrors(entities.read(params.id)))
+      .handle("takeOn", ({ params }) => withApiErrors(entities.takeOn(params.id)))
+      .handle("undoTakeOn", ({ params, payload }) =>
+        withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),
+      )
+      .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
+      .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
+      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)));
   }),
 );
 
@@ -994,6 +1014,12 @@ const operationServices = Layer.mergeAll(
   // The board's read gets each Task's sessions and runs the same way.
   TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
   YourWorkLayer,
+  // Taking an entity on makes a Task through the task service, and reading a
+  // thing at its source goes through the plugin host's lookups.
+  ExternalEntityServiceLayer.pipe(
+    Layer.provide(EntityLookupsLayer),
+    Layer.provide(TaskServiceLayer),
+  ),
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
@@ -1123,6 +1149,7 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  externalEntityRoutes,
   notificationRoutes,
   signalRoutes,
   ignoreRuleRoutes,

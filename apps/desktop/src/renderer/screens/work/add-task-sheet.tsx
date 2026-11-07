@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent, type JSX, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { CheckIcon } from "../../icons/check";
 import { SideSheet } from "../desk";
 import "./add-task-sheet.css";
@@ -29,35 +37,46 @@ const describeLanding = (lane: AddTaskLane): string =>
  *   while a Task is being created does nothing.
  * - `result` says where the last Task landed, such as "Added to Planned.", and
  *   is null before the first.
+ * - `fromSource` is the From a source part, drawn under the New Task field,
+ *   or `null` when no source can be searched. It handles its own keys, such
+ *   as Esc to clear its search.
  * - `onClose` is called by the Close button and by Esc.
  *
- * Esc steps back one thing at a time: it clears the typed title, and when
- * nothing is typed it closes the sheet. The title field has the focus on
- * opening, and again after a Task is created.
+ * Esc steps back one thing at a time: in the title field it clears the typed
+ * title, and anywhere else, or with nothing typed, it closes the sheet. The
+ * title field has the focus on opening, unless `fromSource` took it for its
+ * search, and again after a Task is created.
  */
 export function AddTaskSheet({
   lane,
   onCreate,
   onClose,
   result,
+  fromSource,
 }: {
   readonly lane: AddTaskLane;
   readonly onCreate: (title: string) => Promise<void>;
   readonly onClose: () => void;
   readonly result: string | null;
+  readonly fromSource: ReactNode;
 }): JSX.Element {
   const [title, setTitle] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
+  // The From a source part focuses its search while it mounts, which is before
+  // this runs. The title keeps the focus only when nothing else in the sheet took it.
   useEffect(() => {
-    titleRef.current?.focus({ preventScroll: true });
+    if (bodyRef.current?.contains(document.activeElement) !== true) {
+      titleRef.current?.focus({ preventScroll: true });
+    }
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== "Escape") return;
     event.stopPropagation();
-    if (title === "") {
+    if (title === "" || event.target !== titleRef.current) {
       onClose();
       return;
     }
@@ -86,7 +105,7 @@ export function AddTaskSheet({
 
   return (
     <SideSheet title="Add to Work" onClose={onClose}>
-      <div className="add-task" onKeyDown={handleKeyDown}>
+      <div ref={bodyRef} className="add-task" onKeyDown={handleKeyDown}>
         <form onSubmit={handleSubmit}>
           <label className="field add-task-field">
             <input
@@ -109,6 +128,7 @@ export function AddTaskSheet({
             {result}
           </p>
         )}
+        {fromSource}
       </div>
     </SideSheet>
   );

@@ -82,6 +82,36 @@ export const queryKeys = {
    * which cannot change Your work.
    */
   yourWork: (): LiveQueryKey => ["your-work"],
+  /**
+   * The Inbox's one read (`externalEntity.queryInbox`): its cards, places and
+   * counts. Live topics: `externalEntity` reads it again on every push, and
+   * `task`, `connection` and `plugin` too, because each can move a card in or
+   * out, or change what a card shows (see `buildQueryKeys`).
+   */
+  inbox: (): LiveQueryKey => ["inbox"],
+  /**
+   * The Inbox's counts alone (`externalEntity.countInbox`), which the sidebar
+   * reads on every screen. It is apart from `inbox()` because the shell
+   * holds this read while the Inbox is not open, and the two are read again
+   * for the same pushes.
+   */
+  inboxCount: (): LiveQueryKey => ["inbox-count"],
+  /**
+   * One External Entity (`externalEntity.read`), as an open pane draws it;
+   * without the id, the prefix of every entity read. Live topics: every
+   * `externalEntity`, `connection` and `plugin` push reads the prefix, and a
+   * plain `task` push too (see `buildQueryKeys`). The prefix and not one id,
+   * because a pane embeds its parents' records.
+   */
+  externalEntity: (id?: string): LiveQueryKey =>
+    id === undefined ? ["external-entity"] : ["external-entity", id],
+  /**
+   * Every suggestion list of the Add sheet (`externalEntity.listSuggestions`).
+   * Live topics: `externalEntity` and a plain `task` push, which can give an
+   * entity a live Task or take it away. A search of the source is not keyed
+   * here: a poll cannot change what the source answers.
+   */
+  entitySuggestions: (): LiveQueryKey => ["entity-suggestions"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * One project read by its id. It sits under the `projects` prefix, so
@@ -432,6 +462,43 @@ export const queryKeys = {
 const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), queryKeys.signal()];
 
 /**
+ * The keys of the Inbox's two reads. A card's place on the Inbox depends on
+ * records of other topics: a Task's existence and links decide who has it, a
+ * Connection's status decides `stale`, and a plugin being enabled decides
+ * `kindAvailable`. Those topics map to these keys, so the entity domain
+ * never has to import them to announce a change.
+ */
+const INBOX_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.inbox(), queryKeys.inboxCount()];
+
+/**
+ * The entity reads a plain `task` push makes stale, beyond the Inbox's: an
+ * open entity pane shows which Task has the entity and whether you follow it,
+ * and the Add sheet lists only the entities no live Task has. A Task
+ * created, finished, deleted or linked from anywhere, the CLI included,
+ * changes both and writes no entity row, so no `externalEntity` push comes.
+ * A `derived` push never changes a Task's links or liveness, so it does not
+ * read these, nor the Inbox's.
+ */
+const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.externalEntity(),
+  queryKeys.entitySuggestions(),
+];
+
+/**
+ * The entity reads a `connection` or `plugin` push makes stale: every entity
+ * pane (`kindAvailable`, `stale`, the context's completeness), the Work board
+ * (the same facts on its cards, and the claims a deleted Connection takes
+ * with it) and the Add sheet's suggestions (a deleted Connection takes the
+ * claims that made a thing concern the user, so it stops qualifying). These
+ * changes write no entity row, so no `externalEntity` push comes.
+ */
+const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.externalEntity(),
+  queryKeys.workBoard(),
+  queryKeys.entitySuggestions(),
+];
+
+/**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
  * with no ids means every record of the topic may have changed (the
  * controller sends one first on every subscription), so it returns the list
@@ -441,12 +508,15 @@ const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), 
  *
  * `derived` is the push's flag of the same name, which only a `task` push can
  * carry. It means a Task's card changed because of its sessions or runs, and
- * no field of the Task record changed. Only the Work board draws that, so the
- * push reads the board alone. Tracking already follows `run` pushes, and the
- * list, the Task's record and Your work read fields of the Task itself, so
- * reading them again would fetch the same data. A busy agent causes this push
- * every second, and the shell keeps Tracking and Your work active on every
- * screen.
+ * no field of the Task record changed. Only the Work board draws that, so
+ * the push reads the board and nothing else. The Inbox sorts a card by
+ * whether its Task is live and has it, which only a plain `task` push (a
+ * Task created, edited, finished or deleted) or an `externalEntity` push can
+ * change. Tracking already follows `run` pushes, and the list, the Task's
+ * record and Your work read fields of the Task itself, so reading them again
+ * would fetch the same data. A busy agent causes this push every second, and
+ * the shell keeps the Inbox's count active on every screen, so reading it here
+ * would cost a request a second for nothing.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
@@ -465,6 +535,8 @@ export const buildQueryKeys = (
           queryKeys.tracking(),
           queryKeys.trackingDetail(),
           queryKeys.yourWork(),
+          ...INBOX_KEYS,
+          ...TASK_LINK_KEYS,
         ]
       : [
           queryKeys.tasks(),
@@ -472,6 +544,8 @@ export const buildQueryKeys = (
           queryKeys.tracking(),
           ...ids.map((id) => queryKeys.trackingDetail(id)),
           queryKeys.yourWork(),
+          ...INBOX_KEYS,
+          ...TASK_LINK_KEYS,
         ];
   }
   // Any runner change refetches the list. A runner's own page is refetched
@@ -528,14 +602,23 @@ export const buildQueryKeys = (
   }
   // Any connection change refetches the list. A connection's own page is
   // refetched only when the push lists its id, or when the push lists no ids.
-  // Every signal read is refetched too, see `SIGNAL_DESCRIBE_KEYS`.
+  // Every signal read is refetched too, see `SIGNAL_DESCRIBE_KEYS`, and so
+  // are the Inbox's reads, because a card is stale while its Connection is.
   if (topic === "connection") {
     return ids.length === 0
-      ? [queryKeys.connections(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS]
+      ? [
+          queryKeys.connections(),
+          queryKeys.connection(),
+          ...SIGNAL_DESCRIBE_KEYS,
+          ...INBOX_KEYS,
+          ...ENTITY_SOURCE_KEYS,
+        ]
       : [
           queryKeys.connections(),
           ...ids.map((id) => queryKeys.connection(id)),
           ...SIGNAL_DESCRIBE_KEYS,
+          ...INBOX_KEYS,
+          ...ENTITY_SOURCE_KEYS,
         ];
   }
   // Any workflow change refetches the listing and every trigger list. A
@@ -629,9 +712,32 @@ export const buildQueryKeys = (
   // list is refetched whichever plugin changed. Every signal read is
   // refetched too, see `SIGNAL_DESCRIBE_KEYS`. So is every Connection's own
   // page: a plugin-level write changes what every Connection of the plugin
-  // resolves to.
+  // resolves to. The Inbox's reads, the entity panes and the Work board are
+  // refetched too: a card's kind is available only while its plugin is
+  // enabled.
   if (topic === "plugin") {
-    return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
+    return [
+      queryKeys.plugins(),
+      queryKeys.connection(),
+      ...SIGNAL_DESCRIBE_KEYS,
+      ...INBOX_KEYS,
+      ...ENTITY_SOURCE_KEYS,
+    ];
+  }
+  // A poll, a claim, a place's title, status or progress, and the user's own
+  // moves (take, add, dismiss, restore) all announce this topic. A card is
+  // drawn by the Inbox, the sidebar's count, the Work board's marks and lanes,
+  // an open pane, and the Add sheet's suggestions, so every one of them reads
+  // again. Every open pane reads again, not only the named entities': a pane
+  // embeds its parents' records, so a change to a repository changes the
+  // panes of the entities under it, and the push names only the repository.
+  if (topic === "externalEntity") {
+    return [
+      ...INBOX_KEYS,
+      queryKeys.workBoard(),
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+    ];
   }
   // Provider Accounts are read as one list, so the whole list is refetched
   // whichever account changed. The controller's own read is refetched too:

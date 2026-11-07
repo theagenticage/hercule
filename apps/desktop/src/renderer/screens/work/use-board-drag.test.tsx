@@ -14,11 +14,12 @@ import {
   arrangeLanes,
   buildLanes,
   CARD_NOT_EXACT_NOTE,
+  groupBoardByContext,
   STAGE_NAMES,
   type CardMove,
 } from "@hercule/client-core/work";
-import { buildCard } from "@hercule/client-core/work/testing";
-import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
+import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
+import { BOARD_STAGES, type BoardStage, type EntityPlace, type WorkCard } from "@hercule/contract";
 import { findBody } from "../../app/motion/body";
 import { BoardDesk } from "./board-desk";
 import { BoardLane } from "./board-lane";
@@ -151,15 +152,29 @@ function Board({
   cards,
   currentCards,
   foldedLaneIds,
+  places,
   harness,
 }: {
   readonly cards: readonly WorkCard[];
   readonly currentCards: readonly WorkCard[];
   readonly foldedLaneIds: ReadonlySet<string>;
+  /** When given, the lanes are the outside places of the invented `acme/project` kind, not Projects. */
+  readonly places?: readonly EntityPlace[] | undefined;
   readonly harness: Harness;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const arrangedLanes = arrangeLanes(buildLanes({ cards }, PROJECTS), {
+  const lanes =
+    places === undefined
+      ? buildLanes({ cards }, PROJECTS)
+      : groupBoardByContext(
+          {
+            ...buildBoard(...cards),
+            places,
+            groupings: [{ kind: "acme/project", caption: "Acme project" }],
+          },
+          "acme/project",
+        );
+  const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds,
     openedCellIds: new Set(),
     isFiltering: false,
@@ -193,7 +208,8 @@ function Board({
           <BoardLane
             key={each.lane.id}
             arrangedLane={each}
-            tabStopCardId={null}
+            plugins={[]}
+            tabStop={null}
             isStill
             onToggleLane={() => {}}
             onToggleCell={() => {}}
@@ -211,10 +227,17 @@ function Board({
 const renderBoard = (
   cards: readonly WorkCard[] = CARDS,
   foldedLaneIds: ReadonlySet<string> = new Set(),
+  places?: readonly EntityPlace[],
 ) => {
   const harness: Harness = { moveCard: vi.fn(), say: vi.fn(), onOpenCard: vi.fn() };
   const view = render(
-    <Board cards={cards} currentCards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
+    <Board
+      cards={cards}
+      currentCards={cards}
+      foldedLaneIds={foldedLaneIds}
+      places={places}
+      harness={harness}
+    />,
   );
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
@@ -249,6 +272,11 @@ const renderBoard = (
     /** The element of a card in the page (the hidden one, while it is carried). */
     card: (id: string): HTMLElement =>
       view.container.querySelector<HTMLElement>(`[data-card-id="${id}"]`)!,
+    /** The element of a card in one lane, for a Task that has a card in each of two lanes. */
+    cardIn: (laneId: string, id: string): HTMLElement =>
+      view.container.querySelector<HTMLElement>(
+        `[data-lane-id="${laneId}"] [data-card-id="${id}"]`,
+      )!,
     /** The copy in the hand, or `null` when no card is carried. */
     ghost: (): HTMLElement | null => document.querySelector<HTMLElement>(".board-carry .desk-card"),
     slot: (): HTMLElement | null => document.querySelector<HTMLElement>(".board-slot"),
@@ -574,6 +602,53 @@ describe("dropping a card", () => {
     fireEvent.click(board.card("refund-emails"));
 
     expect(board.onOpenCard).not.toHaveBeenCalled();
+  });
+});
+
+describe("a Task under two outside places", () => {
+  const DEPOT = buildPlace("acme:project:depot", "Depot");
+  const RETURNS = buildPlace("acme:project:returns", "Returns");
+  const DEPOT_LANE = `place:${DEPOT.ref}`;
+  const RETURNS_LANE = `place:${RETURNS.ref}`;
+  const SHARED_CARDS = [
+    buildCard("both", { title: "Both", contextRefs: [DEPOT.ref, RETURNS.ref] }),
+    buildCard("depot-only", { title: "Depot only", contextRefs: [DEPOT.ref] }),
+    buildCard("returns-only", { title: "Returns only", contextRefs: [RETURNS.ref] }),
+  ];
+
+  /** Where the pointer is for the first row of the cell of a stage in a lane. */
+  const pointOn = (board: ReturnType<typeof renderBoard>, laneId: string, stage: BoardStage) => ({
+    x: columnX(stage),
+    y: laneTop(board.scroller.querySelector(`[data-lane-id="${laneId}"]`)!) + LANE_HEAD + 20,
+  });
+
+  it("lifts the copy that was pressed, and leaves the copy in the other lane where it is", () => {
+    const board = renderBoard(SHARED_CARDS, new Set(), [DEPOT, RETURNS]);
+    const inReturns = board.cardIn(RETURNS_LANE, "both");
+
+    const from = pointOn(board, RETURNS_LANE, "exploring");
+    press(inReturns, from.x, from.y);
+    moveTo(board.scroller, from.x, from.y + 6);
+
+    expect(inReturns.hasAttribute("data-dragged")).toBe(true);
+    expect(board.cardIn(DEPOT_LANE, "both").hasAttribute("data-dragged")).toBe(false);
+    expect(board.readCell(RETURNS_LANE, "exploring")).toEqual(["slot", "returns-only"]);
+    expect(board.readCell(DEPOT_LANE, "exploring")).toEqual(["both", "depot-only"]);
+  });
+
+  it("changes only the stage when the card is dropped in a lane of an outside place", () => {
+    const board = renderBoard(SHARED_CARDS, new Set(), [DEPOT, RETURNS]);
+    const from = pointOn(board, RETURNS_LANE, "exploring");
+    press(board.cardIn(RETURNS_LANE, "both"), from.x, from.y);
+    moveTo(board.scroller, from.x, from.y + 6);
+    const to = pointOn(board, RETURNS_LANE, "planned");
+    moveTo(board.scroller, to.x, to.y);
+    release(board.scroller, to.x, to.y);
+
+    // No project, no place to follow: the lane belongs to the source, and the card goes last in its stored cell.
+    expect(board.moveCard.mock.calls[0]![0]).toEqual({ taskId: "both", stage: "planned" });
+    expect(board.ghost()).toBeNull();
+    expect(board.cardIn(RETURNS_LANE, "both").hasAttribute("data-dragged")).toBe(false);
   });
 });
 
