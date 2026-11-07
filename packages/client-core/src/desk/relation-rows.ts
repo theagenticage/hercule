@@ -60,7 +60,10 @@ export type PlaceRow = LockedPlaceRow | OpenPlaceRow;
 /** A place above a thing, and how many steps up it is by the shortest path. */
 export type AncestorRow = PlaceRow & { readonly depth: number };
 
-const buildProgress = (progress: NonNullable<EntityPlace["progress"]>): RelationProgress => ({
+/** Returns how far along a source says a place is, as the bar and its words need it. */
+export const buildRelationProgress = (
+  progress: NonNullable<EntityPlace["progress"]>,
+): RelationProgress => ({
   fraction: progress.fraction,
   ...(progress.done !== undefined && progress.total !== undefined
     ? { words: `${String(progress.done)} of ${String(progress.total)}` }
@@ -82,7 +85,7 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     title: place.title ?? place.noun,
     ...(place.caption === undefined ? {} : { caption: place.caption }),
     ...(place.status === undefined ? {} : { status: place.status }),
-    ...(place.progress === undefined ? {} : { progress: buildProgress(place.progress) }),
+    ...(place.progress === undefined ? {} : { progress: buildRelationProgress(place.progress) }),
     ...(place.targetDate === undefined ? {} : { targetDate: place.targetDate }),
   };
 };

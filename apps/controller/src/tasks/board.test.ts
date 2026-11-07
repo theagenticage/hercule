@@ -37,7 +37,7 @@ import {
   type BoardCardFacts,
   type BoardSessionFact,
 } from "./board";
-import { externalEntityRepository, type ObservedEntity } from "../external-entities/repository";
+import { externalEntityRepository, type ObservedEntity } from "../external-entities";
 import { taskRepository, type BoardTask, type NewTask } from "./repository";
 
 const AT = "2026-10-20T10:00:00.000Z";

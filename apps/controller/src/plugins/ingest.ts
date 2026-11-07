@@ -41,7 +41,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { MAX_FEED_INTERVAL_SECONDS, summarizeCause } from "@hercule/contract";
 import {
   AuthError,
-  decodeAgainst,
   type FeedDeclaration,
   type IngestHandle,
   PluginError,
@@ -55,7 +54,7 @@ import {
 } from "../connections";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
-import { toPluginError } from "./errors";
+import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
@@ -169,7 +168,6 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const type = Option.getOrUndefined(yield* connectionTypes.named(connection.type));
       const typeDisplayName = type?.contribution.displayName ?? connection.type;
-      const configSchema = type?.contribution.configSchema;
       const intervals = Object.entries(source.feeds).map(
         ([name, declaration]) =>
           [name, computeFeedInterval(declaration, connection.feedIntervals[name])] as const,
@@ -347,10 +345,7 @@ const make = Effect.gen(function* () {
           return computeRetryDelay(intervalSeconds, count);
         });
 
-      const decodeConfig: Effect.Effect<unknown, PluginError> =
-        configSchema === undefined
-          ? Effect.succeed(connection.config)
-          : Effect.mapError(decodeAgainst(configSchema, connection.config), toPluginError);
+      const decodeConfig = decodeConnectionConfig(connectionTypes, connection);
 
       const openRetrySeconds = Math.min(...intervals.map(([, seconds]) => seconds));
 

@@ -35,7 +35,6 @@ import {
   type EntitySearchQuery,
   type EntitySearchReply,
   type EntitySearchResult,
-  type EntityStatus,
   type EntitySuggestion,
   type EntitySuggestions,
   type EntitySuggestionsQuery,
@@ -114,27 +113,12 @@ interface TaskForEntity {
 
 /**
  * Returns the stage a Task starts at for a thing: the `stage` that the kind's
- * status table declares for the thing's status, else `planned`. So Todo is
- * Planned and In progress is Building.
- *
- * The stored status keeps the shape, tone and label of the status, not its
- * key, so the declaration is found by those three. The stage is read from the
- * catalog and not stored on the row: a Task is made only while the kind is
- * active, so the catalog is always there when the stage is needed.
+ * status table declared for the thing's status when it was observed, else
+ * `planned`. So Todo is Planned and In progress is Building. The stage is
+ * stored with the status, so the kind need not be in the catalog.
  */
-export const chooseStageForEntity = (
-  declaration: QualifiedEntityKindDeclaration,
-  status: EntityStatus | undefined,
-): TaskStage => {
-  if (status === undefined || declaration.status === null) return DEFAULT_STAGE;
-  const declared = Object.values(declaration.status).find(
-    (candidate) =>
-      candidate.word === status.label &&
-      candidate.shape === status.shape &&
-      candidate.tone === status.tone,
-  );
-  return declared?.stage ?? DEFAULT_STAGE;
-};
+export const chooseStageForEntity = (entity: Pick<TaskableEntity, "stage">): TaskStage =>
+  entity.stage ?? DEFAULT_STAGE;
 
 /** Checks that the text is one web address and nothing else. */
 const isSingleUrl = (text: string): boolean => /^https?:\/\/\S+$/i.test(text);
@@ -444,7 +428,7 @@ const make = Effect.gen(function* () {
             followed: false,
           };
         }
-        const stage = chooseStageForEntity(declaration, record.status);
+        const stage = chooseStageForEntity(record);
         const followed = input.followIfUnconcerned && !record.hasConcern;
         const projectId = input.projectId ?? (yield* findProjectOfRemote(record.targetRemote));
         const task = yield* tasks.createTaskLinkedToRef({

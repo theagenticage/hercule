@@ -385,30 +385,32 @@ describe("takeOn", () => {
 
   describe("the stage", () => {
     it("is the stage the status declares, else planned", async () => {
-      const stages = await run(({ service, tasks, report, connectionId, entityId }) =>
-        Effect.gen(function* () {
-          yield* report(connectionId, [
-            buildObservation("todo", { status: "todo" }),
-            buildObservation("doing", { status: "doing" }),
-            buildObservation("backlog", { status: "backlog" }),
-            {
-              kind: "ticket",
-              ref: ticketRef("bare"),
-              title: "Ticket bare",
-              url: "https://tracker.example/bare",
-              lifecycle: "open",
-              fields: { key: "BARE" },
-              concerns: ["assigned"],
-              sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
-            },
-          ]);
-          const stages: Record<string, string> = {};
-          for (const key of ["todo", "doing", "backlog", "bare"]) {
-            const made = yield* service.takeOn(yield* entityId(ticketRef(key)));
-            stages[key] = (yield* tasks.read(made.taskId)).stage;
-          }
-          return stages;
-        }),
+      const { stages, doingStatus } = await run(
+        ({ service, tasks, report, connectionId, entityId }) =>
+          Effect.gen(function* () {
+            yield* report(connectionId, [
+              buildObservation("todo", { status: "todo" }),
+              buildObservation("doing", { status: "doing" }),
+              buildObservation("backlog", { status: "backlog" }),
+              {
+                kind: "ticket",
+                ref: ticketRef("bare"),
+                title: "Ticket bare",
+                url: "https://tracker.example/bare",
+                lifecycle: "open",
+                fields: { key: "BARE" },
+                concerns: ["assigned"],
+                sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
+              },
+            ]);
+            const stages: Record<string, string> = {};
+            for (const key of ["todo", "doing", "backlog", "bare"]) {
+              const made = yield* service.takeOn(yield* entityId(ticketRef(key)));
+              stages[key] = (yield* tasks.read(made.taskId)).stage;
+            }
+            const doing = yield* service.read(yield* entityId(ticketRef("doing")));
+            return { stages, doingStatus: doing.status };
+          }),
       );
       expect(stages).toEqual({
         todo: "planned",
@@ -416,16 +418,12 @@ describe("takeOn", () => {
         backlog: "planned",
         bare: "planned",
       });
+      // The stage is stored beside the status, and the API does not show it.
+      expect(doingStatus).toEqual({ shape: "half", tone: "active", label: "In progress" });
     });
 
-    it("is planned for a status the kind table does not know", () => {
-      const declaration = {
-        ...TICKET_KIND,
-        word: "acme/ticket",
-      } as Parameters<typeof chooseStageForEntity>[0];
-      expect(
-        chooseStageForEntity(declaration, { shape: "check", tone: "good", label: "Shipped" }),
-      ).toBe("planned");
+    it("is planned for a thing with no stored stage", () => {
+      expect(chooseStageForEntity({ stage: undefined })).toBe("planned");
     });
   });
 
@@ -572,6 +570,7 @@ describe("takeOn", () => {
           const entities = yield* externalEntityRepository;
           // Holds the writer while access is taken away, so the take-on has
           // checked the rows (they look fine) and waits to write.
+          const holding = yield* Deferred.make<void>();
           const release = yield* Deferred.make<void>();
           const holder = yield* Effect.forkChild(
             withTransaction(
@@ -583,13 +582,17 @@ describe("takeOn", () => {
                   reason: "inaccessible",
                   environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
                 }),
-                Deferred.await(release),
+                Effect.andThen(Deferred.succeed(holding, undefined), Deferred.await(release)),
               ),
             ),
           );
-          yield* Effect.sleep("50 millis");
+          yield* Deferred.await(holding);
           const taking = yield* Effect.forkChild(Effect.flip(service.takeOn(id)));
-          yield* Effect.sleep("150 millis");
+          // The database driver is synchronous, so the take-on runs its check and
+          // stops at the writer within a few turns of the scheduler. No clock is
+          // involved. If it had not got there yet, it would read the lost access
+          // itself and call the lookups, which the assertion below catches.
+          yield* Effect.repeat(Effect.yieldNow, { times: 100 });
           yield* Deferred.succeed(release, undefined);
           yield* Fiber.join(holder);
           const error = yield* Fiber.join(taking);

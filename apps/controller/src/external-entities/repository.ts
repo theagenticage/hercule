@@ -34,6 +34,7 @@ import {
   type InboxCard,
   type InboxCounts,
   type InboxSide,
+  type TaskStage,
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { connectionRepository } from "../connections";
@@ -46,6 +47,7 @@ import {
   deriveAccess,
   deriveYours,
   isWorkRecord,
+  readStoredStatus,
   SHARED_COLUMNS,
   unionConcerns,
   VISIBLE_COLUMNS,
@@ -159,6 +161,8 @@ export interface TaskableEntity {
   /** Empty for a record that has no title yet. */
   readonly title: string;
   readonly status: EntityStatus | undefined;
+  /** The Task stage the kind declares for the status, when it declares one. */
+  readonly stage: TaskStage | undefined;
   /** The canonical remote of the repository the work lands in, when the record has one. */
   readonly targetRemote: string | undefined;
   /** What any Connection can read of the thing, as `buildEntityFields` derives it. */
@@ -1262,8 +1266,7 @@ const make = Effect.gen(function* () {
         const row = found[0];
         if (row === undefined) return Option.none();
         const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
-        const status =
-          row.status === null ? undefined : (JSON.parse(String(row.status)) as EntityStatus);
+        const { status, stage } = readStoredStatus(row.status as string | null);
         const repository =
           row.repository === null
             ? undefined
@@ -1276,6 +1279,7 @@ const make = Effect.gen(function* () {
           isWorkRecord: isWorkRecord(row),
           title: (row.title as string | null) ?? "",
           status,
+          stage,
           targetRemote: repository?.target.remote,
           access: deriveAccess(observations),
           hasConcern: unionConcerns(observations).length > 0,
@@ -1323,7 +1327,7 @@ const make = Effect.gen(function* () {
             identifier: row.identifier,
             title: row.title,
             url: row.url,
-            status: row.status === null ? undefined : (JSON.parse(row.status) as EntityStatus),
+            status: readStoredStatus(row.status).status,
           })),
       ),
 

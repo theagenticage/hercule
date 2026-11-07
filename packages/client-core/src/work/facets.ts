@@ -6,7 +6,7 @@
  * one more entry of the list `buildWorkFacets` returns.
  */
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import type { FilterFacet, FilterValue } from "../desk/filter";
+import { FROM_YOUR_SOURCES_HEADING, type FilterFacet, type FilterValue } from "../desk/filter";
 import { namePlugin, type PluginName } from "../intake";
 import { listBoardGroupings, readPlaceName } from "./context-lanes";
 import { chooseLaneId, type WorkLane } from "./lanes";
@@ -99,6 +99,7 @@ const buildContextFacets = (
   listBoardGroupings(board).map((grouping) => ({
     id: grouping.kind,
     caption: grouping.caption,
+    heading: FROM_YOUR_SOURCES_HEADING,
     values: board.places
       .filter((place) => place.kind === grouping.kind)
       .map((place) => ({ id: place.ref, name: readPlaceName(place) }))

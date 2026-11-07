@@ -558,10 +558,14 @@ export const execute = async (
   // Upload only once every id tail has resolved, so a mistyped session id
   // fails before any image is sent.
   await uploadImages(client, images, payload);
+  const queryFields = [
+    ...command.query,
+    ...command.positionals.filter((field) => field.carriedIn === "query"),
+  ];
   const query: Record<string, unknown> = await resolveTails(
     client,
     command,
-    [...command.query, ...command.positionals.filter((field) => field.carriedIn === "query")],
+    queryFields,
     writtenQuery,
     params,
   );
@@ -590,7 +594,7 @@ export const execute = async (
 
   const request: Record<string, unknown> = {};
   if (inPath.length > 0) request["params"] = params;
-  if (command.paged || command.query.length > 0) request["query"] = query;
+  if (command.paged || queryFields.length > 0) request["query"] = query;
   if (payloadFields.length > 0) request["payload"] = payload;
 
   const call = findOperationFunction(client, command);

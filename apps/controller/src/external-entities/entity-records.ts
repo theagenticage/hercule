@@ -7,7 +7,13 @@
  * Nothing here reads the database. The repository reads rows, and these
  * functions decide what they mean, so a card, a detail and a place agree.
  */
-import type { EntityConcern, EntityPlace, InboxCard } from "@hercule/contract";
+import type {
+  EntityConcern,
+  EntityPlace,
+  EntityStatus,
+  InboxCard,
+  TaskStage,
+} from "@hercule/contract";
 import { ENTITY_CONCERNS } from "@hercule/contract";
 import { uuidToString } from "../db";
 
@@ -210,6 +216,20 @@ const readJson = <T>(text: string | number | null): T | undefined =>
   text === null ? undefined : (JSON.parse(String(text)) as T);
 
 /**
+ * Parses the `status` column. Returns the status as the public API shows it,
+ * and the Task stage that was stored beside it, which the API never shows.
+ * Both are undefined for a row with no status.
+ */
+export const readStoredStatus = (
+  text: string | null,
+): { readonly status: EntityStatus | undefined; readonly stage: TaskStage | undefined } => {
+  const stored = readJson<EntityStatus & { readonly stage?: TaskStage }>(text);
+  if (stored === undefined) return { status: undefined, stage: undefined };
+  const { stage, ...status } = stored;
+  return { status, stage };
+};
+
+/**
  * Builds the place a record draws as above the cards. A thing no Connection
  * reads now is restricted: it keeps its kind and noun, and shows no title,
  * status, progress or date.
@@ -219,7 +239,7 @@ export const buildPlace = (
   observations: ReadonlyArray<ObservationRow>,
 ): EntityPlace => {
   const restricted = deriveAccess(observations) !== "ok";
-  const status = restricted ? undefined : readJson<NonNullable<EntityPlace["status"]>>(row.status);
+  const status = restricted ? undefined : readStoredStatus(row.status as string | null).status;
   const progress = restricted
     ? undefined
     : readJson<NonNullable<EntityPlace["progress"]>>(row.progress);
@@ -262,7 +282,7 @@ export interface EntityReadInputs {
 export const buildEntityFields = (input: EntityReadInputs): Omit<InboxCard, "side"> => {
   const { row, observations } = input;
   const concerns = unionConcerns(observations);
-  const status = readJson<NonNullable<InboxCard["status"]>>(row.status);
+  const status = readStoredStatus(row.status as string | null).status;
   const person = readJson<NonNullable<InboxCard["person"]>>(row.person);
   const repository = readJson<NonNullable<InboxCard["repository"]>>(row.repository);
   const reason = readJson<NonNullable<InboxCard["reason"]>>(row.reason);

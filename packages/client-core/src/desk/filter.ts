@@ -26,6 +26,9 @@ export interface FilterValue {
   readonly liftsItself?: true;
 }
 
+/** The heading over the outside places a source reports, in the Group by and the Filter menus. */
+export const FROM_YOUR_SOURCES_HEADING = "From your sources";
+
 /** One way to filter the items, and how to tell whether an item has a value of it. */
 export interface FilterFacet<Item> {
   /** What the filter stores for this facet, such as "project". */
@@ -35,6 +38,12 @@ export interface FilterFacet<Item> {
    * State facet, whose values ("Failed") read well alone.
    */
   readonly caption: string;
+  /**
+   * A quiet heading the menu puts over this facet's row, such as "From your
+   * sources". Facets that follow one another with the same heading sit under
+   * one copy of it.
+   */
+  readonly heading?: string;
   /** The values the menu lists, in order. */
   readonly values: readonly FilterValue[];
   /** Returns whether `item` has the value with this id. */

@@ -138,7 +138,12 @@ describe("renderEntitySlots renders", () => {
         identifier: "#87",
         person: { name: "mei-tanaka" },
         owner: "mei-tanaka",
-        status: { shape: "hold", tone: "attention", label: "Changes requested" },
+        status: {
+          shape: "hold",
+          tone: "attention",
+          label: "Changes requested",
+          stage: "in-review",
+        },
         facts: [
           { form: "delta", added: 120, removed: 30 },
           { form: "count", value: 4, unit: "file" },

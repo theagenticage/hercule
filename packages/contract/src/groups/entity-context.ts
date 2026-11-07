@@ -6,8 +6,8 @@
  * file that two files import in a circle would not load.
  *
  * An External Entity is a durable record of an outside thing. Its kind table,
- * its relation claims and its lifecycle are described in the ticket for the
- * Inbox (#1032) and in `external-entity.ts`.
+ * its relation claims and its lifecycle are described in
+ * `docs/spec/20-external-entities.md` and in `external-entity.ts`.
  */
 import {
   ENTITY_REASON_TONES,

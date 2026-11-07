@@ -13,6 +13,7 @@ import {
   EntityReason,
   EntityStatus,
   MAX_ENTITY_FACTS,
+  TaskStage,
   atMost,
   bounded,
   formatIssue,
@@ -25,6 +26,19 @@ import {
   type EntityObservation,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
+
+/**
+ * A status as it is stored: what a card draws, plus the Task stage the kind's
+ * status table declares for it. The stage is internal. It is stored so a Task
+ * can start at the right stage with no catalog lookup, and `readStoredStatus`
+ * strips it before a status reaches the public API.
+ */
+export const StoredEntityStatus = Schema.Struct({
+  ...EntityStatus.fields,
+  stage: Schema.optionalKey(TaskStage),
+});
+
+export type StoredEntityStatus = Schema.Schema.Type<typeof StoredEntityStatus>;
 
 /** The slots of a kind that has cards: everything a card draws, apart from what changes per read. */
 const WorkEntitySlots = Schema.Struct({
@@ -40,7 +54,7 @@ const WorkEntitySlots = Schema.Struct({
   person: Schema.optionalKey(EntityPerson),
   /** The owner field's value as text. Absent when the kind has no owner or the thing has none. */
   owner: Schema.optionalKey(bounded(1, 120)),
-  status: Schema.optionalKey(EntityStatus),
+  status: Schema.optionalKey(StoredEntityStatus),
   facts: atMost(EntityFact, MAX_ENTITY_FACTS),
   reason: Schema.optionalKey(EntityReason),
 });
@@ -78,7 +92,8 @@ const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
  *   out), pace, patience, identifier, person, owner, status, facts and reason.
  * - A kind with cards or a place also gets the `home` and `section` its
  *   declaration names, as qualified kinds.
- * - A status keeps its `norm` flag.
+ * - A status keeps its `norm` flag, and a kind with cards also keeps the
+ *   `stage` its status table declares (see `StoredEntityStatus`).
  * - A place (pace `context`) gets noun, caption, home, section and status only.
  * - A `delta` fact reads its field as text like `+120 -30`.
  * - A `count` fact reads a whole number and takes its unit from the declaration.
@@ -140,6 +155,10 @@ export const renderEntitySlots = (
         tone: status.tone,
         label: status.word,
         ...(status.norm === undefined ? {} : { norm: status.norm }),
+        // A place never becomes a Task, so only a kind with cards keeps the stage.
+        ...(status.stage === undefined || declaration.pace === "context"
+          ? {}
+          : { stage: status.stage }),
       };
     });
 

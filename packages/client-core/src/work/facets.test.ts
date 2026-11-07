@@ -123,6 +123,15 @@ describe("the facets of outside places", () => {
     ]);
   });
 
+  it("puts only the outside places under the From your sources heading", () => {
+    expect(facets.map((facet) => facet.heading)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      "From your sources",
+    ]);
+  });
+
   it("has no Source facet when no card links anything outside", () => {
     const plain = buildBoard(buildCard("plain"));
     expect(

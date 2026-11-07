@@ -23,7 +23,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { summarizeCause } from "@hercule/contract";
 import {
   AuthError,
-  decodeAgainst,
   PluginError,
   type EntityLookupContext,
   type EntityObservation,
@@ -37,7 +36,7 @@ import {
   INGESTING_STATUSES,
   type StoredConnection,
 } from "../connections";
-import { describeFieldIssues } from "./errors";
+import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
 import { PluginHost } from "./host";
 
@@ -204,21 +203,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /** Decodes the Connection's config against its type's schema, as an ingest loop does. */
-  const decodeConfig = (connection: StoredConnection): Effect.Effect<unknown, PluginError> =>
-    Effect.flatMap(connectionTypes.named(connection.type), (type) => {
-      const configSchema = Option.getOrUndefined(type)?.contribution.configSchema;
-      return configSchema === undefined
-        ? Effect.succeed(connection.config)
-        : Effect.mapError(
-            decodeAgainst(configSchema, connection.config),
-            (error) =>
-              new PluginError({
-                message: `the Connection's config does not fit its type: ${describeFieldIssues(error)}`,
-              }),
-          );
-    });
-
   /**
    * Runs one call to a plugin's lookup for one Connection, with a timeout.
    * Never fails: a failure of any kind (including a rejected credential and a
@@ -236,7 +220,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const exit = yield* Effect.exit(
         Effect.timeoutOption(
-          Effect.flatMap(decodeConfig(connection), (config) =>
+          Effect.flatMap(decodeConnectionConfig(connectionTypes, connection), (config) =>
             Effect.suspend(() =>
               call(
                 {
