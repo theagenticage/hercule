@@ -66,13 +66,15 @@ const renderSnoozeTimer = (
   // signal list reads it.
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, []);
   new QueryObserver(queryClient, signalsToDoQuery(client)).subscribe(() => {});
-  // The shell keeps the Inbox's count active, and the Inbox screen its read.
-  // Each is counted by the times it was read, after its first read.
+  // The shell keeps the Inbox's count active, and the Inbox screen its read. An
+  // open card keeps its entity read active. Each is counted by the times it was read, after its first read.
   const inboxReads: Read[] = [];
   const inboxCountReads: Read[] = [];
+  const entityReads: Read[] = [];
   for (const [key, log] of [
     [queryKeys.inbox(), inboxReads],
     [queryKeys.inboxCount(), inboxCountReads],
+    [queryKeys.externalEntity(), entityReads],
   ] as const) {
     new QueryObserver(queryClient, {
       queryKey: key,
@@ -82,7 +84,7 @@ const renderSnoozeTimer = (
       },
     }).subscribe(() => {});
   }
-  return { reads, inboxReads, inboxCountReads, queryClient };
+  return { reads, inboxReads, inboxCountReads, entityReads, queryClient };
 };
 
 beforeEach(() => {
@@ -236,17 +238,20 @@ describe("SnoozeTimer and the Inbox", () => {
     for (const log of logs) log.length = 0;
   };
 
-  it("reads the Inbox and its count when the snooze has run out, and not before", async () => {
+  it("reads the Inbox, its count and the open entity panes when the snooze has run out, and not before", async () => {
     const until = NOW + FIVE_MINUTES_MS;
-    const { inboxReads, inboxCountReads } = renderSnoozeTimer(new Date(until).toISOString());
-    await forgetFirstReads(inboxReads, inboxCountReads);
+    const { inboxReads, inboxCountReads, entityReads } = renderSnoozeTimer(
+      new Date(until).toISOString(),
+    );
+    await forgetFirstReads(inboxReads, inboxCountReads, entityReads);
 
     await act(() => vi.advanceTimersByTimeAsync(FIVE_MINUTES_MS));
-    expect([inboxReads, inboxCountReads]).toEqual([[], []]);
+    expect([inboxReads, inboxCountReads, entityReads]).toEqual([[], [], []]);
 
     await act(() => vi.advanceTimersByTimeAsync(1_010));
     expect(inboxReads).toHaveLength(1);
     expect(inboxCountReads).toHaveLength(1);
+    expect(entityReads).toHaveLength(1);
     expect(inboxReads[0]!.at).toBeGreaterThanOrEqual(until);
   });
 

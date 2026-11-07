@@ -19,7 +19,7 @@ import { readLengths, useMeasuredAtTextSize } from "../../../app/text-size";
 import { CheckIcon } from "../../../icons/check";
 import { PlusIcon } from "../../../icons/plus";
 import { useVirtualLines } from "../../use-virtual-lines";
-import { joinClassNames } from "./join-class-names";
+import { joinClassNames } from "../../../app/join-class-names";
 import "./model-browser.css";
 
 /** The custom property that holds a row's height, which follows the Text size (styles/row-heights.css). */

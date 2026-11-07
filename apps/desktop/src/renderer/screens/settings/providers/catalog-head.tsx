@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useAgeWords } from "../../../app/age-clock";
-import { joinClassNames } from "./join-class-names";
+import { joinClassNames } from "../../../app/join-class-names";
 import "../../thread/menus.css";
 
 /** Renders "Updated 3 hours ago", from the time of the last good read of the catalog. */

@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { EntityLink, EntitySignalLine } from "@hercule/contract";
 import { buildInboxCard, buildRequestCard } from "./cards.testing";
 import {
+  buildListedTimelineSource,
   buildOpenTimeline,
-  describeTimelineAge,
+  buildWalkableIds,
   describeTimelineOverflow,
   findFirstOpenLine,
   type TimelineSource,
@@ -45,22 +46,7 @@ const linkTo = (ref: string, type: EntityLink["claim"]["type"]): EntityLink => (
   fromRef: SELF,
   toRef: ref,
   claim: { type },
-});
-
-describe("describeTimelineAge", () => {
-  it.each([
-    [0, "1 min ago"],
-    [0.25, "15 min ago"],
-    [1, "1h ago"],
-    [5, "5h ago"],
-    [23.9, "23h ago"],
-    [24, "Yesterday"],
-    [47, "2 days ago"],
-    [24 * 6, "6 days ago"],
-    [-3, "1 min ago"],
-  ])("reads %s hours as %s", (hours, words) => {
-    expect(describeTimelineAge(hoursAgo(hours), NOW)).toBe(words);
-  });
+  hasPersonClaim: type === "person",
 });
 
 describe("buildOpenTimeline", () => {
@@ -69,7 +55,11 @@ describe("buildOpenTimeline", () => {
       buildSource({
         signals: [buildLine("s1", 10), buildLine("s2", 2)],
         timeline: [
-          { reason: "reassigned", say: { say: "Now with Tessa", tone: "plain" }, at: hoursAgo(5) },
+          {
+            reason: "reassigned",
+            sentence: { say: "Now with Tessa", tone: "plain" },
+            at: hoursAgo(5),
+          },
         ],
       }),
       [],
@@ -102,23 +92,6 @@ describe("buildOpenTimeline", () => {
     );
 
     expect(lines.map((line) => line.isLatest)).toEqual([false]);
-  });
-
-  it("names the asker only when the sentence does not", () => {
-    const lines = buildOpenTimeline(
-      buildSource({
-        signals: [
-          buildLine("s1", 3, {
-            asker: "Ines",
-            say: { say: "Ines asked for review", tone: "plain" },
-          }),
-          buildLine("s2", 2, { asker: "Ines", say: { say: "Checks failed", tone: "bad" } }),
-        ],
-      }),
-      [],
-    );
-
-    expect(lines.map((line) => line.person)).toEqual([undefined, "Ines"]);
   });
 
   it("weaves in the newest signal of a confirmed linked card, with its mark and identifier", () => {
@@ -162,10 +135,9 @@ describe("buildOpenTimeline", () => {
   it("weaves in a linked card when the link points at this thing", () => {
     const linked = { ...REVIEW, signals: { openCount: 1, latest: buildLine("p1", 1) } };
 
-    const lines = buildOpenTimeline(
-      buildSource({ links: [{ fromRef: REVIEW.ref, toRef: SELF, claim: { type: "person" } }] }),
-      [linked],
-    );
+    const lines = buildOpenTimeline(buildSource({ links: [linkTo(REVIEW.ref, "person")] }), [
+      linked,
+    ]);
 
     expect(lines).toHaveLength(1);
   });
@@ -176,7 +148,7 @@ describe("buildOpenTimeline", () => {
         timeline: [
           {
             reason: "linked",
-            say: { say: "Linked #9", tone: "plain" },
+            sentence: { say: "Linked #9", tone: "plain" },
             at: hoursAgo(2),
             ref: REVIEW.ref,
           },
@@ -194,7 +166,7 @@ describe("buildOpenTimeline", () => {
         timeline: [
           {
             reason: "linked",
-            say: { say: "Linked #1", tone: "plain" },
+            sentence: { say: "Linked #1", tone: "plain" },
             at: hoursAgo(2),
             ref: "x:y",
           },
@@ -218,12 +190,12 @@ describe("describeTimelineOverflow", () => {
   it.each([
     // [open shown, resolved shown, openCount, signalCount, expected]
     [3, 0, 3, 3, undefined],
-    [50, 0, 62, 62, { kind: "open", count: 12, words: "and 12 more open" }],
-    [50, 0, 1_262, 1_262, { kind: "open", count: 1_212, words: "and 1,212 more open" }],
-    [2, 3, 2, 17, { kind: "older", count: 12, words: "and 12 older" }],
-    [0, 50, 0, 51, { kind: "older", count: 1, words: "and 1 older" }],
+    [50, 0, 62, 62, { kind: "open", words: "and 12 more open" }],
+    [50, 0, 1_262, 1_262, { kind: "open", words: "and 1,212 more open" }],
+    [2, 3, 2, 17, { kind: "older", words: "and 12 older" }],
+    [0, 50, 0, 51, { kind: "older", words: "and 1 older" }],
     // Open work left out wins over resolved work left out.
-    [49, 0, 60, 90, { kind: "open", count: 11, words: "and 11 more open" }],
+    [49, 0, 60, 90, { kind: "open", words: "and 11 more open" }],
   ] as const)(
     "with %s open and %s resolved shown, says %j",
     (open, resolved, openCount, signalCount, expected) => {
@@ -270,5 +242,60 @@ describe("buildOpenTimeline with a thing nobody has a card for", () => {
     expect(
       buildOpenTimeline(buildSource({ links: [linkTo("acme:other:1", "source")] }), [card]),
     ).toEqual([]);
+  });
+});
+
+describe("the keys of the lines", () => {
+  const change = (at: string, reason: "reassigned" | "moved") => ({
+    reason,
+    sentence: { say: `Changed ${at}`, tone: "plain" as const },
+    at,
+  });
+
+  it("name a line by its time and what it is about, not by its position", () => {
+    const moved = change(hoursAgo(3), "moved");
+    const before = buildOpenTimeline(buildSource({ timeline: [moved] }), []);
+    const after = buildOpenTimeline(
+      buildSource({ timeline: [change(hoursAgo(9), "reassigned"), moved] }),
+      [],
+    );
+    expect(after.at(-1)!.key).toBe(before[0]!.key);
+    expect(new Set(after.map((line) => line.key)).size).toBe(2);
+  });
+
+  it("tell apart two changes of one reason in one moment", () => {
+    const twice = change(hoursAgo(3), "moved");
+    const lines = buildOpenTimeline(buildSource({ timeline: [twice, twice] }), []);
+    expect(new Set(lines.map((line) => line.key)).size).toBe(2);
+  });
+});
+
+describe("buildListedTimelineSource", () => {
+  it("holds the newest signal of a card alone, or nothing for a card with none", () => {
+    const latest = buildLine("s1", 2);
+    const card = buildInboxCard("1", { signals: { openCount: 1, latest } });
+    expect(buildListedTimelineSource(card)).toMatchObject({ ref: card.ref, signals: [latest] });
+    expect(buildListedTimelineSource(buildInboxCard("2")).signals).toEqual([]);
+  });
+});
+
+describe("buildWalkableIds", () => {
+  it("opens a card of the page and a peer that is a full record, and not a peer with no id", () => {
+    const ids = buildWalkableIds(
+      [{ ref: "acme:ticket:5", id: "peer-5" }, { ref: "acme:ticket:6" }],
+      [{ ref: "acme:review:9", id: "card-9" }],
+    );
+    expect([...ids]).toEqual([
+      ["acme:ticket:5", "peer-5"],
+      ["acme:review:9", "card-9"],
+    ]);
+  });
+
+  it("prefers the card for a ref that both hold", () => {
+    const ids = buildWalkableIds(
+      [{ ref: "acme:ticket:5", id: "peer-5" }],
+      [{ ref: "acme:ticket:5", id: "card-5" }],
+    );
+    expect(ids.get("acme:ticket:5")).toBe("card-5");
   });
 });

@@ -13,6 +13,7 @@ import type {
   InboxCard,
 } from "@hercule/contract";
 import { readEntityPluginId, formatTargetDate } from "../desk/entity-words";
+import { readSignalWord } from "../intake";
 
 /**
  * A record that may also say what the signals on it are: an Inbox card does,
@@ -73,15 +74,16 @@ const describeFact = (fact: EntityFact): CardFact => {
   }
 };
 
-/** Returns the word of a signal's kind, such as `review-requested` for `github/review-requested`. */
-const readSignalWord = (kind: string): string => kind.slice(kind.indexOf("/") + 1);
-
 /**
  * Returns the signal a card's sentence is drawn from, or `undefined` when the
  * sentence comes from the observation or there is none. It is the latest open
  * signal, except on a row of lasting work that has had only the signal of its
  * own concern, such as a ticket that was assigned to the user: that says
  * nothing, because the row's place and status already say it.
+ *
+ * This relies on a convention: a concern is the word of the signal kind it
+ * raises, so the concern `assigned` raises the signal kind `acme/assigned`.
+ * Nothing else links a concern to its signal on the card.
  */
 export const readSentenceSignal = (card: CardRecord): EntitySignalLine | undefined => {
   const latest = card.signals?.latest;

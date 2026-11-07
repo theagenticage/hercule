@@ -133,8 +133,6 @@ describe("the Work board's key", () => {
 
 describe("the Inbox's and the entities' keys", () => {
   const inboxKeys = [queryKeys.inbox(), queryKeys.inboxCount()];
-  // To do is the one signal list that draws a signal's entity, so a late-attaching entity reads it.
-  const toDoKey = queryKeys.signals({ view: "to-do" });
 
   // Each row is one topic and the exact keys its push reads again. A pane's
   // read is always the whole prefix: a pane embeds its parents' records, so a
@@ -156,7 +154,6 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
-        toDoKey,
       ],
     },
     {
@@ -169,7 +166,6 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
-        toDoKey,
       ],
     },
     {
@@ -288,6 +284,11 @@ describe("the Inbox's and the entities' keys", () => {
       assert.deepStrictEqual(buildQueryKeys(row.topic, row.ids, undefined, row.derived), row.keys);
     });
   }
+
+  it("leaves the signal lists alone on an externalEntity push, because the controller announces a signal push when a thing's open signals gain their entity", () => {
+    const keys = buildQueryKeys("externalEntity", ["e1"]);
+    assert.isFalse(keys.some((read) => isPrefixOf(read, queryKeys.signals({ view: "to-do" }))));
+  });
 
   it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
     for (const topic of ["run", "session", "workflow", "wikiPage"] as const) {

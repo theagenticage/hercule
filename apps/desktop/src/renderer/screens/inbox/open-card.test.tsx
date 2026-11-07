@@ -5,7 +5,7 @@
  */
 import { Suspense, type JSX } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
@@ -349,12 +349,12 @@ describe("the timeline of the open card", () => {
       timeline: [
         {
           reason: "reassigned",
-          say: { say: "Now with Tessa", tone: "plain" },
+          sentence: { say: "Now with Tessa", tone: "plain" },
           at: new Date(Date.now() - 50 * 3_600_000).toISOString(),
         },
         {
           reason: "moved",
-          say: { say: "Moved to In Review", tone: "plain" },
+          sentence: { say: "Moved to In Review", tone: "plain" },
           at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
         },
       ],
@@ -369,8 +369,8 @@ describe("the timeline of the open card", () => {
       .map((line) => line.textContent);
     expect(timeline).toEqual([
       "Now with Tessa2 days ago",
-      `Said ${SIGNAL_IDS[0].slice(-2)}Approved5h ago`,
-      "Moved to In Review2h ago",
+      `Said ${SIGNAL_IDS[0].slice(-2)}Approved5 hours ago`,
+      "Moved to In Review2 hours ago",
     ]);
   });
 
@@ -514,6 +514,7 @@ const SPEC = buildInboxPlace("acme:doc:3", "Payment retry spec", {
 const linkTo = (ref: string, claim: EntityLink["claim"]): EntityLink => ({
   fromRef: ORDER.ref,
   toRef: ref,
+  hasPersonClaim: claim.type === "person",
   claim,
 });
 
@@ -580,6 +581,7 @@ describe("the Linked section of the open card", () => {
         {
           fromRef: SPEC.ref,
           toRef: ORDER.ref,
+          hasPersonClaim: false,
           claim: { type: "text", evidenceKey: "description" },
         },
       ],
@@ -598,11 +600,11 @@ describe("the Linked section of the open card", () => {
     });
   });
 
-  it("ignores a press on a remove button in the moment after a link was made", async () => {
+  it("ignores the second click of a double click on Link, which lands on the remove button that takes its place", async () => {
     const detail = buildDetail(ORDER, {
       places: [ROUND_A, ROUND_B, DEPOT, SPEC],
       links: [
-        { fromRef: SPEC.ref, toRef: ORDER.ref, claim: { type: "text" } },
+        { fromRef: SPEC.ref, toRef: ORDER.ref, hasPersonClaim: false, claim: { type: "text" } },
         linkTo(PR.ref, { type: "person" }),
       ],
       peers: [
@@ -622,7 +624,9 @@ describe("the Linked section of the open card", () => {
     const user = userEvent.setup();
 
     await user.click(await within(sheet).findByRole("button", { name: "Link" }));
-    await user.click(within(sheet).getByRole("button", { name: "Remove the link to Retry" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Remove the link to Retry" }), {
+      detail: 2,
+    });
 
     expect(onLink).toHaveBeenCalledTimes(1);
     expect(onUnlink).not.toHaveBeenCalled();

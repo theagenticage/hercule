@@ -481,16 +481,6 @@ const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), 
 const INBOX_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.inbox(), queryKeys.inboxCount()];
 
 /**
- * The key of To do's list, the one signal list whose signals Intake groups by
- * their `entity`. A signal gets its `entity` when its thing's record becomes
- * full, which writes no signal and so sends no `signal` push: an
- * `externalEntity` push reads this list. Later and Done draw no entity, so
- * their pages are left out, and a filter object here matches only keys that
- * hold it.
- */
-const TO_DO_SIGNAL_KEY: LiveQueryKey = queryKeys.signals({ view: "to-do" });
-
-/**
  * The entity reads a plain `task` push makes stale, beyond the Inbox's: an
  * open entity pane shows which Task has the entity and whether you follow it,
  * and the Add sheet lists only the entities no live Task has. A Task
@@ -769,10 +759,11 @@ export const buildQueryKeys = (
   // entities': a pane embeds its parents' records, so a change to a repository
   // changes the panes of the entities under it, and the push names only the
   // repository.
-  // To do's list is read again too, because a late-attaching entity gives
-  // its signals an `entity` (see `TO_DO_SIGNAL_KEY`).
+  // The signal lists are not read again here: when a thing becomes a full
+  // record, which gives its open signals their `entity`, the controller
+  // announces a `signal` push naming those signals.
   if (topic === "externalEntity") {
-    return [...INBOX_KEYS, ...ENTITY_SOURCE_KEYS, TO_DO_SIGNAL_KEY];
+    return [...INBOX_KEYS, ...ENTITY_SOURCE_KEYS];
   }
   // Provider Accounts are read as one list, so the whole list is refetched
   // whichever account changed. The controller's own read is refetched too:

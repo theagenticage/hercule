@@ -172,11 +172,13 @@
   font: var(--type-meta);
   text-align: left;
 }
-/* A request has no first column: its hint lines up with its title, 10px of padding, a 16px mark and 8px of gap in. */
+/* A request has no first column: its hint lines up with its title, 10px of padding, a 16px mark and 8px of gap in.
+   The line is 16px tall and the button 24px: the 5px under the words is hit area that reaches into the gap
+   between two cards, which is 6px at least, so the words stay where they are and no card loses its edge. */
 .inbox-requests-group .inbox-hint,
 .inbox-else-cards .inbox-hint {
-  margin: 0;
-  padding: 3px 12px 0 34px;
+  margin: 0 0 -5px;
+  padding: 3px 12px 5px 34px;
 }
 .inbox-hint > span {
   min-width: 0;

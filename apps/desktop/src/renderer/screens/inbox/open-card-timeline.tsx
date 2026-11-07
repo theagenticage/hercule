@@ -1,21 +1,22 @@
 import type { JSX, ReactNode } from "react";
-import type { PluginIdentity } from "@hercule/client-core";
-import {
-  describeTimelineAge,
-  type TimelineLine,
-  type TimelineOverflow,
-} from "@hercule/client-core/inbox";
+import { describeAge, type PluginIdentity } from "@hercule/client-core";
+import type { TimelineLine, TimelineOverflow } from "@hercule/client-core/inbox";
+import { joinClassNames } from "../../app/join-class-names";
 import { PluginMark } from "../../marks";
 
-/** Renders the words of one line: its sentence, then the thing it is about or the person it names, small. */
-function LineText({ line }: { readonly line: TimelineLine }): JSX.Element {
-  const resolved = line.signal !== undefined && !line.signal.isOpen;
+/** Renders the words of one line: its sentence, then the thing it is about, small. A resolved line ends with what resolved it. */
+function LineText({
+  line,
+  outcome,
+}: {
+  readonly line: TimelineLine;
+  readonly outcome: string | undefined;
+}): JSX.Element {
   return (
     <span className="open-card-text">
       {line.say}
       {line.identifier !== undefined && <small>{line.identifier}</small>}
-      {line.person !== undefined && <small>{line.person}</small>}
-      {resolved && line.signal?.outcome !== undefined && <q>{line.signal.outcome}</q>}
+      {outcome !== undefined && <q>{outcome}</q>}
     </span>
   );
 }
@@ -27,35 +28,33 @@ function TimelineItem({
   plugins,
   isOpened,
   onToggle,
-  renderAnswers,
+  answers,
 }: {
   readonly line: TimelineLine;
   readonly now: Date;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly isOpened: boolean;
   readonly onToggle: (signalId: string) => void;
-  readonly renderAnswers: (signalId: string) => ReactNode;
+  readonly answers: (signalId: string) => ReactNode;
 }): JSX.Element {
   const { signal } = line;
   const isResolved = signal !== undefined && !signal.isOpen;
   const isSnoozed = signal?.isSnoozed === true;
-  const classes = [
+  const classes = joinClassNames(
     "open-card-signal",
-    line.isLatest ? "is-latest" : "",
-    line.isLinked ? "is-linked" : "",
-    isResolved ? "is-resolved" : "",
-    isSnoozed ? "is-snoozed" : "",
-  ]
-    .filter((name) => name !== "")
-    .join(" ");
+    line.isLatest && "is-latest",
+    line.isLinked && "is-linked",
+    isResolved && "is-resolved",
+    isSnoozed && "is-snoozed",
+  );
   const when = isSnoozed ? (
     <small className="open-card-snoozed">Snoozed</small>
   ) : (
-    <time dateTime={line.at}>{describeTimelineAge(line.at, now)}</time>
+    <time dateTime={line.at}>{describeAge(line.at, now)}</time>
   );
   const row = (
     <>
-      <LineText line={line} />
+      <LineText line={line} outcome={isResolved ? signal.outcome : undefined} />
       {when}
     </>
   );
@@ -82,7 +81,7 @@ function TimelineItem({
       ) : (
         <div className="open-card-signal-row">{row}</div>
       )}
-      {isOpened && signal !== undefined && renderAnswers(signal.id)}
+      {isOpened && signal !== undefined && answers(signal.id)}
     </li>
   );
 }
@@ -145,7 +144,7 @@ export function OpenCardTimeline({
             plugins={plugins}
             isOpened={line.signal !== undefined && line.signal.id === openLineId}
             onToggle={onToggleLine}
-            renderAnswers={answers}
+            answers={answers}
           />
         ))}
       </ol>

@@ -65,7 +65,7 @@ const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y
  */
 export const useCurrentCard = (
   scrollRef: RefObject<HTMLElement | null>,
-  onReach?: (id: string) => void,
+  onReach: (id: string) => void,
 ): CurrentCard => {
   const current = useRef<Current | null>(null);
   const pointerAt = useRef<Point | null>(null);
@@ -84,7 +84,7 @@ export const useCurrentCard = (
     if (element === null) return;
     current.current = { id, by };
     element.setAttribute("data-current", by);
-    onReach?.(id);
+    onReach(id);
     if (by === "pointer") {
       // The ring and the pointer's mark must not both stand: the pointer took over.
       const focused = document.activeElement;

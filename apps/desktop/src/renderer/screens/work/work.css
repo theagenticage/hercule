@@ -10,7 +10,7 @@
   --gutter: 210px;
   /* The band behind a lane's head. It is a step darker than the desk, and a
      step more on the dark themes, as the drawing has it. */
-  --band: color-mix(in oklab, var(--ink) 5%, var(--desk));
+  --band: color-mix(in oklab, var(--ink) var(--band-share), var(--desk));
   --col-gap: 14px;
   --cols: repeat(4, minmax(150px, 1fr)) minmax(112px, 0.72fr);
   position: relative;
@@ -19,13 +19,6 @@
   background: var(--desk);
   -webkit-user-select: none;
   user-select: none;
-}
-[data-theme="orient-express"] .work-desk,
-[data-theme="dark"] .work-desk,
-[data-theme="nile"] .work-desk,
-[data-theme="end-house"] .work-desk,
-[data-theme="blue-train"] .work-desk {
-  --band: color-mix(in oklab, var(--ink) 8%, var(--desk));
 }
 .work-desk[data-lanes="band"] {
   --gutter: 0px;
@@ -443,11 +436,7 @@
   display: none;
 }
 /* The sheet is lighter than --faint was set for on the dark themes, so the chevron takes a step more ink. */
-[data-theme="orient-express"] .board-stack-bar,
-[data-theme="dark"] .board-stack-bar,
-[data-theme="nile"] .board-stack-bar,
-[data-theme="end-house"] .board-stack-bar,
-[data-theme="blue-train"] .board-stack-bar {
+.board-stack-bar {
   --faint: var(--faint-on-stock);
 }
 .board-stack-members {

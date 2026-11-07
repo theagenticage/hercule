@@ -6,29 +6,44 @@
  * drop that stands for the signal has fallen onto it, so the page holds each
  * landed card as it was, and lets it go when the drop has landed.
  */
-import type { EntityReason, Inbox, InboxCard } from "@hercule/contract";
+import type { EntityReason, EntitySignalLine, Inbox, InboxCard } from "@hercule/contract";
 import { decideAskingSentence, decideCardFace } from "./card-face";
 
 /**
- * Returns the ids of the cards whose latest signal is a different one in
- * `after` than in `before`, in the order of `after`. Only a card that both reads
- * hold counts: a card that is new to the page arrived, which is not a landing,
- * and a card that left has nothing to land on. A card whose latest signal ended
- * (it has none now) counts for nothing: nothing new happened.
+ * Checks whether the signal `a` comes after the signal `b`: it was raised
+ * later, and when both were raised in the same moment, its id sorts after.
+ * This is the order the controller picks a card's latest signal in.
+ */
+const isSignalAfter = (a: EntitySignalLine, b: EntitySignalLine): boolean => {
+  const byTime = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+  return byTime === 0 ? a.id > b.id : byTime > 0;
+};
+
+/**
+ * Returns the ids of the cards whose latest signal moved forward from `before`
+ * to `after`, in the order of `after`: it is a later signal than the one the
+ * card had, or the card had none. A latest signal that moved backward is no
+ * landing. That happens when the user answers the newest signal and an older
+ * open one becomes the latest. Only a card that both reads hold counts: a card
+ * that is new to the page arrived, which is not a landing, and a card that
+ * left has nothing to land on. A card whose latest signal ended (it has none
+ * now) counts for nothing: nothing new happened.
  */
 export const listLandedCards = (before: Inbox, after: Inbox): readonly string[] => {
-  const latestBefore = new Map(before.cards.map((card) => [card.id, card.signals.latest?.id]));
+  const latestBefore = new Map(before.cards.map((card) => [card.id, card.signals.latest]));
   return after.cards
     .filter((card) => {
       if (!latestBefore.has(card.id)) return false;
-      const latest = card.signals.latest?.id;
-      return latest !== undefined && latest !== latestBefore.get(card.id);
+      const latest = card.signals.latest;
+      if (latest === undefined) return false;
+      const earlier = latestBefore.get(card.id);
+      return earlier === undefined || isSignalAfter(latest, earlier);
     })
     .map((card) => card.id);
 };
 
 /** A card the page keeps as it was while the drop of its signal falls, and the landing it waits for. */
-export interface HeldCard {
+export interface LandingHold {
   readonly card: InboxCard;
   /** The number of the landing that holds the card, so a later landing on the same card takes over its hold. */
   readonly landing: number;
@@ -42,11 +57,11 @@ export interface HeldCard {
  * is added.
  */
 export const holdLandedCards = (
-  held: ReadonlyMap<string, HeldCard>,
+  held: ReadonlyMap<string, LandingHold>,
   before: Inbox,
   landed: readonly string[],
   landing: number,
-): ReadonlyMap<string, HeldCard> => {
+): ReadonlyMap<string, LandingHold> => {
   const cardsBefore = new Map(before.cards.map((card) => [card.id, card]));
   const next = new Map(held);
   for (const id of landed) {
@@ -63,7 +78,7 @@ export const holdLandedCards = (
  * `inbox` itself when nothing is held, and keeps the order and everything
  * else the read says.
  */
-export const showHeldCards = (inbox: Inbox, held: ReadonlyMap<string, HeldCard>): Inbox =>
+export const showHeldCards = (inbox: Inbox, held: ReadonlyMap<string, LandingHold>): Inbox =>
   held.size === 0
     ? inbox
     : { ...inbox, cards: inbox.cards.map((card) => held.get(card.id)?.card ?? card) };
@@ -74,9 +89,9 @@ export const showHeldCards = (inbox: Inbox, held: ReadonlyMap<string, HeldCard>)
  * none.
  */
 export const releaseHeldCards = (
-  held: ReadonlyMap<string, HeldCard>,
+  held: ReadonlyMap<string, LandingHold>,
   landing: number,
-): ReadonlyMap<string, HeldCard> => {
+): ReadonlyMap<string, LandingHold> => {
   const kept = [...held].filter(([, each]) => each.landing !== landing);
   return kept.length === held.size ? held : new Map(kept);
 };

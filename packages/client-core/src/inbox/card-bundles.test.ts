@@ -7,7 +7,7 @@
 import type { Inbox } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { toggleFilterValue } from "../desk/filter";
-import { isSameBundle, type CardBundle } from "./card-bundles";
+import { isSameBundle, listBundleCardIds, type CardBundle } from "./card-bundles";
 import {
   buildInbox,
   buildInboxCard,
@@ -17,18 +17,22 @@ import {
 } from "./cards.testing";
 import { HOME_GROUPING } from "./inbox-place";
 import { layOutInbox, listRiders, type InboxLayout, type InboxView } from "./lay-out";
-import { NO_PLACEMENT, type RidingChoices, type VisitPlacement } from "./visit-placement";
+import { chooseLead, NO_RIDING_CHOICES, type RidingChoices } from "./riding-choices";
+import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
 
 const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
 
 const layOut = (
   inbox: Inbox,
   held: VisitPlacement = NO_PLACEMENT,
-  riding?: RidingChoices,
+  riding: RidingChoices = NO_RIDING_CHOICES,
 ): InboxLayout => layOutInbox(inbox, VIEW, held, riding);
 
 /** Lays out each read of one visit, and returns the layout of the last. */
-const layOutVisit = (reads: readonly Inbox[], riding?: RidingChoices): InboxLayout => {
+const layOutVisit = (
+  reads: readonly Inbox[],
+  riding: RidingChoices = NO_RIDING_CHOICES,
+): InboxLayout => {
   let held = NO_PLACEMENT;
   let layout: InboxLayout | undefined;
   for (const inbox of reads) {
@@ -56,7 +60,7 @@ const describeParts = (bundle: CardBundle): readonly string[] =>
     part._tag === "asking"
       ? `asking ${part.card.identifier}`
       : part._tag === "quiet"
-        ? `quiet ${part.title}${part.said === undefined ? "" : ` (${part.said})`}`
+        ? `quiet ${part.title}${part.statusWords === undefined ? "" : ` (${part.statusWords})`}`
         : `locked ${part.noun}`,
   );
 
@@ -183,6 +187,20 @@ describe("what rides on a lead", () => {
     );
   });
 
+  it("lists the ids of the cards a row draws: its own and those of its asking and quiet parts, not a peer's", () => {
+    const peer = buildInboxPeer("acme:ticket:77", { id: "record-77" });
+    const inbox = buildInbox([TICKET, OTHER_TICKET, REVIEW], {
+      links: [
+        buildInboxLink(TICKET.ref, REVIEW.ref),
+        buildInboxLink(TICKET.ref, OTHER_TICKET.ref),
+        buildInboxLink(TICKET.ref, peer.ref),
+      ],
+      peers: [peer],
+    });
+    const bundle = bundleOf(layOut(inbox), TICKET.id);
+    expect(listBundleCardIds(TICKET, bundle)).toEqual([TICKET.id, REVIEW.id, OTHER_TICKET.id]);
+  });
+
   it("draws nothing for a link whose other end the read does not hold", () => {
     const inbox = buildInbox([TICKET], { links: [buildInboxLink(TICKET.ref, "acme:ticket:404")] });
     expect(bundleOf(layOut(inbox), TICKET.id).parts).toEqual([]);
@@ -307,12 +325,12 @@ describe("what the visit holds of riding", () => {
   });
 
   it("lets the user's own Link put a request on its lead, and Unlink take it off", () => {
-    const put = new Map([[REVIEW.id, TICKET.ref]]);
+    const put = new Map([[REVIEW.id, chooseLead(TICKET.ref)]]);
     const linkedLayout = layOutVisit([unlinked, linked], put);
     expect(describeParts(bundleOf(linkedLayout, TICKET.id))).toEqual(["asking #3"]);
     expect(requestIds(linkedLayout)).toEqual([]);
 
-    const taken = new Map([[REVIEW.id, undefined]]);
+    const taken = new Map([[REVIEW.id, chooseLead(undefined)]]);
     const unlinkedLayout = layOutVisit([linked, unlinked], taken);
     expect(requestIds(unlinkedLayout)).toEqual([REVIEW.id]);
   });
@@ -347,6 +365,7 @@ describe("the filter and what rides", () => {
       inbox,
       { ...VIEW, filter: toggleFilterValue({}, "whose", "mine") },
       NO_PLACEMENT,
+      NO_RIDING_CHOICES,
     );
     expect(ongoingIds(layout)).toEqual([TICKET.id, OTHER_TICKET.id]);
     const lead = layout.ongoing.surfaces.flatMap((surface) => surface.rows)[0]!;
@@ -359,6 +378,7 @@ describe("the filter and what rides", () => {
       buildInbox([TICKET, { ...OTHER_TICKET, yours: true }, notMine]),
       { ...VIEW, filter: toggleFilterValue({}, "whose", "mine") },
       NO_PLACEMENT,
+      NO_RIDING_CHOICES,
     );
     expect(ongoingIds(layout)).toEqual([OTHER_TICKET.id]);
     expect(requestIds(layout)).toEqual([]);

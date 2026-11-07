@@ -414,7 +414,7 @@ A signal alone can bring a card onto the clock. That is an arrival too, taken on
   - **A first observation writes none**, and neither does a partial record that a full observation completes, or a pair whose first end was first seen in this write: what a thing already carried is a baseline, not news.
 - **At most 50 rows for a ref** (`MAX_ENTITY_TIMELINE`). The write that goes over deletes the oldest.
 - **The words** come from the entity's `reason_templates` under the keys `reassigned`, `moved` and `linked`, else from the core's own sentences: "Now with {person}", "Moved to {value}", "Linked {value}". They are built when read, by the function that builds a signal's sentence.
-- **Read.** `ExternalEntityDetail.timeline` holds at most 50 changes, oldest first. Each is `{ reason, say, at, ref? }`, with `ref` for a `linked` change. Each entity record, `EntityPlace` and unrestricted `EntityPeer` has `latestChange`, read for a whole list in one statement, so a Task's linked thing shows its latest change wherever the shared relation row draws it.
+- **Read.** `ExternalEntityDetail.timeline` holds at most 50 changes, oldest first. Each is `{ reason, sentence, at, ref? }`, with `ref` for a `linked` change. Each entity record, `EntityPlace` and unrestricted `EntityPeer` has `latestChange`, read for a whole list in one statement, so a Task's linked thing shows its latest change wherever the shared relation row draws it.
 - **Nothing acts on it.** No stage moves, no run stops, no signal ends, no card changes place, no Task changes, and no event or signal is raised. Two pull requests for one ticket are fine: each is linked, and each says so.
 
 ## 9. Operations

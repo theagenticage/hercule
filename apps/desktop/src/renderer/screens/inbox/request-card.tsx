@@ -1,37 +1,28 @@
 import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import {
-  decideCardFace,
-  describeCardAloud,
-  isSameBundle,
-  type CardBundle,
-} from "@hercule/client-core/inbox";
+import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import "../desk/card.css";
 import { CardMonogram, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
-import { HintLines } from "./hint-lines";
+import { buildCardPropsComparer } from "./card-props";
+import { LinkLines } from "./link-lines";
 import { useCardTime } from "./use-card-time";
 
 interface RequestCardProps {
   readonly card: InboxCard;
   readonly homeName: string | undefined;
   readonly bundle: CardBundle;
-  readonly isFresh: boolean;
+  /** The cards a signal just landed on. The request shows the new mark when its id is in it. */
+  readonly freshIds: ReadonlySet<string>;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly step: number;
 }
 
-/** Checks whether two sets of props draw the same request. The layout builds a new bundle on each read, so bundles are compared by what they draw. */
-const arePropsEqual = (before: RequestCardProps, after: RequestCardProps): boolean =>
-  (Object.keys(after) as (keyof RequestCardProps)[]).every((key) =>
-    key === "bundle"
-      ? isSameBundle(before.bundle, after.bundle)
-      : Object.is(before[key], after[key]),
-  );
+const arePropsEqual = buildCardPropsComparer<RequestCardProps>();
 
 /**
  * Renders a small request as a card of its own, in the narrow column: the
@@ -50,7 +41,7 @@ const arePropsEqual = (before: RequestCardProps, after: RequestCardProps): boole
  *   the user can link ("Mentions OPS-47"), and what it is linked to ("Linked to
  *   #6263"). They stand under the card in one `.inbox-bundle`, and are not part
  *   of the card.
- * - `isFresh` shows the new mark: a signal just landed on the card.
+ * - `freshIds` are the cards a signal just landed on. The request shows the new mark when it is one.
  * - `step` is the card's place in its list, which sets when its words arrive
  *   after the first read.
  *
@@ -66,7 +57,7 @@ function RequestCardView({
   card,
   homeName,
   bundle,
-  isFresh,
+  freshIds,
   plugins,
   monogram,
   step,
@@ -85,7 +76,7 @@ function RequestCardView({
         data-access={card.access === "ok" ? undefined : card.access}
         data-has-task={card.taskId === undefined ? undefined : ""}
         tabIndex={-1}
-        aria-label={describeCardAloud(face, wait)}
+        aria-label={describeCardAloud(face, wait, 0)}
       >
         <i className="card-stock" />
         <span className="card-body">
@@ -97,15 +88,15 @@ function RequestCardView({
           </p>
           {wait !== null && <CardWaitFigure wait={wait} />}
           {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
-          <span className="request-under">
-            {isFresh && <NewMark />}
+          <span className="request-under" data-landing-line>
+            {freshIds.has(card.id) && <NewMark />}
             {face.status !== undefined && (
               <span className="request-shape">
                 <StatusShape shape={face.status.shape} tone={face.status.tone} size={13} />
               </span>
             )}
             {face.sentence !== undefined && (
-              <span className="request-said" data-tone={face.sentence.tone}>
+              <span className="request-said" data-landing-sentence data-tone={face.sentence.tone}>
                 {face.sentence.text}
               </span>
             )}
@@ -115,7 +106,7 @@ function RequestCardView({
           <CardMoves card={card} />
         </span>
       </div>
-      <HintLines
+      <LinkLines
         leadId={card.id}
         leadIdentifier={face.identifier}
         lines={bundle.lines}

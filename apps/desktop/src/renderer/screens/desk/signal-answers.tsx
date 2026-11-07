@@ -14,6 +14,7 @@ import {
 } from "@hercule/client-core";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { isPrimaryModifierHeld } from "../../app/primary-modifier";
+import type { AnswerFailure } from "../../app/use-answer-signal";
 import { buildLook, Face } from "../../faces";
 import { LedgerAnswer } from "./ledger-answer";
 import "./signal-answers.css";
@@ -25,12 +26,6 @@ const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
   quiet: "btn btn--quiet",
   plain: "btn",
 };
-
-/** An answer that failed, and why. */
-export interface AnswerFailure {
-  readonly actionId: string;
-  readonly message: string;
-}
 
 /**
  * Renders a describe line, with the parts the core marked, such as a branch

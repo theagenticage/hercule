@@ -20,6 +20,7 @@ import type {
 import { lowerFirst, type PluginName } from "../intake";
 import { readEntityPluginId } from "./entity-words";
 import { describeClaim } from "./link-claim";
+import { readOtherRef } from "./link-ends";
 
 /** The records and the `part of` steps a reply carries, which are all the rows are built from. */
 export interface RelationGraph {
@@ -47,7 +48,11 @@ export interface RowLink {
   readonly kind: "confirmed" | "hint";
   /** Who says the two are linked, in words, such as "Linear reports this". */
   readonly claimWords: string;
-  /** True when the user made the link, so they can remove it. A source's link is never removed. */
+  /**
+   * True when the user has made a claim on the link, so they can remove it,
+   * even when a source reports the same link as well. A source's own claim is
+   * never removed.
+   */
   readonly canUnlink: boolean;
 }
 
@@ -129,7 +134,12 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     ...(place.targetDate === undefined ? {} : { targetDate: place.targetDate }),
     ...(place.latestChange === undefined
       ? {}
-      : { latestChange: { say: place.latestChange.say.say, tone: place.latestChange.say.tone } }),
+      : {
+          latestChange: {
+            say: place.latestChange.sentence.say,
+            tone: place.latestChange.sentence.tone,
+          },
+        }),
   };
 };
 
@@ -154,7 +164,12 @@ export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
     ...(peer.status === undefined ? {} : { status: peer.status }),
     ...(peer.latestChange === undefined
       ? {}
-      : { latestChange: { say: peer.latestChange.say.say, tone: peer.latestChange.say.tone } }),
+      : {
+          latestChange: {
+            say: peer.latestChange.sentence.say,
+            tone: peer.latestChange.sentence.tone,
+          },
+        }),
   };
 };
 
@@ -240,6 +255,11 @@ export interface LinkedThings {
   readonly plugins: ReadonlyArray<PluginName>;
 }
 
+/** The record at the far end of a link, and whether it came as a place or as a peer. */
+type FarEnd =
+  | { readonly _tag: "place"; readonly place: EntityPlace }
+  | { readonly _tag: "peer"; readonly peer: EntityPeer };
+
 /** The rows of the Linked section: what is linked for sure, and what only text says. */
 export interface LinkedRows {
   readonly confirmed: readonly PlaceRow[];
@@ -264,27 +284,26 @@ export const buildLinkedRows = ({
   plugins,
 }: LinkedThings): LinkedRows => {
   // One lookup by ref: a place when the reply holds one, else the peer. A far end in neither has no row.
-  const farEnds = new Map<string, EntityPlace | EntityPeer>([
-    ...peers.map((peer) => [peer.ref, peer] as const),
-    ...places.map((place) => [place.ref, place] as const),
+  const farEnds = new Map<string, FarEnd>([
+    ...peers.map((peer) => [peer.ref, { _tag: "peer", peer }] as const),
+    ...places.map((place) => [place.ref, { _tag: "place", place }] as const),
   ]);
   const confirmed: PlaceRow[] = [];
   const hints: PlaceRow[] = [];
   for (const link of links) {
-    const otherRef = link.fromRef === ref ? link.toRef : link.fromRef;
-    const farEnd = farEnds.get(otherRef);
+    const farEnd = farEnds.get(readOtherRef(link, ref));
     if (farEnd === undefined) continue;
-    const row = "yours" in farEnd ? buildPeerRow(farEnd) : buildPlaceRow(farEnd);
+    const row = farEnd._tag === "peer" ? buildPeerRow(farEnd.peer) : buildPlaceRow(farEnd.place);
     const isHint = link.claim.type === "text";
     // A hint is offered to be linked, which nobody does to a thing they cannot even name.
     if (isHint && row.isLocked) continue;
-    const mentioner = link.fromRef === ref ? undefined : farEnd.identifier;
+    const mentioner = link.fromRef === ref ? undefined : row.isLocked ? undefined : row.identifier;
     const linked: PlaceRow = {
       ...row,
       link: {
         kind: isHint ? "hint" : "confirmed",
         claimWords: describeClaim(link.claim, plugins, mentioner),
-        canUnlink: link.claim.type === "person",
+        canUnlink: link.hasPersonClaim,
       },
     };
     (isHint ? hints : confirmed).push(linked);

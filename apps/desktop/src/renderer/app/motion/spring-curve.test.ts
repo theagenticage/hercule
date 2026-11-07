@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSpringCurve } from "./spring-curve";
+import { buildSpringCurve, buildSpringKnock } from "./spring-curve";
 import type { SpringName } from "./springs";
 
 /** Returns the numbers of a `linear(...)` easing. */
@@ -38,5 +38,27 @@ describe("buildSpringCurve", () => {
 
   it("returns the same curve each time", () => {
     expect(buildSpringCurve("travel")).toBe(buildSpringCurve("travel"));
+  });
+});
+
+describe("buildSpringKnock", () => {
+  it("moves off in the direction of the push, by about 2 px for 145 px/s on hand, and ends at rest", () => {
+    const { offsets, ms } = buildSpringKnock("hand", 145);
+    expect(offsets[0]).toBe(0);
+    expect(offsets.at(-1)).toBe(0);
+    const peak = Math.max(...offsets);
+    expect(peak).toBeGreaterThan(1.5);
+    expect(peak).toBeLessThan(3);
+    expect(offsets.length).toBeGreaterThan(20);
+    expect(offsets.length).toBeLessThan(60);
+    expect(ms).toBeGreaterThan(200);
+    expect(ms).toBeLessThan(600);
+  });
+
+  it("scales with the speed, and returns the same knock each time", () => {
+    const slow = buildSpringKnock("hand", 50);
+    const quick = buildSpringKnock("hand", 100);
+    expect(Math.max(...quick.offsets)).toBeCloseTo(2 * Math.max(...slow.offsets), 1);
+    expect(buildSpringKnock("hand", 100)).toBe(quick);
   });
 });

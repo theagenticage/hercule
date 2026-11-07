@@ -807,6 +807,13 @@
   --wait-over: var(--ink);
   /* What dims the page behind an open card: flat, no blur. In the light themes it is paper, so nothing turns grey. */
   --veil: color-mix(in oklab, var(--desk) 72%, transparent);
+  /* Words on a sheet of stock: a place, a request, an open card, a stack. The dark themes lift them
+     (below), and the light themes leave them as they are, so a sheet reads these in every theme and
+     no stylesheet lists the themes that differ. */
+  --faint-on-stock: var(--faint);
+  --fail-ink-on-stock: var(--fail-ink);
+  /* The share of ink in the band behind a lane's head on the Work board. */
+  --band-share: 5%;
 }
 [data-theme="styles"] {
   --mark-l: 0.43;
@@ -822,4 +829,9 @@
   /* The stock is lighter than --faint was set for, so words on a place take a step more ink. A
      place reads this through --faint, which cannot refer to itself. */
   --faint-on-stock: color-mix(in oklab, var(--muted) 45%, var(--faint));
+  --band-share: 8%;
+}
+/* Blue Train's stock is lighter still, so a failure on it takes a lighter tomato. */
+[data-theme="blue-train"] {
+  --fail-ink-on-stock: oklch(0.82 0.11 30);
 }

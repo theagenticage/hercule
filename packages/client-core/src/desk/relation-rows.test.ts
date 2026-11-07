@@ -156,10 +156,15 @@ describe("buildLinkedRows", () => {
     type,
     ...extra,
   });
-  const build = (links: readonly EntityLink[], peers: readonly EntityPeer[] = []) =>
+  /** A link the test names without `hasPersonClaim`, which then holds exactly when the firmest claim is the user's. */
+  type TestLink = Omit<EntityLink, "hasPersonClaim"> & { readonly hasPersonClaim?: boolean };
+  const build = (links: readonly TestLink[], peers: readonly EntityPeer[] = []) =>
     buildLinkedRows({
       ref: ORDER,
-      links,
+      links: links.map((link) => ({
+        ...link,
+        hasPersonClaim: link.hasPersonClaim ?? link.claim.type === "person",
+      })),
       places: [place(OTHER, "Chilled crates", { identifier: "PO-2", noun: "Order" })],
       peers,
       plugins: PLUGINS,
@@ -179,6 +184,23 @@ describe("buildLinkedRows", () => {
     expect(byPerson.confirmed[0]?.link).toEqual({
       kind: "confirmed",
       claimWords: "You linked this",
+      canUnlink: true,
+    });
+  });
+
+  it("lets the user remove their own claim on a link a source reports as well", () => {
+    const rows = build([
+      {
+        fromRef: ORDER,
+        toRef: OTHER,
+        claim: claimOf("source", { plugin: "quayside" }),
+        hasPersonClaim: true,
+      },
+    ]);
+
+    expect(rows.confirmed[0]?.link).toEqual({
+      kind: "confirmed",
+      claimWords: "Quayside reports this",
       canUnlink: true,
     });
   });
@@ -264,7 +286,7 @@ describe("the latest change of a row", () => {
   it("carries the finished words and tone of the place or peer", () => {
     const change = {
       reason: "reassigned",
-      say: { say: "Now with Tessa", tone: "plain" },
+      sentence: { say: "Now with Tessa", tone: "plain" },
       at: "x",
     } as const;
 

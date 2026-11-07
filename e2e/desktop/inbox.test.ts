@@ -388,11 +388,14 @@ describe("Inbox", () => {
     expect(before).not.toBeNull();
 
     // The review request arrives as a signal. The app reads the Inbox again
-    // when it reconnects, and the same card now says what the signal says.
+    // when it reconnects, and the same card now says who asked. A request in
+    // the narrow column names the person alone when the sentence is the usual
+    // one (a plain tone), because the column's title already says what a
+    // request is.
     await arranged.restartController(() => {
       seedReviewRequestSignal(arranged.home);
     });
-    await expect.poll(() => sentence.textContent()).toBe("juno-park asked for your review");
+    await expect.poll(() => sentence.textContent()).toBe("juno-park");
 
     // The card stayed: the same one, in the same place, and no second card.
     expect(await page.locator('aside[aria-label="Requests"] .inbox-request').count()).toBe(1);

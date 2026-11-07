@@ -12,6 +12,7 @@
  */
 import type { EntityLink, EntityPeer, InboxCard } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
+import { isLinkBetween, nameLinkedThing, readOtherRef } from "../desk/link-ends";
 import { findHomeName, type PlaceContext } from "./inbox-place";
 import type { VisitPlacement } from "./visit-placement";
 
@@ -48,7 +49,7 @@ export interface QuietPart {
   readonly noun: string;
   readonly title: string;
   /** The status word, or "You took it on" for a card a Task holds. */
-  readonly said: string | undefined;
+  readonly statusWords: string | undefined;
   /** What the link between it and the lead says. `undefined` for a rider whose link the read does not hold. */
   readonly claim: LinkClaim | undefined;
 }
@@ -145,7 +146,7 @@ export interface BundleSources {
 
 /**
  * Returns the lookups `buildCardBundle` reads. `riding` is `decideDrawnRiding`'s
- * answer and `rankOf` gives each card's place in the order of the visit, which
+ * answer and `readRank` gives each card's place in the order of the visit, which
  * orders the cards that ride on one lead.
  */
 export const indexBundleSources = (
@@ -155,7 +156,7 @@ export const indexBundleSources = (
     readonly peers: readonly EntityPeer[];
   },
   riding: ReadonlyMap<string, string>,
-  rankOf: (cardId: string) => number,
+  readRank: (cardId: string) => number,
   context: PlaceContext,
 ): BundleSources => {
   const linksByRef = new Map<string, EntityLink[]>();
@@ -174,7 +175,8 @@ export const indexBundleSources = (
     if (known === undefined) ridersByLead.set(lead, [card]);
     else known.push(card);
   }
-  for (const riders of ridersByLead.values()) riders.sort((a, b) => rankOf(a.id) - rankOf(b.id));
+  for (const riders of ridersByLead.values())
+    riders.sort((a, b) => readRank(a.id) - readRank(b.id));
   return {
     cardByRef: new Map(inbox.cards.map((card) => [card.ref, card])),
     peerByRef: new Map(inbox.peers.map((peer) => [peer.ref, peer])),
@@ -198,7 +200,7 @@ const buildQuietPartOfCard = (card: InboxCard, claim: LinkClaim | undefined): Qu
   pluginId: readEntityPluginId(card.kind),
   noun: card.noun,
   title: card.title,
-  said: card.taskId === undefined ? card.status?.label : TAKEN_WORDS,
+  statusWords: card.taskId === undefined ? card.status?.label : TAKEN_WORDS,
   claim,
 });
 
@@ -210,13 +212,9 @@ const buildQuietPartOfPeer = (peer: EntityPeer, claim: LinkClaim): QuietPart => 
   pluginId: readEntityPluginId(peer.kind),
   noun: peer.noun,
   title: peer.title ?? peer.noun,
-  said: peer.status?.label,
+  statusWords: peer.status?.label,
   claim,
 });
-
-/** Returns how a line names the thing at the other end of a link: its identifier, else its title, else its noun. */
-const nameReference = (card: InboxCard | undefined, peer: EntityPeer | undefined): string =>
-  card?.identifier ?? peer?.identifier ?? peer?.title ?? peer?.noun ?? "";
 
 /** Returns the part for a confirmed link from the lead to `otherRef`, or `undefined` when the read holds nothing at that end. */
 const buildPartOfLink = (
@@ -268,8 +266,8 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
   const riders = sources.ridersByLead.get(lead.ref) ?? [];
   const links = sources.linksByRef.get(lead.ref) ?? [];
   if (riders.length === 0 && links.length === 0) return EMPTY_BUNDLE;
-  const claimOf = (otherRef: string): LinkClaim | undefined =>
-    links.find((link) => link.fromRef === otherRef || link.toRef === otherRef)?.claim;
+  const findClaimToward = (otherRef: string): LinkClaim | undefined =>
+    links.find((link) => isLinkBetween(link, lead.ref, otherRef))?.claim;
 
   const asking: AskingPart[] = [];
   const quiet: QuietPart[] = [];
@@ -279,7 +277,7 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
 
   for (const card of riders) {
     seen.add(card.ref);
-    const claim = claimOf(card.ref);
+    const claim = findClaimToward(card.ref);
     if (card.taskId === undefined) {
       asking.push({
         _tag: "asking",
@@ -293,27 +291,29 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
   }
 
   for (const link of links) {
-    const otherRef = link.fromRef === lead.ref ? link.toRef : link.fromRef;
+    const otherRef = readOtherRef(link, lead.ref);
     if (seen.has(otherRef)) continue;
     seen.add(otherRef);
     const card = sources.cardByRef.get(otherRef);
     const peer = sources.peerByRef.get(otherRef);
     if (link.claim.type === "text") {
-      if (peer?.restricted === true || (card === undefined && peer === undefined)) continue;
+      const farEnd = card ?? peer;
+      if (peer?.restricted === true || farEnd === undefined) continue;
       lines.push({
         _tag: "mention",
         word: link.fromRef === lead.ref ? "Mentions" : "Mentioned in",
-        reference: nameReference(card, peer),
+        reference: nameLinkedThing(farEnd),
         otherRef,
         fromRef: link.fromRef,
         toRef: link.toRef,
         claim: link.claim,
       });
     } else if (lead.card === "compact") {
-      if (peer?.restricted === true || (card === undefined && peer === undefined)) continue;
+      const farEnd = card ?? peer;
+      if (peer?.restricted === true || farEnd === undefined) continue;
       lines.push({
         _tag: "peer",
-        reference: nameReference(card, peer),
+        reference: nameLinkedThing(farEnd),
         otherRef,
         openId: card?.id ?? peer?.id,
         claim: link.claim,
@@ -331,6 +331,19 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
   if (asking.length + quiet.length + locked.length + lines.length === 0) return EMPTY_BUNDLE;
   return { parts: [...asking, ...quiet, ...locked], lines, riders };
 };
+
+/**
+ * Returns the ids of the cards a row draws: `card` first, then the card of
+ * each part of `bundle` that has one (an asking part, or a quiet part of a
+ * card on the Inbox). A peer or a locked part has no card and adds nothing.
+ */
+export const listBundleCardIds = (card: InboxCard, bundle: CardBundle): readonly string[] => [
+  card.id,
+  ...bundle.parts.flatMap((part) => {
+    if (part._tag === "asking") return [part.card.id];
+    return part._tag === "quiet" && part.cardId !== undefined ? [part.cardId] : [];
+  }),
+];
 
 const isSameClaim = (a: LinkClaim | undefined, b: LinkClaim | undefined): boolean =>
   a === b ||
@@ -357,7 +370,7 @@ const isSamePart = (a: TuckedPart, b: TuckedPart): boolean => {
       a.cardId === b.cardId &&
       a.openId === b.openId &&
       a.title === b.title &&
-      a.said === b.said &&
+      a.statusWords === b.statusWords &&
       isSameClaim(a.claim, b.claim)
     );
   }

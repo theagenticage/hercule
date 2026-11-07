@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { MOTION_EASE } from "../app/motion/ease";
 
 /**
  * Tests that every token the Work and Inbox pages share (the desk, the card
@@ -67,6 +68,9 @@ const SHARED_TOKENS = [
   "--wait-recent",
   "--wait-due",
   "--wait-over",
+  "--faint-on-stock",
+  "--fail-ink-on-stock",
+  "--band-share",
 ];
 
 type Block = { selectors: string[]; declared: Set<string> };
@@ -106,5 +110,13 @@ describe("the shared Work and Inbox tokens", () => {
         ),
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe("the motion tokens", () => {
+  it("keeps the ease of Web Animations equal to --m-ease", () => {
+    expect(readFileSync(join(import.meta.dirname, "tokens.css"), "utf8")).toContain(
+      `--m-ease: ${MOTION_EASE};`,
+    );
   });
 });

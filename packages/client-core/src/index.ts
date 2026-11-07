@@ -416,7 +416,6 @@ export {
   trimAnswerEllipsis,
   type EventDaySection,
   type EventHandlingLabel,
-  type IntakeEntry,
   type IntakeSection,
   type IntakeTab,
   type IntakeTabPlugin,

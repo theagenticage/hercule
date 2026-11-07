@@ -19,6 +19,7 @@ const link = (toRef: string, type: EntityLink["claim"]["type"]): EntityLink => (
   fromRef: SELF,
   toRef,
   claim: { type },
+  hasPersonClaim: type === "person",
 });
 
 describe("listLinkableRows", () => {
@@ -26,7 +27,7 @@ describe("listLinkableRows", () => {
     const rows = listLinkableRows([row(SELF), row("a"), row("b"), row("c"), row("d")], SELF, [
       link("a", "source"),
       link("b", "person"),
-      { fromRef: "c", toRef: SELF, claim: { type: "source" } },
+      { fromRef: "c", toRef: SELF, claim: { type: "source" }, hasPersonClaim: false },
     ]);
 
     expect(rows.map((each) => each.ref)).toEqual(["d"]);

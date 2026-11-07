@@ -45,6 +45,7 @@ function AskingPartRow({
   return (
     <div
       className="inbox-part is-asking"
+      data-landing-part
       role="button"
       tabIndex={-1}
       data-card-id={card.id}
@@ -59,13 +60,13 @@ function AskingPartRow({
       <span className="part-ask">
         {isFresh && <NewMark />}
         {sentence !== undefined && (
-          <span className="part-said" data-tone={sentence.tone}>
+          <span className="part-said" data-landing-line data-tone={sentence.tone}>
             {sentence.text}
           </span>
         )}
       </span>
       {wait !== null && <CardWaitFigure wait={wait} />}
-      <span className="part-line">
+      <span className="part-line" data-landing-line>
         {face.status !== undefined && (
           <StatusShape shape={face.status.shape} tone={face.status.tone} size={12} />
         )}
@@ -104,6 +105,7 @@ function QuietPartRow({
   return (
     <div
       className="inbox-part is-quiet"
+      data-landing-part
       role={part.openId === undefined ? undefined : "button"}
       tabIndex={part.openId === undefined ? undefined : -1}
       data-lead-id={leadId}
@@ -118,9 +120,9 @@ function QuietPartRow({
       <span className="part-title" title={part.title}>
         {part.title}
       </span>
-      <span className="part-said">
+      <span className="part-said" data-landing-line>
         {isFresh && <NewMark />}
-        {part.said}
+        {part.statusWords}
       </span>
     </div>
   );

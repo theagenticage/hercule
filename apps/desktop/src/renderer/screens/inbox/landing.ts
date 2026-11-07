@@ -1,19 +1,24 @@
 /**
  * The moment a signal lands on a card, drawn on the page: the one time the
  * Inbox lets itself be noticed. A drop falls onto the line that will change
- * (`startDrop`), and when it lands the card takes a knock, its sentence rolls
+ * (`startDrops`), and when it lands the card takes a knock, its sentence rolls
  * over to the new words, and a rim of light fades (`playReaction`). A part that
  * rides on a card gets the same moment on its own row: its words rise into
  * place and its rim lights, and the card it rides on does nothing, so no card
  * ever changes place.
  *
  * Everything runs on the compositor as one `transform` or `opacity` animation
- * per new line, apart from the knock, which the motion kernel springs. No
- * timer is left behind. Under Reduce motion there is no drop, no knock and no
- * roll: the words change in place and the rim fades.
+ * per new line, the knock included (`buildSpringKnock` turns its spring into
+ * the keyframes). No timer is left behind. Under Reduce motion there is no
+ * drop, no knock and no roll: the words change in place and the rim fades.
+ *
+ * The page marks what the landing reads and moves with attributes: a part that
+ * rides on a card is `data-landing-part`, the line of a card that carries its
+ * sentence (and the first line of a part) is `data-landing-line`, and the
+ * sentence inside a line is `data-landing-sentence`.
  */
 import type { EntityReason } from "@hercule/contract";
-import { buildSpringCurve, isMotionReduced, trackBody } from "../../app/motion";
+import { buildSpringCurve, buildSpringKnock, MOTION_EASE } from "../../app/motion";
 import { ensureCopyLayer } from "./inbox-motion";
 import { findCardElement } from "./inbox-page-dom";
 
@@ -45,28 +50,15 @@ const RISE_MS = 240;
 const RIM_MS = 1100;
 const RIM_REDUCED_MS = 900;
 
-/** The easing of the rim, which is the stylesheet's `--m-ease`: a Web Animation cannot read a custom property. */
-const RIM_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
-
-type CardKind = "row" | "request" | "part";
-
-/** The line of a card that carries its sentence, and the sentence, for a row and for a request. */
-const LINES = { row: ".row-context", request: ".request-under" } as const;
-const SENTENCES = { row: ".row-news", request: ".request-said" } as const;
-
 /**
- * The words of a part: its first line, which says what it asks, or the line
- * under it when it asks nothing. The query returns the first match in the
- * order of the page, so a part that asks gets its sentence.
+ * What the page marks. The line of a card is the one that carries its
+ * sentence; the words of a part are its first line, which says what it asks,
+ * or the line under it when it asks nothing. A query returns the first match
+ * in the order of the page, so a part that asks gets its sentence.
  */
-const PART_WORDS = ".part-said, .part-line";
-
-const readKind = (element: HTMLElement): CardKind =>
-  element.classList.contains("inbox-part")
-    ? "part"
-    : element.classList.contains("inbox-request")
-      ? "request"
-      : "row";
+const PART = "[data-landing-part]";
+const LINE = "[data-landing-line]";
+const SENTENCE = "[data-landing-sentence]";
 
 /**
  * Returns the element that draws the card `cardId` under `scroller`: a row, a
@@ -76,7 +68,7 @@ const readKind = (element: HTMLElement): CardKind =>
  */
 export const findLandingElement = (scroller: HTMLElement, cardId: string): HTMLElement | null =>
   findCardElement(scroller, cardId) ??
-  scroller.querySelector<HTMLElement>(`.inbox-part[data-open-id="${CSS.escape(cardId)}"]`);
+  scroller.querySelector<HTMLElement>(`${PART}[data-open-id="${CSS.escape(cardId)}"]`);
 
 /**
  * Checks whether `element` can be seen on the page now: it takes room, and
@@ -90,51 +82,78 @@ export const isShownOnPage = (scroller: HTMLElement, element: HTMLElement): bool
   return box.bottom > page.top && box.top < page.bottom;
 };
 
-/** Returns the line a drop falls onto: the line of a card that carries its sentence, or the words of a part. */
-const findSpot = (element: HTMLElement): Element | null => {
-  const kind = readKind(element);
-  return element.querySelector(kind === "part" ? PART_WORDS : LINES[kind]);
+/** Where a drop falls and where it starts, in window pixels, as measured on the page. */
+export interface DropPlan {
+  readonly tone: LandingTone;
+  /** The left edge of the line the drop falls onto. */
+  readonly lineLeft: number;
+  /** The vertical middle of that line. */
+  readonly lineMiddle: number;
+  /** The top of the card, from which the drop starts `DROP_HEIGHT` above. */
+  readonly cardTop: number;
+}
+
+/**
+ * Measures where a signal of `tone` will fall onto `element`: its line, and
+ * where the card lies. Only reads the page, so a caller can plan every card
+ * of a landing before it writes anything (`startDrops`). Returns `undefined`
+ * when the element has no line to fall on.
+ */
+export const planDrop = (element: HTMLElement, tone: LandingTone): DropPlan | undefined => {
+  const line = element.querySelector(LINE);
+  if (line === null) return undefined;
+  const spot = line.getBoundingClientRect();
+  return {
+    tone,
+    lineLeft: spot.left,
+    lineMiddle: spot.top + spot.height / 2,
+    cardTop: element.getBoundingClientRect().top,
+  };
 };
 
 /**
- * Starts the drop of a signal that is about to land on `element`: a 7px dot
- * in the tone of the news appears 24px above the card and falls onto its line
- * over 360ms, stretching as it goes, and flattens where it lands. It removes
- * itself, and its layer when it is the last in it, when it ends. Does nothing
- * when the page has no layer or the element has no line to fall on. The
- * caller starts it as the card still shows its old words, and calls
- * `playReaction` `REACTION_DELAY_MS` later.
+ * Starts the drops planned by `planDrop`: for each, a 7px dot in the tone of
+ * the news appears 24px above its card and falls onto the line over 360ms,
+ * stretching as it goes, and flattens where it lands. Each removes itself, and
+ * the layer when it is the last in it, when it ends. Does nothing when the
+ * page has no layer. The caller starts them as the cards still show their old
+ * words, and calls `playReaction` `REACTION_DELAY_MS` later.
+ *
+ * The layer is measured once for all the drops, and only after it is made, so
+ * a landing on many cards costs one layout and not one for each.
  */
-export const startDrop = (scroller: HTMLElement, element: HTMLElement, tone: LandingTone): void => {
-  const spot = findSpot(element)?.getBoundingClientRect();
-  const layer = spot === undefined ? null : ensureCopyLayer(scroller);
-  if (spot === undefined || layer === null) return;
+export const startDrops = (scroller: HTMLElement, plans: readonly DropPlan[]): void => {
+  if (plans.length === 0) return;
+  const layer = ensureCopyLayer(scroller);
+  if (layer === null) return;
   const origin = layer.getBoundingClientRect();
-  const x = spot.left + 3 - origin.left;
-  const y = spot.top + spot.height / 2 - origin.top;
-  const from = element.getBoundingClientRect().top - DROP_HEIGHT - origin.top;
-  const at = (top: number, scale: string): string =>
-    `translate3d(${x.toFixed(1)}px,${top.toFixed(1)}px,0) scale(${scale})`;
-  const drop = document.createElement("i");
-  drop.className = "landing-drop";
-  drop.dataset["tone"] = tone;
-  layer.append(drop);
-  const flight = drop.animate(
-    [
-      { transform: at(from, ".7,1"), opacity: 0 },
-      { transform: at(from + 12, ".85,1.2"), opacity: 1, offset: 0.2 },
-      { transform: at(y, ".85,1.35"), opacity: 1, offset: 0.78, easing: "linear" },
-      { transform: at(y, "1.5,.55"), opacity: 1, offset: 0.84 },
-      { transform: at(y, "1.5,.55"), opacity: 0 },
-    ],
-    { duration: DROP_MS, easing: "cubic-bezier(.4, 0, .9, .8)" },
-  );
-  const land = (): void => {
-    drop.remove();
-    if (layer.childElementCount === 0) layer.remove();
-  };
-  flight.onfinish = land;
-  flight.oncancel = land;
+  for (const plan of plans) {
+    const x = plan.lineLeft + 3 - origin.left;
+    const y = plan.lineMiddle - origin.top;
+    const from = plan.cardTop - DROP_HEIGHT - origin.top;
+    const at = (top: number, scale: string): string =>
+      `translate3d(${x.toFixed(1)}px,${top.toFixed(1)}px,0) scale(${scale})`;
+    const drop = document.createElement("i");
+    drop.className = "landing-drop";
+    drop.dataset["tone"] = plan.tone;
+    layer.append(drop);
+    const flight = drop.animate(
+      [
+        { transform: at(from, ".7,1"), opacity: 0 },
+        { transform: at(from + 12, ".85,1.2"), opacity: 1, offset: 0.2 },
+        { transform: at(y, ".85,1.35"), opacity: 1, offset: 0.78, easing: "linear" },
+        { transform: at(y, "1.5,.55"), opacity: 1, offset: 0.84 },
+        { transform: at(y, "1.5,.55"), opacity: 0 },
+      ],
+      { duration: DROP_MS, easing: "cubic-bezier(.4, 0, .9, .8)" },
+    );
+    const land = (): void => {
+      drop.remove();
+      if (layer.childElementCount === 0) layer.remove();
+    };
+    flight.onfinish = land;
+    flight.oncancel = land;
+  }
 };
 
 /** The sentence of a card as it was before the landing, and where the card, its line and the sentence lay. */
@@ -153,10 +172,9 @@ export interface HeldSentence {
  * roll, and for a card with no sentence.
  */
 export const holdSentence = (element: HTMLElement): HeldSentence | undefined => {
-  const kind = readKind(element);
-  if (kind === "part") return undefined;
-  const line = element.querySelector(LINES[kind]);
-  const sentence = line?.querySelector<HTMLElement>(SENTENCES[kind]);
+  if (element.matches(PART)) return undefined;
+  const line = element.querySelector(LINE);
+  const sentence = line?.querySelector<HTMLElement>(SENTENCE);
   if (line == null || sentence == null) return undefined;
   return {
     sentence: sentence.cloneNode(true) as HTMLElement,
@@ -173,9 +191,9 @@ export const holdSentence = (element: HTMLElement): HeldSentence | undefined => 
  * the line; the clip leaves when it has gone. Does nothing when the new
  * sentence is missing.
  */
-const rollSentence = (element: HTMLElement, kind: "row" | "request", held: HeldSentence): void => {
-  const line = element.querySelector(LINES[kind]);
-  const arrived = line?.querySelector<HTMLElement>(SENTENCES[kind]);
+const rollSentence = (element: HTMLElement, held: HeldSentence): void => {
+  const line = element.querySelector(LINE);
+  const arrived = line?.querySelector<HTMLElement>(SENTENCE);
   if (line == null || arrived == null) return;
   const { ease, ms } = buildSpringCurve("hand");
   const clip = document.createElement("div");
@@ -223,22 +241,24 @@ const rims = new WeakMap<HTMLElement, Animation>();
  * the news (`plain` and `attention` use the user's color), which fades in
  * 1100ms: in by 14% of that time, then out. Under Reduce motion it is a plain
  * fade of 900ms. The rim is the `::after` of `.is-landed`, which the
- * stylesheet draws; the class and the tone go when the rim ends.
+ * stylesheet draws; the class and the tone go when the rim ends. `isReduced`
+ * is whether the reader asked for no movement, which the caller reads once for
+ * the whole landing: reading it here would cost a style lookup for each card.
  */
-export const lightRim = (element: HTMLElement, tone: LandingTone): void => {
+export const lightRim = (element: HTMLElement, tone: LandingTone, isReduced: boolean): void => {
   rims.get(element)?.cancel();
   if (tone === "bad" || tone === "good") element.dataset["landed"] = tone;
   else delete element.dataset["landed"];
   element.classList.add("is-landed");
-  const rim = isMotionReduced()
+  const rim = isReduced
     ? element.animate(
         { opacity: [1, 0] },
         { duration: RIM_REDUCED_MS, easing: "linear", pseudoElement: "::after" },
       )
     : element.animate(
         [
-          { opacity: 0, easing: RIM_EASE },
-          { opacity: 1, offset: 0.14, easing: RIM_EASE },
+          { opacity: 0, easing: MOTION_EASE },
+          { opacity: 1, offset: 0.14, easing: MOTION_EASE },
           { opacity: 0 },
         ],
         { duration: RIM_MS, pseudoElement: "::after" },
@@ -257,20 +277,23 @@ export const lightRim = (element: HTMLElement, tone: LandingTone): void => {
 
 /**
  * Plays what happens when the drop has landed on `element`, after its new
- * words are drawn. The rim lights. A row or a request takes a knock and rolls
- * its sentence from `held` to the new one. A part lifts its words 5px into
- * place and no card moves. Under Reduce motion only the rim plays.
+ * words are drawn, and Reduce motion is off (under it, `lightRim` alone
+ * plays). The rim lights. A row or a request takes a knock, a push down that
+ * its spring brings back, and rolls its sentence from `held` to the new one. A
+ * part lifts its words 5px into place and no card moves.
+ *
+ * The knock is a Web Animation that adds to the card's own transform, so it
+ * costs the main thread nothing and a card that is also being moved is not
+ * disturbed.
  */
 export const playReaction = (
   element: HTMLElement,
   tone: LandingTone,
   held: HeldSentence | undefined,
 ): void => {
-  lightRim(element, tone);
-  if (isMotionReduced()) return;
-  const kind = readKind(element);
-  if (kind === "part") {
-    element.querySelector(PART_WORDS)?.animate(
+  lightRim(element, tone, false);
+  if (element.matches(PART)) {
+    element.querySelector(LINE)?.animate(
       [
         { transform: `translateY(${String(RISE_DISTANCE)}px)`, opacity: 0 },
         { transform: "none", opacity: 1 },
@@ -279,6 +302,10 @@ export const playReaction = (
     );
     return;
   }
-  trackBody(element).kick({ y: KNOCK_SPEED });
-  if (held !== undefined) rollSentence(element, kind, held);
+  const { offsets, ms } = buildSpringKnock("hand", KNOCK_SPEED);
+  element.animate(
+    offsets.map((offset) => ({ transform: `translate3d(0,${offset.toFixed(2)}px,0)` })),
+    { duration: ms, easing: "linear", composite: "add" },
+  );
+  if (held !== undefined) rollSentence(element, held);
 };

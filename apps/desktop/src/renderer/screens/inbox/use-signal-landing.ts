@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { flushSync } from "react-dom";
 import {
   describeLanding,
@@ -6,10 +14,11 @@ import {
   listLandedCards,
   releaseHeldCards,
   showHeldCards,
-  type HeldCard,
+  type LandingHold,
 } from "@hercule/client-core/inbox";
 import type { Inbox } from "@hercule/contract";
 import { isMotionReduced } from "../../app/motion";
+import { addIds, NO_IDS } from "./card-ids";
 import {
   findLandingElement,
   holdSentence,
@@ -17,16 +26,12 @@ import {
   lightRim,
   playReaction,
   REACTION_DELAY_MS,
-  startDrop,
+  planDrop,
+  startDrops,
   type LandingTone,
 } from "./landing";
 
-const NOTHING: ReadonlySet<string> = new Set();
-const NOTHING_HELD: ReadonlyMap<string, HeldCard> = new Map();
-
-/** Joins the ids of two sets, or returns `before` itself when `more` adds nothing. */
-const addIds = (before: ReadonlySet<string>, more: readonly string[]): ReadonlySet<string> =>
-  more.every((id) => before.has(id)) ? before : new Set([...before, ...more]);
+const NOTHING_HELD: ReadonlyMap<string, LandingHold> = new Map();
 
 /** Returns what a screen reader says for the cards `ids` of `inbox`, one sentence for each card the read holds. */
 const announceCards = (inbox: Inbox, ids: readonly string[]): string => {
@@ -92,7 +97,7 @@ export const useSignalLanding = ({
   // The last of the visit's own reads, to see which cards a signal landed on since. A copy kept from
   // an earlier visit says nothing about this one.
   const [lastRead, setLastRead] = useState<Inbox | undefined>(undefined);
-  const [freshIds, setFreshIds] = useState(NOTHING);
+  const [freshIds, setFreshIds] = useState(NO_IDS);
   const [held, setHeld] = useState(NOTHING_HELD);
   const [landing, setLanding] = useState<Landing | undefined>(undefined);
   const [announcement, setAnnouncement] = useState("");
@@ -133,21 +138,32 @@ export const useSignalLanding = ({
     const scroller = scrollRef.current;
     const read = latest.current.received;
     const cards = new Map(read?.cards.map((card) => [card.id, card]));
-    const dropped = new Map<string, LandingTone>();
-    for (const id of landing.ids) {
-      const card = cards.get(id);
-      const element = scroller === null ? null : findLandingElement(scroller, id);
-      if (scroller === null || card === undefined || element === null) continue;
-      if (!isShownOnPage(scroller, element)) continue;
-      const { tone } = describeLanding(card);
-      if (landing.isReduced) {
-        lightRim(element, tone);
-      } else {
-        startDrop(scroller, element, tone);
-        dropped.set(id, tone);
-      }
+    // Everything is measured before anything is written, so a landing on many cards costs one layout.
+    const shown =
+      scroller === null
+        ? []
+        : landing.ids.flatMap((id) => {
+            const card = cards.get(id);
+            const element = findLandingElement(scroller, id);
+            if (card === undefined || element === null || !isShownOnPage(scroller, element)) {
+              return [];
+            }
+            return [{ id, element, tone: describeLanding(card).tone }];
+          });
+    if (landing.isReduced) {
+      for (const { element, tone } of shown) lightRim(element, tone, true);
+      return;
     }
-    if (landing.isReduced) return;
+    const planned = shown.flatMap(({ id, element, tone }) => {
+      const plan = planDrop(element, tone);
+      return plan === undefined ? [] : [{ id, plan }];
+    });
+    const dropped = new Map<string, LandingTone>(planned.map(({ id, plan }) => [id, plan.tone]));
+    if (scroller !== null)
+      startDrops(
+        scroller,
+        planned.map(({ plan }) => plan),
+      );
 
     /** Draws the new words of the cards this landing holds, and plays the reaction on those a drop fell on. */
     const letLand = (): void => {
@@ -176,11 +192,12 @@ export const useSignalLanding = ({
     timers.current.add(timer);
   }, [landing, scrollRef]);
 
-  const clearFresh = (id: string): void => {
+  // Stable, because the screen depends on it in an effect.
+  const clearFresh = useCallback((id: string): void => {
     setFreshIds((before) =>
       before.has(id) ? new Set([...before].filter((each) => each !== id)) : before,
     );
-  };
+  }, []);
 
   // The visit asks whether the read it draws is the same one as before, so the same inputs must give the same read.
   const inbox = useMemo(

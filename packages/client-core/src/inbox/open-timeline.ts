@@ -7,31 +7,14 @@
  */
 import type {
   EntityChange,
-  EntityLink,
   EntityPeer,
-  EntityPlace,
   EntityReason,
   EntitySignalLine,
   ExternalEntityDetail,
   InboxCard,
 } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-
-/**
- * Returns how long before `now` a line of the timeline happened, in words:
- * "4 min ago" under an hour (at least 1), "3h ago" under a day, "Yesterday"
- * for the next day, then "5 days ago". An `at` after `now` reads "1 min ago".
- */
-export const describeTimelineAge = (at: string, now: Date): string => {
-  const hours = Math.max(0, now.getTime() - Date.parse(at)) / HOUR_MS;
-  if (hours < 1) return `${String(Math.max(1, Math.round(hours * 60)))} min ago`;
-  if (hours < 24) return `${String(Math.min(23, Math.round(hours)))}h ago`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? "Yesterday" : `${String(days)} days ago`;
-};
+import { readOtherRef } from "../desk/link-ends";
 
 /** What a line of the timeline says about a signal of the thing itself. */
 export interface TimelineSignal {
@@ -45,15 +28,17 @@ export interface TimelineSignal {
 
 /** One line of the open card's timeline. */
 export interface TimelineLine {
-  /** Names the line among the others, so a list can key by it. */
+  /**
+   * Names the line among the others, so a list can key by it: the time and
+   * the reason or signal it is about, so a line keeps its key when others
+   * come before it.
+   */
   readonly key: string;
   /** When it happened, as an ISO timestamp. */
   readonly at: string;
   /** The sentence, finished: the person is in it. */
   readonly say: string;
   readonly tone: EntityReason["tone"];
-  /** The person who asked, when the sentence does not name them. */
-  readonly person: string | undefined;
   /** For a line about another thing: how it names itself, such as "#6238". */
   readonly identifier: string | undefined;
   /** For a line about another thing: the plugin whose mark it wears. */
@@ -75,43 +60,28 @@ export type TimelineSource = Pick<
 /** How a line about another thing names it. */
 interface OtherThing {
   readonly kind: string;
-  readonly identifier: string | undefined;
+  readonly identifier?: string | undefined;
 }
 
-/** Returns the end of `link` that is not `ref`. */
-const readOtherRef = (link: EntityLink, ref: string): string =>
-  link.fromRef === ref ? link.toRef : link.fromRef;
-
-/** Returns the kind and the identifier of the thing at `ref`, from the page's cards, the peers and the places, or `undefined`. */
-const findOtherThing = (
-  ref: string,
-  cards: ReadonlyArray<InboxCard>,
-  peers: ReadonlyArray<EntityPeer>,
-  places: ReadonlyArray<EntityPlace>,
-): OtherThing | undefined => {
-  const known: ReadonlyArray<
-    { readonly kind: string; readonly identifier?: string | undefined } | undefined
-  > = [
-    cards.find((card) => card.ref === ref),
-    peers.find((peer) => peer.ref === ref && !peer.restricted),
-    places.find((place) => place.ref === ref && !place.restricted),
-  ];
-  const found = known.find((thing) => thing !== undefined);
-  return found === undefined ? undefined : { kind: found.kind, identifier: found.identifier };
+/**
+ * Returns the peers and the places of `detail` by ref, for finding the thing a
+ * line is about without searching a list for each line. A peer wins over a
+ * place for a ref that both hold. A restricted one has no kind to draw and is
+ * left out.
+ */
+const indexOtherThings = (detail: TimelineSource): ReadonlyMap<string, OtherThing> => {
+  const others = new Map<string, OtherThing>();
+  for (const thing of [...detail.places, ...detail.peers]) {
+    if (!thing.restricted) others.set(thing.ref, thing);
+  }
+  return others;
 };
-
-/** Returns the asker of a signal when the sentence does not name them, else `undefined`. */
-const readUnnamedPerson = (line: EntitySignalLine): string | undefined =>
-  line.asker === undefined || line.say.say.toLowerCase().includes(line.asker.toLowerCase())
-    ? undefined
-    : line.asker;
 
 const buildSignalLine = (line: EntitySignalLine): TimelineLine => ({
   key: `signal:${line.id}`,
   at: line.createdAt,
   say: line.say.say,
   tone: line.say.tone,
-  person: readUnnamedPerson(line),
   identifier: undefined,
   markPluginId: undefined,
   isLinked: false,
@@ -124,16 +94,12 @@ const buildSignalLine = (line: EntitySignalLine): TimelineLine => ({
   },
 });
 
-const buildChangeLine = (
-  change: EntityChange,
-  index: number,
-  other: OtherThing | undefined,
-): TimelineLine => ({
-  key: `change:${String(index)}`,
+/** Returns the line for `change`. `other` is the thing a `linked` change is about, when it is known. */
+const buildChangeLine = (change: EntityChange, other: OtherThing | undefined): TimelineLine => ({
+  key: `change:${change.at}:${change.reason}:${change.ref ?? ""}`,
   at: change.at,
-  say: change.say.say,
-  tone: change.say.tone,
-  person: undefined,
+  say: change.sentence.say,
+  tone: change.sentence.tone,
   identifier: other?.identifier,
   markPluginId: other === undefined ? undefined : readEntityPluginId(other.kind),
   isLinked: false,
@@ -163,22 +129,19 @@ export const buildOpenTimeline = (
   detail: TimelineSource,
   cards: ReadonlyArray<InboxCard>,
 ): readonly TimelineLine[] => {
+  const cardByRef = new Map(cards.map((card) => [card.ref, card]));
+  const others = indexOtherThings(detail);
   const lines: TimelineLine[] = [
-    ...detail.timeline.map((change, index) =>
-      buildChangeLine(
-        change,
-        index,
-        change.ref === undefined
-          ? undefined
-          : findOtherThing(change.ref, cards, detail.peers, detail.places),
-      ),
-    ),
+    ...detail.timeline.map((change) => {
+      const card = change.ref === undefined ? undefined : cardByRef.get(change.ref);
+      const other = change.ref === undefined ? undefined : others.get(change.ref);
+      return buildChangeLine(change, card ?? other);
+    }),
     ...detail.signals.map(buildSignalLine),
   ];
   for (const link of detail.links) {
     if (link.claim.type === "text") continue;
-    const ref = readOtherRef(link, detail.ref);
-    const card = cards.find((each) => each.ref === ref);
+    const card = cardByRef.get(readOtherRef(link, detail.ref));
     const latest = card?.signals.latest;
     if (card === undefined || latest === undefined) continue;
     lines.push({
@@ -186,7 +149,6 @@ export const buildOpenTimeline = (
       at: latest.createdAt,
       say: latest.say.say,
       tone: latest.say.tone,
-      person: undefined,
       identifier: card.identifier,
       markPluginId: readEntityPluginId(card.kind),
       isLinked: true,
@@ -197,13 +159,49 @@ export const buildOpenTimeline = (
   // `toSorted` is stable, so lines of one moment keep the order they were added in.
   const ordered = lines.toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const latestIndex = ordered.findLastIndex(isLive);
-  return ordered.map((line, index) => (index === latestIndex ? { ...line, isLatest: true } : line));
+  const counts = new Map<string, number>();
+  return ordered.map((line, index) => {
+    // Two changes of one reason in one moment would share a key, so the later ones are counted.
+    const earlier = counts.get(line.key) ?? 0;
+    counts.set(line.key, earlier + 1);
+    return {
+      ...line,
+      key: earlier === 0 ? line.key : `${line.key}#${String(earlier)}`,
+      isLatest: index === latestIndex,
+    };
+  });
 };
+
+/**
+ * Returns the source of the timeline for a card the Inbox holds when its own
+ * read has not answered yet: the card's newest signal alone.
+ */
+export const buildListedTimelineSource = (card: InboxCard): TimelineSource => ({
+  ref: card.ref,
+  signals: card.signals.latest === undefined ? [] : [card.signals.latest],
+  timeline: [],
+  places: [],
+  peers: [],
+  links: [],
+});
+
+/**
+ * Returns the id a link to a thing opens inside the sheet, by the thing's ref.
+ * A thing opens when it has an id to read: a card of the page, or a peer that
+ * is a full record. A card wins over a peer for a ref both hold.
+ */
+export const buildWalkableIds = (
+  peers: ReadonlyArray<Pick<EntityPeer, "id" | "ref">>,
+  cards: ReadonlyArray<Pick<InboxCard, "id" | "ref">>,
+): ReadonlyMap<string, string> =>
+  new Map<string, string>([
+    ...peers.flatMap((peer) => (peer.id === undefined ? [] : [[peer.ref, peer.id] as const])),
+    ...cards.map((card) => [card.ref, card.id] as const),
+  ]);
 
 /** What a card's lines leave out: how many, and whether they are open work or only older, resolved lines. */
 export interface TimelineOverflow {
   readonly kind: "open" | "older";
-  readonly count: number;
   /** The words for the line, such as "and 12 more open" or "and 1,204 older". */
   readonly words: string;
 }
@@ -226,11 +224,11 @@ export const describeTimelineOverflow = (
   const shownOpen = detail.signals.filter((line) => line.status === "open").length;
   if (detail.openCount > shownOpen) {
     const count = detail.openCount - shownOpen;
-    return { kind: "open", count, words: `and ${COUNT_FORMAT.format(count)} more open` };
+    return { kind: "open", words: `and ${COUNT_FORMAT.format(count)} more open` };
   }
   if (detail.signalCount > detail.signals.length) {
     const count = detail.signalCount - detail.signals.length;
-    return { kind: "older", count, words: `and ${COUNT_FORMAT.format(count)} older` };
+    return { kind: "older", words: `and ${COUNT_FORMAT.format(count)} older` };
   }
   return undefined;
 };

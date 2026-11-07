@@ -5,7 +5,7 @@
  */
 import type { EntityPlace } from "@hercule/contract";
 import { buildLinkedRows, buildPlaceRow } from "@hercule/client-core/desk";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RelationRows } from "./relation-rows";
@@ -111,7 +111,14 @@ describe("RelationRows for linked things", () => {
   const build = (claim: { type: "source" | "person" | "text" }, extra: object = {}) =>
     buildLinkedRows({
       ref: ORDER,
-      links: [{ fromRef: ORDER, toRef: OTHER, claim: { ...claim, ...extra } }],
+      links: [
+        {
+          fromRef: ORDER,
+          toRef: OTHER,
+          hasPersonClaim: claim.type === "person",
+          claim: { ...claim, ...extra },
+        },
+      ],
       places: [other],
       peers: [],
       plugins: PLUGINS,
@@ -139,6 +146,19 @@ describe("RelationRows for linked things", () => {
     expect(onUnlink).toHaveBeenCalledExactlyOnceWith(confirmed[0]);
   });
 
+  it("ignores the second click of a double click on the remove button, which a Link button may have just made appear under the pointer", () => {
+    const onUnlink = vi.fn();
+    const { confirmed } = build({ type: "person" });
+    render(<RelationRows rows={confirmed} plugins={PLUGINS} onUnlink={onUnlink} />);
+    const remove = screen.getByRole("button", { name: "Remove the link to Chilled crates" });
+
+    fireEvent.click(remove, { detail: 2 });
+    expect(onUnlink).not.toHaveBeenCalled();
+
+    fireEvent.click(remove, { detail: 1 });
+    expect(onUnlink).toHaveBeenCalledOnce();
+  });
+
   it("offers a hint a Link button, with the words of where the reference was found", async () => {
     const onLink = vi.fn();
     const { hints } = build({ type: "text" }, { evidenceKey: "description" });
@@ -154,7 +174,7 @@ describe("RelationRows for linked things", () => {
       place({
         latestChange: {
           reason: "reassigned",
-          say: { say: "Now with Tessa", tone: "plain" },
+          sentence: { say: "Now with Tessa", tone: "plain" },
           at: "2026-11-05T09:00:00.000Z",
         },
       }),

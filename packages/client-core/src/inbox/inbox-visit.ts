@@ -21,12 +21,8 @@ import {
   type InboxGrouping,
 } from "./groupings";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
-import {
-  NO_PLACEMENT,
-  NO_RIDING_CHOICES,
-  type RidingChoices,
-  type VisitPlacement,
-} from "./visit-placement";
+import { NO_RIDING_CHOICES, type RidingChoices } from "./riding-choices";
+import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
 
 /** Whether a column shows cards, and when it shows none, whether the user's own move took the last one. */
 type Emptiness = "filled" | "empty" | "emptied by move";

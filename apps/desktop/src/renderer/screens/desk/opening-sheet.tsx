@@ -143,7 +143,6 @@ export function OpeningSheet({
   useLayoutEffect(() => {
     const words = contentRef.current?.firstElementChild;
     if (followsContent !== true || !isOpen || !(words instanceof HTMLElement)) return;
-    if (typeof ResizeObserver === "undefined") return;
     let measuredHeight = words.offsetHeight;
     const observer = new ResizeObserver(() => {
       if (words.offsetHeight === measuredHeight) return;

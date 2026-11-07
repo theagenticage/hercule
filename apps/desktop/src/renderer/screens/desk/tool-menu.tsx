@@ -1,4 +1,5 @@
 import type { JSX, ReactNode } from "react";
+import { joinClassNames } from "../../app/join-class-names";
 import { CheckIcon } from "../../icons/check";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
@@ -52,10 +53,6 @@ export function ToolMenu({
   );
 }
 
-/** Joins the classes an item is drawn with, leaving out those it does not have. */
-const joinClasses = (...classes: ReadonlyArray<string | false | undefined>): string =>
-  classes.filter((each) => each !== undefined && each !== false).join(" ");
-
 /**
  * What a `MenuPick` does when pressed:
  *
@@ -96,7 +93,7 @@ export function MenuPick({
       {...itemProps}
       type="button"
       role={kind === "toggle" ? "menuitemcheckbox" : itemProps.role}
-      className={joinClasses("menu-pick", isOn && "is-on", itemProps.className)}
+      className={joinClassNames("menu-pick", isOn && "is-on", itemProps.className)}
       onClick={onPick}
     >
       {kind === "toggle" && <i className="menu-box">{isOn && <CheckIcon size={11} />}</i>}
@@ -124,7 +121,7 @@ export function MenuBack({
     <button
       {...itemProps}
       type="button"
-      className={joinClasses("menu-back", itemProps.className)}
+      className={joinClassNames("menu-back", itemProps.className)}
       onClick={onBack}
     >
       <ChevronLeftIcon size={12} />
@@ -162,7 +159,7 @@ export function MenuAction({
     <button
       {...itemProps}
       type="button"
-      className={joinClasses("menu-action", itemProps.className)}
+      className={joinClassNames("menu-action", itemProps.className)}
       onClick={onPick}
     >
       {name}
@@ -195,7 +192,7 @@ export function MenuSwitch({
       {...itemProps}
       type="button"
       role="menuitemcheckbox"
-      className={joinClasses("menu-switch", isOn && "is-on", itemProps.className)}
+      className={joinClassNames("menu-switch", isOn && "is-on", itemProps.className)}
       onClick={onToggle}
     >
       <span className="menu-switch-words">

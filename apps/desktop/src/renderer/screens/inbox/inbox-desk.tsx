@@ -1,4 +1,5 @@
 import type { JSX, ReactNode, RefObject } from "react";
+import { joinClassNames } from "../../app/join-class-names";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import "./inbox.css";
 import "./inbox-bundle.css";
@@ -53,15 +54,13 @@ export function InboxDesk({
   readonly scrollRef: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
   const hasScrollbar = useShowsClassicScrollbar(scrollRef);
-  const classes = [
+  const classes = joinClassNames(
     "inbox-desk",
-    isHolding ? "is-holding" : null,
-    isArriving ? "is-arriving" : null,
-    isOffline ? "is-offline" : null,
-    hasScrollbar ? "has-scrollbar" : null,
-  ]
-    .filter((each) => each !== null)
-    .join(" ");
+    isHolding && "is-holding",
+    isArriving && "is-arriving",
+    isOffline && "is-offline",
+    hasScrollbar && "has-scrollbar",
+  );
   return (
     <div className={classes} data-state={state}>
       {toolbar}

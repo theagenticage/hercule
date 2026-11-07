@@ -443,28 +443,47 @@ const PEERS: readonly EntityPeer[] = [
 
 /** The claims between the specimen's things: a source's, a person's and a reference found in text. */
 const LINKS: readonly EntityLink[] = [
-  { fromRef: ISSUE_412, toRef: pullRequestRef(6238), claim: { type: "source", plugin: "github" } },
-  { fromRef: ISSUE_412, toRef: pullRequestRef(6101), claim: { type: "person", actor: "user" } },
-  { fromRef: ISSUE_412, toRef: "sentry:issue:4471", claim: { type: "source", plugin: "github" } },
+  {
+    fromRef: ISSUE_412,
+    toRef: pullRequestRef(6238),
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "github" },
+  },
+  {
+    fromRef: ISSUE_412,
+    toRef: pullRequestRef(6101),
+    hasPersonClaim: true,
+    claim: { type: "person", actor: "user" },
+  },
+  {
+    fromRef: ISSUE_412,
+    toRef: "sentry:issue:4471",
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "github" },
+  },
   {
     fromRef: pullRequestRef(6219),
     toRef: ISSUE_398,
+    hasPersonClaim: false,
     claim: { type: "text", evidenceKey: "description" },
   },
   {
     fromRef: pullRequestRef(6207),
     toRef: pullRequestRef(6100),
+    hasPersonClaim: false,
     claim: { type: "source", plugin: "github" },
   },
   // Tidewatch reports the pull request, so it rides on the ticket. A pull request that only names a ticket in its text is a hint.
   {
     fromRef: TICKET_142,
     toRef: pullRequestRef(6244),
+    hasPersonClaim: false,
     claim: { type: "source", plugin: "tidewatch" },
   },
   {
     fromRef: pullRequestRef(6203),
     toRef: TICKET_150,
+    hasPersonClaim: false,
     claim: { type: "text", evidenceKey: "description" },
   },
 ];
@@ -563,8 +582,8 @@ export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
 
 /** The things the first Tidewatch ticket's open card changed at the source, oldest first. */
 const TICKET_142_CHANGES: readonly EntityChange[] = [
-  { reason: "reassigned", say: { say: "Now with Mei", tone: "plain" }, at: daysAgo(3) },
-  { reason: "moved", say: { say: "Moved to In progress", tone: "plain" }, at: hoursAgo(30) },
+  { reason: "reassigned", sentence: { say: "Now with Mei", tone: "plain" }, at: daysAgo(3) },
+  { reason: "moved", sentence: { say: "Moved to In progress", tone: "plain" }, at: hoursAgo(30) },
 ];
 
 /** What the open card of the first Tidewatch ticket reads: its detail, and the signal of its open line. */
@@ -618,7 +637,12 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
         field: { name: "body", placeholder: "Write a reply" },
         describeLine: [{ kind: "text", text: "Replies on SHOP-142 in Tidewatch." }],
       },
-      { id: "done", label: "Mark done", operation: null },
+      {
+        id: "done",
+        label: "Mark done",
+        operation: null,
+        describeLine: [{ kind: "text", text: "Takes it off your list. Tidewatch is not told" }],
+      },
     ],
     match: {},
     status: "open",

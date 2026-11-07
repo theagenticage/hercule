@@ -6,17 +6,23 @@ import {
   type HerculeClient,
   type PluginIdentity,
 } from "@hercule/client-core";
-import { buildLinkedRows, readEntityPluginId, type PlaceRow } from "@hercule/client-core/desk";
 import {
+  buildLinkedRows,
+  nameLinkedThing,
+  readEntityPluginId,
+  type OpenPlaceRow,
+  type PlaceRow,
+} from "@hercule/client-core/desk";
+import {
+  buildListedTimelineSource,
   buildOpenTimeline,
+  buildWalkableIds,
   decideOpenCard,
   describeTimelineOverflow,
   findFirstOpenLine,
-  isCardTimeDependent,
   readPlaceView,
   type EntityLinkMove,
   type PlaceView,
-  type TimelineSource,
 } from "@hercule/client-core/inbox";
 import type { AddRow } from "@hercule/client-core/work";
 import type { EntityRecord, Inbox } from "@hercule/contract";
@@ -31,7 +37,7 @@ import { OpenCardLinkSearch } from "./open-card-link-search";
 import { readOpenCardPlaces } from "./open-card-places";
 import { OpenCardTimeline } from "./open-card-timeline";
 import type { OpenCard, OpenTarget } from "./use-open-card";
-import { useMinuteClock } from "./use-minute-clock";
+import { useOpenCardClock } from "./use-open-card-clock";
 
 /** What the open card needs of the page: the moves it offers. Each is called with the card's id. */
 export interface OpenCardMoveHandlers {
@@ -49,9 +55,6 @@ export interface OpenCardMoveHandlers {
   readonly onSeeInIntake: (entityId: string) => void;
 }
 
-/** How long after a link is made that a press on a link's remove button is ignored: the second click of a double click must not undo the first. */
-const LINK_SETTLE_MS = 400;
-
 /** Returns the name of the card or place `target`, for the dialog's name and for the way back. */
 const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
   if (target.kind === "card") {
@@ -64,16 +67,6 @@ const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
 const keyTarget = (target: OpenTarget): string =>
   target.kind === "card" ? `card:${target.id}` : `place:${target.ref}`;
 
-/** Returns the timeline's source for a card the Inbox holds and whose read has not answered: its newest signal alone. */
-const buildListedTimelineSource = (card: Inbox["cards"][number]): TimelineSource => ({
-  ref: card.ref,
-  signals: card.signals.latest === undefined ? [] : [card.signals.latest],
-  timeline: [],
-  places: [],
-  peers: [],
-  links: [],
-});
-
 /**
  * Renders the body of the open sheet for the card `id`. It draws at once from
  * the Inbox's own record of the card, then from `externalEntity.read` when
@@ -84,8 +77,7 @@ const buildListedTimelineSource = (card: Inbox["cards"][number]): TimelineSource
  *   newest open one, and its answers are read with `signal.read` alone. The
  *   first open line is chosen once, so answering it does not open the next.
  * - Linking and unlinking go through the page's moves, so each is one gesture
- *   on the undo stack. A press on a link's remove button is ignored for a
- *   moment after a link is made.
+ *   on the undo stack.
  *
  * Orchestrating: it owns the read and the choice of the open line.
  */
@@ -119,15 +111,12 @@ function OpenCardContents({
     detail.data ?? (listed === undefined ? undefined : buildListedTimelineSource(listed));
   const cards = inbox?.cards ?? [];
   const lines = source === undefined ? [] : buildOpenTimeline(source, cards);
-  const now = useMinuteClock(
-    (record !== undefined && isCardTimeDependent(record)) || lines.length > 0,
-  );
+  const now = useOpenCardClock(record, lines);
 
   // The card opens one line by itself, the first time it has one to open.
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
   const firstLine = detail.data === undefined ? undefined : findFirstOpenLine(detail.data.signals);
   if (chosenLine === undefined && firstLine !== undefined) setChosenLine(firstLine);
-  const lastLinkedAt = useRef(0);
 
   if (record === undefined) {
     return (
@@ -171,12 +160,7 @@ function OpenCardContents({
     toName,
   });
   // A linked thing opens inside the sheet when it has an id to read: a card of this page, or a peer that is a full record.
-  const walkableIds = new Map<string, string>([
-    ...(detail.data?.peers ?? []).flatMap((peer) =>
-      peer.id === undefined ? [] : [[peer.ref, peer.id] as const],
-    ),
-    ...cards.map((card) => [card.ref, card.id] as const),
-  ]);
+  const walkableIds = buildWalkableIds(detail.data?.peers ?? [], cards);
   const linked =
     detail.data === undefined ? null : (
       <OpenCardLinked
@@ -188,14 +172,10 @@ function OpenCardContents({
           if (walkId !== undefined) onWalkCard(walkId);
         }}
         onUnlink={(row: PlaceRow) => {
-          if (Date.now() - lastLinkedAt.current < LINK_SETTLE_MS) return;
-          moves.onUnlink(
-            buildMove(row.ref, row.isLocked ? row.noun : (row.identifier ?? row.title)),
-          );
+          moves.onUnlink(buildMove(row.ref, nameLinkedThing(row)));
         }}
-        onLink={(row: PlaceRow) => {
-          lastLinkedAt.current = Date.now();
-          moves.onLink(buildMove(row.ref, row.isLocked ? row.noun : (row.identifier ?? row.title)));
+        onLink={(row: OpenPlaceRow) => {
+          moves.onLink(buildMove(row.ref, nameLinkedThing(row)));
         }}
         search={
           words.moves._tag === "off" ? null : (
@@ -205,7 +185,6 @@ function OpenCardContents({
               links={detail.data.links}
               ownPluginId={readEntityPluginId(record.kind)}
               onPick={(row: AddRow) => {
-                lastLinkedAt.current = Date.now();
                 moves.onLink(buildMove(row.ref, row.identifier));
               }}
             />

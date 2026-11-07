@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import {
   advanceInboxVisit,
@@ -7,17 +7,12 @@ import {
   type VisitStep,
 } from "@hercule/client-core/inbox";
 import { waitForStillHand } from "../../app/motion";
+import { addIds, NO_IDS } from "./card-ids";
 import { comeDownIntoPlace, flipInboxPage } from "./inbox-motion";
 import { useSignalLanding } from "./use-signal-landing";
 
 /** How long the sunrise waits after the user's own move empties the Inbox, which is the time the last card takes to step aside. */
 const SUNRISE_DELAY_MS = 320;
-
-const NOTHING: ReadonlySet<string> = new Set();
-
-/** Joins the ids of two sets, or returns `before` itself when `more` adds nothing. */
-const addIds = (before: ReadonlySet<string>, more: readonly string[]): ReadonlySet<string> =>
-  more.every((id) => before.has(id)) ? before : new Set([...before, ...more]);
 
 /**
  * Returns what the Inbox page draws for the read it holds (`InboxVisit`), and
@@ -56,7 +51,7 @@ export const useInboxVisit = ({
   readonly announcement: string;
 } => {
   const [history, setHistory] = useState(START_OF_VISIT);
-  const [released, setReleased] = useState(NOTHING);
+  const [released, setReleased] = useState(NO_IDS);
   // A signal that lands holds its card's old words back for a moment, so the read drawn is not always the latest.
   const landing = useSignalLanding({
     received: step.received,
@@ -64,7 +59,31 @@ export const useInboxVisit = ({
     scrollRef,
   });
 
-  const next = advanceInboxVisit(history, { ...step, received: landing.inbox, released });
+  // Laying out the page is the costly part of a draw, so it runs again only for a different read or choice.
+  const { view, isFresh, hasUserMove, riding } = step;
+  const { grouping, filter, requestsOrder } = view;
+  const next = useMemo(
+    () =>
+      advanceInboxVisit(history, {
+        received: landing.inbox,
+        view: { grouping, filter, requestsOrder },
+        released,
+        isFresh,
+        hasUserMove,
+        ...(riding === undefined ? {} : { riding }),
+      }),
+    [
+      history,
+      landing.inbox,
+      grouping,
+      filter,
+      requestsOrder,
+      released,
+      isFresh,
+      hasUserMove,
+      riding,
+    ],
+  );
   // Set while drawing, so the draw that shows a new read already holds its cards.
   if (next.history !== history) setHistory(next.history);
   const { visit } = next;

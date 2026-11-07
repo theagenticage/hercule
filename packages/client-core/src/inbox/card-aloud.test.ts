@@ -16,21 +16,21 @@ describe("describeCardAloud", () => {
       status: { shape: "ring", tone: "quiet", label: "Draft" },
       waitingSince: "2026-11-05T12:00:00.000Z",
     });
-    expect(describeCardAloud(decideCardFace(card), describeCardWait(card, NOW))).toBe(
+    expect(describeCardAloud(decideCardFace(card), describeCardWait(card, NOW), 0)).toBe(
       "Review, #7, Cache slot lookups, yours, Ines asked for your review, Draft, Waiting 2 days",
     );
   });
 
   it("leaves out each slot a card does not have", () => {
     const card = buildInboxCard("8", { title: "Fix the cart" });
-    expect(describeCardAloud(decideCardFace(card), null)).toBe("Ticket, ACME-8, Fix the cart");
+    expect(describeCardAloud(decideCardFace(card), null, 0)).toBe("Ticket, ACME-8, Fix the cart");
   });
 
   it.each([
     [1, "Ticket, ACME-8, Fix the cart, with 1 thing riding on it"],
     [3, "Ticket, ACME-8, Fix the cart, with 3 things riding on it"],
-  ])("ends with what rides on a card: %s", (riding, words) => {
+  ])("ends with what rides on a card: %s", (riderCount, words) => {
     const card = buildInboxCard("8", { title: "Fix the cart" });
-    expect(describeCardAloud(decideCardFace(card), null, riding)).toBe(words);
+    expect(describeCardAloud(decideCardFace(card), null, riderCount)).toBe(words);
   });
 });

@@ -7,14 +7,20 @@ import {
   listLandedCards,
   releaseHeldCards,
   showHeldCards,
-  type HeldCard,
+  type LandingHold,
 } from "./landed-signals";
 
-const withLatest = (id: string, signalId: string | undefined) =>
+const withLatest = (id: string, signalId: string | undefined, createdAt?: string) =>
   buildInboxCard(id, {
     signals: {
       openCount: signalId === undefined ? 0 : 1,
-      ...(signalId === undefined ? {} : { latest: buildSignalLine(signalId, "Tessa commented") }),
+      ...(signalId === undefined
+        ? {}
+        : {
+            latest: buildSignalLine(signalId, "Tessa commented", {
+              ...(createdAt === undefined ? {} : { createdAt }),
+            }),
+          }),
     },
   });
 
@@ -28,6 +34,24 @@ describe("listLandedCards", () => {
     ],
     ["a newer signal replacing the latest", withLatest("1", "s1"), withLatest("1", "s2"), ["1"]],
     ["the same signal read again", withLatest("1", "s1"), withLatest("1", "s1"), []],
+    [
+      "a signal raised later replacing the latest, whatever its id",
+      withLatest("1", "s9", "2026-11-07T09:00:00.000Z"),
+      withLatest("1", "s1", "2026-11-07T09:05:00.000Z"),
+      ["1"],
+    ],
+    [
+      "an older signal becoming the latest after the newest was answered",
+      withLatest("1", "s2", "2026-11-07T09:05:00.000Z"),
+      withLatest("1", "s1", "2026-11-07T09:00:00.000Z"),
+      [],
+    ],
+    [
+      "an older signal with a smaller id becoming the latest in the same moment",
+      withLatest("1", "s2"),
+      withLatest("1", "s1"),
+      [],
+    ],
     ["a signal that ended and left none", withLatest("1", "s1"), withLatest("1", undefined), []],
   ])("lists %s", (_name, before, after, landed) => {
     expect(listLandedCards(buildInbox([before]), buildInbox([after]))).toEqual(landed);
@@ -79,7 +103,7 @@ describe("holding the landed cards for their landing", () => {
   it("keeps the version a card was first held with when a second signal lands on it, and passes it to the second landing", () => {
     const first = holdLandedCards(new Map(), before, ["1"], 1);
     const again = holdLandedCards(first, after, ["1"], 2);
-    expect(again.get("1")).toEqual<HeldCard>({ card: older, landing: 2 });
+    expect(again.get("1")).toEqual<LandingHold>({ card: older, landing: 2 });
     expect(releaseHeldCards(again, 1)).toBe(again);
   });
 

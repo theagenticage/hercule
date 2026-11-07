@@ -132,22 +132,14 @@
   --row-lead: 18px;
 }
 /* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink. */
-[data-theme="orient-express"] .inbox-place,
-[data-theme="dark"] .inbox-place,
-[data-theme="nile"] .inbox-place,
-[data-theme="end-house"] .inbox-place,
-[data-theme="blue-train"] .inbox-place,
-[data-theme="orient-express"] .inbox-welcome,
-[data-theme="dark"] .inbox-welcome,
-[data-theme="nile"] .inbox-welcome,
-[data-theme="end-house"] .inbox-welcome,
-[data-theme="blue-train"] .inbox-welcome {
+.inbox-place,
+.inbox-welcome {
   --faint: var(--faint-on-stock);
 }
 /* Blue Train's stock is lighter still, so a failure takes a lighter tomato. */
-[data-theme="blue-train"] .inbox-place,
-[data-theme="blue-train"] .inbox-request {
-  --fail-ink: oklch(0.82 0.11 30);
+.inbox-place,
+.inbox-request {
+  --fail-ink: var(--fail-ink-on-stock);
 }
 .inbox-place-head {
   position: relative;
@@ -286,7 +278,7 @@
 }
 .row-context {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0 10px;
   min-width: 0;
   margin-top: 2px;
@@ -298,11 +290,21 @@
 .row-context > span {
   flex: none;
 }
+/* The new mark is level with the middle of the first line, also when the sentence wraps under it. */
+.row-context > .card-fresh,
+.request-under > .card-fresh {
+  margin-top: calc((var(--line-16) - 6px) / 2);
+}
+/* The sentence is the one part that gives way, and it wraps to a second line before it is cut: a narrow window
+   must not hide what the signal said. */
 .row-context > .row-news {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
 }
 .row-context > span:not(:last-child)::after {
   content: "\00b7";
@@ -495,10 +497,10 @@
   grid-column: 2 / -1;
   grid-row: 2;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   min-width: 0;
-  height: var(--line-16);
+  min-height: var(--line-16);
   margin-top: 1px;
   color: var(--muted);
   font: var(--type-summary);
@@ -507,17 +509,22 @@
   grid-column: 2 / -1;
   grid-row: 3;
 }
+/* A line tall, so the shape sits level with the first line of the sentence when the sentence wraps. */
 .request-shape {
   display: inline-flex;
   flex: none;
+  align-items: center;
+  height: var(--line-16);
 }
+/* The sentence wraps to a second line before it is cut: a narrow window must not hide what the signal said. */
 .request-said {
   position: relative;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .request-said[data-tone="bad"] {
   color: var(--fail-ink);

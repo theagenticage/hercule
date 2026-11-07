@@ -8,6 +8,7 @@ import {
   type Ref,
 } from "react";
 import { Colleague, type ColleaguePose } from "./colleague";
+import { joinClassNames } from "../../app/join-class-names";
 import type { Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { FailedMark } from "./status-shape";
@@ -142,14 +143,12 @@ export function Card({
   const nowTone = nowToneOrDefault ?? "summary";
   const hasSecondLine = now !== null && now !== undefined;
   const { titleRef, isLong } = useIsTitleLong(hasSecondLine);
-  const classes = [
+  const classes = joinClassNames(
     "desk-card",
-    isLong ? "has-long-title" : null,
-    selected === true ? "is-selected" : null,
+    isLong && "has-long-title",
+    selected === true && "is-selected",
     className,
-  ]
-    .filter((each) => each !== null && each !== undefined)
-    .join(" ");
+  );
   return (
     <div
       {...rest}

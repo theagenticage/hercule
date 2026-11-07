@@ -16,7 +16,9 @@
  * - `FilterControl`, `FilterChips`: the Filter button with its menu, and the
  *   chips of what is chosen, for any list of items.
  * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
- *   It is the one part here that reads something (the clock).
+ * - `useEntitySearch`: the search of things at a source, as Work's Add sheet
+ *   and the open card's "Link something" both run it. These two hooks are the
+ *   only parts here that read something (the clock, the query cache).
  * - `useFocusPageOnArrival`: gives the page that scrolls the keyboard focus as
  *   it opens, so its keys act after a click on the sidebar.
  * - `ViewPill`: the pill that names a place and switches between its views.
@@ -77,5 +79,6 @@ export {
 } from "./tool-menu";
 export { UndoLine } from "./undo-line";
 export { useDeskAgeLabel } from "./use-desk-age-label";
+export { useEntitySearch } from "./use-entity-search";
 export { useFocusPageOnArrival } from "./use-focus-page-on-arrival";
 export { ViewPill } from "./view-pill";

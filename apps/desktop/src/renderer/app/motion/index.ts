@@ -4,8 +4,8 @@
  * from what is on screen with the speed it has. Only `transform`, `opacity`
  * and the `--lift` custom property are written; `will-change` is set only
  * while a body moves, by the `is-moving` class; and the clock asks for a frame
- * only while something moves. `buildSpringCurve` is the other way to use a
- * spring: as the easing of a Web Animation.
+ * only while something moves. `buildSpringCurve` and `buildSpringKnock` are the
+ * other way to use a spring: as the easing or the keyframes of a Web Animation.
  */
 export { findBody, MOVING_CLASS, trackBody, type MotionBody, type Velocity } from "./body";
 export {
@@ -19,9 +19,15 @@ export {
   type FlipByKeyOptions,
   type LayoutRect,
 } from "./layout";
+export { MOTION_EASE } from "./ease";
 export { copyElementWithoutIds } from "./copy-element";
 export { isMotionReduced } from "./reduced";
-export { buildSpringCurve, type SpringCurve } from "./spring-curve";
+export {
+  buildSpringCurve,
+  buildSpringKnock,
+  type SpringCurve,
+  type SpringKnock,
+} from "./spring-curve";
 export type { SpringName } from "./springs";
 export { animateValue, type MotionValue } from "./value";
 export { waitForStillHand } from "./still-hand";

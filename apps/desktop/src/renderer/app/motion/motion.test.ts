@@ -161,50 +161,6 @@ describe("a body", () => {
     expect(trackBody(element)).toBe(trackBody(element));
   });
 
-  describe("a kick", () => {
-    it("moves a body at rest off its place and brings it back by itself, then lets the clock go", () => {
-      const element = makeElement();
-      const body = trackBody(element);
-
-      body.kick({ y: 145 });
-      expect(element.classList.contains("is-moving")).toBe(true);
-      let peak = 0;
-      for (let frame = 0; frame < 30; frame++) {
-        play(FRAME);
-        peak = Math.max(peak, body.values.y);
-      }
-      // 145 px/s on `hand` peaks at about 2 px.
-      expect(peak).toBeGreaterThan(1.5);
-      expect(peak).toBeLessThan(3);
-
-      play(SETTLE_TIME);
-      expect(body.values.y).toBe(0);
-      expect(element.style.transform).toBe("");
-      expect(element.classList.contains("is-moving")).toBe(false);
-      expect(vi.getTimerCount()).toBe(0);
-    });
-
-    it("only adds speed to a body already on its way, which keeps its goal", () => {
-      const body = trackBody(makeElement());
-      body.to({ y: 100 }, "travel");
-      play(FRAME * 3);
-      const speedBefore = body.velocity.y;
-
-      body.kick({ y: 145 });
-      expect(body.velocity.y).toBeCloseTo(speedBefore + 145, 5);
-      play(SETTLE_TIME);
-      expect(body.values.y).toBe(100);
-    });
-
-    it("does nothing under Reduce motion", () => {
-      setReduced(true);
-      const element = makeElement();
-      trackBody(element).kick({ y: 145 });
-      expect(element.classList.contains("is-moving")).toBe(false);
-      expect(vi.getTimerCount()).toBe(0);
-    });
-  });
-
   describe("under Reduce motion", () => {
     beforeEach(() => setReduced(true));
 

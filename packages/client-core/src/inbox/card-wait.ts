@@ -4,11 +4,10 @@
  */
 import type { EntityRecord } from "@hercule/contract";
 import { describeDeskAge, findNextDeskAgeChange } from "../desk/age";
+import { findNextAgeChange, formatAge } from "../threads/age";
 import { readSentenceSignal, type CardRecord } from "./card-face";
 
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
+const HOUR_MS = 60 * 60 * 1000;
 
 /**
  * How much of its patience a wait has used, which sets the ink and weight of
@@ -59,37 +58,6 @@ export const describeCardWait = (card: EntityRecord, now: Date): CardWait | null
 };
 
 /**
- * Returns how long ago a signal landed as the short figure a row draws after
- * its sentence: "4m" under an hour (never "0m"), "3h" under a day, then "5d".
- * This reads finer than a request's wait, which counts from an hour: a row's
- * sentence is news, and news is read in minutes.
- */
-export const formatSignalAge = (at: string, now: Date): string => {
-  const age = Math.max(0, now.getTime() - Date.parse(at));
-  if (age < HOUR_MS) return `${String(Math.max(1, Math.floor(age / MINUTE_MS)))}m`;
-  if (age < DAY_MS) return `${String(Math.floor(age / HOUR_MS))}h`;
-  return `${String(Math.floor(age / DAY_MS))}d`;
-};
-
-/**
- * Returns the first moment after `now` at which `formatSignalAge` returns
- * different text for a signal that landed at `at`. "1m" holds for the first two
- * minutes, so a signal that has just landed first changes at two minutes.
- */
-export const findNextSignalAgeChange = (at: string, now: Date): Date => {
-  const age = Math.max(0, now.getTime() - Date.parse(at));
-  const next =
-    age < HOUR_MS
-      ? age < MINUTE_MS
-        ? 2 * MINUTE_MS
-        : (Math.floor(age / MINUTE_MS) + 1) * MINUTE_MS
-      : age < DAY_MS
-        ? (Math.floor(age / HOUR_MS) + 1) * HOUR_MS
-        : (Math.floor(age / DAY_MS) + 1) * DAY_MS;
-  return new Date(Date.parse(at) + next);
-};
-
-/**
  * Returns the line that tells the user a card may be out of date, or
  * `undefined` when its facts are as fresh as they can be:
  *
@@ -135,7 +103,7 @@ export const isCardTimeDependent = (card: CardRecord): boolean =>
 export interface CardTime {
   readonly wait: CardWait | null;
   readonly trust: string | undefined;
-  /** How long ago the sentence's signal landed, such as "4m", or `undefined` when the card draws none. */
+  /** How long ago the sentence's signal landed, as `formatAge` writes it ("4m"), or `undefined` when the card draws none. */
   readonly signalAge: string | undefined;
 }
 
@@ -145,7 +113,7 @@ export const describeCardTime = (card: CardRecord, now: Date): CardTime => {
   return {
     wait: describeCardWait(card, now),
     trust: describeCardTrust(card, now),
-    signalAge: moment === undefined ? undefined : formatSignalAge(moment, now),
+    signalAge: moment === undefined ? undefined : formatAge(moment, now),
   };
 };
 
@@ -157,15 +125,15 @@ const NEVER = new Date(8.64e15);
  * something different for `card`, so a screen sets one timer for it and draws
  * the card only then. It is `NEVER` for a card that is not time dependent.
  *
- * Three things change over time, and the earliest counts:
+ * Four things change over time, and the earliest counts:
  *
  * - its text: the hour figure goes up each whole hour from the second hour
  *   (a wait under two hours reads "1h"), and once past a day, each whole day;
  * - its level, at a quarter of the kind's patience, at the patience, and at
  *   three times it;
  * - the age of the facts in the trust line, which changes by the day or week;
- * - the age of the sentence's signal, which changes by the minute while it is
- *   under an hour old.
+ * - the age of the sentence's signal (`findNextAgeChange`), which changes by
+ *   the minute while it is under an hour old.
  */
 export const findNextCardTimeChange = (card: CardRecord, now: Date): Date => {
   const changes: number[] = [];
@@ -181,6 +149,6 @@ export const findNextCardTimeChange = (card: CardRecord, now: Date): Date => {
   }
   if (showsAgeOfFacts(card)) changes.push(findNextDeskAgeChange(card.observedAt, now).getTime());
   const moment = readSignalMoment(card);
-  if (moment !== undefined) changes.push(findNextSignalAgeChange(moment, now).getTime());
+  if (moment !== undefined) changes.push(findNextAgeChange(moment, now).getTime());
   return changes.length === 0 ? NEVER : new Date(Math.min(...changes));
 };

@@ -71,6 +71,9 @@ export const lowerFirst = (text: string): string =>
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
 const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** Returns the word of a signal's kind: `review-requested` for `github/review-requested`, `proposal` for `proposal`. */
+export const readSignalWord = (kind: string): string => kind.slice(kind.indexOf("/") + 1);
+
 /**
  * Returns the label of a signal's kind: "Mentioned" for `github/mentioned`,
  * "Review requested" for `github/review-requested`, "Proposal" for
@@ -81,7 +84,7 @@ const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text
  * capital.
  */
 export const nameSignalKind = (kind: string): string =>
-  CORE_KIND_LABELS[kind] ?? upperFirst(kind.slice(kind.indexOf("/") + 1).replaceAll("-", " "));
+  CORE_KIND_LABELS[kind] ?? upperFirst(readSignalWord(kind).replaceAll("-", " "));
 
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
 export const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
@@ -268,7 +271,7 @@ export const buildIntakeTabs = (
  * One thing a section draws, in order: a signal on its own, or the signals
  * about one outside thing under a header for that thing.
  */
-export type IntakeEntry =
+type IntakeEntry =
   | { readonly kind: "signal"; readonly signal: Signal }
   | {
       readonly kind: "entity";

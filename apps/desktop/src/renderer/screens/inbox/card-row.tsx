@@ -2,17 +2,13 @@ import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
-import {
-  decideCardFace,
-  describeCardAloud,
-  isSameBundle,
-  type CardBundle,
-} from "@hercule/client-core/inbox";
+import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { CardMonogram, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
-import { HintLines } from "./hint-lines";
+import { buildCardPropsComparer } from "./card-props";
+import { LinkLines } from "./link-lines";
 import { TuckedParts } from "./tucked-parts";
 import { useCardTime } from "./use-card-time";
 
@@ -41,31 +37,10 @@ const isSameNear = (before: readonly OpenPlaceRow[], after: readonly OpenPlaceRo
     );
   });
 
-/** Checks whether `freshIds` marks the same cards of this row, and of the parts under it, as it did. */
-const isSameFresh = (before: CardRowProps, after: CardRowProps): boolean =>
-  [
-    after.card.id,
-    ...after.bundle.parts.flatMap((part) =>
-      part._tag === "asking"
-        ? [part.card.id]
-        : part._tag === "quiet" && part.cardId !== undefined
-          ? [part.cardId]
-          : [],
-    ),
-  ].every((id) => before.freshIds.has(id) === after.freshIds.has(id));
-
-/**
- * Checks whether two sets of props draw the same row. The layout builds a new
- * `near` list and a new bundle on each read, so those are compared by what
- * they draw, `freshIds` by the cards of this row, and every other prop by identity.
- */
-const arePropsEqual = (before: CardRowProps, after: CardRowProps): boolean =>
-  (Object.keys(after) as (keyof CardRowProps)[]).every((key) => {
-    if (key === "near") return isSameNear(before.near, after.near);
-    if (key === "bundle") return isSameBundle(before.bundle, after.bundle);
-    if (key === "freshIds") return isSameFresh(before, after);
-    return Object.is(before[key], after[key]);
-  });
+/** The layout builds a new `near` list on each read, so it is compared by what it draws. */
+const arePropsEqual = buildCardPropsComparer<CardRowProps>({
+  near: (before, after) => isSameNear(before.near, after.near),
+});
 
 /**
  * Renders a card of lasting work as a row on the surface of its place: its
@@ -136,7 +111,7 @@ function CardRowView({
             <p className="row-title" title={face.title}>
               {face.title}
             </p>
-            <span className="row-context">
+            <span className="row-context" data-landing-line>
               {freshIds.has(card.id) && <NewMark />}
               {face.whose !== undefined && <span>{face.whose}</span>}
               {near.map((place) => (
@@ -150,7 +125,7 @@ function CardRowView({
                 <CardFactText key={index} fact={fact} />
               ))}
               {face.sentence !== undefined && (
-                <span className="row-news" data-tone={face.sentence.tone}>
+                <span className="row-news" data-landing-sentence data-tone={face.sentence.tone}>
                   {face.sentence.text}
                   {signalAge !== undefined && (
                     <>
@@ -180,7 +155,7 @@ function CardRowView({
           freshIds={freshIds}
         />
       )}
-      <HintLines
+      <LinkLines
         leadId={card.id}
         leadIdentifier={face.identifier}
         lines={bundle.lines}

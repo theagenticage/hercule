@@ -38,25 +38,15 @@
   overflow-y: auto;
 }
 
-/* The sheet is lighter than --faint was set for on the dark themes, so the
-   words of the sheet take a step more ink (the drawing's
-   `--faint-on-stock`, on `.open`). The timeline's ages, a linked row's claim
+/* The words of the sheet. Its width is set when the sheet is measured, and its
+   height is the sheet's. The sheet is lighter than --faint was set for on the
+   dark themes, so its words take a step more ink (the drawing's
+   `--faint-on-stock`, on `.open`): the timeline's ages, a linked row's claim
    and a quiet row's words are faint. Blue Train's stock is lighter still, so a
    failure takes a lighter tomato. */
-[data-theme="orient-express"] .open-card,
-[data-theme="dark"] .open-card,
-[data-theme="nile"] .open-card,
-[data-theme="end-house"] .open-card,
-[data-theme="blue-train"] .open-card {
-  --faint: var(--faint-on-stock);
-}
-[data-theme="blue-train"] .open-card {
-  --fail-ink: oklch(0.82 0.11 30);
-}
-
-/* The words of the sheet. Its width is set when the sheet is measured, and its
-   height is the sheet's. */
 .open-card {
+  --faint: var(--faint-on-stock);
+  --fail-ink: var(--fail-ink-on-stock);
   display: flow-root;
   padding: 12px 0 8px;
   color: var(--ink);
@@ -294,7 +284,8 @@
   grid-template-columns: max-content minmax(0, 1fr) auto;
   margin-top: 2px;
   padding: 6px 6px 0;
-  border-top: 1px solid var(--divider);
+  /* Not --divider: on the dark themes it is as dark as the stock, so on a sheet it would not show. */
+  border-top: 1px solid var(--line-soft);
 }
 .open-card-why {
   grid-column: 1 / -1;
@@ -519,9 +510,10 @@ button.open-card-signal-row:focus-visible {
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-/* The answers of the opened line, under it and in line with its words. */
+/* The answers of the opened line, under it and in line with its words. A row's button has 4px of
+   padding before it, so the ledger starts 4px early and the buttons start where the words do. */
 .open-card-answers {
-  margin: 4px 0 6px;
+  margin: 4px 0 6px -4px;
 }
 .open-card-line-note {
   margin: 4px 0 6px;

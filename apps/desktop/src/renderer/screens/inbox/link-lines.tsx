@@ -5,7 +5,8 @@ import type { TuckedLine } from "@hercule/client-core/inbox";
 import { LinkIcon } from "../../icons/link";
 
 /**
- * Renders the quiet lines under a card, each a whole-line button.
+ * Renders the quiet lines under a card, each a whole-line button: the
+ * references found in its text, and what it is linked to.
  *
  * - A hint ("Mentions OPS-47", "Mentioned in #6263") is a reference found in
  *   text. It joins nothing. `Link them`, which shows on hover, links the pair:
@@ -19,7 +20,7 @@ import { LinkIcon } from "../../icons/link";
  * the card the lines lie under: the id keys the line for the page's motion, and
  * the identifier names whose text holds a reference.
  */
-export function HintLines({
+export function LinkLines({
   leadId,
   leadIdentifier,
   lines,
@@ -52,7 +53,8 @@ export function HintLines({
             </button>
           );
         }
-        const mentioner = line.word === "Mentions" ? leadIdentifier : line.reference;
+        // The end whose text holds the reference is the card itself unless the line names it as the other end.
+        const mentioner = line.fromRef === line.otherRef ? line.reference : leadIdentifier;
         const words = describeClaim(line.claim, plugins, mentioner);
         return (
           <button

@@ -90,9 +90,11 @@ export const buildInboxLink = (
   fromRef: string,
   toRef: string,
   type: EntityLink["claim"]["type"] = "source",
+  hasPersonClaim: boolean = type === "person",
 ): EntityLink => ({
   fromRef,
   toRef,
+  hasPersonClaim,
   claim:
     type === "source"
       ? { type, plugin: "acme" }

@@ -28,16 +28,11 @@ const describePlace = (row: OpenPlaceRow, isKindShown: boolean): string =>
     .filter((part) => part !== undefined)
     .join(" · ");
 
-/** What a row does with the link that brought it: remove a link the user made, or confirm a hint. */
-interface LinkActions {
-  readonly onUnlink?: ((row: PlaceRow) => void) | undefined;
-  readonly onLink?: ((row: PlaceRow) => void) | undefined;
-}
-
 /**
  * Renders the words of who says a row's thing is linked, which stand over the
  * row's end while the row is hovered or has the focus, and the button that
- * removes the link when the user made it.
+ * removes the link when the user made it. The button ignores the second click
+ * of a double click, so a double click on a Link button cannot undo itself.
  */
 function ClaimAndUnlink({
   row,
@@ -57,7 +52,9 @@ function ClaimAndUnlink({
           className="relation-unlink"
           title="Remove this link. The source is not told."
           aria-label={`Remove the link to ${row.isLocked ? row.noun : row.title}`}
-          onClick={() => {
+          onClick={(event) => {
+            // The second click of a double click may land here: the first one linked a thing, and this button took its place under the pointer.
+            if (event.detail > 1) return;
             onUnlink(row);
           }}
         >
@@ -104,7 +101,7 @@ function HintRow({
   onLink,
 }: {
   readonly row: OpenPlaceRow;
-  readonly onLink?: ((row: PlaceRow) => void) | undefined;
+  readonly onLink?: ((row: OpenPlaceRow) => void) | undefined;
 }): JSX.Element {
   return (
     <li className="relation-row is-hint">
@@ -244,7 +241,9 @@ export function RelationRows({
   readonly onWalk?: ((ref: string) => void) | undefined;
   readonly canWalk?: ((row: OpenPlaceRow) => boolean) | undefined;
   readonly isKindShown?: boolean;
-} & LinkActions): JSX.Element {
+  readonly onUnlink?: ((row: PlaceRow) => void) | undefined;
+  readonly onLink?: ((row: OpenPlaceRow) => void) | undefined;
+}): JSX.Element {
   return (
     <ul className="relation-rows">
       {rows.map((row) =>

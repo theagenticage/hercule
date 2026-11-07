@@ -50,7 +50,7 @@ import {
   parseIntakeListWidth,
   trimAnswerEllipsis,
   type EventHandlingLabel,
-  type IntakeEntry,
+  type IntakeSection,
 } from "./intake";
 
 const PLUGINS = [
@@ -394,7 +394,7 @@ describe("groupSignalsIntoSections: entities", () => {
       ...(priority === undefined ? {} : { priority }),
     });
   /** Describes entries as "id" for a signal on its own and "[entity: ids]" for a group. */
-  const describeEntries = (section: { entries: ReadonlyArray<IntakeEntry> }) =>
+  const describeEntries = (section: Pick<IntakeSection, "entries">) =>
     section.entries.map((entry) =>
       entry.kind === "signal"
         ? entry.signal.id

@@ -119,7 +119,7 @@ export function RequestsSide({
                   card={row.card}
                   homeName={row.homeName}
                   bundle={row.bundle}
-                  isFresh={freshIds.has(row.card.id)}
+                  freshIds={freshIds}
                   plugins={plugins}
                   monogram={monogram}
                   step={stepOfCard.get(row.card.id) ?? 0}
@@ -135,7 +135,12 @@ export function RequestsSide({
           isSunriseStill={isSunriseStill}
         />
       )}
-      <WithSomeoneElse rows={withSomeoneElse.rows} plugins={plugins} monogram={monogram} />
+      <WithSomeoneElse
+        rows={withSomeoneElse.rows}
+        plugins={plugins}
+        monogram={monogram}
+        freshIds={freshIds}
+      />
     </aside>
   );
 }

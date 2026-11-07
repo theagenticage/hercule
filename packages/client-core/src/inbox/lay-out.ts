@@ -26,12 +26,11 @@ import {
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
+import type { RidingChoices } from "./riding-choices";
 import {
-  NO_RIDING_CHOICES,
   placeInboxCards,
   type PlacementChoice,
   type RequestsOrder,
-  type RidingChoices,
   type VisitPlacement,
 } from "./visit-placement";
 
@@ -218,15 +217,15 @@ export const layOutInbox = (
   inbox: Inbox,
   view: InboxView,
   held: VisitPlacement,
-  riding: RidingChoices = NO_RIDING_CHOICES,
+  riding: RidingChoices,
 ): InboxLayout => {
   const context = buildPlaceContext(inbox);
   const placement = placeInboxCards(inbox, view, held, context, riding);
-  const rankOf = (id: string): number => placement.cards.get(id)?.rank ?? 0;
+  const readRank = (id: string): number => placement.cards.get(id)?.rank ?? 0;
   // Every list keeps the order its cards joined the visit in: oldest first at the start, then arrivals.
-  const inVisitOrder = inbox.cards.toSorted((a, b) => rankOf(a.id) - rankOf(b.id));
+  const inVisitOrder = inbox.cards.toSorted((a, b) => readRank(a.id) - readRank(b.id));
   const drawnRiding = decideDrawnRiding(inbox.cards, placement);
-  const sources = indexBundleSources(inbox, drawnRiding, rankOf, context);
+  const sources = indexBundleSources(inbox, drawnRiding, readRank, context);
   const shown = new Set(
     filterItems(inVisitOrder, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
   );

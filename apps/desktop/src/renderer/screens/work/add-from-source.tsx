@@ -2,13 +2,11 @@ import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import {
-  buildEntitySearch,
   buildSuggestionGroups,
   decideAddList,
   describeAddedLine,
   describeSearchLine,
   describeSearchPlaceholder,
-  isPastedLink,
   listAddSources,
   listScopeOptions,
   mergePlaces,
@@ -16,31 +14,17 @@ import {
   type AddOpening,
   type AddRow,
   type AddSource,
-  type SearchState,
 } from "@hercule/client-core/work";
-import type {
-  EntityPlace,
-  EntitySearchQuery,
-  EntitySearchReply,
-  EntitySuggestions,
-  PluginDetail,
-} from "@hercule/contract";
-import {
-  entitySearchQuery,
-  entitySuggestionsQuery,
-  inboxQuery,
-  pluginsQuery,
-} from "../../app/queries";
+import type { EntityPlace, EntitySuggestions, PluginDetail } from "@hercule/contract";
+import { entitySuggestionsQuery, inboxQuery, pluginsQuery } from "../../app/queries";
 import { undoAddedTask } from "../../app/undo-added-task";
 import type { Gesture } from "../../app/undo-stack";
 import { ChevronDownIcon } from "../../icons/chevron-down";
 import { SearchIcon } from "../../icons/search";
 import { PluginMark } from "../../marks";
+import { useEntitySearch } from "../desk";
 import { ViewSwitch } from "../view-switch";
 import { AddList, type SuggestionsView } from "./add-list";
-
-/** How long typing must stop before a search is sent, in milliseconds. */
-const TYPING_PAUSE_MS = 180;
 
 /** What the sheet tells its page when a thing was added. */
 export interface AddedThing {
@@ -173,10 +157,6 @@ function SourceSearch({
 }): JSX.Element {
   const [tab, setTab] = useState(initialSource);
   const [chosenScopeRef, setChosenScopeRef] = useState(initialScopeRef);
-  const [text, setText] = useState("");
-  // It keeps the source the words were sent to, so a link that moves the tab
-  // does not ask the question again.
-  const [search, setSearch] = useState<EntitySearchQuery | null>(null);
   const [added, setAdded] = useState<ReadonlyMap<string, AddedRow>>(new Map());
   const searchRef = useRef<HTMLInputElement>(null);
   // The gesture reserved for each add that is on its way, by the ref of the thing, until its answer says the line.
@@ -217,50 +197,27 @@ function SourceSearch({
     searchRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // A search waits for typing to stop. Clearing the field does not wait.
-  useEffect(() => {
-    if (text.trim() === (search?.text ?? "")) return;
-    const timer = setTimeout(() => {
-      setSearch(buildEntitySearch(text, tab, scopeRef));
-    }, TYPING_PAUSE_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [text, search, tab, scopeRef]);
-
-  const searchRead = useQuery({
-    ...entitySearchQuery(client, search ?? undefined),
-    enabled: search !== null && !isOffline,
-  });
-  const reply = searchRead.data;
-
-  // An answer that says the link is from another source moves the tab there.
-  const [lastReply, setLastReply] = useState<EntitySearchReply | undefined>(undefined);
-  if (reply !== undefined && reply !== lastReply) {
-    setLastReply(reply);
-    if (reply.source !== tab && sources.some((source) => source.id === reply.source)) {
-      setTab(reply.source);
+  const search = useEntitySearch({
+    client,
+    sources,
+    tab,
+    scopeRef,
+    isOffline,
+    onSourceMoved: (source) => {
+      setTab(source);
       setChosenScopeRef("");
-    }
-  }
+    },
+  });
+  const { text, reply } = search;
 
-  const isLink = search !== null && isPastedLink(search.text);
-  const searchState: SearchState =
-    search === null || isOffline
-      ? { status: "idle" }
-      : reply !== undefined
-        ? { status: "answered", reply }
-        : searchRead.error !== null
-          ? { status: "failed", reason: readErrorMessage(searchRead.error) }
-          : { status: "pending" };
   const list = decideAddList({
     sourceName: sourceName(reply?.source ?? tab),
     names,
-    text: search?.text ?? "",
-    isLink,
+    text: search.searchedText,
+    isLink: search.isLink,
     isOffline,
     scope,
-    search: searchState,
+    search: search.state,
   });
   const suggestions: SuggestionsView =
     shownSuggestions !== undefined
@@ -370,11 +327,8 @@ function SourceSearch({
         ? suggestions.groups.flatMap((group) => group.rows)
         : [];
   const submit = (): void => {
-    if (text.trim() !== (search?.text ?? "")) {
-      // The list on screen is for older words, so Return searches the new ones first.
-      setSearch(buildEntitySearch(text, tab, scopeRef));
-      return;
-    }
+    // The list on screen may be for older words, so Return searches the new ones first.
+    if (search.searchTypedWords()) return;
     const firstAddable = shownRows.find((row) => row.taskId === undefined && !added.has(row.ref));
     if (firstAddable !== undefined) add(firstAddable);
   };
@@ -382,8 +336,7 @@ function SourceSearch({
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key !== "Escape" || text === "") return;
     event.stopPropagation();
-    setText("");
-    setSearch(null);
+    search.clear();
     searchRef.current?.focus({ preventScroll: true });
   };
 
@@ -392,12 +345,12 @@ function SourceSearch({
     sourceName: sourceName(tab),
     scope,
     isOffline,
-    isLink,
+    isLink: search.isLink,
     linkSourceName: reply === undefined ? undefined : sourceName(reply.source),
   });
   const changeScope = (next: string): void => {
     setChosenScopeRef(next);
-    setSearch(buildEntitySearch(text, tab, next));
+    search.searchIn(tab, next);
   };
 
   return (
@@ -416,7 +369,7 @@ function SourceSearch({
           const nextScopeRef = id === initialSource ? initialScopeRef : "";
           setTab(id);
           setChosenScopeRef(nextScopeRef);
-          setSearch(buildEntitySearch(text, id, nextScopeRef));
+          search.searchIn(id, nextScopeRef);
           searchRef.current?.focus({ preventScroll: true });
         }}
       />
@@ -435,8 +388,7 @@ function SourceSearch({
           aria-label={placeholder}
           autoComplete="off"
           onChange={(event) => {
-            setText(event.target.value);
-            if (event.target.value.trim() === "") setSearch(null);
+            search.type(event.target.value);
           }}
         />
       </form>

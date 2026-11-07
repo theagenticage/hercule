@@ -1,33 +1,26 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import type { HerculeClient, PluginIdentity } from "@hercule/client-core";
 import { listLinkableRows } from "@hercule/client-core/inbox";
 import {
-  buildEntitySearch,
   decideAddList,
-  isPastedLink,
   listAddSources,
   type AddRow,
   type AddSource,
-  type SearchState,
 } from "@hercule/client-core/work";
-import type { EntityLink, EntitySearchQuery, EntitySearchReply } from "@hercule/contract";
-import { entitySearchQuery, pluginsQuery } from "../../app/queries";
+import type { EntityLink } from "@hercule/contract";
+import { pluginsQuery } from "../../app/queries";
 import { LinkIcon } from "../../icons/link";
 import { PluginMark } from "../../marks";
+import { useEntitySearch } from "../desk";
 import { ViewSwitch } from "../view-switch";
-
-/** How long typing must stop before a search is sent, in milliseconds. The Add to Work sheet waits as long. */
-const TYPING_PAUSE_MS = 180;
 
 const PLACEHOLDER = "Search by title or number";
 
 /**
  * Renders the search of one source, and the rows that can be linked from what
- * it finds. It is Work's Add search (`externalEntity.search`, the same words
- * for each outcome): a source is chosen on a tab, typing waits for a pause, a
- * pasted link moves the tab to the source that answered it, and Return links
- * the first row.
+ * it finds. It runs Work's Add search (`useEntitySearch`, the same words for
+ * each outcome): a source is chosen on a tab, and Return links the first row.
  */
 function SourceLinkSearch({
   client,
@@ -43,7 +36,7 @@ function SourceLinkSearch({
   readonly client: HerculeClient;
   readonly sources: readonly AddSource[];
   readonly names: ReadonlyMap<string, string>;
-  readonly plugins: Parameters<typeof PluginMark>[0]["plugins"];
+  readonly plugins: readonly PluginIdentity[];
   readonly initialSource: string;
   readonly selfRef: string;
   readonly links: readonly EntityLink[];
@@ -51,58 +44,29 @@ function SourceLinkSearch({
   readonly onClose: () => void;
 }): JSX.Element {
   const [tab, setTab] = useState(initialSource);
-  const [text, setText] = useState("");
-  // The words and source last sent, so a pasted link that moves the tab does not ask again.
-  const [search, setSearch] = useState<EntitySearchQuery | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // A search waits for typing to stop. Clearing the field does not wait.
-  useEffect(() => {
-    if (text.trim() === (search?.text ?? "")) return;
-    const timer = setTimeout(() => {
-      setSearch(buildEntitySearch(text, tab, ""));
-    }, TYPING_PAUSE_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [text, search, tab]);
-
-  const read = useQuery({
-    ...entitySearchQuery(client, search ?? undefined),
-    enabled: search !== null,
+  const search = useEntitySearch({
+    client,
+    sources,
+    tab,
+    scopeRef: "",
+    isOffline: false,
+    onSourceMoved: setTab,
   });
-  const reply = read.data;
-
-  // An answer that says the link is from another source moves the tab there.
-  const [lastReply, setLastReply] = useState<EntitySearchReply | undefined>(undefined);
-  if (reply !== undefined && reply !== lastReply) {
-    setLastReply(reply);
-    if (reply.source !== tab && sources.some((source) => source.id === reply.source)) {
-      setTab(reply.source);
-    }
-  }
-
-  const isLink = search !== null && isPastedLink(search.text);
-  const searchState: SearchState =
-    search === null
-      ? { status: "idle" }
-      : reply !== undefined
-        ? { status: "answered", reply }
-        : read.error !== null
-          ? { status: "failed", reason: readErrorMessage(read.error) }
-          : { status: "pending" };
+  const { reply } = search;
   const list = decideAddList({
     sourceName: names.get(reply?.source ?? tab) ?? tab,
     names,
-    text: search?.text ?? "",
-    isLink,
+    text: search.searchedText,
+    isLink: search.isLink,
     isOffline: false,
     scope: undefined,
-    search: searchState,
+    search: search.state,
   });
   const rows = list.kind === "results" ? listLinkableRows(list.rows, selfRef, links) : [];
   const note =
@@ -113,11 +77,8 @@ function SourceLinkSearch({
         : undefined;
 
   const submit = (): void => {
-    if (text.trim() !== (search?.text ?? "")) {
-      // The list on screen is for older words, so Return searches the new ones first.
-      setSearch(buildEntitySearch(text, tab, ""));
-      return;
-    }
+    // The list on screen may be for older words, so Return searches the new ones first.
+    if (search.searchTypedWords()) return;
     const first = rows[0];
     if (first !== undefined) onPick(first);
   };
@@ -141,7 +102,7 @@ function SourceLinkSearch({
           view={tab}
           onPick={(id) => {
             setTab(id);
-            setSearch(buildEntitySearch(text, id, ""));
+            search.searchIn(id, "");
             inputRef.current?.focus({ preventScroll: true });
           }}
         />
@@ -155,13 +116,12 @@ function SourceLinkSearch({
         <input
           ref={inputRef}
           className="open-card-find-input"
-          value={text}
+          value={search.text}
           placeholder={PLACEHOLDER}
           aria-label="Link something"
           autoComplete="off"
           onChange={(event) => {
-            setText(event.target.value);
-            if (event.target.value.trim() === "") setSearch(null);
+            search.type(event.target.value);
           }}
         />
       </form>

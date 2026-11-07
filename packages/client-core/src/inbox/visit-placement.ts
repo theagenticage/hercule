@@ -18,8 +18,9 @@
  * list, and its surface or group, if it is new too, joins at the end. The
  * user's own Group by or Requests order starts the surfaces or groups over, and
  * so does the next visit. The user's own Link and Unlink are the one thing that
- * changes what a card rides on during a visit (`RidingChoices`). The order of the rows inside a list is held until the
- * next visit even then: the user asked for other lists, not for other rows.
+ * changes what a card rides on during a visit (`RidingChoices`). The order of
+ * the rows inside a list is held until the next visit even then: the user asked
+ * for other lists, not for other rows.
  */
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { PLACE_GROUPING, resolveGrouping, type InboxGrouping } from "./groupings";
@@ -30,6 +31,7 @@ import {
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
+import { readChosenLead, type RidingChoices } from "./riding-choices";
 
 /** How the Requests column is ordered. */
 export type RequestsOrder = "oldest" | "mine" | "place";
@@ -47,16 +49,6 @@ export interface PlacementChoice {
   readonly grouping: string;
   readonly requestsOrder: RequestsOrder;
 }
-
-/**
- * The lead each card was put on or taken off by the user's own Link or Unlink
- * in this visit, by card id, as the lead's ref. `undefined` means taken off.
- * It wins over what a read says, for the rest of the visit.
- */
-export type RidingChoices = ReadonlyMap<string, string | undefined>;
-
-/** No choice made. */
-export const NO_RIDING_CHOICES: RidingChoices = new Map();
 
 /** What a visit holds of one card. */
 export interface HeldCard {
@@ -182,7 +174,7 @@ export const placeInboxCards = (
   choice: PlacementChoice,
   held: VisitPlacement,
   context: PlaceContext,
-  riding: RidingChoices = NO_RIDING_CHOICES,
+  riding: RidingChoices,
 ): VisitPlacement => {
   const keepsSurfaces = held.requestedGrouping === choice.grouping;
   const grouping = keepsSurfaces ? held.grouping : resolveGrouping(inbox, choice.grouping);
@@ -193,7 +185,8 @@ export const placeInboxCards = (
   const cards = new Map<string, HeldCard>();
   let isChanged = !keepsSurfaces || !keepsGroups;
   for (const [id, card] of held.cards) {
-    const ridesOn = riding.has(id) ? riding.get(id) : card.ridesOn;
+    const chosen = riding.get(id);
+    const ridesOn = chosen === undefined ? card.ridesOn : readChosenLead(chosen);
     if (ridesOn !== card.ridesOn) isChanged = true;
     cards.set(id, {
       side: card.side,
@@ -224,8 +217,13 @@ export const placeInboxCards = (
       if (!(keepsGroups && held.groupRank.has(requestGroup))) newGroups.add(requestGroup);
       isChanged = true;
     }
+    const chosen = riding.get(card.id);
     const ridesOn =
-      seen !== undefined ? seen.ridesOn : riding.has(card.id) ? riding.get(card.id) : card.ridesOn;
+      seen !== undefined
+        ? seen.ridesOn
+        : chosen === undefined
+          ? card.ridesOn
+          : readChosenLead(chosen);
     cards.set(card.id, { side, ridesOn, rank: seen?.rank ?? cards.size, heads, requestGroup });
   }
   if (!isChanged) return held;

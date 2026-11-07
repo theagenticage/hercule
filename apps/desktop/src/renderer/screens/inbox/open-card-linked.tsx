@@ -31,7 +31,7 @@ export function OpenCardLinked({
   readonly onWalk: (ref: string) => void;
   readonly canWalk: (row: OpenPlaceRow) => boolean;
   readonly onUnlink: (row: PlaceRow) => void;
-  readonly onLink: (row: PlaceRow) => void;
+  readonly onLink: (row: OpenPlaceRow) => void;
   readonly search: ReactNode;
 }): JSX.Element | null {
   if (rows.confirmed.length === 0 && rows.hints.length === 0 && search === null) return null;
