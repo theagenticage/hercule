@@ -82,7 +82,7 @@ interface SentDraft {
  *   dialog. When the user has no account, an Add an account button follows it
  *   and opens the add-account sheet;
  * - the composer, see `DraftComposer`;
- * - the start cards, or the starter threads while the project has no open
+ * - the start cards, or the starter threads while the project has no planned
  *   task, when the draft is in a project, see `StartCards`.
  *
  * ⏎ or Send starts the thread with what the composer shows, and opens it once

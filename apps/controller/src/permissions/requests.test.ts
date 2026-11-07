@@ -46,6 +46,7 @@ const insertSession = Effect.gen(function* () {
     accessMode: "approval-required",
     workspaceId: null,
     projectId: undefined,
+    taskId: undefined,
     checkoutBranch: undefined,
     githubConnectionId: undefined,
     spec: "{}",

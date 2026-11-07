@@ -7,7 +7,7 @@ import { IntakeIcon } from "../../icons/intake";
 import { TasksIcon } from "../../icons/tasks";
 import { GitHubMark } from "../../logos";
 
-// The starters show only while a project has no open task, so they load the
+// The starters show only while a project has no planned task, so they load the
 // first time they show, and are not part of the first screen's scripts
 // (spec 17 §Performance).
 const StarterThreads = lazy(() =>
@@ -17,11 +17,10 @@ const StarterThreads = lazy(() =>
 /**
  * Renders the start cards under a Draft Thread's composer, as the Bureau
  * book's `session-empty` page draws them: "Start from Intake", then up to
- * three open tasks of the project, most urgent first. Each card shows where
- * the task came from, whether it is a Proposal or a Task, its priority as
- * bars, and its title.
+ * three planned tasks of the project, most urgent first. Each card shows where
+ * the task came from, its priority as bars, and its title.
  *
- * While the project has no open task, three starter threads take the cards'
+ * While the project has no planned task, three starter threads take the cards'
  * place, see `StarterThreads`.
  *
  * A click hands the card's `message`, one line that points the thread's
@@ -72,7 +71,7 @@ export function StartCards({
           >
             <span className="start-top">
               {card.source === "github" ? <GitHubMark size={14} /> : <TasksIcon size={14} />}
-              <span>{card.kind}</span>
+              <span>Task</span>
               <span className="spacer" />
               <span
                 className="bars"

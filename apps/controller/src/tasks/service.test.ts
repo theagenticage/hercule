@@ -7,6 +7,8 @@ import {
   MAX_TASK_TITLE_LENGTH,
   type Task,
   type TaskCreateInput,
+  type TaskStage,
+  type TaskStatus,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString, withTransaction, type Change } from "../db";
@@ -106,6 +108,7 @@ describe("task.create", () => {
       title: "Fix the flaky migration test",
       description: "",
       status: "open",
+      stage: "planned",
       priority: "normal",
       labels: [],
       provenance: [],
@@ -113,6 +116,7 @@ describe("task.create", () => {
     expect(task.id).toMatch(UUID_V7);
     expect(task.createdAt).toBe(task.updatedAt);
     expect(task.statusChangedAt).toBe(task.createdAt);
+    expect(task.stageChangedAt).toBe(task.createdAt);
     expect(task.deletedAt).toBeUndefined();
   });
 
@@ -264,6 +268,135 @@ describe("task.update", () => {
         },
       },
     });
+  });
+});
+
+/** The coarse status each stage reads, written out here rather than derived. */
+const STATUS_OF_STAGE: ReadonlyArray<readonly [TaskStage, TaskStatus]> = [
+  ["exploring", "open"],
+  ["planned", "open"],
+  ["building", "in-progress"],
+  ["in-review", "in-progress"],
+  ["landed", "in-progress"],
+  ["done", "done"],
+  ["dropped", "cancelled"],
+];
+
+/**
+ * Every way to move a Task: a Task at `from` gets `patch`, and ends at `stage`.
+ * `changes` lists the keys of the `task.updated` event, or is empty when the
+ * write must leave the Task alone and record nothing.
+ */
+const MOVES: ReadonlyArray<{
+  readonly from: TaskStage;
+  readonly patch: { readonly stage: TaskStage } | { readonly status: TaskStatus };
+  readonly stage: TaskStage;
+  readonly changes: ReadonlyArray<string>;
+}> = [
+  { from: "planned", patch: { stage: "exploring" }, stage: "exploring", changes: ["stage"] },
+  { from: "building", patch: { stage: "in-review" }, stage: "in-review", changes: ["stage"] },
+  { from: "landed", patch: { stage: "done" }, stage: "done", changes: ["stage", "status"] },
+  {
+    from: "planned",
+    patch: { status: "in-progress" },
+    stage: "building",
+    changes: ["stage", "status"],
+  },
+  { from: "in-review", patch: { status: "in-progress" }, stage: "in-review", changes: [] },
+  { from: "exploring", patch: { status: "open" }, stage: "exploring", changes: [] },
+  { from: "landed", patch: { status: "open" }, stage: "planned", changes: ["stage", "status"] },
+  { from: "building", patch: { status: "done" }, stage: "done", changes: ["stage", "status"] },
+  {
+    from: "in-review",
+    patch: { status: "cancelled" },
+    stage: "dropped",
+    changes: ["stage", "status"],
+  },
+];
+
+describe("the stage of a task", () => {
+  it.each(STATUS_OF_STAGE)("reads %s as the status %s", async (stage, status) => {
+    const task = await run(
+      Effect.flatMap(TaskService, (tasks) =>
+        tasks.create({ title: "Staged", description: "", stage }),
+      ),
+    );
+    expect(task).toMatchObject({ stage, status });
+  });
+
+  it.each(MOVES)(
+    "moves a task at $from by $patch to $stage, reporting $changes",
+    async ({ from, patch, stage, changes }) => {
+      const { before, after, events } = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          const created = yield* tasks.create({ title: "Moving", description: "", stage: from });
+          yield* TestClock.adjust(A_MINUTE);
+          const after = yield* tasks.update({ id: created.id, ...patch });
+          return { before: created, after, events: yield* readEventsOfKind("task.updated") };
+        }),
+      );
+      const reported = events.flatMap((event) =>
+        Object.keys((event.payload as { changes: object }).changes),
+      );
+      expect(reported.sort()).toEqual(changes);
+      expect(after.stage).toBe(stage);
+      expect(after.status).toBe(STATUS_OF_STAGE.find(([name]) => name === stage)?.[1]);
+      if (changes.length === 0) expect(after).toEqual(before);
+    },
+  );
+
+  it("moves statusChangedAt only with the coarse status, and stageChangedAt only with the stage", async () => {
+    const { created, withinStatus, acrossStatus } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create({ title: "Timed", description: "", stage: "building" });
+        yield* TestClock.adjust(A_MINUTE);
+        const withinStatus = yield* tasks.update({ id: created.id, stage: "in-review" });
+        yield* TestClock.adjust(A_MINUTE);
+        const acrossStatus = yield* tasks.update({ id: created.id, stage: "done" });
+        return { created, withinStatus, acrossStatus };
+      }),
+    );
+    expect(withinStatus.stageChangedAt > created.stageChangedAt).toBe(true);
+    expect(withinStatus.statusChangedAt).toBe(created.statusChangedAt);
+    expect(acrossStatus.stageChangedAt > withinStatus.stageChangedAt).toBe(true);
+    expect(acrossStatus.statusChangedAt > withinStatus.statusChangedAt).toBe(true);
+  });
+
+  it("refuses a stage and a status in one update, says to send the stage, and writes nothing", async () => {
+    const { error, task, events } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create({ title: "Both", description: "" });
+        const error = yield* Effect.flip(
+          tasks.update({ id: created.id, stage: "in-review", status: "done" }),
+        );
+        return {
+          error,
+          task: yield* tasks.read(created.id),
+          events: yield* readEventsOfKind("task.updated"),
+        };
+      }),
+    );
+    expect(readValidationIssues(error)).toEqual([
+      { path: ["status"], message: expect.stringContaining("Send stage alone") as unknown },
+    ]);
+    expect(task).toMatchObject({ stage: "planned", status: "open" });
+    expect(events).toEqual([]);
+  });
+
+  it("lists the tasks at any of the stages in the filter", async () => {
+    const titles = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        yield* Effect.forEach(["exploring", "planned", "building", "dropped"] as const, (stage) =>
+          tasks.create({ title: stage, description: "", stage }),
+        );
+        return sortTitles((yield* tasks.query({ stage: ["exploring", "building"] })).items);
+      }),
+    );
+    expect(titles).toEqual(["building", "exploring"]);
   });
 });
 
@@ -551,7 +684,7 @@ describe("provenance", () => {
     ]);
   });
 
-  it("creates an in-progress task with its handoff entry in one write, and emits one task.created with the entry", async () => {
+  it("creates a task at building with its handoff entry in one write, and emits one task.created with the entry", async () => {
     const { task, read, created, updated } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -569,7 +702,12 @@ describe("provenance", () => {
       }),
     );
     const entry = { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF, actor: "user" };
-    expect(task).toMatchObject({ id: HANDOFF_TASK_ID, status: "in-progress", priority: "high" });
+    expect(task).toMatchObject({
+      id: HANDOFF_TASK_ID,
+      stage: "building",
+      status: "in-progress",
+      priority: "high",
+    });
     expect(read.provenance).toEqual([expect.objectContaining(entry)]);
     expect(created.map((event) => event.payload)).toMatchObject([
       { task: { id: HANDOFF_TASK_ID, status: "in-progress", provenance: [entry] } },
@@ -995,24 +1133,31 @@ describe("paging", () => {
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("rejects a search cursor reused with a different filter", async () => {
-    const error = await runError(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        for (let index = 0; index < 4; index += 1) {
-          yield* tasks.create({
-            title: `report ${index}`,
-            description: "prose",
-            labels: [index < 2 ? "a" : "b"],
-          });
-        }
-        const { nextCursor } = yield* tasks.query({ limit: 1, text: "prose", labels: ["a"] });
-        if (nextCursor === undefined) return yield* Effect.die("the search has a second page");
-        return yield* tasks.query({ limit: 1, text: "prose", labels: ["b"], cursor: nextCursor });
-      }),
-    );
-    expect(error).toMatchObject({ error: { code: "validation" } });
-  });
+  it.each([
+    ["labels", { labels: ["a"] }, { labels: ["b"] }],
+    ["stage", { stage: ["planned"] }, { stage: ["building"] }],
+  ] as const)(
+    "rejects a search cursor reused with a different %s filter",
+    async (_field, first, second) => {
+      const error = await runError(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          for (let index = 0; index < 4; index += 1) {
+            yield* tasks.create({
+              title: `report ${index}`,
+              description: "prose",
+              labels: [index < 2 ? "a" : "b"],
+              stage: index < 2 ? "planned" : "building",
+            });
+          }
+          const { nextCursor } = yield* tasks.query({ limit: 1, text: "prose", ...first });
+          if (nextCursor === undefined) return yield* Effect.die("the search has a second page");
+          return yield* tasks.query({ limit: 1, text: "prose", ...second, cursor: nextCursor });
+        }),
+      );
+      expect(error).toMatchObject({ error: { code: "validation" } });
+    },
+  );
 
   it("rejects a search that also has a sort, and names both fields", async () => {
     const error = await runError(

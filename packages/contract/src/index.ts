@@ -531,12 +531,15 @@ export {
   ProvenanceEntry,
   TASK_PRIORITIES,
   TASK_SORT_FIELDS,
+  TASK_STAGES,
+  deriveTaskStatus,
   TASK_STATUSES,
   Task,
   TaskCreateInput,
   TaskCreatedEventPayload,
   TaskFilter,
   TaskPriority,
+  TaskStage,
   TaskStatus,
   TaskUpdateCall,
   TaskUpdateInput,
@@ -560,6 +563,7 @@ export {
   TrackingRun,
   TrackingTask,
   refuseEmptyTaskUpdate,
+  refuseStageWithStatus,
 } from "./groups/task";
 export {
   BoundAction,

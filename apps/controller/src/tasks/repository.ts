@@ -36,6 +36,7 @@ import type {
   ProvenanceEntry,
   Task,
   TaskPriority,
+  TaskStage,
   TaskStatus,
 } from "@hercule/contract";
 import {
@@ -62,6 +63,7 @@ export interface TaskFilter {
   readonly refs?: ReadonlyArray<ExternalRef>;
   readonly labels?: ReadonlyArray<string>;
   readonly status?: ReadonlyArray<TaskStatus>;
+  readonly stage?: ReadonlyArray<TaskStage>;
   readonly projectId?: string;
   /** `true` keeps the tasks with a handoff entry, `false` the tasks without one. */
   readonly handedOff?: boolean;
@@ -138,6 +140,8 @@ export interface NewTask {
   readonly id?: string;
   readonly title: string;
   readonly description: string;
+  readonly stage: TaskStage;
+  /** The coarse reading of `stage`, already derived by the caller. */
   readonly status: TaskStatus;
   readonly priority: TaskPriority;
   readonly labels: ReadonlyArray<string>;
@@ -151,6 +155,8 @@ export interface NewTask {
 export interface TaskEdit {
   readonly title?: string;
   readonly description?: string;
+  readonly stage?: TaskStage;
+  /** Must be the coarse reading of `stage`; it is written only when it changed. */
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
@@ -162,12 +168,14 @@ interface TaskRow {
   readonly title: string;
   readonly description: string;
   readonly status: string;
+  readonly stage: string;
   readonly priority: string;
   readonly labels: string;
   readonly project_id: Uint8Array | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly status_changed_at: string;
+  readonly stage_changed_at: string;
   readonly deleted_at: string | null;
 }
 
@@ -182,8 +190,9 @@ interface ProvenanceRow {
 }
 
 const COLUMNS =
-  "tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.labels, " +
-  "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, tasks.deleted_at";
+  "tasks.id, tasks.title, tasks.description, tasks.status, tasks.stage, tasks.priority, tasks.labels, " +
+  "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
+  "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -253,6 +262,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
         filter.refs ?? null,
         filter.labels ?? null,
         filter.status ?? null,
+        filter.stage ?? null,
         filter.projectId ?? null,
         filter.handedOff ?? null,
       ])}`,
@@ -281,6 +291,12 @@ const make = Effect.gen(function* () {
           filter.refs === undefined ? "tasks.status" : "+tasks.status",
           filter.status,
         ),
+      );
+    }
+    if (filter.stage !== undefined) {
+      // Same reason as the status clause above.
+      clauses.push(
+        buildAnyOfClause(filter.refs === undefined ? "tasks.stage" : "+tasks.stage", filter.stage),
       );
     }
     if (filter.projectId !== undefined) {
@@ -355,6 +371,7 @@ const make = Effect.gen(function* () {
                 title: row.title,
                 description: row.description,
                 status: row.status as TaskStatus,
+                stage: row.stage as TaskStage,
                 priority: row.priority as TaskPriority,
                 labels: JSON.parse(row.labels) as ReadonlyArray<string>,
                 ...(row.project_id === null ? {} : { projectId: uuidToString(row.project_id) }),
@@ -362,6 +379,7 @@ const make = Effect.gen(function* () {
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
                 statusChangedAt: row.status_changed_at,
+                stageChangedAt: row.stage_changed_at,
                 ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
               };
             });
@@ -625,13 +643,13 @@ const make = Effect.gen(function* () {
         const id = task.id === undefined ? mintUuid() : uuidFromString(task.id);
         yield* sql`
           INSERT INTO tasks
-            (id, title, description, status, priority, labels, project_id,
-             created_at, updated_at, status_changed_at)
+            (id, title, description, status, stage, priority, labels, project_id,
+             created_at, updated_at, status_changed_at, stage_changed_at)
           VALUES
-            (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.priority},
+            (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.stage}, ${task.priority},
              ${JSON.stringify(task.labels)},
              ${task.projectId === undefined ? null : uuidFromString(task.projectId)},
-             ${task.at}, ${task.at}, ${task.at})
+             ${task.at}, ${task.at}, ${task.at}, ${task.at})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
         return {
@@ -639,6 +657,7 @@ const make = Effect.gen(function* () {
           title: task.title,
           description: task.description,
           status: task.status,
+          stage: task.stage,
           priority: task.priority,
           labels: task.labels,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
@@ -650,6 +669,7 @@ const make = Effect.gen(function* () {
           createdAt: task.at,
           updatedAt: task.at,
           statusChangedAt: task.at,
+          stageChangedAt: task.at,
         };
       }),
 
@@ -679,6 +699,9 @@ const make = Effect.gen(function* () {
         }
         if (edit.status !== undefined) {
           sets.push(sql`status = ${edit.status}`, sql`status_changed_at = ${at}`);
+        }
+        if (edit.stage !== undefined) {
+          sets.push(sql`stage = ${edit.stage}`, sql`stage_changed_at = ${at}`);
         }
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);

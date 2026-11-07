@@ -289,6 +289,8 @@ export interface CreateRequest {
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
   readonly projectId: string | undefined;
+  /** The Task the session joins; `undefined` when it joins none. */
+  readonly taskId: string | undefined;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as. */
@@ -1789,6 +1791,7 @@ const make = Effect.gen(function* () {
           permissionProfileId,
           conversationId,
           runId,
+          taskId,
           kind,
           workspaceId,
           done,
@@ -1848,6 +1851,7 @@ const make = Effect.gen(function* () {
             permissionProfileId,
             conversationId,
             runId,
+            taskId,
             kind,
             workspaceId,
             done,
@@ -2302,6 +2306,7 @@ const make = Effect.gen(function* () {
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
           projectId: open.projectId,
+          taskId: open.taskId,
           checkoutBranch: open.checkoutBranch,
           githubConnectionId: open.githubConnectionId,
           requestedAccessMode: open.requestedAccessMode,

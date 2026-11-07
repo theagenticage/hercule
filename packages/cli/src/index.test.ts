@@ -920,12 +920,14 @@ describe("id tails", () => {
       title: `task ${tail}`,
       description: "",
       status: "open",
+      stage: "planned",
       priority: "normal",
       labels: [] as Array<string>,
       provenance: [] as Array<never>,
       createdAt: at,
       updatedAt: at,
       statusChangedAt: at,
+      stageChangedAt: at,
     });
     const rows = [
       buildTaskRow("aaaaaaa1", "2026-01-01T00:00:00.000Z"),

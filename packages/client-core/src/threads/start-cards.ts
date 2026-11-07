@@ -1,12 +1,9 @@
 /**
- * Builds the start cards under a Draft Thread's composer: the open tasks of
+ * Builds the start cards under a Draft Thread's composer: the planned tasks of
  * the draft's project, most urgent first, each one a click away from a first
  * message that points the thread's agent at it.
  */
 import type { Task, TaskPriority } from "@hercule/contract";
-
-/** The label that makes a task a Proposal (GLOSSARY.md): prepared by agents, not yet accepted. */
-const PROPOSED_LABEL = "proposed";
 
 /** How many of four bars a priority fills. Four is urgent, which is drawn in the failure hue. */
 const PRIORITY_BARS: Readonly<Record<TaskPriority, 1 | 2 | 3 | 4>> = {
@@ -18,8 +15,6 @@ const PRIORITY_BARS: Readonly<Record<TaskPriority, 1 | 2 | 3 | 4>> = {
 
 export interface StartCard {
   readonly taskId: string;
-  /** `Proposal` for a task the agents are asking the user to accept, `Task` otherwise. */
-  readonly kind: "Proposal" | "Task";
   /** The task's priority, which the bars draw and which a screen reader reads out instead. */
   readonly priority: TaskPriority;
   readonly bars: 1 | 2 | 3 | 4;
@@ -65,7 +60,6 @@ export const buildStartCards = (tasks: readonly Task[]): readonly StartCard[] =>
     const ref = task.provenance.find((entry) => entry.ref !== undefined)?.ref;
     return {
       taskId: task.id,
-      kind: task.labels.includes(PROPOSED_LABEL) ? "Proposal" : "Task",
       priority: task.priority,
       bars: PRIORITY_BARS[task.priority],
       source: ref?.startsWith("github:") === true ? "github" : null,

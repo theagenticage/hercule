@@ -240,6 +240,7 @@ const insertQueuedSession = (
           runnerId,
           workspaceId: null,
           projectId: undefined,
+          taskId: undefined,
           checkoutBranch: options.checkoutBranch,
           githubConnectionId: options.githubConnectionId,
           requestedAccessMode: "approval-required",

@@ -40,6 +40,8 @@ interface Fixture {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly statusChangedAt: string;
+  readonly stage: string;
+  readonly stageChangedAt: string;
 }
 
 const RUNNER: Fixture = {
@@ -47,6 +49,7 @@ const RUNNER: Fixture = {
   title: "Wire the runner socket up",
   description: "The controller accepts a runner over one WebSocket and hosts sessions on it.",
   status: "open",
+  stage: "planned",
   priority: "high",
   labels: ["runner", "protocol"],
   projectId: PROJECT.id,
@@ -60,6 +63,7 @@ const RUNNER: Fixture = {
   createdAt: "2026-09-04T15:21:31.646Z",
   updatedAt: "2026-09-04T15:21:31.646Z",
   statusChangedAt: "2026-09-04T15:21:31.646Z",
+  stageChangedAt: "2026-09-04T15:21:31.646Z",
 };
 
 const PRUNE: Fixture = {
@@ -67,6 +71,7 @@ const PRUNE: Fixture = {
   title: "Prune the event log after 90 days",
   description: "The retention job walks the log by arrival time and drops what is older.",
   status: "done",
+  stage: "done",
   priority: "normal",
   labels: ["events"],
   projectId: PROJECT.id,
@@ -80,6 +85,7 @@ const PRUNE: Fixture = {
   createdAt: "2026-09-04T15:21:31.701Z",
   updatedAt: "2026-09-04T15:21:31.755Z",
   statusChangedAt: "2026-09-04T15:21:31.755Z",
+  stageChangedAt: "2026-09-04T15:21:31.755Z",
 };
 
 /**

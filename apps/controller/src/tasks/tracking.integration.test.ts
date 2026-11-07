@@ -12,6 +12,7 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
   HandoffLegs,
+  deriveTaskStatus,
   MAX_LEG_QUERY_RUNS,
   MAX_TRACKING_DETAIL_RUNS,
   MAX_TRACKING_FAILURE_CAUSE,
@@ -60,17 +61,19 @@ const insertTrackedTask = async (
   { sql }: ServerHarness,
   title: string,
   fields: {
-    readonly status?: "in-progress" | "done" | "open";
+    readonly stage?: "building" | "done" | "planned";
     readonly priority?: TaskPriority;
   } = {},
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const tasks = yield* taskRepository;
+      const stage = fields.stage ?? "building";
       const task = yield* tasks.insert({
         title,
         description: "",
-        status: fields.status ?? "in-progress",
+        stage,
+        status: deriveTaskStatus(stage),
         priority: fields.priority ?? "normal",
         labels: [],
         projectId: undefined,
@@ -284,7 +287,7 @@ describe("task.queryTracking", () => {
       const token = await completeSetup(harness.base);
       const kept = await insertTrackedTask(harness, "kept");
       await insertRun(harness, kept, { at: minute(1), ending: COMPLETED });
-      const done = await insertTrackedTask(harness, "done", { status: "done" });
+      const done = await insertTrackedTask(harness, "done", { stage: "done" });
       await insertRun(harness, done, { at: minute(1), ending: COMPLETED });
       const deleted = await insertTrackedTask(harness, "deleted");
       await insertRun(harness, deleted, { at: minute(1), ending: COMPLETED });
@@ -302,6 +305,7 @@ describe("task.queryTracking", () => {
             title: "no handoff",
             description: "",
             status: "in-progress",
+            stage: "building",
             priority: "normal",
             labels: [],
             projectId: undefined,
@@ -770,6 +774,7 @@ describe("task.readTracking", () => {
             title: "no handoff",
             description: "",
             status: "in-progress",
+            stage: "building",
             priority: "normal",
             labels: [],
             projectId: undefined,

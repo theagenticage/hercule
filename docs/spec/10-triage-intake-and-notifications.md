@@ -90,7 +90,7 @@ Conventions the answers rely on:
 
 - **Accepting is not starting.** Accept persists the work; starting it is a separate act (~~a Start answer,~~ a manual run, a session opened on the task, or handing the Task to an agent from its screen *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*). V1 ships no work workflow on purpose - the no-workflow situation is what dogfooding tests first - so a fresh install offers Accept and Dismiss only. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): every install now does.)*
 - ~~**A fitting workflow** is one that declares a required `taskId` input (`hercule workflow query`); the agent picks among those by name and description and names it in the answer label.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Gone with Start *X*.
-- **Whoever starts work owns the transition.** A work workflow's first step sets `status: in-progress` ~~and removes `proposed`~~; work workflows trigger on status changes (`event.changes.status.new == "in-progress"`), never on `task.created`~~, so a `proposed` task cannot be picked up by accident~~ ([./09-tasks.md](./09-tasks.md)). *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* No Task exists before Accept, so there is no `proposed` label for a work workflow to guard on or remove.
+- **Whoever starts work owns the transition.** A work workflow's first step sets `status: in-progress` ~~and removes `proposed`~~; work workflows trigger on status changes (`event.payload.changes.status.new == "in-progress"`), never on `task.created`~~, so a `proposed` task cannot be picked up by accident~~ ([./09-tasks.md](./09-tasks.md)). *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* No Task exists before Accept, so there is no `proposed` label for a work workflow to guard on or remove.
 - There is no park. "Not now" is Accept: the task waits in the backlog at the priority triage gave it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Or the user snoozes the proposal (Section 9.7).
 
 ### 2.5 Recommended topology
@@ -105,7 +105,7 @@ external events ──▶ Triage (cron batch) ──▶ Tasks ──▶ work wor
 
 - Triage is the only doorway between raw external events and expensive work.
 - Tasks are the buffer. Triage never starts a work run; it leaves a ~~Task~~ proposal, and the user's Accept ~~or Start~~ does the rest *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Accept creates the Task, and work starts from the Task, Section 9.3)*. This is what lets the user see, edit and cancel prepared work before money is spent.
-- Provenance-only appends also fire `task.updated`, so any work workflow MUST filter on the fields it cares about (`has(event.changes.status)`).
+- Provenance-only appends also fire `task.updated`, so any work workflow MUST filter on the fields it cares about (`has(event.payload.changes.status)`).
 
 ### 2.6 Task interaction from a per-event workflow
 

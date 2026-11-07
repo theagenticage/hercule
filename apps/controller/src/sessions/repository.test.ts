@@ -64,6 +64,7 @@ const insertSession = (
       accessMode: "approval-required",
       workspaceId: null,
       projectId: undefined,
+      taskId: undefined,
       checkoutBranch: undefined,
       githubConnectionId: undefined,
       spec: "{}",
@@ -558,6 +559,7 @@ describe("the kind of a session", () => {
         done: undefined,
         archived: undefined,
         runId: undefined,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
         workspaceId: undefined,
@@ -669,6 +671,7 @@ describe("listing the sessions on one profile", () => {
           done: undefined,
           archived: undefined,
           runId: undefined,
+          taskId: undefined,
           conversationId: undefined,
           activeSince: undefined,
           workspaceId: undefined,
@@ -700,6 +703,7 @@ describe("listing the sessions of runs", () => {
         done: undefined,
         archived: undefined,
         runId,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
         workspaceId: undefined,
@@ -731,6 +735,62 @@ describe("listing the sessions of runs", () => {
   });
 });
 
+describe("listing the sessions of a Task", () => {
+  /** Lists every session whose Task is `taskId`, oldest first. */
+  const listByTask = (taskId: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        done: undefined,
+        archived: undefined,
+        runId: undefined,
+        taskId,
+        conversationId: undefined,
+        activeSince: undefined,
+        workspaceId: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("lists the sessions set on the Task, reads the Task back, and leaves other sessions out", async () => {
+    const { first, second, listed, readTask, readNone } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const [taskA, taskB] = [mintId(), mintId()];
+        const first = yield* insertSession(mintId());
+        const second = yield* insertSession(mintId());
+        const other = yield* insertSession(mintId());
+        const none = yield* insertSession(mintId());
+        yield* sessions.setTaskId(first, taskA);
+        yield* sessions.setTaskId(second, taskA);
+        yield* sessions.setTaskId(other, taskB);
+        const one = yield* sessions.one(first);
+        const unlinked = yield* sessions.one(none);
+        return {
+          first,
+          second,
+          listed: yield* listByTask(taskA),
+          readTask: Option.map(one, (found) => found.taskId),
+          readNone: Option.map(unlinked, (found) => found.taskId),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(listed).toEqual([first, second]);
+    expect(Option.isSome(readTask) && readTask.value).not.toBeNull();
+    expect(readNone).toEqual(Option.some(null));
+  });
+});
+
 describe("listing the sessions of workspaces", () => {
   /** Lists every session placed in `workspaceId`, or in one of them, oldest first. */
   const listByWorkspaces = (workspaceId: string | ReadonlyArray<string>) =>
@@ -749,6 +809,7 @@ describe("listing the sessions of workspaces", () => {
         done: undefined,
         archived: undefined,
         runId: undefined,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
         doneSince: undefined,
@@ -831,6 +892,7 @@ describe("listing the sessions active since an instant", () => {
           done: undefined,
           archived: undefined,
           runId: undefined,
+          taskId: undefined,
           conversationId: undefined,
           activeSince: instant,
           workspaceId: undefined,
@@ -887,6 +949,7 @@ describe("listing the sessions active since an instant", () => {
             done: undefined,
             archived: undefined,
             runId: undefined,
+            taskId: undefined,
             conversationId: undefined,
             activeSince: instant,
             workspaceId: undefined,
@@ -983,6 +1046,7 @@ const insertResumableSession = Effect.gen(function* () {
     accessMode: "approval-required",
     workspaceId: null,
     projectId: undefined,
+    taskId: undefined,
     checkoutBranch: undefined,
     githubConnectionId: undefined,
     spec: "{}",
@@ -1193,6 +1257,7 @@ describe("the archived mark of a session", () => {
         done: undefined,
         archived,
         runId: undefined,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
         workspaceId: undefined,

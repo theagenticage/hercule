@@ -112,6 +112,8 @@ export interface StoredSession {
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | null;
+  /** The Task the session belongs to; `null` when it belongs to none. */
+  readonly taskId: string | null;
   /** The GitHub account this session pushes as, chosen when it was spawned. */
   readonly githubConnectionId: string | null;
   readonly requestedAccessMode: AccessMode;
@@ -209,6 +211,8 @@ export interface NewSession {
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | undefined;
+  /** The Task the session belongs to; `undefined` when it belongs to none. */
+  readonly taskId: string | undefined;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as, chosen when it was spawned. */
@@ -247,6 +251,8 @@ export interface SessionPageRequest {
   readonly conversationId: string | undefined;
   /** Only the sessions these runs' agent steps started. */
   readonly runId: string | ReadonlyArray<string> | undefined;
+  /** Only the sessions of this Task. */
+  readonly taskId: string | undefined;
   /** Only the sessions of these kinds. */
   readonly kind: SessionKind | ReadonlyArray<SessionKind> | undefined;
   /** Only the sessions placed in this workspace, or in one of these workspaces. */
@@ -278,6 +284,7 @@ interface SessionRow {
   readonly runner_id: Uint8Array;
   readonly workspace_id: Uint8Array | null;
   readonly project_id: Uint8Array | null;
+  readonly task_id: Uint8Array | null;
   readonly github_connection_id: Uint8Array | null;
   readonly requested_access_mode: string;
   readonly access_mode: string;
@@ -323,7 +330,7 @@ interface SessionRow {
  */
 const buildColumnList = (): string =>
   "id, kind, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, provider_account_id, harness_id, runner_id, " +
-  "workspace_id, project_id, " +
+  "workspace_id, project_id, task_id, " +
   "github_connection_id, requested_access_mode, " +
   // Read to compute `unenforced`: the tool families this session's spec disallowed.
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
@@ -366,6 +373,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
   projectId: row.project_id === null ? null : uuidToString(row.project_id),
+  taskId: row.task_id === null ? null : uuidToString(row.task_id),
   githubConnectionId:
     row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
   requestedAccessMode: row.requested_access_mode as AccessMode,
@@ -615,6 +623,7 @@ const make = Effect.gen(function* () {
           session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
         const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
         const project = session.projectId === undefined ? null : uuidFromString(session.projectId);
+        const task = session.taskId === undefined ? null : uuidFromString(session.taskId);
         const connection =
           session.githubConnectionId === undefined
             ? null
@@ -630,7 +639,7 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO sessions (id, title, role, permission_profile_id, agent_id, conversation_id,
                                 run_id, step_id, provider_account_id, harness_id, runner_id,
-                                workspace_id, project_id, checkout_branch, github_connection_id,
+                                workspace_id, project_id, task_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_by, created_at, last_activity_at)
@@ -639,7 +648,7 @@ const make = Effect.gen(function* () {
                   ${conversation}, ${run}, ${session.step?.stepId ?? null},
                   ${uuidFromString(session.providerAccountId)}, ${session.harnessId},
                   ${uuidFromString(session.runnerId)},
-                  ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
+                  ${workspace}, ${project}, ${task}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.createdBy}, ${session.at}, ${session.at})
@@ -788,6 +797,9 @@ const make = Effect.gen(function* () {
               ? sql`run_id = ${uuidFromString(request.runId)}`
               : sql`run_id IN ${sql.in(request.runId.map(uuidFromString))}`,
           );
+        }
+        if (request.taskId !== undefined) {
+          clauses.push(sql`task_id = ${uuidFromString(request.taskId)}`);
         }
         if (request.kind !== undefined) {
           clauses.push(
@@ -1400,6 +1412,13 @@ const make = Effect.gen(function* () {
       Effect.asVoid(sql`
         UPDATE sessions SET role = ${role}
         WHERE id = ${uuidFromString(sessionId)} AND role IS NULL
+      `),
+
+    /** Sets the Task the session belongs to. It checks nothing: the caller chose a Task that can be joined. */
+    setTaskId: (sessionId: string, taskId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET task_id = ${uuidFromString(taskId)}
+        WHERE id = ${uuidFromString(sessionId)}
       `),
 
     /**

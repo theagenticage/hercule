@@ -542,6 +542,7 @@ export const CLI = {
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
+      { args: ["--stage", "exploring", "--stage", "planned"] },
       { args: ["--text", "flaky login"] },
       {
         args: [
@@ -567,7 +568,11 @@ export const CLI = {
       },
       status: {
         flag: "status",
-        help: "The task's status; repeat the flag to list open and in-progress tasks together.",
+        help: "The task's coarse status; repeat the flag to list open and in-progress tasks together. `--stage` is the exact word.",
+      },
+      stage: {
+        flag: "stage",
+        help: "The task's stage: exploring, planned, building, in-review, landed, done or dropped; repeat the flag to list Tasks at any of the stages.",
       },
       projectId: {
         flag: "project",
@@ -645,6 +650,10 @@ export const CLI = {
         flag: "description",
         help: "The task's markdown body. Pipe an empty string for none.",
       },
+      stage: {
+        flag: "stage",
+        help: "Where the task starts; leave it off to start at planned. Use exploring for work still being looked into.",
+      },
       priority: {
         flag: "priority",
         help: "How much this matters; leave it off to use the server's default.",
@@ -667,6 +676,7 @@ export const CLI = {
     command: "task update",
     help: "Edits a task; a field you leave out is not changed. Labels move one at a time with --add-label and --remove-label, so a user and an agent writing the same task never undo each other.",
     examples: [
+      { args: ["1f3a9c2e", "--stage", "in-review"] },
       { args: ["1f3a9c2e", "--status", "in-progress"] },
       { args: ["1f3a9c2e", "--add-label", "triaged", "--remove-label", "needs-triage"] },
       {
@@ -688,7 +698,11 @@ export const CLI = {
       },
       status: {
         flag: "status",
-        help: "The task's status. There is no state machine: every transition is allowed.",
+        help: "Sets a coarse status: open, in-progress, done or cancelled. The task moves to the earliest stage that status reads, unless its stage already reads it. `--stage` is the exact word; send one of the two, not both.",
+      },
+      stage: {
+        flag: "stage",
+        help: "Moves the task to this stage: exploring, planned, building, in-review, landed, done or dropped. There is no state machine: every move is allowed. The status follows from it.",
       },
       priority: { flag: "priority", help: "How much this matters now." },
       projectId: {
@@ -3814,6 +3828,7 @@ export const CLI = {
       { args: ["--status", "busy", "--status", "idle"] },
       { args: ["--kind", "thread"] },
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
+      { args: ["--task", "3d9f6e21"] },
       { args: ["--kind", "agent", "--kind", "run", "--active-since", "2026-10-09T12:00:00.000Z"] },
       { args: ["--kind", "thread", "--done-since", "2026-10-09T12:00:00.000Z"] },
     ],
@@ -3841,6 +3856,11 @@ export const CLI = {
         flag: "run",
         help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; repeat the flag to list the sessions of several runs. Find a run with `hercule run list`.",
         resolves: "run.query",
+      },
+      taskId: {
+        flag: "task",
+        help: "Only the sessions of this Task, by its id or a tail of eight or more characters; find it with `hercule task list`.",
+        resolves: "task.query",
       },
       permissionProfileId: {
         flag: "profile",
@@ -3987,6 +4007,10 @@ export const CLI = {
         stdin: "Bring the changelog up to date in the repo I work in.",
       },
       {
+        args: ["--task", "3d9f6e21"],
+        stdin: "Look at the refund flow too; it belongs with this Task.",
+      },
+      {
         args: ["--role", "review", "--dedup-key", "review-pr-87"],
         stdin: "Review pull request 87 and report what you would change.",
       },
@@ -4065,6 +4089,11 @@ export const CLI = {
         help: "The project the thread belongs to, by its id or a tail of eight or more characters; without it, a Thread a session starts is filed under the calling session's project, or under none if that project was deleted. Every repo in --workspace must be filed under the project, whether named or copied; to use a repo from another project, name that project here.",
         resolves: "project.query",
       },
+      taskId: {
+        flag: "task",
+        help: "The Task to join, by its id or a tail of eight or more characters; find it with `hercule task list`. A Thread joins a Task even without this flag: a Thread a session starts joins the calling session's Task, and one in an ephemeral workspace joins the Task that workspace belongs to. A Task that is done or dropped is refused; reopen it, or leave --task off.",
+        resolves: "task.query",
+      },
       workspace: {
         flag: "workspace",
         help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for no checkout, or, when a session spawns on its own Runner, to join the calling session\'s workspace. A primary branch may be specified only when spawning from an Agent.',
@@ -4078,7 +4107,7 @@ export const CLI = {
       forbidden:
         "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
       invalid_state:
-        "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`",
+        "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off",
     },
   },
   "session.update": {

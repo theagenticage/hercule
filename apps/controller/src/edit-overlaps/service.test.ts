@@ -124,6 +124,7 @@ const insertThread = (repositories: ReadonlyArray<string>, toldable = true) =>
         accessMode: "approval-required",
         workspaceId: yield* insertWorkspace(repositories),
         projectId: undefined,
+        taskId: undefined,
         checkoutBranch: undefined,
         githubConnectionId: undefined,
         spec: "{}",

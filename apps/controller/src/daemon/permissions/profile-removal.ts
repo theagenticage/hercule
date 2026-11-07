@@ -81,6 +81,7 @@ const make = Effect.gen(function* () {
                 done: undefined,
                 archived: undefined,
                 runId: undefined,
+                taskId: undefined,
                 activeSince: undefined,
                 workspaceId: undefined,
                 doneSince: undefined,

@@ -13,7 +13,7 @@
  * - `workspace`, for working files, observations and retained work;
  * - `provider`, for the Provider Accounts and the Model Profiles, whose entries
  *   name each thread's model and say whether it can run;
- * - `task`, for the open tasks a Draft Thread offers to start from, for the
+ * - `task`, for the planned tasks a Draft Thread offers to start from, for the
  *   Tasks Tracking lists, whose waiting rows the To do count takes in, and for
  *   Intake's Done lists, whose rows show where a handoff's Task stands;
  * - `connection`, for the GitHub Connection the New project form clones

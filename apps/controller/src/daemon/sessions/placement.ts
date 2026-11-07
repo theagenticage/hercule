@@ -919,6 +919,8 @@ const make = Effect.gen(function* () {
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
+            // The rule that picks a Task for a new session is not written yet.
+            taskId: undefined,
             checkoutBranch: open.checkoutBranch ?? opened.checkoutBranch,
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the

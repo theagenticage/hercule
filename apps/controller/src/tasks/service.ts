@@ -32,6 +32,7 @@ import {
   createNotFoundError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
+  deriveTaskStatus,
   Id,
   MAX_TASK_LABELS,
   TASK_SORT_FIELDS,
@@ -39,11 +40,13 @@ import {
   TaskFilter,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
+  refuseStageWithStatus,
   type Forbidden,
   type NotFound,
   type ProvenanceEntry,
   type Task,
   type TaskPriority,
+  type TaskStage,
   type TaskStatus,
   type TaskUpdatedEventPayload,
   type Unauthenticated,
@@ -81,11 +84,14 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 /**
  * The input of `task.update`: the task's id and the fields to change. Decoding
- * fails when the edit sets no field. The check is the same one the request
- * schema uses, so both reject the same edits.
+ * fails when the edit sets no field, or sets both `stage` and `status`. The
+ * checks are the same ones the request schema uses, so both reject the same
+ * edits. Spreading the fields drops the checks of `TaskUpdateInput`, so they
+ * are attached again here; a workflow step calls this service directly.
  */
 const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
   refuseEmptyTaskUpdate,
+  refuseStageWithStatus,
 );
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
@@ -99,6 +105,7 @@ interface TaskPatch {
   readonly title?: string;
   readonly description?: string;
   readonly status?: TaskStatus;
+  readonly stage?: TaskStage;
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
   readonly addLabels?: ReadonlyArray<string>;
@@ -137,6 +144,27 @@ const NO_SUCH_PROJECT = "no such project";
 /** Returns true if an edit gives a field a value other than the one it holds. */
 const isNewValue = <Value>(next: Value | undefined, held: Value): next is Value =>
   next !== undefined && next !== held;
+
+/**
+ * Returns the stage a legacy `status` write moves a Task to. A Task whose
+ * stage already reads that status stays where it is, so `in-progress` never
+ * moves an `in-review` Task back to `building`. Otherwise the status gives the
+ * earliest stage that reads it: `open` gives `planned`, `in-progress` gives
+ * `building`, `done` gives `done` and `cancelled` gives `dropped`.
+ */
+const chooseStageForStatus = (current: TaskStage, status: TaskStatus): TaskStage => {
+  if (deriveTaskStatus(current) === status) return current;
+  switch (status) {
+    case "open":
+      return "planned";
+    case "in-progress":
+      return "building";
+    case "done":
+      return "done";
+    case "cancelled":
+      return "dropped";
+  }
+};
 
 /** Returns the values with duplicates removed, keeping the first of each. */
 const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
@@ -201,6 +229,11 @@ const make = Effect.gen(function* () {
    * Applies `patch` to the task `id` in the caller's transaction, and returns
    * the task as stored. The `task.updated` event lists what changed. See
    * `update` for the rules; the patch is already decoded.
+   *
+   * The stage is the truth and the status is written only from it. A patch
+   * that sets a `status` is turned into a stage first (`chooseStageForStatus`).
+   * The event reports `changes.stage` whenever the stage changes, and
+   * `changes.status` whenever the coarse status changes with it.
    */
   const updateTask = (
     id: string,
@@ -226,13 +259,23 @@ const make = Effect.gen(function* () {
           changes.description = { old: before.description, new: patch.description };
           edit.description = patch.description;
         }
-        if (isNewValue(patch.status, before.status)) {
-          changes.status = { old: before.status, new: patch.status };
-          edit.status = patch.status;
-        }
         if (isNewValue(patch.priority, before.priority)) {
           changes.priority = { old: before.priority, new: patch.priority };
           edit.priority = patch.priority;
+        }
+        const stage =
+          patch.stage ??
+          (patch.status === undefined
+            ? undefined
+            : chooseStageForStatus(before.stage, patch.status));
+        if (isNewValue(stage, before.stage)) {
+          changes.stage = { old: before.stage, new: stage };
+          edit.stage = stage;
+          const status = deriveTaskStatus(stage);
+          if (status !== before.status) {
+            changes.status = { old: before.status, new: status };
+            edit.status = status;
+          }
         }
         const project = before.projectId ?? null;
         if (isNewValue(patch.projectId, project)) {
@@ -298,14 +341,16 @@ const make = Effect.gen(function* () {
   /**
    * Writes a new task, with its first provenance entries and its
    * `task.created` event, in the caller's transaction, and returns it. The
-   * task gets the `id` the caller chose, or a new one. Fails with `NotFound`
-   * if the project does not exist.
+   * task gets the `id` the caller chose, or a new one, and the status that
+   * reads its `stage`. The `actor` stamps the row's provenance and the event.
+   * Fails with `NotFound` if the project does not exist.
    */
   const insertTask = (
     fields: Pick<
       NewTask,
-      "id" | "title" | "description" | "status" | "priority" | "labels" | "projectId" | "provenance"
+      "id" | "title" | "description" | "stage" | "priority" | "labels" | "projectId" | "provenance"
     >,
+    actor: string,
   ): Effect.Effect<Task, NotFound | SqlError> =>
     withTransaction(
       sql,
@@ -313,9 +358,13 @@ const make = Effect.gen(function* () {
         // One clock read, inside the transaction: the row and the event
         // that records it carry the same instant.
         const at = yield* nowIso;
-        const actor = yield* currentStamp;
         yield* ensureProjectExists(fields.projectId);
-        const task = yield* tasks.insert({ ...fields, at, actor });
+        const task = yield* tasks.insert({
+          ...fields,
+          status: deriveTaskStatus(fields.stage),
+          at,
+          actor,
+        });
         yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
         yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
         return task;
@@ -352,8 +401,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a task and returns it. Fails with `NotFound` if the project does
-     * not exist.
+     * Creates a task and returns it, at the stage the input names or at
+     * `planned`. Fails with `NotFound` if the project does not exist.
      *
      * A task that a run's step creates gets one more provenance entry, `{
      * runId }`, after the ones the step's params give, unless one of those
@@ -372,15 +421,18 @@ const make = Effect.gen(function* () {
           caller._tag === "run" && !given.some((entry) => entry.runId === caller.runId)
             ? [...given, { runId: caller.runId }]
             : given;
-        return yield* insertTask({
-          title: decoded.title,
-          description: decoded.description,
-          status: "open",
-          priority: decoded.priority ?? "normal",
-          labels: removeDuplicates(decoded.labels ?? []),
-          projectId: decoded.projectId,
-          provenance,
-        });
+        return yield* insertTask(
+          {
+            title: decoded.title,
+            description: decoded.description,
+            stage: decoded.stage ?? "planned",
+            priority: decoded.priority ?? "normal",
+            labels: removeDuplicates(decoded.labels ?? []),
+            projectId: decoded.projectId,
+            provenance,
+          },
+          yield* currentStamp,
+        );
       }),
 
     /**
@@ -388,11 +440,13 @@ const make = Effect.gen(function* () {
      * write, and returns the Task. This is the one way to record a handoff:
      * `create` and `update` refuse an entry that names a signal.
      *
-     * - With `newTask`, it creates the Task `in-progress`, with the id the
+     * - With `newTask`, it creates the Task at `building`, with the id the
      *   handoff chose, and the entry. One `task.created` event carries the
      *   entry, and no `task.updated` follows.
      * - Without it, it appends the entry to the Task `taskId` and sets the
-     *   Task `in-progress` if it was not. One `task.updated` event.
+     *   status `in-progress`, as any legacy status write does: a Task that is
+     *   `open` moves to `building`, and one that is already `in-progress`
+     *   keeps its stage. One `task.updated` event.
      *
      * It runs in the caller's transaction. Only the user hands work off, so it
      * fails with `Forbidden` for any other caller, whatever grants they hold.
@@ -409,16 +463,19 @@ const make = Effect.gen(function* () {
           ONLY_THE_USER_RECORDS_HANDOFF,
         );
         if (handoff.newTask !== undefined) {
-          return yield* insertTask({
-            id: handoff.taskId,
-            title: handoff.newTask.title,
-            description: "",
-            status: "in-progress",
-            priority: handoff.newTask.priority,
-            labels: [],
-            projectId: undefined,
-            provenance: [handoff.entry],
-          });
+          return yield* insertTask(
+            {
+              id: handoff.taskId,
+              title: handoff.newTask.title,
+              description: "",
+              stage: "building",
+              priority: handoff.newTask.priority,
+              labels: [],
+              projectId: undefined,
+              provenance: [handoff.entry],
+            },
+            yield* currentStamp,
+          );
         }
         return yield* updateTask(handoff.taskId, {
           status: "in-progress",
@@ -430,8 +487,9 @@ const make = Effect.gen(function* () {
      * Updates a task and returns it as stored. The `task.updated` event lists
      * what changed.
      *
-     * A patch that sets no field fails to decode with a `Validation` error, and
-     * a patch that asks for the values the task already has writes nothing.
+     * A patch that sets no field, or sets both `stage` and `status`, fails to
+     * decode with a `Validation` error. A patch that asks for the values the
+     * task already has writes nothing.
      * Otherwise either one would move `updatedAt` and write a `task.updated`
      * event that describes no change, and a workflow triggered by that event
      * would run for nothing.
