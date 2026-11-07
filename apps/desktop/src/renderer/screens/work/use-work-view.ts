@@ -61,6 +61,13 @@ export interface WorkView {
   readonly openedCellIds: ReadonlySet<string>;
   readonly toggleCell: (cellId: string) => void;
   /**
+   * The ids (`buildStackId` in client-core) of the stacks the user opened to
+   * show their members. A stack with a question or a failure inside opens by
+   * itself and is not recorded here.
+   */
+  readonly openedStackIds: ReadonlySet<string>;
+  readonly toggleStack: (stackId: string) => void;
+  /**
    * The ids of the lanes that show folded right now. While a filter is on,
    * lanes open whatever the user folded before, and this holds only the lanes
    * the user folded since the filter came on.
@@ -76,11 +83,11 @@ export interface WorkView {
 
 /**
  * Holds the client state of the Work board: the filter and the Find text,
- * which lanes are folded, which cells are opened, the Display choices, and
+ * which lanes are folded, which cells and stacks are opened, the Display choices, and
  * the current card.
  *
  * - How the lanes group, folds and Display are kept in `localStorage` under `storageKey` (see
- *   `work-view-storage.ts`). The filter, the Find text, the opened cells and
+ *   `work-view-storage.ts`). The filter, the Find text, the opened cells and stacks, and
  *   the current card are not: they are about what the user is doing now.
  * - A fold made while a filter is on lasts as long as the filter does: it is
  *   kept apart from the saved folds, and dropped when the filter changes or
@@ -92,6 +99,7 @@ export const useWorkView = (storageKey: string): WorkView => {
   const [findText, setFindTextState] = useState("");
   const [filterFolds, setFilterFolds] = useState<ReadonlySet<string>>(new Set());
   const [openedCellIds, setOpenedCellIds] = useState<ReadonlySet<string>>(new Set());
+  const [openedStackIds, setOpenedStackIds] = useState<ReadonlySet<string>>(new Set());
   const [currentCard, setCurrentCard] = useState<CardInLane | null>(null);
 
   const isFiltering = isFilterOn(filter) || findText.trim() !== "";
@@ -136,6 +144,10 @@ export const useWorkView = (storageKey: string): WorkView => {
     openedCellIds,
     toggleCell: (cellId) => {
       setOpenedCellIds(toggleId(openedCellIds, cellId));
+    },
+    openedStackIds,
+    toggleStack: (stackId) => {
+      setOpenedStackIds(toggleId(openedStackIds, stackId));
     },
     foldedLaneIds,
     toggleLane: (laneId) => {

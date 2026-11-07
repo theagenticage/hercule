@@ -1,13 +1,15 @@
 /** Tests the lanes as the board draws them: what each cell shows, the failed count, the dots, and the counts over the stages. */
 import { describe, expect, it } from "vitest";
-import { arrangeLanes, buildCellId, countCardsByStage } from "./arrange-lanes";
+import { arrangeLanes, buildCellId, buildStackId, countCardsByStage } from "./arrange-lanes";
 import { buildBoard, buildCard, FAILURE, QUESTION } from "./cards.testing";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
-const CLOSED = {
+const CLOSED: Parameters<typeof arrangeLanes>[1] = {
   foldedLaneIds: new Set<string>(),
   openedCellIds: new Set<string>(),
+  openedStackIds: new Set<string>(),
+  stackCandidates: [],
   isFiltering: false,
 };
 
@@ -90,6 +92,62 @@ describe("arrangeLanes", () => {
     const [lane] = arrangeLanes(buildLanes(board, []), CLOSED);
 
     expect(lane!.cells.find((cell) => cell.stage === "building")!.dot).toBe(expected);
+  });
+});
+
+describe("arrangeLanes with a stack", () => {
+  const STACK_CANDIDATES = [
+    { leadTaskId: "ticket", memberTaskId: "pr1", noun: "pull request" },
+    { leadTaskId: "ticket", memberTaskId: "pr2", noun: "pull request" },
+  ];
+  const withStack = { ...CLOSED, stackCandidates: STACK_CANDIDATES };
+  const cards = [
+    buildCard("ticket", { projectId: "storefront" }),
+    buildCard("pr1", { projectId: "storefront" }),
+    buildCard("pr2", { projectId: "storefront" }),
+    buildCard("alone", { projectId: "storefront" }),
+  ];
+  const readCell = (view: typeof CLOSED, among = cards) =>
+    arrangeLanes(buildLanes(buildBoard(...among), PROJECTS), view)[0]!.cells.find(
+      (cell) => cell.stage === "exploring",
+    )!;
+
+  it("draws the members of a closed stack nowhere", () => {
+    const cell = readCell(withStack);
+
+    expect(cell.shownCards.map((card) => card.id)).toEqual(["ticket", "alone"]);
+    expect(cell.openStackLeadIds.size).toBe(0);
+    expect(cell.cardCount).toBe(4);
+  });
+
+  it("draws the members right after their lead once the user opened the stack", () => {
+    const cell = readCell({
+      ...withStack,
+      openedStackIds: new Set([buildStackId("storefront", "ticket")]),
+    });
+
+    expect(cell.shownCards.map((card) => card.id)).toEqual(["ticket", "pr1", "pr2", "alone"]);
+    expect([...cell.openStackLeadIds]).toEqual(["ticket"]);
+  });
+
+  it("opens by itself when a member has a question, whatever the user chose", () => {
+    const cell = readCell(withStack, [
+      cards[0]!,
+      buildCard("pr1", { projectId: "storefront", openQuestion: QUESTION }),
+      cards[2]!,
+      cards[3]!,
+    ]);
+
+    expect(cell.shownCards.map((card) => card.id)).toEqual(["ticket", "pr1", "pr2", "alone"]);
+  });
+
+  it("keeps the opened state of a stack in one lane apart from the same lead in another", () => {
+    const cell = readCell({
+      ...withStack,
+      openedStackIds: new Set([buildStackId("other", "ticket")]),
+    });
+
+    expect(cell.openStackLeadIds.size).toBe(0);
   });
 });
 

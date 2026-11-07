@@ -91,6 +91,7 @@ export function BoardLane({
   selectedIds,
   onToggleLane,
   onToggleCell,
+  onToggleStack,
   onAddTask,
   onPressCard,
   onFocusCard,
@@ -104,6 +105,7 @@ export function BoardLane({
   readonly selectedIds: ReadonlySet<string>;
   readonly onToggleLane: (laneId: string) => void;
   readonly onToggleCell: (cellId: string) => void;
+  readonly onToggleStack: (stackId: string) => void;
   readonly onAddTask: (laneId: string) => void;
   /** Called with the card and the keys held when a card is clicked. */
   readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
@@ -195,6 +197,7 @@ export function BoardLane({
               canWriteSummaries={canWriteSummaries}
               selectedIds={selectedIds}
               onToggleCell={onToggleCell}
+              onToggleStack={onToggleStack}
               onPressCard={onPressCard}
               onFocusCard={onFocusCard}
             />

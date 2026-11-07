@@ -204,6 +204,10 @@
 .board-lane-facts .relation-progress {
   color: inherit;
 }
+/* The lane's bar is a shade stronger than the same bar on the place head. */
+.board-lane-facts .relation-bar {
+  background: color-mix(in oklab, var(--ink) 11%, transparent);
+}
 /* A failure is one tomato mark on a card, but the lane's words stay ink: they carry the meaning. */
 .board-failed-count {
   flex: none;
@@ -363,6 +367,100 @@
 }
 .board-cell[data-stage="landed"] > .board-more {
   margin-top: 0;
+}
+
+/* ---------- Stacks ----------
+   A lead card with what it holds peeking from under it as a sheet that says
+   why, such as "2 pull requests". The card opens the card; the sheet opens
+   the stack in place, with the members as cards under a thin rail. */
+.board-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* The card covers the top 8px of the sheet. :where keeps the rule weaker than a card that moves or is hovered. */
+:where(.board-stack) > .desk-card {
+  z-index: 1;
+}
+.board-stack-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* A minimum, so a larger Text size grows the sheet instead of clipping it. */
+  min-height: calc(34px + var(--text-size-step));
+  margin: -8px 7px 0;
+  padding: 8px 10px 0;
+  border-radius: 0 0 var(--card-r-inner) var(--card-r-inner);
+  background: var(--stock);
+  box-shadow: var(--h-rest);
+  color: var(--muted);
+  font: var(--type-summary);
+  text-align: left;
+  transition: color var(--m-quick);
+}
+/* The sheet takes the hover tint on its own, so it is told apart from the card before the click. */
+.board-stack-bar:hover {
+  color: var(--ink);
+}
+.board-stack-bar:hover::after {
+  content: "";
+  position: absolute;
+  inset: 8px 0 0;
+  border-radius: 0 0 var(--card-r-inner) var(--card-r-inner);
+  background: var(--hover);
+  pointer-events: none;
+}
+.board-stack-bar:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.board-stack-bar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-stack-bar .ic {
+  color: var(--faint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .board-stack-bar .ic {
+    transition: transform var(--m-base) var(--m-ease);
+  }
+}
+.board-stack.is-open > .board-stack-bar .ic {
+  transform: rotate(180deg);
+}
+/* A stack with a question or a failure inside is open and stays open: nothing to press. */
+.board-stack-bar:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.board-stack-bar:disabled:hover::after {
+  display: none;
+}
+/* The sheet is lighter than --faint was set for on the dark themes, so the chevron takes a step more ink. */
+[data-theme="orient-express"] .board-stack-bar,
+[data-theme="dark"] .board-stack-bar,
+[data-theme="nile"] .board-stack-bar,
+[data-theme="end-house"] .board-stack-bar,
+[data-theme="blue-train"] .board-stack-bar {
+  --faint: var(--faint-on-stock);
+}
+.board-stack-members {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  margin: 14px 0 0 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--divider);
+}
+/* A stack whose lead is in the hand is hidden whole, so its sheet is not left standing without a card. */
+.board-stack[data-dragged] {
+  display: none;
 }
 
 /* ---------- Offline ---------- */

@@ -123,6 +123,8 @@ describe("groupBoardByContext", () => {
       const arranged = arrangeLanes(lanes, {
         foldedLaneIds: new Set(),
         openedCellIds: new Set(),
+        openedStackIds: new Set(),
+        stackCandidates: [],
         isFiltering: false,
       });
       expect(countCardsByStage(arranged)).toMatchObject({ exploring: 2, building: 1 });

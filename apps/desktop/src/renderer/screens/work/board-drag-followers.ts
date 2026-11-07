@@ -8,6 +8,7 @@ import { ghostElement, measureLayoutRect, trackBody } from "../../app/motion";
 import { copyCardForMotion } from "../desk";
 import type { Carry, Follower } from "./board-drag-carry";
 import { readCardInLane } from "./card-in-lane";
+import { hideDraggedCard } from "./dragged-card";
 import { flipBoard } from "./flip-board";
 import type { ReleasePose } from "./land-card";
 
@@ -96,7 +97,7 @@ export const liftFollowers = (
   }
   // The copies are measured and made first, so hiding the cards moves nothing they were copied from.
   flipBoard(scroller, "hand", () => {
-    for (const element of elements) element.dataset["dragged"] = "";
+    for (const element of elements) hideDraggedCard(element);
   });
   return followers;
 };

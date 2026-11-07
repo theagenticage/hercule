@@ -60,18 +60,24 @@ export const measureBoardGeometry = (
       for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
         const stage = readStage(cell.dataset["stage"]);
         if (stage === undefined) continue;
-        const shownCards = [...cell.children].filter(
-          (child): child is HTMLElement =>
-            child instanceof HTMLElement && child.dataset["cardId"] !== undefined,
+        // A row of the cell is a card alone, or the lead of a stack: the stack's members stand
+        // inside it and are not places a drop may take.
+        const shownCards = [...cell.children].flatMap(
+          (child): { card: HTMLElement; row: HTMLElement }[] => {
+            if (!(child instanceof HTMLElement)) return [];
+            if (child.dataset["cardId"] !== undefined) return [{ card: child, row: child }];
+            const lead = child.classList.contains("board-stack") ? child.firstElementChild : null;
+            return lead instanceof HTMLElement ? [{ card: lead, row: child }] : [];
+          },
         );
-        const rows = shownCards.flatMap((child) => {
-          const { cardId, dragged } = child.dataset;
+        const rows = shownCards.flatMap(({ card, row }) => {
+          const { cardId, dragged } = card.dataset;
           if (cardId === undefined || dragged !== undefined) return [];
-          const place = places?.get(cardKeys?.get(child) ?? "") ?? measureLayoutRect(child);
+          const place = places?.get(cardKeys?.get(card) ?? "") ?? measureLayoutRect(card);
           return [
             {
               id: cardId,
-              element: child,
+              element: row,
               left: toBoardLeft(place.left),
               right: toBoardLeft(place.left + place.width),
               top: toBoardTop(place.top),

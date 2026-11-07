@@ -13,13 +13,20 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   arrangeLanes,
   buildLanes,
+  buildStackId,
   CARD_NOT_EXACT_NOTE,
   groupBoardByContext,
   STAGE_NAMES,
   type CardMove,
 } from "@hercule/client-core/work";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
-import { BOARD_STAGES, type BoardStage, type EntityPlace, type WorkCard } from "@hercule/contract";
+import {
+  BOARD_STAGES,
+  type BoardStage,
+  type EntityPlace,
+  type WorkCard,
+  type WorkStackCandidate,
+} from "@hercule/contract";
 import { findBody } from "../../app/motion/body";
 import { BoardDesk } from "./board-desk";
 import { BoardLane } from "./board-lane";
@@ -51,6 +58,9 @@ const CARD_GAP = 20;
 const LANE_HEAD = 40;
 const LANE_PADDING = 30;
 const FOLDED_LANE_HEIGHT = 44;
+/** The part of a stack's sheet that sticks out under its lead card, and the room above its members. */
+const SHEET_HEIGHT = 26;
+const MEMBERS_TOP = 14;
 
 /** The left edge of the column of `stage`. */
 const columnLeft = (stage: BoardStage): number => 200 + 150 * BOARD_STAGES.indexOf(stage);
@@ -59,6 +69,18 @@ const columnLeft = (stage: BoardStage): number => 200 + 150 * BOARD_STAGES.index
 const readStubbedHeight = (element: HTMLElement): number => {
   if (element.dataset["dragged"] !== undefined) return 0;
   if (element.classList.contains("board-slot")) return Number.parseFloat(element.style.height);
+  if (element.classList.contains("board-stack")) {
+    const members = element.querySelectorAll(
+      ".board-stack-members > [data-card-id]:not([data-dragged])",
+    );
+    return (
+      CARD_HEIGHT +
+      SHEET_HEIGHT +
+      (members.length === 0
+        ? 0
+        : MEMBERS_TOP + members.length * CARD_HEIGHT + (members.length - 1) * CARD_GAP)
+    );
+  }
   return element.dataset["cardId"] === undefined ? 0 : CARD_HEIGHT;
 };
 
@@ -119,8 +141,12 @@ const layOut = (element: HTMLElement): DOMRect => {
   }
   if (cell instanceof HTMLElement && lane !== null && readStubbedHeight(element) > 0) {
     let above = 0;
+    // A lead card stands where its stack stands.
+    const row = element.parentElement?.classList.contains("board-stack")
+      ? element.parentElement
+      : element;
     for (
-      let before = element.previousElementSibling;
+      let before = row.previousElementSibling;
       before !== null;
       before = before.previousElementSibling
     ) {
@@ -158,6 +184,11 @@ interface Harness {
     typeof vi.fn<(sourceCardId: string, targetCardId: string) => boolean>
   >;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
+  /** The stacks the board draws: the pairs that may stack, and the ids (`buildStackId`) of the open ones. */
+  readonly stack?: {
+    readonly candidates: readonly WorkStackCandidate[];
+    readonly openedIds: ReadonlySet<string>;
+  };
 }
 
 /** Renders the board as the Work screen does, with the drag hook on it. */
@@ -192,6 +223,8 @@ function Board({
   const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds,
     openedCellIds: new Set(),
+    openedStackIds: harness.stack?.openedIds ?? new Set(),
+    stackCandidates: harness.stack?.candidates ?? [],
     isFiltering: false,
   });
   const [isCarrying, setIsCarrying] = useState(false);
@@ -232,6 +265,7 @@ function Board({
             selectedIds={harness.selectedIds}
             onToggleLane={() => {}}
             onToggleCell={() => {}}
+            onToggleStack={() => {}}
             onAddTask={() => {}}
             onPressCard={harness.onOpenCard}
             onFocusCard={() => {}}
@@ -248,8 +282,10 @@ const renderBoard = (
   foldedLaneIds: ReadonlySet<string> = new Set(),
   selectedIds: ReadonlySet<string> = new Set(),
   places?: readonly EntityPlace[],
+  stack?: Harness["stack"],
 ) => {
   const harness: Harness = {
+    ...(stack === undefined ? {} : { stack }),
     selectedIds,
     moveCard: vi.fn(),
     moveCards: vi.fn(),
@@ -318,7 +354,11 @@ const renderBoard = (
       ]
         .filter((child) => child.dataset["dragged"] === undefined)
         .map((child) =>
-          child.classList.contains("board-slot") ? "slot" : (child.dataset["cardId"] ?? "?"),
+          child.classList.contains("board-slot")
+            ? "slot"
+            : child.classList.contains("board-stack")
+              ? `stack:${(child.firstElementChild as HTMLElement).dataset["cardId"] ?? "?"}`
+              : (child.dataset["cardId"] ?? "?"),
         ),
   };
 };
@@ -1287,5 +1327,84 @@ describe("carrying several selected cards", () => {
     release(board.scroller, 270, 195);
     expect(board.holdMerge).not.toHaveBeenCalled();
     expect(board.moveCards).toHaveBeenCalledOnce();
+  });
+});
+
+describe("carrying a card of a stack", () => {
+  // The ticket leads two pull requests in Exploring; a card alone follows.
+  const STACKED: readonly WorkCard[] = [
+    buildCard("ticket", { title: "Ticket", projectId: "storefront" }),
+    buildCard("pr-one", { title: "PR one", projectId: "storefront" }),
+    buildCard("pr-two", { title: "PR two", projectId: "storefront" }),
+    buildCard("alone", { title: "Alone", projectId: "storefront" }),
+    buildCard("in-build", { title: "In build", projectId: "storefront", stage: "building" }),
+  ];
+  const renderStack = (isOpen: boolean) =>
+    renderBoard(STACKED, new Set(), new Set(), undefined, {
+      candidates: [
+        { leadTaskId: "ticket", memberTaskId: "pr-one", noun: "pull request" },
+        { leadTaskId: "ticket", memberTaskId: "pr-two", noun: "pull request" },
+      ],
+      openedIds: new Set(isOpen ? [buildStackId("storefront", "ticket")] : []),
+    });
+
+  it("hides only the member while it is in the hand, keeps the slot in the cell beside the stack, and moves it alone", () => {
+    const board = renderStack(true);
+    expect(board.readCell("storefront", "exploring")).toEqual(["stack:ticket", "alone"]);
+
+    press(board.card("pr-one"), 230, 200);
+    moveTo(board.scroller, 230, 206);
+
+    expect(board.card("pr-one").hasAttribute("data-dragged")).toBe(true);
+    expect(board.card("ticket").closest(".board-stack")!.hasAttribute("data-dragged")).toBe(false);
+    expect(board.card("pr-two").hasAttribute("data-dragged")).toBe(false);
+    // The slot opens beside the stack, never inside it: here, where the pointer is, below the lead.
+    expect(board.readCell("storefront", "exploring")).toEqual(["stack:ticket", "slot", "alone"]);
+
+    // Let go in Building, below the one card there.
+    moveTo(board.scroller, columnX("building"), rowY(0) + 40);
+    release(board.scroller, columnX("building"), rowY(0) + 40);
+
+    expect(board.moveCard).toHaveBeenCalledExactlyOnceWith(
+      { taskId: "pr-one", stage: "building", afterTaskId: "in-build" },
+      `Moved "PR one" to ${STAGE_NAMES.building}`,
+      undefined,
+    );
+    expect(board.slot()).toBeNull();
+    expect(board.card("pr-one").hasAttribute("data-dragged")).toBe(false);
+  });
+
+  it("hides the whole stack with its lead while the lead is in the hand, and shows it again on Esc", () => {
+    const board = renderStack(true);
+
+    press(board.card("ticket"), 220, rowY(0));
+    moveTo(board.scroller, 220, rowY(0) + 6);
+
+    const stack = board.card("ticket").closest(".board-stack")!;
+    expect(stack.hasAttribute("data-dragged")).toBe(true);
+    expect(board.readCell("storefront", "exploring")).toEqual(["slot", "alone"]);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(stack.hasAttribute("data-dragged")).toBe(false);
+    expect(board.card("ticket").hasAttribute("data-dragged")).toBe(false);
+    expect(board.readCell("storefront", "exploring")).toEqual(["stack:ticket", "alone"]);
+  });
+
+  it("drops a card before a stack as a card before its lead, never inside the stack", () => {
+    const board = renderStack(false);
+
+    press(board.card("in-build"), columnX("building"), rowY(0));
+    moveTo(board.scroller, columnX("building"), rowY(0) + 6);
+    // In the top third of the lead card, so the place is before the stack.
+    moveTo(board.scroller, columnX("exploring"), rowY(0) - 10);
+    expect(board.readCell("storefront", "exploring")).toEqual(["slot", "stack:ticket", "alone"]);
+    release(board.scroller, columnX("exploring"), rowY(0) - 10);
+
+    expect(board.moveCard).toHaveBeenCalledOnce();
+    expect(board.moveCard.mock.calls[0]![0]).toMatchObject({
+      taskId: "in-build",
+      stage: "exploring",
+    });
   });
 });
