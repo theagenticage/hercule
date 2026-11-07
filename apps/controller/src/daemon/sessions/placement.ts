@@ -89,7 +89,7 @@ import {
   type DedupOperation,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
-import { buildThreadTaskTitle, TaskService } from "../../tasks";
+import { TaskService, type JoiningWorkspace } from "../../tasks";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -340,7 +340,11 @@ type TaskSource =
       readonly callerTaskId: string | undefined;
     };
 
-/** The Task that was made for a new Thread, and the title it was made with. */
+/**
+ * The Task that was made for a new Thread, and the title it was made with. The
+ * title is the Thread's own: a Thread that runs title generation has text in
+ * its prompt, so its title is never blank and the Task is made with it as is.
+ */
 interface MadeTask {
   readonly taskId: string;
   readonly title: string;
@@ -925,17 +929,62 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Returns the title, the Task and the made Task of a session about to be
+   * written, in the transaction that writes it. A `fixed` task source gives
+   * the Task as it is and keeps the title. A `joining` one builds the title
+   * first, because a new Task is named after it, and then joins a Task by the
+   * join rule. Fails with `NotFound` or `InvalidState` when the spawn named a
+   * Task that is missing, deleted or finished.
+   */
+  const resolveSessionTask = (
+    open: Placing,
+    opened: {
+      readonly workspaceId: string | null;
+      readonly workspaceKind: JoiningWorkspace["kind"] | null;
+    },
+  ): Effect.Effect<
+    {
+      readonly title: string | undefined;
+      readonly taskId: string | undefined;
+      readonly madeTask: MadeTask | undefined;
+    },
+    Validation | NotFound | InvalidState | SqlError
+  > =>
+    Effect.gen(function* () {
+      if (open.taskSource._tag === "fixed") {
+        return { title: open.title, taskId: open.taskSource.taskId, madeTask: undefined };
+      }
+      const title = yield* sessions.buildNewSessionTitle(open);
+      const joined = yield* tasks.joinSession({
+        requestedTaskId: open.taskSource.requestedTaskId,
+        callerTaskId: open.taskSource.callerTaskId,
+        workspace:
+          opened.workspaceId === null || opened.workspaceKind === null
+            ? undefined
+            : { id: opened.workspaceId, kind: opened.workspaceKind },
+        // A session with no Agent is a Thread. This matches the `kind`
+        // column the database derives, because a session placed here
+        // answers no conversation and runs no step.
+        sessionKind: open.agentId === undefined ? "thread" : "agent",
+        title,
+        projectId: open.projectId,
+      });
+      return {
+        title,
+        taskId: joined?.taskId,
+        madeTask: joined?.created === true ? { taskId: joined.taskId, title } : undefined,
+      };
+    });
+
+  /**
    * Writes the workspace and the session in one transaction, joining the
    * caller's when there is one. Returns the new session's id, the workspace
    * frame the runner must be told about after the commit, if any, and the
    * Task that was made for the session, if one was.
    *
-   * A session whose `taskSource` is `joining` gets its Task after its
-   * workspace is opened, because the rule reads the workspace, and before the
-   * session is stored, because the session stores the Task. Its title is built
-   * first, because a new Task is named after it. Fails with `NotFound` or
-   * `InvalidState` when the spawn named a Task that is missing, deleted or
-   * finished.
+   * The session's Task is resolved after its workspace is opened, because the
+   * join rule reads the workspace, and before the session is stored, because
+   * the session stores the Task (`resolveSessionTask`).
    */
   const writeSession = (
     open: Placing,
@@ -972,32 +1021,7 @@ const make = Effect.gen(function* () {
             branch: buildThreadBranch(sessionId),
             at,
           });
-          let title = open.title;
-          let taskId: string | undefined;
-          let madeTask: MadeTask | undefined;
-          if (open.taskSource._tag === "fixed") {
-            taskId = open.taskSource.taskId;
-          } else {
-            title = yield* sessions.buildNewSessionTitle(open);
-            const joined = yield* tasks.joinSession({
-              requestedTaskId: open.taskSource.requestedTaskId,
-              callerTaskId: open.taskSource.callerTaskId,
-              workspace:
-                opened.workspaceId === null || opened.workspaceKind === null
-                  ? undefined
-                  : { id: opened.workspaceId, kind: opened.workspaceKind },
-              // A session with no Agent is a Thread. This matches the `kind`
-              // column the database derives, because a session placed here
-              // answers no conversation and runs no step.
-              sessionKind: open.agentId === undefined ? "thread" : "agent",
-              title,
-              projectId: open.projectId,
-            });
-            taskId = joined?.taskId;
-            if (joined?.created === true) {
-              madeTask = { taskId: joined.taskId, title: buildThreadTaskTitle(title) };
-            }
-          }
+          const { title, taskId, madeTask } = yield* resolveSessionTask(open, opened);
           yield* sessions.create({
             id: sessionId,
             permissionProfileId: open.permissionProfileId,

@@ -642,7 +642,7 @@ const make = Effect.gen(function* () {
      * Task is deleted or finished (`FINISHED_STAGES`). One query that joins
      * the row to its Task.
      */
-    readLiveTaskIdOfWorkspace: (
+    readJoinableTaskIdOfWorkspace: (
       workspaceId: string,
     ): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(

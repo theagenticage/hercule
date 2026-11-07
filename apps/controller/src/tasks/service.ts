@@ -162,7 +162,7 @@ const NO_SUCH_PROJECT = "no such project";
  * has at least one character, and a stored empty title would make every read
  * of the Task fail.
  */
-export const UNTITLED_THREAD_TITLE = "Untitled thread";
+const UNTITLED_THREAD_TITLE = "Untitled thread";
 
 /** The workspace a session works in, as the join rule needs to know it. */
 export interface JoiningWorkspace {
@@ -178,22 +178,13 @@ export interface JoinedTask {
 }
 
 /**
- * Returns the title of the Task made for a Thread with this title: the title
- * itself, or `UNTITLED_THREAD_TITLE` when it is blank. A caller that must
- * compare the Task's title with the Thread's later (`adoptGeneratedTitle`)
- * builds the expected title with this function.
+ * Returns true if the stage is `done` or `dropped`, so a Task at it takes no
+ * new work. The caller has already ruled out deleted Tasks (`tasks.live`). The
+ * query that reads a workspace's Task uses the same finished stages
+ * (`FINISHED_STAGES`). A Task is joinable when it is neither deleted nor
+ * finished.
  */
-export const buildThreadTaskTitle = (threadTitle: string): string =>
-  threadTitle.trim() === "" ? UNTITLED_THREAD_TITLE : threadTitle;
-
-/**
- * Returns true if a Task takes new work: it is not deleted and its stage is
- * not `done` or `dropped`. This is the one definition of a live Task for the
- * join rule; the query that reads a workspace's Task uses the same finished
- * stages (`FINISHED_STAGES`).
- */
-const isLiveTask = (task: Pick<Task, "stage" | "deletedAt">): boolean =>
-  task.deletedAt === undefined && !FINISHED_STAGES.includes(task.stage);
+const isFinishedStage = (stage: TaskStage): boolean => FINISHED_STAGES.includes(stage);
 
 /** The message for a spawn that names a finished Task. */
 const buildFinishedTaskRefusal = (stage: TaskStage): string =>
@@ -201,7 +192,7 @@ const buildFinishedTaskRefusal = (stage: TaskStage): string =>
   "reopen the task by moving it to another stage, or start without a taskId";
 
 /**
- * What the join rule found before it makes a Task: the live Task to join, if
+ * What the join rule found before it makes a Task: the joinable Task, if
  * any, and the workspace whose `task_workspaces` row must be written when the
  * session joins a Task (undefined when none must be).
  */
@@ -458,13 +449,15 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the id of the Task, or `undefined` when there is no such Task or
-   * it is not live (`isLiveTask`).
+   * it is deleted or finished (`isFinishedStage`).
    */
-  const readLiveTaskId = (id: string | undefined): Effect.Effect<string | undefined, SqlError> =>
+  const readJoinableTaskId = (
+    id: string | undefined,
+  ): Effect.Effect<string | undefined, SqlError> =>
     id === undefined
       ? Effect.succeed(undefined)
       : Effect.map(tasks.live(id), (found) =>
-          Option.isSome(found) && isLiveTask(found.value) ? found.value.id : undefined,
+          Option.isSome(found) && !isFinishedStage(found.value.stage) ? found.value.id : undefined,
         );
 
   /**
@@ -477,23 +470,24 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<string, NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
       const task = yield* readLiveTaskOrFail(id);
-      if (!isLiveTask(task)) {
+      if (isFinishedStage(task.stage)) {
         return yield* Effect.fail(createInvalidStateError(buildFinishedTaskRefusal(task.stage)));
       }
       return task.id;
     });
 
   /**
-   * Finds the live Task a session joins, without making one. The first source
-   * that gives a live Task wins:
+   * Finds the Task a session joins, without making one. The first source that
+   * gives a Task that is not finished or deleted wins:
    *
    * 1. `requestedTaskId`, which the caller has already checked;
-   * 2. the caller's Task, when it is live;
-   * 3. the live Task of the workspace, when the workspace is ephemeral.
+   * 2. the caller's Task, when it is not finished or deleted;
+   * 3. the Task of the workspace, when the workspace is ephemeral and the Task
+   *    is not finished or deleted.
    *
    * A main workspace is never read: sharing one says nothing about being the
    * same work. Also returns the workspace to record, which is an ephemeral
-   * workspace that has no live Task yet.
+   * workspace that has no such Task yet.
    */
   const findTaskToJoin = (input: {
     readonly requestedTaskId: string | undefined;
@@ -505,9 +499,9 @@ const make = Effect.gen(function* () {
       const ofWorkspace =
         ephemeral === undefined
           ? undefined
-          : Option.getOrUndefined(yield* tasks.readLiveTaskIdOfWorkspace(ephemeral.id));
+          : Option.getOrUndefined(yield* tasks.readJoinableTaskIdOfWorkspace(ephemeral.id));
       const taskId =
-        input.requestedTaskId ?? (yield* readLiveTaskId(input.callerTaskId)) ?? ofWorkspace;
+        input.requestedTaskId ?? (yield* readJoinableTaskId(input.callerTaskId)) ?? ofWorkspace;
       return {
         taskId,
         workspaceToRecord:
@@ -525,8 +519,10 @@ const make = Effect.gen(function* () {
       : Effect.flatMap(nowIso, (at) => tasks.recordWorkspaceTask(workspaceToRecord, taskId, at));
 
   /**
-   * Finishes the join of a Thread: joins the Task `findTaskToJoin` found, or
-   * makes a new one when it found none, and records the workspace's Task.
+   * Finishes the join of a session: joins the Task `findTaskToJoin` found, and
+   * records the workspace's Task. Only a Thread reaches the branch that makes a
+   * Task when none was found; `joinSession` returns earlier for an Agent
+   * session, which never makes one.
    *
    * The new Task is `exploring`, with priority `normal`, no description, no
    * labels and no provenance. It has the Thread's project only when that
@@ -536,9 +532,9 @@ const make = Effect.gen(function* () {
    * event takes off Done reaches this method with no request behind it, and
    * `currentStamp` dies on a missing actor.
    */
-  const settleThread = (
+  const settleJoin = (
     found: FoundTask,
-    thread: { readonly title: string; readonly projectId: string | undefined },
+    session: { readonly title: string; readonly projectId: string | undefined },
   ): Effect.Effect<JoinedTask, SqlError> =>
     Effect.gen(function* () {
       if (found.taskId !== undefined) {
@@ -546,12 +542,12 @@ const make = Effect.gen(function* () {
         return { taskId: found.taskId, created: false };
       }
       const projectId =
-        thread.projectId !== undefined && (yield* tasks.projectExists(thread.projectId))
-          ? thread.projectId
+        session.projectId !== undefined && (yield* tasks.projectExists(session.projectId))
+          ? session.projectId
           : undefined;
       const task = yield* writeTask(
         {
-          title: buildThreadTaskTitle(thread.title),
+          title: session.title.trim() === "" ? UNTITLED_THREAD_TITLE : session.title,
           description: "",
           stage: "exploring",
           priority: "normal",
@@ -712,17 +708,20 @@ const make = Effect.gen(function* () {
      *    or `dropped`, because new work on a finished Task is a contradiction
      *    the caller should hear about.
      * 2. `callerTaskId`, the Task of the session that spawned this one, or of
-     *    the parent of a fork. Only a live Task counts.
-     * 3. The live Task of the workspace, when the workspace is ephemeral. A
+     *    the parent of a fork. Only a Task that is not finished or deleted
+     *    counts.
+     * 3. The Task of the workspace, when the workspace is ephemeral and the
+     *    Task is not finished or deleted. A
      *    main workspace is shared by whatever runs in it, so it has no Task
      *    of its own, and this source is skipped for it and for a session
      *    with no workspace.
      * 4. A new Task, only for a `thread`. An `agent` session never makes one.
      *
      * Sources 2 and 3 never refuse: a Task that is deleted, missing or
-     * finished gives nothing, and the next source decides. When a Task is joined in an
-     * ephemeral workspace that has no live Task, the workspace's row is written,
-     * so the next Thread in the workspace joins the same Task.
+     * finished gives nothing, and the next source decides. When a Task is
+     * joined in an ephemeral workspace that has no joinable Task, the
+     * workspace's row is written, so the next Thread in the workspace joins the
+     * same Task.
      *
      * It checks no grant. Starting a Thread was already allowed by
      * `session.spawn`, and the Task follows from it. It joins the caller's
@@ -752,14 +751,14 @@ const make = Effect.gen(function* () {
             workspace: input.workspace,
           });
           if (found.taskId === undefined && input.sessionKind === "agent") return undefined;
-          return yield* settleThread(found, input);
+          return yield* settleJoin(found, input);
         }),
       ),
 
     /**
      * Returns the Task a Thread joins when it is taken off Done: its own Task
-     * when that is still live, otherwise the live Task of its ephemeral
-     * workspace, otherwise a new Task (sources 2, 3 and 4 of `joinSession`,
+     * when that is not finished or deleted, otherwise the joinable Task of its
+     * ephemeral workspace, otherwise a new Task (sources 2, 3 and 4 of `joinSession`,
      * with `currentTaskId` as source 2). A Thread always ends up with a Task,
      * so it always returns one.
      *
@@ -783,14 +782,14 @@ const make = Effect.gen(function* () {
             callerTaskId: input.currentTaskId,
             workspace: input.workspace,
           });
-          return (yield* settleThread(found, input)).taskId;
+          return (yield* settleJoin(found, input)).taskId;
         }),
       ),
 
     /**
      * Gives the Task made for a Thread the Thread's generated title. It
-     * renames the Task only when the Task is live, its title is still `from`
-     * (the title it was made with), and `to` is a different, non-blank title.
+     * renames the Task only when the Task is not finished or deleted, its title is still `from`
+     * (the title it was made with), and `to` is a different title.
      * A Task someone renamed since is left alone. Does nothing otherwise.
      *
      * It runs after a commit with no request behind it, so the rename is
@@ -806,11 +805,11 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          if (input.to === input.from || input.to.trim() === "") return;
+          if (input.to === input.from) return;
           const found = yield* tasks.live(input.taskId);
           if (
             Option.isNone(found) ||
-            !isLiveTask(found.value) ||
+            isFinishedStage(found.value.stage) ||
             found.value.title !== input.from
           ) {
             return;

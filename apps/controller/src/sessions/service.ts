@@ -895,12 +895,12 @@ const make = Effect.gen(function* () {
 
   /**
    * Takes the Done mark off a session, in the caller's transaction, gives the
-   * Thread a live Task, and writes the `session.reopened` audit entry, whose
+   * Thread a Task that is not finished or deleted, and writes the `session.reopened` audit entry, whose
    * record announces the change. Writes nothing when the session is not Done.
    *
-   * The Thread keeps its Task while that is live. Otherwise (it has none, or
-   * its Task is finished or deleted) it joins the live Task of its workspace
-   * or gets a new one (`TaskService.rejoinThread`), because coming back after
+   * The Thread keeps its Task while that is not finished or deleted. Otherwise
+   * (it has none, or its Task is finished or deleted) it joins the joinable
+   * Task of its workspace or gets a new one (`TaskService.rejoinThread`), because coming back after
    * the user closed a Task is new work. This is the only place a resume is
    * told apart from a reopen: a harness resume of an exited Thread that was
    * never Done changes nothing and never reaches this function.
