@@ -1,9 +1,10 @@
 /**
  * The CSS selector of a menu's items that can take the focus: the items with
- * the role `menuitem` or `menuitemradio` that are not marked `aria-disabled`.
+ * the role `menuitem`, `menuitemradio` or `menuitemcheckbox` that are not
+ * marked `aria-disabled`.
  */
 export const FOCUSABLE_MENU_ITEM_SELECTOR =
-  ":is([role='menuitem'], [role='menuitemradio']):not([aria-disabled='true'])";
+  ":is([role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox']):not([aria-disabled='true'])";
 
 /** The keys `moveMenuFocus` handles. */
 export type MenuFocusKey = "ArrowDown" | "ArrowUp" | "Home" | "End";

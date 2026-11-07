@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./cleanup": "./src/fleet/cleanup.ts",
     "./cleanup-progress": "./src/fleet/cleanup-progress.ts",
+    "./desk": "./src/desk/index.ts",
     "./discussion-text": "./src/discussion-text.ts",
     "./fleet": "./src/fleet/fleet.ts",
     "./graph-layout": "./src/graph-layout.ts",

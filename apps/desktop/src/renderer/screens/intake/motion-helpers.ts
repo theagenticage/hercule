@@ -2,7 +2,7 @@
  * Small helpers the motion of Intake's lists and of Tracking share: where
  * things are on screen, whether motion plays, and copies of elements to move.
  */
-import { readMotionDuration } from "./motion-tokens";
+import { isMotionReduced } from "../../app/motion";
 
 /** The top and bottom edges of a row or of a list's viewport, in pixels from the window's top. */
 export interface RowPlace {
@@ -15,10 +15,10 @@ export const isOnScreen = (place: RowPlace, viewport: RowPlace): boolean =>
   place.bottom > viewport.top && place.top < viewport.bottom;
 
 /**
- * Checks whether a motion would play: `--dur-2` is more than 0, which Reduce
- * motion and a page with no stylesheet make it, and someone can see the window.
+ * Checks whether a motion would play: motion is not reduced (Reduce motion, or
+ * a page with no stylesheet, as in tests, reduces it) and someone can see the window.
  */
-export const isMotionShown = (): boolean => !document.hidden && readMotionDuration("--dur-2") > 0;
+export const isMotionShown = (): boolean => !document.hidden && !isMotionReduced();
 
 /**
  * Returns a copy of `element` to animate where it was, such as a row that

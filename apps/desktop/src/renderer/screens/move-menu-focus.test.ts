@@ -64,8 +64,8 @@ describe("moveMenuFocus", () => {
     expect(moveMenuFocus(menu, "End")?.textContent).toBe("Three");
   });
 
-  it("steps through the choices of a group of radio items too", () => {
-    const menu = buildMenu(["One", "Two"], [], "menuitemradio");
+  it.each(["menuitemradio", "menuitemcheckbox"])("steps through %s items too", (role) => {
+    const menu = buildMenu(["One", "Two"], [], role);
     expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("One");
     expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("Two");
   });

@@ -1,0 +1,56 @@
+/* The sunrise: what a page shows when everything is done. Rays fan up over
+   one hairline, which is the horizon, and Hercule comes up over it. The
+   page places the sunrise's box on its hairline. */
+.sunrise {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 720px;
+  height: 240px;
+  margin-left: -360px;
+  pointer-events: none;
+}
+.sunrise svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.sunrise .ray {
+  stroke: var(--faint);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.8;
+  /* The ray keeps its width while it grows out of its inner end. */
+  vector-effect: non-scaling-stroke;
+}
+.sunrise-head {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 96px;
+  height: 76px;
+  margin-left: -48px;
+  overflow: hidden;
+  line-height: 0;
+}
+.sunrise-head .cr {
+  display: block;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sunrise .ray {
+    animation: ray-grow 700ms var(--m-ease) calc(420ms + var(--ray-delay)) backwards;
+  }
+  .sunrise-head .cr {
+    animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) backwards;
+  }
+}
+@keyframes ray-grow {
+  from {
+    transform: scale(0);
+  }
+}
+@keyframes sun-rise {
+  from {
+    transform: translateY(76px);
+  }
+}

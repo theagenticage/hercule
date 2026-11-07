@@ -683,3 +683,107 @@
   --who-ink: oklch(var(--char-ink-l) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris)));
   --who-tint: oklch(var(--char-tint-l) var(--char-tint-c) var(--hue, var(--hue-iris)));
 }
+
+/* ---------- Work and Inbox: the desk and its cards ----------
+   The tokens both pages share: the desk under the cards, the card stock and its shadows, the type
+   roles, the card shape, and the motion curves and durations. Every token here sits in the shared
+   rule or in the block of each theme that changes it, so none can be missing from a theme. The
+   dark values come first and the light themes override them, as above. */
+:root,
+[data-theme] {
+  /* The desk: the ground under the cards. One tone below the app's --surface, so cards
+     read as objects lying on it. */
+  --desk: color-mix(in oklab, var(--bg) 70%, var(--surface));
+
+  /* A blocked card goes quiet: its words step back. */
+  --word-press: var(--faint);
+  --paper: oklch(0.36 0.05 76);
+  /* The one suggested answer. Each theme's --accent, except where --accent is not green. */
+  --answer: var(--accent);
+  --answer-fg: var(--accent-fg);
+
+  /* An initiative's colour: one hue each, set on the row as --plan-hue, at a lightness and
+     chroma each theme family can carry. Kept away from marigold and tomato, which mean things. */
+  --plan-l: 0.76;
+  --plan-c: 0.105;
+  --plan-soft-a: 0.24;
+
+  /* Card stock. --stock is the sheet itself; the rest are its edges. */
+  --stock: oklch(0.345 0.022 62);
+  --stock-carry: oklch(from var(--stock) calc(l + 0.03) c h);
+  /* On a near-black desk a shadow says little. A card reads by what light does to it: a lit top
+     edge, and a sheen falling from above and fading out before the middle. */
+  --stock-sheen: linear-gradient(oklch(1 0 0 / 0.035), oklch(1 0 0 / 0) 45%);
+  --stock-flat: color-mix(in oklab, var(--raised) 70%, var(--desk));
+  --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
+  --stock-rim-flat: color-mix(in oklab, var(--rim) 62%, transparent);
+  --stock-lit: color-mix(in oklab, white 13%, transparent);
+  --stock-press: color-mix(in oklab, var(--sunken) 42%, var(--desk));
+
+  /* A card at rest, under the pointer, and in the hand. Dark values; the light themes follow. */
+  --h-rest: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
+  --h-hover: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 6px 10px -3px oklch(0 0 0 / 0.3), 0 16px 28px -12px oklch(0 0 0 / 0.42);
+  --h-carry: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0 0 0 / 0.26), 0 14px 20px -6px oklch(0 0 0 / 0.36), 0 36px 56px -18px oklch(0 0 0 / 0.56);
+
+  /* Type roles, on the app's scale. Sizes and line heights follow the Text size setting, as the
+     --t-* and --line-* tokens do, so a larger step never clips a card's words. */
+  --type-lane: var(--w-bold) var(--t-14) / calc(20px + var(--text-size-step)) var(--font-ui);
+  --type-card: var(--w-medium) var(--t-13) / var(--line-18) var(--font-ui);
+  --type-summary: var(--w-regular) var(--t-12) / var(--line-16) var(--font-ui);
+  --type-meta: var(--w-regular) var(--t-11) / var(--line-16) var(--font-ui);
+
+  /* The card's shape. --card-h is the card's minimum height at the default text size. It grows
+     by the step four times: for the title's two lines, the summary's line, and the age line. */
+  --card-r: var(--r-md);
+  --card-r-inner: 8px;
+  --card-pad-x: 12px;
+  --card-pad-y: 10px;
+  --card-h: calc(88px + 4 * var(--text-size-step));
+  --card-gap: 20px;
+
+  /* Motion: durations, easing curves and a spring written as a curve. */
+  --m-press: 80ms;
+  --m-quick: 140ms;
+  --m-base: 220ms;
+  --m-slow: 360ms;
+  --m-long: 560ms;
+  --m-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --m-ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --m-ease-both: cubic-bezier(0.6, 0, 0.2, 1);
+  /* A spring as a CSS curve, for transitions that need a touch of overshoot. */
+  --m-settle: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1);
+}
+
+/* The light themes. Whitehaven is also the default, when no theme is set. */
+[data-theme="whitehaven"],
+[data-theme="light"],
+[data-theme="styles"],
+:root:not([data-theme]) {
+  --desk: var(--bg);
+  --stock: var(--raised);
+  --stock-carry: var(--raised);
+  --stock-sheen: none;
+  --stock-flat: color-mix(in oklab, var(--raised) 58%, var(--desk));
+  --word-press: var(--muted);
+  --plan-l: 0.56;
+  --plan-c: 0.135;
+  --plan-soft-a: 0.22;
+  --paper: oklch(0.72 0.07 80);
+  --stock-rim: color-mix(in oklab, var(--rim) 40%, transparent);
+  --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
+  --stock-lit: oklch(1 0 0 / 0.9);
+  --stock-press: color-mix(in oklab, var(--sunken) 80%, var(--desk));
+  --h-rest: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.05), 0 2px 5px -2px oklch(0.3 0.03 70 / 0.1);
+  --h-hover: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 5px 9px -2px oklch(0.3 0.03 70 / 0.1), 0 16px 28px -10px oklch(0.3 0.03 70 / 0.26);
+  --h-carry: inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0.3 0.03 70 / 0.08), 0 14px 20px -6px oklch(0.3 0.03 70 / 0.16), 0 36px 56px -18px oklch(0.3 0.03 70 / 0.34);
+}
+
+/* Each dark theme tints its card stock. Nile also has its own suggested-answer colour, because its
+   accent is not green. Orient Express uses the dark values above unchanged. */
+[data-theme="nile"] {
+  --stock: oklch(0.335 0.026 172);
+  --answer: oklch(0.76 0.1 162);
+  --answer-fg: oklch(0.2 0.035 165);
+}
+[data-theme="end-house"] { --stock: oklch(0.345 0.03 352); }
+[data-theme="blue-train"] { --stock: oklch(0.385 0.034 250); }
