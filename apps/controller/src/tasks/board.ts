@@ -38,7 +38,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository, type BoardTask } from "./repository";
-import { cutText } from "./tracking-output";
+import { cutText } from "../text";
 
 /** A session of a Task that the board looks into. */
 export interface BoardSessionFact {

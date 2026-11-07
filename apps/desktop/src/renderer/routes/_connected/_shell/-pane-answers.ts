@@ -16,8 +16,13 @@ import {
 } from "@hercule/client-core/work";
 import type { TaskDetail } from "@hercule/contract";
 import type { CardMover } from "../../../app/card-mover";
-import { findHeldAnswer, type PendingIntents } from "../../../app/pending-intents";
+import {
+  findHeldAnswer,
+  listFailedAnswers,
+  type PendingIntents,
+} from "../../../app/pending-intents";
 import type { Gesture } from "../../../app/undo-stack";
+import { holdWithUndo } from "../../../app/use-pending-intents";
 
 /** What the screen lends the answer, to show its result and close the pane. */
 export interface PaneAnswerCallbacks {
@@ -74,38 +79,22 @@ export const answerFromPane = (
     if (built.notice !== null) callbacks.sayWithoutUndo(built.notice);
     return;
   }
-  for (const intent of store.getSnapshot()) {
-    if (
-      intent.kind === "answer" &&
-      intent.state === "failed" &&
-      intent.sessionId === question.sessionId &&
-      intent.requestId === question.requestId
-    ) {
+  for (const intent of listFailedAnswers(store.getSnapshot())) {
+    if (intent.sessionId === question.sessionId && intent.requestId === question.requestId) {
       store.discard(intent.intentId);
     }
   }
-  const intentId = store.hold({
-    kind: "answer",
-    taskId,
-    sessionId: question.sessionId,
-    requestId: question.requestId,
-    answers: built.answers,
-  });
-  callbacks.closePane();
   const words = describeAnswerGiven(built.answers);
-  const takeOffStack = callbacks.sayWithUndo(`${words}.`, {
-    words,
-    undo: () => {
-      if (!store.undo(intentId)) return Promise.reject(new Error("It was already sent."));
-      return Promise.resolve(undefined);
+  holdWithUndo(
+    store,
+    {
+      kind: "answer",
+      taskId,
+      sessionId: question.sessionId,
+      requestId: question.requestId,
+      answers: built.answers,
     },
-  });
-  // Once the answer is on its way, Undo can no longer stop it, so the gesture
-  // leaves the stack and the next Undo reaches the gesture before it.
-  const stopWatching = store.subscribe(() => {
-    const held = store.getSnapshot().find((intent) => intent.intentId === intentId);
-    if (held?.state === "pending") return;
-    stopWatching();
-    takeOffStack();
-  });
+    { sayWithUndo: callbacks.sayWithUndo, line: `${words}.`, words },
+  );
+  callbacks.closePane();
 };

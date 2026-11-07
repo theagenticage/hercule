@@ -4,7 +4,8 @@
  * Each function reads the page when it is called and holds nothing, so a
  * sheet never grows toward a place that was measured earlier and has moved.
  */
-import type { SheetOrigin } from "../desk";
+import type { BoardStage } from "@hercule/contract";
+import { copyCardForMotion, type SheetOrigin } from "../desk";
 
 /** The attribute of the card whose sheet is open. It is set from outside React, which never writes it. */
 const DENT_ATTRIBUTE = "data-away";
@@ -17,7 +18,7 @@ export interface TaskPlace {
   /** The id of the cell of the Task's stage in its lane. */
   readonly cellId: string;
   /** The Task's stage. */
-  readonly stage: string;
+  readonly stage: BoardStage;
 }
 
 /**
@@ -37,31 +38,6 @@ const isShownOnBoard = (rect: DOMRect, scroller: HTMLElement): boolean => {
     rect.right > view.left &&
     rect.left < view.right
   );
-};
-
-/**
- * Returns a copy of a card as the sheet carries it: the same words and age,
- * with nothing to click, no id to repeat, and hidden from assistive
- * technology. The card's own look may carry the dent, a focus ring or a move
- * in flight, and the copy takes none of them.
- */
-const copyCardWords = (card: HTMLElement): HTMLElement => {
-  const copy = card.cloneNode(true) as HTMLElement;
-  for (const attribute of [
-    "id",
-    "tabindex",
-    "role",
-    "aria-label",
-    "data-card-id",
-    DENT_ATTRIBUTE,
-  ]) {
-    copy.removeAttribute(attribute);
-  }
-  copy.classList.remove("is-focus", "is-moving", "is-rising", "is-carried");
-  copy.style.cssText = "";
-  copy.setAttribute("aria-hidden", "true");
-  copy.inert = true;
-  return copy;
 };
 
 /**
@@ -85,7 +61,7 @@ export const readSheetOrigin = (
   const card = scroller.querySelector<HTMLElement>(`[data-card-id="${place.taskId}"]`);
   if (card !== null) {
     const rect = card.getBoundingClientRect();
-    if (isShownOnBoard(rect, scroller)) return { rect, words: copyCardWords(card) };
+    if (isShownOnBoard(rect, scroller)) return { rect, words: copyCardForMotion(card) };
   }
   const stand: Array<Element | null> = [
     scroller.querySelector(`[data-more-cell-id="${place.cellId}"]`),

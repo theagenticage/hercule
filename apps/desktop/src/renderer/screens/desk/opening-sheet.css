@@ -1,7 +1,11 @@
 /* The sheet that opens out of a card, from the drawing's `.pane` (`css/pane.css`).
    It floats over the page, which must not reflow, so its parent is positioned.
-   Its box and corner are written by `OpeningSheet` as it moves, and so is
-   `--sheet-progress`, from 0 to 1, for the parts a page draws to follow it. */
+   Its box and corner (the sheet's own `border-radius`, which its paper and its
+   clip inherit) are written by `OpeningSheet` as it moves, and so is
+   `--sheet-progress`, from 0 to 1, for the parts a page draws to follow it.
+   `--sheet-progress` changes on every frame and inherits, so it stops at the
+   clip: nothing inside the words restyles while the sheet moves, and the words
+   cannot read it. */
 .opening-layer {
   position: absolute;
   inset: 0;
@@ -15,7 +19,7 @@
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  --sheet-corner: 12px;
+  border-radius: var(--r-md);
 }
 .opening-sheet[inert] {
   pointer-events: none;
@@ -27,7 +31,7 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  border-radius: var(--sheet-corner);
+  border-radius: inherit;
   background: var(--stock);
   box-shadow: var(--h-carry);
 }
@@ -38,7 +42,8 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
-  border-radius: var(--sheet-corner);
+  border-radius: inherit;
+  --sheet-progress: 0;
 }
 /* The words are laid out once at the open size, and the growing sheet reveals them. */
 .opening-words {

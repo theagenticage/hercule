@@ -1,35 +1,23 @@
+import type { JSX, KeyboardEvent } from "react";
 import {
-  Fragment,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type JSX,
-  type KeyboardEvent,
-} from "react";
-import {
-  buildTaskThreadRow,
   chooseCardColleaguePose,
-  chooseCardSecondLine,
   decideQuestionAnswers,
-  describeNextThreadJoin,
   listTaskActions,
   STAGE_NAMES,
   type AnswerableTaskQuestion,
   type PaneAnswer,
   type SummaryStanding,
-  type TaskAction,
   type TaskActionId,
-  type TaskQuestion,
-  type TaskThreadRow,
   type UnsentAnswer,
 } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage, type TaskDetail, type WorkCard } from "@hercule/contract";
-import { buildLook, Face } from "../../faces";
-import { CheckIcon } from "../../icons/check";
-import { ComposeIcon } from "../../icons/compose";
-import { OverlapIcon } from "../../icons/overlap";
-import { Colleague, FailedMark } from "../desk";
+import { buildLook } from "../../faces";
+import { Colleague } from "../desk";
+import { FailureSection } from "./task-pane-failure";
+import { Foot } from "./task-pane-foot";
+import { QuestionSection, UnsentAnswerSection } from "./task-pane-question";
+import { RunsSection } from "./task-pane-runs";
+import { ThreadsSection } from "./task-pane-threads";
 import "./task-pane.css";
 
 /**
@@ -68,6 +56,8 @@ export interface TaskPaneChanges {
   readonly onSendAnswerAgain: (intentId: string) => void;
   /** Drops an answer that was not sent. */
   readonly onDiscardAnswer: (intentId: string) => void;
+  /** Asks the run `runId`, which runs the workflow `workflowName`, to stop. */
+  readonly onStopRun: (runId: string, workflowName: string) => void;
 }
 
 /** What the pane shows of the answers the user gave to this Task's questions. */
@@ -105,14 +95,6 @@ export type TaskPaneRead =
   | { readonly status: "ready"; readonly detail: TaskDetail; readonly standing: SummaryStanding }
   | { readonly status: "failed"; readonly message: string }
   | { readonly status: "gone" };
-
-/** The pose a Thread's face takes in a row, from what the Thread is doing. */
-const ROW_POSES = {
-  Asks: "waiting",
-  Waiting: "waiting",
-  Working: "working",
-  Done: "idle",
-} as const;
 
 /** Renders the stage path: each stage as a step, the current one in ink. Choosing a step moves the Task there. */
 function StagePath({
@@ -170,434 +152,6 @@ export function TaskPaneColleague({
   );
 }
 
-/** Renders what a failed run needs: the card's words, then the two moves only a failure has. */
-function FailureSection({
-  card,
-  actions,
-  onAction,
-}: {
-  readonly card: WorkCard;
-  readonly actions: readonly TaskAction[];
-  readonly onAction: (id: TaskActionId) => void;
-}): JSX.Element | null {
-  const failure = card.failure;
-  const words = chooseCardSecondLine(card, false);
-  if (failure === undefined || words?.tone !== "failed") return null;
-  const colleague = chooseCardColleaguePose(card);
-  return (
-    <section className="task-pane-sec" aria-label="What failed">
-      <p className="task-pane-who">
-        {colleague !== null && (
-          <Face look={buildLook(colleague.sessionId)} pose="failed" size={22} />
-        )}
-        <span>
-          <b>{failure.workflowName}</b> stopped.
-        </span>
-      </p>
-      <p className="task-pane-ask task-pane-failed">
-        <FailedMark />
-        {words.text}
-      </p>
-      <div className="task-pane-answers">
-        {actions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className={action.filled ? "task-pane-answer is-suggested" : "task-pane-answer"}
-            onClick={() => {
-              onAction(action.id);
-            }}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Renders the line for the user's own answer. Return sends it. */
-function ReplyLine({
-  placeholder,
-  onSend,
-}: {
-  readonly placeholder: string;
-  readonly onSend: (text: string) => void;
-}): JSX.Element {
-  const [text, setText] = useState("");
-  const send = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    const words = text.trim();
-    if (words === "") return;
-    // The words stay: a refused answer (too long) keeps them to be edited,
-    // and a taken one closes the sheet.
-    onSend(words);
-  };
-  return (
-    <form className="task-pane-reply" onSubmit={send}>
-      <input
-        value={text}
-        placeholder={placeholder}
-        aria-label="Your answer"
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-      />
-    </form>
-  );
-}
-
-/** Renders a Thread's open question: who asks, the question, and what the pane can do with it. */
-function QuestionSection({
-  question,
-  said,
-  actions,
-  onAnswer,
-  onOpenThread,
-}: {
-  readonly question: TaskQuestion;
-  /** What the user said to this question, while the answer is held or sent, or `null`. */
-  readonly said: string | null;
-  readonly actions: readonly TaskAction[];
-  readonly onAnswer: TaskPaneChanges["onAnswer"];
-  readonly onOpenThread: (sessionId: string) => void;
-}): JSX.Element {
-  const answerable: AnswerableTaskQuestion | null =
-    question.kind === "answerable" ? question : null;
-  return (
-    <section className="task-pane-sec" aria-label="What a Thread asks">
-      <p className="task-pane-who">
-        <Face look={buildLook(question.sessionId)} pose="waiting" size={22} />
-        <span>
-          {question.asker === null ? (
-            "A Thread asks."
-          ) : (
-            <>
-              <b>{question.asker}</b> asks.
-            </>
-          )}
-        </span>
-        {actions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className="task-pane-open-thread"
-            onClick={() => {
-              onOpenThread(question.sessionId);
-            }}
-          >
-            {action.label}
-          </button>
-        ))}
-      </p>
-      <p className="task-pane-ask">{question.question}</p>
-      {said !== null && <p className="task-pane-said">{said}</p>}
-      {said === null && answerable !== null && answerable.chips.length > 0 && (
-        <div className="task-pane-answers">
-          {answerable.chips.map((chip) => (
-            <button
-              key={chip.label}
-              type="button"
-              title={chip.description}
-              className={chip.suggested ? "task-pane-answer is-suggested" : "task-pane-answer"}
-              onClick={() => {
-                onAnswer({ kind: "chip", label: chip.label }, answerable);
-              }}
-            >
-              {chip.label}
-            </button>
-          ))}
-        </div>
-      )}
-      {said === null && answerable !== null && (
-        <ReplyLine
-          key={question.requestId}
-          placeholder={answerable.placeholder}
-          onSend={(text) => {
-            onAnswer({ kind: "text", text }, answerable);
-          }}
-        />
-      )}
-    </section>
-  );
-}
-
-/** Renders an answer that was not sent: the user's words, why, and Send again or Open thread, and Discard. */
-function UnsentAnswerSection({
-  unsent,
-  onSendAgain,
-  onOpenThread,
-  onDiscard,
-}: {
-  readonly unsent: UnsentAnswer;
-  readonly onSendAgain: (intentId: string) => void;
-  readonly onOpenThread: (sessionId: string) => void;
-  readonly onDiscard: (intentId: string) => void;
-}): JSX.Element {
-  const choose = (id: UnsentAnswer["actions"][number]["id"]): void => {
-    if (id === "send-again") onSendAgain(unsent.intentId);
-    else if (id === "open-thread") onOpenThread(unsent.sessionId);
-    else onDiscard(unsent.intentId);
-  };
-  return (
-    <section className="task-pane-sec" aria-label="An answer that was not sent" role="status">
-      <p className="task-pane-said">{unsent.said}</p>
-      <p className="task-pane-unsent-note">{unsent.notice}</p>
-      <div className="task-pane-answers">
-        {unsent.actions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className={
-              action.id === "discard" ? "task-pane-answer" : "task-pane-answer is-suggested"
-            }
-            onClick={() => {
-              choose(action.id);
-            }}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/**
- * Renders the line under a Thread's row that asks before the Thread moves to a
- * new Task. Moving a Thread leaves the workspace's link to the old Task, so it
- * says first that the next Thread there still joins the old Task. Esc takes
- * the line back and keeps the pane open.
- */
-function MoveThreadConfirm({
-  taskTitle,
-  onConfirm,
-  onCancel,
-}: {
-  readonly taskTitle: string;
-  readonly onConfirm: () => void;
-  readonly onCancel: () => void;
-}): JSX.Element {
-  const confirmRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    confirmRef.current?.focus();
-  }, []);
-  return (
-    <div
-      className="task-pane-confirm"
-      role="group"
-      aria-label="Move this Thread to a new Task"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        onCancel();
-      }}
-    >
-      <p>{describeNextThreadJoin({ title: taskTitle })}</p>
-      <div className="task-pane-confirm-buttons">
-        <button type="button" className="task-pane-btn" ref={confirmRef} onClick={onConfirm}>
-          Move
-        </button>
-        <button type="button" className="task-pane-btn" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Renders the Threads of the Task, and says how many more there are than the pane lists. */
-function ThreadsSection({
-  detail,
-  taskTitle,
-  onOpenThread,
-  onMoveThreadToNewTask,
-}: {
-  readonly detail: TaskDetail;
-  /** The title of the Task the pane shows, which the note before a move names. */
-  readonly taskTitle: string;
-  readonly onOpenThread: (sessionId: string) => void;
-  readonly onMoveThreadToNewTask: (sessionId: string) => void;
-}): JSX.Element | null {
-  // The Thread whose "Move to a new Task" asks for a second press, and the
-  // buttons that opened it, so the focus can go back to the one that did.
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const moveButtons = useRef(new Map<string, HTMLButtonElement>());
-  if (detail.sessions.length === 0) return null;
-  const hidden = detail.sessionCount - detail.sessions.length;
-  return (
-    <section className="task-pane-sec" aria-label="Threads">
-      <h3>
-        Threads <span>{detail.sessionCount}</span>
-      </h3>
-      {detail.sessions.map((session) => {
-        const row: TaskThreadRow = buildTaskThreadRow(session);
-        return (
-          <Fragment key={row.id}>
-            <div className="task-pane-row">
-              <button
-                type="button"
-                className="task-pane-row-open"
-                onClick={() => {
-                  onOpenThread(row.id);
-                }}
-              >
-                <Face
-                  look={buildLook(row.id)}
-                  pose={row.state === null ? "idle" : ROW_POSES[row.state]}
-                  size={20}
-                />
-                <span className="task-pane-row-text">{row.label}</span>
-                {row.state !== null && <small>{row.state}</small>}
-              </button>
-              {row.canMoveToNewTask && (
-                <button
-                  type="button"
-                  className="task-pane-row-move"
-                  aria-expanded={confirmingId === row.id}
-                  ref={(button) => {
-                    if (button === null) moveButtons.current.delete(row.id);
-                    else moveButtons.current.set(row.id, button);
-                  }}
-                  onClick={() => {
-                    setConfirmingId(confirmingId === row.id ? null : row.id);
-                  }}
-                >
-                  Move to a new Task
-                </button>
-              )}
-            </div>
-            {confirmingId === row.id && (
-              <MoveThreadConfirm
-                taskTitle={taskTitle}
-                onConfirm={() => {
-                  setConfirmingId(null);
-                  onMoveThreadToNewTask(row.id);
-                }}
-                onCancel={() => {
-                  setConfirmingId(null);
-                  moveButtons.current.get(row.id)?.focus();
-                }}
-              />
-            )}
-          </Fragment>
-        );
-      })}
-      {hidden > 0 && <p className="task-pane-more">and {hidden} more</p>}
-    </section>
-  );
-}
-
-/**
- * Renders the line that asks what a new Thread should do, in place of the
- * foot's buttons. It starts with `words`. Return sends what is written (an
- * empty line sends nothing), and Esc takes the line back.
- */
-function ThreadPrompt({
-  words,
-  onSend,
-  onCancel,
-}: {
-  readonly words: string;
-  readonly onSend: (prompt: string) => void;
-  readonly onCancel: () => void;
-}): JSX.Element {
-  const [text, setText] = useState(words);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    inputRef.current?.focus({ preventScroll: true });
-  }, []);
-  const send = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    const prompt = text.trim();
-    if (prompt !== "") onSend(prompt);
-  };
-  return (
-    <form className="task-pane-thread" onSubmit={send}>
-      <input
-        ref={inputRef}
-        value={text}
-        placeholder="What should this thread do?"
-        aria-label="What should this thread do?"
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          event.stopPropagation();
-          // The line goes, so the focus goes back to the pane's title, not to nowhere.
-          event.currentTarget
-            .closest(".task-pane")
-            ?.querySelector<HTMLElement>("[data-sheet-focus]")
-            ?.focus();
-          onCancel();
-        }}
-      />
-      <kbd>↩</kbd>
-    </form>
-  );
-}
-
-/**
- * Renders the foot: Done, Start a thread and Merge on the left, and Drop alone
- * at the right. While the pane asks what a new Thread should do
- * (`threadPrompt`), the foot is that one line instead.
- */
-function Foot({
-  start,
-  end,
-  threadPrompt,
-  onAction,
-}: {
-  readonly start: readonly TaskAction[];
-  readonly end: TaskAction;
-  readonly threadPrompt: {
-    readonly words: string;
-    readonly onSend: (prompt: string) => void;
-    readonly onCancel: () => void;
-  } | null;
-  readonly onAction: (id: TaskActionId) => void;
-}): JSX.Element {
-  const icons: Partial<Record<TaskActionId, JSX.Element>> = {
-    done: <CheckIcon size={14} />,
-    "start-thread": <ComposeIcon size={14} />,
-    merge: <OverlapIcon size={14} />,
-  };
-  const draw = (action: TaskAction, className: string): JSX.Element => (
-    <button
-      key={action.id}
-      type="button"
-      className={className}
-      onClick={() => {
-        onAction(action.id);
-      }}
-    >
-      {icons[action.id]}
-      {action.label}
-      {action.keyHint !== null && <kbd>{action.keyHint}</kbd>}
-    </button>
-  );
-  if (threadPrompt !== null) {
-    return (
-      <footer className="task-pane-foot">
-        <ThreadPrompt
-          words={threadPrompt.words}
-          onSend={threadPrompt.onSend}
-          onCancel={threadPrompt.onCancel}
-        />
-      </footer>
-    );
-  }
-  return (
-    <footer className="task-pane-foot">
-      {start.map((action) => draw(action, "task-pane-btn"))}
-      {draw(end, "task-pane-btn task-pane-btn--end")}
-    </footer>
-  );
-}
-
 /**
  * Renders a Task's details, the words of the opening sheet. It is
  * presentational: it reads nothing, and every button calls a callback.
@@ -618,8 +172,8 @@ function Foot({
  * - `actions` is what its buttons do.
  *
  * From the top: the crumb, the title, the stage path, where it stands with
- * the quiet line under it, a failure, a question, What is left, Threads, and
- * the foot. Esc steps back. Return does what the first button of the section
+ * the quiet line under it, a failure, a question, What is left, Threads, Runs,
+ * and the foot. Esc steps back. Return does what the first button of the section
  * above says, unless the focus is on a button or a field: it tries again
  * after a failure, and sends the suggested answer of a question.
  *
@@ -644,10 +198,13 @@ export function TaskPane({
 }): JSX.Element {
   const detail = read.status === "ready" ? read.detail : null;
   const isGone = read.status === "gone";
+  // The failure is the card's, so that what the section shows and what its
+  // buttons do read the same card. The question is the details': a card whose
+  // answer is held has had its question taken off.
+  const question = detail === null ? null : decideQuestionAnswers(detail);
   // A Task that no longer exists offers nothing to do to it.
   const taskActions =
-    card === null || isGone ? null : listTaskActions(detail ?? { card, sessions: [] });
-  const question = detail === null ? null : decideQuestionAnswers(detail);
+    card === null || isGone ? null : listTaskActions({ failure: card.failure, question });
   const act = (id: TaskActionId): void => {
     switch (id) {
       case "try-again":
@@ -750,11 +307,9 @@ export function TaskPane({
             ) : (
               <p className="task-pane-note">{read.standing.note}</p>
             )}
-            <FailureSection
-              card={read.detail.card}
-              actions={taskActions?.failure ?? []}
-              onAction={act}
-            />
+            {card !== null && (
+              <FailureSection card={card} actions={taskActions?.failure ?? []} onAction={act} />
+            )}
             {answers.unsent.map((unsent) => (
               <UnsentAnswerSection
                 key={unsent.intentId}
@@ -768,7 +323,7 @@ export function TaskPane({
               <QuestionSection
                 question={question}
                 said={answers.said}
-                actions={taskActions?.question ?? []}
+                openThread={taskActions?.openThread ?? null}
                 onAnswer={actions.onAnswer}
                 onOpenThread={actions.onOpenThread}
               />
@@ -785,6 +340,11 @@ export function TaskPane({
               taskTitle={read.detail.card.title}
               onOpenThread={actions.onOpenThread}
               onMoveThreadToNewTask={actions.onMoveThreadToNewTask}
+            />
+            <RunsSection
+              detail={read.detail}
+              onOpenRun={actions.onOpenRun}
+              onStopRun={actions.onStopRun}
             />
           </>
         )}

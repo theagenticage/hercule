@@ -246,7 +246,7 @@ button.task-pane-note:hover {
   box-shadow: inset 0 0 0 1.5px var(--focus);
 }
 
-/* ---------- Thread rows ---------- */
+/* ---------- Thread and run rows ---------- */
 .task-pane-row {
   position: relative;
   display: flex;
@@ -284,8 +284,12 @@ button.task-pane-note:hover {
   color: var(--faint);
   font: var(--type-meta);
 }
-/* Moving a Thread to a new Task is not for every pass over the row: it shows on approach and gives the state's place to it. */
-.task-pane-row-move {
+/* A run's mark, in the place a Thread's face has. */
+.task-pane-row .shape {
+  margin: 0 3px;
+}
+/* An action of a row (move a Thread to a new Task, stop a run) is not for every pass over the row: it shows on approach and gives the state's place to it. */
+.task-pane-row-action {
   display: none;
   flex: none;
   padding: 2px 6px;
@@ -293,15 +297,15 @@ button.task-pane-note:hover {
   color: var(--muted);
   font: var(--type-meta);
 }
-.task-pane-row-move:hover {
+.task-pane-row-action:hover {
   color: var(--ink);
 }
-.task-pane-row:hover .task-pane-row-move,
-.task-pane-row:focus-within .task-pane-row-move {
+.task-pane-row:hover .task-pane-row-action,
+.task-pane-row:focus-within .task-pane-row-action {
   display: inline;
 }
-.task-pane-row:hover small,
-.task-pane-row:focus-within small {
+.task-pane-row:hover:has(.task-pane-row-action) small,
+.task-pane-row:focus-within:has(.task-pane-row-action) small {
   display: none;
 }
 /* The question before a Thread moves to a new Task: one quiet line under its row, indented to the row's words. */
@@ -410,9 +414,14 @@ button.task-pane-note:hover {
   background: var(--hover);
   color: var(--ink);
 }
+/* The key hint is the drawing's kbd: an 18px grid cell, in the medium weight. */
 .task-pane-btn kbd {
+  display: inline-grid;
+  place-items: center;
+  height: 18px;
   background: none;
   color: var(--faint);
+  font-weight: var(--w-medium);
   padding: 0;
   min-width: 0;
 }
@@ -449,13 +458,11 @@ button.task-pane-note:hover {
 }
 /* A colleague on the sheet's top edge stands where it stood on the card, 14px
    from the right, and slides clear of the toolbar's right end as the sheet
-   opens, to 214px. */
-.task-sheet {
-  --sheet-head: calc(14px + 200px * var(--sheet-progress));
-}
+   opens, 200px to the left. It moves by transform: `right` would lay the sheet
+   out again on every frame. */
 .task-sheet > .card-holder {
-  right: var(--sheet-head);
+  transform: translateX(calc(-200px * var(--sheet-progress)));
 }
 .task-sheet > .card-paws {
-  right: calc(var(--sheet-head) + 3px);
+  transform: translateX(calc(-200px * var(--sheet-progress)));
 }

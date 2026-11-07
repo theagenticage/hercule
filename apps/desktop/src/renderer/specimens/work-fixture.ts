@@ -20,7 +20,13 @@
  * Platform and Insights exist as Projects but hold no card, so the board
  * leaves their lanes out.
  */
-import type { Project, TaskDetail, WorkBoard, WorkCard } from "@hercule/contract";
+import type {
+  Project,
+  TaskDetail,
+  TrackingDetailRun,
+  WorkBoard,
+  WorkCard,
+} from "@hercule/contract";
 import { buildProject } from "@hercule/client-core/threads/testing";
 import { buildBoard, buildCard, buildSummary } from "@hercule/client-core/work/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
@@ -37,6 +43,24 @@ const daysAgo = (days: number): string => new Date(SPECIMEN_NOW - days * DAY_MS)
 
 /** Returns the id of the Task numbered `n`. */
 const taskId = (n: number): string => `01a0d1c0-6e80-7000-8000-${String(n).padStart(12, "0")}`;
+
+/** Returns the id of the run numbered `n`. Run 1 is the one the failed card's failure names. */
+const runId = (n: number): string => taskId(799 + n);
+
+/** Returns a run of the workflow `workflowName` that has the given `status`, created `hours` hours before the specimen's clock. */
+const buildRun = (
+  n: number,
+  workflowName: string,
+  status: TrackingDetailRun["status"],
+  hours: number,
+): TrackingDetailRun => ({
+  id: runId(n),
+  workflowId: null,
+  workflowName,
+  status,
+  createdAt: hoursAgo(hours),
+  awaitedSignalIds: [],
+});
 
 /** Returns the id of the Thread numbered `n`. */
 const sessionId = (n: number): string =>
@@ -130,7 +154,7 @@ const PLACED: ReadonlyArray<Placed> = [
   }),
   depot("in-review", "Start the refund when the depot confirms", 0.2, {
     failure: {
-      runId: taskId(800),
+      runId: runId(1),
       workflowName: "Review PR",
       cause: "the branch changed mid-run",
     },
@@ -303,8 +327,11 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
         },
       ],
       sessionCount: 2,
-      runs: [],
-      runCount: 0,
+      runs: [
+        buildRun(2, "Review PR", "running", 1),
+        buildRun(3, "Check the refund rules", "completed", 5),
+      ],
+      runCount: 3,
     },
     {
       task: {
@@ -342,8 +369,8 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
         },
       ],
       sessionCount: 1,
-      runs: [],
-      runCount: 0,
+      runs: [buildRun(1, "Review PR", "failed", 3)],
+      runCount: 1,
     },
   ],
 };

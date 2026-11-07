@@ -17,7 +17,6 @@ import {
   measureLayoutRect,
   trackBody,
   type LayoutRect,
-  type MotionBody,
   type SpringName,
 } from "../../app/motion";
 import {
@@ -26,21 +25,25 @@ import {
   findMergeCandidate,
   isSameDropPlace,
   toBoardPoint,
-  type BoardGeometry,
-  type BoardView,
 } from "./board-drag-geometry";
+import { CARRY_SCALE, type Carry, type MergeChoice } from "./board-drag-carry";
+import {
+  FOLLOWER_LAND_GAP,
+  liftFollowers,
+  moveFollowers,
+  readFollowerPose,
+} from "./board-drag-followers";
+import { createMergeGesture } from "./board-drag-merge";
+import { copyCardForMotion } from "../desk";
 import { playMergeIn } from "./board-flights";
 import { flipBoard } from "./flip-board";
 import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
-import { markMergeTarget, unmarkMergeTarget } from "./merge-target";
+import { unmarkMergeTarget } from "./merge-target";
 import "./drag.css";
 
 /** How far the pointer moves, in pixels, before a press becomes a carry. Less than this is a click. */
 const LIFT_DISTANCE = 5;
-
-/** How much bigger a card is in the hand. */
-const CARRY_SCALE = 1.03;
 
 /** The most a carried card leans, in degrees, to either side. */
 const MOST_LEAN = 1.2;
@@ -62,31 +65,6 @@ const FASTEST_THROW = 2500;
 
 /** How long, in milliseconds, a click right after a carry is swallowed. */
 const CLICK_GUARD_MS = 50;
-
-/** How long, in milliseconds, the hand must rest over the middle of a card before the two are drawn together. */
-const MERGE_DWELL_MS = 1000;
-
-/** How far, in pixels, the pointer may drift from where it began to rest before the wait starts again. */
-const MERGE_STILL_DISTANCE = 6;
-
-/** Where the card in the hand docks on the card it merges into: this far across and down from its corner, in pixels. */
-const DOCK_ACROSS = 10;
-const DOCK_DOWN = 8;
-
-/** How the card in the hand looks when docked: smaller, tilted, and lifted less. */
-const DOCK_SCALE = 0.96;
-const DOCK_TILT = 1.6;
-const DOCK_LIFT = 0.6;
-
-/** How long, in milliseconds, a card that leaves its dock glides to the pointer instead of jumping to it. */
-const UNDOCK_GLIDE_MS = 200;
-
-/** How a selected card carried behind the card in the hand sits: each one further, in pixels, and smaller, as a share of its size. */
-const FOLLOWER_OFFSET = 5;
-const FOLLOWER_SHRINK = 0.02;
-
-/** How long, in milliseconds, each card carried behind the first lands after the one before it. */
-const FOLLOWER_LAND_GAP = 40;
 
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
@@ -143,15 +121,6 @@ export interface BoardDragOptions {
   readonly onCarryingChange: (isCarrying: boolean) => void;
 }
 
-/** The pointer's last place, and how fast it moves (pixels per millisecond, smoothed). */
-interface Hand {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  movedAt: number;
-}
-
 /** A press on a card that has not moved far enough to be a carry. */
 interface Press {
   readonly pointerId: number;
@@ -159,67 +128,6 @@ interface Press {
   readonly element: HTMLElement;
   readonly startX: number;
   readonly startY: number;
-}
-
-/** A selected card carried behind the card in the hand. */
-interface Follower {
-  readonly card: WorkCard;
-  /** The copy of the card behind the one in hand, in the carry layer. */
-  readonly ghost: HTMLElement;
-  readonly body: MotionBody;
-  /** Where the layout puts the copy, in window pixels. */
-  readonly home: LayoutRect;
-  /** How many places behind the card in the hand it rides: 1 is right behind it. */
-  readonly depth: number;
-}
-
-/** A card in the hand. */
-interface Carry {
-  readonly pointerId: number;
-  readonly card: WorkCard;
-  /** The card's element in the page. It stays mounted and hidden for the whole carry. */
-  readonly source: HTMLElement;
-  readonly root: HTMLElement;
-  readonly layer: HTMLElement;
-  /** The copy of the card in the hand, the only child of `layer`. */
-  readonly ghost: HTMLElement;
-  readonly body: MotionBody;
-  /** The selected cards carried behind it, in the order they land. Empty for a card carried alone. */
-  readonly followers: readonly Follower[];
-  /** The hollow that shows where the card would land. It lives in the cell, outside React's reach. */
-  readonly slot: HTMLElement;
-  /** Where the layout puts the copy in the hand, in window pixels. */
-  readonly home: LayoutRect;
-  /** Where in the card the pointer took hold of it. */
-  readonly grab: { readonly x: number; readonly y: number };
-  readonly reduced: boolean;
-  readonly watcher: MutationObserver;
-  readonly hand: Hand;
-  geometry: BoardGeometry;
-  /** The scroller in the window, and how far it is scrolled. */
-  view: BoardView;
-  place: DropPlace | null;
-  uprightTimer: number | undefined;
-  scrollFrame: number;
-  /** The folded lane that is marked as the target, if one is. */
-  markedLane: HTMLElement | null;
-  /** The card the carry is drawn into for a merge, or `null`. */
-  merge: MergeChoice | null;
-  /** The card whose middle the pointer is over, or `null`. A merge needs the pointer to rest there. */
-  hoverCardId: string | null;
-  /** Where the pointer began to rest over `hoverCardId`. */
-  rest: { readonly x: number; readonly y: number };
-  dwellTimer: number | undefined;
-  /** Whether Option (Alt) is held, which chooses the card at once. */
-  isAltHeld: boolean;
-  /** Until this time (`performance.now()`), a card that left its dock glides to the pointer. */
-  glideUntil: number;
-}
-
-/** The card a carry would merge into: its id and its element, which carries the marks. */
-interface MergeChoice {
-  readonly cardId: string;
-  readonly element: HTMLElement;
 }
 
 /**
@@ -297,6 +205,11 @@ const createBoardDrag = (
 ): { readonly destroy: () => void } => {
   let press: Press | null = null;
   let carry: Carry | null = null;
+  const { dockOnMerge, setMergeTarget, followMergeWish } = createMergeGesture(
+    scroller,
+    () => readOptions().cards,
+    (c) => carry === c,
+  );
 
   /**
    * Measures the board again after the page changed. `places` are the card
@@ -365,87 +278,6 @@ const createBoardDrag = (
     moveSlot(c, cell.element, before?.element ?? findCellFoot(cell.element));
   };
 
-  /** Docks the card in the hand on the corner of the card it merges into, smaller and tilted. */
-  const dockOnMerge = (c: Carry): void => {
-    if (c.merge === null) return;
-    const place = measureLayoutRect(c.merge.element);
-    c.body.to(
-      {
-        x: place.left + DOCK_ACROSS - c.home.left,
-        y: place.top + DOCK_DOWN - c.home.top,
-        s: DOCK_SCALE,
-        r: DOCK_TILT,
-        l: DOCK_LIFT,
-      },
-      "hand",
-      { reduced: c.reduced },
-    );
-  };
-
-  /**
-   * Draws the card in the hand into the card `cardId` for a merge, or undoes
-   * it all at once when `cardId` is `null`: the card in the hand comes back
-   * to the pointer, the target settles, and the slot opens again.
-   */
-  const setMergeTarget = (c: Carry, cardId: string | null): void => {
-    if (c.merge?.cardId === cardId) return;
-    if (c.merge !== null) {
-      unmarkMergeTarget(c.merge.element);
-      c.merge = null;
-      c.slot.classList.remove("is-shut");
-      c.glideUntil = performance.now() + UNDOCK_GLIDE_MS;
-      c.body.to(
-        {
-          x: c.hand.x - c.grab.x - c.home.left,
-          y: c.hand.y - c.grab.y - c.home.top,
-          s: CARRY_SCALE,
-          l: 1,
-        },
-        "hand",
-        { reduced: c.reduced },
-      );
-    }
-    if (cardId === null) return;
-    const element = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
-    const card = readOptions().cards.find((each) => each.id === cardId);
-    if (element === null || card === undefined) return;
-    c.merge = { cardId, element };
-    c.slot.classList.add("is-shut");
-    markMergeTarget(element, card.title);
-    dockOnMerge(c);
-  };
-
-  /**
-   * Decides from where the pointer rests whether the carry is drawn into the
-   * card `candidateId` (the card whose middle it is over, or `null`). Only a
-   * hand held still over a card's middle means merge, or Option at once:
-   * passing over a card, or still deciding where to put the card, starts
-   * nothing. The wait starts again when the pointer moves more than
-   * `MERGE_STILL_DISTANCE` or reaches another card, and moving off the middle
-   * of the target undoes the merge at once.
-   */
-  const followMergeWish = (c: Carry, candidateId: string | null): void => {
-    const hasMoved = Math.hypot(c.hand.x - c.rest.x, c.hand.y - c.rest.y) > MERGE_STILL_DISTANCE;
-    const isSameWish = candidateId === c.hoverCardId && !hasMoved;
-    if (!isSameWish) {
-      c.hoverCardId = candidateId;
-      c.rest = { x: c.hand.x, y: c.hand.y };
-      window.clearTimeout(c.dwellTimer);
-    }
-    if (candidateId === null) {
-      setMergeTarget(c, null);
-    } else if (c.merge?.cardId === candidateId) {
-      // Drifting inside the middle of the target keeps it.
-    } else if (c.isAltHeld) {
-      setMergeTarget(c, candidateId);
-    } else if (!isSameWish) {
-      setMergeTarget(c, null);
-      c.dwellTimer = window.setTimeout(() => {
-        if (carry === c && c.hoverCardId === candidateId) setMergeTarget(c, candidateId);
-      }, MERGE_DWELL_MS);
-    }
-  };
-
   /**
    * Works out which place the pointer points at, from the measurements, and
    * shows it when it changed. Over the middle of a card, the place is the
@@ -490,23 +322,6 @@ const createBoardDrag = (
     c.scrollFrame = requestAnimationFrame(step);
   };
 
-  /** Sends the cards behind the one in hand after it as a stack: each 5px further along and 2% smaller than the one before. */
-  const moveFollowers = (c: Carry): void => {
-    const x = c.hand.x - c.grab.x;
-    const y = c.hand.y - c.grab.y;
-    for (const follower of c.followers) {
-      follower.body.to(
-        {
-          x: x + follower.depth * FOLLOWER_OFFSET - follower.home.left,
-          y: y + follower.depth * FOLLOWER_OFFSET - follower.home.top,
-          s: 1 - follower.depth * FOLLOWER_SHRINK,
-        },
-        "travel",
-        { reduced: c.reduced },
-      );
-    }
-  };
-
   /** Follows the pointer: the copy goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
   const followHand = (c: Carry, x: number, y: number): void => {
     const now = performance.now();
@@ -517,15 +332,17 @@ const createBoardDrag = (
     hand.x = x;
     hand.y = y;
     hand.movedAt = now;
-    if (c.merge !== null) {
-      // Drawn into a card, the card in the hand stays docked until the pointer leaves it.
-      dockOnMerge(c);
-    } else if (now < c.glideUntil) {
-      c.body.to({ x: x - c.grab.x - c.home.left, y: y - c.grab.y - c.home.top }, "hand", {
-        reduced: c.reduced,
-      });
-    } else {
-      c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
+    // Drawn into a card, the card in the hand stays docked until the pointer
+    // leaves the card. It is docked when the card is chosen, and again when the
+    // card moves (`onScroll`, `onPageChanged`), not when the pointer does.
+    if (c.merge === null) {
+      if (now < c.glideUntil) {
+        c.body.to({ x: x - c.grab.x - c.home.left, y: y - c.grab.y - c.home.top }, "hand", {
+          reduced: c.reduced,
+        });
+      } else {
+        c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
+      }
     }
     if (!c.reduced && c.merge === null) {
       c.body.to({ r: limitSymmetric(hand.vx * LEAN_PER_SPEED, MOST_LEAN) }, "hand", {
@@ -554,19 +371,6 @@ const createBoardDrag = (
       tilt: shown.r,
       lift: shown.l,
       velocity: { x: toPixelsASecond(c.hand.vx), y: toPixelsASecond(c.hand.vy) },
-    };
-  };
-
-  /** Reads how the copy of a follower looks now, for its landing to start from. It has no speed: it trails the hand. */
-  const readFollowerPose = (follower: Follower): ReleasePose => {
-    const shown = follower.body.values;
-    return {
-      centerX: follower.home.left + follower.home.width / 2 + shown.x,
-      centerY: follower.home.top + follower.home.height / 2 + shown.y,
-      scale: shown.s,
-      tilt: shown.r,
-      lift: shown.l,
-      velocity: { x: 0, y: 0 },
     };
   };
 
@@ -745,45 +549,6 @@ const createBoardDrag = (
     releaseCarry(carry, "travel", undefined);
   };
 
-  /**
-   * Picks up the selected cards other than the pressed one, when the pressed
-   * card is selected: each is copied into the carry layer where it stands,
-   * and hidden in the page. The cards are taken in the order the board draws
-   * them, and only those the board draws and the screen knows. The cards
-   * below the hidden ones glide up.
-   */
-  const liftFollowers = (
-    layer: HTMLElement,
-    pressed: WorkCard,
-    options: BoardDragOptions,
-  ): readonly Follower[] => {
-    if (!options.selectedIds.has(pressed.id)) return [];
-    const followers: Follower[] = [];
-    const elements: HTMLElement[] = [];
-    for (const element of scroller.querySelectorAll<HTMLElement>("[data-card-id]")) {
-      const card = options.cards.find((each) => each.id === element.dataset["cardId"]);
-      if (card === undefined || card.id === pressed.id || !options.selectedIds.has(card.id)) {
-        continue;
-      }
-      const depth = followers.length + 1;
-      const home = measureLayoutRect(element);
-      const ghost = ghostElement(element, layer);
-      for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
-        ghost.removeAttribute(name);
-      }
-      ghost.classList.add("is-follower");
-      // Each card sits behind the one before it.
-      ghost.style.zIndex = String(-depth);
-      followers.push({ card, ghost, body: trackBody(ghost), home, depth });
-      elements.push(element);
-    }
-    // The copies are measured and made first, so hiding the cards moves nothing they were copied from.
-    flipBoard(scroller, "hand", () => {
-      for (const element of elements) element.dataset["dragged"] = "";
-    });
-    return followers;
-  };
-
   /** Lifts the pressed card into the hand: the card is copied into the carry layer, and its place in the page becomes a slot. */
   const liftCard = (event: PointerEvent): void => {
     const held = press;
@@ -819,12 +584,8 @@ const createBoardDrag = (
     layer.className = "board-carry";
     layer.setAttribute("aria-hidden", "true");
     root.appendChild(layer);
-    const ghost = ghostElement(source, layer);
+    const ghost = ghostElement(source, layer, copyCardForMotion(source));
     source.style.removeProperty("scale");
-    ghost.style.removeProperty("scale");
-    for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
-      ghost.removeAttribute(name);
-    }
     ghost.classList.add("is-carried");
 
     const slot = document.createElement("div");
@@ -833,7 +594,7 @@ const createBoardDrag = (
     slot.style.height = `${String(home.height)}px`;
     cell.insertBefore(slot, source);
     source.dataset["dragged"] = "";
-    const followers = liftFollowers(layer, card, options);
+    const followers = liftFollowers(scroller, layer, card, options);
     if (followers.length > 0) {
       // A count on the card in the hand: itself and the cards behind it.
       ghost.classList.add("has-followers");
@@ -900,6 +661,7 @@ const createBoardDrag = (
     // A card that is replaced by a new element lost its marks, so the wait starts again.
     if (c.merge !== null && !c.merge.element.isConnected) setMergeTarget(c, null);
     remeasure(c);
+    dockOnMerge(c);
   }
 
   /**

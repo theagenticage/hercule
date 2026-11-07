@@ -31,6 +31,7 @@ import { makeSummaryWake, TaskService, TaskServiceLayer, TaskSummaryWake } from 
 import {
   TextGeneration,
   TextGenerationError,
+  TextGenerationModels,
   TextGenerationModelsLayer,
 } from "../../text-generation";
 import {
@@ -327,7 +328,7 @@ describe("a Task merged away", () => {
 });
 
 describe("an answer that arrives after the Task changed", () => {
-  it("is dropped, and the next call waits for the pacing of the first", async () => {
+  it("is stored as a stale summary, and the next call waits for the pacing of the first and then refreshes it", async () => {
     const result = await run((model) =>
       Effect.gen(function* () {
         const gate = yield* Deferred.make<void>();
@@ -340,16 +341,17 @@ describe("an answer that arrives after the Task changed", () => {
         yield* markDirty(task.id);
         yield* Deferred.succeed(gate, undefined);
         yield* elapse(10);
-        const dropped = yield* readRow(task.id);
-        const callsAtDrop = model.calls.length;
+        const stale = yield* readRow(task.id);
+        const callsAtStale = model.calls.length;
         yield* elapse(200);
         const callsDuringPacing = model.calls.length;
+        model.answer = () => Effect.succeed({ ...GOOD_ANSWER, line: "Refund bug fixed" });
         yield* elapse(200);
         yield* Fiber.interrupt(loop);
         return {
           inFlight,
-          dropped,
-          callsAtDrop,
+          stale,
+          callsAtStale,
           callsDuringPacing,
           calls: model.calls.length,
           row: yield* readRow(task.id),
@@ -358,16 +360,86 @@ describe("an answer that arrives after the Task changed", () => {
     );
 
     expect(result.inFlight).toBe(1);
-    expect(result.dropped).toMatchObject({ line: null, dirty_revision: 2, input_revision: 0 });
-    expect(result.dropped.dirty_at).not.toBeNull();
-    expect(result.callsAtDrop).toBe(1);
+    // The answer is kept although the Task changed; the row is still dirty.
+    expect(result.stale).toMatchObject({
+      line: "Refund bug found",
+      dirty_revision: 2,
+      input_revision: 1,
+    });
+    expect(result.stale.dirty_at).not.toBeNull();
+    expect(result.callsAtStale).toBe(1);
     expect(result.callsDuringPacing).toBe(1);
     expect(result.calls).toBe(2);
     expect(result.row).toMatchObject({
-      line: "Refund bug found",
+      line: "Refund bug fixed",
       input_revision: 2,
       dirty_at: null,
     });
+  });
+
+  it("gives a Task that changes during every call a summary all the same", async () => {
+    const result = await run((model) =>
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* createTask("Add a refund button");
+        // The Task changes while each call is out.
+        model.answer = () =>
+          Effect.andThen(
+            tasks.markSummaryDirty(task.id).pipe(Effect.orDie),
+            Effect.succeed(GOOD_ANSWER),
+          );
+        yield* markDirty(task.id);
+        const loop = yield* startLoop;
+        yield* elapse(60);
+        yield* Fiber.interrupt(loop);
+        return yield* readRow(task.id);
+      }),
+    );
+
+    expect(result.line).toBe("Refund bug found");
+    expect(result.dirty_at).not.toBeNull();
+  });
+});
+
+describe("the wait for the first Task to be due", () => {
+  /** Starts the loop with a count of how often it looks up the Text Generation Model. */
+  const startCountingLoop = (lookups: { count: number }) =>
+    Effect.forkChild(
+      runTaskSummaryLoop.pipe(
+        Effect.updateService(TextGenerationModels, (models) => ({
+          ...models,
+          resolve: () => {
+            lookups.count += 1;
+            return models.resolve();
+          },
+        })),
+      ),
+    );
+
+  it("looks up no model and claims nothing until a marked Task is due, then calls at that moment", async () => {
+    const lookups = { count: 0 };
+    const result = await run((model) =>
+      Effect.gen(function* () {
+        const task = yield* createTask("Add a refund button");
+        const loop = yield* startCountingLoop(lookups);
+        yield* elapse(10);
+        const idle = { lookups: lookups.count, row: undefined as unknown };
+        yield* markDirty(task.id);
+        yield* elapse(10);
+        yield* markDirty(task.id);
+        yield* elapse(10);
+        const beforeDue = { lookups: lookups.count, row: yield* readRow(task.id) };
+        yield* elapse(10);
+        yield* Fiber.interrupt(loop);
+        return { idle, beforeDue, calls: model.calls, row: yield* readRow(task.id) };
+      }),
+    );
+
+    expect(result.idle.lookups).toBe(0);
+    expect(result.beforeDue.lookups).toBe(0);
+    expect(result.beforeDue.row).toMatchObject({ last_attempt_at: null, next_attempt_at: null });
+    expect(result.calls.map((call) => call.at)).toEqual([40_000]);
+    expect(result.row).toMatchObject({ line: "Refund bug found", dirty_at: null });
   });
 });
 

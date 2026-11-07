@@ -130,8 +130,11 @@ export const readPlacement = (board: WorkBoard, taskId: string): CardPlacement |
   };
 };
 
-/** The move that puts a card back, and whether it puts it back exactly. */
-export interface RestoreMove {
+/**
+ * The move that puts a card at a placement: back on the board after Undo, or
+ * out of Done or Dropped. Also says whether it lands exactly there.
+ */
+export interface MoveToPlacement {
   readonly move: CardMove;
   /**
    * False when the card it followed is no longer in that cell. The card then
@@ -149,7 +152,10 @@ export interface RestoreMove {
  * The move always names `afterTaskId`: with the card's own cell unchanged, an
  * absent one would do nothing.
  */
-export const buildMoveToPlacement = (board: WorkBoard, placement: CardPlacement): RestoreMove => {
+export const buildMoveToPlacement = (
+  board: WorkBoard,
+  placement: CardPlacement,
+): MoveToPlacement => {
   const cell = board.cards.filter(
     (card) =>
       card.id !== placement.taskId &&
@@ -176,7 +182,7 @@ export const buildMoveToPlacement = (board: WorkBoard, placement: CardPlacement)
 export const buildRestoreMove = (
   board: WorkBoard,
   placement: CardPlacement,
-): RestoreMove | undefined =>
+): MoveToPlacement | undefined =>
   board.cards.some((card) => card.id === placement.taskId)
     ? buildMoveToPlacement(board, placement)
     : undefined;

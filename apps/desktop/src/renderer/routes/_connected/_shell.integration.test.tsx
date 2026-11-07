@@ -932,7 +932,11 @@ describe("the assistants", () => {
     ) => {
       const threadReads = countThreadReads(calls);
       act(() => {
-        live.pushInvalidation("session", ids, conversationIds);
+        live.pushInvalidation(
+          "session",
+          ids,
+          conversationIds === undefined ? {} : { conversationIds },
+        );
       });
       // The thread list is read again on every push, so its read marks the
       // push as handled.

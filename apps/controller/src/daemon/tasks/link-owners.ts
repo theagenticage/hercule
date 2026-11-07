@@ -25,7 +25,7 @@ export const TaskLinkOwnersLayer: Layer.Layer<TaskLinkOwners, never, SqlClient.S
       const runs = yield* runRepository;
 
       return {
-        moveTask: (sourceId: string, targetId: string) =>
+        moveTaskLinks: (sourceId: string, targetId: string) =>
           Effect.andThen(
             sessions.moveTaskLinks(sourceId, targetId),
             runs.moveTaskLinks(sourceId, targetId),

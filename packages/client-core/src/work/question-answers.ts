@@ -18,6 +18,7 @@ import {
   typeQuestionAnswer,
 } from "../threads/question-draft";
 import { EMPTY_REQUEST_DRAFT } from "../threads/request-drafts";
+import { BLANK_QUESTION_WORDS } from "./card-words";
 
 /** What the pane reads of a Task to find its question. */
 export type TaskQuestionSource = Pick<TaskDetail, "card" | "sessions">;
@@ -64,9 +65,6 @@ export interface OpenThreadTaskQuestion extends TaskQuestionWords {
 
 export type TaskQuestion = AnswerableTaskQuestion | OpenThreadTaskQuestion;
 
-/** The words shown for a question the agent asked with no text. */
-const BLANK_QUESTION = "Has a question";
-
 /**
  * Finds the question the pane shows for `detail`, or returns `null` when
  * there is none. There is none when:
@@ -93,7 +91,7 @@ export const decideQuestionAnswers = (detail: TaskQuestionSource): TaskQuestion 
     sessionId: session.id,
     requestId: request.requestId,
     asker: request.subagentName ?? (session.role?.trim() || null),
-    question: first.question.trim() === "" ? BLANK_QUESTION : first.question,
+    question: first.question.trim() === "" ? BLANK_QUESTION_WORDS : first.question,
   };
   const answerable =
     request.detail.questions.length === 1 && !first.multiSelect && first.secret !== true;

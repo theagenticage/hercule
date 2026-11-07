@@ -6,10 +6,12 @@ import { findNextAgeChange } from "@hercule/client-core";
 import {
   buildCellId,
   chooseLaneId,
+  chooseTaskCard,
   decideQuestionAnswers,
   describeHeldAnswer,
   describeSummaryStanding,
   describeUnsentAnswer,
+  type ArrangedLane,
   type SummaryStanding,
 } from "@hercule/client-core/work";
 import type { BoardStage, Project, WorkCard } from "@hercule/contract";
@@ -58,7 +60,9 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * - A Task that was deleted, also after its details were read: a line says
  *   so, and the sheet closes.
  *
- * `threadPromptWords` turns the pane's foot into the line that asks what a new
+ * `drawnLanes` are the lanes the board draws now. The dent is put on the card
+ * again whenever they change, because a card the board draws again is a new
+ * element. `threadPromptWords` turns the pane's foot into the line that asks what a new
  * Thread should do, starting with those words; `null` leaves the foot as it is.
  * `intents` are the answers the app holds, which the pane shows as said or
  * as not sent. `changes` are the pane's buttons that change something. `moveToStage` is how a
@@ -71,6 +75,7 @@ export function WorkPane({
   cards,
   projects,
   scrollRef,
+  drawnLanes,
   isStill,
   intents,
   threadPromptWords,
@@ -83,6 +88,7 @@ export function WorkPane({
   readonly cards: readonly WorkCard[];
   readonly projects: readonly Project[];
   readonly scrollRef: RefObject<HTMLElement | null>;
+  readonly drawnLanes: readonly ArrangedLane[];
   readonly isStill: boolean;
   readonly intents: readonly PendingIntent[];
   readonly threadPromptWords: string | null;
@@ -98,10 +104,10 @@ export function WorkPane({
   });
 
   // The dent stays on the card of the Task the sheet shows. A card the board
-  // draws again is a new element, so it is marked after every draw.
+  // draws again is a new element, so it is marked again whenever the lanes change.
   useLayoutEffect(() => {
     markCardDent(scrollRef.current, presentedId);
-  });
+  }, [scrollRef, presentedId, drawnLanes]);
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     return () => {
@@ -197,7 +203,7 @@ function PresentedTask({
   // The board's card is what the board shows now, a move not yet answered
   // included, so the title and the stage path never lag behind the board.
   const boardCard = cards.find((each) => each.id === presentedId);
-  const card = boardCard ?? detail.data?.card ?? null;
+  const card = chooseTaskCard(cards, presentedId, detail.data) ?? null;
   // A Task with no Project has an empty crumb.
   const projectName =
     card?.projectId === undefined

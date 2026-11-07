@@ -22,8 +22,8 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
-import type { PendingIntent } from "../../../app/pending-intents";
-import { usePendingIntents } from "../../../app/use-pending-intents";
+import { listFailedMerges, listHeldMerges } from "../../../app/pending-intents";
+import { holdWithUndo, usePendingIntents } from "../../../app/use-pending-intents";
 import {
   launchLeavingCard,
   playMergeIn,
@@ -54,15 +54,6 @@ export interface MergeCards {
   readonly mergeCard: (sourceCardId: string, targetCardId: string) => void;
 }
 
-/** Returns the held merges that failed, oldest first. */
-const listFailedMerges = (
-  intents: readonly PendingIntent[],
-): readonly (PendingIntent & { readonly kind: "merge" })[] =>
-  intents.filter(
-    (intent): intent is PendingIntent & { readonly kind: "merge" } =>
-      intent.kind === "merge" && intent.state === "failed",
-  );
-
 /**
  * Returns the merge actions for the board of `boardCards`, and the cards to
  * draw. `isBoardRead` is whether the board was read: a merge that failed while
@@ -92,14 +83,7 @@ export const useMergeCards = ({
 }): MergeCards => {
   const { store, intents } = usePendingIntents(controller, username);
 
-  const heldMerges = useMemo(
-    () =>
-      intents.filter(
-        (intent): intent is PendingIntent & { readonly kind: "merge" } =>
-          intent.kind === "merge" && intent.state !== "failed",
-      ),
-    [intents],
-  );
+  const heldMerges = useMemo(() => listHeldMerges(intents), [intents]);
   const cards = useMemo(
     () => hideHeldMergeSources(boardCards, heldMerges),
     [boardCards, heldMerges],
@@ -147,24 +131,26 @@ export const useMergeCards = ({
   };
 
   const holdMerge = (sourceCardId: string, targetCardId: string): boolean => {
-    const source = boardCards.find((card) => card.id === sourceCardId);
-    const target = boardCards.find((card) => card.id === targetCardId);
+    const {
+      boardCards: shown,
+      openTaskId: openId,
+      closePane: close,
+      moves: lines,
+    } = latest.current;
+    const source = shown.find((card) => card.id === sourceCardId);
+    const target = shown.find((card) => card.id === targetCardId);
     if (source === undefined || target === undefined || source.id === target.id) return false;
-    const intentId = store.hold({ kind: "merge", taskId: source.id, intoTaskId: target.id });
-    if (openTaskId === source.id) closePane();
-    const takeOffStack = moves.sayWithUndo(describeMergedInto(target.title), {
-      words: describeMerge(source.title, target.title),
-      undo: () => undoMerge(intentId, source.id, target.id),
-    });
-    // Once the merge is on its way, Undo can no longer stop it, so the gesture
-    // leaves the stack and the next Undo reaches the gesture before it.
-    const stopWatching = store.subscribe(() => {
-      if (store.getSnapshot().find((intent) => intent.intentId === intentId)?.state === "pending") {
-        return;
-      }
-      stopWatching();
-      takeOffStack();
-    });
+    holdWithUndo(
+      store,
+      { kind: "merge", taskId: source.id, intoTaskId: target.id },
+      {
+        sayWithUndo: lines.sayWithUndo,
+        line: describeMergedInto(target.title),
+        words: describeMerge(source.title, target.title),
+        undo: (intentId) => undoMerge(intentId, source.id, target.id),
+      },
+    );
+    if (openId === source.id) close();
     return true;
   };
 
@@ -178,7 +164,7 @@ export const useMergeCards = ({
     });
     if (!isHeld) {
       if (ghost !== null) removeFlight(ghost);
-      moves.sayWithoutUndo("A card left the board, so nothing was merged.");
+      latest.current.moves.sayWithoutUndo("A card left the board, so nothing was merged.");
     } else if (ghost !== null && scroller !== null) {
       playMergeIn(scroller, ghost, targetCardId);
     }

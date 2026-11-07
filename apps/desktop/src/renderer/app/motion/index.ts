@@ -17,6 +17,7 @@ export {
   type FlipByKeyOptions,
   type LayoutRect,
 } from "./layout";
+export { copyElementWithoutIds } from "./copy-element";
 export { isMotionReduced } from "./reduced";
 export type { SpringName } from "./springs";
 export { animateValue, type MotionValue } from "./value";

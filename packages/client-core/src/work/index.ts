@@ -25,6 +25,8 @@ export * from "./question-answers";
 export * from "./selection";
 export * from "./summary-standing";
 export * from "./task-actions";
+export * from "./task-card";
+export * from "./task-run";
 export * from "./task-thread";
 export * from "./thread-changes";
 export * from "./try-again";

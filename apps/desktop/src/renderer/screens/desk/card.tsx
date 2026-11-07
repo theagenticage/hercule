@@ -100,10 +100,11 @@ function useIsTitleLong(hasSecondLine: boolean): {
  * - `colleague` stands behind the top edge. Only a live Thread has one.
  * - `landed` draws the card as only words, with no sheet.
  * - `selected` is for a page where cards can be selected: `true` draws the
- *   card with a 1.5px ink ring and a check in its top left corner, and
- *   `false` keeps the check ready, hidden, so it can grow in. Leave it out
- *   where cards cannot be selected. The caller names the selected state for
- *   assistive technology (`aria-pressed`).
+ *   card with a 1.5px ink ring and a check in its top left corner that grows
+ *   in, and `false` keeps the check ready, hidden, so it can grow in when the
+ *   card is selected. Leave it out where cards cannot be selected, and while
+ *   no card is: the card then draws no check at all. The caller names the
+ *   selected state for assistive technology (`aria-pressed`).
  *
  * `data-now` holds the second line's tone while there is one, so the
  * stylesheet can shorten the title of a card that asks or failed without a

@@ -358,11 +358,13 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
 });
 
 /**
- * The condition that the partial index `tasks_board_rank` carries, written as
- * the index writes it. SQLite uses a partial index only for a query whose
- * `WHERE` holds the index's own condition, character for character, so every
- * read of that index repeats this text. The index leaves out Tasks at `done`
- * and `dropped`, so its size follows the board and not the history.
+ * The stage condition that the partial index `tasks_board_rank` carries,
+ * written as the index writes it. SQLite uses a partial index only for a query
+ * whose `WHERE` holds each condition of the index, so every read of that index
+ * repeats this text and also states `deleted_at IS NULL` and
+ * `merged_into_id IS NULL`. The index leaves out Tasks at `done` and `dropped`,
+ * deleted Tasks and merged Tasks, so its size follows the board and not the
+ * history.
  */
 const ON_BOARD = "stage NOT IN ('done', 'dropped')";
 
@@ -418,6 +420,42 @@ const readBoardSummary = (row: BoardSummaryColumns): TaskSummary | undefined =>
         stale: row.summary_stale === 1,
       };
 
+/**
+ * The columns of `tasks` (aliased `t`), the project (`p`) and the summary
+ * (`s`) that a board read selects, and the row they make. `readBoardTaskRow`
+ * turns the row into a `BoardTask`.
+ */
+const BOARD_TASK_COLUMNS =
+  "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank, " +
+  "t.created_at, t.stage_changed_at, t.failed_run_id, " +
+  BOARD_SUMMARY_COLUMNS;
+
+interface BoardTaskRow extends BoardSummaryColumns {
+  readonly id: Uint8Array;
+  readonly title: string;
+  readonly stage: BoardStage;
+  readonly priority: TaskPriority;
+  readonly project_id: Uint8Array | null;
+  readonly board_rank: string;
+  readonly created_at: string;
+  readonly stage_changed_at: string;
+  readonly failed_run_id: Uint8Array | null;
+}
+
+/** Returns the `BoardTask` a row of `BOARD_TASK_COLUMNS` describes. */
+const readBoardTaskRow = (row: BoardTaskRow): BoardTask => ({
+  id: uuidToString(row.id),
+  title: row.title,
+  stage: row.stage,
+  priority: row.priority,
+  projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
+  boardRank: row.board_rank,
+  createdAt: row.created_at,
+  stageChangedAt: row.stage_changed_at,
+  failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
+  summary: readBoardSummary(row),
+});
+
 /** Returns true if the stage is one of the board's five stages. */
 const isBoardStage = (stage: TaskStage): stage is BoardStage =>
   (BOARD_STAGES as ReadonlyArray<string>).includes(stage);
@@ -446,6 +484,16 @@ const make = Effect.gen(function* () {
    */
   const taskCanBeSummarized = sql`t.deleted_at IS NULL AND t.merged_into_id IS NULL
                                   AND t.stage NOT IN ${sql.in(FINISHED_STAGES)}`;
+
+  /**
+   * Builds the expression for the id a Task id stands for: the id of the Task
+   * it was merged into, or the id itself when it was not merged. Reading it
+   * inside the statement that reads the Task means a merge that commits
+   * between two statements cannot make the read miss.
+   */
+  const buildSurvivorIdSql = (id: string) =>
+    sql`COALESCE((SELECT merged_into_id FROM tasks WHERE id = ${uuidFromString(id)}),
+                 ${uuidFromString(id)})`;
 
   /** Builds an `IN` clause over a list. An empty list gives a clause that matches nothing. */
   const buildAnyOfClause = (column: string, values: ReadonlyArray<unknown>) =>
@@ -730,6 +778,25 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the title and description of the live Task with that id, or
+     * none when it does not exist, is deleted, or was merged into another
+     * Task (as `live`). Reads only those two columns: it loads no
+     * provenance, so a caller that needs just the words pays for just them.
+     */
+    readTitleAndDescription: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly title: string; readonly description: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly title: string; readonly description: string }>`
+          SELECT title, description FROM tasks
+          WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL AND merged_into_id IS NULL`,
+        (rows) => Option.fromNullishOr(rows[0]),
+      ),
+
+    /**
      * Returns the live Task an id stands for: the Task with that id, or the
      * Task it was merged into. Like `live`, it gives none for a Task that does
      * not exist or is deleted, and for a merged Task whose survivor is deleted.
@@ -740,11 +807,9 @@ const make = Effect.gen(function* () {
      * after. One hop is enough, because a merge repoints every Task merged
      * into its source (`markMerged`).
      */
-    liveOrSurvivor: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
+    readLiveOrSurvivor: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
       sql<TaskRow>`SELECT ${sql.literal(COLUMNS)} FROM tasks
-                   WHERE tasks.id = COALESCE((SELECT merged_into_id FROM tasks
-                                              WHERE id = ${uuidFromString(id)}),
-                                             ${uuidFromString(id)})
+                   WHERE tasks.id = ${buildSurvivorIdSql(id)}
                      AND tasks.deleted_at IS NULL AND tasks.merged_into_id IS NULL`.pipe(
         Effect.flatMap(hydrate),
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
@@ -1054,51 +1119,22 @@ const make = Effect.gen(function* () {
      * Returns one Task as the Work board reads it, or none when the Task does
      * not exist, is deleted, or is at `done` or `dropped`, where the board
      * draws no card. The id of a merged Task gives the survivor's card, found
-     * inside the same statement (see `liveOrSurvivor`). A Task of a deleted
+     * inside the same statement (see `readLiveOrSurvivor`). A Task of a deleted
      * project has no `projectId`, as in `listBoardTasks`. One lookup of the
      * Task by its id.
      */
     readBoardTask: (id: string): Effect.Effect<Option.Option<BoardTask>, SqlError> =>
       Effect.map(
-        sql<
-          {
-            readonly id: Uint8Array;
-            readonly title: string;
-            readonly stage: BoardStage;
-            readonly priority: TaskPriority;
-            readonly project_id: Uint8Array | null;
-            readonly board_rank: string;
-            readonly created_at: string;
-            readonly stage_changed_at: string;
-            readonly failed_run_id: Uint8Array | null;
-          } & BoardSummaryColumns
-        >`
-          SELECT t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank,
-                 t.created_at, t.stage_changed_at, t.failed_run_id,
-                 ${sql.literal(BOARD_SUMMARY_COLUMNS)}
+        sql<BoardTaskRow>`
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
           FROM tasks t
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
           LEFT JOIN task_summaries s ON s.task_id = t.id
-          WHERE t.id = COALESCE((SELECT merged_into_id FROM tasks WHERE id = ${uuidFromString(id)}),
-                                ${uuidFromString(id)})
+          WHERE t.id = ${buildSurvivorIdSql(id)}
             AND t.${sql.literal(ON_BOARD)} AND t.deleted_at IS NULL AND t.merged_into_id IS NULL`,
         (rows) => {
           const row = rows[0];
-          return row === undefined
-            ? Option.none()
-            : Option.some({
-                id: uuidToString(row.id),
-                title: row.title,
-                stage: row.stage,
-                priority: row.priority,
-                projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
-                boardRank: row.board_rank,
-                createdAt: row.created_at,
-                stageChangedAt: row.stage_changed_at,
-                failedRunId:
-                  row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
-                summary: readBoardSummary(row),
-              });
+          return row === undefined ? Option.none() : Option.some(readBoardTaskRow(row));
         },
       ),
 
@@ -1125,43 +1161,15 @@ const make = Effect.gen(function* () {
      */
     listBoardTasks: (limit: number): Effect.Effect<ReadonlyArray<BoardTask>, SqlError> =>
       Effect.map(
-        sql<
-          {
-            readonly id: Uint8Array;
-            readonly title: string;
-            readonly stage: BoardStage;
-            readonly priority: TaskPriority;
-            readonly project_id: Uint8Array | null;
-            readonly board_rank: string;
-            readonly created_at: string;
-            readonly stage_changed_at: string;
-            readonly failed_run_id: Uint8Array | null;
-          } & BoardSummaryColumns
-        >`
-          SELECT t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank,
-                 t.created_at, t.stage_changed_at, t.failed_run_id,
-                 ${sql.literal(BOARD_SUMMARY_COLUMNS)}
+        sql<BoardTaskRow>`
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
           FROM tasks t INDEXED BY tasks_board_rank
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
           LEFT JOIN task_summaries s ON s.task_id = t.id
           WHERE t.${sql.literal(ON_BOARD)} AND t.deleted_at IS NULL AND t.merged_into_id IS NULL
           ORDER BY t.project_id, t.stage, t.board_rank
           LIMIT ${limit + 1}`,
-        (rows) =>
-          rows
-            .map((row) => ({
-              id: uuidToString(row.id),
-              title: row.title,
-              stage: row.stage,
-              priority: row.priority,
-              projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
-              boardRank: row.board_rank,
-              createdAt: row.created_at,
-              stageChangedAt: row.stage_changed_at,
-              failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
-              summary: readBoardSummary(row),
-            }))
-            .toSorted(compareBoardOrder),
+        (rows) => rows.map(readBoardTaskRow).toSorted(compareBoardOrder),
       ),
 
     /**
@@ -1496,11 +1504,39 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the time the first dirty Task becomes due, or none when no live
+     * Task is dirty: the least, over the dirty rows, of the later of
+     * `dirty_at` plus `quietSeconds` and `next_attempt_at`. That is the time
+     * `claimSummaryAttempts` would first pick a Task, when it is given the same
+     * quiet time. Walks `task_summaries_dirty`, so it reads only dirty rows; the
+     * planner would otherwise start from the status index of all Tasks.
+     */
+    readNextSummaryDueAt: (quietSeconds: number): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly due_at: string | null }>`
+          SELECT MIN(MAX(strftime('%Y-%m-%dT%H:%M:%fZ', s.dirty_at, ${`+${String(quietSeconds)} seconds`}),
+                         COALESCE(s.next_attempt_at, ''))) AS due_at
+          FROM task_summaries s INDEXED BY task_summaries_dirty JOIN tasks t ON t.id = s.task_id
+          WHERE s.dirty_at IS NOT NULL AND ${taskCanBeSummarized}`,
+        (rows) => Option.fromNullishOr(rows[0]?.due_at),
+      ),
+
+    /**
      * Writes a summary the writer made for revision `dirtyRevision`, and
-     * marks the row current: it clears `dirty_at` and the failure, and
-     * resets the failure count. Writes nothing, and returns false, when the
-     * row's `dirty_revision` has moved on or the Task is deleted, merged or
-     * finished. It never makes a row and never touches the Task itself.
+     * records the revision it was made from (`input_revision`). It clears the
+     * failure and resets the failure count.
+     *
+     * - When the row's `dirty_revision` is still `dirtyRevision`, the summary
+     *   is current: it clears `dirty_at`.
+     * - When the Task changed meanwhile (`dirty_revision` is higher), the
+     *   summary is written anyway and `dirty_at` stays, so the Task is still
+     *   dirty and `next_attempt_at` paces the call that brings it up to date.
+     *   Dropping the answer would leave a Task that changes during every call
+     *   without a summary.
+     *
+     * Writes nothing, and returns false, when the Task is deleted, merged or
+     * finished, or when the row already holds a summary made from a newer
+     * revision. It never makes a row and never touches the Task itself.
      */
     writeSummary: (input: {
       readonly taskId: string;
@@ -1511,11 +1547,13 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql`UPDATE task_summaries
             SET line = ${input.summary.line}, standing_text = ${input.summary.standing},
-                left_text = ${input.summary.left}, input_revision = dirty_revision,
-                generated_at = ${input.at}, dirty_at = NULL, attempt_count = 0,
-                failed_at = NULL, failed_reason = NULL
+                left_text = ${input.summary.left}, input_revision = ${input.dirtyRevision},
+                generated_at = ${input.at},
+                dirty_at = CASE WHEN dirty_revision = ${input.dirtyRevision} THEN NULL ELSE dirty_at END,
+                attempt_count = 0, failed_at = NULL, failed_reason = NULL
             WHERE task_id = ${uuidFromString(input.taskId)}
-              AND dirty_revision = ${input.dirtyRevision}
+              AND dirty_revision >= ${input.dirtyRevision}
+              AND input_revision <= ${input.dirtyRevision}
               AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_summaries.task_id
                           AND ${taskCanBeSummarized})
             RETURNING task_id`,
@@ -1527,7 +1565,9 @@ const make = Effect.gen(function* () {
      * last summary, raises `attempt_count`, stamps `failed_at` and
      * `failed_reason`, and sets `next_attempt_at` to what `chooseNextAttempt`
      * returns for the raised count. The row stays dirty. Writes nothing, and
-     * returns false, under the same conditions as `writeSummary`.
+     * returns false, when the row's `dirty_revision` has moved on (a failure
+     * of an older attempt says nothing about the Task now) or the Task is
+     * deleted, merged or finished.
      */
     writeSummaryFailure: (input: {
       readonly taskId: string;
@@ -1575,7 +1615,7 @@ const make = Effect.gen(function* () {
      * Task that was merged into the source, so that `resolveTaskId` stays one
      * hop. The repoint reads `tasks_merged_into`, which holds only Tasks that
      * are not deleted: a merged Task is never deleted, because a delete of its
-     * id lands on the survivor.
+     * id is refused.
      */
     markMerged: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {

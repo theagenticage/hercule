@@ -21,9 +21,10 @@ import {
   type TaskSummary,
 } from "@hercule/contract";
 import type { OutputSchema } from "@hercule/protocol";
-import type { CursorError } from "../../db";
+import { dropCursorError } from "../../db";
 import { inputRepository, readRecentAssistantText, sessionRepository } from "../../sessions";
-import { cutText, cutTextAtWord, taskRepository, TaskTrackingRuns } from "../../tasks";
+import { taskRepository, TaskTrackingRuns } from "../../tasks";
+import { cutText, cutTextAtWord, takeTail } from "../../text";
 import type { TextGenerationCall } from "../../text-generation";
 
 /**
@@ -153,19 +154,6 @@ interface SummaryInput {
   openQuestions: Array<QuestionInput>;
 }
 
-/**
- * Treats a `CursorError` as a defect. The reads here pass no cursor, so the
- * repository cannot find one that is not ours.
- */
-const dropCursorError = <A, E, R>(
-  effect: Effect.Effect<A, E | CursorError, R>,
-): Effect.Effect<A, Exclude<E, CursorError>, R> =>
-  Effect.catchTag(effect, "CursorError", Effect.die) as Effect.Effect<
-    A,
-    Exclude<E, CursorError>,
-    R
-  >;
-
 const utf8 = new TextEncoder();
 
 const countBytes = (text: string): number => utf8.encode(text).length;
@@ -208,8 +196,7 @@ const shortenText = ({ holder, key }: CuttableText, excessBytes: number): void =
   const bytesPerCharacter = Math.max(1, countEscapedBytes(text) / Math.max(1, text.length));
   const keep = Math.max(0, Math.floor(text.length - excessBytes / bytesPerCharacter) - 1);
   if (key === "latestAssistantText") {
-    // The cut can fall inside a surrogate pair; a lone low half is dropped.
-    holder[key] = keep === 0 ? "" : text.slice(-keep).replace(/^[\uDC00-\uDFFF]/, "");
+    holder[key] = keep === 0 ? "" : takeTail(text, keep);
   } else {
     holder[key] = keep === 0 ? "" : cutText(text, keep);
   }
@@ -275,7 +262,7 @@ export const buildTaskSummaryCall = (
     const inputs = yield* inputRepository;
     const trackingRuns = yield* TaskTrackingRuns;
 
-    const task = Option.getOrUndefined(yield* tasks.live(taskId));
+    const task = Option.getOrUndefined(yield* tasks.readTitleAndDescription(taskId));
     if (task === undefined) return Option.none();
 
     const newest = yield* dropCursorError(

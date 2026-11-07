@@ -69,10 +69,15 @@ export interface BoardKeysInput {
   readonly onEndCard: (card: WorkCard, stage: EndStage) => void;
   /** Asks what a new Thread on the card should do (`T`). */
   readonly onStartThread: (card: WorkCard) => void;
-  /** Selects the card, or takes it out of the selection (`X`). */
-  readonly onToggleSelectCard: (card: WorkCard) => void;
-  /** The selection: how many cards are selected, and a way to empty it (Esc, last). */
-  readonly selection: { readonly count: number; readonly clear: () => void };
+  /**
+   * The selection: how many cards are selected, a way to select a card or take
+   * it out (`X`), and a way to empty it (Esc, last).
+   */
+  readonly selection: {
+    readonly count: number;
+    readonly toggle: (card: WorkCard) => void;
+    readonly clear: () => void;
+  };
   /**
    * The merge by key: `M` picks the card to merge, the arrows walk to the card
    * to merge it into, Return merges and Esc cancels. While a card is picked
@@ -335,7 +340,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       case "select":
         if (currentCard === undefined) return;
         event.preventDefault();
-        input.onToggleSelectCard(currentCard);
+        input.selection.toggle(currentCard);
         return;
       case "fold-lane": {
         if (currentLaneId === undefined) return;

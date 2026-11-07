@@ -85,12 +85,17 @@ const ONLY_THE_USER_UNDOES_TRY_AGAIN =
   "only the user may undo a Try again: it is the user's own correction, so a session or a workflow step may not; ask the user instead";
 
 /**
+ * The refusals of `restoreRecoveredFailure` that `undoTryAgain` can meet. It
+ * has read the recovery row itself and nothing else restores a failure, so
+ * `no-such-start` and `already-restored` cannot reach it.
+ */
+type UndoRefusal = Exclude<FailureRestoreRefusal, "no-such-start" | "already-restored">;
+
+/**
  * What the undo line says when the failure was not put back. Each sentence
  * names why, and none says the run has stopped: the run was only asked to.
  */
-const STAYED_AS_IT_IS: Record<FailureRestoreRefusal, string> = {
-  "no-such-start": "This run did not end a failure, so there is none to put back.",
-  "already-restored": "The failure was already put back.",
+const UNDO_REFUSAL_WORDS: Record<UndoRefusal, string> = {
   "task-deleted": "The Task was deleted.",
   "task-merged": "The Task was merged into another, which now holds its failure.",
   "task-finished": "The Task is already done or dropped.",
@@ -165,11 +170,6 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createNotFoundError("no such Try again on this Task"));
             }
             if (recovery.value.undo !== undefined) return recovery.value.undo;
-            // Only a failure restored before the answer was stored can reach
-            // here, and nothing knows whether that run was asked to stop.
-            if (recovery.value.restoredAt !== undefined) {
-              return { outcome: "restored", stopRequested: false } as const;
-            }
             // The row was written with the run in one transaction, and runs
             // are never deleted.
             const run = Option.getOrThrow(yield* runs.read(input.runId));
@@ -188,16 +188,20 @@ const make = Effect.gen(function* () {
                 ),
               );
             const restoration = yield* tasks.restoreRecoveredFailure({ runId: input.runId });
-            return yield* storeAnswer(
-              input.runId,
-              restoration.restored
-                ? { outcome: "restored", stopRequested: true }
-                : {
-                    outcome: "stopped",
-                    stopRequested: true,
-                    reason: STAYED_AS_IT_IS[restoration.reason],
-                  },
-            );
+            if (restoration.restored) {
+              return yield* storeAnswer(input.runId, { outcome: "restored", stopRequested: true });
+            }
+            const { reason } = restoration;
+            if (reason === "no-such-start" || reason === "already-restored") {
+              return yield* Effect.die(
+                new Error(`the Undo of ${input.runId} was refused: ${reason}`),
+              );
+            }
+            return yield* storeAnswer(input.runId, {
+              outcome: "stopped",
+              stopRequested: true,
+              reason: UNDO_REFUSAL_WORDS[reason],
+            });
           }),
         );
       }),

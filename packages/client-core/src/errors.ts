@@ -9,6 +9,7 @@
 import {
   ERROR_CODES,
   ERROR_STATUS,
+  InvalidStateDetails,
   listDecodeIssues,
   type ErrorCode,
   type Issue,
@@ -120,6 +121,8 @@ export const isConflict = (error: unknown): boolean =>
 export const isInvalidState = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "invalid_state";
 
+const isInvalidStateDetails = Schema.is(InvalidStateDetails);
+
 /**
  * Returns true when the error is an `invalid_state` response that says the
  * Request a decision or an answer was for is not open: the session waits on
@@ -130,13 +133,7 @@ export const isInvalidState = (error: unknown): boolean =>
 export const isRequestClosed = (error: unknown): boolean => {
   if (isNotFound(error)) return true;
   if (!isInvalidState(error)) return false;
-  const details = (error as ApiError).details;
-  return (
-    typeof details === "object" &&
-    details !== null &&
-    "reason" in details &&
-    details.reason === "request-closed"
-  );
+  return isInvalidStateDetails((error as ApiError).details);
 };
 
 /**

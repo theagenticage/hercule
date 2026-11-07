@@ -639,7 +639,9 @@ describe("an assistant's Conversation", () => {
 
       session = buildAdaSession({ openRequests: [ASKED] });
       act(() => {
-        live.pushInvalidation("session", [SESSION_ID], { [SESSION_ID]: ADA.mainConversationId });
+        live.pushInvalidation("session", [SESSION_ID], {
+          conversationIds: { [SESSION_ID]: ADA.mainConversationId },
+        });
       });
       await waitFor(() => {
         expect(document.querySelector(".dock")).not.toBeNull();
@@ -691,7 +693,9 @@ describe("an assistant's Conversation", () => {
 
       session = buildAdaSession({ openRequests: [ASKED] });
       act(() => {
-        live.pushInvalidation("session", [SESSION_ID], { [SESSION_ID]: ADA.mainConversationId });
+        live.pushInvalidation("session", [SESSION_ID], {
+          conversationIds: { [SESSION_ID]: ADA.mainConversationId },
+        });
       });
       await waitFor(() => {
         expect(document.querySelector(".dock")).not.toBeNull();
@@ -1033,7 +1037,9 @@ describe("the Conversation's live topics", () => {
 
     session = buildAdaSession({ id: NEXT_ID });
     act(() => {
-      live.pushInvalidation("session", [NEXT_ID], { [NEXT_ID]: ADA.mainConversationId });
+      live.pushInvalidation("session", [NEXT_ID], {
+        conversationIds: { [NEXT_ID]: ADA.mainConversationId },
+      });
     });
 
     await waitFor(() => {

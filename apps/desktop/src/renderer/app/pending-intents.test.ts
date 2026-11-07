@@ -6,6 +6,8 @@ import {
   createPendingIntents,
   createPendingIntentsHolder,
   findHeldAnswer,
+  listFailedMerges,
+  listHeldAnswers,
   listHeldMerges,
   listUnsentAnswers,
   UNDO_WINDOW_MS,
@@ -315,15 +317,27 @@ describe("the store", () => {
     expect(stub.send).toHaveBeenCalledTimes(2);
   });
 
-  it("does not call a refused first send, or a refused merge, no longer open", async () => {
+  it("says a first send refused because the Request closed took nothing, and offers no Send again", async () => {
+    const stub = createSend();
+    const intents = open(createMemoryStorage(), stub.send);
+    intents.hold(ANSWER);
+    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
+    stub.calls[0]?.reject(new ApiError("invalid_state", "Closed.", CLOSED));
+    await settle();
+
+    expect(intents.getSnapshot()).toMatchObject([
+      { state: "failed", failure: { reason: "closed-before-sent" } },
+    ]);
+  });
+
+  it("calls a refused merge a failed send even when the refusal says a Request closed, and an unrelated refusal of an answer too", async () => {
     const stub = createSend();
     const intents = open(createMemoryStorage(), stub.send);
     intents.hold(ANSWER);
     const mergeId = intents.hold(MERGE);
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
-    const closed = new ApiError("invalid_state", "Closed.");
-    stub.calls[0]?.reject(closed);
-    stub.calls[1]?.reject(closed);
+    stub.calls[0]?.reject(new ApiError("invalid_state", "The runner is away."));
+    stub.calls[1]?.reject(new ApiError("invalid_state", "Closed.", CLOSED));
     await settle();
     expect(intents.getSnapshot().map((intent) => intent.failure?.reason)).toEqual([
       "send-failed",
@@ -331,14 +345,14 @@ describe("the store", () => {
     ]);
 
     const retried = intents.retry(mergeId);
-    stub.calls[2]?.reject(closed);
+    stub.calls[2]?.reject(new ApiError("invalid_state", "Closed.", CLOSED));
     await retried;
     expect(
       intents.getSnapshot().find((intent) => intent.intentId === mergeId)?.failure?.reason,
     ).toBe("send-failed");
   });
 
-  it("finds a held answer by session and Request, and lists held merges", async () => {
+  it("finds a held answer by session and Request, and lists the held answers and merges", async () => {
     const stub = createSend();
     const intents = open(createMemoryStorage(), stub.send);
     intents.hold(ANSWER);
@@ -347,14 +361,18 @@ describe("the store", () => {
 
     expect(findHeldAnswer(snapshot(), "session-1", "request-1")).toMatchObject(ANSWER);
     expect(findHeldAnswer(snapshot(), "session-1", "request-2")).toBeUndefined();
+    expect(listHeldAnswers(snapshot())).toMatchObject([ANSWER]);
     expect(listHeldMerges(snapshot())).toMatchObject([MERGE]);
+    expect(listFailedMerges(snapshot())).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
     expect(findHeldAnswer(snapshot(), "session-1", "request-1")).toBeDefined();
     stub.calls.forEach((call) => call.reject(new Error("No.")));
     await settle();
     expect(findHeldAnswer(snapshot(), "session-1", "request-1")).toBeUndefined();
+    expect(listHeldAnswers(snapshot())).toEqual([]);
     expect(listHeldMerges(snapshot())).toEqual([]);
+    expect(listFailedMerges(snapshot())).toMatchObject([MERGE]);
   });
 
   it("tells subscribers about each change, and hands out one snapshot between changes", () => {
@@ -391,6 +409,38 @@ describe("the unsent answers of a Task", () => {
     expect(listUnsentAnswers(intents.getSnapshot(), "task-1")).toMatchObject([
       { ...ANSWER, state: "failed", failure: { reason: "send-failed", message: "No." } },
     ]);
+  });
+});
+
+describe("showing unsent answers on another Task", () => {
+  it("moves the failed answers of a Task to the one it was merged into, and keeps where they are sent", async () => {
+    vi.useFakeTimers();
+    const stub = createSend();
+    const intents = open(createMemoryStorage(), stub.send);
+    intents.hold(ANSWER);
+    const held = intents.hold({ ...ANSWER, requestId: "request-2" });
+    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
+    stub.calls[0]?.reject(new Error("No."));
+    await settle();
+    // The second answer is still being sent, so it does not move.
+    intents.moveFailedAnswers("task-1", "task-9");
+
+    expect(listUnsentAnswers(intents.getSnapshot(), "task-1")).toEqual([]);
+    expect(listUnsentAnswers(intents.getSnapshot(), "task-9")).toMatchObject([
+      { sessionId: "session-1", requestId: "request-1" },
+    ]);
+    expect(intents.getSnapshot().find((intent) => intent.intentId === held)).toMatchObject({
+      taskId: "task-1",
+      state: "sending",
+    });
+  });
+
+  it("tells subscribers nothing when there is nothing to move", () => {
+    const intents = open(createMemoryStorage(), createSend().send);
+    const listener = vi.fn();
+    intents.subscribe(listener);
+    intents.moveFailedAnswers("task-1", "task-9");
+    expect(listener).not.toHaveBeenCalled();
   });
 });
 

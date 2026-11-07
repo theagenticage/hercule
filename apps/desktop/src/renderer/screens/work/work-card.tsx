@@ -43,7 +43,8 @@ const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null 
  *   card with no summary has no second line (see `chooseCardSecondLine`).
  * - `isSelected` is whether the card is one of the selected cards, and
  *   `isSelecting` whether any card is: while some are, every card tells a
- *   screen reader whether it is pressed (`aria-pressed`).
+ *   screen reader whether it is pressed (`aria-pressed`), and draws its check
+ *   (hidden until selected). With no card selected, no card has a check.
  * - `onPress` is called with the card and the keys held when it is clicked.
  *   The screen opens the card, or selects it when the keys say so.
  * - `onFocus` is called with the card's id when it takes the focus.
@@ -95,7 +96,7 @@ export const WorkCardView = memo(function WorkCardView({
       nowTone={secondLine?.tone}
       colleague={buildColleague(card, isStill)}
       landed={card.stage === "landed" && !isLoudCard(card)}
-      selected={isSelected}
+      selected={isSelecting ? isSelected : undefined}
       meta={<time dateTime={card.lastActivityAt}>{age}</time>}
       onClick={(event) => {
         onPress(card, event);

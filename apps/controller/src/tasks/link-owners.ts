@@ -20,6 +20,6 @@ export class TaskLinkOwners extends Context.Service<
      * caller is `task.merge`, which has checked both. It announces nothing,
      * because the merge announces both Tasks.
      */
-    readonly moveTask: (sourceId: string, targetId: string) => Effect.Effect<void, SqlError>;
+    readonly moveTaskLinks: (sourceId: string, targetId: string) => Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/tasks/TaskLinkOwners") {}

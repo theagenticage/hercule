@@ -280,7 +280,6 @@ interface TaskDetail {
   sessionCount: number             // how many sessions the Task has
   runs: TrackingDetailRun[]        // at most MAX_TRACKING_DETAIL_RUNS (20), oldest first, as Tracking lists them
   runCount: number                 // how many runs the Task has
-  output?: TrackingOutput          // what the newest run's last agent step produced, as Tracking shows it
 }
 
 interface TaskDetailSession {

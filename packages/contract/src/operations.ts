@@ -797,13 +797,6 @@ const TABLE = {
   // not what it runs, but it is still a change to a session someone drives,
   // so it takes the same grant as stopping one. Both take a list of ids, so
   // their paths are the collection's plus the verb.
-  // Moving a Thread to another Task changes how it is filed, as marking it
-  // Done does, so it takes the same grant. Only the user may do it.
-  "session.moveToTask": {
-    requires: "session.steer",
-    method: "POST",
-    path: "/api/v1/sessions/:id/move-to-task",
-  },
   "session.markDone": {
     requires: "session.steer",
     method: "POST",
@@ -813,6 +806,13 @@ const TABLE = {
     requires: "session.steer",
     method: "POST",
     path: "/api/v1/sessions/reopen",
+  },
+  // Moving a Thread to another Task changes how it is filed, as marking it
+  // Done does, so it takes the same grant. Only the user may do it.
+  "session.moveToTask": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/move-to-task",
   },
   // Archiving puts Threads away for good. The grant is the one the user
   // holds, but the operation is also refused to every session token, whatever

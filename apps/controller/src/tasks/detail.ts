@@ -7,8 +7,7 @@
  * the controller daemon implements (ADR 0033):
  *
  * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
- * - `TaskTrackingRuns` for the runs and what the newest one produced, the
- *   same port Tracking uses;
+ * - `TaskTrackingRuns` for the runs, the same port Tracking uses;
  * - `TaskDetailFacts` for the sessions and the number of runs.
  */
 import * as Context from "effect/Context";
@@ -35,7 +34,6 @@ import { requireGrant } from "../actor";
 import { buildWorkCard, TaskBoardFacts } from "./board";
 import { taskRepository, type BoardTask } from "./repository";
 import { TaskTrackingRuns } from "./tracking";
-import { shapeTrackingOutput } from "./tracking-output";
 
 export class TaskDetailFacts extends Context.Service<
   TaskDetailFacts,
@@ -91,7 +89,7 @@ const make = Effect.gen(function* () {
     NotFound | SqlError
   > =>
     Effect.gen(function* () {
-      const task = Option.getOrUndefined(yield* tasks.liveOrSurvivor(requestedId));
+      const task = Option.getOrUndefined(yield* tasks.readLiveOrSurvivor(requestedId));
       if (task === undefined) return yield* Effect.fail(createNotFoundError("no such task"));
       const boardTask = Option.getOrUndefined(yield* tasks.readBoardTask(requestedId));
       const agrees =
@@ -108,7 +106,7 @@ const make = Effect.gen(function* () {
      * unfinished first, then newest, and always the Thread that asks the
      * card's open question) with how many it has, up to
      * `MAX_TRACKING_DETAIL_RUNS` of its runs (oldest first, as Tracking lists
-     * them) with how many it has, and what the newest run produced.
+     * them) with how many it has.
      *
      * The caller needs `task.read`, `session.query` and `run.query`, because
      * the reply shows a session's open Requests and a run's output. A caller
@@ -156,8 +154,6 @@ const make = Effect.gen(function* () {
         );
         const history = yield* runs.readRunHistory(id);
         const runCount = yield* detailFacts.countRuns(id);
-        const output =
-          history.agentStep === undefined ? undefined : shapeTrackingOutput(history.agentStep);
         return {
           task,
           card,
@@ -165,7 +161,6 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
-          ...(output === undefined ? {} : { output }),
         };
       }),
   };

@@ -23,6 +23,7 @@
  * controller is a failed intent.
  */
 import { isRequestClosed, readErrorMessage } from "@hercule/client-core";
+import type { FailureReason } from "@hercule/client-core/work";
 import type { SessionRespondToQuestionInput } from "@hercule/contract";
 
 /** How long an intent stays `pending`, where Undo can still cancel it. */
@@ -47,21 +48,8 @@ export type IntentContent =
       readonly intoTaskId: string;
     };
 
-/**
- * Why an intent failed:
- *
- * - `send-failed`: the controller refused it, or could not be reached;
- * - `no-longer-open`: sending an answer again was refused because the
- *   Request is closed (the harness moved on, the session exited or is gone).
- *   The first send may have reached it, so the answer may have been taken,
- *   and the app does not send it anywhere else. A refusal for another
- *   reason, such as the runner being away, is `send-failed`: the question is
- *   still open, so Send again stays useful;
- * - `interrupted`: the app quit while the intent was held or being sent.
- */
-export type FailureReason = "send-failed" | "no-longer-open" | "interrupted";
-
 export interface IntentFailure {
+  /** Why the intent was not sent. `@hercule/client-core/work` explains each reason and words it. */
   readonly reason: FailureReason;
   /** The error's message, or for `interrupted` a note saying the app quit. */
   readonly message: string;
@@ -104,6 +92,13 @@ export interface PendingIntents {
   /** Removes a `failed` intent. Does nothing for any other state. */
   readonly discard: (intentId: string) => void;
   /**
+   * Shows the failed answers of the Task `fromTaskId` on the Task `toTaskId`,
+   * as when the first was merged into the second. Only the Task they show on
+   * changes: a retry still goes to the Thread and the Request they were
+   * given for. Does nothing when there is none.
+   */
+  readonly moveFailedAnswers: (fromTaskId: string, toTaskId: string) => void;
+  /**
    * Stops the timers and makes the store ignore every later change and call:
    * nothing is sent or scheduled, and a send that ends afterwards writes
    * nothing to storage. Call it when the
@@ -116,9 +111,9 @@ export interface PendingIntents {
 /** The part of `Storage` the store uses. */
 export type IntentStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-/** Returns the storage key for the intents of `userId` on `controllerUrl`. */
-export const buildPendingIntentsKey = (controllerUrl: string, userId: string): string =>
-  `pending-intents:${controllerUrl}:${userId}`;
+/** Returns the storage key for the intents of the user `username` on `controllerUrl`. */
+export const buildPendingIntentsKey = (controllerUrl: string, username: string): string =>
+  `pending-intents:${controllerUrl}:${username}`;
 
 /**
  * Returns the answer intent that is `pending` or `sending` for the Request
@@ -140,13 +135,55 @@ export const findHeldAnswer = (
       intent.requestId === requestId,
   );
 
+/** An answer intent: `kind` is narrowed, so its question and answers can be read. */
+export type AnswerIntent = PendingIntent & { readonly kind: "answer" };
+
+/** A merge intent: `kind` is narrowed, so its two Tasks can be read. */
+export type MergeIntent = PendingIntent & { readonly kind: "merge" };
+
+/** A failed intent: `failure` is set, which the type of every other state does not promise. */
+type FailedIntent = { readonly failure: IntentFailure };
+
+/**
+ * Returns the answer intents that are `pending` or `sending`. The board draws
+ * each one's question as answered while it is held, and draws the question
+ * again if the answer fails.
+ */
+export const listHeldAnswers = (intents: readonly PendingIntent[]): readonly AnswerIntent[] =>
+  intents.filter(
+    (intent): intent is AnswerIntent => intent.kind === "answer" && intent.state !== "failed",
+  );
+
 /**
  * Returns the merge intents that are `pending` or `sending`. The board hides
  * the card of each one's `taskId` while it is held, and shows it again if the
  * merge fails.
  */
-export const listHeldMerges = (intents: readonly PendingIntent[]): readonly PendingIntent[] =>
-  intents.filter((intent) => intent.kind === "merge" && intent.state !== "failed");
+export const listHeldMerges = (intents: readonly PendingIntent[]): readonly MergeIntent[] =>
+  intents.filter(
+    (intent): intent is MergeIntent => intent.kind === "merge" && intent.state !== "failed",
+  );
+
+/** Returns the merge intents that failed, oldest first. */
+export const listFailedMerges = (
+  intents: readonly PendingIntent[],
+): readonly (MergeIntent & FailedIntent)[] =>
+  intents.filter(
+    (intent): intent is MergeIntent & FailedIntent =>
+      intent.kind === "merge" && intent.state === "failed",
+  );
+
+/**
+ * Returns the answer intents that failed, oldest first, whatever Task they
+ * show on.
+ */
+export const listFailedAnswers = (
+  intents: readonly PendingIntent[],
+): readonly (AnswerIntent & FailedIntent)[] =>
+  intents.filter(
+    (intent): intent is AnswerIntent & FailedIntent =>
+      intent.kind === "answer" && intent.state === "failed",
+  );
 
 /**
  * Returns the answer intents of the Task `taskId` that failed, oldest first.
@@ -155,13 +192,23 @@ export const listHeldMerges = (intents: readonly PendingIntent[]): readonly Pend
 export const listUnsentAnswers = (
   intents: readonly PendingIntent[],
   taskId: string,
-): readonly (PendingIntent & { readonly kind: "answer"; readonly failure: IntentFailure })[] =>
-  intents.filter(
-    (
-      intent,
-    ): intent is PendingIntent & { readonly kind: "answer"; readonly failure: IntentFailure } =>
-      intent.kind === "answer" && intent.state === "failed" && intent.taskId === taskId,
-  );
+): readonly (AnswerIntent & FailedIntent)[] =>
+  listFailedAnswers(intents).filter((intent) => intent.taskId === taskId);
+
+/**
+ * Returns why sending `intent` failed with `error`. Only an answer can find
+ * its Request closed. Closed at the first send means the controller took
+ * nothing; closed at a send again means the first send may have been taken
+ * before the Request closed.
+ */
+const decideFailureReason = (
+  intent: PendingIntent,
+  error: unknown,
+  isRetry: boolean,
+): FailureReason => {
+  if (intent.kind !== "answer" || !isRequestClosed(error)) return "send-failed";
+  return isRetry ? "no-longer-open" : "closed-before-sent";
+};
 
 const INTERRUPTED: IntentFailure = {
   reason: "interrupted",
@@ -266,11 +313,10 @@ export const createPendingIntents = (options: {
     try {
       await send(intent);
     } catch (error) {
-      const isClosed = isRetry && intent.kind === "answer" && isRequestClosed(error);
       change(intent.intentId, {
         state: "failed",
         failure: {
-          reason: isClosed ? "no-longer-open" : "send-failed",
+          reason: decideFailureReason(intent, error, isRetry),
           message: readErrorMessage(error),
         },
       });
@@ -322,6 +368,15 @@ export const createPendingIntents = (options: {
       if (find(intentId)?.state === "failed")
         commit(intents.filter((intent) => intent.intentId !== intentId));
     },
+    moveFailedAnswers: (fromTaskId, toTaskId) => {
+      const moved = listUnsentAnswers(intents, fromTaskId).map((intent) => intent.intentId);
+      if (moved.length === 0) return;
+      commit(
+        intents.map((intent) =>
+          moved.includes(intent.intentId) ? { ...intent, taskId: toTaskId } : intent,
+        ),
+      );
+    },
     dispose: () => {
       isDisposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
@@ -337,12 +392,18 @@ export const createPendingIntents = (options: {
  */
 export interface PendingIntentsHolder {
   /**
-   * Returns the store of `userId`, creating it on first use. Asking again for
-   * the same user returns the same store. Asking for another user disposes
-   * the first user's store, so an intent never reaches the next user.
+   * Returns the store of the user `username`, creating it on first use.
+   * Asking again for the same user returns the same store. Asking for another
+   * user disposes the first user's store, so an intent never reaches the next
+   * user.
+   *
+   * It is safe to call while a component renders: creating a store only reads
+   * storage, and starts no timer and sends nothing until an intent is held. A
+   * render that is repeated or thrown away finds the same store. Another user
+   * can only be asked for after sign-out, which closes the store first.
    */
   readonly open: (
-    userId: string,
+    username: string,
     send: (intent: IntentContent) => Promise<unknown>,
   ) => PendingIntents;
   /**
@@ -357,17 +418,17 @@ export const createPendingIntentsHolder = (
   controllerUrl: string,
   storage: IntentStorage,
 ): PendingIntentsHolder => {
-  let current: { readonly userId: string; readonly store: PendingIntents } | null = null;
+  let current: { readonly username: string; readonly store: PendingIntents } | null = null;
   return {
-    open: (userId, send) => {
-      if (current?.userId === userId) return current.store;
+    open: (username, send) => {
+      if (current?.username === username) return current.store;
       current?.store.dispose();
       const store = createPendingIntents({
         storage,
-        storageKey: buildPendingIntentsKey(controllerUrl, userId),
+        storageKey: buildPendingIntentsKey(controllerUrl, username),
         send,
       });
-      current = { userId, store };
+      current = { username, store };
       return store;
     },
     close: () => {

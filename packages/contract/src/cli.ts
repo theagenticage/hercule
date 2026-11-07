@@ -629,7 +629,7 @@ export const CLI = {
   },
   "task.readDetail": {
     command: "task details",
-    help: "Shows one task with everything its details pane draws. The reply holds the task in full, the card the board shows for it, the summary a cheap model wrote of it (absent until one exists, and marked stale when something changed since), up to 10 of its sessions with their open questions (unfinished first, then newest) and how many it has, up to 20 of its runs with how many it has, and what the newest run produced. A summary only describes: an open question or a failure is always read from the sessions and runs. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
+    help: "Shows one task with everything its details pane draws. The reply holds the task in full, the card the board shows for it, up to 10 of its sessions with their open questions (unfinished first, then newest) and how many it has, and up to 20 of its runs with how many it has. The card holds the summary a cheap model wrote of the task (absent until one exists, and marked stale when something changed since). A summary only describes: an open question or a failure is always read from the sessions and runs. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -637,6 +637,10 @@ export const CLI = {
         help: "The task's id, or a tail of eight or more characters. A task that was merged into another answers with the one it was merged into.",
         resolves: "task.query",
       },
+    },
+    errors: {
+      invalid_state:
+        "the task is done or dropped, so it has no card to show details for; reopen it with `hercule task update --stage` first",
     },
   },
   "task.readTracking": {

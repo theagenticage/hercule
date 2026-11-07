@@ -21,7 +21,10 @@
  *   serves the lookup of the Tasks merged into one Task, which a merge repoints
  *   so that a redirect is always one hop. It leaves out deleted Tasks, as every
  *   index of `tasks` does, and a merged Task is never deleted, because a delete
- *   of its id lands on the survivor. A read of it repeats the index's condition.
+ *   of its id is refused. A read of it repeats the index's condition.
+ *   - `tasks_board_rank` of the previous migration is dropped and made again
+ *     without the merged Tasks, which are gone from the board. A read of it
+ *     repeats the new condition (`tasks/repository.ts`, `ON_BOARD`).
  * - `task_provenance.merged_task_id` is the Task a provenance entry records
  *   as merged into the Task that holds the entry (`task.merge`). It is null
  *   for every other entry. No index reads it.
@@ -63,6 +66,13 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX tasks_merged_into ON tasks (merged_into_id)
       WHERE deleted_at IS NULL AND merged_into_id IS NOT NULL
+  `;
+
+  // The board never shows a merged Task, so the index that serves the board leaves it out.
+  yield* sql`DROP INDEX tasks_board_rank`;
+  yield* sql`
+    CREATE INDEX tasks_board_rank ON tasks (project_id, stage, board_rank)
+      WHERE deleted_at IS NULL AND merged_into_id IS NULL AND stage NOT IN ('done', 'dropped')
   `;
 
   yield* sql`ALTER TABLE task_provenance ADD COLUMN merged_task_id BLOB`;

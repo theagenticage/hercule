@@ -87,7 +87,7 @@ import {
   RunTargetsLayer,
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
-  TaskLinkOwnersLayer,
+  TaskServiceWithLinkOwnersLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
@@ -130,7 +130,6 @@ import {
   TaskDetails,
   TaskDetailsLayer,
   TaskService,
-  TaskServiceLayer,
   TaskTracking,
   TaskTrackingLayer,
 } from "../tasks";
@@ -899,7 +898,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
  */
 const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(WorkflowDomainLayer),
-  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+  Layer.provideMerge(TaskServiceWithLinkOwnersLayer),
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(

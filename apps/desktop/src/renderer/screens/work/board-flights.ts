@@ -15,6 +15,7 @@ import {
   staggerDelay,
   trackBody,
 } from "../../app/motion";
+import { copyCardForMotion } from "../desk";
 
 /** The class of the layer that holds the copies in flight. */
 const FLIGHT_LAYER_CLASS = "board-flights";
@@ -105,7 +106,7 @@ export const launchFlights = (
   return cards
     .filter((card) => isInView(card, view))
     .map((card, index) => ({
-      ghost: ghostElement(card, layer),
+      ghost: ghostElement(card, layer, copyCardForMotion(card)),
       delay: staggerDelay(index, gap),
       cardId: card.dataset["cardId"] ?? "",
       laneId: card.closest<HTMLElement>("[data-lane-id]")?.dataset["laneId"] ?? "",
@@ -457,9 +458,6 @@ const moveGhostUnderCards = (scroller: HTMLElement, ghost: HTMLElement): HTMLEle
   layer.setAttribute("aria-hidden", "true");
   canvas.prepend(layer);
   const copy = ghostElement(ghost, layer);
-  for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
-    copy.removeAttribute(name);
-  }
   removeFlight(ghost);
   return copy;
 };

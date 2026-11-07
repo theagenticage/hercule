@@ -1562,10 +1562,13 @@ const make = Effect.gen(function* () {
      * have had, and is listed where the order puts it. An id that is not a
      * session of the Task pins nothing.
      *
-     * One statement: the first step ranks the Task's sessions on
-     * `sessions_task_id` and keeps `limit` of them, and only those are read
-     * whole. `total` is counted in the same pass, so the count costs no
-     * second read. The Task's other sessions are never read whole.
+     * One statement: the first step ranks all of the Task's sessions, found
+     * on `sessions_task_id`, and keeps `limit` of them. Ranking reads, for
+     * each session, only the columns that decide the order (`created_at`,
+     * `run_id`, `status`, `done_at`) and the status of its Run, so the work
+     * grows with the number of sessions the Task has. Only the kept sessions
+     * are then read whole, with all their columns, such as the open Requests.
+     * `total` is counted in the same pass, so the count costs no second read.
      */
     listOfTask: (
       taskId: string,

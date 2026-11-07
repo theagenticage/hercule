@@ -12,6 +12,7 @@
  * stopped. A call that a restart cut off is made again once the Task's
  * `next_attempt_at` has passed.
  */
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -40,20 +41,22 @@ import { buildTaskSummaryCall, parseSummaryAnswer } from "./summary-input";
 export const SUMMARY_CONCURRENCY = 2;
 
 /**
- * The longest the loop sleeps without a wake. A Task becomes due 30 seconds
- * after its first change with nothing to announce it, and a wake lost to a
- * crash or a Text Generation Model that was Off costs this delay at most.
+ * The longest the loop sleeps without a wake. It sleeps until the first Task
+ * is due, which can be an hour away after failures. A wake lost to a crash, or
+ * a Text Generation Model that was Off, costs this delay at most.
  */
 const SUMMARY_BACKSTOP = Duration.minutes(1);
 
 /**
  * Writes the summary of one claimed attempt, or records why it failed.
  *
- * The model call runs outside any transaction. `completeSummary` and
- * `failSummary` are guarded by the revision the attempt was claimed at, so an
- * answer for a Task that changed or ended in the meantime is dropped without a
- * word: the Task is still dirty, and its `next_attempt_at` paces the next
- * call. Fails only when the database cannot be read or written.
+ * The model call runs outside any transaction. `storeSummary` and
+ * `failSummary` are guarded by the revision the attempt was claimed at. An
+ * answer for a Task that changed meanwhile is stored all the same and leaves
+ * the Task dirty, and its `next_attempt_at` paces the next call. An answer for
+ * a Task that ended meanwhile is dropped without a word, and so is a failure
+ * of an older revision. Fails only when the database cannot be read or
+ * written.
  */
 const writeSummary = (attempt: SummaryAttempt) =>
   Effect.gen(function* () {
@@ -76,32 +79,45 @@ const writeSummary = (attempt: SummaryAttempt) =>
     );
     yield* promotion.whenServing(
       Result.isSuccess(outcome)
-        ? tasks.completeSummary({ ...attempt, summary: outcome.success })
+        ? tasks.storeSummary({ ...attempt, summary: outcome.success })
         : tasks.failSummary({ ...attempt, reason: outcome.failure }),
     );
   });
 
 /**
- * Runs rounds until nothing more is due or the Text Generation Model cannot
- * run. A round claims at most `SUMMARY_CONCURRENCY` Tasks and writes them
- * together, so a backlog drains that many at a time and never more are in
- * flight.
+ * Writes the summaries that are due, a round of at most `SUMMARY_CONCURRENCY`
+ * Tasks at a time, until none is due. Returns how long to sleep before the
+ * next look: until the first Task becomes due, but at most `SUMMARY_BACKSTOP`.
+ *
+ * A look is one read of the earliest due time (see
+ * `TaskService.readNextSummaryDueAt`). Only when a Task is due does it resolve
+ * the Text Generation Model and claim, so a mark that is 30 seconds from due
+ * costs one read and no write.
  *
  * The check for a model that is Off, or that no runner can run now, uses the
  * same reason `controller.read` reports. It comes before the claim, so a Task
- * is never marked as tried when no call could be made.
+ * is never marked as tried when no call could be made. Then the Tasks stay
+ * due, and the sleep is the backstop: the next wake, such as the one after the
+ * setting changes, finds them still there.
  */
-const drainDueSummaries = Effect.gen(function* () {
+const writeDueSummaries = Effect.gen(function* () {
   const tasks = yield* TaskService;
   const models = yield* TextGenerationModels;
   const promotion = yield* PromotionState;
   while (true) {
+    const dueAt = yield* tasks.readNextSummaryDueAt();
+    if (Option.isNone(dueAt)) return SUMMARY_BACKSTOP;
+    const untilDue = Date.parse(dueAt.value) - (yield* Clock.currentTimeMillis);
+    if (untilDue > 0) return Duration.min(SUMMARY_BACKSTOP, Duration.millis(untilDue));
+
     const unavailable = buildTextGenerationUnavailableReason(yield* models.resolve());
-    if (unavailable !== null) return;
+    if (unavailable !== null) return SUMMARY_BACKSTOP;
     const attempts = yield* promotion.whenServing(
       tasks.claimSummaryAttempts({ limit: SUMMARY_CONCURRENCY }),
     );
-    if (attempts.length === 0) return;
+    // The read said a Task was due and the claim found none: it changed in
+    // between. The next look settles it; a backstop sleep rules out a spin.
+    if (attempts.length === 0) return SUMMARY_BACKSTOP;
     yield* Effect.forEach(
       attempts,
       (attempt) =>
@@ -116,9 +132,11 @@ const drainDueSummaries = Effect.gen(function* () {
 });
 
 /**
- * Writes the Task Summaries that are due, once at the start, then after each
- * wake of `TaskSummaryWake` and at least every minute. Never returns. A round
- * that fails is logged, and the next one runs.
+ * Writes the Task Summaries that are due. It looks once at the start, then
+ * sleeps until the first Task becomes due, and wakes earlier when
+ * `TaskSummaryWake` fires (a Task was marked) or after at most a minute.
+ * Never returns. A round that fails is logged, and the next one runs after a
+ * minute or the next wake.
  *
  * A Task is due 30 seconds after its first change since its last summary, and
  * a Task is tried at most once every 5 minutes, failures included (see
@@ -138,7 +156,13 @@ export const runTaskSummaryLoop: Effect.Effect<
 > = Effect.gen(function* () {
   const wake = yield* TaskSummaryWake;
   while (true) {
-    yield* absorbFailures("A round of the summary writer failed", drainDueSummaries);
-    yield* wake.awaitWake(SUMMARY_BACKSTOP);
+    let sleepFor = SUMMARY_BACKSTOP;
+    yield* absorbFailures(
+      "A round of the summary writer failed",
+      Effect.map(writeDueSummaries, (duration) => {
+        sleepFor = duration;
+      }),
+    );
+    yield* wake.awaitWake(sleepFor);
   }
 });

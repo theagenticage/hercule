@@ -13,6 +13,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { MAX_BOARD_RANK_LENGTH } from "./board-rank";
 import { taskRepository } from "./repository";
@@ -292,12 +293,22 @@ describe("the failure a Task shows", () => {
         const restored = yield* tasks.restoreRecoveredFailure({ runId: RUN_B });
         const state = yield* readState(task.id);
         const again = yield* tasks.restoreRecoveredFailure({ runId: RUN_B });
-        return { task, restored, state, again };
+        return {
+          task,
+          restored,
+          state,
+          again,
+          entries: yield* readEventsOfKind("task.failureRestored"),
+        };
       }),
     );
     expect(result.restored).toEqual({ restored: true, taskId: result.task.id });
     expect(result.state?.failedRunId).toBe(RUN_A);
     expect(result.again).toEqual({ restored: false, reason: "already-restored" });
+    // One entry, for the restore that happened, stamped with who undid.
+    expect(result.entries.map((entry) => [entry.actor, entry.payload])).toEqual([
+      ["user", { taskId: result.task.id, runId: RUN_B }],
+    ]);
   });
 
   it("is not restored for a run start that ended no failure", async () => {
@@ -358,6 +369,49 @@ describe("the failure a Task shows", () => {
       );
       expect(result.restoration).toEqual({ restored: false, reason });
       expect(result.after).toEqual(result.before);
+    },
+  );
+
+  it.each([
+    ["the user", USER, undefined, 1],
+    [
+      "a session",
+      {
+        _tag: "session",
+        sessionId: "0199e0e7-0002-7000-8000-000000000000",
+        profileId: "0199e0e7-0003-7000-8000-000000000000",
+        grants: [],
+        profileGrants: [],
+        assistantId: null,
+        agentId: null,
+      } satisfies Actor,
+      RUN_A,
+      0,
+    ],
+  ] as const)(
+    "is ended by a Thread that %s starts on the Task by name, or left as it is",
+    async (_who, actor, failedRunIdAfter, revisionRise) => {
+      const result = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          const task = yield* createFailedTask;
+          const before = yield* readState(task.id);
+          // The Task is made by the user; only the Thread is started by the actor under test.
+          yield* tasks
+            .joinSession({
+              requestedTaskId: task.id,
+              callerTaskId: undefined,
+              workspaceId: null,
+              sessionKind: "thread",
+              title: "Look into the refund button",
+              projectId: undefined,
+            })
+            .pipe(Effect.provideService(CurrentActor, actor));
+          return { before, after: yield* readState(task.id) };
+        }),
+      );
+      expect(result.after?.failedRunId).toBe(failedRunIdAfter);
+      expect(result.after!.failureRevision).toBe(result.before!.failureRevision + revisionRise);
     },
   );
 

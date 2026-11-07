@@ -172,6 +172,7 @@ export {
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
   TaskLinkOwnersLayer,
+  TaskServiceWithLinkOwnersLayer,
 } from "./tasks";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {

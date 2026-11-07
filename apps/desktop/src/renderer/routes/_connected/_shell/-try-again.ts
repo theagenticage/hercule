@@ -29,7 +29,11 @@ import {
   readErrorMessage,
   type HerculeClient,
 } from "@hercule/client-core";
-import { describeTryAgain, describeTryAgainUndo } from "@hercule/client-core/work";
+import {
+  describeTryAgain,
+  describeTryAgainFailure,
+  describeTryAgainUndo,
+} from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import type { CardMover } from "../../../app/card-mover";
 import { buildStillSignedInCheck } from "../../../app/still-signed-in";
@@ -165,7 +169,7 @@ export const useTryAgain = (
     },
     onError: (error, { title, isStillSignedIn }) => {
       if (!isStillSignedIn()) return;
-      callbacks.sayWithoutUndo(`Could not try ${title} again: ${readErrorMessage(error)}`);
+      callbacks.sayWithoutUndo(describeTryAgainFailure(title, readErrorMessage(error)));
     },
   });
   return (card) => {

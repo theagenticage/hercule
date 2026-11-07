@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
@@ -33,7 +33,6 @@ import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
-import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
@@ -53,6 +52,7 @@ import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
 import { useMergeCards } from "./-merge-cards";
+import { useStopRun } from "./-stop-run";
 import { usePaneChanges } from "./-pane-changes";
 import { useTaskThreads } from "./-task-threads";
 import { WorkPane } from "./-work-pane";
@@ -72,23 +72,6 @@ const EMPTY_CARDS: readonly WorkCard[] = [];
 /** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
 const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
   controllerInfo.textGeneration.unavailableReason === null;
-
-/**
- * What the details pane's buttons that change something do for now: nothing.
- * THE NEXT SLICE STEP WIRES THESE. Each one is called with only what the user
- * chose, and the screen sends it and says what happened (see
- * `TaskPaneChanges` in `screens/work/task-pane.tsx`). Until then the buttons
- * draw and press, and nothing happens.
- */
-const TASK_PANE_CHANGES_NOT_WIRED: Pick<
-  TaskPaneChanges,
-  "onTryAgain" | "onAnswer" | "onSendAnswerAgain" | "onDiscardAnswer"
-> = {
-  onTryAgain: () => undefined,
-  onAnswer: () => undefined,
-  onSendAnswerAgain: () => undefined,
-  onDiscardAnswer: () => undefined,
-};
 
 /** Returns the line that says since when the controller cannot be reached. */
 const describeOffline = (since: Date): string =>
@@ -170,6 +153,7 @@ export function WorkScreen({
     controller,
     username,
     boardCards: shownBoard?.cards ?? EMPTY_CARDS,
+    isBoardRead: shownBoard !== undefined,
     moves,
     openTaskId,
     scrollRef,
@@ -265,6 +249,8 @@ export function WorkScreen({
     }
     if (card.id !== openTaskId) onChangeOpenTask(card.id);
   };
+
+  const stopRun = useStopRun({ client, say: moves.sayWithoutUndo });
 
   // Starting a Thread from a card, and moving a Thread to a new Task.
   const threads = useTaskThreads({
@@ -393,13 +379,24 @@ export function WorkScreen({
 
   // A click opens the card, or selects it with ⌘ (Ctrl on Linux) held. While a
   // card is picked to merge, every click chooses the card to merge into.
-  const pressCard = (card: WorkCard, keys: PressedKeys): void => {
+  const pressCardNow = (card: WorkCard, keys: PressedKeys): void => {
     if (mergePick.sourceId === null && isPrimaryModifierHeld(keys, bridge.platform)) {
       selection.toggle(card.id);
     } else {
       openCard(card);
     }
   };
+  // The cards get one function for the life of the screen that calls the newest
+  // `pressCardNow`. A function that changed with every read or every open
+  // sheet would draw every card again, and a card is drawn again only when its
+  // own values change.
+  const latestPressCard = useRef(pressCardNow);
+  useLayoutEffect(() => {
+    latestPressCard.current = pressCardNow;
+  });
+  const pressCard = useCallback((card: WorkCard, keys: PressedKeys): void => {
+    latestPressCard.current(card, keys);
+  }, []);
   const keys = useBoardKeys({
     view,
     cards,
@@ -416,10 +413,13 @@ export function WorkScreen({
       endTask(card.id, stage);
     },
     onStartThread: threads.askThread,
-    onToggleSelectCard: (card) => {
-      selection.toggle(card.id);
+    selection: {
+      count: selection.selectedIds.size,
+      toggle: (card) => {
+        selection.toggle(card.id);
+      },
+      clear: selection.clear,
     },
-    selection: { count: selection.selectedIds.size, clear: selection.clear },
     mergePick,
     onAdd: (laneId) => {
       openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
@@ -549,17 +549,20 @@ export function WorkScreen({
             cards={cards}
             projects={projects}
             scrollRef={scrollRef}
+            drawnLanes={arrangedLanes}
             isStill={view.display.isStill}
             intents={pane.intents}
             threadPromptWords={threads.threadPromptWords}
             changes={{
-              ...TASK_PANE_CHANGES_NOT_WIRED,
               ...pane.changes,
               onMerge: () => {
                 const card = cards.find((each) => each.id === openTaskId);
                 if (card !== undefined) mergePick.start(card);
               },
               ...threads.changes,
+              onStopRun: (runId, workflowName) => {
+                if (openTaskId !== null) stopRun(openTaskId, runId, workflowName);
+              },
               onDone: () => {
                 if (openTaskId !== null) endTask(openTaskId, "done");
               },

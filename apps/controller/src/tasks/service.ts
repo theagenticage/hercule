@@ -68,8 +68,9 @@ import {
   type TryAgainUndo,
   type Unauthenticated,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
+  addSeconds,
   afterCommit,
   announce,
   announceTaskCardChange,
@@ -86,7 +87,7 @@ import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
 import { TaskLinkOwners } from "./link-owners";
 import { TaskSummaryWake } from "./summary-wake";
-import { cutText } from "./tracking-output";
+import { cutText } from "../text";
 import {
   taskRepository,
   type BoardCell,
@@ -154,10 +155,6 @@ const SummaryText = Schema.Struct({
 });
 
 const decodeSummaryText = Schema.decodeUnknownEffect(SummaryText);
-
-/** Returns the time `seconds` after `at`, as an ISO 8601 string. */
-const addSeconds = (at: string, seconds: number): string =>
-  new Date(Date.parse(at) + seconds * 1000).toISOString();
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
@@ -331,7 +328,7 @@ const make = Effect.gen(function* () {
    */
   const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
     Effect.gen(function* () {
-      const found = yield* tasks.liveOrSurvivor(id);
+      const found = yield* tasks.readLiveOrSurvivor(id);
       if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_TASK));
       return found.value;
     });
@@ -1048,7 +1045,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        yield* requireUserActor("task.update", ONLY_THE_USER_MERGES);
+        yield* requireUserActor("task.merge", ONLY_THE_USER_MERGES);
         const stamp = yield* currentStamp;
         if (id === input.intoTaskId) {
           return yield* Effect.fail(
@@ -1102,7 +1099,7 @@ const make = Effect.gen(function* () {
             }
 
             yield* tasks.markMerged(sourceId, targetId);
-            yield* linkOwners.moveTask(sourceId, targetId);
+            yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
             // Tracking joins them to the runs, which moved just above.
@@ -1130,7 +1127,9 @@ const make = Effect.gen(function* () {
               stamp,
             );
             yield* tasks.deleteSummary(sourceId);
-            yield* markSummaryDirty(targetId);
+            // The survivor gained Threads and runs. `updateTask` has marked its summary when the
+            // description changed, and marking twice would raise the revision twice.
+            if (description === target.description) yield* markSummaryDirty(targetId);
             // The entry names both Tasks, so clients read both again.
             yield* audit.append({
               kind: "task.merged",
@@ -1154,9 +1153,10 @@ const make = Effect.gen(function* () {
      *    that can be refused: it fails with `NotFound` when there is no such
      *    Task or it is deleted, and with `InvalidState` when it is at `done`
      *    or `dropped`, because new work on a finished Task is a contradiction
-     *    the caller should hear about. A `thread` that joins this way also
-     *    ends the Task's failure and raises its `failure_revision`, because
-     *    the user has taken the Task up; no other source does.
+     *    the caller should hear about. A `thread` that the user starts this
+     *    way also ends the Task's failure and raises its `failure_revision`,
+     *    because the user has taken the Task up. A Thread started this way by
+     *    a session leaves the failure as it is, and no other source ends it.
      * 2. `callerTaskId`, the Task of the session that spawned this one, or of
      *    the parent of a fork. Only a joinable Task counts.
      * 3. The Task of the workspace, when the workspace is ephemeral and the
@@ -1208,8 +1208,14 @@ const make = Effect.gen(function* () {
             requestedTaskId === undefined
               ? yield* readJoinableTaskId(callerTaskId)
               : yield* requireJoinableTask(requestedTaskId);
-          // The user took the Task up by naming it, so its failure is handled.
-          if (requestedTaskId !== undefined && input.sessionKind === "thread") {
+          // The user took the Task up by naming it, so its failure is handled. An agent that
+          // starts a Thread on the Task has handled nothing yet.
+          const actor = yield* CurrentActor;
+          if (
+            requestedTaskId !== undefined &&
+            input.sessionKind === "thread" &&
+            actor._tag === "user"
+          ) {
             if (yield* tasks.endFailure(requestedTaskId)) {
               yield* announceTaskCardChange(requestedTaskId);
             }
@@ -1367,7 +1373,8 @@ const make = Effect.gen(function* () {
      * Drop all raise the revision, so none of them is ever overwritten.
      *
      * Returns `{ restored: true }`, or `{ restored: false, reason }` having
-     * changed nothing.
+     * changed nothing. A restore writes a `task.failureRestored` audit entry
+     * stamped with the current actor, which dies when there is none.
      */
     restoreRecoveredFailure: (input: {
       readonly runId: string;
@@ -1375,8 +1382,15 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const taskId = yield* tasks.restoreFailure(input.runId, yield* nowIso);
+          const at = yield* nowIso;
+          const taskId = yield* tasks.restoreFailure(input.runId, at);
           if (Option.isSome(taskId)) {
+            yield* audit.append({
+              kind: "task.failureRestored",
+              actor: yield* currentStamp,
+              payload: { taskId: taskId.value, runId: input.runId },
+              at,
+            });
             yield* announceTaskCardChange(taskId.value);
             return { restored: true, taskId: taskId.value } as const;
           }
@@ -1420,7 +1434,7 @@ const make = Effect.gen(function* () {
      * the summary reads, so a crash cannot lose the change.
      *
      * When the mark starts a dirty cycle on a Task that has a written summary,
-     * it announces the Task as a derived change (as `completeSummary` does), so
+     * it announces the Task as a derived change (as `storeSummary` does), so
      * clients draw the summary as stale. Later marks of the same cycle announce
      * nothing.
      *
@@ -1444,7 +1458,7 @@ const make = Effect.gen(function* () {
      * once in that time, failures included.
      *
      * Returns the Task ids with the `dirtyRevision` to hand back to
-     * `completeSummary` or `failSummary`. Checks no grant.
+     * `storeSummary` or `failSummary`. Checks no grant.
      */
     claimSummaryAttempts: (input: {
       readonly limit: number;
@@ -1465,23 +1479,29 @@ const make = Effect.gen(function* () {
     /**
      * Stores the summary the writer made for the revision it was given by
      * `claimSummaryAttempts`, in one short transaction, and returns whether it
-     * stored it. It stores nothing when the Task changed since (its
-     * `dirty_revision` moved on) or is no longer live, and then the row stays
-     * dirty and the next attempt is paced as before.
+     * stored it. It stores nothing when the Task is no longer live (deleted,
+     * merged or finished), and never makes a row.
      *
-     * A stored summary clears `dirty_at` and the failure, and resets the
-     * failure count. It writes a `task.summarized` audit entry stamped with
-     * the system actor and announces the Task as a derived change, which
-     * clients read at the slower pace. It does not touch the Task's
-     * `updatedAt`, writes no `task.updated` event, and marks nothing dirty,
-     * because none of those would be a decision of a model.
+     * - When the Task has not changed since the claim, the summary is current:
+     *   the row is clean.
+     * - When it changed meanwhile, the summary is stored all the same and the
+     *   row stays dirty, so the card shows it as stale and the next attempt,
+     *   paced by `next_attempt_at`, brings it up to date. A Task that changes
+     *   during every call would otherwise never get a summary.
+     *
+     * A stored summary clears the failure and resets the failure count. It
+     * writes a `task.summarized` audit entry stamped with the system actor and
+     * announces the Task as a derived change, which clients read at the slower
+     * pace. It does not touch the Task's `updatedAt`, writes no `task.updated`
+     * event, and marks nothing dirty, because none of those would be a
+     * decision of a model.
      *
      * The text must fit the contract's bounds (`MAX_SUMMARY_LINE` and the
      * other two): the writer cuts it at a word first, and an overlong text is
      * a defect here, because a stored text over its bound would fail every
      * read of the board. Checks no grant.
      */
-    completeSummary: (input: {
+    storeSummary: (input: {
       readonly taskId: string;
       readonly dirtyRevision: number;
       readonly summary: Pick<TaskSummary, "line" | "standing" | "left">;
@@ -1514,15 +1534,28 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the time the first dirty Task becomes due for a summary, or none
+     * when no live Task is dirty. It is the earliest time at which
+     * `claimSummaryAttempts` would pick a Task: `SUMMARY_QUIET_SECONDS` after
+     * the first change, or the Task's `next_attempt_at` when that is later.
+     * The summary writer sleeps until then. Runs outside a transaction, so it
+     * reads on the read connection and never waits for the writer. Checks no
+     * grant.
+     */
+    readNextSummaryDueAt: (): Effect.Effect<Option.Option<string>, SqlError> =>
+      tasks.readNextSummaryDueAt(SUMMARY_QUIET_SECONDS),
+
+    /**
      * Records that the attempt for the revision `claimSummaryAttempts` gave
      * failed, in one short transaction, and returns whether it recorded it.
      * It keeps the last summary, stores the (cut) `reason` with the time,
      * raises the failure count, and sets `next_attempt_at` to now plus
      * `SUMMARY_MIN_INTERVAL_SECONDS` doubled for each failure in a row, at
      * most one hour. The row stays dirty, so the card shows the summary as
-     * stale. Like `completeSummary`, it records nothing when the Task changed
-     * since or is no longer live, so a late failure cannot touch a Task that
-     * was merged away. Checks no grant.
+     * stale. Unlike `storeSummary`, it records nothing when the Task changed
+     * since: a failure of an older attempt says nothing about the Task now.
+     * It also records nothing when the Task is no longer live, so a late
+     * failure cannot touch a Task that was merged away. Checks no grant.
      */
     failSummary: (input: {
       readonly taskId: string;

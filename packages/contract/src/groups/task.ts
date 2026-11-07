@@ -868,8 +868,6 @@ export const TaskDetail = Schema.Struct({
   runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
   /** How many runs the Task has, with a link to `run.query` by `taskIds`, the same way. */
   runCount: Schema.Int,
-  /** What the newest run's last agent step produced, as Tracking shows it. */
-  output: Schema.optionalKey(TrackingOutput),
 });
 
 export type TaskDetail = Schema.Schema.Type<typeof TaskDetail>;

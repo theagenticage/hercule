@@ -5,6 +5,7 @@
  * draws and says.
  */
 import type { WorkCard } from "@hercule/contract";
+import { dropClosingFullStops, cutWithEllipsis } from "../text";
 import { shortenTitle } from "./describe-card-move";
 
 /** The most characters of a title that the label on the card to merge into shows before it is cut. */
@@ -22,14 +23,11 @@ export const MERGE_PICK_WORDS = "Pick the card to merge this into. Return merges
 
 /** Returns the label on the top edge of the card to merge into: `Merge into Serve smaller…`. A long title is cut. */
 export const describeMergeTarget = (title: string): string =>
-  `Merge into ${
-    title.length > MOST_LABEL_TITLE_CHARACTERS
-      ? `${title.slice(0, MOST_LABEL_TITLE_CHARACTERS - 1).trimEnd()}…`
-      : title
-  }`;
+  `Merge into ${cutWithEllipsis(title, MOST_LABEL_TITLE_CHARACTERS)}`;
 
-/** Returns what the undo line says after a merge: `Merged into Serve smaller checkout.` */
-export const describeMergedInto = (targetTitle: string): string => `Merged into ${targetTitle}.`;
+/** Returns what the undo line says after a merge: `Merged into "Serve smaller checkout".` A long title is cut. */
+export const describeMergedInto = (targetTitle: string): string =>
+  `Merged into "${shortenTitle(targetTitle)}".`;
 
 /** Returns the words of a merge for the undo stack, in the past tense, like the words of a move: `Merged "A" into "B"`. */
 export const describeMerge = (sourceTitle: string, targetTitle: string): string =>
@@ -41,7 +39,7 @@ export const describeMerge = (sourceTitle: string, targetTitle: string): string 
  * card is back on the board by then, so the line says so.
  */
 export const describeMergeFailure = (sourceTitle: string, message: string): string =>
-  `The merge did not happen, so "${shortenTitle(sourceTitle)}" is back on the board: ${message.replace(/\.+$/, "")}.`;
+  `The merge did not happen, so "${shortenTitle(sourceTitle)}" is back on the board: ${dropClosingFullStops(message)}.`;
 
 /** The Task of a merge the app holds, which merges into another Task. */
 export interface HeldMerge {

@@ -33,10 +33,12 @@ describe("the label of the card to merge into", () => {
 });
 
 describe("the words after a merge", () => {
-  it("names the Task merged into, in full", () => {
-    expect(describeMergedInto("Serve smaller checkout pages on phones")).toBe(
-      "Merged into Serve smaller checkout pages on phones.",
-    );
+  it("names the Task merged into, quoted", () => {
+    expect(describeMergedInto("Refund emails")).toBe('Merged into "Refund emails".');
+  });
+
+  it("cuts a long title of the Task merged into", () => {
+    expect(describeMergedInto("x".repeat(40))).toBe(`Merged into "${"x".repeat(31)}…".`);
   });
 
   it("quotes both titles for the undo stack, cutting a long one", () => {

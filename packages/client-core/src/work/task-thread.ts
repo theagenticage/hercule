@@ -8,6 +8,9 @@ import { WORKING_STATUSES } from "../threads/status";
 /** What a Thread row says about the Thread, in one word. */
 export type TaskThreadState = "Asks" | "Waiting" | "Working" | "Done";
 
+/** How a Thread's face stands in its row: waiting with a raised palm, typing at work, or at rest. */
+export type TaskThreadPose = "waiting" | "working" | "idle";
+
 /** One Thread row of the details pane. */
 export interface TaskThreadRow {
   readonly id: string;
@@ -15,6 +18,8 @@ export interface TaskThreadRow {
   readonly label: string;
   /** The state to show beside the label, or `null` for a Thread at rest. */
   readonly state: TaskThreadState | null;
+  /** The pose of the Thread's face, from what the Thread is doing. */
+  readonly pose: TaskThreadPose;
   /**
    * Whether the row offers "Move to a new Task". Only a Thread moves: the
    * controller refuses an Agent session and a run's session.
@@ -55,10 +60,28 @@ export const describeTaskThreadState = (session: TaskDetailSession): TaskThreadS
   return session.done ? "Done" : null;
 };
 
+/** Returns the pose of a Thread's face for the one word that says what it is doing. */
+const choosePose = (state: TaskThreadState | null): TaskThreadPose => {
+  switch (state) {
+    case "Asks":
+    case "Waiting":
+      return "waiting";
+    case "Working":
+      return "working";
+    case "Done":
+    case null:
+      return "idle";
+  }
+};
+
 /** Returns the row of one Thread of the details pane. */
-export const buildTaskThreadRow = (session: TaskDetailSession): TaskThreadRow => ({
-  id: session.id,
-  label: chooseTaskThreadLabel(session),
-  state: describeTaskThreadState(session),
-  canMoveToNewTask: session.kind === "thread",
-});
+export const buildTaskThreadRow = (session: TaskDetailSession): TaskThreadRow => {
+  const state = describeTaskThreadState(session);
+  return {
+    id: session.id,
+    label: chooseTaskThreadLabel(session),
+    state,
+    pose: choosePose(state),
+    canMoveToNewTask: session.kind === "thread",
+  };
+};

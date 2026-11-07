@@ -43,6 +43,26 @@ describe("a Thread row of the pane", () => {
   });
 
   it.each([
+    ["idle", buildDetailSession("a"), "idle"],
+    ["marked Done", buildDetailSession("a", { done: true }), "idle"],
+    ["running a turn", buildDetailSession("a", { status: "busy" }), "working"],
+    [
+      "waiting on an approval",
+      buildDetailSession("a", { openRequests: [buildApprovalRequest("r")] }),
+      "waiting",
+    ],
+    [
+      "asking a question",
+      buildDetailSession("a", {
+        openRequests: [buildQuestionRequest("r", [buildQuestion("Why")])],
+      }),
+      "waiting",
+    ],
+  ] as const)("poses the face of a Thread that is %s as %s", (_, session, pose) => {
+    expect(buildTaskThreadRow(session).pose).toBe(pose);
+  });
+
+  it.each([
     ["has a role", "  review ", "Review PR", "review"],
     ["has no role", null, "Review PR", "Review PR"],
     ["has a blank role", "  ", "Review PR", "Review PR"],

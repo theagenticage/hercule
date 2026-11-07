@@ -6,6 +6,7 @@
  * returns (the Undo of an end).
  */
 import type { WorkBoard, WorkCard } from "@hercule/contract";
+import { dropClosingFullStops } from "../text";
 import { applyCardMove, type CardMove } from "./card-move";
 import { shortenTitle } from "./describe-card-move";
 
@@ -84,5 +85,5 @@ export const describeCardEndFailure = (card: WorkCard, stage: EndStage, reason: 
     stage === "done"
       ? `Marking "${shortenTitle(card.title)}" Done`
       : `Dropping "${shortenTitle(card.title)}"`;
-  return `${what} did not save, so the card came back: ${reason.replace(/\.+$/, "")}. Try again.`;
+  return `${what} did not save, so the card came back: ${dropClosingFullStops(reason)}. Try again.`;
 };

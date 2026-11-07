@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkCard } from "@hercule/contract";
 import { buildCard } from "./cards.testing";
-import { describeCardMove, describeCardsMove } from "./describe-card-move";
+import { describeCardMove, describeCardsMove, describeMoveFailure } from "./describe-card-move";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
 
@@ -88,5 +88,13 @@ describe("describeCardsMove", () => {
     ],
   ])("names the place for %s", (_name, moves, stage, words) => {
     expect(describeCardsMove(moves, stage, PROJECTS)).toBe(words);
+  });
+});
+
+describe("describeMoveFailure", () => {
+  it("says the card went back and why, ending in one full stop", () => {
+    expect(describeMoveFailure("The Task is gone.")).toBe(
+      "The move did not save, so the card went back: The Task is gone. Try the move again.",
+    );
   });
 });

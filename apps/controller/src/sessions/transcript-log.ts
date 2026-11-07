@@ -26,6 +26,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { parseStoredEvent, type HarnessEvent, type SubagentId } from "@hercule/protocol";
 import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
+import { takeTail } from "../text";
 import { buildAgentClause } from "./repository";
 
 /**
@@ -272,14 +273,6 @@ export const readAssistantTexts = (
  * deltas it needs. A fixed window keeps the read from growing with the turn.
  */
 const RECENT_TEXT_WINDOW = 200;
-
-/** Returns the last `max` characters of `text`, without starting inside a surrogate pair. */
-const takeTail = (text: string, max: number): string => {
-  if (text.length <= max) return text;
-  const start = text.length - max;
-  const startsInsidePair = /[\uDC00-\uDFFF]/.test(text.charAt(start));
-  return text.slice(startsInsidePair ? start + 1 : start);
-};
 
 /**
  * Returns the newest assistant text of a session's own agent, at most

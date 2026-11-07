@@ -179,6 +179,8 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { createPendingCardMoves } from "../app/pending-card-moves";
+import { createPendingIntentsHolder } from "../app/pending-intents";
 import { createUndoStack } from "../app/undo-stack";
 import { CleanupProvider } from "../app/cleanup";
 import {
@@ -873,17 +875,15 @@ const seedQueryCache = (
     for (const detail of work.details ?? []) {
       queryClient.setQueryData(queryKeys.taskDetail(detail.task.id), detail);
     }
-    if (work.details !== undefined) {
-      // The details say whether summaries are on.
-      queryClient.setQueryData(controllerQuery(client).queryKey, {
-        id: "01a06d02-7800-7000-8000-000000000001",
-        publicKey: "controller-key",
-        version: "0.4.2",
-        defaultRunnerId: null,
-        localRunnerId: null,
-        textGeneration: { model: null, lastFailure: null, unavailableReason: null },
-      });
-    }
+    // The board and the details read whether summaries are on.
+    queryClient.setQueryData(controllerQuery(client).queryKey, {
+      id: "01a06d02-7800-7000-8000-000000000001",
+      publicKey: "controller-key",
+      version: "0.4.2",
+      defaultRunnerId: null,
+      localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+    });
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1087,6 +1087,8 @@ const buildRouter = (
         live: SILENT_LIVE,
         pendingSubmissions,
         undoStack: createUndoStack(),
+        pendingCardMoves: createPendingCardMoves(),
+        pendingIntents: createPendingIntentsHolder(CONTROLLER_URL, localStorage),
       },
     }),
   });

@@ -355,7 +355,7 @@ export const buildDescribe: Effect.Effect<
      */
     const readTaskTitle = readOncePerId((id) =>
       Effect.map(
-        tasks.liveOrSurvivor(id),
+        tasks.readLiveOrSurvivor(id),
         Option.match({ onNone: () => id, onSome: (task) => task.title }),
       ),
     );

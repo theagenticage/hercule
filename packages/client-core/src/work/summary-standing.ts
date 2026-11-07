@@ -4,6 +4,7 @@
  */
 import type { TaskSummary, TextGenerationStatus } from "@hercule/contract";
 import { describeAge } from "../threads/age";
+import { PENDING_SUMMARY_WORDS } from "./card-words";
 
 /** What the pane shows for where a Task stands. */
 export interface SummaryStanding {
@@ -39,7 +40,7 @@ export const describeSummaryStanding = (
   if (summary === undefined) {
     return {
       standing: null,
-      note: off ? "Summaries are off" : "Writing a summary",
+      note: off ? "Summaries are off" : PENDING_SUMMARY_WORDS,
       linksToTextGeneration: off,
     };
   }

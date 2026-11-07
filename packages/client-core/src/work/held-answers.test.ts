@@ -7,6 +7,7 @@ import {
   describeHeldAnswer,
   describeUnsentAnswer,
   showHeldAnswers,
+  type FailureReason,
   type UnsentAnswerSource,
 } from "./held-answers";
 
@@ -73,10 +74,7 @@ describe("a card whose answer is held", () => {
 });
 
 describe("an answer that was not sent", () => {
-  const source = (
-    reason: UnsentAnswerSource["failure"]["reason"],
-    message = "The runner is away.",
-  ): UnsentAnswerSource => ({
+  const source = (reason: FailureReason, message = "The runner is away."): UnsentAnswerSource => ({
     intentId: "i1",
     sessionId: "session-1",
     answers: { Refunds: "Store credit" },
@@ -107,6 +105,13 @@ describe("an answer that was not sent", () => {
     expect(unsent.notice).toBe(
       "This question is no longer open, and your answer may have reached it.",
     );
+    expect(unsent.said).toBe("Your answer: “Store credit”");
+    expect(unsent.actions.map((action) => action.id)).toEqual(["open-thread", "discard"]);
+  });
+
+  it("says the question closed before the answer was sent, without saying it may have reached it", () => {
+    const unsent = describeUnsentAnswer(source("closed-before-sent"));
+    expect(unsent.notice).toBe("This question closed before your answer was sent.");
     expect(unsent.said).toBe("Your answer: “Store credit”");
     expect(unsent.actions.map((action) => action.id)).toEqual(["open-thread", "discard"]);
   });

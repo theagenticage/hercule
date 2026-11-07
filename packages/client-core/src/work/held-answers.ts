@@ -6,10 +6,11 @@
  * pane show.
  */
 import type { QuestionAnswers, WorkCard } from "@hercule/contract";
+import { cutWithEllipsis, dropClosingFullStops } from "../text";
 import type { ShownWorkCard } from "./card-words";
 
-/** The longest answer, in characters, that a line quotes before it is cut. */
-const MAX_QUOTED_ANSWER = 60;
+/** The most characters a line quotes of an answer, counting the ellipsis that ends a cut one. */
+const MAX_QUOTED_ANSWER = 61;
 
 /**
  * Returns the answers as one quoted line of words: every answer in order,
@@ -22,9 +23,7 @@ const quoteAnswers = (answers: QuestionAnswers): string => {
     .map((answer) => answer.replace(/\s+/g, " ").trim())
     .filter((answer) => answer !== "")
     .join(", ");
-  const cut =
-    words.length > MAX_QUOTED_ANSWER ? `${words.slice(0, MAX_QUOTED_ANSWER).trimEnd()}…` : words;
-  return `“${cut}”`;
+  return `“${cutWithEllipsis(words, MAX_QUOTED_ANSWER)}”`;
 };
 
 /** Returns what the pane shows in place of a question the user just answered: `You said: “Ship it”.` */
@@ -76,18 +75,29 @@ export const showHeldAnswers = (
   });
 };
 
+/**
+ * Why an intent the app held (an answer or a merge) was not sent:
+ *
+ * - `send-failed`: the controller refused it, or could not be reached;
+ * - `closed-before-sent`: an answer was refused at the first send because its
+ *   Request was closed (the harness moved on, the session exited or is gone).
+ *   The controller took nothing, so the answer did not reach the question;
+ * - `no-longer-open`: sending an answer again was refused because the Request
+ *   is closed. The first send may have reached it, so the answer may have
+ *   been taken, and the app does not send it anywhere else. A refusal for
+ *   another reason, such as the runner being away, is `send-failed`: the
+ *   question is still open, so Send again stays useful;
+ * - `interrupted`: the app quit while the intent was held or being sent.
+ */
+export type FailureReason = "send-failed" | "closed-before-sent" | "no-longer-open" | "interrupted";
+
 /** What an answer that was not sent holds, as the app keeps it. */
 export interface UnsentAnswerSource {
   readonly intentId: string;
   readonly sessionId: string;
   readonly answers: QuestionAnswers;
   readonly failure: {
-    /**
-     * `send-failed`: the controller refused it or could not be reached;
-     * `no-longer-open`: the question had closed when the answer was sent again;
-     * `interrupted`: the app closed while it waited or was being sent.
-     */
-    readonly reason: "send-failed" | "no-longer-open" | "interrupted";
+    readonly reason: FailureReason;
     readonly message: string;
   };
 }
@@ -121,6 +131,9 @@ const DISCARD: UnsentAnswerAction = { id: "discard", label: "Discard" };
  * - `interrupted`: the app closed first, then Send again and Discard. The
  *   answer is never sent by itself after a restart, because it may have been
  *   sent already.
+ * - `closed-before-sent`: the question closed before the answer was sent, so
+ *   it reached nothing. Sending it again would be refused again, so the pane
+ *   offers Open thread and Discard, never Send again.
  * - `no-longer-open`: the question closed, and the answer may have reached it
  *   before it did. Sending it again could only reach another question, so the
  *   pane offers Open thread and Discard, never Send again.
@@ -130,7 +143,7 @@ export const describeUnsentAnswer = (source: UnsentAnswerSource): UnsentAnswer =
   const base = { intentId: source.intentId, sessionId: source.sessionId, said };
   switch (source.failure.reason) {
     case "send-failed": {
-      const message = source.failure.message.replace(/\.+$/, "");
+      const message = dropClosingFullStops(source.failure.message);
       return {
         ...base,
         notice: `It was not sent: ${message}.`,
@@ -142,6 +155,12 @@ export const describeUnsentAnswer = (source: UnsentAnswerSource): UnsentAnswer =
         ...base,
         notice: "The app closed before it was sent.",
         actions: [SEND_AGAIN, DISCARD],
+      };
+    case "closed-before-sent":
+      return {
+        ...base,
+        notice: "This question closed before your answer was sent.",
+        actions: [OPEN_THREAD, DISCARD],
       };
     case "no-longer-open":
       return {

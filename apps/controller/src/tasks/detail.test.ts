@@ -8,8 +8,7 @@
  * - who may read it, and that nothing is read before they are known to;
  * - that the number of statements does not follow the number of sessions.
  *
- * The rules for working a card out from facts are tested in `board.test.ts`,
- * and the shape of a run's output in `tracking-output.test.ts`.
+ * The rules for working a card out from facts are tested in `board.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Schema } from "effect";
@@ -165,7 +164,7 @@ interface RunToWrite {
   readonly at: string;
   /** How the run ends; absent leaves it running. */
   readonly ending?: "completed" | "failed";
-  /** The session the run's agent step ran in. A completed run gives it `output`. */
+  /** The session the run's agent step ran in. */
   readonly stepSessionId?: string;
 }
 
@@ -290,7 +289,7 @@ const writeBusyTask = Effect.gen(function* () {
 });
 
 describe("task.readDetail", () => {
-  it("gives the Task, its card, its unfinished sessions first then the newest, its runs and the newest run's output", async () => {
+  it("gives the Task, its card, its unfinished sessions first then the newest, and its runs", async () => {
     const { ids, exit, detail } = await Effect.runPromise(
       Effect.gen(function* () {
         const ids = yield* writeBusyTask;
@@ -366,13 +365,9 @@ describe("task.readDetail", () => {
     ]);
     expect(detail!.runs[0]!.failureCause).toBe("permission denied on ops-db");
     expect(detail!.runs[2]!.sessionId).toBe(ids.agentSession);
-    expect(detail!.output).toMatchObject({
-      kind: "text",
-      text: "Refunds now reach the gift card.",
-    });
   });
 
-  it("gives a Task with no session and no run empty lists, zero counts and no output", async () => {
+  it("gives a Task with no session and no run empty lists and zero counts", async () => {
     const detail = await Effect.runPromise(
       Effect.gen(function* () {
         const taskId = yield* insertTask({ title: "Plain" });
@@ -386,7 +381,6 @@ describe("task.readDetail", () => {
     expect(detail.sessionCount).toBe(0);
     expect(detail.runs).toEqual([]);
     expect(detail.runCount).toBe(0);
-    expect(detail).not.toHaveProperty("output");
   });
 
   it("lists the Thread that asks the card's question even when ten newer sessions are unfinished", async () => {

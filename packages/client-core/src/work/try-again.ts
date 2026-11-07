@@ -1,9 +1,23 @@
 /** The words of Try again on the details pane and of its Undo. */
 import type { TryAgainUndo } from "@hercule/contract";
+import { dropClosingFullStops } from "../text";
 import type { EndStage } from "./card-change";
+import { shortenTitle } from "./describe-card-move";
 
-/** Returns what the undo line says after Try again, in the past tense like a move: `Tried again on Review PR`. */
-export const describeTryAgain = (title: string): string => `Tried again on ${title}`;
+/**
+ * Returns what the undo line says after Try again, in the past tense like a
+ * move: `Tried again on "Review PR"`. A long title is cut.
+ */
+export const describeTryAgain = (title: string): string =>
+  `Tried again on "${shortenTitle(title)}"`;
+
+/**
+ * Returns what the undo line says when Try again could not be sent:
+ * `Could not try "Review PR" again: The runner is away.` `reason` is the
+ * error's message, whose full stops at the end are replaced by the sentence's own.
+ */
+export const describeTryAgainFailure = (title: string, reason: string): string =>
+  `Could not try "${shortenTitle(title)}" again: ${dropClosingFullStops(reason)}.`;
 
 /** What Undo of Try again did, for the undo line. */
 export type TryAgainUndoResult =
@@ -33,9 +47,9 @@ export const describeTryAgainUndo = (answer: TryAgainUndo): TryAgainUndoResult =
 
 /**
  * Returns what the undo line says when Done or Drop is refused because Try
- * again is still starting the Task's run: `Review PR is starting again, so it
+ * again is still starting the Task's run: `"Review PR" is starting again, so it
  * cannot be marked Done yet. Try again in a moment.` Ending the Task then
- * would race the run that is being started.
+ * would race the run that is being started. A long title is cut.
  */
 export const describeEndWhileTryingAgain = (title: string, stage: EndStage): string =>
-  `${title} is starting again, so it cannot be ${stage === "done" ? "marked Done" : "Dropped"} yet. Try again in a moment.`;
+  `"${shortenTitle(title)}" is starting again, so it cannot be ${stage === "done" ? "marked Done" : "Dropped"} yet. Try again in a moment.`;

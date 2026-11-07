@@ -5,6 +5,7 @@
  */
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { describeDeskAge } from "../desk/age";
+import { dropClosingFullStops } from "../text";
 
 /** The name of each stage as the board shows it. */
 export const STAGE_NAMES: Readonly<Record<BoardStage, string>> = {
@@ -20,7 +21,7 @@ export const STAGE_NAMES: Readonly<Record<BoardStage, string>> = {
  * its own), or `undefined` when nothing is left.
  */
 const cleanCause = (cause: string): string | undefined =>
-  cause.replace(/\s+/g, " ").trim().replace(/\.+$/, "") || undefined;
+  dropClosingFullStops(cause.replace(/\s+/g, " ").trim()) || undefined;
 
 /**
  * Returns the line a failed card shows: "Review PR failed: the branch changed
@@ -32,16 +33,19 @@ const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): string 
   return `${failure.workflowName} failed${cause === undefined ? "" : `: ${cause}`}.`;
 };
 
+/** The words shown for a question the agent asked with no text. */
+export const BLANK_QUESTION_WORDS = "Has a question";
+
 /**
  * Returns the words a card shows for its open question: the question itself,
- * or "Has a question" when the agent asked an empty one or one of only
+ * or `BLANK_QUESTION_WORDS` when the agent asked an empty one or one of only
  * whitespace.
  */
 const describeCardQuestion = (question: NonNullable<WorkCard["openQuestion"]>): string =>
-  question.text.trim() === "" ? "Has a question" : question.text;
+  question.text.trim() === "" ? BLANK_QUESTION_WORDS : question.text;
 
-/** The words a card shows while the Task has no summary yet. */
-const PENDING_SUMMARY_TEXT = "Writing a summary";
+/** The words a card, and the details pane's note, show while the Task has no summary yet. */
+export const PENDING_SUMMARY_WORDS = "Writing a summary";
 
 /** What a screen reader reads for a card whose summary is not written yet. */
 const PENDING_SUMMARY_READING = "Summary being written";
@@ -95,7 +99,7 @@ export const chooseCardSecondLine = (
   }
   if (card.heldAnswer !== undefined) return { text: card.heldAnswer, tone: "summary" };
   if (card.summary === undefined) {
-    return canWriteSummaries ? { text: PENDING_SUMMARY_TEXT, tone: "pending" } : null;
+    return canWriteSummaries ? { text: PENDING_SUMMARY_WORDS, tone: "pending" } : null;
   }
   const line = card.summary.line.trim();
   return line === "" ? null : { text: line, tone: "summary" };

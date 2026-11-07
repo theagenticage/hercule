@@ -6,7 +6,8 @@
  * second page could use belongs here.
  *
  * - `Card`, `Colleague`: the card sheet, and the colleague standing behind
- *   its top edge.
+ *   its top edge. `copyCardForMotion`: a copy of a drawn card to move or to
+ *   show where the card was.
  * - `Toolbar`, `ToolButton`, `IconPill`, `FilterChip`, `ClearChipsButton`,
  *   `FindBox`, `ToolMenu` and the menu rows: the toolbar's row, its controls
  *   and its menus.
@@ -23,6 +24,7 @@
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
+export { copyCardForMotion } from "./copy-card-for-motion";
 export { FilterChips, FilterControl } from "./filter-control";
 export { SectionHeading } from "./section-heading";
 export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-sheet";

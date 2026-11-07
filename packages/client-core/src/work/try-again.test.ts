@@ -1,10 +1,28 @@
 /** Tests the words of Try again and of its Undo. */
 import { describe, expect, it } from "vitest";
-import { describeEndWhileTryingAgain, describeTryAgain, describeTryAgainUndo } from "./try-again";
+import {
+  describeEndWhileTryingAgain,
+  describeTryAgain,
+  describeTryAgainFailure,
+  describeTryAgainUndo,
+} from "./try-again";
 
 describe("the words of Try again", () => {
-  it("names the Task, in the past tense", () => {
-    expect(describeTryAgain("Review PR")).toBe("Tried again on Review PR");
+  it("names the Task, quoted and in the past tense", () => {
+    expect(describeTryAgain("Review PR")).toBe('Tried again on "Review PR"');
+  });
+
+  it("cuts a long title, as every other line of the undo line does", () => {
+    expect(describeTryAgain("x".repeat(40))).toBe(`Tried again on "${"x".repeat(31)}…"`);
+  });
+
+  it("says why a Try again could not be sent, ending in one full stop", () => {
+    expect(describeTryAgainFailure("Review PR", "The runner is away.")).toBe(
+      'Could not try "Review PR" again: The runner is away.',
+    );
+    expect(describeTryAgainFailure("Review PR", "The runner is away")).toBe(
+      'Could not try "Review PR" again: The runner is away.',
+    );
   });
 });
 
@@ -47,9 +65,12 @@ describe("what Done and Drop say while Try again is starting", () => {
   it.each([
     [
       "done",
-      "Review PR is starting again, so it cannot be marked Done yet. Try again in a moment.",
+      '"Review PR" is starting again, so it cannot be marked Done yet. Try again in a moment.',
     ],
-    ["dropped", "Review PR is starting again, so it cannot be Dropped yet. Try again in a moment."],
+    [
+      "dropped",
+      '"Review PR" is starting again, so it cannot be Dropped yet. Try again in a moment.',
+    ],
   ] as const)("refuses %s and says why", (stage, expected) => {
     expect(describeEndWhileTryingAgain("Review PR", stage)).toBe(expected);
   });

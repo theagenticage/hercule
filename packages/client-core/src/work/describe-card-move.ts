@@ -2,13 +2,21 @@ import type { BoardStage, WorkCard } from "@hercule/contract";
 import type { CardMove } from "./card-move";
 import { STAGE_NAMES } from "./card-words";
 import { NO_PROJECT_LANE_NAME, type WorkProject } from "./lanes";
+import { cutWithEllipsis, dropClosingFullStops } from "../text";
 
 /** The most characters of a title the undo line quotes. */
 const MOST_TITLE_CHARACTERS = 32;
 
 /** Returns the title cut to `MOST_TITLE_CHARACTERS`, with an ellipsis when it was cut. */
 export const shortenTitle = (title: string): string =>
-  title.length <= MOST_TITLE_CHARACTERS ? title : `${title.slice(0, MOST_TITLE_CHARACTERS - 1)}…`;
+  cutWithEllipsis(title, MOST_TITLE_CHARACTERS);
+
+/**
+ * Returns the sentence the undo line shows when a move did not save and the
+ * card went back. `reason` is the controller's message, or the error's.
+ */
+export const describeMoveFailure = (reason: string): string =>
+  `The move did not save, so the card went back: ${dropClosingFullStops(reason)}. Try the move again.`;
 
 /**
  * Returns the words for a move, in the past tense, for the undo line:

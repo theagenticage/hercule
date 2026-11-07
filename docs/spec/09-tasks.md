@@ -203,7 +203,7 @@ Rules:
 - **A Thread always ends up with a Task.** An Agent's session never creates one: it takes row 1, 2 or 3 and otherwise has none.
 - **A live Task** is one that is not deleted and whose stage is not `done` or `dropped`.
 - **Row 1 is explicit, so it can be refused.** A `taskId` that names no Task, or a deleted one, fails `not_found`. A Task at `done` or `dropped` fails `invalid_state`, and the message tells the caller to reopen the Task or start without it. Starting new work on a finished Task is a contradiction, and the caller should hear about it.
-- **A Thread started on a Task by name ends the Task's failure.** *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* The user took the Task up, so a Thread (not an Agent's session) that joins by row 1 ends the Task's failure and raises its `failure_revision` ([A failure and how it ends](#a-failure-and-how-it-ends)). A join by any other row does not.
+- **A Thread started on a Task by name ends the Task's failure.** *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* The user took the Task up, so a Thread (not an Agent's session) that the **user** starts by row 1 ends the Task's failure and raises its `failure_revision` ([A failure and how it ends](#a-failure-and-how-it-ends)). A Thread that a session starts by row 1 (an agent calling `session.spawn` with a `taskId`) does not, because the user has not taken the failure up. A join by any other row does not either.
 - **A merged Task is joined as its survivor.** *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A `taskId` the spawn named, a caller's Task, a fork's parent's Task and a reopened Thread's own Task all go through `resolveTaskId` ([The redirect](#merging-tasks)), inside the transaction that writes the join.
 - **Rows 2 and 3 are implicit, so they never refuse.** They give a live Task or nothing. A caller or a fork's parent whose Task is finished, deleted or missing gives nothing, and the next row decides. This one rule serves spawn, fork and reopen.
 - **A run step's session takes its run's `taskId` as it is,** even when that Task is finished, and the run may have none. It does not go through rows 1 to 4 and does not write `task_workspaces`. A Thread that step starts can then inherit the Task by row 2. A fork of a run step's session is an Agent's session, not a run step, so it follows rows 2 and 3.
@@ -316,15 +316,15 @@ interface TaskSummary {
 
 Nothing marks a Task dirty for each token, for each stream event, or when a summary is written. A Task that is deleted, merged or at `done` or `dropped` is left alone, and moving a Task to `done` or `dropped` clears `dirty_at`, so a finished Task costs no call. `dirty_at` is the time of the first change since the last summary. Later changes raise `dirty_revision` and leave `dirty_at` where it is.
 
-**When it is written.** One loop in the controller daemon, which wakes when a Task is marked dirty and at least every minute:
+**When it is written.** One loop in the controller daemon. It reads the time the first dirty Task becomes due (30 seconds after its first change, or its `next_attempt_at` when that is later) and sleeps until then. A Task being marked wakes it earlier, and it never sleeps more than a minute. When a Task is due:
 
 1. If the Text Generation Model is Off, or no runner can run a call now (`unavailableReason`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), it does nothing and leaves the Tasks dirty. The setting is the only switch: there is no setting for summaries. The next wake after the setting changes finds the work still there.
 2. It picks the Tasks that are live, have been dirty for at least 30 seconds, and whose `next_attempt_at` is empty or past. It takes at most 2, oldest change first.
 3. Before the call it sets `next_attempt_at` to 5 minutes from now. So a Task is called at most once every 5 minutes, failures included.
 4. It makes the call outside any transaction. The input is at most 24 KiB.
-5. In one short transaction it stores the answer only if `dirty_revision` is the one it started from and the Task is still live. Otherwise it drops the answer: the Task is still dirty, and `next_attempt_at` paces the next call.
+5. In one short transaction it stores the answer when the Task is still live (not deleted, merged or finished). It never recreates a row, and it never replaces a summary made from a newer revision. If `dirty_revision` is the one the call started from, the summary is current and the row becomes clean. If the Task changed meanwhile, the summary is stored all the same and the row stays dirty (`dirty_at` is kept), so the card shows it as stale and `next_attempt_at` paces the call that refreshes it. Dropping that answer would leave a Task that changes during every call without a summary.
 
-A stored summary clears `dirty_at` and the failure, resets `attempt_count`, writes the audit entry `task.summarized` (ids only, never the text, never routed), and announces the Task as a derived change, which clients read at the slow pace. The model's texts are cut at a word to their bounds. An answer is never refused for its length.
+A stored summary clears the failure, resets `attempt_count`, writes the audit entry `task.summarized` (ids only, never the text, never routed), and announces the Task as a derived change, which clients read at the slow pace. The model's texts are cut at a word to their bounds. An answer is never refused for its length.
 
 **When a call fails,** the Task keeps its last summary, which shows as stale, and the failure is recorded. The next attempt waits 5 minutes doubled for each failure in a row, at most 1 hour.
 
@@ -343,8 +343,8 @@ A stored summary clears `dirty_at` and the failure, resets `attempt_count`, writ
 
 *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A Task shows a failure when its `failed_run_id` is set. A run of the Task that fails sets it. It stays until something ends it, and looking at it ends nothing.
 
-- **What ends a failure:** a run starting on the Task (**Try again** is `run.rerun`, which keeps the card on its row), and a Thread started on the Task by name (`session.spawn` with its `taskId`, [Which Task a session gets](#which-task-a-session-gets), row 1). A Thread that joins the Task any other way does not. Done and Drop take the Task off the board and block every older Undo. They do not erase the failure: if the Task is moved back to a live stage, its failure shows again, so a failure is never lost.
-- **A revision guards the Undo.** The Task's `failure_revision` rises whenever the one who handles the failure changes: a run starts, a failure is set, a Thread starts by name, the Task goes to `done` or `dropped`, or a merge changes the failure. It rises even when the Task showed no failure.
+- **What ends a failure:** a run starting on the Task (**Try again** is `run.rerun`, which keeps the card on its row), and a Thread that the user starts on the Task by name (`session.spawn` with its `taskId`, [Which Task a session gets](#which-task-a-session-gets), row 1). A Thread that a session starts by name, or that joins the Task any other way, does not. Done and Drop take the Task off the board and block every older Undo. They do not erase the failure: if the Task is moved back to a live stage, its failure shows again, so a failure is never lost.
+- **A revision guards the Undo.** The Task's `failure_revision` rises whenever the one who handles the failure changes: a run starts, a failure is set, the user starts a Thread by name, the Task goes to `done` or `dropped`, or a merge changes the failure. It rises even when the Task showed no failure.
 - **A recovery row** is written in the transaction that starts a run which ended a failure. It names the run, the Task, the failure that was ended and the `failure_revision` right after the start. A Thread started by name writes none, so it has no Undo.
 
 **`task.undoTryAgain`** (`POST /tasks/{id}/try-again/undo`, body `{ runId }`) undoes a Try again in a few seconds' line of Undo. Only the user may: a session is refused with `forbidden`. In one transaction it decides before it cancels anything:
@@ -357,7 +357,7 @@ A stored summary clears `dirty_at` and the failure, resets `attempt_count`, writ
 | Answer | Means |
 |---|---|
 | `restored` | The failure is back on the Task. |
-| `stopped` | The run was asked to stop, and the failure stayed away because something newer holds the Task: another failure, a second retry, a Thread started by name, a merge, Done or Drop, or the Task was deleted. The current state stays, and `reason` says why in words for the undo line. |
+| `stopped` | The run was asked to stop, and the failure stayed away because something newer holds the Task: another failure, a second retry, a Thread the user started by name, a merge, Done or Drop, or the Task was deleted. The current state stays, and `reason` says why in words for the undo line. |
 | `too-late` | The run had already ended. Nothing changed. |
 
 `stopRequested` is true when the run was asked to stop. It does not say the run has stopped: the answer never claims more than that it was asked. The first answer is stored on the recovery row, so a repeat returns exactly it.
@@ -371,7 +371,7 @@ A stored summary clears `dirty_at` and the failure, resets `attempt_count`, writ
 - **Labels are united,** with no duplicates.
 - **The description** is the survivor's, then, when the source's is not blank, a blank line and `Merged from "<source title>":` and a line break and the source's description. A blank source description adds nothing.
 - **A failure is carried,** so a merge never hides one. If the source shows a failure, the survivor takes it. If both do, the survivor keeps the one whose run ended later (`runs.finished_at`, ties broken by run id). The survivor's `failure_revision` rises, so a Try again Undo from before the merge cannot overwrite the result. The source's recovery rows stay on the source, which is merged, so they can never restore.
-- **Its summary is written again.** The survivor is marked dirty, and the source's summary row is deleted. A summary in flight for either Task fails the revision check or the live check, and its answer is dropped.
+- **Its summary is written again.** The survivor is marked dirty, and the source's summary row is deleted. A summary in flight for the source fails the live check, and its answer is dropped. One in flight for the survivor is stored as stale, and the merge's mark keeps the survivor dirty, so it is written again.
 
 **What moves.** In one transaction, with no wait on anything outside the database:
 

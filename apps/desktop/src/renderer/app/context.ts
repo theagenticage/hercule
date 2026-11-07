@@ -79,10 +79,11 @@ export interface SavedController {
    */
   readonly pendingCardMoves: PendingCardMoves;
   /**
-   * The answers the user gave from the Work pane and the app holds back for the
-   * undo line before it sends them. They belong to this controller and this
-   * user, so the store opens once the shell knows the user, and the router
-   * closes it when the user signs out (see `createAppRouter`).
+   * The answers the user gave from the Work pane and the merges the user asked
+   * for, which the app holds back for the undo line before it sends them. They
+   * belong to this controller and this user, so the store opens once the shell
+   * knows the user, and the router closes it when the user signs out (see
+   * `createAppRouter`).
    */
   readonly pendingIntents: PendingIntentsHolder;
 }

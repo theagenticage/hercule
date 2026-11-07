@@ -106,7 +106,7 @@ export const createSheetController = (parts: SheetParts, host: SheetHost): Sheet
     sheet.style.top = `${rect.top.toFixed(2)}px`;
     sheet.style.width = `${rect.width.toFixed(2)}px`;
     sheet.style.height = `${rect.height.toFixed(2)}px`;
-    sheet.style.setProperty("--sheet-corner", `${corner.toFixed(2)}px`);
+    sheet.style.borderRadius = `${corner.toFixed(2)}px`;
     const shown = computeSheetWords(p);
     words.style.opacity = shown.opacity.toFixed(3);
     words.style.transform = `translateY(${shown.rise.toFixed(2)}px)`;

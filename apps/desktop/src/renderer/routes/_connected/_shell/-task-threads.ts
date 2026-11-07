@@ -21,6 +21,7 @@ import {
 } from "@hercule/client-core";
 import {
   buildTaskThreadStart,
+  chooseTaskCard,
   describeThreadRefused,
   describeThreadStarted,
   THREAD_MOVED_WORDS,
@@ -203,14 +204,16 @@ export const useTaskThreads = ({
   readonly closePane: () => void;
 }): TaskThreadsState => {
   const queryClient = useQueryClient();
-  const { noteHandOff } = useHandOffs(scrollRef);
+  const { noteHandOff } = useHandOffs(scrollRef, cards);
   const [askedTaskId, setAskedTaskId] = useState<string | null>(null);
   // What the line starts with: the words of a start that was refused, else nothing.
   const [askedWords, setAskedWords] = useState("");
   const requests = useTaskThreadRequests({
     client,
     say,
-    onStarted: noteHandOff,
+    onStarted: (taskId) => {
+      noteHandOff(taskId, "colleague-arrives");
+    },
     onRefused: (card, prompt) => {
       setAskedWords(prompt);
       setAskedTaskId(card.id);
@@ -230,8 +233,11 @@ export const useTaskThreads = ({
   const readOpenCard = (): WorkCard | undefined =>
     openTaskId === null
       ? undefined
-      : (cards.find((each) => each.id === openTaskId) ??
-        queryClient.getQueryData<TaskDetail>(queryKeys.taskDetail(openTaskId))?.card);
+      : chooseTaskCard(
+          cards,
+          openTaskId,
+          queryClient.getQueryData<TaskDetail>(queryKeys.taskDetail(openTaskId)),
+        );
 
   return {
     threadPromptWords: openTaskId !== null && askedTaskId === openTaskId ? askedWords : null,

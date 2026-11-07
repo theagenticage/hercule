@@ -54,7 +54,7 @@ export const useMergePick = ({
   readonly say: (text: string) => void;
   readonly onStart: () => void;
 }): MergePick => {
-  const [pickedId, setSourceId] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const unmarkTarget = useRef<() => void>(() => undefined);
   // False from the moment picking ends, before React has drawn that, so a focus change in between marks nothing.
   const isPicking = useRef(false);
@@ -124,7 +124,7 @@ export const useMergePick = ({
     start: (card) => {
       onStart();
       isPicking.current = true;
-      setSourceId(card.id);
+      setPickedId(card.id);
       say(MERGE_PICK_WORDS);
       const scroller = scrollRef.current;
       const element = scroller?.querySelector<HTMLElement>(`[data-card-id="${card.id}"]`);
@@ -135,12 +135,12 @@ export const useMergePick = ({
     },
     cancel: () => {
       isPicking.current = false;
-      setSourceId(null);
+      setPickedId(null);
     },
     confirm: (targetCardId) => {
       if (sourceId === null) return;
       isPicking.current = false;
-      setSourceId(null);
+      setPickedId(null);
       if (targetCardId === sourceId) return;
       // The target gives up its marks first, so its settle after the merge is not cut short.
       unmarkTarget.current();

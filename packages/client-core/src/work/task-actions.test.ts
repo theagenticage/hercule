@@ -8,13 +8,21 @@ import {
   buildQuestion,
   buildQuestionRequest,
 } from "./task-detail.testing";
+import { decideQuestionAnswers } from "./question-answers";
 import { listTaskActions, type TaskActions } from "./task-actions";
+
+/** Lists the actions of a Task with this `detail`, as the pane reads its failure and its question. */
+const listActionsForDetail = (detail: ReturnType<typeof buildDetail>): TaskActions =>
+  listTaskActions({ failure: detail.card.failure, question: decideQuestionAnswers(detail) });
 
 /** Returns the ids of every action, in the order down the sheet. */
 const listIdsDownTheSheet = (actions: TaskActions): readonly string[] =>
-  [...actions.failure, ...actions.question, ...actions.foot.start, actions.foot.end].map(
-    (action) => action.id,
-  );
+  [
+    ...actions.failure,
+    ...(actions.openThread === null ? [] : [actions.openThread]),
+    ...actions.foot.start,
+    actions.foot.end,
+  ].map((action) => action.id);
 
 const ASKING = buildDetailSession("s1", {
   openRequests: [
@@ -24,13 +32,13 @@ const ASKING = buildDetailSession("s1", {
 
 describe("the actions of the pane", () => {
   it("lists only the foot for a Task with nothing to do", () => {
-    const actions = listTaskActions(buildDetail(buildCard("a")));
+    const actions = listActionsForDetail(buildDetail(buildCard("a")));
     expect(listIdsDownTheSheet(actions)).toEqual(["done", "start-thread", "merge", "drop"]);
     expect(actions.returnKey).toBeNull();
   });
 
   it("puts the foot's words and keys on the buttons", () => {
-    const { foot } = listTaskActions(buildDetail(buildCard("a")));
+    const { foot } = listActionsForDetail(buildDetail(buildCard("a")));
     expect([...foot.start, foot.end].map((a) => [a.label, a.keyHint])).toEqual([
       ["Done", "D"],
       ["Start a thread", "T"],
@@ -40,7 +48,7 @@ describe("the actions of the pane", () => {
   });
 
   it("leads a failed Task with Try again, filled, then Open the run, and Return tries again", () => {
-    const actions = listTaskActions(buildDetail(buildCard("a", { failure: FAILURE })));
+    const actions = listActionsForDetail(buildDetail(buildCard("a", { failure: FAILURE })));
     expect(listIdsDownTheSheet(actions)).toEqual([
       "try-again",
       "open-run",
@@ -58,7 +66,7 @@ describe("the actions of the pane", () => {
 
   it("puts the question under the failure, and Return still tries again", () => {
     const card = { ...buildAskingCard("s1", "r1"), failure: FAILURE };
-    const actions = listTaskActions(buildDetail(card, ASKING));
+    const actions = listActionsForDetail(buildDetail(card, ASKING));
     expect(listIdsDownTheSheet(actions).slice(0, 3)).toEqual([
       "try-again",
       "open-run",
@@ -68,7 +76,7 @@ describe("the actions of the pane", () => {
   });
 
   it("offers Open thread under a question, and Return sends the suggested answer", () => {
-    const actions = listTaskActions(buildDetail(buildAskingCard("s1", "r1"), ASKING));
+    const actions = listActionsForDetail(buildDetail(buildAskingCard("s1", "r1"), ASKING));
     expect(listIdsDownTheSheet(actions)).toEqual([
       "open-thread",
       "done",
@@ -83,8 +91,8 @@ describe("the actions of the pane", () => {
     const asking = buildDetailSession("s1", {
       openRequests: [buildQuestionRequest("r1", [buildQuestion("Why")])],
     });
-    const actions = listTaskActions(buildDetail(buildAskingCard("s1", "r1"), asking));
-    expect(actions.question.map((a) => a.id)).toEqual(["open-thread"]);
+    const actions = listActionsForDetail(buildDetail(buildAskingCard("s1", "r1"), asking));
+    expect(actions.openThread?.id).toBe("open-thread");
     expect(actions.returnKey).toBeNull();
   });
 
@@ -92,15 +100,23 @@ describe("the actions of the pane", () => {
     const several = buildDetailSession("s1", {
       openRequests: [buildQuestionRequest("r1", [buildQuestion("A"), buildQuestion("B")])],
     });
-    const actions = listTaskActions(buildDetail(buildAskingCard("s1", "r1"), several));
-    expect(actions.question.map((a) => a.id)).toEqual(["open-thread"]);
+    const actions = listActionsForDetail(buildDetail(buildAskingCard("s1", "r1"), several));
+    expect(actions.openThread?.id).toBe("open-thread");
     expect(actions.returnKey).toBeNull();
   });
 
   it("offers no Open thread when the question closed", () => {
-    const actions = listTaskActions(
+    const actions = listActionsForDetail(
       buildDetail(buildAskingCard("s1", "r1"), buildDetailSession("s1")),
     );
-    expect(actions.question).toEqual([]);
+    expect(actions.openThread).toBeNull();
+  });
+
+  it("takes the failure from the facts it is given, apart from the question", () => {
+    const question = decideQuestionAnswers(buildDetail(buildAskingCard("s1", "r1"), ASKING));
+    const actions = listTaskActions({ failure: FAILURE, question });
+    expect(actions.failure.map((a) => a.id)).toEqual(["try-again", "open-run"]);
+    expect(actions.openThread?.id).toBe("open-thread");
+    expect(listTaskActions({ failure: undefined, question }).failure).toEqual([]);
   });
 });

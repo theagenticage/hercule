@@ -660,7 +660,9 @@ describe("the join rule, after a merge", () => {
     const result = await run(() =>
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const survivor = yield* createTask("Refund flow");
+        // The survivor has the title the generated one replaces, so only the merged check of
+        // the title adoption keeps it from being renamed.
+        const survivor = yield* createTask("a session");
         const made = yield* tasks.joinSession({
           requestedTaskId: undefined,
           callerTaskId: undefined,
@@ -684,7 +686,7 @@ describe("the join rule, after a merge", () => {
       }),
     );
 
-    expect(result.title).toBe("Refund flow");
+    expect(result.title).toBe("a session");
     expect(result.newUpdates).toBe(0);
   });
 });
@@ -705,7 +707,7 @@ describe("a summary", () => {
         );
         const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 5 });
         yield* merge(source.id, survivor.id);
-        const stored = yield* tasks.completeSummary({
+        const stored = yield* tasks.storeSummary({
           taskId: attempt!.taskId,
           dirtyRevision: attempt!.dirtyRevision,
           summary: { line: "Refunds fail", standing: "Found.", left: "A fix." },
@@ -732,6 +734,31 @@ describe("a summary", () => {
     expect(result.stored).toBe(false);
     expect(result.failed).toBe(false);
     expect(result.rows).toEqual([[result.survivor.id, true]]);
+  });
+});
+
+describe("the survivor's summary", () => {
+  it.each([
+    ["with its description changed by the merge", "Refunds fail", "Refunds fail on gift cards"],
+    ["with its description kept", "", "Refunds fail on gift cards"],
+  ])("is marked as out of date once, %s", async (_name, sourceDescription, survivorDescription) => {
+    const raised = await run(() =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const source = yield* createTask("Refund bug", { description: sourceDescription });
+        const survivor = yield* createTask("Refund flow", { description: survivorDescription });
+        const readRevision = Effect.map(
+          sql<{ readonly dirty_revision: number }>`
+            SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(survivor.id)}`,
+          (rows) => rows[0]?.dirty_revision ?? 0,
+        );
+        const before = yield* readRevision;
+        yield* merge(source.id, survivor.id);
+        return (yield* readRevision) - before;
+      }),
+    );
+
+    expect(raised).toBe(1);
   });
 });
 

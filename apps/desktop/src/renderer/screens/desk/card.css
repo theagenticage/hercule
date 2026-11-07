@@ -99,6 +99,11 @@
 .desk-card.is-selected .card-check {
   opacity: 1;
   transform: none;
+  /* A check that is drawn already selected grows in from the hidden look. */
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.5);
+  }
 }
 /* Pressing is a dent, not an animation. */
 .desk-card:active:not(.is-carried) {

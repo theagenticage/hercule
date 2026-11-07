@@ -27,8 +27,24 @@ import {
 import { buildPendingIntentsKey, UNDO_WINDOW_MS } from "../../../app/pending-intents";
 import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 
+// The ids of the cards that drew, in order. A card's reading for a screen
+// reader is built on every draw of that card and nowhere else, so the list
+// shows which cards a change drew again.
+const drawnCardIds = vi.hoisted(() => [] as string[]);
+vi.mock("@hercule/client-core/work", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@hercule/client-core/work")>();
+  return {
+    ...original,
+    describeCardForReader: (...args: Parameters<typeof original.describeCardForReader>) => {
+      drawnCardIds.push(args[0].id);
+      return original.describeCardForReader(...args);
+    },
+  };
+});
+
 // The board stops the paws of a working colleague whose card is out of view.
 beforeEach(() => {
+  drawnCardIds.length = 0;
   stubIntersectionObserver();
 });
 
@@ -259,6 +275,76 @@ describe("the Work screen", () => {
 
     await screen.findByRole("button", { name: /^Order history hides refunded items/ });
     expect(countBoardReads(calls)).toBe(before + 1);
+  });
+
+  it("draws only the card a board read changed", async () => {
+    let title = "Order history hides cancelled items";
+    const { live } = await openWork({
+      board: () =>
+        buildBoard(
+          ...CARDS.map((card) => (card.id === buildTaskId(3) ? { ...card, title } : card)),
+        ),
+    });
+    await screen.findByRole("button", { name: /^Order history hides cancelled items/ });
+    await live.waitForFirstPushes();
+    drawnCardIds.length = 0;
+
+    title = "Order history hides refunded items";
+    live.pushInvalidation("task", [buildTaskId(3)]);
+
+    await screen.findByRole("button", { name: /^Order history hides refunded items/ });
+    expect(new Set(drawnCardIds)).toEqual(new Set([buildTaskId(3)]));
+  });
+
+  it("draws only the two cards that gain or lose the tab stop when another card's details open", async () => {
+    const user = userEvent.setup();
+    const task = CARDS[2]!;
+    const other = CARDS[4]!;
+    await openWork({
+      handlers: {
+        [detailPath(task.id)]: { body: buildDetail(task) },
+        [detailPath(other.id)]: { body: buildDetail(other) },
+      },
+    });
+    await user.click(
+      await screen.findByRole("button", { name: /^Order history hides cancelled items/ }),
+    );
+    await screen.findByRole("dialog", { name: "Order history hides cancelled items" });
+    drawnCardIds.length = 0;
+
+    await user.click(getCard("Tidy the depot labels"));
+    await screen.findByRole("dialog", { name: "Tidy the depot labels" });
+
+    // The card that was pressed takes the tab stop from the one pressed before.
+    expect(new Set(drawnCardIds)).toEqual(new Set([task.id, other.id]));
+  });
+
+  it("keeps the dent on the open Task's card when a read moves the card to another cell", async () => {
+    const user = userEvent.setup();
+    const task = CARDS[2]!;
+    let stage: BoardStage = "planned";
+    const { live } = await openWork({
+      board: () =>
+        buildBoard(...CARDS.map((card) => (card.id === task.id ? { ...card, stage } : card))),
+      handlers: { [detailPath(task.id)]: { body: buildDetail(task) } },
+    });
+    await user.click(
+      await screen.findByRole("button", { name: /^Order history hides cancelled items/ }),
+    );
+    await screen.findByRole("dialog", { name: "Order history hides cancelled items" });
+    await live.waitForFirstPushes();
+    const before = getCard("Order history hides cancelled items");
+    expect(before.hasAttribute("data-away")).toBe(true);
+
+    stage = "building";
+    live.pushInvalidation("task", [task.id]);
+
+    await waitFor(() => {
+      expect(getCard("Order history hides cancelled items").closest("[data-stage]")).not.toBe(
+        before.closest("[data-stage]"),
+      );
+    });
+    expect(getCard("Order history hides cancelled items").hasAttribute("data-away")).toBe(true);
   });
 
   it("reads nothing while the window is hidden, and reads once when it shows", async () => {
@@ -1054,7 +1140,7 @@ describe("the Work screen's details pane", () => {
     const before = countDetailReads(calls, SUMMARISED_CARD.id);
 
     standing = "The carrier answered.";
-    live.pushInvalidation("task", [SUMMARISED_CARD.id], undefined, "updated", true);
+    live.pushInvalidation("task", [SUMMARISED_CARD.id], { derived: true });
 
     await screen.findByText("The carrier answered.");
     expect(countDetailReads(calls, SUMMARISED_CARD.id)).toBe(before + 1);
@@ -1128,7 +1214,7 @@ describe("the Work screen's details pane", () => {
     await live.waitForFirstPushes();
 
     isDeleted = true;
-    live.pushInvalidation("task", [task.id], undefined, "updated", true);
+    live.pushInvalidation("task", [task.id], { derived: true });
 
     expect(await screen.findByText("This Task no longer exists.")).toBeTruthy();
     expect(within(pane).queryByRole("button", { name: /^Done/ })).toBeNull();
@@ -1542,7 +1628,7 @@ describe("trying a failed run again from the details pane", () => {
     fireEvent.click(button);
     fireEvent.click(button);
 
-    expect(await screen.findByText("Tried again on Cache delivery slot lookups.")).toBeTruthy();
+    expect(await screen.findByText('Tried again on "Cache delivery slot lookups".')).toBeTruthy();
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -1602,7 +1688,7 @@ describe("trying a failed run again from the details pane", () => {
     [
       "puts the failure back",
       { body: { outcome: "restored", stopRequested: true } },
-      "Put back: Tried again on Cache delivery slot lookups.",
+      'Put back: Tried again on "Cache delivery slot lookups".',
     ],
     [
       "says why the Task stays as it is, and that the run was only asked to stop",
@@ -1613,12 +1699,12 @@ describe("trying a failed run again from the details pane", () => {
           reason: "The Task is already done or dropped.",
         },
       },
-      "Could not put back: Tried again on Cache delivery slot lookups. The Task is already done or dropped. The run was asked to stop.",
+      'Could not put back: Tried again on "Cache delivery slot lookups". The Task is already done or dropped. The run was asked to stop.',
     ],
     [
       "says the run already ran",
       { body: { outcome: "too-late", stopRequested: false } },
-      "Could not put back: Tried again on Cache delivery slot lookups. The run had already ended, so nothing was put back.",
+      'Could not put back: Tried again on "Cache delivery slot lookups". The run had already ended, so nothing was put back.',
     ],
   ])("undoes it and %s", async (_name, undo, line) => {
     const user = userEvent.setup({ delay: null });
@@ -1655,7 +1741,7 @@ describe("trying a failed run again from the details pane", () => {
 
       expect(
         await screen.findByText(
-          `Cache delivery slot lookups is starting again, so it cannot be ${past} yet. Try again in a moment.`,
+          `"Cache delivery slot lookups" is starting again, so it cannot be ${past} yet. Try again in a moment.`,
         ),
       ).toBeTruthy();
       expect(listCalls(calls, `PATCH /api/v1/tasks/${FAILED.id}`)).toHaveLength(0);
@@ -1675,7 +1761,7 @@ describe("trying a failed run again from the details pane", () => {
 
     expect(
       await screen.findByText(
-        "Could not try Cache delivery slot lookups again: The runner is away.",
+        'Could not try "Cache delivery slot lookups" again: The runner is away.',
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
@@ -2238,7 +2324,7 @@ describe("merging two cards", () => {
     await user.keyboard("{Enter}");
 
     expect(screen.queryByRole("button", { name: /^Label the pallets/ })).toBeNull();
-    expect(screen.getByText("Merged into Weigh the parcels.")).toBeTruthy();
+    expect(screen.getByText('Merged into "Weigh the parcels".')).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Undo/ })).toBeTruthy();
     expect(getCard("Weigh the parcels").hasAttribute("data-merge-target")).toBe(false);
     expect(document.querySelector(".work-desk")?.hasAttribute("data-merge-picking")).toBe(false);
@@ -2621,5 +2707,110 @@ describe("selecting several cards", () => {
     });
     expect(readBodies(calls, `POST /api/v1/tasks/${PACK.id}/move`)).toHaveLength(1);
     expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toHaveLength(0);
+  });
+});
+
+describe("the runs of a Task in the details pane", () => {
+  const ASKING = CARDS[0]!;
+  const RUNNING_ID = buildTaskId(970);
+  const FINISHED_ID = buildTaskId(971);
+  const RUNNING = {
+    id: RUNNING_ID,
+    workflowId: null,
+    workflowName: "Review PR",
+    status: "running" as const,
+    createdAt: "2026-09-29T09:00:00.000Z",
+    awaitedSignalIds: [],
+  };
+  const FINISHED = {
+    ...RUNNING,
+    id: FINISHED_ID,
+    workflowName: "Check the refund rules",
+    status: "completed" as const,
+    finishedAt: "2026-09-29T09:05:00.000Z",
+  };
+  const STOP_PATH = `POST /api/v1/runs/${RUNNING_ID}/cancel`;
+  /** The run `run.cancel` returns once the controller has taken the request. */
+  const CANCELLED = {
+    id: RUNNING_ID,
+    workflowId: null,
+    plan: { name: "Review PR", inputs: [], triggers: [], steps: [], edges: [] },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    runnerId: buildTaskId(7001),
+    workspaceId: buildTaskId(7002),
+    subscriptions: [],
+    createdAt: RUNNING.createdAt,
+    status: "cancelled",
+    finishedAt: "2026-09-29T09:06:00.000Z",
+    steps: [],
+    edgeTraversals: [],
+  };
+
+  /** Opens the pane of the asking Task, whose details list a running and a finished run, and returns it. */
+  const openPane = async (handlers: Readonly<Record<string, Handler>> = {}) => {
+    const user = userEvent.setup({ delay: null });
+    const opened = await openWork({
+      handlers: {
+        [detailPath(ASKING.id)]: {
+          body: buildDetail(ASKING, { runs: [RUNNING, FINISHED], runCount: 5 }),
+        },
+        ...handlers,
+      },
+    });
+    await user.click(
+      await screen.findByRole("button", { name: /^Refund emails show the wrong currency/ }),
+    );
+    const pane = await screen.findByRole("dialog", { name: ASKING.title });
+    await within(pane).findByText("Check the refund rules");
+    return { ...opened, user, pane };
+  };
+
+  it("lists the runs with where each one is, and says how many more there are", async () => {
+    const { pane } = await openPane();
+
+    expect(within(pane).getByRole("button", { name: /Review PR\s*Running/ })).toBeTruthy();
+    expect(
+      within(pane).getByRole("button", { name: /Check the refund rules\s*Done/ }),
+    ).toBeTruthy();
+    expect(within(pane).getByText("and 3 more")).toBeTruthy();
+    // Only a live run offers Stop.
+    expect(within(pane).getAllByText("Stop")).toHaveLength(1);
+  });
+
+  it("opens the run from its row", async () => {
+    const { user, pane, router } = await openPane();
+
+    await user.click(within(pane).getByRole("button", { name: /Check the refund rules/ }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/runs/${FINISHED_ID}`);
+    });
+  });
+
+  it("stops a live run, keeps its workspace, and says it was asked to stop, with no Undo", async () => {
+    const { user, pane, calls } = await openPane({ [STOP_PATH]: { body: CANCELLED } });
+
+    // The button shows when the row is hovered or focused, which the stylesheet decides.
+    await user.click(within(pane).getByText("Stop"));
+
+    expect(await screen.findByText('Asked "Review PR" to stop.')).toBeTruthy();
+    expect(readBodies(calls, STOP_PATH)).toEqual([{ keepWorkspace: true }]);
+    expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
+  });
+
+  it("says why when the controller refuses to stop the run", async () => {
+    const { user, pane } = await openPane({
+      [STOP_PATH]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The run has already ended."),
+      },
+    });
+
+    await user.click(within(pane).getByText("Stop"));
+
+    expect(
+      await screen.findByText('Could not stop "Review PR": The run has already ended.'),
+    ).toBeTruthy();
   });
 });

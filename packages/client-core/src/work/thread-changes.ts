@@ -3,6 +3,7 @@
  * its own: the request a start sends, and the words around both.
  */
 import type { SessionSpawnInput, Workspace, WorkCard } from "@hercule/contract";
+import { dropClosingFullStops } from "../text";
 import { shortenTitle } from "./describe-card-move";
 
 /** The Task a Thread is started on: what the request needs of its card. */
@@ -78,7 +79,7 @@ export const describeThreadStarted = (card: Pick<WorkCard, "title">): string =>
  * pane's line.
  */
 export const describeThreadRefused = (card: Pick<WorkCard, "title">, reason: string): string =>
-  `Could not start a thread on "${shortenTitle(card.title)}": ${reason.replace(/\.+$/, "")}. Your words are back in the pane.`;
+  `Could not start a thread on "${shortenTitle(card.title)}": ${dropClosingFullStops(reason)}. Your words are back in the pane.`;
 
 /**
  * Returns the sentence that goes where "Move to a new Task" is offered, before

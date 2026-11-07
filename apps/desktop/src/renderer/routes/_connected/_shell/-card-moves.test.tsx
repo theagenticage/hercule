@@ -56,6 +56,7 @@ interface HeldMove {
  */
 const buildClient = (readBoard: () => WorkBoard | Promise<WorkBoard>) => {
   const held: HeldMove[] = [];
+  let token = "token-of-ada";
   const hold =
     (via: HeldMove["via"]) =>
     ({ params, payload }: { params: { id: string }; payload: unknown }) =>
@@ -73,13 +74,18 @@ const buildClient = (readBoard: () => WorkBoard | Promise<WorkBoard>) => {
         });
       });
   const client = {
+    getToken: () => token,
     task: {
       queryBoard: () => Promise.resolve().then(readBoard),
       move: hold("move"),
       update: hold("update"),
     },
   } as unknown as HerculeClient;
-  return { client, held };
+  /** Signs out and signs in as another user: the client then holds another token. */
+  const signInAsAnotherUser = (): void => {
+    token = "token-of-grace";
+  };
+  return { client, held, signInAsAnotherUser };
 };
 
 /** A read the test answers when it chooses. */
@@ -104,7 +110,7 @@ const holdReads = () => {
 };
 
 const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) => {
-  const { client, held } = buildClient(readBoard);
+  const { client, held, signInAsAnotherUser } = buildClient(readBoard);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(queryKeys.workBoard(), BOARD);
   const undoStack = createUndoStack<CardMover>();
@@ -139,7 +145,17 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
   const view = mount();
   const findStage = (id: string, board = view.result.current.board) =>
     board?.cards.find((card) => card.id === id)?.stage;
-  return { ...view, held, client, queryClient, undoStack, findStage, mount, returning };
+  return {
+    ...view,
+    held,
+    client,
+    queryClient,
+    undoStack,
+    findStage,
+    mount,
+    returning,
+    signInAsAnotherUser,
+  };
 };
 
 /** Waits until `count` requests have been sent. A move is sent a moment after it is made. */
@@ -808,6 +824,24 @@ describe("useCardMoves", () => {
       expect(result.current.line.text).toBe('Dropped "Task a". It has left the board.');
     });
 
+    it("gives each card its own Undo again after a group of cards that stopped with an error", () => {
+      const { result } = setUp();
+      act(() => {
+        expect(() => {
+          result.current.endCardsTogether("done", () => {
+            result.current.endCard("a", "done");
+            throw new Error("stopped");
+          });
+        }).toThrow("stopped");
+      });
+
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+
+      expect(result.current.line.text).toBe('Marked "Task b" Done. It has left the board.');
+    });
+
     it("writes the answered end into the cached board, so a late read cannot bring the card back", async () => {
       const { result, held, queryClient } = setUp(() => withoutTask("b"));
       act(() => {
@@ -959,6 +993,55 @@ describe("useCardMoves", () => {
   });
 });
 
+describe("useCardMoves across a sign-out", () => {
+  /** The board the next user loads: the card "a" is still in Building there. */
+  const NEXT_USERS_BOARD = buildBoard(
+    buildCard("a", { stage: "building" }),
+    buildCard("b", { stage: "building" }),
+  );
+
+  it("does not write the answer of a move into the cache of the next user", async () => {
+    const { result, held, queryClient, signInAsAnotherUser } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+    });
+    await waitForRequests(held, 1);
+
+    signInAsAnotherUser();
+    act(() => {
+      queryClient.setQueryData(queryKeys.workBoard(), NEXT_USERS_BOARD);
+    });
+    await act(() => {
+      held[0]!.accept();
+      return Promise.resolve();
+    });
+    await settleQueue();
+
+    expect(
+      queryClient.getQueryData<WorkBoard>(queryKeys.workBoard())?.cards.map((card) => card.stage),
+    ).toEqual(["building", "building"]);
+  });
+
+  it("does not send a queued move, nor say that it failed, for a user who has signed out", async () => {
+    const { result, held, signInAsAnotherUser } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      result.current.moveCard({ taskId: "b", stage: "in-review" }, "Moved b");
+    });
+    await waitForRequests(held, 1);
+
+    signInAsAnotherUser();
+    await act(() => {
+      held[0]!.refuse("Not allowed.");
+      return Promise.resolve();
+    });
+    await settleQueue();
+
+    expect(held).toHaveLength(1);
+    expect(result.current.line.text).not.toContain("did not save");
+  });
+});
+
 describe("useCardMoves with several cards at once", () => {
   /** Accepts the request at `index` and lets the queue go on. */
   const accept = async (held: readonly HeldMove[], index: number): Promise<void> => {
@@ -1043,6 +1126,41 @@ describe("useCardMoves with several cards at once", () => {
     await waitFor(() => {
       expect(result.current.line.text).toBe("Nothing to undo.");
     });
+  });
+
+  it("moves a second card whose place the first card's move left looking unchanged, and undoes both", async () => {
+    const { result, queryClient, held } = setUp();
+    // One cell of three cards: dragging a and b to the end puts them after c.
+    act(() => {
+      queryClient.setQueryData(
+        queryKeys.workBoard(),
+        buildBoard(
+          buildCard("a", { stage: "building" }),
+          buildCard("b", { stage: "building" }),
+          buildCard("c", { stage: "building" }),
+        ),
+      );
+    });
+
+    act(() => {
+      result.current.moveCards(
+        [
+          { taskId: "a", stage: "building", afterTaskId: "c" },
+          { taskId: "b", stage: "building", afterTaskId: "a" },
+        ],
+        () => "Moved 2 Tasks",
+      );
+    });
+
+    expect(listIds(result.current.board!.cards)).toEqual(["c", "a", "b"]);
+    await acceptRequests(held, 0, 2);
+    expect(held.map((each) => each.taskId)).toEqual(["a", "b"]);
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+
+    expect(listIds(result.current.board!.cards)).toEqual(["a", "b", "c"]);
   });
 
   it("leaves out a move that changes nothing, and gives the words only the moves that remain", async () => {

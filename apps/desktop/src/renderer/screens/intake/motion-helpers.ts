@@ -1,6 +1,6 @@
 /**
  * Small helpers the motion of Intake's lists and of Tracking share: where
- * things are on screen, whether motion plays, and copies of elements to move.
+ * things are on screen and whether motion plays.
  */
 import { isMotionReduced } from "../../app/motion";
 
@@ -19,18 +19,3 @@ export const isOnScreen = (place: RowPlace, viewport: RowPlace): boolean =>
  * a page with no stylesheet, as in tests, reduces it) and someone can see the window.
  */
 export const isMotionShown = (): boolean => !document.hidden && !isMotionReduced();
-
-/**
- * Returns a copy of `element` to animate where it was, such as a row that
- * leaves. The copy keeps the element's look, but loses every `id` and `data-*`
- * attribute, so neither the page's ids nor a query for its data ever finds it.
- */
-export const copyElementWithoutIds = (element: HTMLElement): HTMLElement => {
-  const copy = element.cloneNode(true) as HTMLElement;
-  for (const each of [copy, ...copy.querySelectorAll<HTMLElement>("*")]) {
-    for (const name of each.getAttributeNames()) {
-      if (name === "id" || name.startsWith("data-")) each.removeAttribute(name);
-    }
-  }
-  return copy;
-};

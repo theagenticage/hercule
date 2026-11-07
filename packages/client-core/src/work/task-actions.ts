@@ -3,7 +3,8 @@
  * pane draws and wires what this returns; it decides no label, no key and no
  * order of its own.
  */
-import { decideQuestionAnswers, type TaskQuestionSource } from "./question-answers";
+import type { WorkCard } from "@hercule/contract";
+import type { TaskQuestion } from "./question-answers";
 
 export type TaskActionId =
   | "try-again"
@@ -28,8 +29,8 @@ export interface TaskAction {
 export interface TaskActions {
   /** Under a failure: Try again, Open the run. Empty when the Task has no failure. */
   readonly failure: readonly TaskAction[];
-  /** Under an open question the pane shows: Open thread. Empty when it shows none. */
-  readonly question: readonly TaskAction[];
+  /** Under an open question the pane shows: Open thread. `null` when it shows none. */
+  readonly openThread: TaskAction | null;
   /** The foot: Done, Start a thread and Merge on the left, Drop alone at the right. */
   readonly foot: {
     readonly start: readonly TaskAction[];
@@ -68,22 +69,31 @@ const MERGE: TaskAction = { id: "merge", label: "Merge", keyHint: "M", filled: f
 const DROP: TaskAction = { id: "drop", label: "Drop", keyHint: "⌫", filled: false };
 
 /**
- * Lists the actions of the pane for `detail`. A failure leads, and a question
- * sits under it, so down the sheet the order is Try again, Open the run, Open
- * thread, Done, Drop. Done and Drop stay in the foot on every Task, failed or
- * not.
+ * What the actions depend on. The caller picks where each comes from, so the
+ * pane's buttons and its Return key read the same card for the failure.
+ */
+export interface TaskActionFacts {
+  /** The failure of the Task's card, or `undefined` for a Task that has none. */
+  readonly failure: WorkCard["failure"];
+  /** The question the pane shows (`decideQuestionAnswers`), or `null` when it shows none. */
+  readonly question: TaskQuestion | null;
+}
+
+/**
+ * Lists the actions of the pane for a Task with these `facts`. A failure
+ * leads, and a question sits under it, so down the sheet the order is Try
+ * again, Open the run, Open thread, Done, Drop. Done and Drop stay in the foot
+ * on every Task, failed or not.
  *
  * Open thread is on every question the pane shows, whether the pane answers
- * it or only shows it. A question the pane cannot find (it closed, or its
- * Thread is not among the listed ones) gets no action.
+ * it or only shows it. A Task with no question to show gets no action.
  */
-export const listTaskActions = (detail: TaskQuestionSource): TaskActions => {
-  const question = decideQuestionAnswers(detail);
-  const failed = detail.card.failure !== undefined;
+export const listTaskActions = ({ failure, question }: TaskActionFacts): TaskActions => {
+  const failed = failure !== undefined;
   const hasSuggestedAnswer = question?.kind === "answerable" && question.chips.length > 0;
   return {
     failure: failed ? [TRY_AGAIN, OPEN_RUN] : [],
-    question: question === null ? [] : [OPEN_THREAD],
+    openThread: question === null ? null : OPEN_THREAD,
     foot: { start: [DONE, START_THREAD, MERGE], end: DROP },
     returnKey: failed ? "try-again" : hasSuggestedAnswer ? "send-suggested-answer" : null,
   };
