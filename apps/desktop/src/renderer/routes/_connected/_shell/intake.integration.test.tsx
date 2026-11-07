@@ -66,6 +66,7 @@ const GITHUB: PluginDetail = {
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 };
 
 const CONNECTION_ID = "01a06d02-7200-7000-8000-0000000000c1";

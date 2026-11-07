@@ -74,6 +74,10 @@ export const MUTABLE_LIVE_TOPICS = [
   // carry the ids of the sessions whose subagents changed.
   "subagent",
   "signal",
+  // An External Entity changes when a poll reports a new state, and when a
+  // card is taken on, dismissed or restored. It feeds the Inbox, its count and
+  // the marks on Work.
+  "externalEntity",
   // A new Post, a joined participant and a newly shared file announce their
   // Discussion as updated.
   "discussion",

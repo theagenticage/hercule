@@ -42,10 +42,10 @@ describe("readThreadRef", () => {
 
 describe("findTaskToContinue", () => {
   // The describe line runs this lookup for every distinct thread on every
-  // read of To do, so it must start from the few provenance rows of the ref.
+  // read of To do, so it must start from the few link rows of the ref.
   // Without statistics SQLite otherwise starts from the status index and scans
   // every open task.
-  it("starts from the provenance of the ref, not from the status index or a scan of the tasks", async () => {
+  it("starts from the links of the ref, not from the status index or a scan of the tasks", async () => {
     const plan = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -58,13 +58,13 @@ describe("findTaskToContinue", () => {
             return Effect.succeed(statement);
           }),
         );
-        const [text, params] = statements.find(([text]) => text.includes("FROM tasks"))!;
+        const [text, params] = statements.find(([text]) => text.includes("task_entity_links"))!;
         return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     const details = plan.map((step) => step.detail);
-    expect(details.some((detail) => detail.includes("task_provenance"))).toBe(true);
+    expect(details.some((detail) => detail.includes("task_entity_links"))).toBe(true);
     expect(details.some((detail) => detail.includes("tasks_status_updated_at"))).toBe(false);
     expect(details.some((detail) => detail.startsWith("SCAN tasks"))).toBe(false);
   });

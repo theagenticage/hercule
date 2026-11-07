@@ -28,6 +28,7 @@ const buildPlugin = (id: string, displayName: string): PluginDetail => ({
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /** Builds a signal of `kind` resolved by the user at `at`. */

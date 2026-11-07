@@ -15,13 +15,19 @@ export const buildCard = (id: string, overrides: Partial<WorkCard> = {}): WorkCa
   createdAt: "2026-11-01T09:00:00.000Z",
   stageChangedAt: "2026-11-01T09:00:00.000Z",
   lastActivityAt: "2026-11-01T09:00:00.000Z",
+  entityMarks: [],
+  contextRefs: [],
   ...overrides,
 });
 
-/** Returns a board of these cards, in this order. */
+/** Returns a board of these cards, in this order, with no outside places. */
 export const buildBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   cards,
   truncated: false,
+  places: [],
+  edges: [],
+  groupings: [],
+  contextComplete: true,
 });
 
 /** A failure for a card, from the invented "Review PR" workflow. */

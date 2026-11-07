@@ -41,6 +41,35 @@ export {
 } from "./connections";
 
 export {
+  ENTITY_FACT_FORMS,
+  ENTITY_REASON_TONES,
+  ENTITY_STATUS_SHAPES,
+  ENTITY_STATUS_STAGES,
+  ENTITY_STATUS_TONES,
+  EntityFactDeclaration,
+  EntityKindDeclaration,
+  EntityObservation,
+  EntityObservationRelations,
+  EntityProgress,
+  EntityReasonDeclaration,
+  EntityRepository,
+  EntityStatusDeclaration,
+  EntityTemplate,
+  MAX_ENTITY_FIELDS,
+  MAX_ENTITY_FIELD_NAME_LENGTH,
+  MAX_ENTITY_FIELD_TEXT_LENGTH,
+  MAX_ENTITY_OBSERVATIONS,
+  MAX_ENTITY_RELATIONS,
+  QualifiedEntityKindDeclaration,
+  type EntityInventory,
+  type EntityLookup,
+  type EntityLookupContext,
+  type EntityRecognition,
+  type EntityResolution,
+  type IngestEntities,
+} from "./entities";
+
+export {
   ActionError,
   AuthError,
   BINDING_PLACES,

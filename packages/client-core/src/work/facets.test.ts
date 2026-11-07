@@ -19,7 +19,7 @@ const BOARD = buildBoard(
   buildCard("loose"),
 );
 
-const FACETS = buildWorkFacets(buildLanes(BOARD, PROJECTS));
+const FACETS = buildWorkFacets(buildLanes(BOARD, PROJECTS), BOARD, []);
 const [STATE, PROJECT] = FACETS;
 
 describe("buildWorkFacets", () => {
@@ -77,7 +77,7 @@ describe("buildWorkFacets", () => {
 
   it("does not exclude a failed card from With an agent", () => {
     const failedAndBusy = buildCard("both", { failure: FAILURE, workingSessionId: "s3" });
-    const facets = buildWorkFacets(buildLanes(buildBoard(failedAndBusy), PROJECTS));
+    const facets = buildWorkFacets(buildLanes(buildBoard(failedAndBusy), PROJECTS), buildBoard(failedAndBusy), []);
     expect(listIds(filterItems([failedAndBusy], { state: ["agent"] }, facets))).toEqual(["both"]);
   });
 });

@@ -17,6 +17,7 @@ export const buildPlugin = (id: string, displayName: string, mark?: PluginMark):
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /**

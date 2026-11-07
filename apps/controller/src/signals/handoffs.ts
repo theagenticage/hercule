@@ -92,9 +92,10 @@ export const readThreadRef = (origin: SignalOrigin): Option.Option<ExternalRef> 
     : Option.none();
 
 /**
- * Returns the open Task (status `open` or `in-progress`) whose provenance
- * carries `ref`, or none. When several do, it returns the one updated most
- * recently. A deleted Task is never returned.
+ * Returns the active Task of `ref`, or none: the live Task with the oldest
+ * link to the ref (`findActiveTaskForRef`). A finished or deleted Task is
+ * never returned, and an update to a Task never changes which one is
+ * returned.
  *
  * It takes the task repository, not `TaskService`, because the describe line
  * runs this same lookup and reads rows directly (see the describer's module
@@ -104,21 +105,7 @@ export const readThreadRef = (origin: SignalOrigin): Option.Option<ExternalRef> 
 export const findTaskToContinue = (
   tasks: TaskRepository,
   ref: ExternalRef,
-): Effect.Effect<Option.Option<Task>, SqlError> =>
-  tasks
-    .list(
-      { refs: [ref], status: ["open", "in-progress"] },
-      {
-        limit: 1,
-        cursor: undefined,
-        order: { _tag: "column", sort: [{ field: "updatedAt", direction: "desc" }] },
-      },
-    )
-    .pipe(
-      // No cursor is given, so the listing has none to refuse.
-      Effect.catchTag("CursorError", (error) => Effect.die(error)),
-      Effect.map((page) => Option.fromNullishOr(page.items[0])),
-    );
+): Effect.Effect<Option.Option<Task>, SqlError> => tasks.findActiveTaskForRef(ref);
 
 const make = Effect.gen(function* () {
   const signals = yield* signalRepository;

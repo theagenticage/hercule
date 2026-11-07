@@ -8,7 +8,14 @@
  * by `boardRank` itself, because a card it has moved has no rank it could
  * truthfully compare. See `card-move.ts`.
  */
-import { BOARD_STAGES, type BoardStage, type WorkBoard, type WorkCard } from "@hercule/contract";
+import {
+  BOARD_STAGES,
+  type BoardStage,
+  type EntityProgress,
+  type EntityStatus,
+  type WorkBoard,
+  type WorkCard,
+} from "@hercule/contract";
 
 /** The part of a Project that a lane needs. */
 export interface WorkProject {
@@ -28,14 +35,42 @@ export interface LaneCell {
   readonly cards: readonly WorkCard[];
 }
 
-/** One lane of the board: a Project and its five cells, in `BOARD_STAGES` order. */
+/** What a card says when its Task stands under more than one place of the lane's kind. */
+export interface CardPlaces {
+  /** For example "In 2 projects". */
+  readonly summary: string;
+  /** The title of each place, for the hover. */
+  readonly names: readonly string[];
+}
+
+/**
+ * What a lane for an outside place adds to a lane (see `context-lanes.ts`).
+ * The lane belongs to the source: a drop there changes a card's stage and
+ * never its membership.
+ */
+export interface OutsideLane {
+  /** The plugin whose mark the lane shows, or `null` for the "No <caption>" lane, which has no mark. */
+  readonly pluginId: string | null;
+  /** The words for the kind of place, such as "Linear project". */
+  readonly caption: string;
+  /** What the place says about itself. Absent for the "No <caption>" lane or when it reports none. */
+  readonly status?: EntityStatus;
+  /** Only when the source reports it. It is never worked out from the cards. */
+  readonly progress?: EntityProgress;
+  /** By Task id: the cards of this lane whose Task stands under more than one place of this kind. */
+  readonly cardPlaces: Readonly<Record<string, CardPlaces>>;
+}
+
+/** One lane of the board: a Project (or an outside place) and its five cells, in `BOARD_STAGES` order. */
 export interface WorkLane {
-  /** The Project's id, or `NO_PROJECT_LANE_ID`. */
+  /** The Project's id, `NO_PROJECT_LANE_ID`, or the id of an outside lane. */
   readonly id: string;
   readonly name: string;
-  /** The Project a card dropped or added in this lane gets: `null` for no Project. */
+  /** The Project a card dropped or added in this lane gets: `null` for no Project. Always `null` for an outside lane. */
   readonly projectId: string | null;
   readonly cells: readonly LaneCell[];
+  /** Set on a lane for an outside place, and on the "No <caption>" lane that goes with them. */
+  readonly outside?: OutsideLane;
 }
 
 /**
@@ -49,15 +84,18 @@ export const chooseLaneId = (card: WorkCard, projectIds: ReadonlySet<string>): s
     ? card.projectId
     : NO_PROJECT_LANE_ID;
 
-const buildLane = (
+/** Returns a lane of these cards, with one cell per board stage. */
+export const buildLane = (
   id: string,
   name: string,
   projectId: string | null,
   cards: readonly WorkCard[],
+  outside?: OutsideLane,
 ): WorkLane => ({
   id,
   name,
   projectId,
+  ...(outside === undefined ? {} : { outside }),
   cells: BOARD_STAGES.map((stage) => ({
     stage,
     cards: cards.filter((card) => card.stage === stage),

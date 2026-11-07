@@ -2,10 +2,12 @@
 export {
   TaskService,
   TaskServiceLayer,
+  type CreatedTaskUndo,
   type FailureRestoration,
   type FailureRestoreRefusal,
   type QueryInput,
   type TaskPage,
+  type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
 export { taskRepository, type BoardTask, type NewTask } from "./repository";

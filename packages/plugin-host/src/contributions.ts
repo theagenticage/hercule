@@ -1,6 +1,7 @@
 import { type Effect, Schema } from "effect";
 import { AccessMode, CredentialVariable, ModelArgument } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
+import type { EntityKindDeclaration, EntityLookup, IngestEntities } from "./entities";
 import { PLUGIN_ID_SOURCE } from "./manifest";
 import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
@@ -356,6 +357,8 @@ export interface IngestContext {
   readonly credentials: () => Effect.Effect<Record<string, string>, ConnectionUnavailable>;
   /** Present only when the manifest requested the `resources` capability. */
   readonly resources?: ConnectionResources;
+  /** Present only when the manifest requested the `entities` capability. */
+  readonly entities?: IngestEntities;
   /**
    * Returns the open signals raised from this Connection's events, read at
    * the moment of the call. A source uses it to watch the threads that have
@@ -453,6 +456,19 @@ export interface EventSourceContribution {
    * reads an event kind the source does not declare.
    */
   readonly signalKinds?: ReadonlyArray<SignalKindDeclaration>;
+  /**
+   * The kinds of External Entity this source reports, such as a pull request.
+   * None when left out. A kind is not a signal kind: `linear/issue` can be
+   * both, in two namespaces. A source that declares entity kinds, or an
+   * `entityLookup`, needs the `entities` capability. The host refuses the
+   * source when two kinds share a word, when two kinds' `refPrefix` overlap
+   * (also across plugins), when an identifier template names no field, when a
+   * `home` or `section` names a kind this source does not declare, or when a
+   * status maps to a stage that is not a Task stage.
+   */
+  readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
+  /** Recognizes, searches and reads this source's things for the Add button on Work. */
+  readonly entityLookup?: EntityLookup;
   /**
    * Starts ingesting for one Connection. The host opens a handle for every
    * Connection of the source's type that is `connected` or `error` while the

@@ -1,11 +1,14 @@
 /**
  * The facets of the Work board's Filter menu, built on the shared filter of
  * `@hercule/client-core/desk`: State (Has a question, Failed, With an agent)
- * and Project. Another state is one more row of `STATE_ROWS`; another facet is
+ * and Project, then Source and one facet for each kind of outside place the
+ * board can group by. Another state is one more row of `STATE_ROWS`; another facet is
  * one more entry of the list `buildWorkFacets` returns.
  */
-import type { WorkCard } from "@hercule/contract";
+import type { WorkBoard, WorkCard } from "@hercule/contract";
 import type { FilterFacet, FilterValue } from "../desk/filter";
+import { namePlugin, type PluginName } from "../intake";
+import { listBoardGroupings, readPlaceName } from "./context-lanes";
 import { chooseLaneId, type WorkLane } from "./lanes";
 
 /** The id of the State facet, whose values are Has a question, Failed and With an agent. */
@@ -13,6 +16,12 @@ const STATE_FACET_ID = "state";
 
 /** The id of the Project facet, which is also the id of the grouping by Project. */
 export const PROJECT_FACET_ID = "project";
+
+/** The id of the Source facet, whose values are the plugins that have a mark on a card. */
+export const SOURCE_FACET_ID = "source";
+
+/** The id of the Source value for a card whose Task links nothing outside. */
+const NO_SOURCE_VALUE_ID = "(none)";
 
 interface StateRow {
   readonly id: string;
@@ -55,12 +64,63 @@ const buildProjectFacet = (lanes: readonly WorkLane[]): FilterFacet<WorkCard> =>
   };
 };
 
+const buildSourceFacet = (
+  cards: readonly WorkCard[],
+  plugins: readonly PluginName[],
+): FilterFacet<WorkCard> | undefined => {
+  const pluginIds = [...new Set(cards.flatMap((card) => card.entityMarks.map((mark) => mark.plugin)))];
+  if (pluginIds.length === 0) return undefined;
+  const values = pluginIds
+    .map((pluginId) => ({ id: pluginId, name: namePlugin(pluginId, plugins) }))
+    .toSorted((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
+  return {
+    id: SOURCE_FACET_ID,
+    caption: "Source",
+    values: [...values, { id: NO_SOURCE_VALUE_ID, name: "No source" }],
+    hasValue: (card, valueId) =>
+      valueId === NO_SOURCE_VALUE_ID
+        ? card.entityMarks.length === 0
+        : card.entityMarks.some((mark) => mark.plugin === valueId),
+  };
+};
+
 /**
- * Returns the facets of the Filter menu, in menu order. `lanes` must be the
- * lanes of the whole board, not the lanes the filter leaves, so that a
- * Project the filter hides stays in the menu to be chosen again.
+ * Returns one facet for each kind of outside place the board can group by. Its
+ * id is the kind, its caption the kind's words ("Linear project"), and its
+ * values the places of that kind. A card has a place when the place is in its
+ * `contextRefs`. Filtering only narrows the cards: it never changes a Task's
+ * Project or Initiative.
  */
-export const buildWorkFacets = (lanes: readonly WorkLane[]): readonly FilterFacet<WorkCard>[] => [
-  buildStateFacet(),
-  buildProjectFacet(lanes),
-];
+const buildContextFacets = (
+  board: Pick<WorkBoard, "places" | "groupings">,
+): readonly FilterFacet<WorkCard>[] =>
+  listBoardGroupings(board).map((grouping) => ({
+    id: grouping.kind,
+    caption: grouping.caption,
+    values: board.places
+      .filter((place) => place.kind === grouping.kind)
+      .map((place) => ({ id: place.ref, name: readPlaceName(place) }))
+      .toSorted((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)),
+    hasValue: (card, valueId) => card.contextRefs.includes(valueId),
+  }));
+
+/**
+ * Returns the facets of the Filter menu, in menu order: State, Project, then
+ * Source (when a card links something outside) and the outside places. `lanes`
+ * must be the Project lanes of the whole board, and `board` the whole board,
+ * not what the filter leaves, so that a value the filter hides stays in the
+ * menu to be chosen again. `plugins` gives the names of the Source values.
+ */
+export const buildWorkFacets = (
+  lanes: readonly WorkLane[],
+  board: Pick<WorkBoard, "cards" | "places" | "groupings">,
+  plugins: readonly PluginName[],
+): readonly FilterFacet<WorkCard>[] => {
+  const source = buildSourceFacet(board.cards, plugins);
+  return [
+    buildStateFacet(),
+    buildProjectFacet(lanes),
+    ...(source === undefined ? [] : [source]),
+    ...buildContextFacets(board),
+  ];
+};

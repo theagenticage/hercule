@@ -63,6 +63,7 @@ const GITHUB: PluginDetail = {
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 };
 
 const buildSignal = (id: string, title: string): Signal => ({
