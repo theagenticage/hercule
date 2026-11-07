@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import { describeClaim } from "@hercule/client-core/desk";
+import { describeClaim, describeHint } from "@hercule/client-core/desk";
 import type { TuckedLine } from "@hercule/client-core/inbox";
 import { LinkIcon } from "../../icons/link";
 
@@ -55,7 +55,7 @@ export function LinkLines({
         }
         // The end whose text holds the reference is the card itself unless the line names it as the other end.
         const mentioner = line.fromRef === line.otherRef ? line.reference : leadIdentifier;
-        const words = describeClaim(line.claim, plugins, mentioner);
+        const words = describeHint(line, mentioner);
         return (
           <button
             key={`hint:${line.fromRef}>${line.toRef}`}

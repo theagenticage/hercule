@@ -9,7 +9,8 @@ const make = Effect.gen(function* () {
   const entities = yield* externalEntityRepository;
   return SignalEntities.of({
     readByRefs: entities.readSignalEntities,
-    recordArrival: (ref) => Effect.flatMap(nowIso, (now) => entities.recordArrival(ref, now)),
+    recordArrivalAfter: (ref, write) =>
+      Effect.flatMap(nowIso, (now) => entities.recordArrivalAfter(ref, now, write)),
   });
 });
 

@@ -11,6 +11,7 @@ import { EMPTY_BUNDLE, listBundleCardIds, type CardBundle } from "./card-bundles
 import {
   buildInbox,
   buildInboxCard,
+  buildInboxHint,
   buildInboxLink,
   buildInboxPeer,
   buildRequestCard,
@@ -237,7 +238,7 @@ describe("hints", () => {
   const mentioner = buildRequestCard("3", { identifier: "#6263" });
   const mentioned = buildInboxCard("1", { identifier: "OPS-47" });
   const inbox = buildInbox([mentioned, mentioner], {
-    links: [buildInboxLink(mentioner.ref, mentioned.ref, "text")],
+    hints: [buildInboxHint(mentioner.ref, mentioned.ref)],
   });
 
   it("says Mentions under the card whose text holds the reference, and Mentioned in under the other", () => {
@@ -250,7 +251,7 @@ describe("hints", () => {
     expect(bundleOf(layOut(inbox), mentioned.id).lines[0]).toMatchObject({
       fromRef: mentioner.ref,
       toRef: mentioned.ref,
-      claim: { type: "text", evidenceKey: "description" },
+      evidenceKey: "description",
     });
   });
 
@@ -268,10 +269,10 @@ describe("hints", () => {
     const card = buildInboxCard("1");
     const layout = layOut(
       buildInbox([card], {
-        links: [
-          buildInboxLink(card.ref, plain.ref, "text"),
-          buildInboxLink(untitled.ref, card.ref, "text"),
-          buildInboxLink(card.ref, hidden.ref, "text"),
+        hints: [
+          buildInboxHint(card.ref, plain.ref),
+          buildInboxHint(untitled.ref, card.ref),
+          buildInboxHint(card.ref, hidden.ref),
         ],
         peers: [plain, untitled, hidden],
       }),

@@ -11,7 +11,7 @@ import { SignalEntities } from "./signal-entities";
 export interface SignalEntitiesCalls {
   /** The refs of each `readByRefs` call. */
   readonly reads: Array<ReadonlyArray<string>>;
-  /** The ref of each `recordArrival` call. */
+  /** The ref of each `recordArrivalAfter` call. */
   readonly arrivals: Array<string>;
 }
 
@@ -34,9 +34,10 @@ export const buildSignalEntitiesDouble = (
           }),
         );
       }),
-    recordArrival: (ref) =>
-      Effect.sync(() => {
+    recordArrivalAfter: (ref, write) =>
+      Effect.suspend(() => {
         calls.arrivals.push(ref);
+        return write;
       }),
   });
   return { layer, calls };

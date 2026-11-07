@@ -49,11 +49,11 @@ const measurePatienceUsed = (card: RidingCard, nowMs: number): number => {
  * the ref of each rider to the ref of its lead.
  *
  * - A compact thing rides when it has no live Task, so it is a Requests
- *   card, and it has a direct link to a rich thing that is among `cards`
- *   whose firmest claim is `source` or `person`. A `text` claim is a hint and
- *   joins nothing. A compact thing a live Task holds stays on the
- *   with-someone-else side and never rides: its link shows as a quiet row on
- *   the lead.
+ *   card, and it has a direct link to a rich thing that is among `cards`.
+ *   `links` hold only what a source reports or a person made; a hint (a
+ *   reference found in text) is not a link and is never passed in. A compact
+ *   thing a live Task holds stays on the with-someone-else side and never
+ *   rides: its link shows as a quiet row on the lead.
  * - With several such rich things, it rides on the most pressing: the one
  *   that has used the largest share of its patience at `nowMs`
  *   (`measurePatienceUsed`), then the lowest ref.
@@ -82,7 +82,6 @@ export const decideRiding = (
     leadsByRider.set(rider.ref, leads);
   };
   for (const link of links) {
-    if (link.claim.type === "text") continue;
     const from = byRef.get(link.fromRef);
     const to = byRef.get(link.toRef);
     if (from === undefined || to === undefined) continue;

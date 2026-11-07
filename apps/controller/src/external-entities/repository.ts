@@ -23,11 +23,12 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
-  MAX_CONTEXT_DEPTH,
-  MAX_CONTEXT_PARENTS,
   MAX_ENTITY_ANCESTORS,
+  MAX_ENTITY_HINTS,
   MAX_ENTITY_LINKS,
+  MAX_ENTITY_SIGNALS,
   MAX_INBOX_CARDS,
+  MAX_INBOX_HINTS,
   MAX_INBOX_LINKS,
   MAX_INBOX_PEERS,
   MAX_INBOX_PLACES,
@@ -40,13 +41,13 @@ import {
   type Inbox,
   type InboxCard,
   type InboxCounts,
-  type InboxSide,
   type SignalEntity,
   type TaskStage,
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
 import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
 import {
   buildEntityFields,
@@ -71,18 +72,13 @@ import {
   type SharedValues,
 } from "./entity-records";
 import { announceEntityChanges } from "./announce";
-import { CURRENT_LINKED_SQL, makeEntityLinkReads, readFarEnd } from "./entity-links";
-import { decideRiding, selectInboxPage, type RidingCard } from "./riding";
-import { CURRENT_PART_OF_SQL, WALK_DOWN_SQL, WALK_STATE_ROOM, WALK_UP_SQL } from "./claim-graph";
+import { makeEntityLinkReads, readFarEnd } from "./entity-links";
+import { selectInboxPage } from "./riding";
+import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
+import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
-import {
-  buildLiveSignalExists,
-  buildCardSignalFields,
-  makeSignalLineReads,
-  OPEN_SIGNAL_ENTITY_REFS_SQL,
-  OPEN_SIGNAL_REFS_SQL,
-} from "./signal-lines";
+import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
 import type { EntitySlots } from "./slots";
 import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from "./timeline";
 
@@ -425,6 +421,16 @@ const planObservationWrite = (input: {
   return unchanged ? undefined : stamped;
 };
 
+/** What `writeObservedEntities` is asked to write. */
+interface ObservedWrite {
+  readonly connectionId: string;
+  readonly isInventory: boolean;
+  readonly stampsRead: boolean;
+  readonly observed: ReadonlyArray<ObservedEntity>;
+  readonly leaving: ReadonlyArray<string>;
+  readonly environment: EntityEnvironment;
+}
+
 /** What a write reads of its refs, before or after it writes. */
 interface RefStates {
   readonly entities: ReadonlyMap<string, PresentedEntityRow>;
@@ -472,138 +478,15 @@ const MAX_REFS_PER_STATEMENT = 1000;
 /** Returns the refs sorted, each once. */
 const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
-/**
- * The refs that concern the user: some Connection's inventory reports a
- * concern for them. The Inbox, the Add sheet's suggestions, the refs Hercule
- * wants read and the daily sweep all start from this one query, so a thing
- * that is on the Inbox is also kept, read and suggested.
- *
- * Open signals are not in it. A signal holds a card on the Inbox while it is
- * open and not snoozed (`ELIGIBLE_ENTITIES_SQL`), and holds the record for as
- * long as it is open at all, snoozed or not (`WANTED_REFS_SQL`, the sweep).
- * Those are two questions with two answers, so each asks its own.
- */
-const CONCERNED_REFS_SQL = `SELECT ref FROM external_entity_observations WHERE concerns <> '[]'`;
-
-/**
- * The one definition of what is on the Inbox, as common table expressions.
- * An entity is eligible when it is a full record of a work kind, is not
- * dismissed, and concerns the user, has a live Task, or holds an open signal
- * that is not snoozed now. A dismissed entity stays out whatever signals
- * arrive. Access, lifecycle, stale and whether the kind is still declared do
- * not matter: a card keeps its last known facts.
- *
- * `eligible` carries the active Task (`task_id`), the `side` the server puts
- * the card on, and whether a live Task follows the ref. The Inbox, its counts
- * and the Add sheet's suggestions all read it, so they cannot disagree.
- *
- * The statement it sits in must define `read_clock(now)` first, because a
- * snooze ends with time and nothing is written when it does.
- * `buildEligibleEntities` puts both in place.
- */
-const ELIGIBLE_ENTITIES_SQL = `
-  live_links AS MATERIALIZED (${LIVE_TASK_LINKS_SQL}),
-  eligible AS (
-    SELECT e.*, l.task_id AS task_id,
-      CASE WHEN l.task_id IS NOT NULL THEN 'with-someone-else'
-           WHEN e.card = 'compact' THEN 'requests'
-           ELSE 'ongoing' END AS side,
-      EXISTS (SELECT 1 FROM live_links f WHERE f.ref = e.ref AND f.following = 1) AS following
-    FROM external_entities e
-    LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
-    WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
-      AND (e.ref IN (${CONCERNED_REFS_SQL}) OR l.task_id IS NOT NULL
-           OR ${buildLiveSignalExists("e")})
-  )`;
-
-/**
- * The SQL that finds the refs Hercule wants a Connection to read, as a list of
- * common table expressions. `wanted` holds:
- *
- * - the roots: refs that concern the user (`CONCERNED_REFS_SQL`), refs a
- *   live Task links, and refs of full work records that hold an open signal
- *   (snoozed or not, because a snoozed signal still needs its card kept
- *   current). A signal on a ref with no such record makes nothing wanted
- *   here: `listWanted` adds those for the Connection the signal came through;
- * - everything above the roots, up to `MAX_CONTEXT_DEPTH` levels of
- *   `part-of`, even where no record exists. A thing contributes its first
- *   `MAX_CONTEXT_PARENTS` parents (by ref), and the walk stops after
- *   `WALK_STATE_ROOM` states beyond the roots, so the work of one poll stays
- *   bounded however the graph grows;
- * - the direct peers of the roots, but only while they have no record: a
- *   peer gets one read for its title and access, and its own links and parents
- *   are never followed.
- *
- * The sweep that prunes observations asks this same question, so what is
- * wanted is decided once.
- */
-const WANTED_REFS_SQL = `
-  wanted_roots(ref) AS (
-    ${CONCERNED_REFS_SQL}
-    UNION
-    SELECT ref FROM (${LIVE_TASK_LINKS_SQL})
-    UNION
-    ${OPEN_SIGNAL_ENTITY_REFS_SQL}
-  ),
-  wanted_context(ref, depth) AS (
-    SELECT ref, 0 FROM wanted_roots
-    UNION
-    SELECT parent.value, w.depth + 1
-    FROM wanted_context w,
-      json_each((
-        SELECT json_group_array(to_ref) FROM (
-          SELECT DISTINCT c.to_ref FROM external_entity_relation_claims c
-          WHERE c.from_ref = w.ref AND ${CURRENT_PART_OF_SQL}
-          ORDER BY c.to_ref LIMIT ${MAX_CONTEXT_PARENTS})
-      )) parent
-    WHERE w.depth < ${MAX_CONTEXT_DEPTH}
-    LIMIT (SELECT COUNT(*) FROM wanted_roots) + ${WALK_STATE_ROOM}
-  ),
-  wanted_peers(ref) AS (
-    -- CROSS JOIN pins the order, so each root seeks its claims by index
-    -- instead of SQLite scanning every current claim.
-    SELECT c.to_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
-      ON c.from_ref = r.ref AND ${CURRENT_LINKED_SQL}
-    UNION
-    SELECT c.from_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
-      ON c.to_ref = r.ref AND ${CURRENT_LINKED_SQL}
-  ),
-  wanted(ref) AS (
-    SELECT ref FROM wanted_context
-    UNION
-    SELECT ref FROM wanted_peers
-    WHERE NOT EXISTS (SELECT 1 FROM external_entities e WHERE e.ref = wanted_peers.ref)
-  )`;
-
-/**
- * Checks that a card on the Inbox counts as on the clock: a full record of a
- * fast kind that is not dismissed and has no live Task. Only those cards take
- * a number of the arrival counter.
- */
-const countsOnTheClock = (entity: EntityRow, hasTask: boolean): boolean =>
-  isWorkRecord(entity) && entity.pace === "fast" && entity.dismissed_at === null && !hasTask;
-
-/**
- * One eligible card as the Inbox reads it, with only what riding, the counts
- * and the page order need. The page's full entity rows are read afterwards,
- * for the cards that made the page.
- */
-interface EligibleCard extends RidingCard {
-  /** The active Task of the thing, else null. */
-  readonly taskId: Uint8Array | null;
-  readonly side: InboxSide;
-  /** True when a live Task follows the thing. */
-  readonly following: boolean;
-  readonly arrivalSequence: number;
-}
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* claimRepository;
   const tasks = yield* taskRepository;
-  const signalLines = makeSignalLineReads(sql);
+  const signals = yield* signalRepository;
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
+  const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
+  const inbox = makeInboxPopulation(sql, linkReads);
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
@@ -792,13 +675,6 @@ const make = Effect.gen(function* () {
     return Effect.asVoid(sql`UPDATE external_entities SET ${sql.csv(sets)} WHERE ref = ${ref}`);
   };
 
-  /** Takes the next number of the arrival counter. The counter only goes up, even after a prune. */
-  const takeArrivalSequence = Effect.map(
-    sql<{ readonly last: number }>`
-      UPDATE external_entity_arrival_counter SET last = last + 1 WHERE id = 1 RETURNING last`,
-    (rows) => rows[0]!.last,
-  );
-
   /**
    * Writes what a list of observations from one Connection reports, and
    * returns what changed. This is the part `reconcile` and `refresh` share.
@@ -809,40 +685,42 @@ const make = Effect.gen(function* () {
    * 3. Writes the shared fields of each entity, by `decideSharedWrite`.
    * 4. Applies each observation's relations.
    * 5. Gives a thing that went from no concern to some concern the start of
-   *    its wait, and, when it is a fast kind with no Task and not dismissed,
-   *    a number of the arrival counter.
+   *    its wait.
    * 6. Reads the state again and compares it with the first.
+   *
+   * A thing that this write puts onto the Inbox as a card on the clock takes
+   * a number of the arrival counter (`recordArrivalsAfter`).
    */
-  const writeObservedEntities = (input: {
-    readonly connectionId: string;
-    readonly isInventory: boolean;
-    readonly stampsRead: boolean;
-    readonly observed: ReadonlyArray<ObservedEntity>;
-    readonly leaving: ReadonlyArray<string>;
-    readonly environment: EntityEnvironment;
-  }): Effect.Effect<ReconcileChanges, SqlError> =>
+  const writeObservedEntities = (
+    input: ObservedWrite,
+  ): Effect.Effect<ReconcileChanges, SqlError> => {
+    const { environment } = input;
+    const { now } = environment;
+    const observed = [...input.observed].sort((a, b) =>
+      a.observation.ref.localeCompare(b.observation.ref),
+    );
+    const touched = sortUnique([
+      ...observed.map((entry) => entry.observation.ref),
+      ...input.leaving,
+    ]);
+    return inbox.recordArrivalsAfter(touched, now, writeObservations(input, observed, touched));
+  };
+
+  /**
+   * Writes the observations of `writeObservedEntities` (`observed` sorted by
+   * ref, `touched` the refs they and `leaving` name) and returns what changed.
+   */
+  const writeObservations = (
+    input: ObservedWrite,
+    observed: ReadonlyArray<ObservedEntity>,
+    touched: ReadonlyArray<string>,
+  ): Effect.Effect<ReconcileChanges, SqlError> =>
     Effect.gen(function* () {
       const { environment } = input;
       const { now } = environment;
       const connection = uuidFromString(input.connectionId);
-      const observed = [...input.observed].sort((a, b) =>
-        a.observation.ref.localeCompare(b.observation.ref),
-      );
-      const touched = sortUnique([
-        ...observed.map((entry) => entry.observation.ref),
-        ...input.leaving,
-      ]);
 
       const before = yield* readRefStates(touched, environment);
-      const activeTasks = yield* tasks.listActiveTasksForRefs(touched);
-      const refsWithTask = new Set(activeTasks.map((task) => task.ref));
-      // Which of the refs no Connection reports a concern for were on the
-      // Inbox before this write (a live signal held them). A thing that was
-      // on the Inbox already does not arrive again when a concern joins.
-      const noConcernBefore = touched.filter(
-        (ref) => unionConcerns(before.observations.get(ref) ?? []).length === 0,
-      );
-      const eligibleBefore = yield* listEligibleRefs(noConcernBefore, now);
 
       for (const entry of observed) {
         const ref = entry.observation.ref;
@@ -922,7 +800,7 @@ const make = Effect.gen(function* () {
           (beforeRow === undefined || !isWorkRecord(beforeRow))
         );
       });
-      const signalIds = yield* signalLines.listOpenSignalIds(becameWorkRecord);
+      const signalIds = yield* signals.listOpenSignalIds(becameWorkRecord);
       for (const ref of touched) {
         const entity = afterWrite.entities.get(ref);
         const reported = unionConcerns(before.observations.get(ref) ?? []);
@@ -933,24 +811,6 @@ const make = Effect.gen(function* () {
         const sets = [sql`updated_at = ${now}`];
         if (reported.length === 0) sets.push(sql`concerned_since = ${now}`);
         yield* sql`UPDATE external_entities SET ${sql.csv(sets)} WHERE ref = ${ref}`;
-      }
-
-      // A thing that was off the Inbox and is on it now has arrived, whether
-      // a concern or a live signal brought it. One that was on it already,
-      // held by a signal before a concern joined, has not.
-      const mayHaveArrived = noConcernBefore.filter(
-        (ref) => !eligibleBefore.has(ref) && afterWrite.entities.has(ref),
-      );
-      const eligibleAfter = yield* listEligibleRefs(mayHaveArrived, now);
-      for (const ref of mayHaveArrived) {
-        if (
-          eligibleAfter.has(ref) &&
-          countsOnTheClock(afterWrite.entities.get(ref)!, refsWithTask.has(ref))
-        ) {
-          yield* sql`
-            UPDATE external_entities SET arrival_sequence = ${yield* takeArrivalSequence}
-            WHERE ref = ${ref}`;
-        }
       }
 
       yield* markLinkedSummariesDirty(
@@ -1049,115 +909,6 @@ const make = Effect.gen(function* () {
   // -------------------------------------------------------------------------
   // The Inbox
   // -------------------------------------------------------------------------
-
-  const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
-
-  /**
-   * Builds the common table expressions of `ELIGIBLE_ENTITIES_SQL`, with the
-   * `read_clock` they need: `now` decides which snoozes have ended.
-   */
-  const buildEligibleEntities = (now: string) =>
-    sql`read_clock(now) AS (SELECT ${now}), ${sql.literal(ELIGIBLE_ENTITIES_SQL)}`;
-
-  /**
-   * Reads every eligible card at `now`, oldest first by `(firstObservedAt,
-   * id)`, with the lean fields (`EligibleCard`). This is the one place an
-   * Inbox read evaluates the membership (`ELIGIBLE_ENTITIES_SQL`): the page,
-   * its peers, the riding and the counts all work from the cards it returns.
-   */
-  const readEligibleCards = (now: string): Effect.Effect<ReadonlyArray<EligibleCard>, SqlError> =>
-    Effect.map(
-      sql<{
-        readonly ref: string;
-        readonly card: "rich" | "compact";
-        readonly pace: "fast" | "slow";
-        readonly patience: number;
-        readonly waiting_since: string;
-        readonly task_id: Uint8Array | null;
-        readonly side: InboxSide;
-        readonly following: number;
-        readonly arrival_sequence: number | null;
-      }>`
-        WITH ${buildEligibleEntities(now)}
-        SELECT ref, card, pace, patience,
-          COALESCE(waiting_since, concerned_since, first_observed_at) AS waiting_since,
-          task_id, side, following, arrival_sequence
-        FROM eligible ORDER BY first_observed_at, id`,
-      (rows) =>
-        rows.map((row) => ({
-          ref: row.ref,
-          card: row.card,
-          pace: row.pace,
-          patience: row.patience,
-          waitingSince: row.waiting_since,
-          hasTask: row.task_id !== null,
-          taskId: row.task_id,
-          side: row.side,
-          following: row.following === 1,
-          arrivalSequence: row.arrival_sequence ?? 0,
-        })),
-    );
-
-  /**
-   * Returns which of `refs` are eligible for the Inbox at `now` (the one
-   * definition in `ELIGIBLE_ENTITIES_SQL`). One statement, none for no refs.
-   */
-  const listEligibleRefs = (
-    refs: ReadonlyArray<string>,
-    now: string,
-  ): Effect.Effect<ReadonlySet<string>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed(new Set())
-      : Effect.map(
-          sql<{ readonly ref: string }>`
-            WITH ${buildEligibleEntities(now)}
-            SELECT ref FROM eligible
-            WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          (rows) => new Set(rows.map((row) => row.ref)),
-        );
-
-  /**
-   * Counts the eligible cards. Every rider has no live Task, so each one is a
-   * Requests card that the count leaves out, because the client draws it under
-   * its lead.
-   */
-  const countCards = (
-    cards: ReadonlyArray<EligibleCard>,
-    riding: ReadonlyMap<string, string>,
-  ): InboxCounts => {
-    const onTheClock = cards.filter((card) => card.taskId === null && card.pace === "fast");
-    return {
-      onTheClock: onTheClock.length,
-      requests: cards.filter((card) => card.side === "requests").length - riding.size,
-      withSomeoneElse: cards.filter((card) => card.side === "with-someone-else").length,
-      newestArrival: Math.max(0, ...onTheClock.map((card) => card.arrivalSequence)),
-    };
-  };
-
-  /**
-   * Reads what the Inbox is at `now`: every eligible card, who rides on whom
-   * (`decideRiding`, over every card, before any page limit) and the counts.
-   * Two statements, the cards and the links among them.
-   */
-  const readInboxStanding = (
-    now: string,
-  ): Effect.Effect<
-    {
-      readonly cards: ReadonlyArray<EligibleCard>;
-      readonly riding: ReadonlyMap<string, string>;
-      readonly counts: InboxCounts;
-    },
-    SqlError
-  > =>
-    Effect.gen(function* () {
-      const cards = yield* readEligibleCards(now);
-      const links = yield* linkReads.readLinksOf(
-        cards.map((card) => card.ref),
-        { confirmedOnly: true },
-      );
-      const riding = decideRiding(cards, links, Date.parse(now));
-      return { cards, riding, counts: countCards(cards, riding) };
-    });
 
   /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
   const buildRidesOn = (lead: string | undefined) => (lead === undefined ? {} : { ridesOn: lead });
@@ -1504,7 +1255,11 @@ const make = Effect.gen(function* () {
      */
     queryInbox: (environment: EntityEnvironment): Effect.Effect<Inbox, SqlError> =>
       Effect.gen(function* () {
-        const { cards: eligibleCards, riding, counts } = yield* readInboxStanding(environment.now);
+        const {
+          cards: eligibleCards,
+          riding,
+          counts,
+        } = yield* inbox.readInboxStanding(environment.now);
         const page = selectInboxPage(
           eligibleCards.map((card) => card.ref),
           riding,
@@ -1525,11 +1280,8 @@ const make = Effect.gen(function* () {
           environment,
         });
         const activePluginIds = new Set(environment.activePluginIds);
-        const cardSignals = yield* signalLines.readCardSignals(
-          rows.map(({ row }) => ({
-            ref: row.ref,
-            reasonTemplates: row.reason_templates as string | null,
-          })),
+        const cardSignals = yield* signals.readLatestLiveSignals(
+          rows.map(({ row }) => row.ref),
           environment.now,
         );
 
@@ -1545,16 +1297,20 @@ const make = Effect.gen(function* () {
             latestChange: context.latestChanges.get(row.ref),
           }),
           side: card.side,
-          ...buildCardSignalFields(cardSignals.get(row.ref)),
+          ...buildCardSignalFields(cardSignals.get(row.ref), row.reason_templates as string | null),
           ...buildRidesOn(riding.get(row.ref)),
         }));
         const { places, edges } = context;
 
-        const pageLinks = yield* linkReads.readLinksOf([...pageRefs], { limit: MAX_INBOX_LINKS });
-        const links = pageLinks.slice(0, MAX_INBOX_LINKS);
+        // Links and hints have one bound (`MAX_INBOX_HINTS` equals `MAX_INBOX_LINKS`).
+        const found = yield* linkReads.readLinksAndHintsOf([...pageRefs], MAX_INBOX_LINKS);
+        const links = found.links.slice(0, MAX_INBOX_LINKS);
+        const hints = found.hints.slice(0, MAX_INBOX_HINTS);
         const farRefs = [
           ...new Set(
-            links.flatMap((link) => [link.fromRef, link.toRef].filter((ref) => !pageRefs.has(ref))),
+            [...links, ...hints].flatMap((pair) =>
+              [pair.fromRef, pair.toRef].filter((ref) => !pageRefs.has(ref)),
+            ),
           ),
         ];
         const foundPeers = yield* linkReads.listPeers(
@@ -1565,9 +1321,10 @@ const make = Effect.gen(function* () {
         const peers = foundPeers.slice(0, MAX_INBOX_PEERS);
         const truncated =
           cardsTruncated ||
-          pageLinks.length > MAX_INBOX_LINKS ||
+          found.links.length > MAX_INBOX_LINKS ||
+          found.hints.length > MAX_INBOX_HINTS ||
           foundPeers.length > MAX_INBOX_PEERS;
-        return { cards, places, edges, counts, links, peers, truncated };
+        return { cards, places, edges, counts, links, hints, peers, truncated };
       }),
 
     /**
@@ -1585,7 +1342,7 @@ const make = Effect.gen(function* () {
 
     /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
     countInbox: (now: string): Effect.Effect<InboxCounts, SqlError> =>
-      Effect.map(readInboxStanding(now), (standing) => standing.counts),
+      Effect.map(inbox.readInboxStanding(now), (standing) => standing.counts),
 
     /**
      * Returns one entity with the records above it and what it is linked to,
@@ -1611,14 +1368,16 @@ const make = Effect.gen(function* () {
           WHERE ref = ${row.ref}`;
         const active = links.find((link) => link.position === 1);
         const related = yield* claims.readClaimsFor(row.ref, MAX_ENTITY_LINKS);
-        const linkedRefs = related.links
-          .slice(0, MAX_ENTITY_LINKS)
-          .map((link) => readFarEnd(link, row.ref));
+        const entityLinks = related.links.slice(0, MAX_ENTITY_LINKS);
+        const entityHints = related.hints.slice(0, MAX_ENTITY_HINTS);
+        const linkedRefs = [...entityLinks, ...entityHints].map((pair) =>
+          readFarEnd(pair, row.ref),
+        );
         const context = yield* readContext({
           starts: [row.ref],
           alsoPlaces: linkedRefs,
           maxAncestors: MAX_ENTITY_ANCESTORS,
-          maxPlaces: MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS,
+          maxPlaces: MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS + MAX_ENTITY_HINTS,
           environment,
         });
         return Option.some({
@@ -1635,19 +1394,19 @@ const make = Effect.gen(function* () {
           kindAvailable: environment.activeKinds.has(row.kind as string),
           places: context.places,
           edges: context.edges,
-          links: related.links.slice(0, MAX_ENTITY_LINKS),
+          links: entityLinks,
+          hints: entityHints,
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
-          ...(yield* signalLines.readDetailSignals(
-            row.ref,
+          ...buildDetailSignalFields(
+            yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS, environment.now),
             row.reason_templates as string | null,
-            environment.now,
-          )),
+          ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            yield* listEligibleRefs(linkedRefs, environment.now),
+            yield* inbox.listEligibleRefs(linkedRefs, environment.now),
             linkedRefs,
             environment.activeEntityKinds,
-          )).slice(0, MAX_ENTITY_LINKS),
+          )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
         });
       }),
 
@@ -1730,7 +1489,7 @@ const make = Effect.gen(function* () {
           readonly url: string;
           readonly status: string | null;
         }>`
-          WITH RECURSIVE ${buildEligibleEntities(input.now)},
+          WITH RECURSIVE ${inbox.buildEligibleEntities(input.now)},
           walk_start(ref) AS (
             SELECT value FROM json_each(${refsJson(input.contextRef === undefined ? [] : [input.contextRef])})
           ),
@@ -1804,36 +1563,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that an open signal landed on the entity at `ref`, at `now`.
-     * When the entity was off the clock and this signal puts it on, it takes
-     * a number of the arrival counter, once.
-     *
-     * It decides from the rows, in the caller's transaction, after the signal
-     * is written. The entity must be on the Inbox now (`listEligibleRefs`, the
-     * one definition: a full record of a work kind, not dismissed, held by
-     * something). The signal is what put it there only when nothing else
-     * holds it: it is a fast kind, concerns the user through no Connection,
-     * has no live Task, and the signal is its only live signal (open and not
-     * snoozed). A second signal, or one from a second Connection, finds the
-     * card on the clock already and raises nothing. Does nothing for a ref
-     * with no entity. Announces nothing: the signal's own announcement
-     * already refreshes the Inbox.
+     * Runs `write`, which writes an open signal on the thread `ref`, and
+     * returns its result. When the write puts the entity at `ref` onto the
+     * Inbox as a card on the clock, the entity takes a number of the arrival
+     * counter, stamped at `now` (see `recordArrivalsAfter`). A ref with no
+     * entity changes nothing. Run it in the caller's transaction. Announces
+     * nothing: the signal's own announcement already refreshes the Inbox.
      */
-    recordArrival: (ref: string, now: string): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        if (!(yield* listEligibleRefs([ref], now)).has(ref)) return;
-        const entity = (yield* readEntities([ref])).get(ref);
-        if (entity === undefined) return;
-        const observations = (yield* readObservations([ref])).get(ref) ?? [];
-        const hasTask = (yield* tasks.listActiveTasksForRefs([ref])).length > 0;
-        if (unionConcerns(observations).length > 0 || !countsOnTheClock(entity, hasTask)) return;
-        const live = (yield* signalLines.countLiveSignals([ref], now)).get(ref) ?? 0;
-        if (live !== 1) return;
-        yield* sql`
-          UPDATE external_entities
-          SET arrival_sequence = ${yield* takeArrivalSequence}, updated_at = ${now}
-          WHERE ref = ${ref}`;
-      }),
+    recordArrivalAfter: <A, E, R>(
+      ref: string,
+      now: string,
+      write: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E | SqlError, R> => inbox.recordArrivalsAfter([ref], now, write),
 
     /**
      * Dismisses an entity: it leaves the Inbox and stays out, whatever a new
@@ -1884,14 +1625,7 @@ const make = Effect.gen(function* () {
         const entities = yield* sql`
           WITH RECURSIVE
           roots(ref) AS (
-            ${sql.literal(CONCERNED_REFS_SQL)}
-            UNION
-            -- Every Task link, finished Tasks too: a finished Task still names
-            -- its things. (Wanted refs count only live Tasks.)
-            SELECT ref FROM task_entity_links
-            UNION
-            -- An open signal keeps its thing, snoozed or not.
-            ${sql.literal(OPEN_SIGNAL_REFS_SQL)}
+            ${sql.literal(RETAINED_ROOT_REFS_SQL)}
           ),
           walk_start(ref) AS (SELECT ref FROM roots),
           ${sql.literal(WALK_UP_SQL)}
@@ -1904,7 +1638,7 @@ const make = Effect.gen(function* () {
           DELETE FROM external_entity_observations
           WHERE NOT EXISTS (SELECT 1 FROM external_entities e WHERE e.ref = external_entity_observations.ref)
             AND ref NOT IN (SELECT ref FROM wanted)
-            AND ref NOT IN (${sql.literal(OPEN_SIGNAL_REFS_SQL)})
+            AND ref NOT IN (${sql.literal(OPEN_THREAD_REFS_SQL)})
           RETURNING ref`;
         yield* timeline.deleteOrphanedChanges();
         return { entities: entities.length, observations: observations.length };

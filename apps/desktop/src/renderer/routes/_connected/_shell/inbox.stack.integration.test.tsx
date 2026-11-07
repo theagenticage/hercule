@@ -8,10 +8,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { EntityLink, EntityPeer, Inbox, InboxCard } from "@hercule/contract";
+import type { EntityHint, EntityLink, EntityPeer, Inbox, InboxCard } from "@hercule/contract";
 import {
   buildInbox,
   buildInboxCard,
+  buildInboxHint,
   buildInboxLink,
   buildInboxPeer,
   buildInboxPlace,
@@ -77,12 +78,16 @@ const ACME = buildSourcePlugin("acme", "Acme", [
 
 const COUNTS = { onTheClock: 3, requests: 1, withSomeoneElse: 0, newestArrival: 5 };
 
-/** Returns the Inbox these cards make, with the links and peers given. */
+/** Returns the Inbox these cards make, with the links, peers and hints given. */
 const buildPageInbox = (
   cards: readonly InboxCard[],
   links: readonly EntityLink[] = [],
   peers: readonly EntityPeer[] = [],
-): Inbox => ({ ...buildInbox(cards, { places: [PRICING], links, peers }), counts: COUNTS });
+  hints: readonly EntityHint[] = [],
+): Inbox => ({
+  ...buildInbox(cards, { places: [PRICING], links, hints, peers }),
+  counts: COUNTS,
+});
 
 /** Opens the Inbox, which the controller answers with what `inbox` returns each time. */
 const openInbox = async (inbox: () => Inbox, handlers: Readonly<Record<string, Handler>> = {}) => {
@@ -187,7 +192,7 @@ describe("what rides on a card of the Inbox", () => {
       identifier: "#6263",
     });
     await openInbox(() =>
-      buildPageInbox([REFUNDS, mentioner], [buildInboxLink(mentioner.ref, REFUNDS.ref, "text")]),
+      buildPageInbox([REFUNDS, mentioner], [], [], [buildInboxHint(mentioner.ref, REFUNDS.ref)]),
     );
 
     await screen.findByText("Mentions OPS-1");
@@ -216,7 +221,9 @@ describe("Link them", () => {
         });
         return buildPageInbox(
           [REFUNDS, SLOTS, request],
-          [buildInboxLink(request.ref, REFUNDS.ref, linked ? "person" : "text")],
+          linked ? [buildInboxLink(request.ref, REFUNDS.ref, "person")] : [],
+          [],
+          linked ? [] : [buildInboxHint(request.ref, REFUNDS.ref)],
         );
       },
       links: (): Handler => () => {

@@ -333,9 +333,9 @@ const make = Effect.gen(function* () {
    * - an open signal on the thread was raised from a later event. That
    *   signal is newer, so it stays, and the raise is dropped.
    *
-   * When it writes the signal, it also tells the signal entities port that an
-   * open signal landed on the thread, so the entity of that thread can become
-   * an arrival.
+   * It writes the signal through the signal entities port, which sees whether
+   * an open signal landing on the thread puts the entity of that thread onto
+   * the Inbox, so the entity can become an arrival.
    */
   const writeSignal = (
     raise: PendingRaise,
@@ -372,9 +372,11 @@ const make = Effect.gen(function* () {
         )).includes(true);
         const written: Signal =
           lowered && signal.priority === "urgent" ? { ...signal, priority: "high" } : signal;
-        yield* signals.insert(written, [raise.eventId], { priorityLowered: lowered });
         // The entity decides what an arrival is, so this only reports the raise.
-        yield* entities.recordArrival(raise.threadRef);
+        yield* entities.recordArrivalAfter(
+          raise.threadRef,
+          signals.insert(written, [raise.eventId], { priorityLowered: lowered }),
+        );
         yield* audit.append({
           kind: "signal.raised",
           actor: SYSTEM_ACTOR,

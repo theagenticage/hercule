@@ -14,9 +14,10 @@ import {
   MAX_GRAPH_EDGES,
   type EntityConflict,
   type EntityEdge,
+  type EntityHint,
   type EntityLink,
 } from "@hercule/contract";
-import { readFirmestLinks } from "./entity-links";
+import { readLinksAndHints } from "./entity-links";
 
 /** The two relations a claim can state. */
 export type Relation = "part-of" | "linked";
@@ -210,12 +211,13 @@ export const makeClaimGraph = (sql: SqlClient.SqlClient) => {
       }),
 
     /**
-     * Returns the peers `ref` is linked to and the claims refused on `ref`,
+     * Returns the links and hints of `ref` and the claims refused on `ref`,
      * for the detail read of one entity.
      *
      * A pair of peers appears once, in either direction, under its firmest
-     * claim: `source`, then `person`, then `text` (see `readFirmestLinks`).
-     * It returns at most `limit + 1` links, so the caller can tell that some
+     * claim: `source`, then `person`, then `text` (see `readLinksAndHints`).
+     * It is a link when a source or a person claims it, else a hint. It
+     * returns at most `limit + 1` of each, so the caller can tell that some
      * were cut. A claim names only its plugin or its actor, never the
      * Connection. The conflicts are the claims stored as `conflicted` that
      * start or end at `ref`.
@@ -226,12 +228,13 @@ export const makeClaimGraph = (sql: SqlClient.SqlClient) => {
     ): Effect.Effect<
       {
         readonly links: ReadonlyArray<EntityLink>;
+        readonly hints: ReadonlyArray<EntityHint>;
         readonly conflicts: ReadonlyArray<EntityConflict>;
       },
       SqlError
     > =>
       Effect.gen(function* () {
-        const links = yield* readFirmestLinks(sql, [ref], { limit });
+        const { links, hints } = yield* readLinksAndHints(sql, [ref], limit);
 
         const refused = yield* sql<{
           readonly from_ref: string;
@@ -253,7 +256,7 @@ export const makeClaimGraph = (sql: SqlClient.SqlClient) => {
           toRef: row.to_ref,
           reason: row.conflict_reason,
         }));
-        return { links, conflicts };
+        return { links, hints, conflicts };
       }),
   };
 };

@@ -181,7 +181,7 @@ describe("riding on the Inbox", () => {
     ]);
   });
 
-  it("rides on a person's link too, and a hint rides on nothing but shows as a link with its text", async () => {
+  it("rides on a person's link too, and a hint rides on nothing but shows as a hint with its text", async () => {
     const inbox = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(TICKET_KIND, [ticket("t1"), ticket("t2")], 1);
@@ -195,8 +195,10 @@ describe("riding on the Inbox", () => {
     expect(ridesOn.get(ticketRef("t1"))).toBe(epicRef("e1"));
     expect(ridesOn.get(ticketRef("t2"))).toBeUndefined();
     expect(inbox.counts.requests).toBe(1);
-    const hint = inbox.links.find((link) => link.fromRef === ticketRef("t2"));
-    expect(hint?.claim).toEqual({ type: "text", plugin: PLUGIN, evidenceKey: "description" });
+    expect(inbox.links.map((link) => link.fromRef)).toEqual([ticketRef("t1")]);
+    expect(inbox.hints).toEqual([
+      { fromRef: ticketRef("t2"), toRef: epicRef("e1"), evidenceKey: "description" },
+    ]);
   });
 
   it("stands a ticket alone when its only lead is dismissed", async () => {
@@ -384,7 +386,8 @@ describe("links and peers", () => {
       }),
     );
     expect(inbox.peers).toEqual([]);
-    // The source's claim is firmer than the hint, and carries no evidence key.
+    // The source's claim is firmer than the text one, so the pair is a link and no hint.
+    expect(inbox.hints).toEqual([]);
     expect(inbox.links).toEqual([
       {
         fromRef: epicRef("e1"),

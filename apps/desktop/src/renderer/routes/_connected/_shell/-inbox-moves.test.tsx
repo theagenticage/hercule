@@ -115,6 +115,7 @@ const setUp = (
         released: new Set(),
         isFresh: true,
         hasUserMove: moves.hasPendingEdits,
+        isMotionReduced: () => false,
       });
       if (drawn.history !== visit.history) visit.setHistory(drawn.history);
       const riding =

@@ -433,24 +433,33 @@ describe("Inbox membership and arrivals", () => {
 
         // An entity that was off the clock gains a signal.
         yield* refresh(ACCOUNT_A, [ticket("known")], 4);
-        yield* raiseSignal(ticketRef("known"));
-        yield* repository.recordArrival(ticketRef("known"), at(5));
+        yield* repository.recordArrivalAfter(
+          ticketRef("known"),
+          at(5),
+          raiseSignal(ticketRef("known")),
+        );
         const raised = (yield* repository.countInbox(at(5))).newestArrival;
 
         // A second signal, from a second Connection, on a card on the clock already.
-        yield* raiseSignal(ticketRef("known"), { connectionId: ACCOUNT_B });
-        yield* repository.recordArrival(ticketRef("known"), at(6));
+        yield* repository.recordArrivalAfter(
+          ticketRef("known"),
+          at(6),
+          raiseSignal(ticketRef("known"), { connectionId: ACCOUNT_B }),
+        );
         const afterSecond = (yield* repository.countInbox(at(6))).newestArrival;
 
         // A signal on a card that concerns the user already.
         yield* reconcile(ACCOUNT_A, [ticket("mine", { concerns: ["assigned"] })], 7);
         const mineArrival = (yield* repository.countInbox(at(7))).newestArrival;
-        yield* raiseSignal(ticketRef("mine"));
-        yield* repository.recordArrival(ticketRef("mine"), at(8));
+        yield* repository.recordArrivalAfter(
+          ticketRef("mine"),
+          at(8),
+          raiseSignal(ticketRef("mine")),
+        );
         const afterMine = (yield* repository.countInbox(at(8))).newestArrival;
 
         // A ref with no entity does nothing.
-        yield* repository.recordArrival(ticketRef("nobody"), at(9));
+        yield* repository.recordArrivalAfter(ticketRef("nobody"), at(9), Effect.void);
         return { created, raised, afterSecond, mineArrival, afterMine };
       }),
     );
@@ -465,8 +474,11 @@ describe("Inbox membership and arrivals", () => {
       Effect.gen(function* () {
         // Signal first: the signal brings the quiet card onto the clock, then the first concern comes.
         yield* refresh(ACCOUNT_A, [ticket("signal-first")], 1);
-        yield* raiseSignal(ticketRef("signal-first"));
-        yield* repository.recordArrival(ticketRef("signal-first"), at(2));
+        yield* repository.recordArrivalAfter(
+          ticketRef("signal-first"),
+          at(2),
+          raiseSignal(ticketRef("signal-first")),
+        );
         const signalArrival = (yield* repository.countInbox(at(2))).newestArrival;
         yield* reconcile(ACCOUNT_A, [ticket("signal-first", { concerns: ["assigned"] })], 3);
         const afterConcern = (yield* repository.countInbox(at(3))).newestArrival;
@@ -474,8 +486,11 @@ describe("Inbox membership and arrivals", () => {
         // Concern first: a later signal finds the card on the clock already.
         yield* reconcile(ACCOUNT_A, [ticket("concern-first", { concerns: ["assigned"] })], 4);
         const concernArrival = (yield* repository.countInbox(at(4))).newestArrival;
-        yield* raiseSignal(ticketRef("concern-first"));
-        yield* repository.recordArrival(ticketRef("concern-first"), at(5));
+        yield* repository.recordArrivalAfter(
+          ticketRef("concern-first"),
+          at(5),
+          raiseSignal(ticketRef("concern-first")),
+        );
         const afterSignal = (yield* repository.countInbox(at(5))).newestArrival;
         return { signalArrival, afterConcern, concernArrival, afterSignal };
       }),
@@ -493,8 +508,11 @@ describe("Inbox membership and arrivals", () => {
         const rows = yield* sql<{ readonly id: Uint8Array }>`
           SELECT id FROM external_entities WHERE ref = ${ticketRef("hidden")}`;
         yield* repository.dismiss(uuidToString(rows[0]!.id), "user", at(2));
-        yield* raiseSignal(ticketRef("hidden"));
-        yield* repository.recordArrival(ticketRef("hidden"), at(3));
+        yield* repository.recordArrivalAfter(
+          ticketRef("hidden"),
+          at(3),
+          raiseSignal(ticketRef("hidden")),
+        );
         const inbox = yield* readInbox(repository, 4);
         const open = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM signals WHERE status = 'open'`;
@@ -629,7 +647,7 @@ describe("Inbox membership and arrivals", () => {
 });
 
 describe("how the signal reads use the database", () => {
-  it("seeks signals by ref through the thread index for the Inbox, the detail and its counts, never scanning the table", async () => {
+  it("seeks signals by ref through the thread index for the Inbox, the detail, its counts and an arrival, never scanning the table", async () => {
     const plans = await run(({ repository, refresh, sql }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("indexed")], 1);
@@ -640,7 +658,7 @@ describe("how the signal reads use the database", () => {
           readInbox(repository, 3),
           repository.countInbox(at(3)),
           readDetail(repository, sql, ticketRef("indexed"), 3),
-          repository.recordArrival(ticketRef("indexed"), at(3)),
+          repository.recordArrivalAfter(ticketRef("indexed"), at(3), Effect.void),
         ]).pipe(
           Effect.provideService(Statement.CurrentTransformer, (statement) =>
             Effect.sync(() => {
@@ -661,7 +679,7 @@ describe("how the signal reads use the database", () => {
         return plans;
       }),
     );
-    // The card read, the detail read, the arrival count and the Inbox membership.
+    // The card read, the detail read and the Inbox membership (read by the counts and by the arrival).
     expect(plans.length).toBeGreaterThanOrEqual(3);
     for (const plan of plans) {
       expect(plan).toMatch(/SEARCH s USING (COVERING )?INDEX signals_thread_ref/);

@@ -158,10 +158,13 @@ export const describeLinkRemoved = (remaining: EntityUnlinkResult["remaining"]):
 
 /**
  * Returns `inbox` with `edit` made: the pair's link replaced, added or removed.
- * What rides on what is not part of an edit: the visit holds it.
+ * A pair that gets a link is no longer a hint. A removed link leaves no hint
+ * behind: the next read shows one if text still mentions the pair. What rides
+ * on what is not part of an edit: the visit holds it.
  */
 export const applySetLink = (inbox: Inbox, edit: SetLinkEdit): Inbox => {
-  const isPair = (link: EntityLink): boolean => isLinkBetween(link, edit.fromRef, edit.toRef);
+  const isPair = (pair: Pick<EntityLink, "fromRef" | "toRef">): boolean =>
+    isLinkBetween(pair, edit.fromRef, edit.toRef);
   const known = inbox.links.find(isPair);
   const { claim, hasPersonClaim } = edit;
   const links =
@@ -170,7 +173,8 @@ export const applySetLink = (inbox: Inbox, edit: SetLinkEdit): Inbox => {
       : known === undefined
         ? [...inbox.links, { fromRef: edit.fromRef, toRef: edit.toRef, claim, hasPersonClaim }]
         : inbox.links.map((link) => (link === known ? { ...link, claim, hasPersonClaim } : link));
-  return { ...inbox, links };
+  const hints = claim === undefined ? inbox.hints : inbox.hints.filter((hint) => !isPair(hint));
+  return { ...inbox, links, hints };
 };
 
 /** Returns how a move names the thing at `ref`: its identifier, else its title, else its noun. */

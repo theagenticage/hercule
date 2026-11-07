@@ -121,17 +121,6 @@ describe("buildOpenTimeline", () => {
     });
   });
 
-  it("does not weave in the card of a hint in text, which proves nothing", () => {
-    const linked = {
-      ...REVIEW,
-      signals: { openCount: 1, latest: buildLine("p1", 1) },
-    };
-
-    const lines = buildOpenTimeline(buildSource({ links: [linkTo(REVIEW.ref, "text")] }), [linked]);
-
-    expect(lines).toEqual([]);
-  });
-
   it("weaves in a linked card when the link points at this thing", () => {
     const linked = { ...REVIEW, signals: { openCount: 1, latest: buildLine("p1", 1) } };
 

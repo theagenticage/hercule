@@ -8,6 +8,12 @@
  * of the event log can find them by index. A snooze is kept in
  * `signal_snoozes`, beside the signal rather than on it, and every read joins
  * it in. Nothing here decides policy; it only reads and writes.
+ *
+ * It also answers the questions other domains ask about the signals on a
+ * thread ref (the External Entities domain draws them inside a card). A
+ * signal is live when it is open and not snoozed now. `LIVE_SIGNAL_SQL` is
+ * the one definition of that, shared by Intake's To do and by every thread
+ * read, so the two cannot disagree.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -105,6 +111,93 @@ export const encodeSignalMatch = (match: SignalMatch): string =>
 
 /** The signals, each beside its snooze row, or beside nulls when it has none. */
 const SIGNALS_WITH_SNOOZES = "signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id";
+
+/**
+ * The SQL condition that an open signal `s` is live: it has no snooze, or its
+ * snooze has ended. The statement it sits in reads `SIGNALS_WITH_SNOOZES` and
+ * defines a `read_clock(now)` table with the time of the read, because a
+ * snooze ends with time and nothing is written when it does. Write
+ * `s.status = 'open'` beside it so SQLite seeks the index on status.
+ */
+const LIVE_SIGNAL_SQL = "(z.until IS NULL OR z.until <= (SELECT now FROM read_clock))";
+
+/**
+ * The refs of every open signal that has a thread ref, snoozed ones too, as a
+ * `SELECT` of one `ref` column. A thing with an open signal is kept by the
+ * sweep and wanted by the refresh, so a snoozed signal never loses its card.
+ * Every poll reads it, so it names the partial index of the open signals
+ * (`signals_open_thread`) to keep the resolved signals, which are most of the
+ * table, unread. Without the name the planner scans `signals_thread_ref`, which
+ * also holds them.
+ */
+export const OPEN_THREAD_REFS_SQL =
+  "SELECT thread_ref AS ref FROM signals INDEXED BY signals_open_thread WHERE status = 'open' AND thread_ref IS NOT NULL";
+
+/**
+ * Builds the SQL condition that some signal on the thread `threadRefColumn`
+ * (such as `e.ref`) is live. The statement it sits in must define a
+ * `read_clock(now)` table with the time of the read.
+ */
+export const buildLiveThreadSignalExists = (threadRefColumn: string): string => `
+  EXISTS (
+    SELECT 1 FROM ${SIGNALS_WITH_SNOOZES}
+    WHERE s.thread_ref = ${threadRefColumn} AND s.status = 'open' AND ${LIVE_SIGNAL_SQL})`;
+
+/** A signal on a thread, with the fields a card or a line of its detail shows. */
+export interface ThreadSignal {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly asker?: string;
+  readonly priority: TaskPriority;
+  readonly status: SignalStatus;
+  readonly createdAt: string;
+  /** What the signal ended with; only a resolved signal has one. */
+  readonly outcome?: string;
+  /** True when the signal is open and snoozed past the time of the read. */
+  readonly snoozed: boolean;
+}
+
+/** The newest live signal of a thread, with how many live signals the thread has. */
+export interface LiveThreadSignals {
+  readonly latest: ThreadSignal;
+  readonly liveCount: number;
+}
+
+/** What the detail of one thread shows of its signals. */
+export interface ThreadSignalLines {
+  /** At most `limit` signals, oldest first by `createdAt`, then `id`. */
+  readonly signals: ReadonlyArray<ThreadSignal>;
+  /** The open signals, snoozed ones included. */
+  readonly openCount: number;
+  /** Every signal on the thread, open and resolved. */
+  readonly signalCount: number;
+}
+
+interface ThreadSignalRow {
+  readonly id: Uint8Array;
+  readonly kind: string;
+  readonly title: string;
+  readonly asker: string | null;
+  readonly priority: string;
+  readonly status: string;
+  readonly created_at: string;
+  readonly outcome: string | null;
+  readonly snoozed: number;
+}
+
+/** Converts a row of the thread reads into a `ThreadSignal`. */
+const parseThreadSignalRow = (row: ThreadSignalRow): ThreadSignal => ({
+  id: uuidToString(row.id),
+  kind: row.kind,
+  title: row.title,
+  ...(row.asker === null ? {} : { asker: row.asker }),
+  priority: row.priority as TaskPriority,
+  status: row.status as SignalStatus,
+  createdAt: row.created_at,
+  ...(row.outcome === null ? {} : { outcome: row.outcome }),
+  snoozed: row.snoozed === 1,
+});
 
 /** The Later view's order: soonest `until` first. */
 const LATER_SCOPE: CursorScope = {
@@ -274,16 +367,6 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /**
-   * Builds the conditions of To do at `now` over `SIGNALS_WITH_SNOOZES`: the
-   * signal is open, and it has no snooze or its snooze ran out at or before
-   * `now`.
-   */
-  const buildToDoConditions = (now: string) => [
-    sql`s.status = 'open'`,
-    sql`(z.until IS NULL OR z.until <= ${now})`,
-  ];
-
   /** Builds the condition that a signal's id is one of `ids`, which may be empty. */
   const buildIdIn = (column: string, ids: ReadonlyArray<string>) =>
     ids.length === 0
@@ -414,8 +497,13 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
       Effect.map(
         sql<SignalRow>`
+          WITH read_clock(now) AS (SELECT ${now})
           SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
-          WHERE ${sql.and([...buildToDoConditions(now), ...buildFilterClauses(filter)])}
+          WHERE ${sql.and([
+            sql`s.status = 'open'`,
+            sql.literal(LIVE_SIGNAL_SQL),
+            ...buildFilterClauses(filter),
+          ])}
           ORDER BY z.until IS NULL, z.until, s.created_at, s.id
         `,
         (rows) => rows.map(parseRow),
@@ -577,6 +665,114 @@ const make = Effect.gen(function* () {
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),
+
+    /**
+     * Returns, for each of `threadRefs` that holds a live signal, its newest
+     * live signal (by `createdAt`, then id) and how many live signals it holds.
+     * A ref with no live signal is left out. One statement however many refs
+     * there are, none for no refs, served by the index `signals_thread_ref`.
+     */
+    readLatestLiveSignals: (
+      threadRefs: ReadonlyArray<string>,
+      now: string,
+    ): Effect.Effect<ReadonlyMap<string, LiveThreadSignals>, SqlError> =>
+      threadRefs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<ThreadSignalRow & { readonly ref: string; readonly live_count: number }>`
+              WITH read_clock(now) AS (SELECT ${now}),
+              live AS (
+                SELECT s.thread_ref AS ref, s.id, s.kind, s.title, s.asker, s.priority,
+                  s.status, s.created_at, NULL AS outcome, 0 AS snoozed,
+                  COUNT(*) OVER (PARTITION BY s.thread_ref) AS live_count,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY s.thread_ref ORDER BY s.created_at DESC, s.id DESC) AS newest
+                FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
+                WHERE s.status = 'open'
+                  AND s.thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))
+                  AND ${sql.literal(LIVE_SIGNAL_SQL)})
+              SELECT ref, id, kind, title, asker, priority, status, created_at, outcome, snoozed,
+                live_count
+              FROM live WHERE newest = 1`,
+            (rows) =>
+              new Map(
+                rows.map((row): [string, LiveThreadSignals] => [
+                  row.ref,
+                  { latest: parseThreadSignalRow(row), liveCount: row.live_count },
+                ]),
+              ),
+          ),
+
+    /**
+     * Returns the ids of the open signals (snoozed ones too) whose thread ref
+     * is one of `threadRefs`, sorted. One statement, none for no refs.
+     */
+    listOpenSignalIds: (
+      threadRefs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      threadRefs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM signals
+              WHERE status = 'open'
+                AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))`,
+            (rows) => rows.map((row) => uuidToString(row.id)).sort(),
+          ),
+
+    /**
+     * Returns the signals on `threadRef` that a detail shows, with the counts.
+     * At most `limit` signals: the newest open ones first (snoozed ones
+     * included, marked), then the newest resolved ones in whatever room is
+     * left. The selected signals are returned oldest first, by `createdAt`,
+     * then by id.
+     *
+     * Three statements, all served by the index `signals_thread_ref`, so the
+     * work is bounded by the limit however many signals the thread has: the
+     * two counts, the open signals, and the resolved ones (not read when the
+     * open ones fill the room).
+     */
+    readThreadSignals: (
+      threadRef: string,
+      limit: number,
+      now: string,
+    ): Effect.Effect<ThreadSignalLines, SqlError> =>
+      Effect.gen(function* () {
+        const counts = yield* sql<{ readonly status: string; readonly total: number }>`
+          SELECT status, COUNT(*) AS total FROM signals
+          WHERE thread_ref = ${threadRef} GROUP BY status`;
+        const openCount = counts.find((row) => row.status === "open")?.total ?? 0;
+        const signalCount = counts.reduce((sum, row) => sum + row.total, 0);
+        const open =
+          openCount === 0
+            ? []
+            : yield* sql<ThreadSignalRow>`
+              WITH read_clock(now) AS (SELECT ${now})
+              SELECT s.id, s.kind, s.title, s.asker, s.priority, s.status, s.created_at,
+                NULL AS outcome, NOT ${sql.literal(LIVE_SIGNAL_SQL)} AS snoozed
+              FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
+              WHERE s.thread_ref = ${threadRef} AND s.status = 'open'
+              ORDER BY s.created_at DESC, s.id DESC LIMIT ${limit}`;
+        const room = limit - open.length;
+        const resolved =
+          room <= 0 || signalCount === openCount
+            ? []
+            : yield* sql<ThreadSignalRow>`
+              SELECT id, kind, title, asker, priority, status, created_at,
+                json_extract(resolution, '$.outcome') AS outcome, 0 AS snoozed
+              FROM signals
+              WHERE thread_ref = ${threadRef} AND status = 'resolved'
+              ORDER BY created_at DESC, id DESC LIMIT ${room}`;
+        // The ids are lowercase hex, so comparing them as text orders them as SQLite orders the bytes.
+        const signals = [...open, ...resolved]
+          .map(parseThreadSignalRow)
+          .sort(
+            (a, b) =>
+              (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          );
+        return { signals, openCount, signalCount };
+      }),
 
     /**
      * Returns the open signals raised from the events of one Connection,

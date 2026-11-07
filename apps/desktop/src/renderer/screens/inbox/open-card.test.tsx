@@ -63,6 +63,7 @@ const buildDetail = (
     places: [ROUND_A, ROUND_B, DEPOT],
     edges: EDGES,
     links: [],
+    hints: [],
     conflicts: [],
     signals: [],
     openCount: 0,
@@ -577,14 +578,7 @@ describe("the Linked section of the open card", () => {
   it("offers a reference found in text as a hint that links when Link is pressed", async () => {
     const detail = buildDetail(ORDER, {
       places: [ROUND_A, ROUND_B, DEPOT, SPEC],
-      links: [
-        {
-          fromRef: SPEC.ref,
-          toRef: ORDER.ref,
-          hasPersonClaim: false,
-          claim: { type: "text", evidenceKey: "description" },
-        },
-      ],
+      hints: [{ fromRef: SPEC.ref, toRef: ORDER.ref, evidenceKey: "description" }],
     });
     const { onLink } = renderPage(ORDER, detail);
     const sheet = await openTheCard();
@@ -603,10 +597,8 @@ describe("the Linked section of the open card", () => {
   it("ignores the second click of a double click on Link, which lands on the remove button that takes its place", async () => {
     const detail = buildDetail(ORDER, {
       places: [ROUND_A, ROUND_B, DEPOT, SPEC],
-      links: [
-        { fromRef: SPEC.ref, toRef: ORDER.ref, hasPersonClaim: false, claim: { type: "text" } },
-        linkTo(PR.ref, { type: "person" }),
-      ],
+      hints: [{ fromRef: SPEC.ref, toRef: ORDER.ref }],
+      links: [linkTo(PR.ref, { type: "person" })],
       peers: [
         {
           ref: PR.ref,

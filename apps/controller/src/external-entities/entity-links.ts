@@ -1,12 +1,13 @@
 /**
- * Reads the direct links between outside things: the links of a list of refs,
- * the records at the far end of those links that have no card, the links that
- * decide riding on the Inbox, and the pairs of Tasks that may be drawn as a
- * stack on Work.
+ * Reads the direct links between outside things: the links and hints of a list
+ * of refs, the records at the far end of those that have no card, the links
+ * that decide riding on the Inbox, and the pairs of Tasks that may be drawn as
+ * a stack on Work.
  *
- * A link here is a pair of peers under its firmest current claim (`source`,
- * then `person`, then `text`). A claim whose target is still pending
- * (`unresolved:...`) names no ref yet, so it is never a link or a peer.
+ * A pair of peers is drawn under its firmest current claim (`source`, then
+ * `person`, then `text`). It is a link when a source or a person claims it,
+ * and a hint when only text does. A claim whose target is still pending
+ * (`unresolved:...`) names no ref yet, so it is never a link, a hint or a peer.
  *
  * Every read is one statement however many refs it is given.
  */
@@ -17,6 +18,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   MAX_BOARD_STACK_CANDIDATES,
   type EntityChange,
+  type EntityHint,
   type EntityLink,
   type EntityPeer,
   type WorkStackCandidate,
@@ -54,8 +56,8 @@ export const CURRENT_LINKED_SQL =
  */
 export const EFFECTIVE_LINK_SQL = `${CURRENT_LINKED_SQL} AND c.claim_type IN ('source', 'person')`;
 
-/** One row of the links statement: the firmest current `linked` claim of a pair, with the plugin of its Connection when it has one. */
-interface LinkRow {
+/** One row of the pairs statement: the firmest current `linked` claim of a pair, with the plugin of its Connection when it has one. */
+interface PairRow {
   readonly id: number;
   readonly from_ref: string;
   readonly to_ref: string;
@@ -68,6 +70,9 @@ interface LinkRow {
   readonly has_person_claim: number;
 }
 
+/** A row whose firmest claim a source or a person made: the pair is a link. */
+type LinkRow = PairRow & { readonly claim_type: EntityLink["claim"]["type"] };
+
 /**
  * The SQL that ranks the claim types, 0 for the firmest. It is built from the
  * one list of claim types, so the order cannot differ from the rest of the code.
@@ -76,7 +81,10 @@ const CLAIM_TYPE_RANK_SQL = `CASE t.claim_type ${CLAIM_TYPES_FIRMEST_FIRST.map(
   (type, rank) => `WHEN '${type}' THEN ${rank}`,
 ).join(" ")} END`;
 
-/** Converts a row of the links statement to a link. */
+/** Checks that the pair joins two things. A pair whose firmest claim is `text` is a hint. */
+const isLinkRow = (row: PairRow): row is LinkRow => row.claim_type !== "text";
+
+/** Converts a row whose firmest claim is a source's or a person's to a link. */
 const buildLink = (row: LinkRow): EntityLink => ({
   fromRef: row.from_ref,
   toRef: row.to_ref,
@@ -84,78 +92,124 @@ const buildLink = (row: LinkRow): EntityLink => ({
     type: row.claim_type,
     ...(row.plugin_id === null ? {} : { plugin: row.plugin_id }),
     ...(row.actor === null ? {} : { actor: row.actor }),
-    // Only a hint names its text. A source's evidence is a URL and stays on the server.
-    ...(row.claim_type === "text" && row.evidence_key !== ""
-      ? { evidenceKey: row.evidence_key }
-      : {}),
   },
   hasPersonClaim: row.has_person_claim === 1,
 });
 
+/** Converts a row whose firmest claim is `text` to a hint. */
+const buildHint = (row: PairRow): EntityHint => ({
+  fromRef: row.from_ref,
+  toRef: row.to_ref,
+  ...(row.evidence_key === "" ? {} : { evidenceKey: row.evidence_key }),
+});
+
 /**
- * Reads the direct links of `refs`: every pair that has a current `linked`
- * claim with one end in `refs`, once, under its firmest claim, in the order of
- * that claim's id. Among claims of one type the oldest wins. A claim names only
- * its plugin or its actor, never the Connection. A thing linked to itself is no
- * link, and a pending target is no end. `hasPersonClaim` is true when a person
- * also claims the pair, so the person's own claim can be removed even when a
- * source's claim hides it.
- *
- * - With `limit`, the statement cuts the list, so rows past the limit are
- *   never loaded. It returns at most `limit + 1` links, so the caller can
- *   tell that more exist. Without it, every link is returned.
- * - With `confirmedOnly`, a `text` claim is not read, so a pair that only a
- *   hint reports has no link.
+ * Reads the firmest current `linked` claim of every pair that has one end in
+ * `refs`, once, in the order of the claim's id. Among claims of one type the
+ * oldest wins. A thing linked to itself is no pair, and a pending target is no
+ * end. `claimTest` is the SQL test a claim must pass to be read. At most
+ * `limit + 1` rows of each list (links and hints) are returned, so the caller
+ * can tell that more exist; with no `limit`, every row is.
  *
  * One statement however many refs there are.
  */
-export const readFirmestLinks = (
+const readFirmestPairs = (
   sql: SqlClient.SqlClient,
   refs: ReadonlyArray<string>,
-  options: { readonly limit?: number; readonly confirmedOnly?: boolean } = {},
-): Effect.Effect<Array<EntityLink>, SqlError> => {
+  claimTest: string,
+  limit: number | undefined,
+): Effect.Effect<ReadonlyArray<PairRow>, SqlError> => {
   if (refs.length === 0) return Effect.succeed([]);
   const refsJson = JSON.stringify(refs);
-  const claimTest = sql.literal(options.confirmedOnly ? EFFECTIVE_LINK_SQL : CURRENT_LINKED_SQL);
-  // SQLite reads a negative LIMIT as no limit at all.
-  const rowLimit = options.limit === undefined ? -1 : options.limit + 1;
+  const claimTestSql = sql.literal(claimTest);
+  const rowsPerList = limit === undefined ? Number.MAX_SAFE_INTEGER : limit + 1;
   // CROSS JOIN pins the order, so each ref seeks its claims by index. UNION
   // drops the claim that both of its ends find when both are in `refs`.
-  return Effect.map(
-    sql<LinkRow>`
-      WITH touching AS (
-        SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
-        FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
-          ON c.from_ref = r.value AND ${claimTest}
-        WHERE c.from_ref <> c.to_ref
-        UNION
-        SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
-        FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
-          ON c.to_ref = r.value AND ${claimTest}
-        WHERE c.from_ref <> c.to_ref
-      ),
-      ranked AS (
-        SELECT t.*,
-          ROW_NUMBER() OVER (
-            PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)
-            ORDER BY ${sql.literal(CLAIM_TYPE_RANK_SQL)}, t.id) AS pair_rank,
-          MAX(t.claim_type = 'person') OVER (
-            PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)) AS has_person_claim
-        FROM touching t
-      )
-      SELECT t.id, t.from_ref, t.to_ref, t.claim_type, t.actor, k.plugin_id, t.evidence_key,
-        t.has_person_claim
-      FROM ranked t LEFT JOIN connections k ON k.id = t.connection_id
+  return sql<PairRow>`
+    WITH touching AS (
+      SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
+      FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
+        ON c.from_ref = r.value AND ${claimTestSql}
+      WHERE c.from_ref <> c.to_ref
+      UNION
+      SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
+      FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
+        ON c.to_ref = r.value AND ${claimTestSql}
+      WHERE c.from_ref <> c.to_ref
+    ),
+    ranked AS (
+      SELECT t.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)
+          ORDER BY ${sql.literal(CLAIM_TYPE_RANK_SQL)}, t.id) AS pair_rank,
+        MAX(t.claim_type = 'person') OVER (
+          PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)) AS has_person_claim
+      FROM touching t
+    ),
+    firmest AS (
+      SELECT t.*,
+        ROW_NUMBER() OVER (PARTITION BY t.claim_type = 'text' ORDER BY t.id) AS list_rank
+      FROM ranked t
       WHERE t.pair_rank = 1
-      ORDER BY t.id
-      LIMIT ${rowLimit}`,
-    (rows) => rows.map(buildLink),
-  );
+    )
+    SELECT t.id, t.from_ref, t.to_ref, t.claim_type, t.actor, k.plugin_id, t.evidence_key,
+      t.has_person_claim
+    FROM firmest t LEFT JOIN connections k ON k.id = t.connection_id
+    WHERE t.list_rank <= ${rowsPerList}
+    ORDER BY t.id`;
 };
 
-/** Returns the end of `link` that is not `ref`. */
-export const readFarEnd = (link: EntityLink, ref: string): string =>
-  link.fromRef === ref ? link.toRef : link.fromRef;
+/**
+ * Reads the links of `refs` that join two things: every pair that a source or
+ * a person claims, with one end in `refs`, once, under its firmest claim, in
+ * the order of that claim's id. A `text` claim is not read, so a pair that
+ * only text mentions has no link here. `hasPersonClaim` is true when a person
+ * also claims the pair, so the person's own claim can be removed even when a
+ * source's claim hides it. Every link is returned.
+ *
+ * One statement however many refs there are.
+ */
+export const readLinks = (
+  sql: SqlClient.SqlClient,
+  refs: ReadonlyArray<string>,
+): Effect.Effect<Array<EntityLink>, SqlError> =>
+  Effect.map(readFirmestPairs(sql, refs, EFFECTIVE_LINK_SQL, undefined), (rows) =>
+    rows.filter(isLinkRow).map(buildLink),
+  );
+
+/**
+ * Reads the links and the hints of `refs`: every pair that has a current
+ * `linked` claim with one end in `refs`, once, under its firmest claim, each
+ * list in the order of that claim's id. Among claims of one type the oldest
+ * wins. A pair is a link when a source or a person claims it, even if text
+ * mentions it too, and a hint when only text does. A claim names only its
+ * plugin or its actor, never the Connection. A thing linked to itself is no
+ * pair, and a pending target is no end.
+ *
+ * Each list is cut by the statement, so rows past `limit` are never loaded.
+ * It returns at most `limit + 1` of each, so the caller can tell that more
+ * exist.
+ *
+ * One statement however many refs there are.
+ */
+export const readLinksAndHints = (
+  sql: SqlClient.SqlClient,
+  refs: ReadonlyArray<string>,
+  limit: number,
+): Effect.Effect<
+  { readonly links: Array<EntityLink>; readonly hints: Array<EntityHint> },
+  SqlError
+> =>
+  Effect.map(readFirmestPairs(sql, refs, CURRENT_LINKED_SQL, limit), (rows) => ({
+    links: rows.filter(isLinkRow).map(buildLink),
+    hints: rows.filter((row) => !isLinkRow(row)).map(buildHint),
+  }));
+
+/** Returns the end of `pair` that is not `ref`. */
+export const readFarEnd = (
+  pair: { readonly fromRef: string; readonly toRef: string },
+  ref: string,
+): string => (pair.fromRef === ref ? pair.toRef : pair.fromRef);
 
 /**
  * Builds the peer a record draws as. A record no Connection can read now is
@@ -210,11 +264,18 @@ export const makeEntityLinkReads = (
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
   return {
-    /** Returns the direct links of `refs` (see `readFirmestLinks` for the options). */
-    readLinksOf: (
+    /** Returns the links of `refs` that join two things, with no hints (see `readLinks`). */
+    readLinksOf: (refs: ReadonlyArray<string>): Effect.Effect<Array<EntityLink>, SqlError> =>
+      readLinks(sql, refs),
+
+    /** Returns the links and the hints of `refs`, each list cut at `limit + 1` (see `readLinksAndHints`). */
+    readLinksAndHintsOf: (
       refs: ReadonlyArray<string>,
-      options?: { readonly limit?: number; readonly confirmedOnly?: boolean },
-    ): Effect.Effect<Array<EntityLink>, SqlError> => readFirmestLinks(sql, refs, options),
+      limit: number,
+    ): Effect.Effect<
+      { readonly links: Array<EntityLink>; readonly hints: Array<EntityHint> },
+      SqlError
+    > => readLinksAndHints(sql, refs, limit),
 
     /**
      * Returns the things at the far end of links as peers, sorted by ref.

@@ -411,7 +411,8 @@ describe("reporting the arrival of a raised signal", () => {
     const failing = {
       layer: Layer.succeed(SignalEntities)({
         readByRefs: () => Effect.succeed(new Map()),
-        recordArrival: () => Effect.die("the entity write failed"),
+        recordArrivalAfter: (_ref, write) =>
+          Effect.flatMap(write, () => Effect.die("the entity write failed")),
       }),
     };
     const outcome = await run(

@@ -84,12 +84,6 @@ describe("decideRiding", () => {
       rides: {},
     },
     {
-      name: "never rides on a hint",
-      cards: [lead("T"), small("A")],
-      links: [link("A", "T", "text")],
-      rides: {},
-    },
-    {
       name: "never rides two lasting things on each other",
       cards: [lead("T"), lead("U", 99)],
       links: [link("T", "U")],

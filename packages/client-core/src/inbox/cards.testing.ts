@@ -1,6 +1,7 @@
 /** Test cards for the Inbox, in the invented Northwind Market world. */
 import type {
   Connection,
+  EntityHint,
   EntityLink,
   EntityPeer,
   EntityPlace,
@@ -83,8 +84,7 @@ export const buildInboxPlace = (
 
 /**
  * Returns a link between two refs under the claim given: a `source` claim of
- * the invented `acme` plugin, a `person` claim of the user, or a `text` claim
- * found in a description.
+ * the invented `acme` plugin, or a `person` claim of the user.
  */
 export const buildInboxLink = (
   fromRef: string,
@@ -95,12 +95,14 @@ export const buildInboxLink = (
   fromRef,
   toRef,
   hasPersonClaim,
-  claim:
-    type === "source"
-      ? { type, plugin: "acme" }
-      : type === "person"
-        ? { type, actor: "user" }
-        : { type, evidenceKey: "description" },
+  claim: type === "source" ? { type, plugin: "acme" } : { type, actor: "user" },
+});
+
+/** Returns a hint: `fromRef` mentions `toRef` in its description. */
+export const buildInboxHint = (fromRef: string, toRef: string): EntityHint => ({
+  fromRef,
+  toRef,
+  evidenceKey: "description",
 });
 
 /**
@@ -149,12 +151,13 @@ export const buildSignalLine = (
 /** Returns an Inbox of these cards, in this order, with the places and edges given. */
 export const buildInbox = (
   cards: readonly InboxCard[],
-  context: Partial<Pick<Inbox, "places" | "edges" | "links" | "peers">> = {},
+  context: Partial<Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers">> = {},
 ): Inbox => ({
   cards,
   places: [],
   edges: [],
   links: [],
+  hints: [],
   peers: [],
   counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
   truncated: false,

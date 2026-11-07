@@ -286,6 +286,44 @@ describe("writing source claims", () => {
     ]);
   });
 
+  it("reads a pair that only text mentions as a hint, and as a link once a source reports it too", async () => {
+    const read = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+          VALUES (${SITE}, 'linked', ${ORDER}, 'text', ${uuidFromString(ERP_ACCOUNT)}, 'note-1',
+                  'current', ${AT})`;
+        const hinted = yield* claims.readClaimsFor(ORDER, NO_CUT);
+        yield* report(claims, OTHER_ERP_ACCOUNT, ORDER, [], { linked: [SITE] });
+        return { hinted, linked: yield* claims.readClaimsFor(ORDER, NO_CUT) };
+      }),
+    );
+
+    expect(read.hinted.links).toEqual([]);
+    expect(read.hinted.hints).toEqual([{ fromRef: SITE, toRef: ORDER, evidenceKey: "note-1" }]);
+    expect(read.linked.hints).toEqual([]);
+    expect(read.linked.links.map((link) => link.claim.type)).toEqual(["source"]);
+  });
+
+  it("cuts links and hints apart, so a flood of hints never hides a link", async () => {
+    const read = await run((claims, sql) =>
+      Effect.gen(function* () {
+        for (const name of ["h1", "h2", "h3"]) {
+          yield* sql`INSERT INTO external_entity_relation_claims
+            (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+            VALUES (${ORDER}, 'linked', ${`acme-erp:site:${name}`}, 'text',
+                    ${uuidFromString(ERP_ACCOUNT)}, 'note', 'current', ${AT})`;
+        }
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], { linked: ["acme-erp:site:a"] });
+        return yield* claims.readClaimsFor(ORDER, 1);
+      }),
+    );
+
+    expect(read.links.map((link) => link.toRef)).toEqual(["acme-erp:site:a"]);
+    // One more than the limit, so the caller can tell that hints were cut.
+    expect(read.hints).toHaveLength(2);
+  });
+
   it("cuts the links in the statement: one more than the limit, each pair under its firmest claim", async () => {
     const links = await run((claims, sql) =>
       Effect.gen(function* () {

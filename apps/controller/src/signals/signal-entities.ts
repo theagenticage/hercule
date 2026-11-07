@@ -26,11 +26,17 @@ export class SignalEntities extends Context.Service<
       refs: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyMap<string, SignalEntity>, SqlError>;
     /**
-     * Records that an open signal landed on the entity of `ref`. When the
-     * entity was off the clock, it becomes an arrival, as a new concern would.
-     * It does nothing for a ref with no entity. It runs in the caller's
+     * Runs `write`, which writes an open signal on the thread `ref`, and
+     * returns its result. When the write put the entity of `ref` onto the
+     * Inbox and the clock, the entity becomes an arrival, as a new concern
+     * would. The port looks at the Inbox before `write` runs, so a signal that
+     * lands on a card that is on the Inbox already makes no arrival. It does
+     * nothing extra for a ref with no entity. It runs in the caller's
      * transaction and checks no grant.
      */
-    readonly recordArrival: (ref: string) => Effect.Effect<void, SqlError>;
+    readonly recordArrivalAfter: <A, E, R>(
+      ref: string,
+      write: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | SqlError, R>;
   }
 >()("hercule/controller/signals/SignalEntities") {}

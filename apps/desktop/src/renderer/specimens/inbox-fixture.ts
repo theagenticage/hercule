@@ -33,6 +33,7 @@ import type {
   Connection,
   EntityChange,
   EntityEdge,
+  EntityHint,
   EntityLink,
   EntityPeer,
   EntityPlace,
@@ -441,7 +442,7 @@ const PEERS: readonly EntityPeer[] = [
   },
 ];
 
-/** The claims between the specimen's things: a source's, a person's and a reference found in text. */
+/** The links between the specimen's things: a source's and a person's. */
 const LINKS: readonly EntityLink[] = [
   {
     fromRef: ISSUE_412,
@@ -462,35 +463,29 @@ const LINKS: readonly EntityLink[] = [
     claim: { type: "source", plugin: "github" },
   },
   {
-    fromRef: pullRequestRef(6219),
-    toRef: ISSUE_398,
-    hasPersonClaim: false,
-    claim: { type: "text", evidenceKey: "description" },
-  },
-  {
     fromRef: pullRequestRef(6207),
     toRef: pullRequestRef(6100),
     hasPersonClaim: false,
     claim: { type: "source", plugin: "github" },
   },
-  // Tidewatch reports the pull request, so it rides on the ticket. A pull request that only names a ticket in its text is a hint.
+  // Tidewatch reports the pull request, so it rides on the ticket.
   {
     fromRef: TICKET_142,
     toRef: pullRequestRef(6244),
     hasPersonClaim: false,
     claim: { type: "source", plugin: "tidewatch" },
   },
-  {
-    fromRef: pullRequestRef(6203),
-    toRef: TICKET_150,
-    hasPersonClaim: false,
-    claim: { type: "text", evidenceKey: "description" },
-  },
+];
+
+/** The references found in text between the specimen's things: a pull request that only names a ticket in its description. */
+const HINTS: readonly EntityHint[] = [
+  { fromRef: pullRequestRef(6219), toRef: ISSUE_398, evidenceKey: "description" },
+  { fromRef: pullRequestRef(6203), toRef: TICKET_150, evidenceKey: "description" },
 ];
 
 /** What `externalEntity.queryInbox` answers in the specimen. */
 export const INBOX: Inbox = {
-  ...buildInbox(CARDS, { places: PLACES, edges: EDGES, links: LINKS, peers: PEERS }),
+  ...buildInbox(CARDS, { places: PLACES, edges: EDGES, links: LINKS, hints: HINTS, peers: PEERS }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
 
@@ -607,6 +602,7 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
     ],
     edges: EDGES.filter((edge) => edge.fromRef === card.ref || edge.fromRef === BETA),
     links: LINKS.filter((link) => link.fromRef === card.ref),
+    hints: HINTS.filter((hint) => hint.fromRef === card.ref),
     conflicts: [],
     signals: TICKET_142_SIGNALS,
     openCount: 1,

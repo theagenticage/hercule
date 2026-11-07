@@ -24,19 +24,15 @@ export const MAX_LINK_RESULTS = 5;
 /**
  * Returns the rows of a search that can be linked to the thing at `selfRef`,
  * at most `MAX_LINK_RESULTS`: not the thing itself, and not a thing already
- * linked to it by a source or by the user. A reference found in text does not
- * count as a link, because it proves nothing: its thing can still be linked.
+ * linked to it by a source or by the user. `links` holds no hint, because a
+ * reference found in text proves nothing: its thing can still be linked.
  */
 export const listLinkableRows = (
   rows: readonly AddRow[],
   selfRef: string,
   links: readonly EntityLink[],
 ): readonly AddRow[] => {
-  const linked = new Set(
-    links
-      .filter((link) => link.claim.type !== "text")
-      .flatMap((link) => [link.fromRef, link.toRef]),
-  );
+  const linked = new Set(links.flatMap((link) => [link.fromRef, link.toRef]));
   return rows
     .filter((row) => row.ref !== selfRef && !linked.has(row.ref))
     .slice(0, MAX_LINK_RESULTS);

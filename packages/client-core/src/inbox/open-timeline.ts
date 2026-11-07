@@ -116,8 +116,7 @@ const isLive = (line: TimelineLine): boolean =>
  *
  * - The thing's own signals, resolved and snoozed ones included, and what
  *   changed at its source (`detail.timeline`).
- * - For each confirmed link (a `source` or `person` claim, never a hint in
- *   text) whose far end has a card on the page, that card's newest signal,
+ * - For each link (never a hint) whose far end has a card on the page, that card's newest signal,
  *   drawn with the far end's mark and identifier and marked `isLinked`.
  * - A change that says a thing was linked wears that thing's mark and
  *   identifier when `detail` or `cards` know the thing.
@@ -140,7 +139,6 @@ export const buildOpenTimeline = (
     ...detail.signals.map(buildSignalLine),
   ];
   for (const link of detail.links) {
-    if (link.claim.type === "text") continue;
     const card = cardByRef.get(readOtherRef(link, detail.ref));
     const latest = card?.signals.latest;
     if (card === undefined || latest === undefined) continue;

@@ -15,6 +15,7 @@ import { NO_PLACEMENT, startRidingMove, type VisitPlacement } from "./visit-plac
 import {
   buildInbox,
   buildInboxCard,
+  buildInboxHint,
   buildInboxLink,
   buildInboxPeer,
   buildRequestCard,
@@ -55,13 +56,19 @@ describe("planLink", () => {
   });
 
   it("turns a hint into the user's link", () => {
-    const hint = buildInboxLink(REVIEW.ref, TICKET.ref, "text");
-    const inbox = buildInbox([TICKET, REVIEW], { links: [hint] });
+    const hint = buildInboxHint(REVIEW.ref, TICKET.ref);
+    const inbox = buildInbox([TICKET, REVIEW], { hints: [hint] });
     const { edit } = planLink(inbox, REVIEW.ref, TICKET.ref);
     const linked = applyInboxEdit(inbox, edit);
     expect(linked.links).toEqual([
-      { ...hint, claim: { type: "person", actor: "user" }, hasPersonClaim: true },
+      {
+        fromRef: REVIEW.ref,
+        toRef: TICKET.ref,
+        claim: { type: "person", actor: "user" },
+        hasPersonClaim: true,
+      },
     ]);
+    expect(linked.hints).toEqual([]);
     expect(linked.cards).toBe(inbox.cards);
   });
 
@@ -135,16 +142,11 @@ describe("planUnlink", () => {
   });
 
   it.each([
-    ["a source's claim alone", buildInboxLink(REVIEW.ref, TICKET.ref, "source")],
-    ["a hint", buildInboxLink(REVIEW.ref, TICKET.ref, "text")],
-  ])("has nothing to take back when the pair is held by %s", (_name, link) => {
+    ["a source's claim alone", { links: [buildInboxLink(REVIEW.ref, TICKET.ref, "source")] }],
+    ["a hint", { hints: [buildInboxHint(REVIEW.ref, TICKET.ref)] }],
+  ])("has nothing to take back when the pair is held by %s", (_name, held) => {
     expect(
-      planUnlink(
-        buildInbox([TICKET, REVIEW], { links: [link] }),
-        REVIEW.ref,
-        TICKET.ref,
-        NO_PLACEMENT,
-      ),
+      planUnlink(buildInbox([TICKET, REVIEW], held), REVIEW.ref, TICKET.ref, NO_PLACEMENT),
     ).toBe(undefined);
   });
 

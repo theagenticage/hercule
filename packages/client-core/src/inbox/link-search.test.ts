@@ -33,12 +33,6 @@ describe("listLinkableRows", () => {
     expect(rows.map((each) => each.ref)).toEqual(["d"]);
   });
 
-  it("keeps a thing that only a reference in text links, so it can be confirmed", () => {
-    const rows = listLinkableRows([row("a")], SELF, [link("a", "text")]);
-
-    expect(rows.map((each) => each.ref)).toEqual(["a"]);
-  });
-
   it("lists no more than the most the search shows, after leaving out what cannot be linked", () => {
     const many = Array.from({ length: 12 }, (_, index) => row(`r${String(index)}`));
 

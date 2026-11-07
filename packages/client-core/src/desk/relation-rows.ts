@@ -11,6 +11,7 @@
  */
 import type {
   EntityEdge,
+  EntityHint,
   EntityLink,
   EntityPeer,
   EntityPlace,
@@ -19,7 +20,7 @@ import type {
 } from "@hercule/contract";
 import { lowerFirst, type PluginName } from "../intake";
 import { readEntityPluginId } from "./entity-words";
-import { describeClaim } from "./link-claim";
+import { describeClaim, describeHint } from "./link-claim";
 import { readOtherRef } from "./link-ends";
 
 /** The records and the `part of` steps a reply carries, which are all the rows are built from. */
@@ -247,6 +248,7 @@ export interface LinkedThings {
   /** The ref of the thing whose links these are. */
   readonly ref: string;
   readonly links: readonly EntityLink[];
+  readonly hints: readonly EntityHint[];
   /** Where a link's far end is found first. */
   readonly places: readonly EntityPlace[];
   /** Where it is found when `places` has no record for it. */
@@ -267,18 +269,18 @@ export interface LinkedRows {
 }
 
 /**
- * Returns the rows of a thing's links, in the order the links are given. A
- * link whose far end no record is held for has no row, and neither has a hint
- * whose far end the user cannot open. A link with a `source`
- * or `person` claim is confirmed, and one with only a `text` claim is a hint.
- * Each row carries the words of its claim (`describeClaim`) and whether the
- * user can remove it. A claim made by the text of the far end names that
- * thing's identifier ("Found in the description of #6263"); a claim found in
- * this thing's own text names only the text.
+ * Returns the rows of a thing's links and hints, each in the order given. A
+ * link or hint whose far end no record is held for has no row, and neither has
+ * a hint whose far end the user cannot open. Each row carries the words of its
+ * claim (`describeClaim`, `describeHint`) and whether the user can remove it.
+ * A hint made by the text of the far end names that thing's identifier ("Found
+ * in the description of #6263"); a hint found in this thing's own text names
+ * only the text.
  */
 export const buildLinkedRows = ({
   ref,
   links,
+  hints,
   places,
   peers,
   plugins,
@@ -288,25 +290,34 @@ export const buildLinkedRows = ({
     ...peers.map((peer) => [peer.ref, { _tag: "peer", peer }] as const),
     ...places.map((place) => [place.ref, { _tag: "place", place }] as const),
   ]);
+  const buildFarEndRow = (pair: Pick<EntityLink, "fromRef" | "toRef">): PlaceRow | undefined => {
+    const farEnd = farEnds.get(readOtherRef(pair, ref));
+    if (farEnd === undefined) return undefined;
+    return farEnd._tag === "peer" ? buildPeerRow(farEnd.peer) : buildPlaceRow(farEnd.place);
+  };
   const confirmed: PlaceRow[] = [];
-  const hints: PlaceRow[] = [];
   for (const link of links) {
-    const farEnd = farEnds.get(readOtherRef(link, ref));
-    if (farEnd === undefined) continue;
-    const row = farEnd._tag === "peer" ? buildPeerRow(farEnd.peer) : buildPlaceRow(farEnd.place);
-    const isHint = link.claim.type === "text";
-    // A hint is offered to be linked, which nobody does to a thing they cannot even name.
-    if (isHint && row.isLocked) continue;
-    const mentioner = link.fromRef === ref ? undefined : row.isLocked ? undefined : row.identifier;
-    const linked: PlaceRow = {
+    const row = buildFarEndRow(link);
+    if (row === undefined) continue;
+    confirmed.push({
       ...row,
       link: {
-        kind: isHint ? "hint" : "confirmed",
-        claimWords: describeClaim(link.claim, plugins, mentioner),
+        kind: "confirmed",
+        claimWords: describeClaim(link.claim, plugins),
         canUnlink: link.hasPersonClaim,
       },
-    };
-    (isHint ? hints : confirmed).push(linked);
+    });
   }
-  return { confirmed, hints };
+  const hintRows: PlaceRow[] = [];
+  for (const hint of hints) {
+    const row = buildFarEndRow(hint);
+    // A hint is offered to be linked, which nobody does to a thing they cannot even name.
+    if (row === undefined || row.isLocked) continue;
+    const mentioner = hint.fromRef === ref ? undefined : row.identifier;
+    hintRows.push({
+      ...row,
+      link: { kind: "hint", claimWords: describeHint(hint, mentioner), canUnlink: false },
+    });
+  }
+  return { confirmed, hints: hintRows };
 };

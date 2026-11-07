@@ -7,7 +7,16 @@ export { SignalClaims, SignalClaimsLayer } from "./claims";
 export { readThreadRef, SignalHandoffs, SignalHandoffsLayer } from "./handoffs";
 export { IgnoreRuleService, IgnoreRuleServiceLayer } from "./ignore-rules";
 export { SignalRaises, SignalRaisesLayer } from "./raises";
-export { signalRepository, type PendingRaise, type SignalSummary } from "./repository";
+export {
+  buildLiveThreadSignalExists,
+  OPEN_THREAD_REFS_SQL,
+  signalRepository,
+  type LiveThreadSignals,
+  type PendingRaise,
+  type SignalSummary,
+  type ThreadSignal,
+  type ThreadSignalLines,
+} from "./repository";
 export { SignalEntities } from "./signal-entities";
 export { SignalService, SignalServiceLayer } from "./service";
 export { YourWork, YourWorkLayer } from "./your-work";

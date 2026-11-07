@@ -325,9 +325,20 @@ export const buildPlace = (
   };
 };
 
+/** The paces of a work kind. A `context` pace is a place, which never has a card. */
+const WORK_PACES = ["fast", "slow"];
+
 /** Checks that a record is a full record of a work kind: the only kind of record a card is made from. */
 export const isWorkRecord = (row: EntityRow): boolean =>
-  row.completeness === "full" && (row.pace === "fast" || row.pace === "slow");
+  row.completeness === "full" && WORK_PACES.includes(row.pace as string);
+
+/**
+ * Builds the SQL condition that the row `entityAlias` of `external_entities` is
+ * a work record. It is the SQL form of `isWorkRecord`, built from the same
+ * paces, so the two cannot disagree.
+ */
+export const buildWorkRecordCondition = (entityAlias: string): string =>
+  `${entityAlias}.completeness = 'full' AND ${entityAlias}.pace IN (${WORK_PACES.map((pace) => `'${pace}'`).join(", ")})`;
 
 /** What a card or a detail adds to the row it draws. */
 export interface EntityReadInputs {

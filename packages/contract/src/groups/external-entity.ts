@@ -92,6 +92,9 @@ export const MAX_ENTITY_ANCESTORS = MAX_CONTEXT_PARENTS;
  */
 export const MAX_ENTITY_LINKS = 100;
 
+/** The most hints one entity read lists. Hints are bounded apart from links, so a flood of mentions never hides a link. */
+export const MAX_ENTITY_HINTS = MAX_ENTITY_LINKS;
+
 /**
  * The most direct links one Inbox read carries: the links of the cards on the
  * page. It equals `MAX_GRAPH_EDGES`, the bound of the reply's other lists of
@@ -99,11 +102,14 @@ export const MAX_ENTITY_LINKS = 100;
  */
 export const MAX_INBOX_LINKS = MAX_GRAPH_EDGES;
 
+/** The most hints one Inbox read carries. It equals `MAX_INBOX_LINKS`, and the two lists are cut apart. */
+export const MAX_INBOX_HINTS = MAX_INBOX_LINKS;
+
 /**
  * The most peers one Inbox read carries: the records at the far end of a link
- * that have no card of their own. At most one per link.
+ * or a hint that have no card of their own. At most one per link or hint.
  */
-export const MAX_INBOX_PEERS = MAX_INBOX_LINKS;
+export const MAX_INBOX_PEERS = MAX_INBOX_LINKS + MAX_INBOX_HINTS;
 
 /** The most signal lines one entity read carries. Open signals come first, so open work is never cut for resolved work. */
 export const MAX_ENTITY_SIGNALS = 50;
@@ -186,23 +192,18 @@ export const EntityConflict = Schema.Struct({
 export type EntityConflict = Schema.Schema.Type<typeof EntityConflict>;
 
 /**
- * One relationship between peers as it is drawn: the pair once, under its
- * firmest claim (`source`, then `person`, then `text`).
+ * One link between peers: a pair that a source reports or a person made, once,
+ * under its firmest claim (`source`, then `person`). A pair that only text
+ * mentions is no link; it is an `EntityHint`.
  */
 export const EntityLink = Schema.Struct({
   fromRef: ExternalRef,
   toRef: ExternalRef,
   /** The firmest claim, for the hover. It names only a plugin or an actor, never a Connection. */
   claim: Schema.Struct({
-    type: Schema.Literals(["source", "person", "text"]),
+    type: Schema.Literals(["source", "person"]),
     plugin: Schema.optionalKey(PluginId),
     actor: Schema.optionalKey(Actor),
-    /**
-     * Which text the reference was found in, such as "description". Set for a
-     * `text` claim only, so a client can say "The description of #6263". A
-     * `source` claim never carries one: the URL it came from stays on the server.
-     */
-    evidenceKey: Schema.optionalKey(bounded(1, MAX_ENTITY_EVIDENCE_KEY_LENGTH)),
   }),
   /**
    * True when a person also claims this pair (`externalEntity.link`), whatever
@@ -213,6 +214,25 @@ export const EntityLink = Schema.Struct({
 });
 
 export type EntityLink = Schema.Schema.Type<typeof EntityLink>;
+
+/**
+ * A pair of peers that only text holds together: a reference found in the
+ * text of one of them. It joins nothing until a person links the two. A pair
+ * that a source or a person also claims is an `EntityLink`, never a hint.
+ */
+export const EntityHint = Schema.Struct({
+  /** The thing whose text holds the reference. */
+  fromRef: ExternalRef,
+  /** The thing the reference points at. */
+  toRef: ExternalRef,
+  /**
+   * Which text the reference was found in, such as "description", so a client
+   * can say "The description of #6263". Absent when the claim has no evidence key.
+   */
+  evidenceKey: Schema.optionalKey(bounded(1, MAX_ENTITY_EVIDENCE_KEY_LENGTH)),
+});
+
+export type EntityHint = Schema.Schema.Type<typeof EntityHint>;
 
 /**
  * One signal as a card draws it. Every field comes from the `Signal` record,
@@ -423,7 +443,9 @@ export const Inbox = Schema.Struct({
   counts: InboxCounts,
   /** The direct links of the cards on the page. */
   links: atMost(EntityLink, MAX_INBOX_LINKS),
-  /** The records at the far end of those links that have no card of their own. */
+  /** The pairs of the cards on the page that only text holds together. */
+  hints: atMost(EntityHint, MAX_INBOX_HINTS),
+  /** The records at the far end of those links and hints that have no card of their own. */
   peers: atMost(EntityPeer, MAX_INBOX_PEERS),
   /** True when more cards exist than `MAX_INBOX_CARDS`. The screen says so. */
   truncated: Schema.Boolean,
@@ -440,13 +462,14 @@ export const ExternalEntityDetail = Schema.Struct({
   ...entityFields,
   kindAvailable: Schema.Boolean,
   /**
-   * The records above this one and the targets of its links, each once. Its
-   * bound is the most ancestors plus the most links, so no record the entity
-   * reaches is left out.
+   * The records above this one and the targets of its links and hints, each
+   * once. Its bound is the most ancestors plus the most links and hints, so no
+   * record the entity reaches is left out.
    */
-  places: atMost(EntityPlace, MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS),
+  places: atMost(EntityPlace, MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
   edges: atMost(EntityEdge, MAX_GRAPH_EDGES),
   links: atMost(EntityLink, MAX_ENTITY_LINKS),
+  hints: atMost(EntityHint, MAX_ENTITY_HINTS),
   /** Claims the graph refused, such as a loop, with why. */
   conflicts: atMost(EntityConflict, MAX_ENTITY_LINKS),
   /**
@@ -461,8 +484,8 @@ export const ExternalEntityDetail = Schema.Struct({
   signalCount: Schema.Int,
   /** What changed at the source, in time order, oldest first. */
   timeline: atMost(EntityChange, MAX_ENTITY_TIMELINE),
-  /** The records at the far end of this thing's links that have no card of their own. */
-  peers: atMost(EntityPeer, MAX_ENTITY_LINKS),
+  /** The records at the far end of this thing's links and hints that have no card of their own. */
+  peers: atMost(EntityPeer, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
 });
 
 export type ExternalEntityDetail = Schema.Schema.Type<typeof ExternalEntityDetail>;

@@ -108,9 +108,10 @@ describe("RelationRows for linked things", () => {
     title: "Chilled crates",
     status: { shape: "fork", tone: "active", label: "Checks failed" },
   });
-  const build = (claim: { type: "source" | "person" | "text" }, extra: object = {}) =>
+  const build = (claim: { type: "source" | "person" }, extra: object = {}) =>
     buildLinkedRows({
       ref: ORDER,
+      hints: [],
       links: [
         {
           fromRef: ORDER,
@@ -161,7 +162,14 @@ describe("RelationRows for linked things", () => {
 
   it("offers a hint a Link button, with the words of where the reference was found", async () => {
     const onLink = vi.fn();
-    const { hints } = build({ type: "text" }, { evidenceKey: "description" });
+    const { hints } = buildLinkedRows({
+      ref: ORDER,
+      links: [],
+      hints: [{ fromRef: ORDER, toRef: OTHER, evidenceKey: "description" }],
+      places: [other],
+      peers: [],
+      plugins: PLUGINS,
+    });
     render(<RelationRows rows={hints} plugins={PLUGINS} onLink={onLink} />);
 
     expect(screen.getByText("Found in the description")).toBeTruthy();

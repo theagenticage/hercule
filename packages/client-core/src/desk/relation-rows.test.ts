@@ -1,5 +1,11 @@
 /** Tests the rows of the outside graph, with an invented purchase order that sits in two delivery rounds. */
-import type { EntityEdge, EntityLink, EntityPeer, EntityPlace } from "@hercule/contract";
+import type {
+  EntityEdge,
+  EntityHint,
+  EntityLink,
+  EntityPeer,
+  EntityPlace,
+} from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildLinkedRows,
@@ -158,13 +164,18 @@ describe("buildLinkedRows", () => {
   });
   /** A link the test names without `hasPersonClaim`, which then holds exactly when the firmest claim is the user's. */
   type TestLink = Omit<EntityLink, "hasPersonClaim"> & { readonly hasPersonClaim?: boolean };
-  const build = (links: readonly TestLink[], peers: readonly EntityPeer[] = []) =>
+  const build = (
+    links: readonly TestLink[],
+    peers: readonly EntityPeer[] = [],
+    hints: readonly EntityHint[] = [],
+  ) =>
     buildLinkedRows({
       ref: ORDER,
       links: links.map((link) => ({
         ...link,
         hasPersonClaim: link.hasPersonClaim ?? link.claim.type === "person",
       })),
+      hints,
       places: [place(OTHER, "Chilled crates", { identifier: "PO-2", noun: "Order" })],
       peers,
       plugins: PLUGINS,
@@ -206,12 +217,8 @@ describe("buildLinkedRows", () => {
   });
 
   it("keeps a reference found in text apart as a hint, and names the text it was found in", () => {
-    const fromOther = build([
-      { fromRef: OTHER, toRef: ORDER, claim: claimOf("text", { evidenceKey: "description" }) },
-    ]);
-    const fromSelf = build([
-      { fromRef: ORDER, toRef: OTHER, claim: claimOf("text", { evidenceKey: "description" }) },
-    ]);
+    const fromOther = build([], [], [{ fromRef: OTHER, toRef: ORDER, evidenceKey: "description" }]);
+    const fromSelf = build([], [], [{ fromRef: ORDER, toRef: OTHER, evidenceKey: "description" }]);
 
     expect(fromOther.confirmed).toEqual([]);
     expect(fromOther.hints[0]?.link).toMatchObject({
@@ -274,8 +281,9 @@ describe("buildLinkedRows", () => {
 
   it("leaves out a hint whose far end the user cannot open", () => {
     const rows = build(
-      [{ fromRef: ORDER, toRef: PEER, claim: claimOf("text") }],
+      [],
       [{ ref: PEER, kind: "quayside/order", noun: "Order", yours: false, restricted: true }],
+      [{ fromRef: ORDER, toRef: PEER }],
     );
 
     expect(rows.hints).toEqual([]);

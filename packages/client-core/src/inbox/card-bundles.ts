@@ -13,7 +13,7 @@
  * row that draws the same is not drawn again. Nothing here knows a kind by
  * name.
  */
-import type { EntityLink, EntityPeer, InboxCard } from "@hercule/contract";
+import type { EntityHint, EntityLink, EntityPeer, InboxCard } from "@hercule/contract";
 import { replaceEqualDeep } from "@tanstack/query-core";
 import { readEntityPluginId } from "../desk/entity-words";
 import { isLinkBetween, nameLinkedThing, readOtherRef } from "../desk/link-ends";
@@ -86,7 +86,8 @@ export interface MentionHint {
   /** The end whose text holds the reference. */
   readonly fromRef: string;
   readonly toRef: string;
-  readonly claim: LinkClaim;
+  /** Which text holds the reference, such as "description", when the read says. */
+  readonly evidenceKey: string | undefined;
 }
 
 /** A line under a request that says what it is linked to: "Linked to #6263". */
@@ -145,12 +146,29 @@ export interface BundleSources {
   readonly peerByRef: ReadonlyMap<string, EntityPeer>;
   /** Every link by each of its two ends. */
   readonly linksByRef: ReadonlyMap<string, readonly EntityLink[]>;
+  /** Every hint by each of its two ends. */
+  readonly hintsByRef: ReadonlyMap<string, readonly EntityHint[]>;
   /** The riding cards of each lead, by the lead's ref, in the order of the visit. */
   readonly ridersByLead: ReadonlyMap<string, readonly InboxCard[]>;
   /** The bundles of the layout before this one, by card id. A bundle that comes out equal keeps its identity. */
   readonly previousBundles: Readonly<Record<string, CardBundle>>;
   readonly context: PlaceContext;
 }
+
+/** Returns `pairs` by each of their two ends, so a pair is found from either thing. */
+const indexByEnds = <Pair extends { readonly fromRef: string; readonly toRef: string }>(
+  pairs: readonly Pair[],
+): ReadonlyMap<string, readonly Pair[]> => {
+  const byRef = new Map<string, Pair[]>();
+  for (const pair of pairs) {
+    for (const ref of [pair.fromRef, pair.toRef]) {
+      const known = byRef.get(ref);
+      if (known === undefined) byRef.set(ref, [pair]);
+      else known.push(pair);
+    }
+  }
+  return byRef;
+};
 
 /**
  * Returns the lookups `buildCardBundle` reads. `riding` is `decideDrawnRiding`'s
@@ -162,6 +180,7 @@ export const indexBundleSources = (
   inbox: {
     readonly cards: readonly InboxCard[];
     readonly links: readonly EntityLink[];
+    readonly hints: readonly EntityHint[];
     readonly peers: readonly EntityPeer[];
   },
   riding: ReadonlyMap<string, string>,
@@ -169,14 +188,6 @@ export const indexBundleSources = (
   context: PlaceContext,
   previousBundles: Readonly<Record<string, CardBundle>>,
 ): BundleSources => {
-  const linksByRef = new Map<string, EntityLink[]>();
-  for (const link of inbox.links) {
-    for (const ref of [link.fromRef, link.toRef]) {
-      const known = linksByRef.get(ref);
-      if (known === undefined) linksByRef.set(ref, [link]);
-      else known.push(link);
-    }
-  }
   const ridersByLead = new Map<string, InboxCard[]>();
   for (const card of inbox.cards) {
     const lead = riding.get(card.id);
@@ -190,7 +201,8 @@ export const indexBundleSources = (
   return {
     cardByRef: new Map(inbox.cards.map((card) => [card.ref, card])),
     peerByRef: new Map(inbox.peers.map((peer) => [peer.ref, peer])),
-    linksByRef,
+    linksByRef: indexByEnds(inbox.links),
+    hintsByRef: indexByEnds(inbox.hints),
     ridersByLead,
     previousBundles,
     context,
@@ -266,9 +278,9 @@ const describeLine = (line: TuckedLine): string =>
  *   parts come by title, locked ones last.
  * - On a request, a direct link is a line "Linked to ...", unless the thing is
  *   one the user cannot read, which a request does not name.
- * - A `text` claim is a hint on either card: "Mentions ..." under the card whose
- *   text holds the reference, "Mentioned in ..." under the one it points at. A
- *   hint never makes a part and never changes what rides.
+ * - A hint (`Inbox.hints`) is a line on either card: "Mentions ..." under the
+ *   card whose text holds the reference, "Mentioned in ..." under the one it
+ *   points at. A hint never makes a part and never changes what rides.
  * - A link whose other end the read does not hold draws nothing.
  *
  * Returns `EMPTY_BUNDLE` itself for a card that carries nothing. Returns the
@@ -278,7 +290,8 @@ const describeLine = (line: TuckedLine): string =>
 export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBundle => {
   const riders = sources.ridersByLead.get(lead.ref) ?? [];
   const links = sources.linksByRef.get(lead.ref) ?? [];
-  if (riders.length === 0 && links.length === 0) return EMPTY_BUNDLE;
+  const hints = sources.hintsByRef.get(lead.ref) ?? [];
+  if (riders.length === 0 && links.length === 0 && hints.length === 0) return EMPTY_BUNDLE;
   const findClaimToward = (otherRef: string): LinkClaim | undefined =>
     links.find((link) => isLinkBetween(link, lead.ref, otherRef))?.claim;
 
@@ -303,25 +316,32 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
     }
   }
 
-  for (const link of links) {
-    const otherRef = readOtherRef(link, lead.ref);
+  for (const hint of hints) {
+    const otherRef = readOtherRef(hint, lead.ref);
     if (seen.has(otherRef)) continue;
     seen.add(otherRef);
     const card = sources.cardByRef.get(otherRef);
     const peer = sources.peerByRef.get(otherRef);
-    if (link.claim.type === "text") {
-      const farEnd = card ?? peer;
-      if (peer?.restricted === true || farEnd === undefined) continue;
-      lines.push({
-        _tag: "mention",
-        word: link.fromRef === lead.ref ? "Mentions" : "Mentioned in",
-        reference: nameLinkedThing(farEnd),
-        otherRef,
-        fromRef: link.fromRef,
-        toRef: link.toRef,
-        claim: link.claim,
-      });
-    } else if (lead.card === "compact") {
+    const farEnd = card ?? peer;
+    if (peer?.restricted === true || farEnd === undefined) continue;
+    lines.push({
+      _tag: "mention",
+      word: hint.fromRef === lead.ref ? "Mentions" : "Mentioned in",
+      reference: nameLinkedThing(farEnd),
+      otherRef,
+      fromRef: hint.fromRef,
+      toRef: hint.toRef,
+      evidenceKey: hint.evidenceKey,
+    });
+  }
+
+  for (const link of links) {
+    const otherRef = readOtherRef(link, lead.ref);
+    if (seen.has(otherRef)) continue;
+    seen.add(otherRef);
+    if (lead.card === "compact") {
+      const card = sources.cardByRef.get(otherRef);
+      const peer = sources.peerByRef.get(otherRef);
       const farEnd = card ?? peer;
       if (peer?.restricted === true || farEnd === undefined) continue;
       lines.push({
