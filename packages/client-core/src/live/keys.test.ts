@@ -133,13 +133,15 @@ describe("the Work board's key", () => {
 
 describe("the Inbox's and the entities' keys", () => {
   const inboxKeys = [queryKeys.inbox(), queryKeys.inboxCount()];
+  // To do is the one signal list that draws a signal's entity, so a late-attaching entity reads it.
+  const toDoKey = queryKeys.signals({ view: "to-do" });
 
   // Each row is one topic and the exact keys its push reads again. A pane's
   // read is always the whole prefix: a pane embeds its parents' records, so a
   // push naming one entity can change another entity's pane.
   const rows: ReadonlyArray<{
     readonly name: string;
-    readonly topic: "task" | "externalEntity" | "connection" | "plugin";
+    readonly topic: "task" | "signal" | "externalEntity" | "connection" | "plugin";
     readonly derived?: true;
     readonly ids: ReadonlyArray<string>;
     readonly keys: ReadonlyArray<LiveQueryKey>;
@@ -154,6 +156,7 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
+        toDoKey,
       ],
     },
     {
@@ -166,6 +169,31 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
+        toDoKey,
+      ],
+    },
+    {
+      name: "a signal push naming ids reads the Inbox, the open entity panes and the signal lists, not the board or the suggestions",
+      topic: "signal",
+      ids: ["s1"],
+      keys: [
+        queryKeys.signals(),
+        queryKeys.signal("s1"),
+        queryKeys.yourWork(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+      ],
+    },
+    {
+      name: "a signal push naming no ids",
+      topic: "signal",
+      ids: [],
+      keys: [
+        queryKeys.signals(),
+        queryKeys.signal(),
+        queryKeys.yourWork(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
       ],
     },
     {
@@ -262,7 +290,7 @@ describe("the Inbox's and the entities' keys", () => {
   }
 
   it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
-    for (const topic of ["run", "session", "signal", "workflow", "wikiPage"] as const) {
+    for (const topic of ["run", "session", "workflow", "wikiPage"] as const) {
       for (const ids of [[], ["x"]]) {
         const keys = buildQueryKeys(topic, ids);
         for (const key of [
@@ -281,12 +309,15 @@ describe("the Inbox's and the entities' keys", () => {
 });
 
 describe("signal pushes", () => {
-  it("invalidates every list, the changed signals and Your work", () => {
+  it("invalidates every list, the changed signals, Your work, the Inbox and the entity panes", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [
       queryKeys.signals(),
       queryKeys.signal("first"),
       queryKeys.signal("second"),
       queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
     ]);
   });
 
@@ -308,6 +339,9 @@ describe("signal pushes", () => {
       queryKeys.signals(),
       queryKeys.signal(),
       queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
     ]);
   });
 

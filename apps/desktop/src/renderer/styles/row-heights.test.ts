@@ -45,6 +45,7 @@ describe("row-heights.css", () => {
       "--list-height-two-line-row": [52, 2],
       "--list-height-column-row": [46, 2],
       "--intake-height-section": [40, 1],
+      "--intake-height-group": [32, 1],
       "--intake-height-row": [52, 2],
       "--tracking-height-row": [46, 2],
       "--model-browser-height-row": [46, 2],
@@ -108,6 +109,11 @@ describe("the heights of the default Text size", () => {
   });
 
   it("are those of Intake's list and opened Tracking", () => {
-    expect(readIntakeListHeights()).toEqual({ section: 40, signalRow: 52, trackingRow: 46 });
+    expect(readIntakeListHeights()).toEqual({
+      section: 40,
+      group: 32,
+      signalRow: 52,
+      trackingRow: 46,
+    });
   });
 });

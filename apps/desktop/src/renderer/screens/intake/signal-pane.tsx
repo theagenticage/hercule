@@ -15,10 +15,8 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import {
-  useMutation,
   useQueries,
   useQuery,
-  useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
@@ -65,10 +63,12 @@ import {
 import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
 import { useTrackingRows, useYourWork } from "../../app/tracking";
+import { useAnswerSignal } from "../../app/use-answer-signal";
+import { SignalAnswers } from "../desk";
 import { Mark } from "../../marks";
 import { HandoffTripHeadline } from "./handoff-trip-line";
+import { readAnswerKey } from "./answer-keys";
 import { IgnoreDialog } from "./ignore-dialog";
-import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
 import { SignalPaneMenu } from "./signal-pane-menu";
 import { SignalPaneMoves } from "./signal-moves";
@@ -185,7 +185,6 @@ function SignalDetail({
 }): JSX.Element {
   const { controller, bridge } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const queryClient = useQueryClient();
   const moves = useIntakeMoves();
   const idPrefix = useId();
   const rootRef = useRef<HTMLElement>(null);
@@ -199,34 +198,23 @@ function SignalDetail({
     suggested?.style === "reply" ? suggested.action.id : null,
   );
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
-  // `useMutation` drops its error when the next answer starts, and the error
-  // must name the answer it belongs to, so the failure is kept here.
-  const [failure, setFailure] = useState<AnswerFailure | null>(null);
-
   // A signal handed off before `signal.handOff` existed starts its run
   // untracked, so no row of Tracking waits to land the flight.
   const isHandOff = (actionId: string): boolean =>
     answers.find((answer) => answer.action.id === actionId)?.action.operation?.op ===
     "signal.handOff";
-  const act = useMutation({
-    mutationFn: (input: { readonly actionId: string; readonly text?: string }) =>
-      client.signal.act({ params: { id: signal.id }, payload: input }),
-    onMutate: ({ actionId }) => {
-      setFailure(null);
+  const { act, failure } = useAnswerSignal(client, signal, {
+    onStart: (actionId) => {
       moves.registerOwnChanges([signal.id]);
       if (isHandOff(actionId)) moves.registerHandoff(signal.id);
     },
-    onSuccess: (acted, { actionId }) => {
+    onAnswered: (actionId) => {
       setActedHere(true);
       if (isHandOff(actionId)) moves.confirmHandoff(signal.id);
-      // The lists need no read here: the answer writes an audit entry on the
-      // `signal` topic, and its live push reads every signal list again.
-      queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);
     },
-    onError: (error, input) => {
+    onFailed: () => {
       moves.forgetOwnChanges([signal.id]);
       moves.forgetHandoff(signal.id);
-      setFailure({ actionId: input.actionId, message: readErrorMessage(error) });
     },
   });
 
@@ -449,6 +437,8 @@ function SignalDetail({
               locked={act.isPending || moves.pending}
               failure={failure}
               idPrefix={idPrefix}
+              className="ad-answers"
+              shortcutFor={readAnswerKey}
               platform={bridge.platform}
               onOpenReply={focusReply}
               onDraftChange={(actionId, text) => {

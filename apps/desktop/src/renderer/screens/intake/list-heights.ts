@@ -11,11 +11,13 @@ import { readLengths } from "../../app/text-size";
  * The custom property that holds each height, at the default Text size:
  *
  * - `section` is a section's heading, 40px;
+ * - `group` is the header over the signals about one outside thing, 32px;
  * - `signalRow` is a signal's row in Intake's list, 52px;
  * - `trackingRow` is a row of opened Tracking, 46px.
  */
 const LIST_HEIGHT_PROPERTIES = {
   section: "--intake-height-section",
+  group: "--intake-height-group",
   signalRow: "--intake-height-row",
   trackingRow: "--tracking-height-row",
 } as const;

@@ -2,7 +2,8 @@
  * Tests `SnoozeTimer`: when it reads Intake's lists again so a snoozed
  * signal comes back to To do. The controller sends no push when a snooze
  * runs out, so this timer is the only thing that brings the signal back
- * while the app runs.
+ * while the app runs, and the card that only that signal held back to the
+ * Inbox.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
@@ -65,7 +66,23 @@ const renderSnoozeTimer = (
   // signal list reads it.
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, []);
   new QueryObserver(queryClient, signalsToDoQuery(client)).subscribe(() => {});
-  return { reads, queryClient };
+  // The shell keeps the Inbox's count active, and the Inbox screen its read.
+  // Each is counted by the times it was read, after its first read.
+  const inboxReads: Read[] = [];
+  const inboxCountReads: Read[] = [];
+  for (const [key, log] of [
+    [queryKeys.inbox(), inboxReads],
+    [queryKeys.inboxCount(), inboxCountReads],
+  ] as const) {
+    new QueryObserver(queryClient, {
+      queryKey: key,
+      queryFn: () => {
+        log.push({ view: undefined, at: Date.now() });
+        return Promise.resolve(null);
+      },
+    }).subscribe(() => {});
+  }
+  return { reads, inboxReads, inboxCountReads, queryClient };
 };
 
 beforeEach(() => {
@@ -209,5 +226,70 @@ describe("SnoozeTimer", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(reads).toEqual([]);
+  });
+});
+
+describe("SnoozeTimer and the Inbox", () => {
+  /** Lets the first reads of the Inbox's observers settle, so only later reads are counted. */
+  const forgetFirstReads = async (...logs: Read[][]) => {
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    for (const log of logs) log.length = 0;
+  };
+
+  it("reads the Inbox and its count when the snooze has run out, and not before", async () => {
+    const until = NOW + FIVE_MINUTES_MS;
+    const { inboxReads, inboxCountReads } = renderSnoozeTimer(new Date(until).toISOString());
+    await forgetFirstReads(inboxReads, inboxCountReads);
+
+    await act(() => vi.advanceTimersByTimeAsync(FIVE_MINUTES_MS));
+    expect([inboxReads, inboxCountReads]).toEqual([[], []]);
+
+    await act(() => vi.advanceTimersByTimeAsync(1_010));
+    expect(inboxReads).toHaveLength(1);
+    expect(inboxCountReads).toHaveLength(1);
+    expect(inboxReads[0]!.at).toBeGreaterThanOrEqual(until);
+  });
+
+  it("waits for the controller's clock before it reads the Inbox, so the card is there when it reads", async () => {
+    const until = NOW + FIVE_MINUTES_MS;
+    const controllerRunsOutAt = until + 10_000;
+    const { inboxReads } = renderSnoozeTimer(new Date(until).toISOString(), controllerRunsOutAt);
+    await forgetFirstReads(inboxReads);
+
+    // The timer tries at 1 s, 3 s and 7 s: the controller still has the snooze, so no Inbox read.
+    await act(() => vi.advanceTimersByTimeAsync(FIVE_MINUTES_MS + 9_000));
+    expect(inboxReads).toEqual([]);
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(inboxReads).toHaveLength(1);
+    expect(inboxReads[0]!.at).toBeGreaterThanOrEqual(controllerRunsOutAt);
+  });
+
+  it("reads the Inbox when the snooze runs out while the window is hidden", async () => {
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const { inboxReads, inboxCountReads } = renderSnoozeTimer(
+      new Date(NOW + FIVE_MINUTES_MS).toISOString(),
+    );
+    await forgetFirstReads(inboxReads, inboxCountReads);
+
+    await act(() => vi.advanceTimersByTimeAsync(FIVE_MINUTES_MS + 1_010));
+    expect(inboxReads).toHaveLength(1);
+    expect(inboxCountReads).toHaveLength(1);
+    hidden.mockRestore();
+  });
+
+  it("reads the Inbox when the window gets focus after the snooze ran out while the Mac slept", async () => {
+    const { inboxReads, inboxCountReads } = renderSnoozeTimer(
+      new Date(NOW + FIVE_MINUTES_MS).toISOString(),
+    );
+    await forgetFirstReads(inboxReads, inboxCountReads);
+
+    vi.setSystemTime(NOW + 2 * FIVE_MINUTES_MS);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(inboxReads).toHaveLength(1);
+    expect(inboxCountReads).toHaveLength(1);
   });
 });
