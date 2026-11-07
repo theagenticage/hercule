@@ -22,15 +22,15 @@ export interface OpenCard {
    * page. Called again while open, it moves the sheet to `id` where it stands.
    * Called while the sheet folds home, it turns round.
    */
-  open(id: string, originElement: HTMLElement): void;
+  readonly open: (id: string, originElement: HTMLElement) => void;
   /** Folds the sheet back into the card it opened from. Does nothing when nothing is open. */
-  close(): void;
+  readonly close: () => void;
   /**
    * Moves the open sheet to the card or place `id` on the page, where it
    * stands, as J and K do. The sheet's way back starts again from `id`. Does
    * nothing when nothing is open.
    */
-  walk(id: string): void;
+  readonly walk: (id: string) => void;
   /** What `InboxOpenCard` draws from. Nothing else needs it. */
   readonly sheet: OpenCardSheet;
 }
@@ -49,11 +49,11 @@ export interface OpenCardSheet {
    */
   readonly originElement: HTMLElement | null;
   /** Shows the place or card `id` inside the sheet, keeping the way back. The sheet folds into `id` from then on. */
-  walkInside(id: string): void;
+  readonly walkInside: (id: string) => void;
   /** Shows what the sheet showed before the last `walkInside`. */
-  walkBack(): void;
+  readonly walkBack: () => void;
   /** Forgets the sheet, once it has folded home. Does nothing when it was opened again meanwhile. */
-  finishClose(): void;
+  readonly finishClose: () => void;
 }
 
 interface OpenState {

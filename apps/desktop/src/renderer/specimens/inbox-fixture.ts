@@ -17,7 +17,14 @@
  *   one of the user's own.
  * - With someone else: two pull requests that have a Task.
  */
-import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
+import type {
+  Connection,
+  EntityEdge,
+  EntityPlace,
+  Inbox,
+  InboxCard,
+  PluginDetail,
+} from "@hercule/contract";
 import { buildInbox, buildInboxCard, buildRequestCard } from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { buildPlugin, GITHUB_PLUGIN } from "./plugins-fixture";
@@ -229,15 +236,22 @@ const CARDS: readonly InboxCard[] = [
   }),
 ];
 
+/**
+ * The `part of` edges of the specimen: each delivery round is part of its
+ * site, and each card is part of the places nearest to it, which are all of
+ * its ancestors except the site (a round already reaches the site).
+ */
+const EDGES: readonly EntityEdge[] = [
+  { fromRef: WINTER, toRef: SITE },
+  { fromRef: RETURNS, toRef: SITE },
+  ...CARDS.flatMap((card) =>
+    card.ancestors.filter((ref) => ref !== SITE).map((toRef) => ({ fromRef: card.ref, toRef })),
+  ),
+];
+
 /** What `externalEntity.queryInbox` answers in the specimen. */
 export const INBOX: Inbox = {
-  ...buildInbox(CARDS, {
-    places: PLACES,
-    edges: [
-      { fromRef: WINTER, toRef: SITE },
-      { fromRef: RETURNS, toRef: SITE },
-    ],
-  }),
+  ...buildInbox(CARDS, { places: PLACES, edges: EDGES }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
 

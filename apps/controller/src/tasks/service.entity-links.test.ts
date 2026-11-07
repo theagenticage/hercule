@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ExternalRef, TaskStage } from "@hercule/contract";
+import type { ExternalRef } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidFromString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -131,7 +131,7 @@ describe("the active Task of a ref", () => {
         yield* tasks.update({ id: fourth.id, stage: "done" });
         steps.push(yield* readActive);
         // Reopening a finished Task makes its old link count again.
-        yield* tasks.update({ id: first.id, stage: "planned" as TaskStage });
+        yield* tasks.update({ id: first.id, stage: "planned" });
         steps.push(yield* readActive);
         return steps;
       }),

@@ -1132,8 +1132,11 @@ export const entitySearchQuery = (client: HerculeClient, search: EntitySearchQue
       search?.text ?? null,
       search?.scopeRef ?? null,
     ],
+    // The signal aborts the request once a newer search replaces this one.
     queryFn:
-      search === undefined ? skipToken : () => client.externalEntity.search({ query: search }),
+      search === undefined
+        ? skipToken
+        : ({ signal }) => client.externalEntity.search({ query: search }, { signal }),
     retry: false,
     staleTime: 0,
     gcTime: 0,

@@ -61,7 +61,8 @@ interface AddedRow {
  *
  * `places` are the stored places the Work board holds, which are the
  * contexts the select offers. `opening` says which source and context the
- * sheet starts on. A change of `opening` needs a new component (a `key`),
+ * sheet starts on. `projectId` is the Project that every Task added here joins,
+ * or `null` for none. A change of `opening` needs a new component (a `key`),
  * because the sheet then starts again. Draws nothing when no plugin is a
  * source.
  */
@@ -69,6 +70,7 @@ export function AddFromSource({
   client,
   places,
   opening,
+  projectId,
   isOffline,
   onAdded,
   onFailed,
@@ -77,6 +79,7 @@ export function AddFromSource({
   readonly client: HerculeClient;
   readonly places: ReadonlyArray<EntityPlace>;
   readonly opening: AddOpening;
+  readonly projectId: string | null;
   readonly isOffline: boolean;
   readonly onAdded: (added: AddedThing) => void;
   readonly onFailed: (message: string) => void;
@@ -95,6 +98,7 @@ export function AddFromSource({
       places={places}
       initialSource={openingSource.id}
       initialScopeRef={openingSource.id === opening.sourceId ? (opening.scopeRef ?? "") : ""}
+      projectId={projectId}
       isOffline={isOffline}
       onAdded={onAdded}
       onFailed={onFailed}
@@ -128,6 +132,7 @@ function SourceSearch({
   places,
   initialSource,
   initialScopeRef,
+  projectId,
   isOffline,
   onAdded,
   onFailed,
@@ -139,6 +144,7 @@ function SourceSearch({
   readonly places: ReadonlyArray<EntityPlace>;
   readonly initialSource: string;
   readonly initialScopeRef: string;
+  readonly projectId: string | null;
   readonly isOffline: boolean;
   readonly onAdded: (added: AddedThing) => void;
   readonly onFailed: (message: string) => void;
@@ -235,7 +241,10 @@ function SourceSearch({
         : { status: "loading" };
 
   const addToWork = useMutation({
-    mutationFn: (row: AddRow) => client.externalEntity.addToWork({ payload: { ref: row.ref } }),
+    mutationFn: (row: AddRow) =>
+      client.externalEntity.addToWork({
+        payload: { ref: row.ref, ...(projectId === null ? {} : { projectId }) },
+      }),
     onSuccess: (result, row) => {
       // A Task this call made always has an entity: only an existing Task can come back without one.
       const entityId = result.id;

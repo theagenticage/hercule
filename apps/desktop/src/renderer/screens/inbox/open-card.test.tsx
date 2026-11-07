@@ -167,10 +167,10 @@ describe("InboxOpenCard", () => {
 
     expect(await within(sheet).findByText(/plugin is turned off/)).toBeTruthy();
     expect(
-      (within(sheet).getByRole("button", { name: /^Take it/ }) as HTMLButtonElement).disabled,
+      within(sheet).getByRole<HTMLButtonElement>("button", { name: /^Take it/ }).disabled,
     ).toBe(true);
     expect(
-      (within(sheet).getByRole("button", { name: /^Dismiss/ }) as HTMLButtonElement).disabled,
+      within(sheet).getByRole<HTMLButtonElement>("button", { name: /^Dismiss/ }).disabled,
     ).toBe(true);
   });
 

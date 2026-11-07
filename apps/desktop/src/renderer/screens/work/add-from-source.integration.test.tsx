@@ -159,11 +159,13 @@ const renderSheet = ({
   handlers = {},
   opening = { sourceId: "relay" },
   isOffline = false,
+  projectId = null,
   places = [BASKET, PRICING],
 }: {
   readonly handlers?: Readonly<Record<string, Handler>>;
   readonly opening?: { readonly sourceId?: string; readonly scopeRef?: string };
   readonly isOffline?: boolean;
+  readonly projectId?: string | null;
   readonly places?: readonly (typeof BASKET)[];
 } = {}): Rendered => {
   const calls = stubApi({
@@ -192,6 +194,7 @@ const renderSheet = ({
               client={client}
               places={places}
               opening={opening}
+              projectId={projectId}
               isOffline={isOffline}
               onAdded={(thing) => {
                 added.push(thing);
@@ -328,6 +331,33 @@ describe("From a source: searching", () => {
 
     expect(screen.queryByText("WEB-301")).toBeNull();
     expect(screen.getByText("WEB-302")).toBeTruthy();
+  });
+
+  it("cancels the request of an older search once a newer one was made", async () => {
+    const older = holdAnswer();
+    const handlers: Record<string, Handler> = {
+      [SEARCH_PATH]: (call) =>
+        readSearchText(call) === "gi" ? older.handler() : { body: buildReply() },
+    };
+    const { calls } = renderSheet({ handlers });
+    const sentFetch = globalThis.fetch;
+    const searchSignals: Array<AbortSignal | null | undefined> = [];
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (url.includes("/external-entities/search")) searchSignals.push(init?.signal);
+      return sentFetch(url, init);
+    });
+    const user = userEvent.setup();
+    const search = await findSearch();
+
+    await user.type(search, "gi");
+    await waitFor(() => {
+      expect(listSearches(calls)).toHaveLength(1);
+    });
+    expect(searchSignals[0]?.aborted).toBe(false);
+    await user.type(search, "ft");
+    await screen.findByText("WEB-301");
+
+    expect(searchSignals[0]?.aborted).toBe(true);
   });
 
   it("goes back to the suggestions when the search is cleared", async () => {
@@ -535,6 +565,24 @@ describe("From a source: adding", () => {
     });
     // The keys are back in the search, ready for the next one.
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: /^Search Relay/ }));
+  });
+
+  it.each([
+    ["joins the Project of the lane it was opened from", "01a06d02-7e00-7000-8000-000000000c01"],
+    ["joins no Project when it was opened from outside a Project lane", null],
+  ])("adds a Task that %s", async (_, projectId) => {
+    const { calls } = renderSheet({ projectId, handlers: { [ADD_PATH]: { body: ADDED } } });
+    const user = await searchFor();
+
+    await user.click(getRow("WEB-301"));
+
+    await waitFor(() => {
+      expect(calls.some((call) => `${call.method} ${call.path}` === ADD_PATH)).toBe(true);
+    });
+    const sent = calls.find((call) => `${call.method} ${call.path}` === ADD_PATH);
+    expect(sent?.body).toEqual(
+      projectId === null ? { ref: "relay:issue:301" } : { ref: "relay:issue:301", projectId },
+    );
   });
 
   it("turns the row into a check before the controller answers", async () => {

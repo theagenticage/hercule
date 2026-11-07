@@ -44,6 +44,7 @@ interface Plugin {
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
   readonly intake: unknown;
+  readonly entityKinds: readonly unknown[];
 }
 
 interface Connection {
@@ -139,6 +140,7 @@ const buildPlugin = (id: string, definition: { type: string; displayName: string
   config: {},
   contributions: [{ extensionPoint: "connection-type", id: definition.type, definition }],
   intake: NO_INTAKE,
+  entityKinds: [],
 });
 
 /** A plugin that is installed but contributes no connection type. */
@@ -152,6 +154,7 @@ const BYSTANDER: Plugin = {
   config: {},
   contributions: [{ extensionPoint: "harness", id: "acme", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 /**

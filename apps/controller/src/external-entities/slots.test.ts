@@ -11,6 +11,7 @@ import { renderEntitySlots, type FullEntityObservation } from "./slots";
 
 const PULL_REQUEST: QualifiedEntityKindDeclaration = {
   word: "github/pull-request",
+  connect: "Reviews people ask of you",
   home: "github/repository",
   card: "compact",
   noun: "Pull request",
@@ -22,7 +23,12 @@ const PULL_REQUEST: QualifiedEntityKindDeclaration = {
   owner: "author",
   status: {
     open: { shape: "fork", tone: "quiet", word: "Open", norm: true, stage: "in-review" },
+    failing: { shape: "cross", tone: "bad", word: "Checks failed", stage: "in-review" },
     changes: { shape: "hold", tone: "attention", word: "Changes requested", stage: "in-review" },
+    approved: { shape: "check", tone: "good", word: "Approved", stage: "in-review" },
+    draft: { shape: "dashed", tone: "quiet", word: "Draft", stage: "building" },
+    merged: { shape: "join", tone: "quiet", word: "Merged", stage: "landed" },
+    closed: { shape: "cross", tone: "quiet", word: "Closed" },
   },
   facts: [
     { field: "diff", form: "delta" },
@@ -30,13 +36,20 @@ const PULL_REQUEST: QualifiedEntityKindDeclaration = {
   ],
   reasons: {
     "review-requested": { say: "{person} asked for your review", tone: "plain" },
+    opened: { say: "You opened it", tone: "plain" },
+    "checks-failed": { say: "Checks failed", tone: "bad" },
+    "changes-requested": { say: "Changes requested", tone: "attention" },
+    approved: { say: "Approved, ready to merge", tone: "good" },
     waiting: { say: "With reviewers", tone: "plain" },
+    merged: { say: "Merged", tone: "plain" },
   },
 };
 
 const ISSUE: QualifiedEntityKindDeclaration = {
   word: "github/issue",
+  connect: "Issues assigned to you",
   home: "github/repository",
+  card: "rich",
   noun: "Issue",
   refPrefix: "github:issue:",
   pace: "slow",
@@ -44,7 +57,10 @@ const ISSUE: QualifiedEntityKindDeclaration = {
   identifier: "#{number}",
   person: "assignee",
   owner: "assignee",
-  status: { open: { shape: "ring", tone: "quiet", word: "Open", norm: true } },
+  status: {
+    open: { shape: "ring", tone: "quiet", word: "Open", norm: true },
+    closed: { shape: "check", tone: "good", word: "Closed" },
+  },
   facts: [{ field: "labels", form: "word" }],
   reasons: { assigned: { say: "Assigned to you", tone: "plain" } },
 };
@@ -152,7 +168,7 @@ describe("renderEntitySlots renders", () => {
       },
     },
     {
-      name: "an issue: no card in the declaration means rich, the home and the norm of its status are copied, an unassigned issue has no person or owner, an empty fact is left out",
+      name: "an issue: the home and the norm of its status are copied, an unassigned issue has no person or owner, an empty fact is left out",
       declaration: ISSUE,
       observation: observe(
         "issue",

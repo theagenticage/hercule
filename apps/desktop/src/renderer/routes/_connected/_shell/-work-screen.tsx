@@ -216,6 +216,8 @@ export function WorkScreen({
   const [addLane, setAddLane] = useState<AddTaskLane | null>(null);
   const [addResult, setAddResult] = useState<string | null>(null);
   const [addOpening, setAddOpening] = useState<AddOpening>({});
+  // The Project a thing added from a source joins: the lane's, when a Project lane's `+` opened the sheet.
+  const [addProjectId, setAddProjectId] = useState<string | null>(null);
   const addOpener = useRef<HTMLElement | null>(null);
   /**
    * Opens the sheet. `fromLaneId` is the lane whose `+` or key opened it, when
@@ -233,6 +235,7 @@ export function WorkScreen({
         lane: fromLaneId === undefined ? undefined : lanes.find((each) => each.id === fromLaneId),
       }),
     );
+    setAddProjectId(fromLaneId === undefined ? null : lane.projectId);
     setAddLane(lane);
   };
   const closeAddSheet = (): void => {
@@ -423,6 +426,7 @@ export function WorkScreen({
                   client={client}
                   places={places}
                   opening={addOpening}
+                  projectId={addProjectId}
                   isOffline={offlineSince !== null}
                   onAdded={({ taskId, line, gesture }) => {
                     if (gesture === undefined) {

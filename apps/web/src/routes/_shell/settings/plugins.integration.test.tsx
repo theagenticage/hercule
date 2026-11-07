@@ -37,6 +37,7 @@ interface Fixture {
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
   readonly intake: unknown;
+  readonly entityKinds: readonly unknown[];
 }
 
 const EMPTY_SCHEMA = {
@@ -58,6 +59,7 @@ const ACTIVE: Fixture = {
   config: {},
   contributions: [{ extensionPoint: "harness", id: "acme", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 const ACTIVATION_FAILURE = "the socket at /var/run/borked.sock refused the connection";
@@ -74,6 +76,7 @@ const ERRORED: Fixture = {
   config: {},
   contributions: [{ extensionPoint: "channel", id: "chatter", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 /** A plugin built for a host API this controller does not support, so it was never loaded. */
@@ -87,6 +90,7 @@ const REFUSED: Fixture = {
   config: {},
   contributions: [],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 /** A plugin with one config field of every kind the generated form renders, all set. */
@@ -118,6 +122,7 @@ const CONFIGURABLE: Fixture = {
   },
   contributions: [{ extensionPoint: "harness", id: "notes", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 const buildWriteRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
