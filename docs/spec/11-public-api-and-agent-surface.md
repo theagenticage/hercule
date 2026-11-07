@@ -285,7 +285,7 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 | `externalEntity.restore` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/restore` |
 | `externalEntity.search` | `{ source, text, scopeRef? }` -> `EntitySearchReply` | `task.read` and `connection.query`, user only | `GET /external-entities/search` |
 | `externalEntity.listSuggestions` | `{ contextRef? }` -> `EntitySuggestions` | `task.read` | `GET /external-entities/suggestions` |
-| `externalEntity.addToWork` | `{ ref, projectId? }` -> `{ id, taskId, created, stage, followed }` | `task.update`, user only | `POST /external-entities/add-to-work` |
+| `externalEntity.addToWork` | `{ ref, projectId? }` -> `{ id?, taskId, created, stage, followed }` | `task.update`, user only | `POST /external-entities/add-to-work` |
 
 - **`queryInbox`** returns `{ cards: InboxCard[], places: EntityPlace[], edges: EntityEdge[], counts: InboxCounts, truncated }`: the whole Inbox in one reply, at most `MAX_INBOX_CARDS` (1,000) cards, oldest first inside each side, in a fixed number of statements. A dismissed card is not listed.
 - **`countInbox`** returns the same `counts`, from the same function, for the sidebar. It needs the same grants as `queryInbox`.

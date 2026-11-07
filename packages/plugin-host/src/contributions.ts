@@ -467,7 +467,13 @@ export interface EventSourceContribution {
    * status maps to a stage that is not a Task stage.
    */
   readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
-  /** Recognizes, searches and reads this source's things for the Add button on Work. */
+  /**
+   * Recognizes, searches and reads this source's things for the Add button on
+   * Work. A plugin declares one `entityLookup` at most, because the host
+   * reaches it by plugin id: the host refuses a second source of the same
+   * plugin that declares one. A plugin with several sources puts its lookup on
+   * one of them and makes it cover the things of all.
+   */
   readonly entityLookup?: EntityLookup;
   /**
    * Starts ingesting for one Connection. The host opens a handle for every

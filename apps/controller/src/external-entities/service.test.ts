@@ -430,9 +430,18 @@ describe("takeOn", () => {
   describe("the Project", () => {
     const REMOTE = "github.com/acme/web";
 
-    /** Puts a ticket that lands in `REMOTE` on the Inbox, and files that repository's Resource under `projectNames`. */
+    /**
+     * Puts a ticket that lands in `REMOTE` on the Inbox, and files that
+     * repository's Resource under `projectNames` and under `deletedNames`,
+     * which are then deleted.
+     */
     const arrange =
-      (projectNames: ReadonlyArray<string>, withResource: boolean) => (arranged: Arranged) =>
+      (
+        projectNames: ReadonlyArray<string>,
+        withResource: boolean,
+        deletedNames: ReadonlyArray<string> = [],
+      ) =>
+      (arranged: Arranged) =>
         Effect.gen(function* () {
           const { sql, report, connectionId, entityId, service, tasks } = arranged;
           const at = new Date().toISOString();
@@ -445,6 +454,12 @@ describe("takeOn", () => {
               for (const name of projectNames) {
                 projectIds.push((yield* projects.insert({ name, description: undefined, at })).id);
               }
+              const deletedIds: Array<string> = [];
+              for (const name of deletedNames) {
+                const deleted = yield* projects.insert({ name, description: undefined, at });
+                yield* projects.softDelete(deleted.id, at);
+                deletedIds.push(deleted.id);
+              }
               if (!withResource) return;
               const resource = yield* resources.insert({
                 kind: "repo",
@@ -456,7 +471,7 @@ describe("takeOn", () => {
                 workspaceInclude: true,
                 at,
               });
-              yield* resources.setProjects(resource.id, projectIds);
+              yield* resources.setProjects(resource.id, [...projectIds, ...deletedIds]);
             }),
           );
           yield* report(connectionId, [
@@ -477,6 +492,15 @@ describe("takeOn", () => {
 
     it("is none when no Resource has that remote", async () => {
       expect((await run(arrange(["Web"], false))).projectId).toBeUndefined();
+    });
+
+    it("is none when the only Project of the Resource was deleted, and the Task is still made", async () => {
+      expect((await run(arrange([], true, ["Old"]))).projectId).toBeUndefined();
+    });
+
+    it("is the live Project when the Resource is also filed under a deleted one", async () => {
+      const { projectId, projectIds } = await run(arrange(["Web"], true, ["Old"]));
+      expect(projectId).toBe(projectIds[0]);
     });
   });
 
@@ -680,6 +704,29 @@ describe("addToWork", () => {
     );
     expect(second).toMatchObject({ id: first.id, taskId: first.taskId, created: false });
     expect(resolved).toEqual([]);
+  });
+
+  it("returns the active Task that links a ref Hercule holds no record of, without a read", async () => {
+    const { result, made, resolved, taskCount } = await run(
+      ({ script, service, tasks, countTasks }) =>
+        Effect.gen(function* () {
+          const made = yield* tasks.create({
+            title: "Written by an agent",
+            description: "",
+            provenance: [{ ref: ticketRef("unseen") }],
+          });
+          const result = yield* service.addToWork({ ref: ticketRef("unseen") });
+          return { result, made, resolved: script.resolved, taskCount: yield* countTasks };
+        }),
+    );
+    expect(result).toEqual({
+      taskId: made.id,
+      created: false,
+      stage: made.stage,
+      followed: false,
+    });
+    expect(resolved).toEqual([]);
+    expect(taskCount).toBe(1);
   });
 
   it("files the Task under the Project the user picked", async () => {

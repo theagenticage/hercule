@@ -334,20 +334,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the Project for the Task of an entity: the only Project of the
-   * Resource whose canonical remote is the repository the work lands in. With
-   * no repository, no such Resource, or a Resource in no Project or in several,
-   * there is none. A GitHub repository or a Linear project is never a Project.
+   * Returns the Project for the Task of an entity: the only Project that is
+   * not deleted and that the Resource whose canonical remote is the repository
+   * the work lands in is filed under. With no repository, no such Resource, or
+   * a Resource in no live Project or in several, there is none. A GitHub
+   * repository or a Linear project is never a Project.
    */
   const findProjectOfRemote = (
     remote: string | undefined,
   ): Effect.Effect<string | undefined, SqlError> =>
     Effect.gen(function* () {
       if (remote === undefined) return undefined;
-      const resource = yield* resources.byCanonicalRemote(remote);
-      if (Option.isNone(resource)) return undefined;
-      const projects = (yield* resources.projectsOf([resource.value.id])).get(resource.value.id);
-      return projects !== undefined && projects.length === 1 ? projects[0] : undefined;
+      const projects = yield* resources.listLiveProjectsOfRemote(remote);
+      return projects.length === 1 ? projects[0] : undefined;
     });
 
   /**
@@ -793,19 +792,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         const { contextRef } = query;
-        let refs: ReadonlyArray<string> | undefined;
         const aboveContext = new Set<string>();
         if (contextRef !== undefined) {
           if ((yield* entities.readPlaces([contextRef])).size === 0) {
             return yield* Effect.fail(createNotFoundError("no such context"));
           }
-          refs = yield* claims.listRefsBelow([contextRef]);
           const walk = yield* claims.readAncestors([contextRef]);
           for (const ancestor of walk.ancestors.get(contextRef) ?? []) aboveContext.add(ancestor);
           aboveContext.add(contextRef);
         }
         const found = yield* entities.listSuggestions({
-          refs,
+          contextRef,
           limit: MAX_ENTITY_SUGGESTIONS + 1,
         });
         const truncated = found.length > MAX_ENTITY_SUGGESTIONS;
@@ -842,7 +839,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Adds one thing to Work, as a Task. With an active Task already, returns
-     * it. Otherwise reads the thing at its source when Hercule does not hold
+     * it first, before any read, even when Hercule holds no record of the
+     * thing (the reply then has no `id`). Otherwise reads the thing at its source when Hercule does not hold
      * a full, readable record of it, stores that record (which creates the
      * entity when it is new), and makes the Task as `takeOn` does, in
      * `projectId` when given. When no Connection reports a concern for the
@@ -859,11 +857,16 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
-        const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref: input.ref }));
+        // An existing Task wins before any read: a Task can link a ref Hercule
+        // holds no record of (an agent's `--ref`, or older work), and the user
+        // must get it back even when the source cannot be reached.
         const active = yield* taskRows.findActiveTaskForRef(input.ref);
-        if (known !== undefined && Option.isSome(active)) {
+        if (Option.isSome(active)) {
+          const known = Option.getOrUndefined(
+            yield* entities.readTaskableEntity({ ref: input.ref }),
+          );
           return {
-            id: known.id,
+            ...(known === undefined ? {} : { id: known.id }),
             taskId: active.value.id,
             created: false,
             stage: active.value.stage,

@@ -17,14 +17,6 @@ export const describeTruncatedInbox = (inbox: Inbox): string | undefined =>
     ? `The Inbox shows the first ${MAX_INBOX_CARDS.toLocaleString("en")} cards, and more exist. Dismiss or take on some to bring the rest in.`
     : undefined;
 
-/**
- * The start of the warnings that entity ingest writes on a Connection, such
- * as "The Inbox may be missing items: the GitHub pull request list could only
- * be read in part." A Connection's warning is shared with account setup, so
- * only a warning that starts like this one is about the Inbox.
- */
-const INBOX_WARNING_PREFIX = "The Inbox ";
-
 const joinNames = (names: readonly string[]): string =>
   names.length <= 2
     ? names.join(" and ")
@@ -39,8 +31,9 @@ const joinNames = (names: readonly string[]): string =>
  *
  * - a Connection that needs signing in again, or has failed, names its plugin
  *   and says its cards may be out of date;
- * - failing that, a Connection whose warning is the Inbox's own (a list that
- *   could only be read in part) says that warning as it is.
+ * - failing that, the warning of a Connection of such a plugin, as the
+ *   Connection holds it. The warning is the server's sentence, so the client
+ *   does not read it: it says it as it is.
  */
 export const describeFailingSources = (
   connections: readonly Connection[],
@@ -68,6 +61,8 @@ export const describeFailingSources = (
     }
     return `${joinNames(names)} are not answering. Their cards may be out of date.`;
   }
-  return ofSources.find((connection) => connection.warning?.startsWith(INBOX_WARNING_PREFIX))
-    ?.warning;
+  return ofSources.find(
+    (connection) =>
+      connection.status !== "disabled" && connection.warning !== undefined && connection.warning !== "",
+  )?.warning;
 };

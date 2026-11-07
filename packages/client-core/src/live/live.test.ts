@@ -1011,6 +1011,8 @@ describe("buildQueryKeys", () => {
       ["your-work"],
       ["inbox"],
       ["inbox-count"],
+      ["external-entity"],
+      ["entity-suggestions"],
     ]);
 
     // The same key builders the task queries use.
@@ -1022,6 +1024,8 @@ describe("buildQueryKeys", () => {
       queryKeys.yourWork(),
       queryKeys.inbox(),
       queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
     ]);
   });
 
@@ -1034,6 +1038,8 @@ describe("buildQueryKeys", () => {
       ["your-work"],
       ["inbox"],
       ["inbox-count"],
+      ["external-entity"],
+      ["entity-suggestions"],
     ]);
   });
 

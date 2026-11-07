@@ -2,8 +2,8 @@
  * The wait a card shows and the words about how old its facts are. Both take
  * `now` as a parameter, so a test can fix it.
  */
-import type { InboxCard } from "@hercule/contract";
 import { describeDeskAge } from "../desk/age";
+import type { CardRecord } from "./card-face";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -42,7 +42,7 @@ const decideLevel = (hours: number, patience: number): WaitLevel => {
  * first observation when the card has none. Hours are rounded down, and a wait
  * under an hour reads "1h".
  */
-export const describeCardWait = (card: InboxCard, now: Date): CardWait | null => {
+export const describeCardWait = (card: CardRecord, now: Date): CardWait | null => {
   if (card.pace !== "fast" || card.taskId !== undefined) return null;
   const since = Date.parse(card.waitingSince ?? card.firstObservedAt);
   const hours = Math.max(0, now.getTime() - since) / HOUR_MS;
@@ -63,7 +63,7 @@ export const describeCardWait = (card: InboxCard, now: Date): CardWait | null =>
  * - `inaccessible`: no account can read it now, and the facts are the last known;
  * - `stale`: no account can poll now, so the age of the facts shows.
  */
-export const describeCardTrust = (card: InboxCard, now: Date): string | undefined => {
+export const describeCardTrust = (card: CardRecord, now: Date): string | undefined => {
   if (card.access === "deleted") return "Deleted at the source";
   const age = `Last read ${describeDeskAge(card.observedAt, now)}`;
   if (card.access === "inaccessible") return `No account can read this now. ${age}`;
@@ -75,5 +75,5 @@ export const describeCardTrust = (card: InboxCard, now: Date): string | undefine
  * draws it again as time passes: a wait that counts hours and days, or the age
  * of facts that may be old. A card that shows neither never changes by itself.
  */
-export const isCardTimeDependent = (card: InboxCard): boolean =>
+export const isCardTimeDependent = (card: CardRecord): boolean =>
   (card.pace === "fast" && card.taskId === undefined) || card.stale || card.access !== "ok";

@@ -5,7 +5,7 @@
  * touches a network. The database, the host and the Connections are real.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Fiber, Layer, Schema } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import {
@@ -15,6 +15,7 @@ import {
   registerConnectionType,
   registerEventSource,
   type EntityLookup,
+  type EntityLookupContext,
   type EntityObservation,
   type EntityRecognition,
   type EntityResolution,
@@ -24,9 +25,10 @@ import {
 import { connectionRepository, type StoredConnection } from "../connections";
 import type { ConnectionStatus } from "@hercule/contract";
 import { withTransaction } from "../db";
-import { PluginHost } from "./index";
+import { Secrets } from "../secrets";
+import { PluginHost, Plugins } from "./index";
 import { EntityLookups, EntityLookupsLayer } from "./entity-lookups";
-import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "./testing";
+import { asUser, buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "./testing";
 
 /** What a fake Connection does when asked, by the Connection's account id. */
 type Behavior<A> = (accountId: string) => Effect.Effect<A, AuthError | PluginError>;
@@ -37,6 +39,8 @@ interface FakeLookup {
   readonly calls: Array<string>;
   /** The targets `resolve` received. */
   readonly targets: Array<EntityRecognition>;
+  /** The context of every `resolve` call, in order. */
+  readonly contexts: Array<EntityLookupContext>;
   recognitions: ReadonlyArray<EntityRecognition>;
   search: Behavior<ReadonlyArray<EntityObservation>>;
   resolve: Behavior<EntityResolution>;
@@ -57,6 +61,7 @@ const buildFakeLookup = (): FakeLookup => {
   const fake: FakeLookup = {
     calls: [],
     targets: [],
+    contexts: [],
     recognitions: [],
     search: () => Effect.succeed([]),
     resolve: () => Effect.succeed({ missing: "unknown" }),
@@ -67,9 +72,10 @@ const buildFakeLookup = (): FakeLookup => {
           fake.calls.push(connection.accountId);
           return fake.search(connection.accountId);
         }),
-      resolve: (connection: IngestConnection, _context, target) =>
+      resolve: (connection: IngestConnection, context, target) =>
         Effect.suspend(() => {
           fake.calls.push(connection.accountId);
+          fake.contexts.push(context);
           fake.targets.push(target);
           return fake.resolve(connection.accountId);
         }),
@@ -150,7 +156,10 @@ const insertConnection = (
 /** Boots `plugin` with the fake lookup, inserts one Connection per account id, and runs the test body. */
 const runWith = <A>(
   accounts: ReadonlyArray<string | readonly [string, ConnectionStatus]>,
-  body: (fake: FakeLookup, lookups: EntityLookups["Service"]) => Effect.Effect<A>,
+  body: (
+    fake: FakeLookup,
+    lookups: EntityLookups["Service"],
+  ) => Effect.Effect<A, never, SqlClient.SqlClient | Plugins | Secrets>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -393,6 +402,104 @@ describe("resolve", () => {
       }),
     );
     expect(answer).toEqual({ unavailable: true });
+  });
+});
+
+describe("a Connection that stops being eligible while a lookup runs", () => {
+  /** Finds the Connection of the account and sets its status, as the user disabling it does. */
+  const setStatus = (accountId: string, status: ConnectionStatus) =>
+    Effect.orDie(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const connections = yield* connectionRepository;
+        const all = yield* connections.ofPlugin("tracker");
+        const found = all.find((connection) => connection.accountId === accountId);
+        if (found === undefined) return yield* Effect.die(`no Connection ${accountId}`);
+        yield* withTransaction(
+          sql,
+          connections.update(found.id, { status }, "2026-02-01T00:00:00Z"),
+        );
+        return found;
+      }),
+    );
+
+  it("is not asked when it was disabled during the call before it, and the answer is incomplete", async () => {
+    const { answer, calls } = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        const aIsAsked = yield* Deferred.make<void>();
+        const aMayAnswer = yield* Deferred.make<void>();
+        fake.resolve = (account) =>
+          Effect.gen(function* () {
+            if (account === "a") {
+              yield* Deferred.succeed(aIsAsked, undefined);
+              yield* Deferred.await(aMayAnswer);
+            }
+            return { missing: "not-found" } as const;
+          });
+        const fiber = yield* Effect.forkChild(lookups.resolve("tracker", byRef));
+        yield* Deferred.await(aIsAsked);
+        yield* setStatus("b", "disabled");
+        yield* Deferred.succeed(aMayAnswer, undefined);
+        const answer = yield* Fiber.join(fiber);
+        return { answer, calls: [...fake.calls] };
+      }),
+    );
+    expect(calls).toEqual(["a"]);
+    expect(answer).toEqual({ incomplete: true });
+  });
+
+  it("is not asked when its plugin was disabled during the call before it", async () => {
+    const { answer, calls } = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        const aIsAsked = yield* Deferred.make<void>();
+        const aMayAnswer = yield* Deferred.make<void>();
+        fake.resolve = (account) =>
+          Effect.gen(function* () {
+            if (account === "a") {
+              yield* Deferred.succeed(aIsAsked, undefined);
+              yield* Deferred.await(aMayAnswer);
+            }
+            return { missing: "not-found" } as const;
+          });
+        const fiber = yield* Effect.forkChild(lookups.resolve("tracker", byRef));
+        yield* Deferred.await(aIsAsked);
+        const plugins = yield* Plugins;
+        yield* Effect.orDie(asUser(plugins.disable("tracker")));
+        yield* Deferred.succeed(aMayAnswer, undefined);
+        const answer = yield* Fiber.join(fiber);
+        return { answer, calls: [...fake.calls] };
+      }),
+    );
+    expect(calls).toEqual(["a"]);
+    expect(answer).toEqual({ incomplete: true });
+  });
+
+  it("refuses the credentials of a Connection disabled after its call began", async () => {
+    const { before, after } = await runWith(["a"], (fake, lookups) =>
+      Effect.gen(function* () {
+        const secrets = yield* Secrets;
+        const sql = yield* SqlClient.SqlClient;
+        const [stored] = yield* Effect.orDie(
+          Effect.flatMap(connectionRepository, (connections) => connections.ofPlugin("tracker")),
+        );
+        yield* Effect.orDie(
+          withTransaction(
+            sql,
+            secrets.set({ kind: "connection", id: stored?.id ?? "" }, "token", Redacted.make("t")),
+          ),
+        );
+        fake.resolve = () => Effect.succeed({ missing: "not-found" });
+        yield* lookups.resolve("tracker", byRef);
+        const context = fake.contexts[0];
+        if (context === undefined) return yield* Effect.die("the lookup was not asked");
+        const before = yield* Effect.exit(context.credentials());
+        yield* setStatus("a", "disabled");
+        const after = yield* Effect.exit(context.credentials());
+        return { before, after };
+      }),
+    );
+    expect(Exit.isSuccess(before)).toBe(true);
+    expect(Exit.isFailure(after)).toBe(true);
   });
 });
 

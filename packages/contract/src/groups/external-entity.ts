@@ -522,14 +522,15 @@ export type EntityAddToWorkInput = Schema.Schema.Type<typeof EntityAddToWorkInpu
 /**
  * What `addToWork` returns.
  *
- * - `id` is the entity's id, created when the thing was new to Hercule.
+ * - `id` is the entity's id, created when the thing was new to Hercule. Absent
+ *   when the Task links the ref but Hercule holds no record of it.
  * - `taskId` is the active Task, and `created` says whether this call made it.
  * - `stage` is the stage that Task is at.
  * - `followed` is true when the thing has no concern of its own, so the Task
  *   makes Hercule follow it.
  */
 export const EntityAddToWorkResult = Schema.Struct({
-  id: Id,
+  id: Schema.optionalKey(Id),
   taskId: Id,
   created: Schema.Boolean,
   stage: TaskStage,

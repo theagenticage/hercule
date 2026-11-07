@@ -360,6 +360,7 @@ interface EntityLookupContext { credentials(): Effect<Record<string, string>, Co
 - **`reconcile` emits no event and raises no signal.** Its writes are stamped `plugin:<id>`. Its transaction uses `assertConnectionIngesting`, as `emit` does.
 - **Lookups run outside any transaction.** `EntityLookupContext` holds `credentials` only, read at the moment of the call. The host gives each call a timeout of 8 seconds and fails it with `PluginError`. Recognition is the plugin's own and credential-free. Resolution always uses the target plugin's eligible Connection ([./20-external-entities.md](./20-external-entities.md#10-search-recognition-and-resolution)).
 - **The manifest's `mark`** gains optional `hue` and `solid` beside it, for a mark drawn in a declared hue.
+- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **A plugin declares at most one `entityLookup`.** The host reaches a plugin's lookup by plugin id, through the Connections of that source's type. A second source of the same plugin that declares a lookup is refused at load, naming both sources. A plugin with several sources puts the lookup on one of them.
 
 ### 4.4 Workflow action
 

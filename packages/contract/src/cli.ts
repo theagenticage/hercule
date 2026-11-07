@@ -1191,7 +1191,7 @@ export const CLI = {
   },
   "externalEntity.addToWork": {
     command: "entity add-to-work",
-    help: "Adds a thing from another system to Work as a Task, one at a time. A thing Hercule never saw is read from its source and followed. Returns the entity's id, the Task's id, whether this call created the Task, its stage, and whether Hercule now follows the thing. A thing that already has a live Task returns that Task and creates none.",
+    help: "Adds a thing from another system to Work as a Task, one at a time. A thing Hercule never saw is read from its source and followed. Returns the entity's id (left out when the Task exists and Hercule holds no record of the thing), the Task's id, whether this call created the Task, its stage, and whether Hercule now follows the thing. A thing that already has a live Task returns that Task and creates none.",
     examples: [
       { args: ["github:pr:acme/webshop#87"] },
       { args: ["linear:issue:SHOP-123", "--project", "1f3a9c2e"] },

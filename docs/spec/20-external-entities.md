@@ -54,11 +54,15 @@ Observations and claims key on the ref, not on the entity's id. A Connection can
 
 **Scan** (`external_entity_scans`). One row per (Connection, kind): `last_complete_at` and the writing `actor` (`plugin:<id>`). It moves only when a complete inventory was reconciled.
 
+**Ingest warning** (`external_entity_ingest_warnings`). One row per (Connection, kind) whose latest inventory left something unresolved, such as a partial read or a refused relationship: `warning`, the sentence. The Connection has one warning, shared with account setup, so these rows keep it in place until every kind has resolved its own. Deleting a Connection deletes its rows.
+
 **Claim** (`external_entity_relation_claims`). Section 6.
 
 **Arrival counter** (`external_entity_arrival_counter`). One row holding the last number given. A table of its own, so a number is never given twice, even after pruning removes the entity that held the highest one.
 
 **Task link** (`task_entity_links`). `task_id`, `ref`, `linked_at`, `linked_by`, `following`; the primary key is (`task_id`, `ref`), with an index on `ref`. Owned by the tasks domain.
+
+**Task revision** (`tasks.revision`, tasks domain). A count of the edits to a Task, 0 for a Task nobody has edited. Taking back a Task made for an outside thing asks whether it is still 0, which `updated_at` cannot answer when an edit lands in the same millisecond as the creation or the clock steps back.
 
 ### 1.2 Three shapes of record
 
@@ -349,7 +353,7 @@ Inside the final transaction the service revalidates the exact requested ref, fu
 **Tasks go through `TaskService`.** The tasks domain provides two user-only methods for this: one creates a Task linked to one ref inside the caller's transaction, and one deletes a Task only when it is untouched since creation. The entity domain never inserts a Task itself.
 
 - **`takeOn`** with an active Task returns that Task: a second click, or a second account, is idempotent. With none it creates a Task: the entity's title, the stage of [section 9.3](#93-the-stage-a-new-task-starts-at), priority `normal`, the project of [section 9.4](#94-the-project-of-a-task-taken-on), and provenance `{ ref }`, which writes the link. It returns `{ taskId, created }`. It fails `NotFound` for an unknown id. It writes nothing on the source.
-- **`addToWork { ref, projectId? }`** with an active Task returns `{ taskId, created: false }`. Otherwise, after `prepareEntityForTask`, it writes in one transaction: the observation that was read (which creates the entity when it is new), the Task as `takeOn` makes it (in `projectId` when given; an unknown Project is `NotFound`), and `following` on the link when the entity has no concern of its own. It returns `{ id, taskId, created, stage, followed }`. The line at the foot reads "Added to Exploring. Hercule now follows WEB-301." Adding is always one thing at a time.
+- **`addToWork { ref, projectId? }`** with an active Task returns that Task with `created: false` before any read, even when Hercule holds no record of the ref (the reply then has no `id`). Otherwise, after `prepareEntityForTask`, it writes in one transaction: the observation that was read (which creates the entity when it is new), the Task as `takeOn` makes it (in `projectId` when given; an unknown Project is `NotFound`), and `following` on the link when the entity has no concern of its own. It returns `{ id?, taskId, created, stage, followed }`; `id` is absent only when an existing Task links a ref Hercule holds no record of. The line at the foot reads "Added to Exploring. Hercule now follows WEB-301." Adding is always one thing at a time.
 
 Outbound work uses no credential in this slice. Never pick credentials from whichever poll updated the card.
 
@@ -363,7 +367,7 @@ A Take or an Add that `created` a Task undoes with `externalEntity.undoTakeOn { 
 
 ### 9.4 The project of a Task taken on
 
-Task `projectId` must be a real Project, so a Linear project or a GitHub repository is never used as one. The service takes `repository.target.remote` from the entity, finds its Resource by canonical remote, and finds that Resource's Projects (`project_resources`). With exactly one, it uses it. Otherwise the Task has no project. External team and project facts group things and never create core Projects or Initiatives.
+Task `projectId` must be a real Project, so a Linear project or a GitHub repository is never used as one. The service takes `repository.target.remote` from the entity, finds its Resource by canonical remote, and finds that Resource's Projects (`project_resources`), leaving out deleted Projects, which keep their rows. With exactly one, it uses it. Otherwise the Task has no project. External team and project facts group things and never create core Projects or Initiatives.
 
 ## 10. Search, recognition and resolution
 

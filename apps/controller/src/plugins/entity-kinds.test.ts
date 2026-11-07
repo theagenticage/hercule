@@ -14,7 +14,7 @@ import {
   type PluginManifest,
 } from "@hercule/plugin-host";
 import { decodeEntityKinds, type TakenEntityKinds } from "./entity-kinds";
-import { registerEventSourceContribution } from "./event-sources";
+import { registerEventSourceContribution, type RegisteredEventSource } from "./event-sources";
 
 const MANIFEST: PluginManifest = {
   id: "acme",
@@ -236,6 +236,36 @@ describe("registerEventSourceContribution with entity kinds", () => {
         }),
       ),
     ).toContain("did not request the entities capability");
+  });
+
+  it("refuses a second source of one plugin that declares an entity lookup", async () => {
+    const lookup = {
+      recognize: () => [],
+      search: () => Effect.succeed([]),
+      resolve: () => Effect.succeed({ missing: "unknown" as const }),
+    };
+    const sources: Array<RegisteredEventSource> = [];
+    const registerNext = (id: string, connectionType: string, withLookup: boolean) =>
+      Effect.runPromise(
+        Effect.match(
+          registerEventSourceContribution(
+            MANIFEST,
+            buildSource({ id, connectionType, ...(withLookup ? { entityLookup: lookup } : {}) }),
+            [],
+            new Map(),
+            sources,
+            [],
+          ),
+          { onFailure: (error) => error.message, onSuccess: () => "registered" },
+        ),
+      );
+
+    expect(await registerNext("first", "acme/first", true)).toBe("registered");
+    // A source with no lookup beside a source with one is fine.
+    expect(await registerNext("plain", "acme/plain", false)).toBe("registered");
+    expect(await registerNext("second", "acme/second", true)).toContain(
+      "both declare an entityLookup",
+    );
   });
 
   it("registers entity kinds when the capability is requested", async () => {

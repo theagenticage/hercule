@@ -8,6 +8,10 @@
  *   Connections: `connected` or `error`, of a plugin that is active, oldest
  *   first. Credentials are read by the plugin at the moment of each call, and
  *   no call runs inside a transaction.
+ * - A Connection is eligible when its call starts, not only when the list was
+ *   made: one call can take 8 seconds, and the user may disable a Connection
+ *   or the plugin meanwhile. Such a Connection is not asked, and counts as a
+ *   failed one. Its credentials are refused from then on.
  * - Each call to a plugin gets 8 seconds. The host never answers from the first
  *   Connection that happens to match: several Connections can see several
  *   things, so a resolution is decided over all of them (see `decideScoped`).
@@ -23,6 +27,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { summarizeCause } from "@hercule/contract";
 import {
   AuthError,
+  ConnectionUnavailable,
   PluginError,
   type EntityLookupContext,
   type EntityObservation,
@@ -181,7 +186,11 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
 
-  /** Returns the active event source of the plugin that offers a lookup, if any. */
+  /**
+   * Returns the active event source of the plugin that offers a lookup, if any.
+   * Registration allows one `entityLookup` per plugin, so the first source with
+   * a lookup is the only one.
+   */
   const findLookupSource = (
     pluginId: string,
   ): Effect.Effect<Option.Option<RegisteredEventSource>> =>
@@ -204,10 +213,34 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Checks that the Connection `connectionId` is still one the lookup of
+   * `source` may use: it exists, has the source's type, is `connected` or
+   * `error`, and its plugin is active. Reads the current rows, so a disable
+   * that committed a moment ago counts. Holds no transaction.
+   */
+  const isStillEligible = (
+    source: RegisteredEventSource,
+    connectionId: string,
+  ): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      const current = Option.getOrUndefined(yield* Effect.orDie(connections.one(connectionId)));
+      if (
+        current === undefined ||
+        current.type !== source.connectionType ||
+        !INGESTING_STATUSES.includes(current.status)
+      ) {
+        return false;
+      }
+      return yield* host.isActive(source.pluginId);
+    });
+
+  /**
    * Runs one call to a plugin's lookup for one Connection, with a timeout.
    * Never fails: a failure of any kind (including a rejected credential and a
    * plugin that throws) is `failed`, and running past the timeout is
-   * `timed-out`. Interruption passes through, since the controller is stopping.
+   * `timed-out`. A Connection that is no longer eligible is not asked and is
+   * `failed`, and its `credentials` refuse once it stops being eligible.
+   * Interruption passes through, since the controller is stopping.
    */
   const ask = <A>(
     source: RegisteredEventSource,
@@ -218,6 +251,12 @@ const make = Effect.gen(function* () {
     ) => Effect.Effect<A, AuthError | PluginError>,
   ): Effect.Effect<Asked<A>> =>
     Effect.gen(function* () {
+      if (!(yield* isStillEligible(source, connection.id))) {
+        yield* Effect.logWarning(
+          `The entity lookup of ${source.pluginId} skipped the Connection ${connection.id}, which is no longer eligible.`,
+        );
+        return { status: "failed" };
+      }
       const exit = yield* Effect.exit(
         Effect.timeoutOption(
           Effect.flatMap(decodeConnectionConfig(connectionTypes, connection), (config) =>
@@ -231,7 +270,15 @@ const make = Effect.gen(function* () {
                 },
                 {
                   credentials: () =>
-                    connectionTypes.runtimeFor(source.pluginId).credentials(connection.id),
+                    Effect.flatMap(isStillEligible(source, connection.id), (eligible) =>
+                      eligible
+                        ? connectionTypes.runtimeFor(source.pluginId).credentials(connection.id)
+                        : Effect.fail(
+                            new ConnectionUnavailable({
+                              message: `the connection ${connection.id} can no longer be used for a lookup: it was disabled, or its plugin stopped`,
+                            }),
+                          ),
+                    ),
                 },
               ),
             ),

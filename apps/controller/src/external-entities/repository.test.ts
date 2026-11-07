@@ -1025,6 +1025,41 @@ describe("places and context", () => {
   });
 });
 
+describe("listSuggestions under a context", () => {
+  it("lists the things at any depth below the context, oldest first, and applies the limit in the same read", async () => {
+    const { limited, all, unscoped } = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const under = (...parents: ReadonlyArray<string>) => ({
+          relations: { complete: true, partOf: [...parents], linked: [] },
+        });
+        const add = (entity: ObservedEntity, minutes: number, kind = TICKET_KIND) =>
+          reconcile(ACCOUNT_A, [entity], { minutes, complete: false, kind });
+        yield* add(epic("e1", { concerns: [], ...under(PROJECT) }), 1, EPIC_KIND);
+        yield* add(ticket("direct1", under(PROJECT)), 2);
+        yield* add(ticket("deep1", under(epicRef("e1"))), 3);
+        yield* add(ticket("outside"), 4);
+        yield* add(ticket("direct2", under(PROJECT)), 5);
+        yield* add(ticket("deep2", under(epicRef("e1"))), 6);
+        const refsOf = (rows: ReadonlyArray<{ readonly ref: string }>) =>
+          rows.map((row) => row.ref);
+        return {
+          limited: refsOf(yield* repository.listSuggestions({ contextRef: PROJECT, limit: 3 })),
+          all: refsOf(yield* repository.listSuggestions({ contextRef: PROJECT, limit: 10 })),
+          unscoped: refsOf(yield* repository.listSuggestions({ contextRef: undefined, limit: 10 })),
+        };
+      }),
+    );
+    expect(limited).toEqual([ticketRef("direct1"), ticketRef("deep1"), ticketRef("direct2")]);
+    expect(all).toEqual([
+      ticketRef("direct1"),
+      ticketRef("deep1"),
+      ticketRef("direct2"),
+      ticketRef("deep2"),
+    ]);
+    expect(unscoped).toEqual([...all.slice(0, 2), ticketRef("outside"), ...all.slice(2)]);
+  });
+});
+
 describe("the Inbox: membership, sides and counts", () => {
   it("counts one thing seen by two accounts for two concerns once", async () => {
     const inbox = await run(({ repository, reconcile }) =>

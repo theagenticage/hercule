@@ -26,6 +26,7 @@ import {
   MAX_CONTEXT_DEPTH,
   MAX_CONTEXT_PARENTS,
   MAX_ENTITY_ANCESTORS,
+  MAX_BOARD_PLACES,
   MAX_ENTITY_LINKS,
   MAX_INBOX_CARDS,
   MAX_INBOX_PLACES,
@@ -63,7 +64,7 @@ import {
   type SharedColumn,
   type SharedValues,
 } from "./entity-records";
-import { relationClaimRepository, WALK_STATE_ROOM } from "./relation-claims";
+import { relationClaimRepository, WALK_STATE_ROOM, type AncestorWalk } from "./relation-claims";
 import type { EntitySlots } from "./slots";
 
 export type { EntityEnvironment } from "./entity-records";
@@ -1257,6 +1258,48 @@ const make = Effect.gen(function* () {
         return places;
       }),
 
+    /**
+     * Returns the places the Work board draws, and whether the context they
+     * give is complete, by the same rule as the Inbox: every ref above a link
+     * has a record that some Connection reads now (not stale, not backing off),
+     * and no limit cut the walk.
+     *
+     * The places are the records of `linkedRefs` and of every ref `walk`
+     * found above them. At most `MAX_BOARD_PLACES` refs are kept, the first in
+     * ref order, and the cut is made on the refs before any record is read.
+     * Two statements however many refs there are.
+     */
+    readBoardContext: (input: {
+      readonly linkedRefs: ReadonlyArray<string>;
+      readonly walk: AncestorWalk;
+      readonly environment: EntityEnvironment;
+    }): Effect.Effect<
+      { readonly places: ReadonlyArray<EntityPlace>; readonly contextComplete: boolean },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const { walk, environment } = input;
+        const aboveRefs = sorted([...walk.ancestors.values()].flat());
+        const wantedRefs = sorted([...input.linkedRefs, ...aboveRefs]);
+        const placeRefs = wantedRefs.slice(0, MAX_BOARD_PLACES);
+        const { records, observations } = yield* readRecords(placeRefs);
+        return {
+          places: placeRefs.flatMap((ref) => {
+            const record = records.get(ref);
+            return record === undefined ? [] : [buildPlace(record, observations.get(ref) ?? [])];
+          }),
+          contextComplete: decideContextComplete({
+            cut: walk.cutAll || walk.cutRefs.size > 0 || wantedRefs.length > placeRefs.length,
+            ancestors: aboveRefs,
+            maxAncestors: MAX_BOARD_PLACES,
+            records,
+            observations,
+            activePluginIds: new Set(environment.activePluginIds),
+            now: environment.now,
+          }),
+        };
+      }),
+
     /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
     countInbox: (): Effect.Effect<InboxCounts, SqlError> => readInboxCounts,
 
@@ -1371,12 +1414,14 @@ const make = Effect.gen(function* () {
      * Returns the things that concern the user and have no live Task, for the
      * sheet that lists suggestions: full records of a work kind, not
      * dismissed, with a current concern from some Connection. Oldest first by
-     * `(firstObservedAt, id)`, at most `limit`. When `refs` is given, only
-     * those refs are considered, which is how a chosen context narrows the
-     * list. Context records are never listed.
+     * `(firstObservedAt, id)`, at most `limit`. When `contextRef` is given,
+     * only the things below it are considered, at any depth of current
+     * `part-of` claims. The walk down and the limit run in the same statement,
+     * so a context with a long history of descendants never sends its refs to
+     * the caller. Context records are never listed.
      */
     listSuggestions: (input: {
-      readonly refs: ReadonlyArray<string> | undefined;
+      readonly contextRef: string | undefined;
       readonly limit: number;
     }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> =>
       Effect.map(
@@ -1389,15 +1434,22 @@ const make = Effect.gen(function* () {
           readonly url: string;
           readonly status: string | null;
         }>`
-          WITH live_links AS MATERIALIZED (${sql.literal(LIVE_TASK_LINKS_SQL)})
+          WITH RECURSIVE live_links AS MATERIALIZED (${sql.literal(LIVE_TASK_LINKS_SQL)}),
+          below(ref) AS (
+            SELECT value FROM json_each(${refsJson(input.contextRef === undefined ? [] : [input.contextRef])})
+            UNION
+            SELECT c.from_ref
+            FROM external_entity_relation_claims c JOIN below b ON c.to_ref = b.ref
+            WHERE c.relation = 'part-of' AND c.state = 'current'
+          )
           SELECT e.ref, e.kind, e.noun, e.identifier, e.title, e.url, e.status
           FROM external_entities e
           WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
             AND EXISTS (SELECT 1 FROM external_entity_observations o
                         WHERE o.ref = e.ref AND o.concerns <> '[]')
             AND NOT EXISTS (SELECT 1 FROM live_links l WHERE l.ref = e.ref)
-            AND (${input.refs === undefined ? 1 : 0} = 1
-                 OR e.ref IN (SELECT value FROM json_each(${refsJson(input.refs ?? [])})))
+            AND (${input.contextRef === undefined ? 1 : 0} = 1
+                 OR e.ref IN (SELECT ref FROM below))
           ORDER BY e.first_observed_at, e.id
           LIMIT ${input.limit}`,
         (rows) =>

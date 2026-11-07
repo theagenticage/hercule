@@ -189,6 +189,8 @@ const decodeFeeds = (
  *   `entityKinds` or an `entityLookup` without the `entities` capability;
  * - a name is invalid, or a kind is declared twice;
  * - the Connection type belongs to another plugin, or already has a source;
+ * - the source declares an `entityLookup` and another source of the same
+ *   plugin already does;
  * - a kind has the name of a core kind;
  * - a feed is invalid, as `decodeFeeds` explains;
  * - a signal kind is invalid, as `decodeSignalKinds` explains;
@@ -257,6 +259,21 @@ export const registerEventSourceContribution = (
       return yield* Effect.fail(
         new PluginError({
           message: `the event sources ${claimed.id} and ${id} are both for the Connection type ${names.connectionType}. A Connection type can have one event source; declare every feed and kind on one source.`,
+        }),
+      );
+    }
+    // The host reaches a plugin's lookup by plugin id alone (see `EntityLookups`),
+    // so a second lookup in the same plugin would never be asked.
+    const claimedLookup =
+      contribution.entityLookup === undefined
+        ? undefined
+        : sources.find(
+            (source) => source.pluginId === pluginId && source.entityLookup !== undefined,
+          );
+    if (claimedLookup !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event sources ${claimedLookup.id} and ${id} both declare an entityLookup. A plugin can have one entityLookup; declare it on one source and make it recognize, search and read the things of every source.`,
         }),
       );
     }

@@ -11,12 +11,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { EntityPlace } from "@hercule/contract";
+import { MAX_BOARD_GROUPINGS, type EntityPlace } from "@hercule/contract";
+import { nowIso } from "../../db";
 import {
   externalEntityRepository,
   relationClaimRepository,
   type AncestorWalk,
 } from "../../external-entities";
+import { PluginHost } from "../../plugins";
 import { runRepository } from "../../runs";
 import { sessionRepository } from "../../sessions";
 import {
@@ -54,14 +56,17 @@ const compareText = (left: string, right: string): number =>
  *   nothing.
  * - A Task's `entityMarks` are one per kind among its linked refs that have a
  *   record, in the order the refs were linked.
- * - `groupings` lists each kind that has a caption among the places, once.
- * - `contextComplete` is false when a limit cut the walk, or a ref above a
- *   link has no record.
+ * - `groupings` lists each kind that has a caption among the places, once, in
+ *   kind order, at most `MAX_BOARD_GROUPINGS`. Kinds beyond that are left
+ *   out, and `contextComplete` is false.
+ * - `contextComplete` is false when `placesComplete` is, that is, when a limit
+ *   cut the walk, or a ref above a link is missing, unreadable, stale or
+ *   backing off.
  */
 const buildEntityContext = (
   linksByTask: ReadonlyMap<string, ReadonlyArray<string>>,
   walk: AncestorWalk,
-  places: ReadonlyMap<string, EntityPlace>,
+  boardContext: { readonly places: ReadonlyArray<EntityPlace>; readonly contextComplete: boolean },
 ): {
   readonly context: BoardEntityContext;
   readonly cardFactsByTask: ReadonlyMap<
@@ -69,17 +74,21 @@ const buildEntityContext = (
     Pick<BoardCardFacts, "entityMarks" | "contextRefs">
   >;
 } => {
+  const { places } = boardContext;
+  const placeKinds = new Map(places.map((place) => [place.ref, place.kind] as const));
   const captions = new Map<string, string>();
-  for (const place of places.values()) {
+  for (const place of places) {
     if (place.caption !== undefined) captions.set(place.kind, place.caption);
   }
-  const aboveRefs = new Set([...walk.ancestors.values()].flat());
+  const groupings = [...captions]
+    .toSorted(([left], [right]) => compareText(left, right))
+    .map(([kind, caption]) => ({ kind, caption }));
   const cardFactsByTask = new Map(
     [...linksByTask].map(([taskId, links]) => {
       const kinds = new Set(
         links.flatMap((ref) => {
-          const place = places.get(ref);
-          return place === undefined ? [] : [place.kind];
+          const kind = placeKinds.get(ref);
+          return kind === undefined ? [] : [kind];
         }),
       );
       return [
@@ -95,13 +104,10 @@ const buildEntityContext = (
   );
   return {
     context: {
-      places: [...places.values()].toSorted((left, right) => compareText(left.ref, right.ref)),
+      places,
       edges: walk.edges,
-      groupings: [...captions]
-        .toSorted(([left], [right]) => compareText(left, right))
-        .map(([kind, caption]) => ({ kind, caption })),
-      contextComplete:
-        !walk.cutAll && walk.cutRefs.size === 0 && [...aboveRefs].every((ref) => places.has(ref)),
+      groupings: groupings.slice(0, MAX_BOARD_GROUPINGS),
+      contextComplete: boardContext.contextComplete && groupings.length <= MAX_BOARD_GROUPINGS,
     },
     cardFactsByTask,
   };
@@ -117,63 +123,76 @@ const buildEntityContext = (
  * - when the latest run of each Task ended;
  * - the workflow name and cause of each failed run a Task shows;
  * - the refs every Task links, one walk up `part of` from all of them, and
- *   the records of the refs found.
+ *   the records and observations of the refs found, which tell whether each
+ *   place can be read now.
  *
  * The failed run is the one `tasks.failed_run_id` names. It is read by its
  * id, never found as the Task's newest run: a run that started later and
  * completed does not clear a failure, and a failure can be older than the
  * newest run.
  *
- * It needs the SQL client and nothing else. In particular it reads the entity
- * repositories, never `ExternalEntityService`, which needs the Task service
- * and would make the layers a cycle.
+ * It needs the SQL client and the plugin host, which says which plugins are
+ * running. In particular it reads the entity repositories, never
+ * `ExternalEntityService`, which needs the Task service and would make the
+ * layers a cycle.
  */
-export const TaskBoardFactsLayer: Layer.Layer<TaskBoardFacts, never, SqlClient.SqlClient> =
-  Layer.effect(TaskBoardFacts)(
-    Effect.gen(function* () {
-      const sessions = yield* sessionRepository;
-      const runs = yield* runRepository;
-      const tasksRepository = yield* taskRepository;
-      const claims = yield* relationClaimRepository;
-      const entities = yield* externalEntityRepository;
+export const TaskBoardFactsLayer: Layer.Layer<
+  TaskBoardFacts,
+  never,
+  SqlClient.SqlClient | PluginHost
+> = Layer.effect(TaskBoardFacts)(
+  Effect.gen(function* () {
+    const sessions = yield* sessionRepository;
+    const runs = yield* runRepository;
+    const tasksRepository = yield* taskRepository;
+    const claims = yield* relationClaimRepository;
+    const entities = yield* externalEntityRepository;
+    const host = yield* PluginHost;
 
-      return {
-        readFacts: (tasks: ReadonlyArray<BoardFactsRequest>): Effect.Effect<BoardFacts, SqlError> =>
-          Effect.gen(function* () {
-            const taskIds = tasks.map((task) => task.id);
-            const { totals, notable } = yield* sessions.listBoardFacts(taskIds);
-            const lastRunEndings = yield* runs.listLastEndings(taskIds);
-            const failures = new Map(
-              (yield* runs.listFailures(
-                tasks.flatMap((task) => (task.failedRunId === undefined ? [] : [task.failedRunId])),
-              )).map((failure) => [failure.runId, failure] as const),
-            );
-            const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
-            const linkedRefs = [...new Set([...linksByTask.values()].flat())];
-            const walk = yield* claims.readAncestors(linkedRefs);
-            const places = yield* entities.readPlaces([
-              ...new Set([...linkedRefs, ...[...walk.ancestors.values()].flat()]),
-            ]);
-            const { context, cardFactsByTask } = buildEntityContext(linksByTask, walk, places);
-            const totalsByTask = new Map(totals.map((total) => [total.taskId, total] as const));
-            const notableByTask = groupByTask(notable);
-            return {
-              cards: tasks.map((task): BoardCardFacts => {
-                const total = totalsByTask.get(task.id);
-                return {
-                  sessions: notableByTask.get(task.id) ?? [],
-                  threadCount: total?.threadCount ?? 0,
-                  lastTurnEndedAt: total?.lastTurnEndedAt,
-                  lastRunEndedAt: lastRunEndings.get(task.id),
-                  failure:
-                    task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
-                  entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
-                  contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],
-                };
-              }),
-              context,
-            };
-          }),
-      };
-    }),
-  );
+    return {
+      readFacts: (tasks: ReadonlyArray<BoardFactsRequest>): Effect.Effect<BoardFacts, SqlError> =>
+        Effect.gen(function* () {
+          const taskIds = tasks.map((task) => task.id);
+          const { totals, notable } = yield* sessions.listBoardFacts(taskIds);
+          const lastRunEndings = yield* runs.listLastEndings(taskIds);
+          const failures = new Map(
+            (yield* runs.listFailures(
+              tasks.flatMap((task) => (task.failedRunId === undefined ? [] : [task.failedRunId])),
+            )).map((failure) => [failure.runId, failure] as const),
+          );
+          const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
+          const linkedRefs = [...new Set([...linksByTask.values()].flat())];
+          const walk = yield* claims.readAncestors(linkedRefs);
+          // The plugins that are running, as the Inbox reads them, so a place
+          // that only a stopped plugin could refresh counts as stale here too.
+          const activePluginIds = [
+            ...new Set((yield* host.listActiveEventSources()).map((source) => source.pluginId)),
+          ];
+          const boardContext = yield* entities.readBoardContext({
+            linkedRefs,
+            walk,
+            environment: { now: yield* nowIso, activePluginIds },
+          });
+          const { context, cardFactsByTask } = buildEntityContext(linksByTask, walk, boardContext);
+          const totalsByTask = new Map(totals.map((total) => [total.taskId, total] as const));
+          const notableByTask = groupByTask(notable);
+          return {
+            cards: tasks.map((task): BoardCardFacts => {
+              const total = totalsByTask.get(task.id);
+              return {
+                sessions: notableByTask.get(task.id) ?? [],
+                threadCount: total?.threadCount ?? 0,
+                lastTurnEndedAt: total?.lastTurnEndedAt,
+                lastRunEndedAt: lastRunEndings.get(task.id),
+                failure:
+                  task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
+                entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
+                contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],
+              };
+            }),
+            context,
+          };
+        }),
+    };
+  }),
+);

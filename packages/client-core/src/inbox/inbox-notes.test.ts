@@ -65,19 +65,25 @@ describe("describeFailingSources", () => {
     expect(describeFailingSources(connections, PLUGINS)).toBeUndefined();
   });
 
-  it("says the warning of a Connection when it is the Inbox's own, and no other", () => {
-    const own = "The Inbox may be missing items: the Acme ticket list could only be read in part.";
+  it("says the warning of a source's Connection as it is", () => {
+    const warning = "The Inbox may be missing items: the Acme ticket list could only be read in part.";
+    expect(
+      describeFailingSources([buildSourceConnection("c1", "acme/account", { warning })], PLUGINS),
+    ).toBe(warning);
+    const other = "This token cannot read mail.";
     expect(
       describeFailingSources(
-        [buildSourceConnection("c1", "acme/account", { warning: own })],
+        [buildSourceConnection("c1", "acme/account", { warning: other })],
         PLUGINS,
       ),
-    ).toBe(own);
-    expect(
-      describeFailingSources(
-        [buildSourceConnection("c1", "acme/account", { warning: "This token cannot read mail." })],
-        PLUGINS,
-      ),
-    ).toBeUndefined();
+    ).toBe(other);
+  });
+
+  it("leaves out the warning of a disabled Connection and of a plugin that declares no cards", () => {
+    const connections = [
+      buildSourceConnection("c1", "acme/account", { status: "disabled", warning: "Old news." }),
+      buildSourceConnection("c2", "plain/account", { warning: "Not about cards." }),
+    ];
+    expect(describeFailingSources(connections, PLUGINS)).toBeUndefined();
   });
 });
