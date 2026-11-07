@@ -38,22 +38,24 @@
   display: block;
 }
 /* The Inbox's sunrise: brass rays over a brass horizon, in the flow of the page. The box is
-   three times as wide as it is tall, as the drawing is, and its bottom edge is the horizon. */
+   three times as wide as it is tall, and its bottom edge is the horizon. The drawing keeps
+   10 of its 720 units clear above the longest ray, which the top margin keeps. */
 .sunrise--in-flow {
   position: relative;
   left: auto;
   bottom: auto;
   width: var(--sunrise-width);
   height: calc(var(--sunrise-width) / 3);
-  margin: 0 auto;
+  margin: calc(var(--sunrise-width) / 72) auto 0;
 }
+/* The strokes are the drawing's 1.6 and 1.5 units of its 720, at the width the sunrise is drawn. */
 .sunrise--in-flow .ray {
   stroke: var(--brass);
-  stroke-width: 1.6;
+  stroke-width: calc(var(--sunrise-width) * 1.6 / 720);
 }
 .sunrise .horizon {
   stroke: var(--brass);
-  stroke-width: 1.5;
+  stroke-width: calc(var(--sunrise-width) * 1.5 / 720);
   opacity: 0.85;
   vector-effect: non-scaling-stroke;
 }

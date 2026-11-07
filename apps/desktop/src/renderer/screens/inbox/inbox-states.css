@@ -85,15 +85,18 @@
 .inbox-clear .sunrise {
   max-width: 70%;
 }
+/* The words are set by property and not by the `font` shorthand, which would reset the
+   page's font features (the tailed l), so they keep the drawing's spacing. */
 .inbox-clear h2 {
   margin: 37px 0 6px;
-  font: var(--w-bold) var(--t-20) / 28px var(--font-ui);
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
   letter-spacing: -0.008em;
 }
 .inbox-clear p {
   margin: 0;
   color: var(--muted);
-  font: var(--w-regular) var(--t-14) / 20px var(--font-ui);
+  font-size: var(--t-14);
 }
 @media (prefers-reduced-motion: no-preference) {
   .inbox-clear:not(:has([data-still])) :is(h2, p) {

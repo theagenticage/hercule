@@ -1318,8 +1318,8 @@ const findFleetDrawnSelector = (path: string): string => {
 /** The selector of what the Work board draws last: a card, which the lanes draw after the first render. */
 const WORK_DRAWN_SELECTOR = ".board-lanes .desk-card";
 
-/** The selector of what the Inbox draws last: a row on a place's surface. */
-const INBOX_DRAWN_SELECTOR = ".inbox-place .inbox-row";
+/** The selector of what the Inbox draws last: a row on a place's surface, or the page of an Inbox with no card. */
+const INBOX_DRAWN_SELECTOR = ".inbox-place .inbox-row, .inbox-clear, .inbox-welcome";
 
 /**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
@@ -1441,7 +1441,9 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     throw new Error("Work drew no card. Check the page's console for the error.");
   }
   if (screens.inbox !== undefined && document.querySelector(INBOX_DRAWN_SELECTOR) === null) {
-    throw new Error("The Inbox drew no row. Check the page's console for the error.");
+    throw new Error(
+      "The Inbox drew no row and no empty page. Check the page's console for the error.",
+    );
   }
   if (
     screens.discussions !== undefined &&

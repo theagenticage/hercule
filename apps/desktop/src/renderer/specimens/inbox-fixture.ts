@@ -155,13 +155,17 @@ const CARDS: readonly InboxCard[] = [
     status: { shape: "half", tone: "active", label: "In progress" },
     ancestors: [WEB, CORE],
   }),
-  issue(377, "Search feed drops unbranded products after the catalogue import, so shoppers see an empty page", {
-    status: { shape: "alert", tone: "attention", label: "Needs triage" },
-    person: { name: "Wren" },
-    yours: false,
-    stale: true,
-    observedAt: daysAgo(3),
-  }),
+  issue(
+    377,
+    "Search feed drops unbranded products after the catalogue import, so shoppers see an empty page",
+    {
+      status: { shape: "alert", tone: "attention", label: "Needs triage" },
+      person: { name: "Wren" },
+      yours: false,
+      stale: true,
+      observedAt: daysAgo(3),
+    },
+  ),
   // Ongoing: Platform core.
   issue(1204, "Retry card payments once on a gateway timeout", {
     ref: "github:issue:acme/platform-core#1204",
@@ -185,9 +189,14 @@ const CARDS: readonly InboxCard[] = [
   }),
   // Requests.
   review(6241, "Cache delivery slot lookups for five minutes", 120, { person: { name: "Juno" } }),
-  review(6238, "Split the basket summary into smaller components so that the delivery estimate loads first", 118, {
-    person: { name: "Felix" },
-  }),
+  review(
+    6238,
+    "Split the basket summary into smaller components so that the delivery estimate loads first",
+    118,
+    {
+      person: { name: "Felix" },
+    },
+  ),
   review(6230, "Show unit prices on multi-buy offers", 100, {
     status: { shape: "fork", tone: "attention", label: "Changes requested" },
     person: { name: "Felix" },
@@ -238,8 +247,55 @@ const QUAYSIDE_PLUGIN: PluginDetail = buildPlugin("quayside", "Quayside", {
   hue: 190,
 });
 
+/** A kind of External Entity a plugin declares, qualified with the plugin's id. */
+type EntityKind = PluginDetail["entityKinds"][number];
+
+/**
+ * Returns a kind a plugin declares, with the words the Inbox needs: its card
+ * size, its pace, and what first run says it brings. The rest is a plain kind.
+ */
+const kind = (word: string, noun: string, overrides: Partial<EntityKind>): EntityKind => ({
+  word,
+  noun,
+  refPrefix: `${word.replace("/", ":")}:`,
+  pace: "slow",
+  patience: 336,
+  identifier: "#{number}",
+  person: null,
+  owner: null,
+  status: null,
+  facts: [],
+  reasons: {},
+  ...overrides,
+});
+
 /** The plugins the Inbox specimen installs, with the kinds they declare. */
-const PLUGINS: readonly PluginDetail[] = [GITHUB_PLUGIN, QUAYSIDE_PLUGIN];
+const PLUGINS: readonly PluginDetail[] = [
+  {
+    ...GITHUB_PLUGIN,
+    entityKinds: [
+      kind("github/pull-request", "Pull request", {
+        card: "compact",
+        pace: "fast",
+        patience: 24,
+        connect: "Reviews people ask of you",
+      }),
+      kind("github/issue", "Issue", { connect: "Issues assigned to you" }),
+      kind("github/repository", "Repository", { pace: "context" }),
+    ],
+  },
+  {
+    ...QUAYSIDE_PLUGIN,
+    entityKinds: [
+      kind("quayside/purchase-order", "Purchase order", {
+        identifier: "PO-{number}",
+        connect: "Orders waiting for your sign-off",
+      }),
+      kind("quayside/round", "Delivery round", { pace: "context" }),
+      kind("quayside/site", "Site", { pace: "context" }),
+    ],
+  },
+];
 
 const connect = (id: string, type: string, label: string): Connection => ({
   id,

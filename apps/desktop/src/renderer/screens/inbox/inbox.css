@@ -89,18 +89,23 @@
 
 /* ---------- The order of Requests ---------- */
 .inbox-order {
+  position: relative;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   height: 24px;
-  padding: 0 6px;
+  padding: 0 20px 0 6px;
   border-radius: var(--r-xs);
   color: var(--muted);
   font: var(--type-summary);
   white-space: nowrap;
 }
+/* The chevron is the drawing's: 10 by 6 pixels, 6px from the right edge. The icon's box is larger than its stroke, so it is placed by its middle. */
 .inbox-order .ic {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  margin-top: -8px;
   color: var(--faint);
 }
 .inbox-order:hover {

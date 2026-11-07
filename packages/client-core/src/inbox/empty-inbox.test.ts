@@ -55,6 +55,10 @@ describe("decideEmptyInbox", () => {
     });
   });
 
+  it("is all clear when no plugin offers a source to connect", () => {
+    expect(decideEmptyInbox(buildInbox([]), [], [PLAIN])).toEqual({ _tag: "all-clear" });
+  });
+
   it("is all clear once a source is connected, whatever its status", () => {
     const connections = [buildSourceConnection("c1", "acme/account", { status: "needs-reauth" })];
     expect(decideEmptyInbox(buildInbox([]), connections, [ACME])).toEqual({ _tag: "all-clear" });

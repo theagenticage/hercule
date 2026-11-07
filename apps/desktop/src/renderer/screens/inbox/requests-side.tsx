@@ -32,7 +32,7 @@ function RequestsOrderControl({
     <>
       <button {...triggerProps} type="button" className="inbox-order" title="Order requests">
         <span>{current?.name}</span>
-        <ChevronDownIcon size={10} />
+        <ChevronDownIcon size={16} />
       </button>
       <ToolMenu menuProps={menuProps} label="Order requests" edge="button-end">
         {ORDERS.map((each) => {

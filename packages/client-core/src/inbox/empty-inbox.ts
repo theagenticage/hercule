@@ -60,8 +60,11 @@ export const listSourceOffers = (plugins: readonly PluginDetail[]): readonly Sou
  * cards.
  *
  * - First run: no Connection belongs to a plugin that declares kinds of
- *   cards, so nothing could ever have arrived. The page asks for sources.
- * - All clear: a source is connected and has nothing for the user now.
+ *   cards, so nothing could ever have arrived. The page asks for the sources
+ *   that offer a kind to connect.
+ * - All clear: a source is connected and has nothing for the user now. So is
+ *   an Inbox that has no source to ask for, because the page cannot ask for
+ *   what no plugin offers.
  *
  * It tells the two apart by the Connections, not by what once was on the
  * page, because the controller keeps no record of cards that came and went.
@@ -79,7 +82,6 @@ export const decideEmptyInbox = (
     const pluginId = parsePluginId(connection.type);
     return pluginId !== null && sourcePluginIds.has(pluginId);
   });
-  return hasSource
-    ? { _tag: "all-clear" }
-    : { _tag: "first-run", offers: listSourceOffers(plugins) };
+  const offers = listSourceOffers(plugins);
+  return hasSource || offers.length === 0 ? { _tag: "all-clear" } : { _tag: "first-run", offers };
 };
