@@ -1,5 +1,7 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
+  SUMMARY_MIN_INTERVAL_SECONDS,
+  SUMMARY_QUIET_SECONDS,
   TaskService,
   TaskServiceLayer,
   type FailureRestoration,
@@ -8,7 +10,9 @@ export {
   type TaskPage,
   type UpdateInput,
 } from "./service";
-export { taskRepository, type BoardTask, type NewTask } from "./repository";
+export { taskRepository, type BoardTask, type NewTask, type SummaryAttempt } from "./repository";
+export { TaskLinkOwners } from "./link-owners";
+export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {
   buildWorkCard,
   TaskBoard,
@@ -19,7 +23,7 @@ export {
   type BoardFailureFact,
   type BoardSessionFact,
 } from "./board";
-export { TaskDetails, TaskDetailsLayer } from "./detail";
+export { TaskDetailFacts, TaskDetails, TaskDetailsLayer } from "./detail";
 export {
   TaskTracking,
   TaskTrackingLayer,
@@ -29,4 +33,4 @@ export {
   type TrackedRunHistory,
   type TrackedRuns,
 } from "./tracking";
-export { cutText } from "./tracking-output";
+export { cutText, cutTextAtWord } from "./tracking-output";

@@ -348,9 +348,16 @@ export const buildDescribe: Effect.Effect<
    * most once however many answers name it.
    */
   const buildDescriber = (sitsOn: ReadonlyArray<Signal>) => {
-    /** Returns a task's title, or its id once it is deleted. */
+    /**
+     * Returns a task's title, or its id once it is deleted. A Task that was
+     * merged into another gives the survivor's title, because the approved
+     * action lands on the survivor.
+     */
     const readTaskTitle = readOncePerId((id) =>
-      Effect.map(tasks.live(id), Option.match({ onNone: () => id, onSome: (task) => task.title })),
+      Effect.map(
+        tasks.liveOrSurvivor(id),
+        Option.match({ onNone: () => id, onSome: (task) => task.title }),
+      ),
     );
 
     /** Returns a project's name, or its id once it is deleted. */

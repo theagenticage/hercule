@@ -67,6 +67,28 @@ export const cutText = (text: string, limit: number): string => {
   return (isHighSurrogate ? room.slice(0, -1) : room) + ELLIPSIS;
 };
 
+/**
+ * Returns `text` unchanged when it has at most `limit` characters. Otherwise
+ * returns a cut of it that ends with "…" and has at most `limit` characters,
+ * the "…" included. Unlike `cutText`, the cut always falls at the end of a
+ * word when the kept part holds a space or a line break, however early in
+ * the text that is. Only a first word longer than the room is cut inside the
+ * word, and then never inside a surrogate pair. It never refuses a text.
+ */
+export const cutTextAtWord = (text: string, limit: number): string => {
+  if (text.length <= limit) return text;
+  // One character is kept free for the ellipsis.
+  const room = text.slice(0, Math.max(0, limit - 1));
+  const endsAtWordEnd = /\s/.test(text.charAt(room.length));
+  const lastBreak = room.search(/\s\S*$/);
+  if (endsAtWordEnd || lastBreak >= 0) {
+    return (endsAtWordEnd ? room : room.slice(0, lastBreak)).trimEnd() + ELLIPSIS;
+  }
+  const lastCode = room.charCodeAt(room.length - 1);
+  const isHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
+  return (isHighSurrogate ? room.slice(0, -1) : room) + ELLIPSIS;
+};
+
 /** Shapes one field value: strings are cut, an array or an object is counted. */
 const shapeValue = (value: Schema.Json): TrackingOutputValue => {
   if (value === null || typeof value === "number" || typeof value === "boolean") return value;

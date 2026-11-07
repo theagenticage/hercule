@@ -105,6 +105,7 @@ export {
   type ApiError,
   type CapDetails,
   ShrinkDetails,
+  InvalidStateDetails,
   type ErrorCode,
 } from "./errors";
 

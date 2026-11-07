@@ -170,6 +170,12 @@ const CONVERSATION_DELETED =
   "this session answered an assistant's conversation that was deleted; " +
   "it is kept as history and takes no input";
 
+/**
+ * The details of the refusals that mean the Request is not open, so a client
+ * that sent an answer before can tell them from a runner that is away.
+ */
+const REQUEST_CLOSED = { reason: "request-closed" } as const;
+
 const NO_OPEN_REQUEST = "that session is not waiting on a request";
 
 /**
@@ -686,18 +692,21 @@ const make = Effect.gen(function* () {
    * Reads the session `id` and finds `requestId` among the Requests it waits
    * on. Fails with `InvalidState` when the session is archived, has exited,
    * waits on no Request, or does not wait on this one, and with `NotFound`
-   * when there is no such session.
+   * when there is no such session. The three refusals that mean the Request
+   * is not open carry `{ reason: "request-closed" }`, so a client can tell
+   * them from other `InvalidState` refusals.
    */
   const readOpenRequest = (id: Id, requestId: string) =>
     Effect.gen(function* () {
       const session = yield* readSession(id);
       yield* refuseArchived(session);
       if (session.status === "exited")
-        return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
+        return yield* Effect.fail(createInvalidStateError(HAS_EXITED, REQUEST_CLOSED));
       if (session.openRequests.length === 0)
-        return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
+        return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST, REQUEST_CLOSED));
       const open = session.openRequests.find((request) => request.requestId === requestId);
-      if (open === undefined) return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
+      if (open === undefined)
+        return yield* Effect.fail(createInvalidStateError(STALE_REQUEST, REQUEST_CLOSED));
       return { session, open };
     });
 

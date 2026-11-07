@@ -44,6 +44,16 @@ const addSubagentName = (
   return name === undefined ? request : { ...request, subagentName: name };
 };
 
+/**
+ * Returns the open Requests of a stored session as the `Session` record
+ * shows them: oldest first, each with the name of the subagent that asked it.
+ * Every reader of a session's open Requests builds them here.
+ */
+export const buildOpenRequests = (
+  stored: Pick<StoredSession, "openRequests" | "subagentNames">,
+): ReadonlyArray<SessionRequest> =>
+  stored.openRequests.map((request) => addSubagentName(request, stored.subagentNames));
+
 export const sessionRecordComposer: Effect.Effect<
   Effect.Effect<(stored: StoredSession) => Session>,
   never,
@@ -71,9 +81,7 @@ export const sessionRecordComposer: Effect.Effect<
     ...(stored.done === null ? {} : { done: stored.done }),
     ...(stored.archived === null ? {} : { archived: stored.archived }),
     ...(stored.reopenedAt === null ? {} : { reopenedAt: stored.reopenedAt }),
-    openRequests: stored.openRequests.map((request) =>
-      addSubagentName(request, stored.subagentNames),
-    ),
+    openRequests: buildOpenRequests(stored),
     ...buildUsageFields(stored.usage),
     resumeHeld: isResumeHeld(stored),
     unenforced: listUnenforcedFields(definitions, stored.harnessId, stored.disallowedTools),

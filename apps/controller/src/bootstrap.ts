@@ -51,6 +51,7 @@ import {
   DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskLinkOwnersLayer,
   WorkflowValidityObserversLayer,
   type ProviderAccountProbing,
   type RunServiceReference,
@@ -433,7 +434,7 @@ export const bootWith = <A, E>(
       Layer.provide(SessionEditObserverLayer),
       Layer.provide(ConversationMessagesLayer),
       // A reopened Thread joins a Task through the task service.
-      Layer.provide(TaskServiceLayer),
+      Layer.provide(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
     );
 
     /**

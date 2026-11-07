@@ -86,6 +86,8 @@ import {
   RunServiceReferenceFill,
   RunTargetsLayer,
   TaskBoardFactsLayer,
+  TaskDetailFactsLayer,
+  TaskLinkOwnersLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
@@ -897,7 +899,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
  */
 const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(WorkflowDomainLayer),
-  Layer.provideMerge(TaskServiceLayer),
+  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
@@ -1005,8 +1007,11 @@ const operationServices = Layer.mergeAll(
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
   // The board's read gets each Task's sessions and runs the same way.
   TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
-  // The details pane's read will get the Task's sessions and runs the same way.
-  TaskDetailsLayer,
+  // The details pane's read gets the Task's sessions and runs the same way, and
+  // the card's facts and the newest runs from the ports above.
+  TaskDetailsLayer.pipe(
+    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+  ),
   YourWorkLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -1122,7 +1127,9 @@ export const operationLayers = operationServices.pipe(
   // arrivals, placements and retirements announce, so the drivers above and
   // `TextGeneration` share this one layer.
   Layer.provideMerge(TextGenerationTargetChangesLayer),
-  Layer.provide(TextGenerationStatusLayer),
+  // Also offered to the drivers: the summary writer asks it whether a text
+  // generation could run now.
+  Layer.provideMerge(TextGenerationStatusLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */

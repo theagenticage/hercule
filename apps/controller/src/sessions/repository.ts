@@ -1509,6 +1509,16 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
+    /**
+     * Points every session of the Task `sourceId` at the Task `targetId`, for
+     * a merge. Announces nothing: the merge announces both Tasks.
+     */
+    moveTaskLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET task_id = ${uuidFromString(targetId)}
+        WHERE task_id = ${uuidFromString(sourceId)}
+      `),
+
     /** Stores the Requests the session's agents are parked on, oldest first. */
     setOpenRequests: (
       sessionId: string,
@@ -1540,6 +1550,52 @@ const make = Effect.gen(function* () {
         sql`UPDATE sessions SET last_activity_at = ${at}
             WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'`,
       ),
+
+    /**
+     * Returns up to `limit` sessions of the Task and how many sessions it has.
+     * The unfinished sessions come first (`buildUnfinishedClause`), then the
+     * finished ones, each group newest first (latest `created_at`, then
+     * greatest id).
+     *
+     * `pinnedId` names a session of the Task that must be among the ones
+     * returned. It takes a place that the last session of the order would
+     * have had, and is listed where the order puts it. An id that is not a
+     * session of the Task pins nothing.
+     *
+     * One statement: the first step ranks the Task's sessions on
+     * `sessions_task_id` and keeps `limit` of them, and only those are read
+     * whole. `total` is counted in the same pass, so the count costs no
+     * second read. The Task's other sessions are never read whole.
+     */
+    listOfTask: (
+      taskId: string,
+      limit: number,
+      pinnedId: string | undefined,
+    ): Effect.Effect<
+      { readonly sessions: ReadonlyArray<StoredSession>; readonly total: number },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<SessionRow & { readonly total: number }>`
+          SELECT ${sql.literal(COLUMNS)}, picked.total FROM (
+            SELECT session_id, total, place FROM (
+              SELECT session_id, total,
+                     ROW_NUMBER() OVER (ORDER BY finished, created_at DESC, session_id DESC) AS place,
+                     ROW_NUMBER() OVER (ORDER BY pinned, finished, created_at DESC, session_id DESC)
+                       AS kept
+              FROM (
+                SELECT s.id AS session_id, s.created_at,
+                       COUNT(*) OVER () AS total,
+                       CASE WHEN ${sql.literal(buildUnfinishedClause("s"))} THEN 0 ELSE 1 END AS finished,
+                       CASE WHEN s.id = ${pinnedId === undefined ? null : uuidFromString(pinnedId)}
+                            THEN 0 ELSE 1 END AS pinned
+                FROM sessions s
+                WHERE s.task_id = ${uuidFromString(taskId)}))
+            WHERE kept <= ${limit}) picked
+          JOIN sessions ON sessions.id = picked.session_id
+          ORDER BY picked.place`;
+        return { sessions: rows.map(toSession), total: rows[0]?.total ?? 0 };
+      }),
 
     /**
      * Returns what the Work board reads of the sessions of the Tasks `taskIds`,

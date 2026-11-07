@@ -22,6 +22,9 @@
  *   so that a redirect is always one hop. It leaves out deleted Tasks, as every
  *   index of `tasks` does, and a merged Task is never deleted, because a delete
  *   of its id lands on the survivor. A read of it repeats the index's condition.
+ * - `task_provenance.merged_task_id` is the Task a provenance entry records
+ *   as merged into the Task that holds the entry (`task.merge`). It is null
+ *   for every other entry. No index reads it.
  * - `task_failure_recoveries` gains the answer of the first Undo of a Try
  *   again (`task.undoTryAgain`), so that a repeat of the Undo returns exactly
  *   that answer. All three columns are null until the Undo is decided.
@@ -61,6 +64,8 @@ export default Effect.gen(function* () {
     CREATE INDEX tasks_merged_into ON tasks (merged_into_id)
       WHERE deleted_at IS NULL AND merged_into_id IS NOT NULL
   `;
+
+  yield* sql`ALTER TABLE task_provenance ADD COLUMN merged_task_id BLOB`;
 
   // The outcome is one of `restored`, `stopped` and `too-late`. A Boolean is
   // stored as 0 or 1.

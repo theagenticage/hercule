@@ -23,6 +23,7 @@ import {
   createNotFoundError,
   DEFAULT_PAGE_LIMIT,
   Id,
+  InvalidState,
   RUN_SORT_FIELDS,
   RunFilter,
   type Forbidden,
@@ -33,9 +34,9 @@ import {
   type TaskUndoTryAgainInput,
   type TryAgainUndo,
   type Unauthenticated,
-  type Validation,
+  Validation,
 } from "@hercule/contract";
-import { requireGrant } from "../actor";
+import { requireGrant, requireUserActor } from "../actor";
 import type { ConnectionTypes } from "../connections";
 import {
   buildPageInputFields,
@@ -51,13 +52,14 @@ import type { PromotionState } from "../promotion";
 import type { ProviderAccountRunners } from "../provider-accounts";
 import type { Settings } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
-import type { TaskService } from "../tasks";
+import { TaskService, type FailureRestoreRefusal } from "../tasks";
 import type { TextGeneration } from "../text-generation";
 import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
+import { isUnfinished } from "./step-records";
 import type { WorkspaceSteps } from "./workspace-steps";
 
 const QueryInput = Schema.Struct({
@@ -78,11 +80,34 @@ export interface RunPage {
   readonly nextCursor?: string;
 }
 
+/** The refusal of `task.undoTryAgain` for a caller who is not the user. */
+const ONLY_THE_USER_UNDOES_TRY_AGAIN =
+  "only the user may undo a Try again: it is the user's own correction, so a session or a workflow step may not; ask the user instead";
+
+/**
+ * What the undo line says when the failure was not put back. Each sentence
+ * names why, and none says the run has stopped: the run was only asked to.
+ */
+const STAYED_AS_IT_IS: Record<FailureRestoreRefusal, string> = {
+  "no-such-start": "This run did not end a failure, so there is none to put back.",
+  "already-restored": "The failure was already put back.",
+  "task-deleted": "The Task was deleted.",
+  "task-merged": "The Task was merged into another, which now holds its failure.",
+  "task-finished": "The Task is already done or dropped.",
+  "handled-since":
+    "A newer failure, run or Thread took over this Task, so what it shows now stays.",
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const tasks = yield* TaskService;
   const runs = yield* runRepository;
   const runHeld = yield* runHeldSubscriptions;
   const engine = yield* makeRunEngine;
+
+  /** Stores the first answer of an Undo on its recovery row, and returns it. */
+  const storeAnswer = (runId: string, answer: TryAgainUndo) =>
+    Effect.as(tasks.storeTryAgainUndo(runId, answer), answer);
 
   return {
     start: engine.start,
@@ -129,7 +154,53 @@ const make = Effect.gen(function* () {
       taskId: Id,
       input: TaskUndoTryAgainInput,
     ): Effect.Effect<TryAgainUndo, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      Effect.die(new Error(`not built yet: #1031 (task.undoTryAgain ${taskId} ${input.runId})`)),
+      Effect.gen(function* () {
+        yield* requireUserActor("task.undoTryAgain", ONLY_THE_USER_UNDOES_TRY_AGAIN);
+        yield* requireGrant("run.cancel");
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const recovery = yield* tasks.readFailureRecovery(input.runId);
+            if (Option.isNone(recovery) || recovery.value.taskId !== taskId) {
+              return yield* Effect.fail(createNotFoundError("no such Try again on this Task"));
+            }
+            if (recovery.value.undo !== undefined) return recovery.value.undo;
+            // Only a failure restored before the answer was stored can reach
+            // here, and nothing knows whether that run was asked to stop.
+            if (recovery.value.restoredAt !== undefined) {
+              return { outcome: "restored", stopRequested: false } as const;
+            }
+            // The row was written with the run in one transaction, and runs
+            // are never deleted.
+            const run = Option.getOrThrow(yield* runs.read(input.runId));
+            if (!isUnfinished(run.status)) {
+              return yield* storeAnswer(input.runId, { outcome: "too-late", stopRequested: false });
+            }
+            // The run is unfinished and the user holds the grant, so `cancel`
+            // cannot refuse it.
+            yield* engine
+              .cancel(input.runId, {})
+              .pipe(
+                Effect.catchIf(
+                  (error): error is Validation | InvalidState =>
+                    error instanceof Validation || error instanceof InvalidState,
+                  Effect.die,
+                ),
+              );
+            const restoration = yield* tasks.restoreRecoveredFailure({ runId: input.runId });
+            return yield* storeAnswer(
+              input.runId,
+              restoration.restored
+                ? { outcome: "restored", stopRequested: true }
+                : {
+                    outcome: "stopped",
+                    stopRequested: true,
+                    reason: STAYED_AS_IT_IS[restoration.reason],
+                  },
+            );
+          }),
+        );
+      }),
 
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */
     query: (

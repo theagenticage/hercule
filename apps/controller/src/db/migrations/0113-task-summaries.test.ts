@@ -30,12 +30,16 @@ const migrate = Effect.gen(function* () {
                                 created_at, updated_at, status_changed_at, stage_changed_at)
              VALUES (${buildTestId("task")}, 'Gift cards', '', 'open', 'planned', 'normal', '[]', 'M',
                      ${AT}, ${AT}, ${AT}, ${AT})`;
+  yield* sql`INSERT INTO task_provenance (id, task_id, ref, at, actor)
+             VALUES (${buildTestId("entry")}, ${buildTestId("task")}, 'github:acme/shop#1', ${AT}, 'user')`;
   yield* sql`INSERT INTO task_failure_recoveries (run_id, task_id, failed_run_id, revision_after)
              VALUES (${buildTestId("retry")}, ${buildTestId("task")}, ${buildTestId("failed")}, 1)`;
   yield* runMigrations(UP_TO_TASK_SUMMARIES);
   const tasks = yield* sql<{ readonly merged_into_id: Uint8Array | null }>`
     SELECT merged_into_id FROM tasks`;
   const summaries = yield* sql`SELECT * FROM task_summaries`;
+  const provenance = yield* sql<{ readonly merged_task_id: Uint8Array | null }>`
+    SELECT merged_task_id FROM task_provenance`;
   const recoveries = yield* sql<{
     readonly undo_outcome: string | null;
     readonly undo_stop_requested: number | null;
@@ -44,17 +48,18 @@ const migrate = Effect.gen(function* () {
   const indexes = yield* sql<{ readonly name: string; readonly sql: string }>`
     SELECT name, sql FROM sqlite_master
     WHERE type = 'index' AND name IN ('task_summaries_dirty', 'tasks_merged_into')`;
-  return { tasks, summaries, recoveries, indexes };
+  return { tasks, summaries, provenance, recoveries, indexes };
 });
 
 describe("the task summaries migration", () => {
-  it("leaves existing Tasks unmerged, writes no summary, and leaves recoveries without an Undo answer", async () => {
-    const { tasks, summaries, recoveries } = await Effect.runPromise(
+  it("leaves existing Tasks unmerged, writes no summary, marks no provenance entry as a merge, and leaves recoveries without an Undo answer", async () => {
+    const { tasks, summaries, provenance, recoveries } = await Effect.runPromise(
       migrate.pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
 
     expect(tasks).toEqual([{ merged_into_id: null }]);
     expect(summaries).toEqual([]);
+    expect(provenance).toEqual([{ merged_task_id: null }]);
     expect(recoveries).toEqual([
       { undo_outcome: null, undo_stop_requested: null, undo_reason: null },
     ]);

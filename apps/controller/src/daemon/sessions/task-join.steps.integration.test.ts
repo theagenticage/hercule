@@ -230,4 +230,67 @@ describe("the Task of a workflow run's step sessions", () => {
       expect(await countTasks(arranged)).toEqual(before);
     });
   });
+  it("joins the survivor when the run's Task is merged into another before the next step opens its session", async () => {
+    await withFleet(async (arranged) => {
+      const { base } = arranged.harness;
+      const repo = await createRepo(arranged, "https://github.com/acme/web");
+      const agentId = await createAgent(base, arranged.token);
+      const workflow = await createWorkflowOrFail(base, arranged.token, {
+        definition: {
+          name: "Implement, then review",
+          inputs: [{ name: "signal", signal: { kinds: [SIGNAL_KIND] }, required: true }],
+          workspace: { kind: "ephemeral", checkouts: [{ resourceId: repo }] },
+          steps: [
+            { id: "implement", kind: "agent", agent: agentId, prompt: "Implement the change." },
+            { id: "review", kind: "agent", agent: agentId, prompt: "Review the change." },
+          ],
+          edges: [{ from: "implement", to: "review" }],
+        },
+      });
+      const enabled = await updateWorkflow(base, arranged.token, workflow.id, { enabled: true });
+      expect(enabled.status, await enabled.clone().text()).toBe(200);
+      const signalId = await insertSignal(arranged.harness, workflow.id);
+      const handedOff = await post(
+        base,
+        `/api/v1/signals/${signalId}/hand-off`,
+        { workflowId: workflow.id },
+        arranged.token,
+      );
+      expect(handedOff.status, await handedOff.clone().text()).toBe(200);
+      const runId = ((await handedOff.json()) as { resolution: { runId: string } }).resolution
+        .runId;
+      const sourceId = (await readRun(base, arranged.token, runId)).taskId!;
+      await waitUntil("provisioned the run's workspace", () => {
+        const frame = arranged.wire.frames.find((one) => one._tag === "workspaceProvision");
+        return frame === undefined
+          ? undefined
+          : (frame as unknown as { workspaceId: string }).workspaceId;
+      }).then((workspaceId) => reportWorkspaceReady(arranged, workspaceId));
+
+      const implement = await runStep(arranged, runId, "implement");
+      expect((await readSession(arranged, implement)).taskId).toBe(sourceId);
+
+      const created = await post(
+        base,
+        "/api/v1/tasks",
+        { title: "Webhook retries", description: "", stage: "building" },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const survivorId = ((await created.json()) as { id: string }).id;
+      const merged = await post(
+        base,
+        `/api/v1/tasks/${sourceId}/merge`,
+        { intoTaskId: survivorId },
+        arranged.token,
+      );
+      expect(merged.status, await merged.clone().text()).toBe(200);
+
+      // The first step's session moved with the merge, and the second opens on the survivor.
+      expect((await readSession(arranged, implement)).taskId).toBe(survivorId);
+      const review = await runStep(arranged, runId, "review");
+      expect((await readSession(arranged, review)).taskId).toBe(survivorId);
+      expect((await readRun(base, arranged.token, runId)).taskId).toBe(survivorId);
+    });
+  });
 });

@@ -73,6 +73,7 @@ import {
   ProviderAccountSignInDeadline,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskLinkOwnersLayer,
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
@@ -184,7 +185,7 @@ const buildServices = (
           Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
           // As in the real boot: a reopened Thread joins a Task.
-          Layer.provide(TaskServiceLayer),
+          Layer.provide(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.

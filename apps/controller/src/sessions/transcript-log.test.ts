@@ -10,12 +10,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import type { SqlError } from "effect/sql/SqlError";
 import type { HarnessEvent } from "@hercule/protocol";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
-import { readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import { readAssistantTexts, readOpenTurnId, readRecentAssistantText } from "./transcript-log";
 
 const at = "2026-09-07T10:00:00.000Z";
 
@@ -250,5 +251,100 @@ describe("reading a subagent's open turn", () => {
       ]),
     ).toBeUndefined();
     expect(await readOpenTurn([{ _tag: "turn.started", turnId: "t1" }])).toBeUndefined();
+  });
+});
+
+describe("reading the recent assistant text", () => {
+  /** A text delta of the session's own agent, or of `subagentId`. */
+  const delta = (itemId: string, text: string, subagentId?: string): Row => ({
+    _tag: "content.delta",
+    turnId: "t",
+    itemId,
+    delta: text,
+    ...(subagentId === undefined ? {} : { subagentId }),
+  });
+
+  /** A row that is not a text delta, such as the start of a tool call. */
+  const toolRow = (index: number): Row => ({
+    _tag: "item.started",
+    turnId: "t",
+    itemId: `tool-${String(index)}`,
+  });
+
+  const readRecent = (rows: ReadonlyArray<Row>, maxRows: number, maxChars: number) =>
+    readStoredRows(rows, (sql, sessionId) =>
+      readRecentAssistantText(sql, { sessionId, maxRows, maxChars }),
+    );
+
+  it("reads only the newest rows of a turn with thousands of deltas, in reading order", async () => {
+    const rows = Array.from({ length: 3000 }, (_, index) => delta("a", `${String(index)} `));
+
+    const text = await readRecent(rows, 8, 10_000);
+
+    expect(text).toBe("2992 2993 2994 2995 2996 2997 2998 2999 ");
+  });
+
+  it("looks at a fixed window of the newest rows: text buried under later rows is not read", async () => {
+    const rows = [
+      delta("a", "buried"),
+      ...Array.from({ length: 300 }, (_, index) => toolRow(index)),
+      delta("b", "recent"),
+    ];
+
+    expect(await readRecent(rows, 8, 10_000)).toBe("recent");
+    expect(await readRecent(rows.slice(0, -1), 8, 10_000)).toBe("");
+  });
+
+  it("keeps the newest characters when the text is longer than maxChars", async () => {
+    const text = await readRecent([delta("a", "0123456789"), delta("a", "abcdefghij")], 8, 14);
+
+    expect(text).toBe("6789abcdefghij");
+  });
+
+  it("never reads a subagent's text, and separates items with a blank line", async () => {
+    const text = await readRecent(
+      [
+        delta("a", "first"),
+        delta("sub", "from a subagent", "sub-1"),
+        delta("b", "second"),
+        delta("b", " half"),
+      ],
+      8,
+      1000,
+    );
+
+    expect(text).toBe("first\n\nsecond half");
+  });
+
+  it("does not split a surrogate pair when it cuts", async () => {
+    const text = await readRecent([delta("a", "a😀b")], 8, 2);
+
+    expect(text).toBe("b");
+  });
+
+  it("walks the agent index back from the newest row instead of scanning the session", async () => {
+    const compiled: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+    const plan = await readStoredRows([delta("a", "x")], (sql, sessionId) =>
+      Effect.gen(function* () {
+        yield* Effect.provideService(
+          readRecentAssistantText(sql, { sessionId, maxRows: 8, maxChars: 100 }),
+          Statement.CurrentTransformer,
+          (statement) =>
+            Effect.sync(() => {
+              compiled.push(statement.compile());
+              return statement;
+            }),
+        );
+        const [text, params] = compiled[0]!;
+        const rows = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return rows.map((row) => row.detail);
+      }),
+    );
+
+    expect(plan.some((detail) => detail.includes("USING INDEX session_stream_agent"))).toBe(true);
+    expect(plan.some((detail) => /^SCAN session_stream\b(?! USING)/.test(detail))).toBe(false);
   });
 });

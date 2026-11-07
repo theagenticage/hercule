@@ -1019,6 +1019,27 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns how many runs the Task has. One count on `runs_task_id`, which
+     * reads the index entries of the Task and no run row.
+     */
+    countOfTask: (taskId: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly total: number }>`
+          SELECT COUNT(*) AS total FROM runs WHERE task_id = ${uuidFromString(taskId)}`,
+        (rows) => rows[0]!.total,
+      ),
+
+    /**
+     * Points every run of the Task `sourceId` at the Task `targetId`, for a
+     * merge. One statement on `runs_task_id`.
+     */
+    moveTaskLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE runs SET task_id = ${uuidFromString(targetId)}
+            WHERE task_id = ${uuidFromString(sourceId)}`,
+      ),
+
+    /**
      * Returns the newest `limit` runs of the Task as summaries, newest first
      * (latest `created_at`, then greatest id). A Task with no run has none.
      * One lookup on `runs_task_id`, which holds a Task's runs newest first,

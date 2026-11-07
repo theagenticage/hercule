@@ -167,7 +167,12 @@ export {
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,
 } from "./workflows";
-export { TaskBoardFactsLayer } from "./tasks";
+export {
+  runTaskSummaryLoop,
+  TaskBoardFactsLayer,
+  TaskDetailFactsLayer,
+  TaskLinkOwnersLayer,
+} from "./tasks";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {
   forwardTargetChanges,

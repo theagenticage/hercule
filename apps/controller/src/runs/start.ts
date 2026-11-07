@@ -372,7 +372,12 @@ export const makeRunStart = (
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const { plan, workflowId, inputs, originalRunId, taskId } = yield* readRunToWrite;
+          const { plan, workflowId, inputs, originalRunId, ...chosen } = yield* readRunToWrite;
+          // The Task is followed to its survivor here, in the transaction that
+          // writes the run, so a start that read the Task before a merge cannot
+          // store the merged id.
+          const taskId =
+            chosen.taskId === undefined ? undefined : yield* tasks.resolveTaskId(chosen.taskId);
           const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
           yield* checkCapableRunner(plan);
           yield* checkNesting(origin);

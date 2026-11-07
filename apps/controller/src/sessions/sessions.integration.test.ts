@@ -271,6 +271,11 @@ const parseRefusal = async (
   };
 };
 
+/** Returns the `details` of a refusal, or `undefined` when it has none. */
+const readRefusalDetails = async (response: Response): Promise<unknown> =>
+  ((await response.clone().json()) as { readonly error: { readonly details?: unknown } }).error
+    .details;
+
 /** Returns every session. After a rejected spawn there must be none. */
 const listSessions = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
   const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
@@ -5500,6 +5505,8 @@ describe("session.respondToQuestion", () => {
       expect(await response.clone().text()).toContain(
         "the agent is not waiting on that question any more",
       );
+      // The Request is still open, so this refusal does not say it is closed.
+      expect(await readRefusalDetails(response)).toBeUndefined();
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect((await readSession(arranged, session.id)).openRequests).toEqual(session.openRequests);
     });
@@ -5806,6 +5813,7 @@ describe("answering a Request the session is not waiting on", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
+      expect(await readRefusalDetails(response)).toEqual({ reason: "request-closed" });
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
       expect(listResponseFrames(arranged.wire)).toEqual([]);
@@ -5825,6 +5833,7 @@ describe("answering a Request the session is not waiting on", () => {
         });
 
         expect(response.status, await response.clone().text()).toBe(409);
+        expect(await readRefusalDetails(response)).toEqual({ reason: "request-closed" });
         expect((await parseRefusal(response)).code).toBe("invalid_state");
         await delay(250);
         expect(listResponseFrames(arranged.wire)).toEqual([]);

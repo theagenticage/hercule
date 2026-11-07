@@ -146,6 +146,8 @@ const findOpenQuestion = (
  *   Thread, else the newest session of any kind. It is for navigation only.
  * - `lastActivityAt`: the latest of the Task's creation, the last time a
  *   session of it ended a turn and the last time a run of it ended.
+ * - `summary`: the Task's summary, once it has one. It is only a description,
+ *   so it never decides `openQuestion`, `failure` or any other fact above.
  */
 export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard => {
   const threads = facts.sessions
@@ -192,6 +194,7 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
           },
         }),
     ...(openSessionId === undefined ? {} : { openSessionId }),
+    ...(task.summary === undefined ? {} : { summary: task.summary }),
     threadCount: facts.threadCount,
     ...(working === undefined ? {} : { workingSessionId: working.id }),
     createdAt: task.createdAt,

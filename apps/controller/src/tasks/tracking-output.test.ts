@@ -11,7 +11,12 @@ import {
   MAX_TRACKING_OUTPUT_VALUE,
   MAX_TRACKING_STEP_NAME,
 } from "@hercule/contract";
-import { cutText, shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
+import {
+  cutText,
+  cutTextAtWord,
+  shapeTrackingOutput,
+  type CompletedAgentStep,
+} from "./tracking-output";
 
 const SESSION = "0199e0e7-0007-7000-8000-00000000000a";
 
@@ -94,6 +99,24 @@ describe("shapeTrackingOutput for a step with no output schema", () => {
     const text = (output as { text: string }).text;
     expect(text.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_TEXT);
     expect(text.endsWith("word…")).toBe(true);
+  });
+});
+
+describe("cutTextAtWord", () => {
+  it.each([
+    ["a short text", "Three designs", 20, "Three designs"],
+    ["a text exactly at the limit", "Three designs", 13, "Three designs"],
+    ["a break early in the text", "A reconciliationservice rewrite", 20, "A…"],
+    ["a break in the second half", "Three designs and depots", 20, "Three designs and…"],
+    ["a space right after the kept part", "Three designs depots", 14, "Three designs…"],
+    ["a line break", "Three\ndesigns and depots", 15, "Three\ndesigns…"],
+    ["one word longer than the limit", "reconciliationservice", 10, "reconcili…"],
+    ["a surrogate pair at the cut", "ab😀😀😀", 4, "ab…"],
+  ])("cuts %s", (_name, text, limit, expected) => {
+    const cut = cutTextAtWord(text, limit);
+
+    expect(cut).toBe(expected);
+    expect(cut.length).toBeLessThanOrEqual(limit);
   });
 });
 

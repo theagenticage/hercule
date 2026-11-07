@@ -29,7 +29,7 @@ export {
   buildTimeouts,
   validateOptions,
 } from "./options";
-export { sessionRecordComposer } from "./records";
+export { buildOpenRequests, sessionRecordComposer } from "./records";
 export { validateAnswers, validateDecision } from "./responses";
 export { isResumeHeld } from "./resume-hold";
 export {
@@ -54,6 +54,7 @@ export { buildUnfinishedClause } from "./unfinished";
 export {
   agentExists,
   readAssistantTexts,
+  readRecentAssistantText,
   readTranscriptHead,
   readTranscriptRowsAfter,
 } from "./transcript-log";

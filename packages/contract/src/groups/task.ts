@@ -855,9 +855,8 @@ export type TaskDetailSession = Schema.Schema.Type<typeof TaskDetailSession>;
 export const TaskDetail = Schema.Struct({
   /** The Task in full: description, labels and provenance. */
   task: Task,
-  /** The same facts the board shows for the Task. */
+  /** The same facts the board shows for the Task, its summary included. */
   card: WorkCard,
-  summary: Schema.optionalKey(TaskSummary),
   /** At most `MAX_DETAIL_SESSIONS`, the unfinished first, then newest. */
   sessions: atMost(TaskDetailSession, MAX_DETAIL_SESSIONS),
   /**
@@ -972,7 +971,7 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.get("readDetail", "/tasks/:id/detail", {
       params: { id: Id },
       success: TaskDetail,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.get("read", "/tasks/:id", {
       params: { id: Id },
