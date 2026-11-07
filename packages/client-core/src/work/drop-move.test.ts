@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes } from "./arrange-lanes";
-import { applyCardMove } from "./card-move";
+import { applyCardMove, type CardMove } from "./card-move";
 import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
 import { buildDropMove, buildFollowerMoves, settleGroupDrop } from "./drop-move";
@@ -213,12 +213,35 @@ describe("buildDropMove", () => {
       ["the lane for Tasks under none", "none:acme/project", null],
     ])("changes the stage only in %s", (_, laneId, beforeCardId) => {
       const drop = dropOnOutside(laneId, beforeCardId);
-      expect(drop).toEqual({ move: { taskId: "a", stage: "building" }, targetProjectId: null });
+      expect(drop).toEqual({ move: { taskId: "a", stage: "building" } });
     });
 
     it("changes the stage only on a folded lane too", () => {
       const drop = dropOnOutside("place:acme:project:returns", null, true);
       expect(drop.move).toEqual({ taskId: "a", stage: "building" });
+    });
+
+    it("changes the stage only for every card of a drop of several, and leaves each in its Project", () => {
+      const drop = dropOnOutside("place:acme:project:returns", null);
+      const followers = [board.cards[1]!, board.cards[2]!];
+
+      const settled = settleGroupDrop(board, PROJECTS, drop, followers);
+
+      expect(settled).toEqual({
+        kind: "send",
+        moves: [
+          { taskId: "a", stage: "building" },
+          { taskId: "b", stage: "building" },
+          { taskId: "c", stage: "building" },
+        ],
+      });
+      const moved = (settled as { moves: readonly CardMove[] }).moves.reduce(applyCardMove, board);
+      expect(Object.fromEntries(moved.cards.map((card) => [card.id, card.projectId]))).toEqual({
+        a: "storefront",
+        b: "storefront",
+        c: "checkout",
+        d: "storefront",
+      });
     });
 
     it("leaves the card in its Project, last in its stored cell", () => {

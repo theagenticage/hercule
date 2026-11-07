@@ -314,7 +314,11 @@ export const useCardMoves = ({
         return true;
       }
       const { taskId, ...place } = change.move;
-      await client.task.move({ params: { id: taskId }, payload: place });
+      // An Undo puts back the Task the gesture moved, so it must not move the survivor of a merge.
+      await client.task.move({
+        params: { id: taskId },
+        payload: isUndoWanted === undefined ? place : { ...place, refuseIfMerged: true },
+      });
       return true;
     },
     onSuccess: async (isSent, request) => {

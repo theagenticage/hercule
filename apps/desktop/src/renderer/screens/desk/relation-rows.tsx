@@ -12,10 +12,13 @@ import { PluginMark } from "../../marks";
 import { ProgressBar } from "./progress-bar";
 import "./relation-rows.css";
 
-/** Returns what a place says about itself in one line: "Project · At risk · 14 Nov". */
-const describePlace = (row: OpenPlaceRow): string =>
+/**
+ * Returns what a place says about itself in one line: "Project · At risk · 14
+ * Nov". The kind's noun is left out when `isKindShown` is false.
+ */
+const describePlace = (row: OpenPlaceRow, isKindShown: boolean): string =>
   [
-    row.noun,
+    isKindShown ? row.noun : undefined,
     row.status?.label,
     row.targetDate === undefined ? undefined : formatTargetDate(row.targetDate),
   ]
@@ -49,6 +52,9 @@ function LockedRow({
  *
  * - With `onWalk`, the row is a button that calls it with the place's ref, so
  *   a place inside a sheet can be walked to. Without it, the row is plain.
+ *   `canWalk` narrows that to the rows it accepts, so a row it refuses stays plain.
+ * - `isKindShown` is false where the title already says what kind of thing the
+ *   row is, such as a linked issue that starts with its identifier.
  * - A place no Connection can read is a locked row: a lock and the words "A
  *   Sentry issue you cannot open", never a title, and never a button.
  * - `plugins` is what `plugin.query` returns, for the marks and the names.
@@ -57,10 +63,14 @@ function RelationRow({
   row,
   plugins,
   onWalk,
+  canWalk,
+  isKindShown,
 }: {
   readonly row: PlaceRow;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onWalk?: ((ref: string) => void) | undefined;
+  readonly canWalk?: ((row: OpenPlaceRow) => boolean) | undefined;
+  readonly isKindShown: boolean;
 }): JSX.Element {
   if (row.isLocked) return <LockedRow row={row} plugins={plugins} />;
   const words = (
@@ -70,7 +80,7 @@ function RelationRow({
       </span>
       <span className="relation-title">{row.title}</span>
       <span className="relation-end">
-        <span className="relation-facts">{describePlace(row)}</span>
+        <span className="relation-facts">{describePlace(row, isKindShown)}</span>
         {row.progress !== undefined && (
           <ProgressBar fraction={row.progress.fraction} words={row.progress.words} />
         )}
@@ -79,7 +89,7 @@ function RelationRow({
   );
   return (
     <li className="relation-row">
-      {onWalk === undefined ? (
+      {onWalk === undefined || canWalk?.(row) === false ? (
         <div className="relation-go">{words}</div>
       ) : (
         <button
@@ -100,20 +110,32 @@ function RelationRow({
  * Renders the rows of the places above a thing, as `readAncestorRows`
  * returns them: every place on every path, each once, nearest first. The list
  * is flat, because a place with two parents is not a step on one ladder.
+ * `onWalk`, `canWalk` and `isKindShown` apply to every row (see `RelationRow`).
  */
 export function RelationRows({
   rows,
   plugins,
   onWalk,
+  canWalk,
+  isKindShown,
 }: {
   readonly rows: ReadonlyArray<PlaceRow>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onWalk?: ((ref: string) => void) | undefined;
+  readonly canWalk?: ((row: OpenPlaceRow) => boolean) | undefined;
+  readonly isKindShown?: boolean;
 }): JSX.Element {
   return (
     <ul className="relation-rows">
       {rows.map((row) => (
-        <RelationRow key={row.ref} row={row} plugins={plugins} onWalk={onWalk} />
+        <RelationRow
+          key={row.ref}
+          row={row}
+          plugins={plugins}
+          onWalk={onWalk}
+          canWalk={canWalk}
+          isKindShown={isKindShown !== false}
+        />
       ))}
     </ul>
   );

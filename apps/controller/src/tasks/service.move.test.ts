@@ -432,4 +432,37 @@ describe("task.move", () => {
       expect(result.events[0]?.payload).toMatchObject({ taskId: result.moverId });
     });
   });
+
+  describe("a Task that was merged into another", () => {
+    it("moves the survivor when the move is an ordinary one", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          const source = yield* createInCell("source", "planned");
+          const survivor = yield* createInCell("survivor", "building");
+          yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+          yield* tasks.move({ id: source.id, stage: "exploring" });
+          return yield* tasks.read(survivor.id);
+        }),
+      );
+      expect(result.stage).toBe("exploring");
+    });
+
+    it("is refused, and the survivor stays, when the move is an Undo's (refuseIfMerged)", async () => {
+      const { refusal, survivor } = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          const source = yield* createInCell("source", "planned");
+          const survivor = yield* createInCell("survivor", "building");
+          yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+          const refusal = yield* Effect.flip(
+            tasks.move({ id: source.id, stage: "exploring", refuseIfMerged: true }),
+          );
+          return { refusal, survivor: yield* tasks.read(survivor.id) };
+        }),
+      );
+      expect(refusal).toMatchObject({ error: { code: "not_found" } });
+      expect(survivor.stage).toBe("building");
+    });
+  });
 });

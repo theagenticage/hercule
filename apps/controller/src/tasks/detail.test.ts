@@ -668,6 +668,12 @@ describe("the outside things a Task links", () => {
     expect(detail.edges).toEqual([]);
   });
 
+  it("walks up from the linked things once, for the card and the pane together", async () => {
+    const { statements } = await readLinkedDetail([ticket("one", [PROJECT_A, PROJECT_B])]);
+
+    expect(statements.filter((text) => text.includes("WITH RECURSIVE"))).toHaveLength(1);
+  });
+
   it("sends the same number of statements for 1 linked thing and for 20", async () => {
     const names = (count: number) => Array.from({ length: count }, (_, n) => `t${String(n)}`);
     const small = await readLinkedDetail(
@@ -706,6 +712,7 @@ describe("who may read the details", () => {
                           lastTurnEndedAt: undefined,
                           lastRunEndedAt: undefined,
                           failure: undefined,
+                          linkedRefs: [],
                           entityMarks: [],
                           contextRefs: [],
                         })),
@@ -736,11 +743,6 @@ describe("who may read the details", () => {
                       asked.push("run count");
                       return 0;
                     }),
-                  readLinkedEntities: () =>
-                    Effect.sync(() => {
-                      asked.push("linked entities");
-                      return { entities: [], places: [], edges: [] };
-                    }),
                 }),
               ),
             ),
@@ -758,13 +760,7 @@ describe("who may read the details", () => {
       const exit = await result;
 
       expect(exit._tag).toBe("Success");
-      expect(asked).toEqual([
-        "card facts",
-        "sessions",
-        "run history",
-        "run count",
-        "linked entities",
-      ]);
+      expect(asked).toEqual(["card facts", "sessions", "run history", "run count"]);
     }
   });
 

@@ -113,7 +113,10 @@ export const buildCachedCardMover =
     const request = (async () => {
       // A gesture that was refused changed nothing, so there is nothing to put back.
       if (!(await isUndoWanted)) return;
-      await client.task.move({ params: { id: taskId }, payload: target });
+      await client.task.move({
+        params: { id: taskId },
+        payload: { ...target, refuseIfMerged: true },
+      });
       await writeAnsweredChange<WorkBoard>(queryClient, queryKeys.workBoard(), (cached) =>
         applyCardMove(cached, restore.move),
       );
@@ -136,7 +139,10 @@ export const buildCachedEndedCardMover =
     const { taskId, ...target } = restore.move;
     const request = (async () => {
       if (!(await isUndoWanted)) return;
-      await client.task.move({ params: { id: taskId }, payload: target });
+      await client.task.move({
+        params: { id: taskId },
+        payload: { ...target, refuseIfMerged: true },
+      });
       await writeAnsweredChange<WorkBoard>(queryClient, queryKeys.workBoard(), (cached) =>
         applyCardReturn(cached, card, restore.move),
       );

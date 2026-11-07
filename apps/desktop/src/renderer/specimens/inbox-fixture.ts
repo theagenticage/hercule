@@ -27,7 +27,7 @@ import type {
 } from "@hercule/contract";
 import { buildInbox, buildInboxCard, buildRequestCard } from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import { buildPlugin, GITHUB_PLUGIN } from "./plugins-fixture";
+import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN } from "./plugins-fixture";
 import type { SidebarRecords } from "./shell-page";
 
 const HOUR_MS = 3_600_000;
@@ -254,12 +254,6 @@ export const INBOX: Inbox = {
   ...buildInbox(CARDS, { places: PLACES, edges: EDGES }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
-
-/** The Quayside plugin, invented: purchase orders and the places they lie in. Its mark is a small crate, in a declared hue. */
-const QUAYSIDE_PLUGIN: PluginDetail = buildPlugin("quayside", "Quayside", {
-  paths: ["M2.5 5.5h11v7.5h-11z", "M2.5 8.5h11", "M5.5 5.5V3h5v2.5"],
-  hue: 190,
-});
 
 /** A kind of External Entity a plugin declares, qualified with the plugin's id. */
 type EntityKind = PluginDetail["entityKinds"][number];

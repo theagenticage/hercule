@@ -64,6 +64,8 @@ export interface TaskPaneActions extends TaskPaneChanges {
   readonly onOpenTextGeneration: () => void;
   /** Reads the Task again, after a read that failed. */
   readonly onRetryRead: () => void;
+  /** Shows only the Tasks that are part of an outside place, from a row of Part of. */
+  readonly onFilterByPlace: (placeRef: string) => void;
   /** Esc: goes back, or closes. */
   readonly onStepBack: () => void;
 }
@@ -317,7 +319,11 @@ export function TaskPane({
               onOpenThread={actions.onOpenThread}
               onMoveThreadToNewTask={actions.onMoveThreadToNewTask}
             />
-            <ContextSections detail={read.detail} plugins={plugins} />
+            <ContextSections
+              detail={read.detail}
+              plugins={plugins}
+              onFilterByPlace={actions.onFilterByPlace}
+            />
             <RunsSection
               detail={read.detail}
               onOpenRun={actions.onOpenRun}

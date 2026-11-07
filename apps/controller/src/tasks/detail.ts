@@ -8,8 +8,10 @@
  *
  * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
  * - `TaskTrackingRuns` for the runs, the same port Tracking uses;
- * - `TaskDetailFacts` for the sessions, the number of runs and the outside
- *   things the Task links.
+ * - `TaskDetailFacts` for the sessions and the number of runs.
+ *
+ * The outside things the Task links come from the card's facts, so the card
+ * and the pane are built from one read of the context.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -20,19 +22,19 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   createInvalidStateError,
   createNotFoundError,
-  type EntityEdge,
-  type EntityPlace,
   type InvalidState,
   type Forbidden,
   type Id,
+  MAX_CARD_CONTEXTS,
   MAX_DETAIL_SESSIONS,
   type NotFound,
   type TaskDetail,
   type TaskDetailSession,
+  type WorkCard,
   type Unauthenticated,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { buildWorkCard, TaskBoardFacts } from "./board";
+import { buildWorkCard, TaskBoardFacts, type BoardEntityContext } from "./board";
 import { taskRepository } from "./repository";
 import { TaskTrackingRuns } from "./tracking";
 
@@ -59,26 +61,34 @@ export class TaskDetailFacts extends Context.Service<
 
     /** Returns how many runs the Task has. */
     readonly countRuns: (taskId: string) => Effect.Effect<number, SqlError>;
-
-    /**
-     * Returns the outside things the Task links, as places in the order they
-     * were linked (at most `MAX_CARD_CONTEXTS`; a ref with no record is left
-     * out), with every place above them and the `part of` edges between
-     * them. The number of statements is fixed, whatever the number of links.
-     */
-    readonly readLinkedEntities: (taskId: string) => Effect.Effect<
-      {
-        readonly entities: ReadonlyArray<EntityPlace>;
-        readonly places: ReadonlyArray<EntityPlace>;
-        readonly edges: ReadonlyArray<EntityEdge>;
-      },
-      SqlError
-    >;
   }
 >()("hercule/controller/tasks/TaskDetailFacts") {}
 
 const NO_BOARD_CARD =
   "this task is finished (done or dropped), so it has no details to show. Move it back to a board stage first";
+
+/**
+ * Returns the outside things a Task links for its pane: `entities`, the
+ * linked refs that have a record, in the order they were linked (at most
+ * `MAX_CARD_CONTEXTS`), and the `places` and `edges` among the refs the card
+ * lists in `contextRefs`. They are cut from the board's context, which the
+ * card was built from, so the pane never disagrees with its card.
+ */
+const buildLinkedEntities = (
+  linkedRefs: ReadonlyArray<string>,
+  card: WorkCard,
+  context: BoardEntityContext,
+) => {
+  const shown = new Set(card.contextRefs);
+  const places = context.places.filter((place) => shown.has(place.ref));
+  const placeByRef = new Map(places.map((place) => [place.ref, place] as const));
+  return {
+    // A linked ref with no record has no row to draw, so it is left out.
+    entities: linkedRefs.slice(0, MAX_CARD_CONTEXTS).flatMap((ref) => placeByRef.get(ref) ?? []),
+    places,
+    edges: context.edges.filter((edge) => shown.has(edge.fromRef) && shown.has(edge.toRef)),
+  };
+};
 
 const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
@@ -134,6 +144,7 @@ const make = Effect.gen(function* () {
         const id = task.id;
         const {
           cards: [facts],
+          context,
         } = yield* cardFacts.readFacts([boardTask]);
         const card = buildWorkCard(boardTask, facts!);
         // The card's open question is asked by one Thread, and the pane answers it from that
@@ -145,7 +156,6 @@ const make = Effect.gen(function* () {
         );
         const history = yield* runs.readRunHistory(id);
         const runCount = yield* detailFacts.countRuns(id);
-        const linked = yield* detailFacts.readLinkedEntities(id);
         return {
           task,
           card,
@@ -153,7 +163,7 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
-          ...linked,
+          ...buildLinkedEntities(facts!.linkedRefs, card, context),
         };
       }),
   };

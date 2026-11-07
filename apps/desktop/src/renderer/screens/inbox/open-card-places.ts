@@ -1,4 +1,4 @@
-import type { SheetPlaces, SheetRect } from "../desk";
+import { copyCardForMotion, type SheetPlaces, type SheetRect } from "../desk";
 
 /** The narrowest the open card is, so a small request in the narrow column opens into a sheet wide enough to read. */
 const MIN_SHEET_WIDTH = 520;
@@ -24,8 +24,10 @@ const isOnPage = (element: HTMLElement | null): element is HTMLElement =>
  * window pixels.
  *
  * - The sheet starts from the visible part of `origin`, the card or place head
- *   it opened from, and its words are `origin` itself. An origin that is not
- *   drawn (the card left the page) has no rectangle, and the sheet only fades.
+ *   it opened from, and its words are a detached copy of `origin`: the sheet
+ *   takes the words into itself, and the page's own element must stay in the
+ *   list. An origin that is not drawn (the card left the page) has no
+ *   rectangle, and the sheet only fades.
  * - The sheet stands open over its card's column: its top left corner is the
  *   card's, and it is at least 520px wide. A place opens over its own surface
  *   (the width and left edge of `.inbox-place`). It is as tall as `content`,
@@ -64,7 +66,7 @@ export const readOpenCardPlaces = (
     (surface === null ? (from?.left ?? page.left) - 1 : measureElementRect(surface).left);
   const wantedTop = held?.top ?? from?.top ?? page.top;
   return {
-    origin: { rect: from, words: drawnOrigin },
+    origin: { rect: from, words: drawnOrigin === null ? null : copyCardForMotion(drawnOrigin) },
     destination: {
       left: Math.max(
         page.left + EDGE_MARGIN,

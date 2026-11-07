@@ -415,6 +415,12 @@ export const TaskMoveInput = Schema.Struct({
   projectId: Schema.optionalKey(Schema.NullOr(Id)),
   /** The card this one now follows in its cell. `null` puts it first. Absent keeps it last in the new cell. */
   afterTaskId: Schema.optionalKey(Schema.NullOr(Id)),
+  /**
+   * Fails with `NotFound` when the Task in the path was merged into another,
+   * instead of moving the survivor that the merged id stands for. An Undo sets
+   * it, because it puts back the Task the gesture moved and no other.
+   */
+  refuseIfMerged: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type TaskMoveInput = Schema.Schema.Type<typeof TaskMoveInput>;

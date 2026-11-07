@@ -265,8 +265,8 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 
 *(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* **`task.move`** puts a Task in a place on the board, in one transaction and one `task.updated`, stamped with the actor.
 
-- **Input.** `stage?` is one of the five board stages; `done` and `dropped` fail `validation`, because the board has no such column (Done and Drop go through `task.update`). `projectId?` moves the Task to a project, and `null` to the "No project" lane. `afterTaskId?` is the card the Task now follows in its cell; `null` puts it first; absent keeps it last in the new cell.
-- **Errors.** `not_found` for a Task, a project or an `afterTaskId` that does not exist. `validation` when `afterTaskId` is not in the target cell, or is the moving Task.
+- **Input.** `stage?` is one of the five board stages; `done` and `dropped` fail `validation`, because the board has no such column (Done and Drop go through `task.update`). `projectId?` moves the Task to a project, and `null` to the "No project" lane. `afterTaskId?` is the card the Task now follows in its cell; `null` puts it first; absent keeps it last in the new cell. `refuseIfMerged?` (only `true`) is set by an Undo: it fails the move with `not_found` when the Task in the path was merged into another, where the move would otherwise go to the survivor the merged id stands for. Its CLI field is hidden.
+- **Errors.** `not_found` for a Task, a project or an `afterTaskId` that does not exist, and for a merged Task when `refuseIfMerged` is set. `validation` when `afterTaskId` is not in the target cell, or is the moving Task.
 - **A move that changes nothing writes nothing**, as `task.update`, and emits no event.
 - **Events.** `task.updated` reports `changes.boardRank` beside any `stage` or `projectId` change ([./09-tasks.md](./09-tasks.md#the-board)).
 - Its CLI row is `hercule task move <id> --stage <stage> [--project <id>] [--after <id>]`, with the id, project and card resolved from tails through `task.query` and `project.query`. Not a bound operation: `task.move` lists no `usableIn`.

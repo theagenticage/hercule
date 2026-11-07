@@ -21,6 +21,8 @@
  * leaves their lanes out.
  */
 import type {
+  EntityEdge,
+  EntityPlace,
   Project,
   TaskDetail,
   TrackingDetailRun,
@@ -29,6 +31,7 @@ import type {
 } from "@hercule/contract";
 import { buildProject } from "@hercule/client-core/threads/testing";
 import { buildBoard, buildCard, buildSummary } from "@hercule/client-core/work/testing";
+import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN } from "./plugins-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -241,11 +244,70 @@ export const WORK_RECORDS: WorkRecords = {
   foldedLaneIds: [FIELD_APP.id],
 };
 
-/** The sidebar's lists with the Projects of the Northwind Market world added, for a specimen that opens Work. */
+/**
+ * The sidebar's lists with the Projects of the Northwind Market world added,
+ * and the two plugins that report the outside things the details link, for a
+ * specimen that opens Work.
+ */
 export const WORK_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
   projects: [...SPECIMEN_RECORDS.projects, ...NORTHWIND_PROJECTS],
+  plugins: [GITHUB_PLUGIN, QUAYSIDE_PLUGIN],
 };
+
+/**
+ * What the Task that asks links outside, for the Linked and Part of sections
+ * of its details: a GitHub issue in the storefront repository and in a
+ * Quayside delivery round, the round under a site, and an issue of another
+ * repository that no Connection can read.
+ */
+const LINKED_ISSUE: EntityPlace = {
+  ref: "github:issue:acme/storefront-web#412",
+  kind: "github/issue",
+  noun: "Issue",
+  title: "Basket is empty after signing in again",
+  identifier: "#412",
+  status: { shape: "ring", tone: "active", label: "In progress" },
+  restricted: false,
+};
+const HIDDEN_ISSUE: EntityPlace = {
+  ref: "github:issue:acme/platform-core#1204",
+  kind: "github/issue",
+  noun: "Issue",
+  restricted: true,
+};
+const STOREFRONT_REPOSITORY: EntityPlace = {
+  ref: "github:repository:acme/storefront-web",
+  kind: "github/repository",
+  noun: "Repository",
+  caption: "GitHub repository",
+  title: "storefront-web",
+  restricted: false,
+};
+const WINTER_ROUND: EntityPlace = {
+  ref: "quayside:round:winter-stock",
+  kind: "quayside/round",
+  noun: "Delivery round",
+  caption: "Quayside delivery round",
+  title: "Winter stock",
+  status: { shape: "half", tone: "active", label: "Receiving" },
+  progress: { fraction: 3 / 5, done: 3, total: 5 },
+  targetDate: "2026-10-21T00:00:00.000Z",
+  restricted: false,
+};
+const ROTTERDAM_SITE: EntityPlace = {
+  ref: "quayside:site:rotterdam",
+  kind: "quayside/site",
+  noun: "Site",
+  caption: "Quayside site",
+  title: "Rotterdam depot",
+  restricted: false,
+};
+const LINKED_EDGES: readonly EntityEdge[] = [
+  { fromRef: LINKED_ISSUE.ref, toRef: STOREFRONT_REPOSITORY.ref },
+  { fromRef: LINKED_ISSUE.ref, toRef: WINTER_ROUND.ref },
+  { fromRef: WINTER_ROUND.ref, toRef: ROTTERDAM_SITE.ref },
+];
 
 /** The Task whose details the `work-details` specimen has open: the one that asks a question. */
 const ASKING_CARD = WORK_RECORDS.board.cards.find(
@@ -332,9 +394,9 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
         buildRun(3, "Check the refund rules", "completed", 5),
       ],
       runCount: 3,
-      entities: [],
-      places: [],
-      edges: [],
+      entities: [LINKED_ISSUE, HIDDEN_ISSUE],
+      places: [LINKED_ISSUE, HIDDEN_ISSUE, STOREFRONT_REPOSITORY, WINTER_ROUND, ROTTERDAM_SITE],
+      edges: LINKED_EDGES,
     },
     {
       task: {

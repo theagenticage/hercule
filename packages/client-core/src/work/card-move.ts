@@ -197,8 +197,12 @@ export const CARD_NOT_EXACT_NOTE = "The card it followed has gone, so it went la
  */
 export interface DropMove {
   readonly move: CardMove;
-  /** The Project of the lane the card is let go on, or `null` for the "No project" lane. */
-  readonly targetProjectId: string | null;
+  /**
+   * The Project of the lane the card is let go on, or `null` for the "No
+   * project" lane. Absent for a lane of an outside place, which has no Project:
+   * the drop changes the stage only, for every card carried.
+   */
+  readonly targetProjectId?: string | null;
 }
 
 /**
@@ -232,7 +236,10 @@ export const settleDropMove = (
   if (moving === undefined) {
     return { kind: "refuse", reason: "The Task has left the board, so it was not moved." };
   }
-  if (targetProjectId !== null && !projects.some((each) => each.id === targetProjectId)) {
+  if (
+    typeof targetProjectId === "string" &&
+    !projects.some((each) => each.id === targetProjectId)
+  ) {
     return {
       kind: "refuse",
       reason: "The Project it was dropped on has gone, so the card was not moved.",

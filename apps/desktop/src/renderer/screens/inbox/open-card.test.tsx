@@ -75,13 +75,15 @@ const renderPage = (card: InboxCard, detail: ExternalEntityDetail): Rendered => 
     const openCard = useOpenCard();
     return (
       <div className="inbox-desk">
-        <button
-          onClick={(event) => {
-            openCard.open({ kind: "card", id: card.id }, event.currentTarget);
-          }}
-        >
-          Open the card
-        </button>
+        <div className="inbox-row" data-card-id={card.id}>
+          <button
+            onClick={(event) => {
+              openCard.open({ kind: "card", id: card.id }, event.currentTarget.parentElement!);
+            }}
+          >
+            Open the card
+          </button>
+        </div>
         <InboxOpenCard
           openCard={openCard}
           client={client}
@@ -115,6 +117,33 @@ const openTheCard = async (): Promise<HTMLElement> => {
 };
 
 describe("InboxOpenCard", () => {
+  it("keeps the page's own card in the list while the sheet opens out of a copy of it", async () => {
+    // A test page has no layout, so nothing counts as drawn unless it says so.
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+      new DOMRect(0, 0, 300, 40),
+    ] as unknown as DOMRectList);
+    renderPage(ORDER, buildDetail(ORDER));
+    const sheet = await openTheCard();
+
+    const rows = document.querySelectorAll(`.inbox-desk > .inbox-row[data-card-id="${ORDER_ID}"]`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector("button")).not.toBeNull();
+    // The copy inside the sheet has no card id, so no lookup of the card finds it.
+    expect(sheet.querySelector(".opening-ghost .inbox-row")).not.toBeNull();
+    expect(sheet.querySelector(".opening-ghost [data-card-id]")).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("lays the sheet above its veil, so the veil takes no click meant for the sheet", async () => {
+    renderPage(ORDER, buildDetail(ORDER));
+    const sheet = await openTheCard();
+    const veil = document.querySelector<HTMLElement>(".open-card-veil")!;
+
+    // Two positioned boxes in one layer paint in the order of the page, unless a z-index says otherwise.
+    expect(veil.compareDocumentPosition(sheet) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(getComputedStyle(veil).zIndex).toMatch(/^(auto|0|)$/);
+  });
+
   it("lists every place above a card with two paths, each once", async () => {
     renderPage(ORDER, buildDetail(ORDER));
 

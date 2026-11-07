@@ -74,6 +74,7 @@ const NO_FACTS: BoardCardFacts = {
   lastTurnEndedAt: undefined,
   lastRunEndedAt: undefined,
   failure: undefined,
+  linkedRefs: [],
   entityMarks: [],
   contextRefs: [],
 };

@@ -91,6 +91,8 @@ export interface BoardCardFacts {
   readonly lastRunEndedAt: string | undefined;
   /** The failure of the run `tasks.failed_run_id` names, when the Task has one. */
   readonly failure: BoardFailureFact | undefined;
+  /** The refs the Task links, in the order they were linked. */
+  readonly linkedRefs: ReadonlyArray<string>;
   /** One mark per kind of the Task's linked things that have a record, in the order they were linked. */
   readonly entityMarks: ReadonlyArray<EntityMark>;
   /**

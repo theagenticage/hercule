@@ -177,6 +177,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
                 lastRunEndedAt: lastRunEndings.get(task.id),
                 failure:
                   task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
+                linkedRefs: linksByTask.get(task.id) ?? [],
                 entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
                 contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],
               };

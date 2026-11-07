@@ -6,11 +6,11 @@
 
 /* A flat veil with no blur: paper in the light themes, the scrim in the dark
    ones (`--veil`). It fades with the sheet and takes no pointer once the
-   sheet is folding. */
+   sheet is folding. It has no z-index on purpose: `OpeningSheet` draws it
+   before the sheet, so the sheet lies above it and takes its own clicks. */
 .open-card-veil {
   position: fixed;
   inset: 0;
-  z-index: 40;
   background: var(--veil);
   opacity: 0;
   pointer-events: none;

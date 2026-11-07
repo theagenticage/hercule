@@ -204,7 +204,7 @@ describe("the Inbox's and the entities' keys", () => {
       keys: [queryKeys.workBoard(), queryKeys.taskDetail("t1")],
     },
     {
-      name: "a connection push naming ids reads the entity panes, the board and the suggestions",
+      name: "a connection push naming ids reads the entity panes, the board, the Task details and the suggestions",
       topic: "connection",
       ids: ["c1"],
       keys: [
@@ -215,6 +215,7 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.task(),
         queryKeys.entitySuggestions(),
       ],
     },
@@ -230,11 +231,12 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.task(),
         queryKeys.entitySuggestions(),
       ],
     },
     {
-      name: "a plugin push reads the entity panes, the board and the suggestions",
+      name: "a plugin push reads the entity panes, the board, the Task details and the suggestions",
       topic: "plugin",
       ids: ["github"],
       keys: [
@@ -245,6 +247,7 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.task(),
         queryKeys.entitySuggestions(),
       ],
     },

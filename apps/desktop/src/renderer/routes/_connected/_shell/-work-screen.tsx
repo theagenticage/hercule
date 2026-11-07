@@ -343,6 +343,22 @@ export function WorkScreen({
     moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
   };
 
+  /**
+   * Shows only the Tasks that are part of the place, from a row of Part of in
+   * the details. The filter and the Find text give way to it, so that all the
+   * place's Tasks show, and the details close to let the board be seen.
+   */
+  const filterByPlace = (placeRef: string): void => {
+    const place = places.find((each) => each.ref === placeRef);
+    if (place === undefined) {
+      moves.sayWithoutUndo("That place is not on this board now.");
+      return;
+    }
+    view.setFilter({ [place.kind]: [placeRef] });
+    view.setFindText("");
+    onChangeOpenTask(null);
+  };
+
   // ---------- Add to Work ----------
   const [addLane, setAddLane] = useState<AddTaskLane | null>(null);
   const [addResult, setAddResult] = useState<string | null>(null);
@@ -669,6 +685,7 @@ export function WorkScreen({
               },
             }}
             moveToStage={moveCardToStage}
+            onFilterByPlace={filterByPlace}
             onShown={pane.onPaneShown}
             onChangeTask={onChangeOpenTask}
           />

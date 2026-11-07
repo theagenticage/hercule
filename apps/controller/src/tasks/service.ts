@@ -607,6 +607,13 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const before = yield* readLiveTaskOrFail(requestedId);
+        if (placement.refuseIfMerged === true && before.id !== requestedId) {
+          return yield* Effect.fail(
+            createNotFoundError(
+              "the task was merged into another task, so it was not moved; move the other task if you meant to",
+            ),
+          );
+        }
         // A merged id, for the Task or for the card it follows, stands for the
         // survivor, and the comparisons and the rank below are about it.
         const id = before.id;

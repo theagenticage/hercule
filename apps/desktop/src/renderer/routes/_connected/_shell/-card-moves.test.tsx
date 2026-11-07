@@ -1157,8 +1157,8 @@ describe("useCardMoves with several cards at once", () => {
     ).toEqual(["a", "b"]);
     await acceptRequests(held, 2, 4);
     expect(held.slice(2).map((each) => [each.taskId, each.payload])).toEqual([
-      ["a", { stage: "building", projectId: null, afterTaskId: null }],
-      ["b", { stage: "building", projectId: null, afterTaskId: "a" }],
+      ["a", { stage: "building", projectId: null, afterTaskId: null, refuseIfMerged: true }],
+      ["b", { stage: "building", projectId: null, afterTaskId: "a", refuseIfMerged: true }],
     ]);
     await waitFor(() => {
       expect(result.current.line.text).toBe("Put back: Moved 2 Tasks.");

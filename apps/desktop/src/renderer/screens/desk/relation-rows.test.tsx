@@ -60,6 +60,20 @@ describe("a relation row", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("keeps a row plain when the caller refuses to walk to it", () => {
+    const row = buildPlaceRow(place());
+    render(<RelationRows rows={[row]} plugins={PLUGINS} onWalk={vi.fn()} canWalk={() => false} />);
+    expect(screen.getByText("Rotterdam depot")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("leaves out the kind's noun when the caller says the title already names it", () => {
+    const row = buildPlaceRow(place({ status: { shape: "ring", tone: "active", label: "Open" } }));
+    render(<RelationRows rows={[row]} plugins={PLUGINS} isKindShown={false} />);
+    expect(screen.getByText("Open")).toBeTruthy();
+    expect(screen.queryByText(/Site/)).toBeNull();
+  });
+
   it("draws a place no Connection can read as a lock and words, with no title and no button", () => {
     const locked = buildPlaceRow(
       place({ restricted: true, noun: "Shipment", kind: "quayside/shipment" }),

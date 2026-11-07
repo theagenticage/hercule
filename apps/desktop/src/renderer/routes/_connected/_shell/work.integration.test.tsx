@@ -664,10 +664,12 @@ describe("the Work screen's keys", () => {
     await waitFor(() => {
       expect(listMoves()).toHaveLength(2);
     });
+    // The Undo names the Task it moved, so a merge since then makes the controller refuse it.
     expect(listMoves()[1]?.body).toEqual({
       stage: "exploring",
       projectId: null,
       afterTaskId: null,
+      refuseIfMerged: true,
     });
     expect(
       within(screen.getByRole("group", { name: "Exploring, 1 card, in No project" })).getByRole(
@@ -1937,7 +1939,7 @@ describe("marking a Task Done or Dropped", () => {
     expect(screen.getByText('Put back: Marked "Label the pallets" Done.')).toBeTruthy();
     await waitFor(() => {
       expect(readBodies(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toEqual([
-        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: PACK.id },
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: PACK.id, refuseIfMerged: true },
       ]);
     });
     const cell = screen.getByRole("group", { name: /^Exploring, 3 cards/ });
@@ -1991,7 +1993,7 @@ describe("marking a Task Done or Dropped", () => {
     expect(await screen.findByRole("button", { name: /^Weigh the parcels/ })).toBeTruthy();
     await waitFor(() => {
       expect(readBodies(calls, `POST /api/v1/tasks/${WEIGH.id}/move`)).toEqual([
-        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id },
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id, refuseIfMerged: true },
       ]);
     });
   });
@@ -2644,10 +2646,10 @@ describe("selecting several cards", () => {
     expect(screen.getByText("Put back: Marked 2 Tasks Done.")).toBeTruthy();
     await waitFor(() => {
       expect(readBodies(calls, `POST /api/v1/tasks/${PACK.id}/move`)).toEqual([
-        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: null },
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: null, refuseIfMerged: true },
       ]);
       expect(readBodies(calls, `POST /api/v1/tasks/${WEIGH.id}/move`)).toEqual([
-        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id },
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id, refuseIfMerged: true },
       ]);
     });
     // Each card was sent once, and the Task in between was never touched.
@@ -2671,10 +2673,10 @@ describe("selecting several cards", () => {
       expect(readCellTitles()).toEqual(["Pack the", "Label th", "Weigh th"]);
     });
     expect(readBodies(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toEqual([
-      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: PACK.id },
+      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: PACK.id, refuseIfMerged: true },
     ]);
     expect(readBodies(calls, `POST /api/v1/tasks/${WEIGH.id}/move`)).toEqual([
-      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id },
+      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id, refuseIfMerged: true },
     ]);
   });
 
@@ -3187,6 +3189,14 @@ describe("the details pane's outside things", () => {
     kind: "forge/round",
     noun: "Round",
   });
+  /** A place of a kind that cannot group Tasks: it has no caption. */
+  const UNGROUPED_ROUND = {
+    ref: "forge:round:ungrouped",
+    kind: "forge/round",
+    noun: "Round",
+    title: "Night round",
+    restricted: false,
+  } as const;
   /** A place no Connection can read: it has no title. */
   const LOCKED_ROUND = {
     ref: "forge:round:private",
@@ -3239,7 +3249,7 @@ describe("the details pane's outside things", () => {
     expect(partOf.querySelectorAll(".relation-row.is-locked")).toHaveLength(1);
   });
 
-  it("lists the linked things with their identifier, and a linked thing nobody can open as locked", async () => {
+  it("lists the linked things with their identifier and state but not their kind, and a linked thing nobody can open as locked", async () => {
     const pane = await openPaneWith({
       entities: [PICK_LISTS, SECRET_ISSUE],
       places: [PICK_LISTS, SECRET_ISSUE],
@@ -3250,9 +3260,91 @@ describe("the details pane's outside things", () => {
       within(linked)
         .getAllByRole("listitem")
         .map((row) => row.textContent),
-    ).toEqual(["DEP-12 Print the pick listsIssue · In progress", "A Forge issue you cannot open"]);
+    ).toEqual(["DEP-12 Print the pick listsIn progress", "A Forge issue you cannot open"]);
     // Nothing is above the linked things, so no Part of section is drawn.
     expect(within(pane).queryByRole("region", { name: "Part of" })).toBeNull();
+  });
+
+  /** The Task of the depot repository: its issue is part of the depot and store repositories. */
+  const REPOSITORY_ISSUE = buildPlace("forge:issue:depot-labels", "Print depot pick lists", {
+    kind: "forge/issue",
+    noun: "Issue",
+    identifier: "DEP-13",
+  });
+  const openRepositoryPane = async () => {
+    await openRepositoryWork({
+      handlers: {
+        [detailPath(REPOSITORY_CARDS[1]!.id)]: {
+          body: buildDetail(REPOSITORY_CARDS[1]!, {
+            entities: [REPOSITORY_ISSUE],
+            places: [REPOSITORY_ISSUE, DEPOT_REPOSITORY, LOCKED_ROUND],
+            edges: [
+              { fromRef: REPOSITORY_ISSUE.ref, toRef: DEPOT_REPOSITORY.ref },
+              { fromRef: REPOSITORY_ISSUE.ref, toRef: LOCKED_ROUND.ref },
+            ],
+          }),
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /^Print depot pick lists/ }));
+    return screen.findByRole("dialog", { name: "Print depot pick lists" });
+  };
+
+  it("filters the board to a place when its row of Part of is clicked, and closes the details", async () => {
+    const user = userEvent.setup();
+    const pane = await openRepositoryPane();
+
+    await user.click(await within(pane).findByRole("button", { name: /^depot-service/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Remove filter Forge repository depot-service" }),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Print depot pick lists" })).toBeNull();
+    });
+    // Every Task of the place shows, and no other.
+    expect(getCard(SHARED_TITLE)).toBeTruthy();
+    expect(getCard("Print depot pick lists")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Show the basket total/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Tidy the depot labels/ })).toBeNull();
+  });
+
+  it("replaces the filter and the Find text that were on, so every Task of the place shows", async () => {
+    const user = userEvent.setup();
+    const pane = await openRepositoryPane();
+    // A State filter and a Find text are on while the details are open.
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: /^With an agent/, hidden: true }),
+    );
+    const find = screen.getByRole<HTMLInputElement>("combobox", { name: "Find on the board" });
+    fireEvent.change(find, { target: { value: "no such Task" } });
+
+    await user.click(await within(pane).findByRole("button", { name: /^depot-service/ }));
+
+    expect(screen.queryByRole("button", { name: "Remove filter With an agent" })).toBeNull();
+    expect(find.value).toBe("");
+    expect(
+      screen.getByRole("button", { name: "Remove filter Forge repository depot-service" }),
+    ).toBeTruthy();
+    expect(getCard(SHARED_TITLE)).toBeTruthy();
+  });
+
+  it("leaves a place that cannot group Tasks, and a place nobody can open, as plain rows", async () => {
+    const pane = await openRepositoryPane();
+
+    const partOf = await within(pane).findByRole("region", { name: "Part of" });
+    // The depot repository is a button. The locked round is plain, and has no button.
+    expect(within(partOf).getAllByRole("button")).toHaveLength(1);
+    expect(within(partOf).getByText("A Forge round you cannot open")).toBeTruthy();
+    // A place without a caption, which no facet can filter by, is plain too.
+    cleanup();
+    const plain = await openPaneWith({
+      entities: [PICK_LISTS],
+      places: [PICK_LISTS, UNGROUPED_ROUND],
+      edges: [{ fromRef: ORDER, toRef: UNGROUPED_ROUND.ref }],
+    });
+    const plainPartOf = await within(plain).findByRole("region", { name: "Part of" });
+    expect(within(plainPartOf).queryByRole("button")).toBeNull();
   });
 
   it("draws neither section for a Task that links nothing", async () => {

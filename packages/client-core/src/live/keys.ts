@@ -496,13 +496,16 @@ const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
  * The entity reads a `connection` or `plugin` push makes stale: every entity
  * pane (`kindAvailable`, `stale`, the context's completeness), the Work board
  * (the same facts on its cards, and the claims a deleted Connection takes
- * with it) and the Add sheet's suggestions (a deleted Connection takes the
- * claims that made a thing concern the user, so it stops qualifying). These
- * changes write no entity row, so no `externalEntity` push comes.
+ * with it), every Task's details pane (it embeds the same entities, places
+ * and edges, and sits under the `task` prefix) and the Add sheet's
+ * suggestions (a deleted Connection takes the claims that made a thing concern
+ * the user, so it stops qualifying). These changes write no entity row, so no
+ * `externalEntity` push comes.
  */
 const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
   queryKeys.externalEntity(),
   queryKeys.workBoard(),
+  queryKeys.task(),
   queryKeys.entitySuggestions(),
 ];
 

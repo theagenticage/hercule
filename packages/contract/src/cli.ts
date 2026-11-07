@@ -770,6 +770,8 @@ export const CLI = {
         help: "The card this one now follows among the cards of the task's new project and stage, by its id or a tail of eight or more characters; `null` puts it first. Leave it off to put the task last.",
         resolves: "task.query",
       },
+      // Only the desktop app's Undo sets it; a person at a terminal has no use for it.
+      refuseIfMerged: { hidden: true },
     },
   },
   "task.merge": {
