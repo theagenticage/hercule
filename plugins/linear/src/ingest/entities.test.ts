@@ -528,10 +528,13 @@ describe("the context of an issue", () => {
     ]);
   });
 
-  it("reports no text for an issue without a description", async () => {
+  it("reports an empty text for an issue without a description, so old hints clear", async () => {
     const { reported } = await pollWithContext({ description: null });
 
-    expect(inventoried(reported, "issue-1").texts).toBeUndefined();
+    const observation = inventoried(reported, "issue-1");
+    expect(observation.texts).toEqual([
+      { evidenceKey: "description", text: "", revision: observation.sourceUpdatedAt },
+    ]);
   });
 
   it("says the relations are not complete when the attachments have another page", async () => {
@@ -714,7 +717,7 @@ describe("the context of a place", () => {
     expect(relations?.partOf).toHaveLength(50 + 1);
   });
 
-  it("reports an initiative with its parent initiative, and a milestone and a team with no progress they were not given", async () => {
+  it("reports an initiative with its parent initiative, and a milestone under its project, and a team with no progress they were not given", async () => {
     const { reported } = await pollPlaces({
       initiative: [placeRef("initiative", "init-q4")],
       milestone: [placeRef("milestone", "milestone-beta")],
@@ -728,9 +731,11 @@ describe("the context of a place", () => {
       relations: { complete: true, partOf: [placeRef("initiative", "init-growth")] },
     });
     expect(initiative.progress).toBeUndefined();
+    // The milestone is part of its project, so an issue is drawn under the project once.
     expect(refreshedPlace(reported, placeRef("milestone", "milestone-beta"))).toMatchObject({
       kind: "milestone",
       title: "Beta",
+      relations: { complete: true, partOf: [placeRef("project", "project-checkout")] },
     });
     const team = refreshedPlace(reported, placeRef("team", "team-ops"));
     expect(team).toMatchObject({ kind: "team", title: "Operations" });

@@ -632,6 +632,7 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
         .map((milestone) => ({
           id: milestone.id,
           name: milestone.name,
+          project: { id: milestone.projectId },
           progress: milestone.progress ?? 0,
           targetDate: milestone.targetDate ?? null,
           updatedAt: "2026-11-01T10:00:00.000Z",

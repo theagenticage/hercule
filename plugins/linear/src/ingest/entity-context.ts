@@ -132,9 +132,8 @@ type Relations = NonNullable<EntityObservation["relations"]>;
  *   the context was not read, because then nothing is known about them.
  * - `complete` is true only when the context was read and every page of the
  *   attachments was. Otherwise the host takes no claim away.
- * - `texts` holds the description. An issue with no description reports no
- *   text, because the host's schema takes only a text of one character or
- *   more.
+ * - `texts` holds the description. An issue with no description reports an
+ *   empty text, which clears the hints its old description left.
  */
 export const buildIssueContextFields = (
   issue: ApiIssue,
@@ -165,9 +164,13 @@ export const buildIssueContextFields = (
   const description = buildDescription(issue);
   return {
     relations,
-    ...(description === null || description.trim() === ""
-      ? {}
-      : { texts: [{ evidenceKey: "description", text: description, revision: issue.updatedAt }] }),
+    texts: [
+      {
+        evidenceKey: "description",
+        text: description === null || description.trim() === "" ? "" : description,
+        revision: issue.updatedAt,
+      },
+    ],
   };
 };
 
@@ -246,6 +249,7 @@ const ApiInitiative = Schema.Struct({
 const ApiMilestone = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
+  project: Schema.Struct({ id: Schema.String }),
   progress: Schema.Number,
   targetDate: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
@@ -392,7 +396,7 @@ const MILESTONE_READ = definePlaceRead({
   queryName: "LinearMilestoneContext",
   filterType: "ProjectMilestoneFilter",
   rootField: "projectMilestones",
-  selection: "id name progress targetDate updatedAt",
+  selection: "id name project { id } progress targetDate updatedAt",
   node: ApiMilestone,
   buildObservation: (milestone, workspace) => ({
     kind: MILESTONE_KIND,
@@ -402,6 +406,12 @@ const MILESTONE_READ = definePlaceRead({
     concerns: [],
     ...buildReportedProgress(milestone.progress),
     ...buildTargetDate(milestone.targetDate),
+    // A milestone sits under its project. Without this edge it would be a root
+    // place, and the Inbox would draw an issue under its milestone as well as
+    // under its project.
+    relations: buildPlaceRelations([
+      { refs: [buildProjectRef(workspace, milestone.project.id)], hasMore: false },
+    ]),
     sourceUpdatedAt: milestone.updatedAt,
   }),
 });
