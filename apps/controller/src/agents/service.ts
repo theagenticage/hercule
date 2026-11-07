@@ -355,6 +355,7 @@ const make = Effect.gen(function* () {
                 permissionProfileId: undefined,
                 conversationId: undefined,
                 runId: undefined,
+                taskId: undefined,
                 kind: undefined,
                 done: undefined,
                 archived: undefined,

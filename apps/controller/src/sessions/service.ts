@@ -114,6 +114,7 @@ import {
 import type { SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
+import { TaskService } from "../tasks";
 import { AccountUsage } from "../usage";
 import { WorkspaceService, type GithubAccount, type Retention } from "../workspaces";
 import {
@@ -242,10 +243,30 @@ export interface InputPage {
 }
 
 /**
+ * How a new session gets its Task:
+ *
+ * - `fixed`: the session takes `taskId` as it is and goes through no rule. An
+ *   assistant's session has none. A workflow run's step session has its run's
+ *   Task, even a finished one, and the run may have none.
+ * - `joining`: the session joins a Task by the join rule
+ *   (`TaskService.joinSession`). `requestedTaskId` is the Task the spawn
+ *   named, and `callerTaskId` is the Task of the session that spawned this
+ *   one, or of the parent of a fork.
+ */
+export type TaskSource =
+  | { readonly _tag: "fixed"; readonly taskId: string | undefined }
+  | {
+      readonly _tag: "joining";
+      readonly requestedTaskId: string | undefined;
+      readonly callerTaskId: string | undefined;
+    };
+
+/**
  * Everything needed to store one new session, whether it starts a
  * conversation or continues another session. Every value is already decided:
  * the controller daemon chose the runner and opened the workspace before this
- * row is written.
+ * row is written. The one exception is the session's Task, which `create`
+ * decides from `taskSource`.
  */
 export interface CreateRequest {
   /**
@@ -289,6 +310,7 @@ export interface CreateRequest {
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
   readonly projectId: string | undefined;
+  readonly taskSource: TaskSource;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as. */
@@ -837,6 +859,7 @@ const make = Effect.gen(function* () {
   const observer = yield* SessionObserver;
   const editObserver = yield* SessionEditObserver;
   const workspaces = yield* WorkspaceService;
+  const tasks = yield* TaskService;
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
@@ -890,9 +913,18 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Takes the Done mark off a session, in the caller's transaction, and
-   * writes the `session.reopened` audit entry, whose record announces the
-   * change. Writes nothing when the session is not Done.
+   * Takes the Done mark off a session, in the caller's transaction, makes sure
+   * the Thread has a joinable Task, and writes the `session.reopened` audit
+   * entry, whose record announces the change. Writes nothing when the session
+   * is not Done.
+   *
+   * The Thread keeps its Task while that is joinable (neither deleted nor
+   * finished). Otherwise (it has none, or its Task is deleted or finished) it
+   * joins the joinable Task of its workspace or gets a new one, stamped with
+   * `actor` (`TaskService.rejoinThread`), because coming back after the user
+   * closed a Task is new work. This is the only place a resume is told apart
+   * from a reopen: a harness resume of an exited Thread that was never Done
+   * changes nothing and never reaches this function.
    *
    * `inputId` names the input that reopened it, and is left out for an
    * explicit reopen, so a reader of the audit entry can tell the two apart.
@@ -910,6 +942,16 @@ const make = Effect.gen(function* () {
       // unless it has exited. `rejoinOverlaps` checks that itself, and the
       // resume that brings an exited Thread back runs the steps then.
       yield* editObserver.becameUnfinishedAgain(sessionId);
+      // Read after the reopen wrote its row, so the Thread certainly exists.
+      const thread = Option.getOrThrow(yield* sessions.one(sessionId));
+      const taskId = yield* tasks.rejoinThread({
+        currentTaskId: thread.taskId ?? undefined,
+        workspaceId: thread.workspaceId,
+        title: thread.title,
+        projectId: thread.projectId ?? undefined,
+        actor,
+      });
+      if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
       yield* audit.append({
         kind: "session.reopened",
         actor,
@@ -1789,6 +1831,7 @@ const make = Effect.gen(function* () {
           permissionProfileId,
           conversationId,
           runId,
+          taskId,
           kind,
           workspaceId,
           done,
@@ -1848,6 +1891,7 @@ const make = Effect.gen(function* () {
             permissionProfileId,
             conversationId,
             runId,
+            taskId,
             kind,
             workspaceId,
             done,
@@ -2272,11 +2316,28 @@ const make = Effect.gen(function* () {
      * stored as `queued`: whether the runner has room for it right now is
      * decided by dispatch, the same way for a new session as for any other.
      *
+     * The session's Task is decided here, because the session and its Task
+     * are written together. A `fixed` task source stores its Task as it is. A
+     * `joining` one runs the join rule of the tasks domain
+     * (`TaskService.joinSession`) with the session's title, workspace and
+     * project, before the session is stored. A retried call that the caller
+     * stops with a dedup key therefore makes no second Task.
+     *
+     * Returns `madeTaskId`, the id of the Task the join made for this Thread,
+     * or `undefined` when the session joined an existing Task or has none.
+     * The title generation needs it to rename that Task and no other.
+     *
      * Fails with `Validation` when an image is gone or was uploaded by
      * someone else, or when the session's runner or model cannot take images
-     * (`refuseUnacceptedAttachments`).
+     * (`refuseUnacceptedAttachments`). Fails with `NotFound` or `InvalidState`
+     * when the spawn named a Task that is missing, deleted or finished.
      */
-    create: (open: CreateRequest): Effect.Effect<void, Validation | SqlError> =>
+    create: (
+      open: CreateRequest,
+    ): Effect.Effect<
+      { readonly madeTaskId: string | undefined },
+      Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
         const references = yield* provideSql(readClaimableAttachments(open.attachments));
@@ -2289,9 +2350,25 @@ const make = Effect.gen(function* () {
             attachments: references,
           }),
         );
+        const title = buildTitle(open.title, open.prompt, references[0]?.name);
+        const joined =
+          open.taskSource._tag === "fixed"
+            ? undefined
+            : yield* tasks.joinSession({
+                requestedTaskId: open.taskSource.requestedTaskId,
+                callerTaskId: open.taskSource.callerTaskId,
+                workspaceId: open.spec.workspaceId,
+                // A session with no Agent is a Thread. This matches the
+                // `kind` column the database derives, because a session
+                // placed here answers no conversation and runs no step.
+                sessionKind: open.agentId === undefined ? "thread" : "agent",
+                title,
+                projectId: open.projectId,
+              });
+        const taskId = open.taskSource._tag === "fixed" ? open.taskSource.taskId : joined?.taskId;
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt, references[0]?.name),
+          title,
           role: open.role,
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
@@ -2302,6 +2379,7 @@ const make = Effect.gen(function* () {
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
           projectId: open.projectId,
+          taskId,
           checkoutBranch: open.checkoutBranch,
           githubConnectionId: open.githubConnectionId,
           requestedAccessMode: open.requestedAccessMode,
@@ -2342,6 +2420,7 @@ const make = Effect.gen(function* () {
           },
           at: open.at,
         });
+        return { madeTaskId: joined?.created === true ? joined.taskId : undefined };
       }),
 
     /**
@@ -2952,6 +3031,17 @@ const make = Effect.gen(function* () {
      *
      * When both are dropped, nothing is written or announced.
      *
+     * `madeTaskId` is the Task that was made for this Thread when it started
+     * (`create` returns it), or `undefined` when the Thread joined an existing
+     * Task. In the same transaction as the title write, the Task takes the
+     * stored title (`TaskService.adoptGeneratedTitle`), but only when a title
+     * is stored and the Thread is still in `madeTaskId`. A Thread that has
+     * joined or moved to another Task since must leave that Task alone, even
+     * one with the same title. The title the Task was made with is the
+     * session's own title as it was before this write, because this method is
+     * the only thing that changes a session's title. A failed rename of the
+     * Task also rolls back the Thread's title.
+     *
      * No user can rename a session today, so there is no user-chosen title to
      * protect. A system write like this one carries no actor, as with
      * `setSelection`.
@@ -2959,7 +3049,8 @@ const make = Effect.gen(function* () {
     setGeneratedTitleAndRole: (
       sessionId: string,
       answer: { readonly title: string; readonly needsRefinement: boolean; readonly role: string },
-    ): Effect.Effect<void, SqlError> =>
+      madeTaskId: string | undefined,
+    ): Effect.Effect<void, NotFound | Validation | SqlError> =>
       Effect.gen(function* () {
         const title = cutTitle(cleanGeneratedText(answer.title));
         const cleanedRole = cleanGeneratedText(answer.role).trim();
@@ -2968,9 +3059,22 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const before = yield* sessions.one(sessionId);
             if (title !== "")
               yield* sessions.setGeneratedTitle(sessionId, title, answer.needsRefinement);
             if (validRole !== undefined) yield* sessions.setGeneratedRole(sessionId, validRole);
+            if (
+              title !== "" &&
+              madeTaskId !== undefined &&
+              Option.isSome(before) &&
+              before.value.taskId === madeTaskId
+            ) {
+              yield* tasks.adoptGeneratedTitle({
+                taskId: madeTaskId,
+                from: before.value.title,
+                to: title,
+              });
+            }
             yield* announceSessionChangeById(sessionId);
           }),
         );
@@ -3973,6 +4077,7 @@ export const SessionServiceLayer: Layer.Layer<
   | SessionObserver
   | SessionEditObserver
   | WorkspaceService
+  | TaskService
   | Notifier
   | AccountUsage
 > = Layer.effect(SessionService)(make);

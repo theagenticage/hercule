@@ -108,6 +108,7 @@ const insertSession = (workspaceId: string | null = null, permissionProfileId = 
         accessMode: "approval-required",
         workspaceId,
         projectId: undefined,
+        taskId: undefined,
         checkoutBranch: undefined,
         githubConnectionId: undefined,
         spec: "{}",

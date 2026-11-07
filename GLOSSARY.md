@@ -21,8 +21,12 @@ _Avoid_: filter, topic
 ### Work
 
 **Task**:
-A unit of human intent: a described piece of work someone wants done. Work-type-agnostic; a task is not itself an execution.
+A unit of human intent: a described piece of work someone wants done. Work-type-agnostic; a task is not itself an execution. Every Thread belongs to one Task, which the core makes for the Thread when it has none to join; an Agent's session may join one, and an Assistant's session never does. A Task has a Stage.
 _Avoid_: ticket, issue (reserved for external trackers)
+
+**Stage**:
+Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does. A Task's status is a coarse reading of its stage.
+_Avoid_: step (a workflow's, see Step), status (the coarse reading of the stage, not the stage itself), column (how a board draws a stage), reviewing (the stage is `in-review`)
 
 **Provenance**:
 A task's append-only record of what created or touched it: entries pointing at events, runs, external refs, and the signals handed off onto it. What lets a later event about the same thing find its existing task.
@@ -33,11 +37,11 @@ A fully-qualified canonical identifier for a thing outside Hercule (`github:issu
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace.
+One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Role**:

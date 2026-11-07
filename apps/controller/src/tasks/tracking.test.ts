@@ -77,6 +77,7 @@ const NEW_TASK: NewTask = {
   title: "A task",
   description: "",
   status: "in-progress",
+  stage: "building",
   priority: "normal",
   labels: [],
   projectId: undefined,

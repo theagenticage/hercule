@@ -96,6 +96,7 @@ const buildTask = (id: string, title: string, minutes: number): Task => ({
   title,
   description: "",
   status: "in-progress",
+  stage: "building",
   priority: "normal",
   labels: [],
   provenance: [
@@ -109,6 +110,7 @@ const buildTask = (id: string, title: string, minutes: number): Task => ({
   createdAt: at(minutes),
   updatedAt: at(minutes),
   statusChangedAt: at(minutes),
+  stageChangedAt: at(minutes),
 });
 
 const FINISHED_TASK = buildTask(

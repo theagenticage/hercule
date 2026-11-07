@@ -43,12 +43,13 @@ const [WEBSHOP, OPS] = SIDEBAR_FIXTURE.projects as [
 /** The thread the stubbed controller starts: "Bump the Bun pin". */
 const STARTED = THREAD_FIXTURES.finished;
 
-/** An open task of webshop, as the start cards read it. */
+/** A planned task of webshop, as the start cards read it. */
 const CART_TASK: Task = {
   id: "01a06d02-7700-7000-8000-000000000001",
   title: "Cart total rounding on discounts",
   description: "Totals are off by a cent.",
   status: "open",
+  stage: "planned",
   priority: "high",
   labels: [],
   projectId: WEBSHOP.id,
@@ -56,6 +57,19 @@ const CART_TASK: Task = {
   createdAt: "2026-09-10T08:00:00.000Z",
   updatedAt: "2026-09-10T08:00:00.000Z",
   statusChangedAt: "2026-09-10T08:00:00.000Z",
+  stageChangedAt: "2026-09-10T08:00:00.000Z",
+};
+
+/**
+ * A task of webshop that a Thread is working on: its stage is `exploring`,
+ * and its status is `open` like a planned task's, so only the stage filter
+ * keeps it out of the cards.
+ */
+const THREAD_TASK: Task = {
+  ...CART_TASK,
+  id: "01a06d02-7700-7000-8000-000000000002",
+  title: "Look into the slow checkout",
+  stage: "exploring",
 };
 
 /**
@@ -465,14 +479,21 @@ describe("the new-thread screen", () => {
   });
 
   it("adds a start card's task to the message, after what the user typed", async () => {
+    // The stub honours the `stage` filter as the controller does, so a Task at
+    // `exploring` is offered only when the cards ask for the wrong stage.
     const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "GET /api/v1/tasks": { body: { items: [CART_TASK] } },
+      "GET /api/v1/tasks": (call) => {
+        const stages = new URLSearchParams(call.search).getAll("stage");
+        const matches = (task: Task) => stages.length === 0 || stages.includes(task.stage);
+        return { body: { items: [THREAD_TASK, CART_TASK].filter(matches) } };
+      },
     });
     await userEvent.type(field, "Look at checkout");
 
     const cards = screen.getByRole("region", { name: "Start from Intake" });
     const card = await within(cards).findByRole("button", { name: /Cart total rounding/ });
     expect(card.textContent).toBe("Task" + "Cart total rounding on discounts");
+    expect(within(cards).getAllByRole("button")).toHaveLength(1);
     expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("high priority");
     await userEvent.click(card);
 
@@ -480,7 +501,7 @@ describe("the new-thread screen", () => {
       `Look at checkout\n\nStart working on task ${CART_TASK.id}: Cart total rounding on discounts`,
     );
     expect(document.activeElement).toBe(field);
-    // The cards ask for the project's most urgent open tasks, newest first
+    // The cards ask for the project's most urgent planned tasks, newest first
     // within one priority.
     const tasksCall = calls.find(
       (call) => call.path === "/api/v1/tasks" && new URLSearchParams(call.search).has("projectId"),

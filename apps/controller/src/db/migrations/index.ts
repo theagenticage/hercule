@@ -117,6 +117,8 @@ import eventsRunnerId from "./0106-events-runner-id";
 import harnessReleases from "./0107-harness-releases";
 import diskUsage from "./0108-disk-usage";
 import planLabelProbedAt from "./0109-plan-label-probed-at";
+import taskStages from "./0110-task-stages";
+import threadTasks from "./0111-thread-tasks";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -228,6 +230,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [107, "harness-releases", Effect.succeed(harnessReleases)],
   [108, "disk-usage", Effect.succeed(diskUsage)],
   [109, "plan-label-probed-at", Effect.succeed(planLabelProbedAt)],
+  [110, "task-stages", Effect.succeed(taskStages)],
+  [111, "thread-tasks", Effect.succeed(threadTasks)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

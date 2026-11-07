@@ -63,6 +63,7 @@ const NEW_TASK: NewTask = {
   title: "A task",
   description: "",
   status: "open",
+  stage: "planned",
   priority: "normal",
   labels: [],
   projectId: undefined,

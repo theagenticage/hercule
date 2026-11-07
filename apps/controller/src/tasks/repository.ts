@@ -29,13 +29,14 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
+import { FINISHED_STAGES, MAX_TRACKING_HANDOFFS } from "@hercule/contract";
 import type { SqlError } from "effect/sql/SqlError";
 import type {
   ExternalRef,
   ProvenanceEntry,
   Task,
   TaskPriority,
+  TaskStage,
   TaskStatus,
 } from "@hercule/contract";
 import {
@@ -62,6 +63,7 @@ export interface TaskFilter {
   readonly refs?: ReadonlyArray<ExternalRef>;
   readonly labels?: ReadonlyArray<string>;
   readonly status?: ReadonlyArray<TaskStatus>;
+  readonly stage?: ReadonlyArray<TaskStage>;
   readonly projectId?: string;
   /** `true` keeps the tasks with a handoff entry, `false` the tasks without one. */
   readonly handedOff?: boolean;
@@ -138,6 +140,8 @@ export interface NewTask {
   readonly id?: string;
   readonly title: string;
   readonly description: string;
+  readonly stage: TaskStage;
+  /** The coarse reading of `stage`, already derived by the caller. */
   readonly status: TaskStatus;
   readonly priority: TaskPriority;
   readonly labels: ReadonlyArray<string>;
@@ -151,6 +155,8 @@ export interface NewTask {
 export interface TaskEdit {
   readonly title?: string;
   readonly description?: string;
+  readonly stage?: TaskStage;
+  /** Must be the coarse reading of `stage`; it is written only when it changed. */
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
@@ -162,12 +168,14 @@ interface TaskRow {
   readonly title: string;
   readonly description: string;
   readonly status: string;
+  readonly stage: string;
   readonly priority: string;
   readonly labels: string;
   readonly project_id: Uint8Array | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly status_changed_at: string;
+  readonly stage_changed_at: string;
   readonly deleted_at: string | null;
 }
 
@@ -182,8 +190,9 @@ interface ProvenanceRow {
 }
 
 const COLUMNS =
-  "tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.labels, " +
-  "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, tasks.deleted_at";
+  "tasks.id, tasks.title, tasks.description, tasks.status, tasks.stage, tasks.priority, tasks.labels, " +
+  "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
+  "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -253,6 +262,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
         filter.refs ?? null,
         filter.labels ?? null,
         filter.status ?? null,
+        filter.stage ?? null,
         filter.projectId ?? null,
         filter.handedOff ?? null,
       ])}`,
@@ -281,6 +291,12 @@ const make = Effect.gen(function* () {
           filter.refs === undefined ? "tasks.status" : "+tasks.status",
           filter.status,
         ),
+      );
+    }
+    if (filter.stage !== undefined) {
+      // Same reason as the status clause above.
+      clauses.push(
+        buildAnyOfClause(filter.refs === undefined ? "tasks.stage" : "+tasks.stage", filter.stage),
       );
     }
     if (filter.projectId !== undefined) {
@@ -355,6 +371,7 @@ const make = Effect.gen(function* () {
                 title: row.title,
                 description: row.description,
                 status: row.status as TaskStatus,
+                stage: row.stage as TaskStage,
                 priority: row.priority as TaskPriority,
                 labels: JSON.parse(row.labels) as ReadonlyArray<string>,
                 ...(row.project_id === null ? {} : { projectId: uuidToString(row.project_id) }),
@@ -362,6 +379,7 @@ const make = Effect.gen(function* () {
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
                 statusChangedAt: row.status_changed_at,
+                stageChangedAt: row.stage_changed_at,
                 ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
               };
             });
@@ -393,6 +411,18 @@ const make = Effect.gen(function* () {
                    WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`.pipe(
         Effect.flatMap(hydrate),
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
+      ),
+
+    /**
+     * Returns the stage of the Task with that id, or none if it does not exist
+     * or has been deleted. It reads one column, so it costs the same however
+     * much provenance the Task has.
+     */
+    readStage: (id: string): Effect.Effect<Option.Option<TaskStage>, SqlError> =>
+      Effect.map(
+        sql<{ readonly stage: TaskStage }>`SELECT stage FROM tasks
+                                           WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+        (rows) => Option.fromNullishOr(rows[0]?.stage),
       ),
 
     /**
@@ -611,6 +641,50 @@ const make = Effect.gen(function* () {
               })),
           ),
 
+    /**
+     * Returns the id of the Task that the workspace's row in `task_workspaces`
+     * names, or none when the workspace has no row or the Task is deleted or
+     * finished (the contract's `FINISHED_STAGES`). One query that joins the
+     * row to its Task. Only an ephemeral workspace ever has a row
+     * (`recordWorkspaceTask`), so a main workspace always reads as none.
+     */
+    readJoinableTaskIdOfWorkspace: (
+      workspaceId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array }>`
+          SELECT w.task_id FROM task_workspaces w JOIN tasks ON tasks.id = w.task_id
+          WHERE w.workspace_id = ${uuidFromString(workspaceId)}
+            AND tasks.deleted_at IS NULL AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined ? Option.none() : Option.some(uuidToString(row.task_id));
+        },
+      ),
+
+    /**
+     * Records that the workspace belongs to the Task, replacing the row the
+     * workspace already has. A row that names a finished Task is replaced this
+     * way when the workspace is used again.
+     *
+     * Writes a row only for an ephemeral workspace: a main workspace is shared
+     * by whatever runs in it, so it has no Task of its own. A workspace that no
+     * longer exists writes nothing either. This is the one place that reads the
+     * workspace's `kind`. The repository reads this one column of a table it
+     * does not own, as `projectExists` reads `projects`.
+     */
+    recordWorkspaceTask: (
+      workspaceId: string,
+      taskId: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO task_workspaces (workspace_id, task_id, joined_at)
+        SELECT id, ${uuidFromString(taskId)}, ${at} FROM workspaces
+        WHERE id = ${uuidFromString(workspaceId)} AND kind = 'ephemeral'
+        ON CONFLICT (workspace_id) DO UPDATE SET task_id = excluded.task_id,
+                                                 joined_at = excluded.joined_at`),
+
     /** Returns true if a project exists and has not been deleted. */
     projectExists: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -625,13 +699,13 @@ const make = Effect.gen(function* () {
         const id = task.id === undefined ? mintUuid() : uuidFromString(task.id);
         yield* sql`
           INSERT INTO tasks
-            (id, title, description, status, priority, labels, project_id,
-             created_at, updated_at, status_changed_at)
+            (id, title, description, status, stage, priority, labels, project_id,
+             created_at, updated_at, status_changed_at, stage_changed_at)
           VALUES
-            (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.priority},
+            (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.stage}, ${task.priority},
              ${JSON.stringify(task.labels)},
              ${task.projectId === undefined ? null : uuidFromString(task.projectId)},
-             ${task.at}, ${task.at}, ${task.at})
+             ${task.at}, ${task.at}, ${task.at}, ${task.at})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
         return {
@@ -639,6 +713,7 @@ const make = Effect.gen(function* () {
           title: task.title,
           description: task.description,
           status: task.status,
+          stage: task.stage,
           priority: task.priority,
           labels: task.labels,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
@@ -650,6 +725,7 @@ const make = Effect.gen(function* () {
           createdAt: task.at,
           updatedAt: task.at,
           statusChangedAt: task.at,
+          stageChangedAt: task.at,
         };
       }),
 
@@ -679,6 +755,9 @@ const make = Effect.gen(function* () {
         }
         if (edit.status !== undefined) {
           sets.push(sql`status = ${edit.status}`, sql`status_changed_at = ${at}`);
+        }
+        if (edit.stage !== undefined) {
+          sets.push(sql`stage = ${edit.stage}`, sql`stage_changed_at = ${at}`);
         }
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);

@@ -286,8 +286,17 @@ const withLegacyController = async (
       //   stays null (an empty list would mean a start was claimed with no skills);
       // - its role: no old session was given one, so it stays null;
       // - its kind: computed from the ids, and no old session has an Agent, so
-      //   each is a Thread.
-      expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
+      //   each is a Thread;
+      // - its Task: each is an unfinished Thread, so the migration gave it a
+      //   Task. The Task id is minted at migration time, so the test only checks
+      //   that there is one.
+      const upgradedSessions = (
+        reader.query("SELECT * FROM sessions ORDER BY id").all() as Array<Record<string, unknown>>
+      ).map(({ task_id, ...kept }) => {
+        expect(task_id).toBeInstanceOf(Uint8Array);
+        return kept;
+      });
+      expect(upgradedSessions).toEqual(
         fixture.before.sessions.map((row) => {
           const { instance_id, spec, ...kept } = row as Record<string, unknown>;
           return {

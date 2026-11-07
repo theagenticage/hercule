@@ -302,6 +302,13 @@ export const Session = Schema.Struct({
   workspaceId: Schema.NullOr(Id),
   /** The project the thread belongs to. It only groups the thread; nothing is derived from it. */
   projectId: Schema.NullOr(Id),
+  /**
+   * The Task the session belongs to. Absent when it belongs to none: an
+   * assistant's session, an Agent's session with no Task to join, the session
+   * of a workflow step whose run has no Task, and a Thread that was Done or
+   * archived before Tasks existed.
+   */
+  taskId: Schema.optionalKey(Id),
   requestedAccessMode: AccessMode,
   /** The mode the session actually runs in, after the access-mode fallback. */
   accessMode: AccessMode,
@@ -589,6 +596,13 @@ export const SessionSpawnInput = closedStruct({
    */
   projectId: Schema.optionalKey(Id),
   /**
+   * The Task to join. Fails `NotFound` when no such Task exists or it was
+   * deleted, and `InvalidState` when the Task is `done` or `dropped`: reopen
+   * the Task, or start without it. When absent, the session joins a Task by
+   * the rules in spec 09.
+   */
+  taskId: Schema.optionalKey(Id),
+  /**
    * Where the session works. When absent, a session's spawn on its caller's
    * runner joins the caller's workspace; any other spawn has no checkout.
    */
@@ -856,6 +870,8 @@ export const SessionFilter = Schema.Struct({
   conversationId: Schema.optionalKey(Id),
   /** Only the sessions these runs' agent steps started. */
   runId: Schema.optionalKey(SessionRunFilter),
+  /** Only the sessions of this Task. */
+  taskId: Schema.optionalKey(Id),
   /** Only the sessions of these kinds. */
   kind: Schema.optionalKey(SessionKindFilter),
   /** Only the sessions placed in this workspace, or in one of these workspaces. */

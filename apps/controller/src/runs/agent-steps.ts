@@ -385,6 +385,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
                   checkoutBranch: placed.checkoutBranch,
                   prompt,
                   title: `${run.plan.name} · ${record.stepId}`,
+                  taskId: run.taskId,
                   previousSessionId: findPreviousStepSession(run, step),
                 }),
                 CurrentActor,

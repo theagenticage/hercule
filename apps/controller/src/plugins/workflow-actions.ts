@@ -427,7 +427,7 @@ const BUILT_IN_WORKFLOW_ACTIONS = [
     id: "task.query",
     runsIn: "controller",
     displayName: "Find tasks",
-    description: "Lists the Tasks that match refs, labels, status, project or text.",
+    description: "Lists the Tasks that match refs, labels, status, stage, project or text.",
     // The operation's filter, without the paging fields. A step uses the
     // result to decide what the run does next, for example whether a Task for
     // the event already exists. The first page is enough for that.

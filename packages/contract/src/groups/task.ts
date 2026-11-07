@@ -65,6 +65,56 @@ export const TaskStatus = Schema.Literals(TASK_STATUSES);
 
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
+/** Where a Task stands. Five stages are columns on Work; `done` and `dropped` are the ends. */
+export const TASK_STAGES = [
+  "exploring",
+  "planned",
+  "building",
+  "in-review",
+  "landed",
+  "done",
+  "dropped",
+] as const;
+
+export const TaskStage = Schema.Literals(TASK_STAGES);
+
+export type TaskStage = Schema.Schema.Type<typeof TaskStage>;
+
+/**
+ * The stages at which a Task is finished: `done` and `dropped`. A Task at one
+ * of them takes no new Thread, and a workspace whose Task is at one starts a
+ * new Task.
+ */
+export const FINISHED_STAGES: ReadonlyArray<TaskStage> = ["done", "dropped"];
+
+/** Returns true if the stage is `done` or `dropped`, so a Task at it takes no new work. */
+export const isFinishedStage = (stage: TaskStage): boolean => FINISHED_STAGES.includes(stage);
+
+/**
+ * Returns the coarse status that reads a stage: `exploring` and `planned` are
+ * `open`; `building`, `in-review` and `landed` are `in-progress`; `done` is
+ * `done`; `dropped` is `cancelled`.
+ *
+ * The stage is the truth and the status is only ever written from it, so the
+ * two never disagree. The status stays because stored workflows, frozen run
+ * plans and old events name its values.
+ */
+export const deriveTaskStatus = (stage: TaskStage): TaskStatus => {
+  switch (stage) {
+    case "exploring":
+    case "planned":
+      return "open";
+    case "building":
+    case "in-review":
+    case "landed":
+      return "in-progress";
+    case "done":
+      return "done";
+    case "dropped":
+      return "cancelled";
+  }
+};
+
 /** Re-exported from the package plugins are written against, so a signal's priority and a Task's agree. */
 export { TASK_PRIORITIES, TaskPriority } from "@hercule/plugin-host";
 
@@ -130,7 +180,9 @@ export const Task = Schema.Struct({
   id: Id,
   title: TaskTitle,
   description: TaskDescription,
+  /** A coarse reading of `stage`, worked out from it. */
   status: TaskStatus,
+  stage: TaskStage,
   priority: TaskPriority,
   labels: atMost(Label, MAX_TASK_LABELS),
   /** At most one project, and it survives that project's deletion. */
@@ -140,6 +192,8 @@ export const Task = Schema.Struct({
   updatedAt: Timestamp,
   /** Changes only when `status` changes. */
   statusChangedAt: Timestamp,
+  /** Changes only when `stage` changes. */
+  stageChangedAt: Timestamp,
   /** Set by a delete. A deleted task is never returned, so a caller never sees this field. */
   deletedAt: Schema.optionalKey(Timestamp),
 });
@@ -178,6 +232,7 @@ export const TaskUpdatedEventPayload = Schema.Struct({
     title: Schema.optionalKey(buildValueChange(TaskTitle)),
     description: Schema.optionalKey(buildValueChange(TaskDescription)),
     status: Schema.optionalKey(buildValueChange(TaskStatus)),
+    stage: Schema.optionalKey(buildValueChange(TaskStage)),
     priority: Schema.optionalKey(buildValueChange(TaskPriority)),
     /** `null` when the task had, or now has, no project. */
     projectId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
@@ -202,6 +257,7 @@ export const TaskFilter = Schema.Struct({
   refs: Schema.optionalKey(atMost(ExternalRef, MAX_FILTER_VALUES)),
   labels: Schema.optionalKey(atMost(Label, MAX_FILTER_VALUES)),
   status: Schema.optionalKey(atMost(TaskStatus, MAX_FILTER_VALUES)),
+  stage: Schema.optionalKey(atMost(TaskStage, MAX_FILTER_VALUES)),
   projectId: Schema.optionalKey(Id),
   /**
    * `true` lists only the tasks with a handoff entry in their provenance: an
@@ -224,6 +280,8 @@ export const TASK_SORT_FIELDS = ["updatedAt", "createdAt", "priority", "status"]
 export const TaskCreateInput = Schema.Struct({
   title: TaskTitle,
   description: TaskDescription,
+  /** Where the Task starts. Absent means `planned`: a Task someone files is planned, not explored. */
+  stage: Schema.optionalKey(TaskStage),
   priority: Schema.optionalKey(TaskPriority),
   labels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   projectId: Schema.optionalKey(Id),
@@ -236,7 +294,16 @@ export type TaskCreateInput = Schema.Schema.Type<typeof TaskCreateInput>;
 const TASK_UPDATE_FIELDS = {
   title: Schema.optionalKey(TaskTitle),
   description: Schema.optionalKey(TaskDescription),
+  /**
+   * Sets a coarse status. The Task moves to a stage: `open` gives `planned`,
+   * `in-progress` gives `building`, `done` gives `done` and `cancelled` gives
+   * `dropped`. A Task whose stage already reads as that status stays where it
+   * is: `in-progress` leaves an `in-review` Task there. `stage` is the exact
+   * word; send it to choose the stage. A call that sends both is refused.
+   */
   status: Schema.optionalKey(TaskStatus),
+  /** Moves the Task to this stage. The status follows from it. */
+  stage: Schema.optionalKey(TaskStage),
   priority: Schema.optionalKey(TaskPriority),
   /** `null` detaches the task from its project. */
   projectId: Schema.optionalKey(Schema.NullOr(Id)),
@@ -268,10 +335,30 @@ export const refuseEmptyTaskUpdate = Schema.makeFilter(
 );
 
 /**
+ * Rejects a task update that sets both `stage` and `status`. The stage is the
+ * truth and the status is worked out from it, so a call that sets both could
+ * contradict itself. The task update operation, a workflow step and a bound
+ * answer all use this check, so they refuse the same updates.
+ */
+export const refuseStageWithStatus = Schema.makeFilter(
+  (update: { readonly [Field in keyof typeof TASK_UPDATE_FIELDS]?: unknown }) =>
+    update.stage !== undefined && update.status !== undefined
+      ? {
+          path: ["status"],
+          issue:
+            "A task update cannot set both stage and status, because the status follows from the stage. Send stage alone.",
+        }
+      : undefined,
+);
+
+/**
  * The input of a task update. Every field is optional and an absent field is
  * left unchanged, but at least one field must be set.
  */
-export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(refuseEmptyTaskUpdate);
+export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(
+  refuseEmptyTaskUpdate,
+  refuseStageWithStatus,
+);
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
 
@@ -283,6 +370,7 @@ export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
  */
 export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS }).check(
   refuseEmptyTaskUpdate,
+  refuseStageWithStatus,
 );
 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;

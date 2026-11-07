@@ -45,6 +45,7 @@ export {
   SessionService,
   SessionServiceLayer,
   type StartRequest,
+  type TaskSource,
 } from "./service";
 export { attributeEvent } from "./stream";
 export { buildUnfinishedClause } from "./unfinished";

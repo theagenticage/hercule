@@ -46,7 +46,7 @@ import {
 } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
@@ -57,6 +57,7 @@ import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
+import { TaskServiceLayer } from "../tasks";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { providerAccountRepository } from "../provider-accounts";
@@ -150,9 +151,11 @@ const buildWorkspaceLayer = () =>
 
 const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(buildWorkspaceLayer()),
+  Layer.provideMerge(TaskServiceLayer),
   Layer.provideMerge(
     Layer.mergeAll(
       AuditLogLayer,
+      PlatformEventsLayer,
       SessionTokensLayer,
       AccountUsageLayer,
       ignoreSessions,
@@ -240,6 +243,7 @@ const insertQueuedSession = (
           runnerId,
           workspaceId: null,
           projectId: undefined,
+          taskId: undefined,
           checkoutBranch: options.checkoutBranch,
           githubConnectionId: options.githubConnectionId,
           requestedAccessMode: "approval-required",
@@ -294,9 +298,11 @@ const buildGatedCredentialStack = (
   );
   return SessionServiceLayer.pipe(
     Layer.provideMerge(buildWorkspaceLayer()),
+    Layer.provideMerge(TaskServiceLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         AuditLogLayer,
+        PlatformEventsLayer,
         SessionTokensLayer,
         AccountUsageLayer,
         ignoreSessions,
@@ -2058,11 +2064,15 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
         );
 
         yield* sessions
-          .setGeneratedTitleAndRole(sessionId, {
-            title: generated.title,
-            needsRefinement: generated.needsRefinement ?? false,
-            role: generated.role ?? "",
-          })
+          .setGeneratedTitleAndRole(
+            sessionId,
+            {
+              title: generated.title,
+              needsRefinement: generated.needsRefinement ?? false,
+              role: generated.role ?? "",
+            },
+            undefined,
+          )
           .pipe(Effect.provide(listener));
 
         const [stored] = yield* sql<{ readonly needs_refinement: number | null }>`

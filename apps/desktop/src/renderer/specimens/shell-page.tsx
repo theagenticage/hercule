@@ -319,9 +319,9 @@ export interface ThreadScreenRecords {
 /** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
 export interface DraftScreenRecords {
   readonly projectId: string;
-  /** The project's open tasks the start cards offer, most urgent first, as the start cards' query returns them. */
+  /** The project's planned tasks the start cards offer, most urgent first, as the start cards' query returns them. */
   readonly startTasks: ReadonlyArray<Task>;
-  /** The Connections, which decide the line under the starters that show when there is no open task. */
+  /** The Connections, which decide the line under the starters that show when there is no planned task. */
   readonly connections: ReadonlyArray<Connection>;
   /** What the user picked in the draft's composer, which the draft's pending submission holds. */
   readonly picks: ThreadPicks;
@@ -1490,7 +1490,7 @@ async function mountShellSpecimen(
       </QueryClientProvider>,
     );
   });
-  // The starters, which a draft shows in a project with no open task, load
+  // The starters, which a draft shows in a project with no planned task, load
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
   // The list draws its rows once it has measured its height, after the first render.
@@ -1545,7 +1545,7 @@ export async function mountThreadSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Draft Thread of `draft` open: the sidebar draws it as a row, and
  * the main pane shows the app's real draft screen, with `draft`'s picks made
- * and its project's start cards, or the starters when `draft` has no open
+ * and its project's start cards, or the starters when `draft` has no planned
  * task, and the focus in the message field, as the app puts it there.
  * Returns once the cards are in the document. Fails when the page has no
  * `#root`, draws no sidebar row or no card, leaves

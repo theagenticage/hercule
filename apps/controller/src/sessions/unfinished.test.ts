@@ -57,6 +57,7 @@ const insertSession = (kind: Kind) =>
       accessMode: "approval-required",
       workspaceId: null,
       projectId: undefined,
+      taskId: undefined,
       checkoutBranch: undefined,
       githubConnectionId: undefined,
       spec: "{}",

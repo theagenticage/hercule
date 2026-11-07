@@ -21,7 +21,7 @@
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import type { Page } from "playwright";
+import { errors, type Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import type { Task } from "../../packages/contract/src/index";
 import { findCompiledBinary, runCli } from "../../scripts/controller-process";
@@ -236,24 +236,32 @@ describe("Tracking", () => {
     await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
 
     // The Mark done control takes the pointer only while the pointer is on the
-    // row. The page works out which element the pointer is on when the pointer
-    // moves, so a row the page drew again after the pointer arrived is not
-    // hovered until the pointer moves once more, and the control under the
-    // age label would stay out of reach. The test moves the pointer onto the
-    // row until the control is what the page finds at the control's point.
+    // row. The page works out which element the pointer is on only when the
+    // pointer moves, so a row the page draws again after the pointer arrived
+    // is no longer hovered, and the age label covers the control. Playwright
+    // checks what is under the pointer before it moves the pointer to click,
+    // so on a busy machine a plain click can keep finding the age label until
+    // it times out. Hovering and clicking are therefore one step that is
+    // retried: each try moves the pointer onto the row again, then clicks with
+    // a short timeout. Only a timed out click is retried. A click that goes
+    // through removes the row, so it cannot run twice.
     const row = tracking(page).locator(".tr-run-item");
     const markDone = row.getByRole("button", { name: "Mark done" });
     await expect
-      .poll(async () => {
-        await row.hover();
-        return markDone.evaluate((button) => {
-          const box = button.getBoundingClientRect();
-          const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-          return hit !== null && button.contains(hit);
-        });
-      })
+      .poll(
+        async () => {
+          await row.hover();
+          try {
+            await markDone.click({ timeout: 2_000 });
+            return true;
+          } catch (error) {
+            if (error instanceof errors.TimeoutError) return false;
+            throw error;
+          }
+        },
+        { timeout: 30_000 },
+      )
       .toBe(true);
-    await markDone.click();
     await expect.poll(() => readTrackingRows(page)).toEqual([]);
     const [task] = (await arranged.client.task.query({ query: { limit: 10 } })).items;
     expect(task).toMatchObject({ title: "Webhook deliveries fail", status: "done" });

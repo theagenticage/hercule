@@ -64,8 +64,10 @@ export const sessionRecordComposer: Effect.Effect<
       "done",
       "archived",
       "reopenedAt",
+      "taskId",
     ]),
     // Each key is left out, not set to `undefined`, while it holds nothing.
+    ...(stored.taskId === null ? {} : { taskId: stored.taskId }),
     ...(stored.done === null ? {} : { done: stored.done }),
     ...(stored.archived === null ? {} : { archived: stored.archived }),
     ...(stored.reopenedAt === null ? {} : { reopenedAt: stored.reopenedAt }),

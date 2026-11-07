@@ -64,6 +64,7 @@ const insertTask = (
       title: "A task",
       description: "",
       status: "in-progress",
+      stage: "building",
       priority: "normal",
       labels: [],
       projectId: undefined,

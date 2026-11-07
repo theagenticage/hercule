@@ -606,7 +606,7 @@ export const localRunnerQuery = (bridge: Bridge, runners: ReadonlyArray<Runner>)
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** How many open tasks a Draft Thread offers to start from. */
+/** How many planned tasks a Draft Thread offers to start from. */
 const START_TASK_COUNT = 3;
 
 /**
@@ -620,22 +620,26 @@ const START_TASK_SORT = [
 ] as const;
 
 /**
- * Reads the open tasks of `projectId` a Draft Thread offers to start from:
+ * Reads the planned tasks of `projectId` a Draft Thread offers to start from:
  * the three most urgent, newest first within one priority. The key sits under
  * the `tasks` prefix, so a push on the `task` topic reads them again while a
  * Draft Thread shows them.
+ *
+ * It filters by stage, not status: a Thread's own task sits at `exploring`
+ * and has the status `open`, so a status filter would fill the cards with the
+ * user's running Threads.
  */
 export const startTasksQuery = (client: HerculeClient, projectId: string) =>
   queryOptions({
     queryKey: [
-      ...queryKeys.tasks({ projectId, status: ["open"] }),
+      ...queryKeys.tasks({ projectId, stage: ["planned"] }),
       { sort: START_TASK_SORT, limit: START_TASK_COUNT },
     ],
     queryFn: async (): Promise<readonly Task[]> => {
       const page = await client.task.query({
         query: {
           projectId,
-          status: ["open"],
+          stage: ["planned"],
           sort: START_TASK_SORT,
           limit: START_TASK_COUNT,
         },

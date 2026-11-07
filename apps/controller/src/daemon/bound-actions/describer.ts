@@ -249,6 +249,7 @@ const describeNewTaskFields = (
         ? []
         : [[buildTextPart("description "), buildMarkedPart(input.description)]]),
       ...(input.priority === undefined ? [] : [[buildTextPart(`priority ${input.priority}`)]]),
+      ...(input.stage === undefined ? [] : [[buildTextPart(`stage ${input.stage}`)]]),
       ...(input.labels === undefined || input.labels.length === 0
         ? []
         : [[buildTextPart(formatLabels(input.labels))]]),
@@ -504,6 +505,9 @@ export const buildDescribe: Effect.Effect<
         }
         if (changes.status !== undefined) {
           described.push([buildTextPart(`status → ${changes.status}`)]);
+        }
+        if (changes.stage !== undefined) {
+          described.push([buildTextPart(`stage → ${changes.stage}`)]);
         }
         if (changes.priority !== undefined) {
           described.push([buildTextPart(`priority → ${changes.priority}`)]);

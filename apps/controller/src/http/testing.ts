@@ -120,6 +120,7 @@ import {
   ProviderKeyRequestsLayer,
 } from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
+import { TaskServiceLayer } from "../tasks";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { RunnerMetricsServiceLayer } from "../runner-metrics";
@@ -182,6 +183,8 @@ const buildServices = (
           Layer.provide(SessionObserverLayer),
           Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
+          // As in the real boot: a reopened Thread joins a Task.
+          Layer.provide(TaskServiceLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.

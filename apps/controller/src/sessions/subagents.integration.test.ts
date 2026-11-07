@@ -219,10 +219,14 @@ const readNotificationStatuses = async (
   );
 };
 
-/** Returns a session without the fields that differ between any two sessions: the id and the times. */
+/**
+ * Returns a session without the fields that differ between any two sessions:
+ * the id, the Task the Thread got and the times.
+ */
 const omitIdentity = (session: Session) => ({
   ...session,
   id: undefined,
+  taskId: undefined,
   createdAt: undefined,
   startedAt: undefined,
   lastActivityAt: undefined,

@@ -740,7 +740,7 @@ export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answe
  *
  * They also answer the three reads a Draft Thread adds, which the app makes
  * whenever it opens at `/`: the settings, with none set, the profiles, and
- * the project's open tasks, of which there are none. And each assistant has
+ * the project's planned tasks, of which there are none. And each assistant has
  * an empty core note and no topic, which Settings > Assistants reads.
  */
 export const buildSidebarHandlers = (

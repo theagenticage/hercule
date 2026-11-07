@@ -96,12 +96,14 @@ const RECORDED_TASK: Task = {
   title: "Merge the bumps",
   description: "",
   status: "in-progress",
+  stage: "building",
   priority: "normal",
   labels: [],
   provenance: [],
   createdAt: AT,
   updatedAt: AT,
   statusChangedAt: AT,
+  stageChangedAt: AT,
 };
 
 describe("SignalHandoffs.handOff", () => {

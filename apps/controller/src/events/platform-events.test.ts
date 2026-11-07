@@ -27,12 +27,14 @@ const TASK: Task = {
   title: "Fix the lid",
   description: "It does not close.",
   status: "open",
+  stage: "planned",
   priority: "normal",
   labels: ["hardware"],
   provenance: [{ ref: "github:issue:o/r#42", at: AT, actor: "user" }],
   createdAt: AT,
   updatedAt: AT,
   statusChangedAt: AT,
+  stageChangedAt: AT,
 };
 
 /** The event of a run that ended on its own, so no request caused it. */
