@@ -2,14 +2,13 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import {
   advanceInboxVisit,
-  listLandedCards,
   START_OF_VISIT,
   type InboxVisit,
   type VisitStep,
 } from "@hercule/client-core/inbox";
-import type { Inbox } from "@hercule/contract";
 import { waitForStillHand } from "../../app/motion";
 import { comeDownIntoPlace, flipInboxPage } from "./inbox-motion";
+import { useSignalLanding } from "./use-signal-landing";
 
 /** How long the sunrise waits after the user's own move empties the Inbox, which is the time the last card takes to step aside. */
 const SUNRISE_DELAY_MS = 320;
@@ -34,9 +33,12 @@ const addIds = (before: ReadonlySet<string>, more: readonly string[]): ReadonlyS
  *   caused it, and the cards that make room glide on `hand`.
  * - When the user's own move empties the Inbox, `isWaitingForSunrise` holds
  *   the all-clear back for the time the last card takes to step aside.
- * - A card a signal landed on since the visit's first read is fresh
- *   (`freshIds`), and stays fresh until the pointer or the keys reach it, or it
- *   opens (`clearFresh`). A card that is new to the page is an arrival, not fresh.
+ * - A signal that lands on a card since the visit's first read is played by
+ *   `useSignalLanding`: its drop falls first, and the card's new words are
+ *   drawn when it lands. The card is then fresh (`freshIds`) until the pointer
+ *   or the keys reach it, or it opens (`clearFresh`). A card that is new to
+ *   the page is an arrival, not fresh. `announcement` is what a screen reader
+ *   says for the signals that landed.
  *
  * `step` is the read as `VisitStep` describes it, without the ids released so
  * far, which this hook keeps. `scrollRef` is the element that scrolls the page.
@@ -51,27 +53,18 @@ export const useInboxVisit = ({
   readonly isWaitingForSunrise: boolean;
   readonly freshIds: ReadonlySet<string>;
   readonly clearFresh: (id: string) => void;
+  readonly announcement: string;
 } => {
   const [history, setHistory] = useState(START_OF_VISIT);
   const [released, setReleased] = useState(NOTHING);
-  // The last of the visit's own reads, to see which cards a signal landed on since. A copy kept from
-  // an earlier visit says nothing about this one.
-  const [lastRead, setLastRead] = useState<Inbox | undefined>(undefined);
-  const [freshIds, setFreshIds] = useState(NOTHING);
-  if (step.isFresh && step.received !== undefined && step.received !== lastRead) {
-    setLastRead(step.received);
-    if (lastRead !== undefined) {
-      const landed = listLandedCards(lastRead, step.received);
-      if (landed.length > 0) setFreshIds((before) => addIds(before, landed));
-    }
-  }
-  const clearFresh = (id: string): void => {
-    setFreshIds((before) =>
-      before.has(id) ? new Set([...before].filter((each) => each !== id)) : before,
-    );
-  };
+  // A signal that lands holds its card's old words back for a moment, so the read drawn is not always the latest.
+  const landing = useSignalLanding({
+    received: step.received,
+    isFresh: step.isFresh,
+    scrollRef,
+  });
 
-  const next = advanceInboxVisit(history, { ...step, released });
+  const next = advanceInboxVisit(history, { ...step, received: landing.inbox, released });
   // Set while drawing, so the draw that shows a new read already holds its cards.
   if (next.history !== history) setHistory(next.history);
   const { visit } = next;
@@ -128,7 +121,8 @@ export const useInboxVisit = ({
   return {
     ...visit,
     isWaitingForSunrise: isEmptiedByMove && !hasWaitedForSunrise,
-    freshIds,
-    clearFresh,
+    freshIds: landing.freshIds,
+    clearFresh: landing.clearFresh,
+    announcement: landing.announcement,
   };
 };

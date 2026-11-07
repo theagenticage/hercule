@@ -104,6 +104,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     isWaitingForSunrise,
     freshIds,
     clearFresh,
+    announcement,
   } = useInboxVisit({
     step: {
       received: moves.inbox,
@@ -317,6 +318,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       isHolding={isHolding && inbox !== undefined}
       isArriving={isArriving}
       isOffline={offlineSince !== null}
+      announcement={announcement}
       scrollRef={scrollRef}
     >
       {body}

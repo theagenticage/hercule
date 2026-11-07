@@ -9,6 +9,7 @@ import {
   BODY_TOLERANCE,
   SPRINGS,
   SpringChannels,
+  type Channel,
   type ChannelValues,
   type PartialChannelValues,
   type Spring,
@@ -58,6 +59,7 @@ export class MotionBody implements Moving {
   private delayed: DelayedMove | null = null;
   private onRest: (() => void) | null = null;
   private isLifted = false;
+  private isUnderway = false;
   private readonly element: HTMLElement;
 
   constructor(element: HTMLElement) {
@@ -94,6 +96,33 @@ export class MotionBody implements Moving {
       this.channels.aim(goal, SPRINGS[spring]);
     }
     this.onRest = options.done ?? null;
+    this.isUnderway = true;
+    this.element.classList.add(MOVING_CLASS);
+    startMoving(this);
+  }
+
+  /**
+   * Gives the body a push: adds `speeds` (the channel's unit a second) to the
+   * speed each named channel has now, so it moves off and comes back to its
+   * goal by itself, as a knock on a card does. A body at rest is aimed at the
+   * goal it has, on `spring`. A body already on its way keeps its goal, its
+   * spring and what it does on arrival, and only gains the speed. Under Reduce
+   * motion it does nothing.
+   */
+  kick(speeds: PartialChannelValues, spring: SpringName = "hand"): void {
+    if (isMotionReduced()) return;
+    const kicked = Object.entries(speeds) as [Channel, number][];
+    for (const [channel, speed] of kicked) {
+      this.channels.setSpeed(channel, this.channels.readSpeed(channel) + speed);
+    }
+    if (!this.isUnderway) {
+      const goals = Object.fromEntries(
+        kicked.map(([channel]) => [channel, this.channels.goals[channel]]),
+      );
+      this.channels.aim(goals, SPRINGS[spring]);
+      this.onRest = null;
+      this.isUnderway = true;
+    }
     this.element.classList.add(MOVING_CLASS);
     startMoving(this);
   }
@@ -139,6 +168,7 @@ export class MotionBody implements Moving {
     this.delayed = null;
     this.onRest = null;
     this.isLifted = false;
+    this.isUnderway = false;
     const { style, classList } = this.element;
     style.transform = "";
     style.opacity = "";
@@ -163,6 +193,7 @@ export class MotionBody implements Moving {
 
   /** Called by the clock when the body is at rest: gives the element's `will-change` back and runs `done`. */
   rest(): void {
+    this.isUnderway = false;
     this.element.classList.remove(MOVING_CLASS, RISING_CLASS);
     const done = this.onRest;
     this.onRest = null;

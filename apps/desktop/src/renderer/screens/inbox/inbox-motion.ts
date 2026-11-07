@@ -90,11 +90,13 @@ export const flipInboxPage = (
   flipByKey({ root: scroller, selector: MOVABLE_SELECTOR, readKey: readMotionKey, spring, mutate });
 
 /**
- * Returns the layer for copies of cards that step aside. It lies over the
- * page and under the toolbar, with the page's own edges, so a copy is
- * clipped where the page is.
+ * Returns the layer for what moves over the page without being a card: the
+ * copies of cards that step aside, and the drop of a landing signal. It lies
+ * over the page and under the toolbar, with the page's own edges, so what
+ * moves in it is clipped where the page is. Returns `null` when the page has
+ * no desk. The caller removes the layer when it is the last to leave it.
  */
-const ensureCopyLayer = (scroller: HTMLElement): HTMLElement | null => {
+export const ensureCopyLayer = (scroller: HTMLElement): HTMLElement | null => {
   const desk = scroller.closest<HTMLElement>(".inbox-desk");
   return desk === null ? null : ensureOverlayLayer(desk, "inbox-copies");
 };
