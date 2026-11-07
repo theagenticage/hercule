@@ -33,21 +33,25 @@ import { Colleague, FailedMark } from "../desk";
 import "./task-pane.css";
 
 /**
- * How long after the pane shows another Task the Return key does nothing, in
- * milliseconds. A Return pressed just as the card changed may have been
- * meant for the card before, and Return can send an answer.
- */
-const RETURN_QUIET_MS = 250;
-
-/**
  * What the pane's buttons change. Each one is called with nothing but what
  * the user chose; the caller sends it, and says what happened.
  */
 export interface TaskPaneChanges {
-  /** Tries again the run that failed (Try again, and Return on a failure). */
+  /** Tries again the run that failed (the Try again button). */
   readonly onTryAgain: () => void;
-  /** Answers the question the pane shows, by a chip or by the user's own words. */
-  readonly onAnswer: (answer: PaneAnswer) => void;
+  /**
+   * Return was pressed on the pane's title: does what Return does for this
+   * Task, which is to try again after a failure, else to send the suggested
+   * answer of a question (`TaskActions.returnKey`). The same happens when
+   * Return is pressed on the Task's card on the board.
+   */
+  readonly onReturn: () => void;
+  /**
+   * Answers `question`, by a chip or by the user's own words. `question` is
+   * the one the control that was used belongs to, so the answer goes to it
+   * even when the Task's open question has changed since it was drawn.
+   */
+  readonly onAnswer: (answer: PaneAnswer, question: AnswerableTaskQuestion) => void;
   readonly onDone: () => void;
   readonly onDrop: () => void;
   /** Asks what a Thread on this Task should do: the foot turns into a line to write it on. */
@@ -113,9 +117,12 @@ const ROW_POSES = {
 /** Renders the stage path: each stage as a step, the current one in ink. Choosing a step moves the Task there. */
 function StagePath({
   stage,
+  isDisabled,
   onMoveToStage,
 }: {
   readonly stage: BoardStage;
+  /** True for a Task that no longer exists, which cannot be moved. */
+  readonly isDisabled: boolean;
   readonly onMoveToStage: (stage: BoardStage) => void;
 }): JSX.Element {
   const here = BOARD_STAGES.indexOf(stage);
@@ -129,7 +136,7 @@ function StagePath({
         >
           <button
             type="button"
-            tabIndex={-1}
+            disabled={isDisabled}
             title={`Move it to ${STAGE_NAMES[each]}`}
             onClick={() => {
               onMoveToStage(each);
@@ -252,7 +259,7 @@ function QuestionSection({
   /** What the user said to this question, while the answer is held or sent, or `null`. */
   readonly said: string | null;
   readonly actions: readonly TaskAction[];
-  readonly onAnswer: (answer: PaneAnswer) => void;
+  readonly onAnswer: TaskPaneChanges["onAnswer"];
   readonly onOpenThread: (sessionId: string) => void;
 }): JSX.Element {
   const answerable: AnswerableTaskQuestion | null =
@@ -294,7 +301,7 @@ function QuestionSection({
               title={chip.description}
               className={chip.suggested ? "task-pane-answer is-suggested" : "task-pane-answer"}
               onClick={() => {
-                onAnswer({ kind: "chip", label: chip.label });
+                onAnswer({ kind: "chip", label: chip.label }, answerable);
               }}
             >
               {chip.label}
@@ -307,7 +314,7 @@ function QuestionSection({
           key={question.requestId}
           placeholder={answerable.placeholder}
           onSend={(text) => {
-            onAnswer({ kind: "text", text });
+            onAnswer({ kind: "text", text }, answerable);
           }}
         />
       )}
@@ -444,20 +451,22 @@ function ThreadsSection({
                 <span className="task-pane-row-text">{row.label}</span>
                 {row.state !== null && <small>{row.state}</small>}
               </button>
-              <button
-                type="button"
-                className="task-pane-row-move"
-                aria-expanded={confirmingId === row.id}
-                ref={(button) => {
-                  if (button === null) moveButtons.current.delete(row.id);
-                  else moveButtons.current.set(row.id, button);
-                }}
-                onClick={() => {
-                  setConfirmingId(confirmingId === row.id ? null : row.id);
-                }}
-              >
-                Move to a new Task
-              </button>
+              {row.canMoveToNewTask && (
+                <button
+                  type="button"
+                  className="task-pane-row-move"
+                  aria-expanded={confirmingId === row.id}
+                  ref={(button) => {
+                    if (button === null) moveButtons.current.delete(row.id);
+                    else moveButtons.current.set(row.id, button);
+                  }}
+                  onClick={() => {
+                    setConfirmingId(confirmingId === row.id ? null : row.id);
+                  }}
+                >
+                  Move to a new Task
+                </button>
+              )}
             </div>
             {confirmingId === row.id && (
               <MoveThreadConfirm
@@ -634,15 +643,11 @@ export function TaskPane({
   readonly actions: TaskPaneActions;
 }): JSX.Element {
   const detail = read.status === "ready" ? read.detail : null;
-  const taskActions = card === null ? null : listTaskActions(detail ?? { card, sessions: [] });
+  const isGone = read.status === "gone";
+  // A Task that no longer exists offers nothing to do to it.
+  const taskActions =
+    card === null || isGone ? null : listTaskActions(detail ?? { card, sessions: [] });
   const question = detail === null ? null : decideQuestionAnswers(detail);
-  // When the pane started to show this Task, for the Return key's quiet moment.
-  const shownAt = useRef(0);
-  const cardId = card?.id;
-  useEffect(() => {
-    shownAt.current = performance.now();
-  }, [cardId]);
-
   const act = (id: TaskActionId): void => {
     switch (id) {
       case "try-again":
@@ -679,17 +684,8 @@ export function TaskPane({
     // title, which the sheet focuses, and the sheet itself leave it to the pane.
     if (event.key !== "Enter" || !(event.target instanceof HTMLHeadingElement) || event.repeat)
       return;
-    if (performance.now() - shownAt.current < RETURN_QUIET_MS) return;
     event.preventDefault();
-    if (taskActions?.returnKey === "try-again") {
-      actions.onTryAgain();
-    } else if (
-      taskActions?.returnKey === "send-suggested-answer" &&
-      question?.kind === "answerable"
-    ) {
-      const suggested = question.chips.find((chip) => chip.suggested);
-      if (suggested !== undefined) actions.onAnswer({ kind: "chip", label: suggested.label });
-    }
+    actions.onReturn();
   };
 
   const hasCard = card !== null;
@@ -709,7 +705,13 @@ export function TaskPane({
               <span className="task-pane-title-bar" />
             </h2>
           )}
-          {hasCard && <StagePath stage={card.stage} onMoveToStage={actions.onMoveToStage} />}
+          {hasCard && (
+            <StagePath
+              stage={card.stage}
+              isDisabled={isGone}
+              onMoveToStage={actions.onMoveToStage}
+            />
+          )}
         </header>
         {read.status === "loading" && (
           <div className="task-pane-bars" aria-hidden="true">

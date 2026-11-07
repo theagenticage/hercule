@@ -22,8 +22,14 @@
  *   copy that flies to the count of its stage (Done) or sinks (Dropped). Its
  *   gesture holds the card as it was and the place it stood, so Undo can put
  *   it back exactly, and a refused update brings it back.
+ * - Several cards move or end as one gesture: `moveCards` for a drop of a
+ *   group, `endCardsTogether` around several `endCard` calls. Each card is
+ *   still its own request, sent in order by the same action. The gesture
+ *   holds where every card stood before the first one moved, and Undo puts
+ *   them back in the order they stood, so each lands after the card it
+ *   followed.
  */
-import { useRef, useState, type RefObject } from "react";
+import { useRef, useSyncExternalStore, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
@@ -34,8 +40,11 @@ import {
   buildRestoreMove,
   CARD_ENDED_NOTE,
   CARD_NOT_EXACT_NOTE,
+  CARDS_ENDED_NOTE,
   describeCardEnd,
   describeCardEndFailure,
+  describeCardsEnd,
+  describeCardsLeftAsTheyAre,
   readPlacement,
   reapplyCardChanges,
   type CardChange,
@@ -46,6 +55,7 @@ import {
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
 import type { CardMover, PutBackRequest } from "../../../app/card-mover";
+import type { PendingCardMoves, PendingMove } from "../../../app/pending-card-moves";
 import type { Gesture, UndoStack } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { launchLeavingCard, sendLeavingCard } from "../../../screens/work/board-flights";
@@ -54,21 +64,6 @@ import { workBoardQuery } from "./-work-board";
 
 /** The key every card move runs under, so the moves can be counted. */
 const CARD_MOVES_KEY = ["card-moves"];
-
-/** A move the controller has not answered yet: waiting to be sent, or sent. */
-interface PendingMove {
-  readonly id: number;
-  readonly change: CardChange;
-  /**
-   * Set on the move that undoes another. The move is sent only when this
-   * resolves to true, which it does when the move being undone was saved.
-   * Otherwise the card is still where the undo would put it, or another client
-   * has moved it since, and writing the undo would overwrite that.
-   */
-  readonly isUndoWanted: Promise<boolean> | undefined;
-}
-
-const NO_MOVES: readonly PendingMove[] = [];
 
 /** What `useCardMoves` returns. */
 export interface CardMoves {
@@ -94,6 +89,25 @@ export interface CardMoves {
    * the board is left alone.
    */
   readonly endCard: (taskId: string, stage: EndStage) => void;
+  /**
+   * Moves several cards as one gesture: one request for each move, sent in
+   * order, and one Undo that puts them all back. The board jumps to the new
+   * places, as for `moveCard`. `moves` are applied in order, each over the
+   * board the ones before it left. A move that changes nothing is left out.
+   * `describe` is given the moves that remain, and returns the words for the
+   * undo line. Does nothing when no move remains.
+   */
+  readonly moveCards: (
+    moves: readonly CardMove[],
+    describe: (moves: readonly CardMove[]) => string,
+    note?: string,
+  ) => void;
+  /**
+   * Runs `act`, which marks cards Done or Dropped (`stage`) by calling
+   * `endCard`, and offers one Undo for all the cards it ended instead of one
+   * for each. The undo line says how many, such as "Marked 3 Tasks Done".
+   */
+  readonly endCardsTogether: (stage: EndStage, act: () => void) => void;
   /** Reverses the newest gesture on the undo stack, and says what happened. */
   readonly undoLastMove: () => void;
   /** What the undo line shows. */
@@ -114,6 +128,42 @@ export interface CardMoves {
 
 const NOT_SAVED_MESSAGE = "That move did not save, so there is nothing to put back.";
 const END_NOT_SAVED_MESSAGE = "That update did not save, so there is nothing to put back.";
+
+/** What Undo says when it has nothing to put back, for a gesture of one card or of several. */
+interface UndoRefusals {
+  readonly missing: string;
+  readonly notSaved: string;
+}
+
+/** Returns what Undo says when a gesture that moved `count` cards has nothing to put back. */
+const describeMoveRefusals = (count: number): UndoRefusals =>
+  count === 1
+    ? { missing: "The card is no longer on the board.", notSaved: NOT_SAVED_MESSAGE }
+    : {
+        missing: "The cards are no longer on the board.",
+        notSaved: "Those moves did not save, so there is nothing to put back.",
+      };
+
+/** Returns what Undo says when a gesture that ended `count` cards has nothing to put back. */
+const describeEndRefusals = (count: number): UndoRefusals =>
+  count === 1
+    ? { missing: "The Task is already back on the board.", notSaved: END_NOT_SAVED_MESSAGE }
+    : {
+        missing: "The Tasks are already back on the board.",
+        notSaved: "Those updates did not save, so there is nothing to put back.",
+      };
+
+/** One card's share of a gesture: whether its request was saved, and how Undo puts that card back. */
+interface UndoPart {
+  readonly wasSaved: Promise<boolean>;
+  readonly putBack: (mover: CardMover) => PutBackRequest | undefined;
+}
+
+/** Cards ending together as one gesture: the board before the first one ended, and what each one left. */
+interface EndGroup {
+  readonly startBoard: WorkBoard;
+  readonly ended: { readonly card: WorkCard; readonly part: UndoPart }[];
+}
 
 /** Returns the sentence the undo line shows for a move that failed. */
 const describeMoveFailure = (error: unknown): string =>
@@ -171,12 +221,15 @@ const findNeighbourCardId = (card: HTMLElement): string | null => {
 export const useCardMoves = ({
   client,
   undoStack,
+  pendingMoves,
   serverBoard,
   scrollRef,
   onCardReturning,
 }: {
   readonly client: HerculeClient;
   readonly undoStack: UndoStack<CardMover>;
+  /** The moves the controller has not answered yet. They outlive this screen. */
+  readonly pendingMoves: PendingCardMoves;
   readonly serverBoard: WorkBoard | undefined;
   readonly scrollRef: RefObject<HTMLElement | null>;
   /**
@@ -188,15 +241,9 @@ export const useCardMoves = ({
   readonly onCardReturning: (taskId: string, stage: EndStage) => void;
 }): CardMoves => {
   const queryClient = useQueryClient();
-  // The pending moves are kept twice. The ref is what a gesture reads, so two
-  // gestures before one render see each other's move. The state draws the board.
-  const pendingRef = useRef<readonly PendingMove[]>(NO_MOVES);
-  const [pendingMoves, setPendingMoves] = useState(NO_MOVES);
-  const changePending = (change: (moves: readonly PendingMove[]) => readonly PendingMove[]) => {
-    pendingRef.current = change(pendingRef.current);
-    setPendingMoves(pendingRef.current);
-  };
-  const nextId = useRef(1);
+  // A gesture reads the store's snapshot directly, so two gestures before one
+  // render see each other's move. `shownMoves` is what this render draws.
+  const shownMoves = useSyncExternalStore(pendingMoves.subscribe, pendingMoves.getSnapshot);
   const { line, say, undo } = useUndoLine(undoStack);
 
   /**
@@ -221,7 +268,7 @@ export const useCardMoves = ({
       ? undefined
       : reapplyCardChanges(
           cached,
-          pendingRef.current.map((each) => each.change),
+          pendingMoves.getSnapshot().map((each) => each.change),
         );
   };
 
@@ -243,24 +290,25 @@ export const useCardMoves = ({
       await client.task.move({ params: { id: taskId }, payload: place });
       return true;
     },
-    onSuccess: async (isSent, { id, change }) => {
+    onSuccess: async (isSent, move) => {
       if (isSent) {
         // A read that started before this answer could end after the patch and
         // put the card back. Cancelling reverts it, and the push that follows
         // starts a read that began after the answer.
         await queryClient.cancelQueries({ queryKey: queryKeys.workBoard() });
         queryClient.setQueryData<WorkBoard>(queryKeys.workBoard(), (cached) =>
-          cached === undefined ? undefined : applyCardChange(cached, change),
+          cached === undefined ? undefined : applyCardChange(cached, move.change),
         );
       }
       // Right after the patch, with no wait between, so React draws the
       // patched board and the shorter list together.
-      changePending((moves) => moves.filter((each) => each.id !== id));
+      pendingMoves.remove(move);
     },
-    onError: (error, { id, change }) => {
+    onError: (error, move) => {
+      const { change } = move;
       if (change.kind === "end") onCardReturning(change.card.id, change.stage);
       playBoardChange("travel", () => {
-        changePending((moves) => moves.filter((each) => each.id !== id));
+        pendingMoves.remove(move);
       });
       say(
         change.kind === "end"
@@ -294,17 +342,13 @@ export const useCardMoves = ({
     isUndoWanted: Promise<boolean> | undefined = undefined,
     onShown: (() => void) | undefined = undefined,
   ): Promise<unknown> => {
-    const request: PendingMove = {
-      id: nextId.current++,
-      change,
-      isUndoWanted,
-    };
+    const request: PendingMove = { change, isUndoWanted };
     if (isPlayed) {
       playBoardChange("hand", () => {
-        changePending((moves) => [...moves, request]);
+        pendingMoves.add(request);
       });
     } else {
-      changePending((moves) => [...moves, request]);
+      pendingMoves.add(request);
     }
     onShown?.();
     return mutateAsync(request);
@@ -355,38 +399,57 @@ export const useCardMoves = ({
 
   /**
    * Puts the gesture that Undo reverses on the stack and shows its words on
-   * the undo line. `putBack` asks the open screen to bring the card back. A
-   * gesture whose request failed is taken off the stack again, because it has
-   * nothing to reverse and the next Undo is for the gesture before it.
+   * the undo line. Each of `parts` is one card: `putBack` asks the open
+   * screen to bring that card back. The cards are queued back in the order
+   * of `parts`, so a card that follows another lands after it. A part whose
+   * request failed has nothing to reverse; when none of them has, the gesture
+   * is taken off the stack again, because the next Undo is for the gesture
+   * before it.
    */
   const offerUndo = (
     words: string,
     note: string | undefined,
-    wasSaved: Promise<boolean>,
-    putBack: (mover: CardMover) => PutBackRequest | undefined,
-    messages: { readonly missing: string; readonly notSaved: string },
+    parts: readonly UndoPart[],
+    refusals: UndoRefusals,
   ): void => {
     const gesture: Gesture<CardMover> = {
       words,
       undo: async (mover) => {
-        const request = putBack(mover);
-        if (request === undefined) throw new Error(messages.missing);
-        await request.request;
-        if (!(await wasSaved)) throw new Error(messages.notSaved);
-        return request.isExact ? undefined : CARD_NOT_EXACT_NOTE;
+        // Every card is queued before any is awaited, so each sees the ones before it back in place.
+        const requests = parts.flatMap((part) => {
+          const request = part.putBack(mover);
+          return request === undefined ? [] : [request];
+        });
+        if (requests.length === 0) throw new Error(refusals.missing);
+        await Promise.all(requests.map((each) => each.request));
+        const saved = await Promise.all(parts.map((part) => part.wasSaved));
+        if (!saved.some(Boolean)) throw new Error(refusals.notSaved);
+        const notes = [
+          requests.every((each) => each.isExact) ? undefined : CARD_NOT_EXACT_NOTE,
+          requests.length === parts.length
+            ? undefined
+            : describeCardsLeftAsTheyAre(parts.length - requests.length),
+        ].filter((each) => each !== undefined);
+        return notes.length === 0 ? undefined : notes.join(" ");
       },
     };
     undoStack.push(gesture);
     say(note === undefined ? `${words}.` : `${words}. ${note}`, true);
-    void wasSaved.then((saved) => {
-      if (!saved) undoStack.remove(gesture);
+    void Promise.all(parts.map((part) => part.wasSaved)).then((saved) => {
+      if (!saved.some(Boolean)) undoStack.remove(gesture);
     });
   };
+
+  // Set while `endCardsTogether` runs, so the cards `endCard` ends join one gesture.
+  const endGroup = useRef<EndGroup | null>(null);
 
   const endCard = (taskId: string, stage: EndStage): void => {
     const board = readShownBoard();
     const card = board?.cards.find((each) => each.id === taskId);
-    const from = board === undefined ? undefined : readPlacement(board, taskId);
+    // Cards ending together are put back where they stood before the first one ended.
+    const group = endGroup.current;
+    const from =
+      board === undefined ? undefined : readPlacement(group?.startBoard ?? board, taskId);
     if (card === undefined || from === undefined) return;
 
     // The card in the page flies away as a copy, and its neighbour takes the
@@ -408,13 +471,49 @@ export const useCardMoves = ({
       () => true,
       () => false,
     );
-    offerUndo(
-      describeCardEnd(card, stage),
-      CARD_ENDED_NOTE,
+    const part: UndoPart = {
       wasSaved,
-      (mover) => mover.putEndedCardBack(card, from, stage, wasSaved),
-      { missing: "The Task is already back on the board.", notSaved: END_NOT_SAVED_MESSAGE },
-    );
+      putBack: (mover) => mover.putEndedCardBack(card, from, stage, wasSaved),
+    };
+    if (group === null) {
+      offerUndo(describeCardEnd(card, stage), CARD_ENDED_NOTE, [part], describeEndRefusals(1));
+    } else {
+      group.ended.push({ card, part });
+    }
+  };
+
+  const endCardsTogether = (stage: EndStage, act: () => void): void => {
+    const startBoard = readShownBoard();
+    if (startBoard === undefined || endGroup.current !== null) {
+      act();
+      return;
+    }
+    const group: EndGroup = { startBoard, ended: [] };
+    endGroup.current = group;
+    try {
+      act();
+    } catch (error) {
+      endGroup.current = null;
+      throw error;
+    }
+    endGroup.current = null;
+    // Put back in the order the cards stood, so each lands after the card it followed.
+    const indexOf = (card: WorkCard): number =>
+      startBoard.cards.findIndex((each) => each.id === card.id);
+    const ended = group.ended.toSorted((a, b) => indexOf(a.card) - indexOf(b.card));
+    const [only] = ended;
+    if (only === undefined) return;
+    const parts = ended.map((each) => each.part);
+    if (ended.length === 1) {
+      offerUndo(describeCardEnd(only.card, stage), CARD_ENDED_NOTE, parts, describeEndRefusals(1));
+    } else {
+      offerUndo(
+        describeCardsEnd(ended.length, stage),
+        CARDS_ENDED_NOTE,
+        parts,
+        describeEndRefusals(ended.length),
+      );
+    }
   };
 
   const makeMove = (
@@ -433,14 +532,51 @@ export const useCardMoves = ({
       () => true,
       () => false,
     );
-    offerUndo(words, note, wasSaved, (mover) => mover.putCardBack(from, wasSaved), {
-      missing: "The card is no longer on the board.",
-      notSaved: NOT_SAVED_MESSAGE,
-    });
+    offerUndo(
+      words,
+      note,
+      [{ wasSaved, putBack: (mover) => mover.putCardBack(from, wasSaved) }],
+      describeMoveRefusals(1),
+    );
   };
 
   const moveCard = (move: CardMove, words: string, note?: string): void => {
     makeMove(move, words, note, false);
+  };
+
+  const moveCards = (
+    moves: readonly CardMove[],
+    describe: (moves: readonly CardMove[]) => string,
+    note?: string,
+  ): void => {
+    const original = readShownBoard();
+    if (original === undefined) return;
+    const sent: { readonly move: CardMove; readonly part: UndoPart }[] = [];
+    for (const move of moves) {
+      // Where the card stood before the first card of the group moved, not after.
+      const from = readPlacement(original, move.taskId);
+      const board = readShownBoard();
+      if (from === undefined || board === undefined) continue;
+      if (isSamePlace(from, readPlacement(applyCardMove(board, move), move.taskId))) continue;
+      const wasSaved = sendMove(move, false).then(
+        () => true,
+        () => false,
+      );
+      sent.push({
+        move,
+        part: { wasSaved, putBack: (mover) => mover.putCardBack(from, wasSaved) },
+      });
+    }
+    if (sent.length === 0) return;
+    // Put back in the order the cards stood, so each lands after the card it followed.
+    const indexOf = ({ move }: { readonly move: CardMove }): number =>
+      original.cards.findIndex((each) => each.id === move.taskId);
+    offerUndo(
+      describe(sent.map((each) => each.move)),
+      note,
+      sent.toSorted((a, b) => indexOf(a) - indexOf(b)).map((each) => each.part),
+      describeMoveRefusals(sent.length),
+    );
   };
 
   const moveCardWithMotion = (move: CardMove, words: string, note?: string): void => {
@@ -457,11 +593,13 @@ export const useCardMoves = ({
         ? undefined
         : reapplyCardChanges(
             serverBoard,
-            pendingMoves.map((each) => each.change),
+            shownMoves.map((each) => each.change),
           ),
     moveCard,
     moveCardWithMotion,
+    moveCards,
     endCard,
+    endCardsTogether,
     undoLastMove,
     line,
     sayWithoutUndo: (text) => {

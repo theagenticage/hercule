@@ -1,4 +1,4 @@
-import type { WorkCard } from "@hercule/contract";
+import type { BoardStage, WorkCard } from "@hercule/contract";
 import type { CardMove } from "./card-move";
 import { STAGE_NAMES } from "./card-words";
 import { NO_PROJECT_LANE_NAME, type WorkProject } from "./lanes";
@@ -34,4 +34,23 @@ export const describeCardMove = (
   }
   const where = places.length === 0 ? `in ${STAGE_NAMES[card.stage]}` : `to ${places.join(" in ")}`;
   return `Moved "${shortenTitle(card.title)}" ${where}`;
+};
+
+/**
+ * Returns the words for moving several cards together, in the past tense, for
+ * the undo line: `Moved 3 Tasks to In review`. `moves` are the moves the cards
+ * make and `stage` is where they land. The lane is named, as for one card,
+ * only when a card changes Project: `Moved 3 Tasks to In review in Checkout`.
+ */
+export const describeCardsMove = (
+  moves: readonly CardMove[],
+  stage: BoardStage,
+  projects: readonly WorkProject[],
+): string => {
+  const change = moves.find((move) => move.projectId !== undefined);
+  const lane =
+    change === undefined
+      ? ""
+      : ` in ${projects.find((project) => project.id === change.projectId)?.name ?? NO_PROJECT_LANE_NAME}`;
+  return `Moved ${String(moves.length)} Tasks to ${STAGE_NAMES[stage]}${lane}`;
 };

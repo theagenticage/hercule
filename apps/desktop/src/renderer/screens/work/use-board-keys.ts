@@ -69,6 +69,10 @@ export interface BoardKeysInput {
   readonly onEndCard: (card: WorkCard, stage: EndStage) => void;
   /** Asks what a new Thread on the card should do (`T`). */
   readonly onStartThread: (card: WorkCard) => void;
+  /** Selects the card, or takes it out of the selection (`X`). */
+  readonly onToggleSelectCard: (card: WorkCard) => void;
+  /** The selection: how many cards are selected, and a way to empty it (Esc, last). */
+  readonly selection: { readonly count: number; readonly clear: () => void };
   /**
    * The merge by key: `M` picks the card to merge, the arrows walk to the card
    * to merge it into, Return merges and Esc cancels. While a card is picked
@@ -79,8 +83,17 @@ export interface BoardKeysInput {
   readonly onAdd: (laneId: string | undefined) => void;
   /** The Add to Work sheet: whether it is open, and a way to close it. */
   readonly addSheet: { readonly isOpen: boolean; readonly close: () => void };
-  /** The Task's details sheet: whether it is open, and a way to close it. */
-  readonly taskPane: { readonly isOpen: boolean; readonly close: () => void };
+  /**
+   * The Task's details sheet: whether it is open, a way to close it, and what
+   * Return does on the card it is open for. `pressReturn` does what the sheet's
+   * Return does for that card and returns `true`, or returns `false` for any
+   * other card, which Return then opens.
+   */
+  readonly taskPane: {
+    readonly isOpen: boolean;
+    readonly close: () => void;
+    readonly pressReturn: (card: WorkCard) => boolean;
+  };
 }
 
 /** What `useBoardKeys` gives back to the screen. */
@@ -107,8 +120,9 @@ export interface BoardKeys {
  *   on a card or on its lane (the arrows, the stage keys, Return, A and F)
  *   uses that one card. While focus is on a lane's head there is no card with
  *   focus, so A and F act on that lane unless the pointer rests on a card.
- * - Esc steps back one thing at a time: the keys sheet, the Add to Work sheet,
- *   the details sheet, the Find text, then the filter. An open menu closes itself first.
+ * - Esc steps back one thing at a time: the card picked to merge, the keys
+ *   sheet, the Add to Work sheet, the details sheet, the Find text, the filter,
+ *   then the selection. An open menu closes itself first.
  * - While a card is in the hand of a drag, no key does anything here.
  */
 export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
@@ -218,6 +232,8 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       view.setFindText("");
     } else if (isFilterOn(view.filter)) {
       view.setFilter(EMPTY_FILTER);
+    } else if (input.selection.count > 0) {
+      input.selection.clear();
     } else {
       return;
     }
@@ -286,6 +302,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         if (target !== document.body && target?.matches(".desk-card") !== true) return;
         if (currentCard === undefined) return;
         event.preventDefault();
+        if (input.taskPane.pressReturn(currentCard)) return;
         input.onOpenCard(currentCard);
         return;
       case "shift-stage":
@@ -314,6 +331,11 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         if (currentCard === undefined) return;
         event.preventDefault();
         input.onStartThread(currentCard);
+        return;
+      case "select":
+        if (currentCard === undefined) return;
+        event.preventDefault();
+        input.onToggleSelectCard(currentCard);
         return;
       case "fold-lane": {
         if (currentLaneId === undefined) return;

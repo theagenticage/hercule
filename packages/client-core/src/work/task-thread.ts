@@ -15,6 +15,11 @@ export interface TaskThreadRow {
   readonly label: string;
   /** The state to show beside the label, or `null` for a Thread at rest. */
   readonly state: TaskThreadState | null;
+  /**
+   * Whether the row offers "Move to a new Task". Only a Thread moves: the
+   * controller refuses an Agent session and a run's session.
+   */
+  readonly canMoveToNewTask: boolean;
 }
 
 /**
@@ -55,4 +60,5 @@ export const buildTaskThreadRow = (session: TaskDetailSession): TaskThreadRow =>
   id: session.id,
   label: chooseTaskThreadLabel(session),
   state: describeTaskThreadState(session),
+  canMoveToNewTask: session.kind === "thread",
 });

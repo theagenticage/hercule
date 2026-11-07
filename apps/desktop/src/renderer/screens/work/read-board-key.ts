@@ -17,6 +17,8 @@ export type BoardKeyCommand =
   | { readonly kind: "start-thread" }
   /** Starts picking the card to merge the card into (`M`). */
   | { readonly kind: "merge" }
+  /** Selects the card, or takes it out of the selection (`X`). */
+  | { readonly kind: "select" }
   | { readonly kind: "fold-lane" }
   | { readonly kind: "fold-all-lanes" }
   | { readonly kind: "find" }
@@ -106,6 +108,7 @@ export const readBoardKey = (
   if (letter === "d") return { kind: "end", stage: "done" };
   if (letter === "t") return { kind: "start-thread" };
   if (letter === "m") return { kind: "merge" };
+  if (letter === "x") return { kind: "select" };
   const letterWalk = LETTER_WALKS[letter];
   return letterWalk === undefined ? null : { kind: "walk", walk: letterWalk };
 };

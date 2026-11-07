@@ -15,6 +15,7 @@ import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testin
 import type { WorkBoard } from "@hercule/contract";
 import { flipByKey } from "../../../app/motion";
 import type { CardMover } from "../../../app/card-mover";
+import { createPendingCardMoves } from "../../../app/pending-card-moves";
 import { createUndoStack } from "../../../app/undo-stack";
 import { useCardMoves } from "./-card-moves";
 import { workBoardQuery } from "./-work-board";
@@ -107,6 +108,8 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(queryKeys.workBoard(), BOARD);
   const undoStack = createUndoStack<CardMover>();
+  // Like the stack, the pending moves belong to the app and outlive a screen.
+  const pendingMoves = createPendingCardMoves();
   const returning: Array<readonly [string, string]> = [];
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -120,6 +123,7 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
         return useCardMoves({
           client,
           undoStack,
+          pendingMoves,
           serverBoard: data,
           scrollRef,
           onCardReturning: (taskId, stage) => {
@@ -909,6 +913,35 @@ describe("useCardMoves", () => {
       expect(result.current.line.isShown).toBe(false);
     });
 
+    it("queues the undo behind an update that is still on its way after the screen was left and opened again", async () => {
+      const { result, held, mount, unmount } = setUp();
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+      await waitForRequests(held, 1);
+      unmount();
+
+      // The controller has not answered, so the board it lists still has the
+      // card. The new screen must draw it as Done all the same.
+      const again = mount();
+      expect(listIds(again.result.current.board!.cards)).toEqual(["a", "c"]);
+      act(() => {
+        again.result.current.undoLastMove();
+      });
+      expect(listIds(again.result.current.board!.cards)).toEqual(["a", "b", "c"]);
+
+      // The undo waits for the update, and the update is sent first.
+      await settleQueue();
+      expect(held).toHaveLength(1);
+      await accept(held, 0);
+      await waitForRequests(held, 2);
+      expect(held.map((each) => each.via)).toEqual(["update", "move"]);
+      expect(held[1]).toMatchObject({
+        taskId: "b",
+        payload: { stage: "building", afterTaskId: "a" },
+      });
+    });
+
     it("sends an end after the moves made before it", async () => {
       const { result, held } = setUp();
       act(() => {
@@ -923,5 +956,148 @@ describe("useCardMoves", () => {
       await waitForRequests(held, 2);
       expect(held.map((each) => each.via)).toEqual(["move", "update"]);
     });
+  });
+});
+
+describe("useCardMoves with several cards at once", () => {
+  /** Accepts the request at `index` and lets the queue go on. */
+  const accept = async (held: readonly HeldMove[], index: number): Promise<void> => {
+    await act(() => {
+      held[index]!.accept();
+      return Promise.resolve();
+    });
+  };
+
+  /** Accepts the requests from `first` up to, not including, `end`, each once it has been sent. */
+  const acceptRequests = async (
+    held: readonly HeldMove[],
+    first: number,
+    end: number,
+  ): Promise<void> => {
+    for (let index = first; index < end; index++) {
+      await waitFor(() => {
+        expect(held.length).toBeGreaterThan(index);
+      });
+      await accept(held, index);
+    }
+  };
+
+  const BOTH_TO_REVIEW = [
+    { taskId: "a", stage: "in-review", afterTaskId: "c" },
+    { taskId: "b", stage: "in-review", afterTaskId: "a" },
+  ] as const;
+
+  it("moves them all at once, sends one request each in order, and offers one Undo", async () => {
+    const { result, findStage, held } = setUp();
+
+    act(() => {
+      result.current.moveCards(BOTH_TO_REVIEW, (moves) => `Moved ${String(moves.length)} Tasks`);
+    });
+
+    expect(findStage("a")).toBe("in-review");
+    expect(findStage("b")).toBe("in-review");
+    expect(
+      listIds(result.current.board!.cards.filter((card) => card.stage === "in-review")),
+    ).toEqual(["c", "a", "b"]);
+    expect(result.current.line).toMatchObject({
+      text: "Moved 2 Tasks.",
+      canUndo: true,
+      isShown: true,
+    });
+    await waitForRequests(held, 1);
+    await settleQueue();
+    expect(held.map((each) => each.taskId)).toEqual(["a"]);
+    await accept(held, 0);
+    await waitForRequests(held, 2);
+    expect(held.map((each) => each.taskId)).toEqual(["a", "b"]);
+  });
+
+  it("puts them all back in the places they stood with one Undo, the first card first", async () => {
+    const { result, findStage, held } = setUp();
+    act(() => {
+      result.current.moveCards(BOTH_TO_REVIEW, () => "Moved 2 Tasks");
+    });
+    await acceptRequests(held, 0, 2);
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+
+    expect(findStage("a")).toBe("building");
+    expect(findStage("b")).toBe("building");
+    expect(
+      listIds(result.current.board!.cards.filter((card) => card.stage === "building")),
+    ).toEqual(["a", "b"]);
+    await acceptRequests(held, 2, 4);
+    expect(held.slice(2).map((each) => [each.taskId, each.payload])).toEqual([
+      ["a", { stage: "building", projectId: null, afterTaskId: null }],
+      ["b", { stage: "building", projectId: null, afterTaskId: "a" }],
+    ]);
+    await waitFor(() => {
+      expect(result.current.line.text).toBe("Put back: Moved 2 Tasks.");
+    });
+    // Nothing is left to undo: the two cards were one gesture.
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(result.current.line.text).toBe("Nothing to undo.");
+    });
+  });
+
+  it("leaves out a move that changes nothing, and gives the words only the moves that remain", async () => {
+    const { result, held } = setUp();
+    const describe = vi.fn((moves: readonly unknown[]) => `Moved ${String(moves.length)}`);
+
+    act(() => {
+      result.current.moveCards(
+        [
+          { taskId: "a", stage: "building" },
+          { taskId: "b", stage: "planned" },
+        ],
+        describe,
+      );
+    });
+
+    await waitForRequests(held, 1);
+    expect(held.map((each) => each.taskId)).toEqual(["b"]);
+    expect(describe).toHaveBeenCalledExactlyOnceWith([{ taskId: "b", stage: "planned" }]);
+  });
+
+  it("does nothing, and says nothing, when no move remains", () => {
+    const { result, held } = setUp();
+
+    act(() => {
+      result.current.moveCards([{ taskId: "a", stage: "building" }], () => "never");
+    });
+
+    expect(held).toHaveLength(0);
+    expect(result.current.line.isShown).toBe(false);
+  });
+
+  it("says nothing was put back, and sends nothing, when none of the moves saved", async () => {
+    const { result, held } = setUp();
+    act(() => {
+      result.current.moveCards(BOTH_TO_REVIEW, () => "Moved 2 Tasks");
+    });
+    await waitForRequests(held, 1);
+    await act(() => {
+      held[0]!.refuse("the Task is gone.");
+      return Promise.resolve();
+    });
+    await waitForRequests(held, 2);
+    await act(() => {
+      held[1]!.refuse("the Task is gone.");
+      return Promise.resolve();
+    });
+
+    // A gesture none of whose requests saved is not on the stack.
+    await waitFor(() => {
+      act(() => {
+        result.current.undoLastMove();
+      });
+      expect(result.current.line.text).toBe("Nothing to undo.");
+    });
+    expect(held).toHaveLength(2);
   });
 });

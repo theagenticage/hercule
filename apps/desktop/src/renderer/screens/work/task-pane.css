@@ -72,7 +72,7 @@
     color var(--m-quick),
     border-color var(--m-quick);
 }
-.task-pane-path button:hover {
+.task-pane-path button:hover:not(:disabled) {
   color: var(--ink);
   border-color: color-mix(in oklab, var(--ink) 30%, transparent);
 }

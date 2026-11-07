@@ -17,6 +17,7 @@ import {
 import type { Bridge } from "../../ipc/bridge";
 import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
+import { createPendingCardMoves, type PendingCardMoves } from "./pending-card-moves";
 import { createPendingIntentsHolder, type PendingIntentsHolder } from "./pending-intents";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
@@ -70,6 +71,14 @@ export interface SavedController {
    */
   readonly undoStack: UndoStack<CardMover>;
   /**
+   * The card moves the controller has not answered yet. They live here, not in
+   * the Work screen, so a screen opened again after a visit elsewhere still
+   * draws a card as Done while its update is on the way, and Undo can queue
+   * its inverse behind that update. Like the undo stack, the router clears
+   * them when the user signs out.
+   */
+  readonly pendingCardMoves: PendingCardMoves;
+  /**
    * The answers the user gave from the Work pane and the app holds back for the
    * undo line before it sends them. They belong to this controller and this
    * user, so the store opens once the shell knows the user, and the router
@@ -112,6 +121,7 @@ const buildSavedController = (
     }),
     threadCopies: createThreadCopies(url),
     undoStack: createUndoStack(),
+    pendingCardMoves: createPendingCardMoves(),
     pendingIntents: createPendingIntentsHolder(url, localStorage),
   };
 };

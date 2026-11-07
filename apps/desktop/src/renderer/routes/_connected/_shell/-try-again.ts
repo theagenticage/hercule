@@ -32,6 +32,7 @@ import {
 import { describeTryAgain, describeTryAgainUndo } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import type { CardMover } from "../../../app/card-mover";
+import { buildStillSignedInCheck } from "../../../app/still-signed-in";
 import type { Gesture } from "../../../app/undo-stack";
 
 /** The key every Try again runs under, so the screen can find the requests. */
@@ -42,6 +43,8 @@ interface TryAgainRequest {
   readonly taskId: string;
   readonly runId: string;
   readonly title: string;
+  /** Tells whether the user who pressed Try again is still signed in. */
+  readonly isStillSignedIn: () => boolean;
 }
 
 /** The failed card a Try again needs: its Task, its title and the run that failed. */
@@ -60,6 +63,16 @@ const findRequests = (queryClient: QueryClient, taskId: string): Mutation[] =>
 const releaseTask = (queryClient: QueryClient, taskId: string): void => {
   for (const mutation of findRequests(queryClient, taskId)) {
     queryClient.getMutationCache().remove(mutation);
+  }
+};
+
+/**
+ * Removes the Try again request `request` only, which ends its lock. An older
+ * gesture's Undo must not end the lock of a newer press on the same Task.
+ */
+const releaseRequest = (queryClient: QueryClient, request: TryAgainRequest): void => {
+  for (const mutation of findRequests(queryClient, request.taskId)) {
+    if (mutation.state.variables === request) queryClient.getMutationCache().remove(mutation);
   }
 };
 
@@ -116,7 +129,11 @@ export const useTryAgain = (
     gcTime: Infinity,
     mutationFn: ({ runId }: TryAgainRequest) =>
       client.run.rerun({ params: { id: runId }, payload: {} }),
-    onSuccess: (started, { taskId, title }) => {
+    onSuccess: (started, request) => {
+      const { taskId, title } = request;
+      // The user may have signed out while the request was on its way. Its
+      // Undo would then run as the next account.
+      if (!request.isStillSignedIn()) return;
       // The `run` push brings the board too. This makes sure a read that
       // started after the run committed arrives, even if that push is lost,
       // so the lock always ends.
@@ -138,7 +155,7 @@ export const useTryAgain = (
           } finally {
             // The failure is back, or the Task stays as it is: either way the
             // run is no longer one to wait for.
-            releaseTask(queryClient, taskId);
+            releaseRequest(queryClient, request);
             invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
             invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
           }
@@ -146,7 +163,8 @@ export const useTryAgain = (
       });
       callbacks.onStarted(taskId);
     },
-    onError: (error, { title }) => {
+    onError: (error, { title, isStillSignedIn }) => {
+      if (!isStillSignedIn()) return;
       callbacks.sayWithoutUndo(`Could not try ${title} again: ${readErrorMessage(error)}`);
     },
   });
@@ -155,7 +173,12 @@ export const useTryAgain = (
     if (isTryAgainStarting(queryClient, taskId, failure.runId)) return false;
     // Every earlier request has ended or was refused, so the new one replaces them.
     releaseTask(queryClient, taskId);
-    rerun.mutate({ taskId, runId: failure.runId, title });
+    rerun.mutate({
+      taskId,
+      runId: failure.runId,
+      title,
+      isStillSignedIn: buildStillSignedInCheck(client),
+    });
     return true;
   };
 };

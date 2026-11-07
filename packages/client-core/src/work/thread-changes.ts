@@ -8,11 +8,11 @@ import { shortenTitle } from "./describe-card-move";
 /** The Task a Thread is started on: what the request needs of its card. */
 export type StartTarget = Pick<WorkCard, "id" | "title" | "projectId">;
 
-/** The newest Thread of the Task and where it worked, as far as the client read them. */
-export interface NewestThreadPlace {
+/** The newest session of the Task (of any kind) and where it worked, as far as the client read them. */
+export interface NewestSessionPlace {
   /**
-   * The id of the workspace the newest Thread of the Task worked in, or `null`
-   * when that Thread had none, or the Task has no Thread yet.
+   * The id of the workspace the newest session of the Task worked in, or
+   * `null` when that session had none, or the Task has no session yet.
    */
   readonly workspaceId: string | null;
   /** That workspace as read, or `null` when it could not be found. */
@@ -24,7 +24,7 @@ export interface TaskThreadStart {
   readonly input: SessionSpawnInput;
   /**
    * A sentence for the undo line when the Thread could not start where the
-   * Task's newest Thread worked, or `undefined` when nothing was left out.
+   * Task's newest session worked, or `undefined` when nothing was left out.
    */
   readonly note: string | undefined;
 }
@@ -32,17 +32,17 @@ export interface TaskThreadStart {
 /**
  * Returns the request that starts a Thread on a Task with `prompt`. It names
  * the Task and its Project, so the join rule puts the Thread on it, and it
- * places the Thread in the workspace of the Task's newest Thread (on that
+ * places the Thread in the workspace of the Task's newest session (on that
  * workspace's runner) when `newest` says that workspace is ready.
  *
- * When the newest Thread worked in a workspace that is not ready (or cannot be
+ * When the newest session worked in a workspace that is not ready (or cannot be
  * found), the request leaves the workspace out, and `note` says so: the
  * Thread then starts with no workspace, and the user hears of it.
  */
 export const buildTaskThreadStart = (
   prompt: string,
   target: StartTarget,
-  newest: NewestThreadPlace,
+  newest: NewestSessionPlace,
 ): TaskThreadStart => {
   const base: SessionSpawnInput = {
     prompt,

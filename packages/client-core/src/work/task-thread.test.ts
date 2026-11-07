@@ -49,4 +49,13 @@ describe("a Thread row of the pane", () => {
   ])("names a Thread that %s", (_, role, title, label) => {
     expect(buildTaskThreadRow(buildDetailSession("a", { role, title })).label).toBe(label);
   });
+
+  it.each([
+    ["thread", true],
+    ["agent", false],
+    ["run", false],
+    ["assistant", false],
+  ] as const)("offers to move a session of kind %s to a new Task: %s", (kind, canMove) => {
+    expect(buildTaskThreadRow(buildDetailSession("a", { kind })).canMoveToNewTask).toBe(canMove);
+  });
 });

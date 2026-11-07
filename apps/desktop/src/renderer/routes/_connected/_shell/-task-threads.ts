@@ -5,7 +5,7 @@
  * details again.
  *
  * - A Thread started from a card joins the Task by name (`taskId`), in the
- *   Task's Project, and in the workspace of the Task's newest Thread when
+ *   Task's Project, and in the workspace of the Task's newest session when
  *   that workspace is still ready. When it is not, the Thread starts without
  *   a workspace and the line says so (`buildTaskThreadStart`).
  * - Nothing here navigates: the user stays on Work.
@@ -24,9 +24,10 @@ import {
   describeThreadRefused,
   describeThreadStarted,
   THREAD_MOVED_WORDS,
-  type NewestThreadPlace,
+  type NewestSessionPlace,
 } from "@hercule/client-core/work";
 import type { TaskDetail, WorkCard } from "@hercule/contract";
+import { buildStillSignedInCheck } from "../../../app/still-signed-in";
 import { useHandOffs } from "../../../screens/work/use-hand-offs";
 import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 
@@ -46,17 +47,18 @@ interface TaskThreadRequests {
 }
 
 /**
- * Reads where the newest Thread of the Task `taskId` worked: its workspace's
+ * Reads where the newest session of the Task `taskId` worked: its workspace's
  * id, and the workspace itself. A workspace the controller no longer has reads
  * as `null`. Any other failure rejects, so a Thread never starts in a place
  * the user was not told about.
  */
-const readNewestThreadPlace = async (
+const readNewestSessionPlace = async (
   client: HerculeClient,
   taskId: string,
-): Promise<NewestThreadPlace> => {
+): Promise<NewestSessionPlace> => {
+  // Any kind of session counts: the Task's newest session may be an agent's or a run's.
   const page = await client.session.query({
-    query: { taskId, kind: "thread", sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
+    query: { taskId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
   });
   const workspaceId = page.items[0]?.workspaceId ?? null;
   if (workspaceId === null) return { workspaceId: null, workspace: null };
@@ -93,8 +95,18 @@ const useTaskThreadRequests = ({
   };
 
   const start = useMutation({
-    mutationFn: async ({ card, prompt }: { card: WorkCard; prompt: string }) => {
-      const place = await readNewestThreadPlace(client, card.id);
+    mutationFn: async ({
+      card,
+      prompt,
+      isStillSignedIn,
+    }: {
+      card: WorkCard;
+      prompt: string;
+      isStillSignedIn: () => boolean;
+    }) => {
+      const place = await readNewestSessionPlace(client, card.id);
+      // The read can end after sign-out, and the spawn would then go out as the next account.
+      if (!isStillSignedIn()) throw new Error("You signed out before the thread started.");
       const { input, note } = buildTaskThreadStart(prompt, card, place);
       await client.session.spawn({ payload: input });
       return note;
@@ -106,7 +118,8 @@ const useTaskThreadRequests = ({
       readAgain(card.id);
       onStarted(card.id);
     },
-    onError: (error, { card, prompt }) => {
+    onError: (error, { card, prompt, isStillSignedIn }) => {
+      if (!isStillSignedIn()) return;
       say(describeThreadRefused(card, readErrorMessage(error)));
       onRefused(card, prompt);
     },
@@ -126,7 +139,7 @@ const useTaskThreadRequests = ({
 
   return {
     startThread: (card, prompt) => {
-      start.mutate({ card, prompt });
+      start.mutate({ card, prompt, isStillSignedIn: buildStillSignedInCheck(client) });
     },
     moveThreadToNewTask: (taskId, sessionId) => {
       move.mutate({ taskId, sessionId });

@@ -5,6 +5,7 @@ import { PlusIcon } from "../../icons/plus";
 import type { WorkCard } from "@hercule/contract";
 import { STAGE_NAMES, type ArrangedLane, type ArrangedLaneCell } from "@hercule/client-core/work";
 import { BoardCell } from "./board-cell";
+import type { PressedKeys } from "./work-card";
 
 /**
  * Returns what the line of counts of a folded lane says to a screen reader,
@@ -45,20 +46,24 @@ export function BoardLane({
   tabStopCardId,
   isStill,
   canWriteSummaries,
+  selectedIds,
   onToggleLane,
   onToggleCell,
   onAddTask,
-  onOpenCard,
+  onPressCard,
   onFocusCard,
 }: {
   readonly arrangedLane: ArrangedLane;
   readonly tabStopCardId: string | null;
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
+  /** The ids of the selected cards, which draw selected. */
+  readonly selectedIds: ReadonlySet<string>;
   readonly onToggleLane: (laneId: string) => void;
   readonly onToggleCell: (cellId: string) => void;
   readonly onAddTask: (laneId: string) => void;
-  readonly onOpenCard: (card: WorkCard) => void;
+  /** Called with the card and the keys held when a card is clicked. */
+  readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (cardId: string) => void;
 }): JSX.Element {
   const { lane, isFolded, failedCount, cells } = arrangedLane;
@@ -129,8 +134,9 @@ export function BoardLane({
               tabStopCardId={tabStopCardId}
               isStill={isStill}
               canWriteSummaries={canWriteSummaries}
+              selectedIds={selectedIds}
               onToggleCell={onToggleCell}
-              onOpenCard={onOpenCard}
+              onPressCard={onPressCard}
               onFocusCard={onFocusCard}
             />
           ))}

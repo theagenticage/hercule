@@ -19,6 +19,9 @@ import {
 /** The class of the layer that holds the copies in flight. */
 const FLIGHT_LAYER_CLASS = "board-flights";
 
+/** The class of the layer, inside the board, that holds a card sliding in under the card it merges into. */
+const UNDER_LAYER_CLASS = "board-merge-under";
+
 /** How many milliseconds apart the cards of a folding lane leave, and of an opening lane arrive. */
 export const FOLD_GAP = 12;
 const UNFOLD_GAP = 16;
@@ -439,19 +442,44 @@ const markMerged = (card: HTMLElement): void => {
 };
 
 /**
- * Plays a merge on the board: `ghost`, the copy of the card that merged away,
- * slides to the card `targetCardId` and fades on `hand`. 60ms later that card
- * settles from 1.03 to 1 on `hand`, and a thin ring on it fades. Call it after
- * the change that hid the merged card, so the target stands in its new place.
- * Removes `ghost` (and its layer, if it is the last copy in it) when done.
- * Under Reduce motion the copy just fades and the target does not swell.
+ * Replaces `ghost`, a copy of a card in a layer over the board, with a copy
+ * that looks the same but stands in a layer under every card of the board
+ * (the first child of its canvas, which paints before the cards). The copy
+ * then passes under the card it slides to. Returns `ghost` itself when the
+ * board has no canvas. The new copy is not a card for the keyboard, the
+ * screen reader or a lookup by id.
+ */
+const moveGhostUnderCards = (scroller: HTMLElement, ghost: HTMLElement): HTMLElement => {
+  const canvas = scroller.querySelector<HTMLElement>(".board-canvas");
+  if (canvas === null) return ghost;
+  const layer = document.createElement("div");
+  layer.className = UNDER_LAYER_CLASS;
+  layer.setAttribute("aria-hidden", "true");
+  canvas.prepend(layer);
+  const copy = ghostElement(ghost, layer);
+  for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
+    copy.removeAttribute(name);
+  }
+  removeFlight(ghost);
+  return copy;
+};
+
+/**
+ * Plays a merge on the board: `flying`, the copy of the card that merged away,
+ * slides to the card `targetCardId` and fades on `hand`, under that card. 60ms
+ * later that card settles from 1.03 to 1 on `hand`, and a thin ring on it
+ * fades. Call it after the change that hid the merged card, so the target
+ * stands in its new place. Removes the copy (and its layer, if it is the last
+ * copy in it) when done. Under Reduce motion the copy just fades and the
+ * target does not swell.
  */
 export const playMergeIn = (
   scroller: HTMLElement,
-  ghost: HTMLElement,
+  flying: HTMLElement,
   targetCardId: string,
 ): void => {
   const target = scroller.querySelector<HTMLElement>(`[data-card-id="${targetCardId}"]`);
+  const ghost = target === null ? flying : moveGhostUnderCards(scroller, flying);
   const body = trackBody(ghost);
   if (target === null) {
     body.to({ s: 0.97, o: 0 }, "hand", {

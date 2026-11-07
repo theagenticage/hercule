@@ -32,6 +32,8 @@ describe("readBoardKey", () => {
     [press("Delete"), { kind: "end", stage: "dropped" }],
     [press("t"), { kind: "start-thread" }],
     [press("m"), { kind: "merge" }],
+    [press("x"), { kind: "select" }],
+    [press("X", { shiftKey: true }), null],
     [press("f"), { kind: "fold-lane" }],
     [press("F", { shiftKey: true }), { kind: "fold-all-lanes" }],
     [press("/"), { kind: "find" }],
@@ -42,7 +44,7 @@ describe("readBoardKey", () => {
     expect(readBoardKey(pressed, true, "mac")).toEqual(command);
   });
 
-  it.each(["6", "0", "x", "w", "Tab"])(
+  it.each(["6", "0", "w", "Tab"])(
     "does not use %s, which later slices own or nobody does",
     (key) => {
       expect(readBoardKey(press(key), true, "mac")).toBeNull();
@@ -69,6 +71,7 @@ describe("readBoardKey", () => {
       "d",
       "t",
       "m",
+      "x",
       "Backspace",
       "Delete",
       "f",

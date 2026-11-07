@@ -27,7 +27,7 @@ import {
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
 import { controllerQuery, projectsQuery, userQuery } from "../../../app/queries";
-import { describeUndoKey } from "../../../app/primary-modifier";
+import { describeUndoKey, isPrimaryModifierHeld } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
@@ -39,13 +39,16 @@ import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
+import { SelectionBar } from "../../../screens/work/selection-bar";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
+import { useCardSelection } from "../../../screens/work/use-card-selection";
 import { useMergePick } from "../../../screens/work/use-merge-pick";
 import { useBoardReads } from "../../../screens/work/use-board-reads";
 import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
 import { useViewMotion } from "../../../screens/work/use-view-motion";
 import { useWorkView } from "../../../screens/work/use-work-view";
+import type { PressedKeys } from "../../../screens/work/work-card";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
@@ -114,7 +117,7 @@ export function WorkScreen({
   /** Puts a Task's id in the address to open its details, or `null` to close them. */
   readonly onChangeOpenTask: (taskId: string | null) => void;
 }): JSX.Element {
-  const { client, url, live, undoStack } = controller;
+  const { client, url, live, undoStack, pendingCardMoves } = controller;
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -129,6 +132,7 @@ export function WorkScreen({
   const moves = useCardMoves({
     client,
     undoStack,
+    pendingMoves: pendingCardMoves,
     serverBoard: board.data,
     scrollRef,
     onCardReturning: (taskId, how) => {
@@ -213,6 +217,8 @@ export function WorkScreen({
     isFiltering: view.isFiltering,
   });
   const shownIds = listShownCardIds(arrangedLanes);
+  // Which cards are selected. A card the board stops drawing leaves the selection.
+  const selection = useCardSelection(shownIds);
   const firstShownId = shownIds[0] ?? null;
   const tabStopCardId =
     view.currentCardId !== null && shownIds.includes(view.currentCardId)
@@ -285,6 +291,18 @@ export function WorkScreen({
     if (taskId === openTaskId) onChangeOpenTask(null);
   };
 
+  /**
+   * Marks every selected card Done or Dropped, each by `endTask`, as one
+   * gesture with one Undo, and empties the selection.
+   */
+  const endSelectedTasks = (stage: EndStage): void => {
+    const taskIds = selection.listSelected();
+    moves.endCardsTogether(stage, () => {
+      for (const taskId of taskIds) endTask(taskId, stage);
+    });
+    selection.clear();
+  };
+
   /** Moves a card to a stage from the details' stage path, as the number keys do. */
   const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
     const move = { taskId: card.id, stage };
@@ -354,7 +372,13 @@ export function WorkScreen({
     currentCards: moves.board?.cards ?? EMPTY_CARDS,
     projects,
     arrangedLanes,
+    selectedIds: selection.selectedIds,
     moveCard: moves.moveCard,
+    moveCards: (cardMoves, describe, note) => {
+      moves.moveCards(cardMoves, describe, note);
+      // The selection was carried and has landed.
+      selection.clear();
+    },
     say: moves.sayWithoutUndo,
     holdMerge: merging.holdMerge,
     onCarryingChange: (isCarryingNow) => {
@@ -366,6 +390,16 @@ export function WorkScreen({
 
   // ---------- Keys ----------
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
+
+  // A click opens the card, or selects it with ⌘ (Ctrl on Linux) held. While a
+  // card is picked to merge, every click chooses the card to merge into.
+  const pressCard = (card: WorkCard, keys: PressedKeys): void => {
+    if (mergePick.sourceId === null && isPrimaryModifierHeld(keys, bridge.platform)) {
+      selection.toggle(card.id);
+    } else {
+      openCard(card);
+    }
+  };
   const keys = useBoardKeys({
     view,
     cards,
@@ -382,6 +416,10 @@ export function WorkScreen({
       endTask(card.id, stage);
     },
     onStartThread: threads.askThread,
+    onToggleSelectCard: (card) => {
+      selection.toggle(card.id);
+    },
+    selection: { count: selection.selectedIds.size, clear: selection.clear },
     mergePick,
     onAdd: (laneId) => {
       openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
@@ -392,6 +430,7 @@ export function WorkScreen({
       close: () => {
         onChangeOpenTask(null);
       },
+      pressReturn: (card) => pane.pressReturn(card.id),
     },
   });
 
@@ -444,12 +483,13 @@ export function WorkScreen({
             tabStopCardId={tabStopCardId}
             isStill={view.display.isStill}
             canWriteSummaries={canWriteSummaries}
+            selectedIds={selection.selectedIds}
             onToggleLane={view.toggleLane}
             onToggleCell={view.toggleCell}
             onAddTask={(laneId) => {
               openAddSheet(toAddLane(laneId));
             }}
-            onOpenCard={openCard}
+            onPressCard={pressCard}
             onFocusCard={view.setCurrentCardId}
           />
         ))}
@@ -531,6 +571,16 @@ export function WorkScreen({
             onChangeTask={onChangeOpenTask}
           />
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
+          <SelectionBar
+            count={selection.selectedIds.size}
+            onDone={() => {
+              endSelectedTasks("done");
+            }}
+            onDrop={() => {
+              endSelectedTasks("dropped");
+            }}
+            onClear={selection.clear}
+          />
           <UndoLine
             text={moves.line.text}
             onUndo={moves.line.canUndo ? moves.undoLastMove : null}

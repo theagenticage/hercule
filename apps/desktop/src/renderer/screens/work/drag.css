@@ -192,6 +192,16 @@
   box-shadow: var(--h-hover);
 }
 
+/* The copy of a card sliding in under the card it merges into stands in the
+   board's own canvas, as its first child: it is positioned and has no
+   z-index, so every card, which is positioned too and comes later, paints
+   over it. */
+.board-merge-under {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 /* A card that took part in a merge stands above the card sliding in or out
    under it, and wears the same thin ring that fades as a card that landed. */
 .desk-card[data-merged] {
@@ -203,4 +213,30 @@
   .work-desk[data-carrying] .board-cell::before {
     transition: none;
   }
+}
+
+/* ---------- Several cards in the hand ---------- */
+/* The cards carried behind the first ride under it, one place behind the
+   other. They keep the check of a selected card, and lose its ring. */
+.board-carry .desk-card.is-follower .card-stock {
+  box-shadow: var(--h-hover);
+}
+/* The count on the card in the hand: itself and the cards behind it. */
+.board-carry .desk-card.has-followers::after {
+  content: attr(data-count);
+  position: absolute;
+  z-index: 6;
+  right: -8px;
+  top: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--ink);
+  color: var(--desk);
+  font: var(--type-meta);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
 }

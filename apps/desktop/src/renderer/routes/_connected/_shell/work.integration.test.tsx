@@ -25,6 +25,7 @@ import {
   type Handler,
 } from "../../../app/testing";
 import { buildPendingIntentsKey, UNDO_WINDOW_MS } from "../../../app/pending-intents";
+import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 
 // The board stops the paws of a working colleague whose card is out of view.
 beforeEach(() => {
@@ -113,6 +114,7 @@ const openWork = async ({
   handlers = {},
   retryFailedReads = true,
   path = "/work",
+  platform = "mac",
 }: {
   readonly board?: () => WorkBoard;
   readonly hasAnyTask?: boolean;
@@ -120,6 +122,7 @@ const openWork = async ({
   readonly handlers?: Readonly<Record<string, Handler>>;
   readonly retryFailedReads?: boolean;
   readonly path?: string;
+  readonly platform?: DesktopPlatform;
 } = {}) => {
   const calls = stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
@@ -144,7 +147,7 @@ const openWork = async ({
     ...handlers,
   });
   const app = await renderApp(
-    createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer", platform }),
     {
       path,
       retryFailedReads,
@@ -979,6 +982,35 @@ describe("the Work screen's details pane", () => {
     });
   });
 
+  it("moves the Task from the stage path with the keyboard alone", async () => {
+    const user = userEvent.setup();
+    const task = CARDS[2]!;
+    const { calls } = await openWork({
+      handlers: {
+        [detailPath(task.id)]: { body: buildDetail(task) },
+        [`POST /api/v1/tasks/${task.id}/move`]: () => ({
+          body: { ...buildDetail(task).task, stage: "building" },
+        }),
+      },
+    });
+    await user.click(
+      await screen.findByRole("button", { name: /^Order history hides cancelled items/ }),
+    );
+    const pane = await screen.findByRole("dialog", { name: "Order history hides cancelled items" });
+    const building = within(pane).getByRole("button", { name: "Building" });
+
+    // The step is a tab stop, and Return on it moves the Task.
+    expect(building.tabIndex).toBe(0);
+    act(() => {
+      building.focus();
+    });
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(listCalls(calls, `POST /api/v1/tasks/${task.id}/move`)).toHaveLength(1);
+    });
+  });
+
   it("swaps to another card's Task without a second sheet, and reads the new Task once", async () => {
     const user = userEvent.setup();
     const first = CARDS[0]!;
@@ -1068,6 +1100,39 @@ describe("the Work screen's details pane", () => {
     );
 
     expect(await screen.findByText("This Task no longer exists.")).toBeTruthy();
+    await waitFor(
+      () => {
+        expect(router.state.location.search).toEqual({});
+      },
+      { timeout: 4_000 },
+    );
+  });
+
+  it("says a Task is gone, offers nothing to do to it, and closes when a read after the first finds it deleted", async () => {
+    const user = userEvent.setup();
+    const task = CARDS[2]!;
+    let isDeleted = false;
+    const { router, live } = await openWork({
+      handlers: {
+        [detailPath(task.id)]: () =>
+          isDeleted
+            ? { status: 404, body: buildErrorBody("not_found", "no such Task") }
+            : { body: buildDetail(task) },
+      },
+    });
+    await user.click(
+      await screen.findByRole("button", { name: /^Order history hides cancelled items/ }),
+    );
+    const pane = await screen.findByRole("dialog", { name: "Order history hides cancelled items" });
+    await within(pane).findByRole("button", { name: /^Done/ });
+    await live.waitForFirstPushes();
+
+    isDeleted = true;
+    live.pushInvalidation("task", [task.id], undefined, "updated", true);
+
+    expect(await screen.findByText("This Task no longer exists.")).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /^Done/ })).toBeNull();
+    expect(within(pane).getByRole("button", { name: "Building" })).toHaveProperty("disabled", true);
     await waitFor(
       () => {
         expect(router.state.location.search).toEqual({});
@@ -1289,6 +1354,26 @@ describe("answering a question from the details pane", () => {
     });
   });
 
+  it("sends the suggested answer with Return on the card the pane was opened from", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openAsking();
+    await openAskingPane(user);
+    shortenUndoWindow();
+    // The pane ignores a Return pressed just as it showed the Task.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.activeElement).toBe(getCard("Refund emails show the wrong currency"));
+
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Answered “The shop's”.")).toBeTruthy();
+    await waitFor(
+      () => {
+        expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
+      },
+      { timeout: SHORT_WINDOW_MS * 2 },
+    );
+  });
+
   it("sends the words the user typed, and sends nothing when Undo is pressed", async () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openAsking();
@@ -1466,11 +1551,25 @@ describe("trying a failed run again from the details pane", () => {
     expect(screen.getByRole("button", { name: /^Undo/ })).toBeTruthy();
   });
 
+  it("tries again with Return on the card the pane was opened from, where the focus stays", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openFailed();
+    await openFailedPane(user);
+    // The pane ignores a Return pressed just as it showed the Task.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.activeElement).toBe(getCard("Cache delivery slot lookups"));
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(listCalls(calls, RERUN_PATH)).toHaveLength(1);
+    });
+  });
+
   it("tries again with Return on the title", async () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openFailed();
     const pane = await openFailedPane(user);
-    // The pane ignores a Return pressed just as it showed the Task.
     await new Promise((resolve) => setTimeout(resolve, 300));
     within(pane).getByRole("heading", { name: "Cache delivery slot lookups" }).focus();
 
@@ -1626,7 +1725,9 @@ const openEndable = async ({
   sessions = [],
   workspace = null,
   handlers = {},
+  platform = "mac",
 }: {
+  readonly platform?: DesktopPlatform;
   readonly refuseEnd?: boolean;
   readonly sessions?: ReturnType<typeof buildSession>[];
   readonly workspace?: ReturnType<typeof buildWorkspace> | null;
@@ -1683,6 +1784,7 @@ const openEndable = async ({
   const app = await openWork({
     board: () => buildBoard(...cards),
     handlers: { ...taskHandlers, ...handlers },
+    platform,
   });
   return { ...app, getBoardCards: () => cards };
 };
@@ -1894,6 +1996,39 @@ describe("starting a Thread on a Task", () => {
     expect(screen.getByRole("textbox", { name: "What should this thread do?" })).toBeTruthy();
   });
 
+  it("starts in the workspace of the Task's newest session even when that is not a Thread", async () => {
+    const user = userEvent.setup({ delay: null });
+    const sidebarSessions = buildSidebarHandlers(SIDEBAR_FIXTURE)["GET /api/v1/sessions"]!;
+    const { calls } = await openEndable({
+      workspace: READY_WORKSPACE,
+      handlers: {
+        // Only a read that does not ask for Threads alone finds the run's session.
+        "GET /api/v1/sessions": (call) => {
+          const query = new URLSearchParams(call.search);
+          if (query.get("taskId") === null) {
+            return typeof sidebarSessions === "function" ? sidebarSessions(call) : sidebarSessions;
+          }
+          return { body: { items: query.get("kind") === null ? [NEWEST] : [] } };
+        },
+      },
+    });
+    await screen.findByRole("button", { name: /^Label the pallets/ });
+
+    await startFromKey(user, "Check the carrier labels");
+
+    await waitFor(() => {
+      expect(readBodies(calls, "POST /api/v1/sessions")).toEqual([
+        {
+          prompt: "Check the carrier labels",
+          taskId: LABEL.id,
+          projectId: WEBSHOP.id,
+          runnerId: READY_WORKSPACE.runnerId,
+          workspace: { kind: "existing", workspaceId: READY_WORKSPACE.id },
+        },
+      ]);
+    });
+  });
+
   it("starts without a workspace and says so when the newest Thread's workspace is no longer ready", async () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openEndable({
@@ -1978,6 +2113,39 @@ describe("moving a Thread to a new Task", () => {
     });
     expect(await screen.findByText("Moved the thread to a new Task.")).toBeTruthy();
     expect(within(pane).queryByText(/still joins/)).toBeNull();
+  });
+
+  it("offers the move on a Thread and not on an Agent or run session", async () => {
+    const user = userEvent.setup({ delay: null });
+    const row = (id: number, title: string, kind: "thread" | "agent" | "run") => ({
+      id: buildTaskId(id),
+      title,
+      role: null,
+      kind,
+      status: "idle" as const,
+      openRequests: [],
+      done: false,
+    });
+    await openEndable({
+      handlers: {
+        [detailPath(LABEL.id)]: {
+          body: buildDetail(LABEL, {
+            sessions: [
+              row(941, "Fix the labels", "thread"),
+              row(942, "Nightly import", "agent"),
+              row(943, "Review PR step", "run"),
+            ],
+            sessionCount: 3,
+          }),
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^Label the pallets/ }));
+    const pane = await screen.findByRole("dialog", { name: "Label the pallets" });
+    await within(pane).findByText("Nightly import");
+
+    expect(within(pane).getAllByText("Move to a new Task")).toHaveLength(1);
   });
 
   it("moves nothing when Esc takes the question back, and keeps the pane open", async () => {
@@ -2194,5 +2362,264 @@ describe("merging two cards", () => {
 
     expect(getCard("Label the pallets").hasAttribute("data-merge-source")).toBe(false);
     expect(screen.queryByText(/^Merged into/)).toBeNull();
+  });
+});
+
+// ---------- Selecting several cards ----------
+
+/** Returns the bar over the board that offers Done, Drop and Clear for the selected cards. */
+const getSelectionBar = (): HTMLElement => screen.getByRole("toolbar", { hidden: true });
+
+/** Returns whether the selection bar is shown: it is in the page at all times and fades out. */
+const isSelectionBarShown = (): boolean => getSelectionBar().classList.contains("is-on");
+
+/** Returns the titles of the cards of the one cell, top to bottom. */
+const readCellTitles = (): readonly string[] =>
+  within(screen.getByRole("group", { name: /^Exploring/ }))
+    .getAllByRole("button")
+    .map((card) => card.textContent?.slice(0, 8) ?? "");
+
+describe("selecting several cards", () => {
+  it("marks the focused card with X, counts the marked cards on a bar, and Esc clears them", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    expect(isSelectionBarShown()).toBe(false);
+    // Until a card is marked, no card says whether it is pressed.
+    expect(getCard("Pack the returns").hasAttribute("aria-pressed")).toBe(false);
+
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+
+    expect(getCard("Pack the returns").getAttribute("aria-pressed")).toBe("true");
+    expect(getCard("Label the pallets").getAttribute("aria-pressed")).toBe("false");
+    // The marked card has its ring, and every card keeps a check ready, which the marked one shows.
+    expect(getCard("Pack the returns").classList.contains("is-selected")).toBe(true);
+    expect(getCard("Label the pallets").classList.contains("is-selected")).toBe(false);
+    expect(getCard("Pack the returns").querySelector(".card-check")).not.toBeNull();
+    expect(isSelectionBarShown()).toBe(true);
+    expect(getSelectionBar().textContent).toContain("1 selected");
+    // One card needs no hint about carrying them all.
+    expect(getSelectionBar().textContent).not.toContain("Drag any of them");
+
+    focusCard("Weigh the parcels");
+    await user.keyboard("x");
+
+    expect(getSelectionBar().textContent).toContain("2 selected");
+    expect(getSelectionBar().textContent).toContain("Drag any of them to move them all");
+
+    // X on a marked card takes the mark off.
+    await user.keyboard("x");
+    expect(getSelectionBar().textContent).toContain("1 selected");
+    await user.keyboard("x");
+    await user.keyboard("{Escape}");
+
+    expect(isSelectionBarShown()).toBe(false);
+    expect(getCard("Pack the returns").hasAttribute("aria-pressed")).toBe(false);
+    expect(getCard("Weigh the parcels").hasAttribute("aria-pressed")).toBe(false);
+  });
+
+  it("marks a card with ⌘-click on a Mac, and opens the pane for a plain click", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable();
+    const pack = await screen.findByRole("button", { name: /^Pack the returns/ });
+
+    await user.keyboard("{Meta>}");
+    await user.click(pack);
+    await user.click(getCard("Weigh the parcels"));
+    await user.keyboard("{/Meta}");
+
+    expect(getSelectionBar().textContent).toContain("2 selected");
+    expect(screen.queryByRole("dialog", { name: "Pack the returns" })).toBeNull();
+
+    // Ctrl is no modifier on a Mac, and a plain click opens the card even while some are marked.
+    await user.keyboard("{Control>}");
+    await user.click(getCard("Label the pallets"));
+    await user.keyboard("{/Control}");
+
+    expect(await screen.findByRole("dialog", { name: "Label the pallets" })).toBeTruthy();
+    expect(getSelectionBar().textContent).toContain("2 selected");
+  });
+
+  it("marks a card with Ctrl-click on Linux, where ⌘ is not the modifier", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable({ platform: "linux" });
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+
+    await user.keyboard("{Meta>}");
+    await user.click(getCard("Weigh the parcels"));
+    await user.keyboard("{/Meta}");
+    expect(await screen.findByRole("dialog", { name: "Weigh the parcels" })).toBeTruthy();
+    expect(isSelectionBarShown()).toBe(false);
+
+    await user.keyboard("{Control>}");
+    await user.click(getCard("Pack the returns"));
+    await user.keyboard("{/Control}");
+
+    expect(getSelectionBar().textContent).toContain("1 selected");
+  });
+
+  it("steps back one thing at a time: the pane first, then the marks", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    await user.click(getCard("Label the pallets"));
+    await screen.findByRole("dialog", { name: "Label the pallets" });
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(isSelectionBarShown()).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(isSelectionBarShown()).toBe(false);
+  });
+
+  it("lets a card leave the marks when the board stops drawing it", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    focusCard("Weigh the parcels");
+    await user.keyboard("x");
+    expect(getSelectionBar().textContent).toContain("2 selected");
+
+    await user.type(screen.getByRole("combobox", { name: "Find on the board" }), "Pack");
+
+    await waitFor(() => {
+      expect(getSelectionBar().textContent).toContain("1 selected");
+    });
+  });
+
+  it("marks every selected card Done with one update each, says so in one line, and one Undo puts them all back in place", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    focusCard("Weigh the parcels");
+    await user.keyboard("x");
+
+    await user.click(within(getSelectionBar()).getByRole("button", { name: "Done" }));
+
+    expect(screen.getByText("Marked 2 Tasks Done. They have left the board.")).toBeTruthy();
+    expect(readCellTitles()).toEqual(["Label th"]);
+    expect(isSelectionBarShown()).toBe(false);
+    await waitFor(() => {
+      expect(readBodies(calls, `PATCH /api/v1/tasks/${PACK.id}`)).toEqual([{ stage: "done" }]);
+      expect(readBodies(calls, `PATCH /api/v1/tasks/${WEIGH.id}`)).toEqual([{ stage: "done" }]);
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Undo/ }));
+
+    await waitFor(() => {
+      expect(readCellTitles()).toEqual(["Pack the", "Label th", "Weigh th"]);
+    });
+    expect(screen.getByText("Put back: Marked 2 Tasks Done.")).toBeTruthy();
+    await waitFor(() => {
+      expect(readBodies(calls, `POST /api/v1/tasks/${PACK.id}/move`)).toEqual([
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: null },
+      ]);
+      expect(readBodies(calls, `POST /api/v1/tasks/${WEIGH.id}/move`)).toEqual([
+        { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id },
+      ]);
+    });
+    // Each card was sent once, and the Task in between was never touched.
+    expect(listCalls(calls, `PATCH /api/v1/tasks/${LABEL.id}`)).toHaveLength(0);
+    expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toHaveLength(0);
+  });
+
+  it("restores neighbours that ended together in the order they stood", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Weigh the parcels");
+    await user.keyboard("x");
+    focusCard("Label the pallets");
+    await user.keyboard("x");
+
+    await user.click(within(getSelectionBar()).getByRole("button", { name: "Done" }));
+    await user.click(screen.getByRole("button", { name: /^Undo/ }));
+
+    await waitFor(() => {
+      expect(readCellTitles()).toEqual(["Pack the", "Label th", "Weigh th"]);
+    });
+    expect(readBodies(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toEqual([
+      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: PACK.id },
+    ]);
+    expect(readBodies(calls, `POST /api/v1/tasks/${WEIGH.id}/move`)).toEqual([
+      { stage: "exploring", projectId: WEBSHOP.id, afterTaskId: LABEL.id },
+    ]);
+  });
+
+  it("drops every selected card from the bar, and clears the marks without sending anything with Clear", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    focusCard("Label the pallets");
+    await user.keyboard("x");
+
+    await user.click(within(getSelectionBar()).getByRole("button", { name: /^Clear/ }));
+
+    expect(isSelectionBarShown()).toBe(false);
+    expect(listCalls(calls, `PATCH /api/v1/tasks/${PACK.id}`)).toHaveLength(0);
+
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    focusCard("Label the pallets");
+    await user.keyboard("x");
+    await user.click(within(getSelectionBar()).getByRole("button", { name: "Drop" }));
+
+    expect(screen.getByText("Dropped 2 Tasks. They have left the board.")).toBeTruthy();
+    await waitFor(() => {
+      expect(readBodies(calls, `PATCH /api/v1/tasks/${PACK.id}`)).toEqual([{ stage: "dropped" }]);
+      expect(readBodies(calls, `PATCH /api/v1/tasks/${LABEL.id}`)).toEqual([{ stage: "dropped" }]);
+    });
+  });
+
+  it("names the one card when only one is selected, as D would", async () => {
+    const user = userEvent.setup({ delay: null });
+    await openEndable();
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+
+    await user.click(within(getSelectionBar()).getByRole("button", { name: "Done" }));
+
+    expect(screen.getByText('Marked "Pack the returns" Done. It has left the board.')).toBeTruthy();
+  });
+
+  it("brings back the card that was refused, and the key still undoes the one that saved", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openEndable({
+      handlers: { [`PATCH /api/v1/tasks/${LABEL.id}`]: TASK_GONE },
+    });
+    await screen.findByRole("button", { name: /^Pack the returns/ });
+    focusCard("Pack the returns");
+    await user.keyboard("x");
+    focusCard("Label the pallets");
+    await user.keyboard("x");
+
+    await user.click(within(getSelectionBar()).getByRole("button", { name: "Done" }));
+
+    expect(
+      await screen.findByText(
+        /^Marking "Label the pallets" Done did not save, so the card came back/,
+      ),
+    ).toBeTruthy();
+    expect(readCellTitles()).toEqual(["Label th", "Weigh th"]);
+    // The line shows why and offers no Undo, but the key still undoes the card that did leave.
+    await user.keyboard("{Meta>}z{/Meta}");
+    await waitFor(() => {
+      expect(readCellTitles()).toEqual(["Pack the", "Label th", "Weigh th"]);
+    });
+    expect(readBodies(calls, `POST /api/v1/tasks/${PACK.id}/move`)).toHaveLength(1);
+    expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/move`)).toHaveLength(0);
   });
 });

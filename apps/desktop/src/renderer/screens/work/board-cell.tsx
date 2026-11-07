@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { STAGE_NAMES, type ArrangedLaneCell } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import { ChevronDownIcon } from "../../icons/chevron-down";
-import { WorkCardView } from "./work-card";
+import { WorkCardView, type PressedKeys } from "./work-card";
 
 /**
  * Returns the words of the line under the cards of a cell: "13 more" or "3
@@ -27,7 +27,8 @@ const describeFoot = (cell: ArrangedLaneCell): string => {
  *
  * The cell carries `data-cell-id`, `data-lane-id` and `data-stage`, which drag
  * and keyboard code find it by. `tabStopCardId` is the one card on the board
- * that Tab leads onto.
+ * that Tab leads onto. `selectedIds` are the selected cards, which draw
+ * selected, and `onPressCard` is called when a card is clicked.
  */
 export function BoardCell({
   laneId,
@@ -36,8 +37,9 @@ export function BoardCell({
   tabStopCardId,
   isStill,
   canWriteSummaries,
+  selectedIds,
   onToggleCell,
-  onOpenCard,
+  onPressCard,
   onFocusCard,
 }: {
   readonly laneId: string;
@@ -48,7 +50,8 @@ export function BoardCell({
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
   readonly onToggleCell: (cellId: string) => void;
-  readonly onOpenCard: (card: WorkCard) => void;
+  readonly selectedIds: ReadonlySet<string>;
+  readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (cardId: string) => void;
 }): JSX.Element {
   const { arrangement, stage, cellId } = cell;
@@ -69,7 +72,9 @@ export function BoardCell({
           isTabStop={card.id === tabStopCardId}
           isStill={isStill}
           canWriteSummaries={canWriteSummaries}
-          onOpen={onOpenCard}
+          isSelected={selectedIds.has(card.id)}
+          isSelecting={selectedIds.size > 0}
+          onPress={onPressCard}
           onFocus={onFocusCard}
         />
       ))}

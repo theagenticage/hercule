@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import {
   buildDropMove,
   describeCardMove,
-  settleDropMove,
+  describeCardsMove,
+  settleGroupDrop,
   type ArrangedLane,
   type CardMove,
   type DropPlace,
@@ -80,6 +81,13 @@ const DOCK_LIFT = 0.6;
 /** How long, in milliseconds, a card that leaves its dock glides to the pointer instead of jumping to it. */
 const UNDOCK_GLIDE_MS = 200;
 
+/** How a selected card carried behind the card in the hand sits: each one further, in pixels, and smaller, as a share of its size. */
+const FOLLOWER_OFFSET = 5;
+const FOLLOWER_SHRINK = 0.02;
+
+/** How long, in milliseconds, each card carried behind the first lands after the one before it. */
+const FOLLOWER_LAND_GAP = 40;
+
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
   /** The element that scrolls the board. It stays mounted for the life of the screen, so it holds the pointer. */
@@ -96,10 +104,25 @@ export interface BoardDragOptions {
   /** The lanes the board draws: which are folded, and which cards a cell hides. */
   readonly arrangedLanes: readonly ArrangedLane[];
   /**
+   * The ids of the selected cards. Pressing one of them and carrying it
+   * carries every selected card the board draws behind it.
+   */
+  readonly selectedIds: ReadonlySet<string>;
+  /**
    * Moves a card and shows the move on the undo line, with `note` added to the
    * line when there is one. A move that changes nothing does nothing.
    */
   readonly moveCard: (move: CardMove, words: string, note?: string) => void;
+  /**
+   * Moves the cards of a drop of several as one gesture (see
+   * `CardMoves.moveCards`). `describe` returns the words for the undo line
+   * for the moves that remain.
+   */
+  readonly moveCards: (
+    moves: readonly CardMove[],
+    describe: (moves: readonly CardMove[]) => string,
+    note?: string,
+  ) => void;
   /** Shows `text` on the undo line, with no Undo, for a drop that sent nothing. */
   readonly say: (text: string) => void;
   /**
@@ -138,6 +161,18 @@ interface Press {
   readonly startY: number;
 }
 
+/** A selected card carried behind the card in the hand. */
+interface Follower {
+  readonly card: WorkCard;
+  /** The copy of the card behind the one in hand, in the carry layer. */
+  readonly ghost: HTMLElement;
+  readonly body: MotionBody;
+  /** Where the layout puts the copy, in window pixels. */
+  readonly home: LayoutRect;
+  /** How many places behind the card in the hand it rides: 1 is right behind it. */
+  readonly depth: number;
+}
+
 /** A card in the hand. */
 interface Carry {
   readonly pointerId: number;
@@ -149,6 +184,8 @@ interface Carry {
   /** The copy of the card in the hand, the only child of `layer`. */
   readonly ghost: HTMLElement;
   readonly body: MotionBody;
+  /** The selected cards carried behind it, in the order they land. Empty for a card carried alone. */
+  readonly followers: readonly Follower[];
   /** The hollow that shows where the card would land. It lives in the cell, outside React's reach. */
   readonly slot: HTMLElement;
   /** Where the layout puts the copy in the hand, in window pixels. */
@@ -185,10 +222,14 @@ interface MergeChoice {
   readonly element: HTMLElement;
 }
 
-/** What a drop sends, with the words for the undo line and the note that follows them, if any. */
+/**
+ * What a drop sends: the moves, the card in the hand first and then the cards
+ * behind it, the words for the undo line (`describe` is given the moves that
+ * are sent) and the note that follows them, if any.
+ */
 interface DropChange {
-  readonly move: CardMove;
-  readonly words: string;
+  readonly moves: readonly CardMove[];
+  readonly describe: (moves: readonly CardMove[]) => string;
   readonly note: string | undefined;
 }
 
@@ -413,7 +454,9 @@ const createBoardDrag = (
    */
   const choosePlace = (c: Carry): void => {
     const point = toBoardPoint(c.view, c.hand.x, c.hand.y);
-    const candidate = findMergeCandidate(c.geometry, point.x, point.y);
+    // A merge joins two cards, so several cards in the hand never merge.
+    const candidate =
+      c.followers.length > 0 ? null : findMergeCandidate(c.geometry, point.x, point.y);
     if (candidate === null) {
       followMergeWish(c, null);
       const place = chooseDropPlace(c.geometry, point.x, point.y);
@@ -447,6 +490,23 @@ const createBoardDrag = (
     c.scrollFrame = requestAnimationFrame(step);
   };
 
+  /** Sends the cards behind the one in hand after it as a stack: each 5px further along and 2% smaller than the one before. */
+  const moveFollowers = (c: Carry): void => {
+    const x = c.hand.x - c.grab.x;
+    const y = c.hand.y - c.grab.y;
+    for (const follower of c.followers) {
+      follower.body.to(
+        {
+          x: x + follower.depth * FOLLOWER_OFFSET - follower.home.left,
+          y: y + follower.depth * FOLLOWER_OFFSET - follower.home.top,
+          s: 1 - follower.depth * FOLLOWER_SHRINK,
+        },
+        "travel",
+        { reduced: c.reduced },
+      );
+    }
+  };
+
   /** Follows the pointer: the copy goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
   const followHand = (c: Carry, x: number, y: number): void => {
     const now = performance.now();
@@ -476,6 +536,7 @@ const createBoardDrag = (
         if (c.merge === null) c.body.to({ r: 0 }, "hand", { reduced: false });
       }, STILL_AFTER_MS);
     }
+    moveFollowers(c);
     choosePlace(c);
     scrollAtEdge(c);
   };
@@ -493,6 +554,19 @@ const createBoardDrag = (
       tilt: shown.r,
       lift: shown.l,
       velocity: { x: toPixelsASecond(c.hand.vx), y: toPixelsASecond(c.hand.vy) },
+    };
+  };
+
+  /** Reads how the copy of a follower looks now, for its landing to start from. It has no speed: it trails the hand. */
+  const readFollowerPose = (follower: Follower): ReleasePose => {
+    const shown = follower.body.values;
+    return {
+      centerX: follower.home.left + follower.home.width / 2 + shown.x,
+      centerY: follower.home.top + follower.home.height / 2 + shown.y,
+      scale: shown.s,
+      tilt: shown.r,
+      lift: shown.l,
+      velocity: { x: 0, y: 0 },
     };
   };
 
@@ -522,6 +596,12 @@ const createBoardDrag = (
     readOptions().onCarryingChange(false);
     c.slot.remove();
     delete c.source.dataset["dragged"];
+    for (const follower of c.followers) {
+      scroller
+        .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
+        ?.removeAttribute("data-dragged");
+      follower.body.clear();
+    }
     clearMarks(c);
     c.body.clear();
     c.layer.remove();
@@ -530,23 +610,45 @@ const createBoardDrag = (
   /**
    * Puts the card on the page at the place of `change`, or back where it was when
    * there is none, and lets it come down from where it looks now. The card
-   * leaves the hand, and the move is sent, in one committed change, so the
-   * board is measured after both.
+   * leaves the hand, and the moves are sent, in one committed change, so the
+   * board is measured after both. The cards behind it come down after it, each
+   * 40ms after the one before, at their places or at home.
    */
   const releaseCarry = (c: Carry, spring: SpringName, change: DropChange | undefined): void => {
     const pose = readReleasePose(c);
+    const followerPoses = c.followers.map(readFollowerPose);
     endCarry(c);
     flipBoard(scroller, spring, () => {
       c.slot.remove();
       delete c.source.dataset["dragged"];
+      for (const follower of c.followers) {
+        scroller
+          .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
+          ?.removeAttribute("data-dragged");
+      }
       clearMarks(c);
       flushSync(() => {
         const options = readOptions();
         options.onCarryingChange(false);
-        if (change !== undefined) options.moveCard(change.move, change.words, change.note);
+        if (change === undefined) return;
+        if (c.followers.length === 0) {
+          options.moveCard(change.moves[0]!, change.describe(change.moves), change.note);
+        } else {
+          options.moveCards(change.moves, change.describe, change.note);
+        }
       });
     });
-    landCard(scroller, c, pose, spring, change?.move);
+    landCard(scroller, c, pose, spring, change?.moves[0], 0);
+    c.followers.forEach((follower, index) => {
+      landCard(
+        scroller,
+        { ...follower, layer: c.layer, place: c.place },
+        followerPoses[index]!,
+        spring,
+        change?.moves.find((move) => move.taskId === follower.card.id),
+        (index + 1) * FOLLOWER_LAND_GAP,
+      );
+    });
   };
 
   /**
@@ -574,7 +676,7 @@ const createBoardDrag = (
       playMergeIn(scroller, c.ghost, target.cardId);
       return;
     }
-    landCard(scroller, c, pose, "travel", undefined);
+    landCard(scroller, c, pose, "travel", undefined, 0);
     options.say("A card left the board, so nothing was merged.");
   };
 
@@ -598,24 +700,38 @@ const createBoardDrag = (
       releaseCarry(c, "travel", undefined);
       return;
     }
+    const followers = c.followers.map((follower) => follower.card);
     const drop = buildDropMove({
       movingCard: c.card,
       lane,
       stage: place.stage,
       beforeCardId: place.kind === "cell" ? place.beforeCardId : null,
+      followerIds: followers.map((card) => card.id),
     });
-    const settled = settleDropMove({ cards: options.currentCards }, options.projects, drop);
+    const settled = settleGroupDrop(
+      { cards: options.currentCards },
+      options.projects,
+      drop,
+      followers,
+    );
     if (settled.kind === "refuse") {
       releaseCarry(c, "travel", undefined);
       options.say(settled.reason);
       return;
     }
-    const card = options.currentCards.find((each) => each.id === c.card.id) ?? c.card;
-    releaseCarry(c, "hand", {
-      move: settled.move,
-      words: describeCardMove(card, settled.move, options.projects),
-      note: settled.note,
-    });
+    // The words name the cards as they stood before the move, which is how the board is now.
+    const describe = (moves: readonly CardMove[]): string => {
+      const [only] = moves;
+      const card =
+        only === undefined
+          ? undefined
+          : (options.currentCards.find((each) => each.id === only.taskId) ??
+            [c.card, ...followers].find((each) => each.id === only.taskId));
+      return only !== undefined && moves.length === 1 && card !== undefined
+        ? describeCardMove(card, only, options.projects)
+        : describeCardsMove(moves, place.stage ?? c.card.stage, options.projects);
+    };
+    releaseCarry(c, "hand", { moves: settled.moves, describe, note: settled.note });
   };
 
   /**
@@ -627,6 +743,45 @@ const createBoardDrag = (
     if (carry === null) return;
     swallowNextClick(isPointerUp);
     releaseCarry(carry, "travel", undefined);
+  };
+
+  /**
+   * Picks up the selected cards other than the pressed one, when the pressed
+   * card is selected: each is copied into the carry layer where it stands,
+   * and hidden in the page. The cards are taken in the order the board draws
+   * them, and only those the board draws and the screen knows. The cards
+   * below the hidden ones glide up.
+   */
+  const liftFollowers = (
+    layer: HTMLElement,
+    pressed: WorkCard,
+    options: BoardDragOptions,
+  ): readonly Follower[] => {
+    if (!options.selectedIds.has(pressed.id)) return [];
+    const followers: Follower[] = [];
+    const elements: HTMLElement[] = [];
+    for (const element of scroller.querySelectorAll<HTMLElement>("[data-card-id]")) {
+      const card = options.cards.find((each) => each.id === element.dataset["cardId"]);
+      if (card === undefined || card.id === pressed.id || !options.selectedIds.has(card.id)) {
+        continue;
+      }
+      const depth = followers.length + 1;
+      const home = measureLayoutRect(element);
+      const ghost = ghostElement(element, layer);
+      for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
+        ghost.removeAttribute(name);
+      }
+      ghost.classList.add("is-follower");
+      // Each card sits behind the one before it.
+      ghost.style.zIndex = String(-depth);
+      followers.push({ card, ghost, body: trackBody(ghost), home, depth });
+      elements.push(element);
+    }
+    // The copies are measured and made first, so hiding the cards moves nothing they were copied from.
+    flipBoard(scroller, "hand", () => {
+      for (const element of elements) element.dataset["dragged"] = "";
+    });
+    return followers;
   };
 
   /** Lifts the pressed card into the hand: the card is copied into the carry layer, and its place in the page becomes a slot. */
@@ -678,6 +833,12 @@ const createBoardDrag = (
     slot.style.height = `${String(home.height)}px`;
     cell.insertBefore(slot, source);
     source.dataset["dragged"] = "";
+    const followers = liftFollowers(layer, card, options);
+    if (followers.length > 0) {
+      // A count on the card in the hand: itself and the cards behind it.
+      ghost.classList.add("has-followers");
+      ghost.dataset["count"] = String(followers.length + 1);
+    }
 
     const body = trackBody(ghost);
     const reduced = isMotionReduced();
@@ -697,6 +858,7 @@ const createBoardDrag = (
       layer,
       ghost,
       body,
+      followers,
       slot,
       home,
       grab: { x: event.clientX - seen.left, y: event.clientY - seen.top },

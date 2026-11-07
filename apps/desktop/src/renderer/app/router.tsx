@@ -91,6 +91,7 @@ export const createAppRouter = (context: RouterContext) => {
       router.clearCache();
       // The gestures were the signed-out user's: Undo must not reach the next one.
       context.controller?.undoStack.clear();
+      context.controller?.pendingCardMoves.clear();
       // What the user had not sent yet stays in storage as unsent. It is never sent by itself.
       context.controller?.pendingIntents.close();
     }

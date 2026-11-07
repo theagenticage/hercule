@@ -9,7 +9,7 @@ import {
   describeNextThreadJoin,
   describeThreadRefused,
   describeThreadStarted,
-  type NewestThreadPlace,
+  type NewestSessionPlace,
 } from "./thread-changes";
 
 const TARGET = { id: "task-1", title: "Refund emails show the wrong currency" };
@@ -17,7 +17,7 @@ const IN_PROJECT = { ...TARGET, projectId: "storefront" };
 const READY = { id: "ws-1", runnerId: "runner-1", status: "ready" } as const;
 
 describe("buildTaskThreadStart", () => {
-  it.each<[string, typeof TARGET, NewestThreadPlace, object, string | undefined]>([
+  it.each<[string, typeof TARGET, NewestSessionPlace, object, string | undefined]>([
     [
       "joins the Task and reuses the newest Thread's ready workspace on its runner",
       IN_PROJECT,

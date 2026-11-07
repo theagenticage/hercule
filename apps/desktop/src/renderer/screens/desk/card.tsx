@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Colleague, type ColleaguePose } from "./colleague";
 import type { Look } from "../../faces";
+import { CheckIcon } from "../../icons/check";
 import { FailedMark } from "./status-shape";
 import "./card.css";
 
@@ -98,6 +99,11 @@ function useIsTitleLong(hasSecondLine: boolean): {
  *   draws it, such as a `<time>`.
  * - `colleague` stands behind the top edge. Only a live Thread has one.
  * - `landed` draws the card as only words, with no sheet.
+ * - `selected` is for a page where cards can be selected: `true` draws the
+ *   card with a 1.5px ink ring and a check in its top left corner, and
+ *   `false` keeps the check ready, hidden, so it can grow in. Leave it out
+ *   where cards cannot be selected. The caller names the selected state for
+ *   assistive technology (`aria-pressed`).
  *
  * `data-now` holds the second line's tone while there is one, so the
  * stylesheet can shorten the title of a card that asks or failed without a
@@ -114,6 +120,7 @@ export function Card({
   meta,
   colleague,
   landed,
+  selected,
   className,
   ref,
   ...rest
@@ -124,12 +131,18 @@ export function Card({
   readonly meta?: ReactNode;
   readonly colleague?: CardColleague | null;
   readonly landed: boolean;
+  readonly selected?: boolean | undefined;
   readonly ref?: Ref<HTMLDivElement>;
 }): JSX.Element {
   const nowTone = nowToneOrDefault ?? "summary";
   const hasSecondLine = now !== null && now !== undefined;
   const { titleRef, isLong } = useIsTitleLong(hasSecondLine);
-  const classes = ["desk-card", isLong ? "has-long-title" : null, className]
+  const classes = [
+    "desk-card",
+    isLong ? "has-long-title" : null,
+    selected === true ? "is-selected" : null,
+    className,
+  ]
     .filter((each) => each !== null && each !== undefined)
     .join(" ");
   return (
@@ -141,6 +154,11 @@ export function Card({
       data-now={hasSecondLine ? nowTone : undefined}
     >
       <i className="card-stock" />
+      {selected !== undefined && (
+        <i className="card-check" aria-hidden="true">
+          <CheckIcon size={12} />
+        </i>
+      )}
       <span className="card-body">
         {colleague !== null && colleague !== undefined && <Colleague {...colleague} />}
         <div className="card-words" aria-hidden="true">

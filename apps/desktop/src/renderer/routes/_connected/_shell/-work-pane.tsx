@@ -55,7 +55,8 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * - A Task that was merged into another: the read answers with the survivor,
  *   and the address takes the survivor's id in place, so the sheet stays open
  *   and shows it.
- * - A Task that was deleted: a line says so, and the sheet closes.
+ * - A Task that was deleted, also after its details were read: a line says
+ *   so, and the sheet closes.
  *
  * `threadPromptWords` turns the pane's foot into the line that asks what a new
  * Thread should do, starting with those words; `null` leaves the foot as it is.
@@ -212,7 +213,10 @@ function PresentedTask({
     onChangeTask(survivorId);
   }, [survivorId, presentedId, isWanted, queryClient, client, detail.data, onChangeTask]);
 
-  const isGone = detail.data === undefined && detail.isError && isNotFound(detail.error);
+  // A read that says the Task is gone wins over the details kept from before:
+  // the cache keeps the old data after a failed refetch, and a deleted Task
+  // must not stay actionable.
+  const isGone = detail.isError && isNotFound(detail.error);
   useEffect(() => {
     if (!isGone || !isWanted) return;
     const timer = setTimeout(() => {
@@ -224,10 +228,10 @@ function PresentedTask({
   }, [isGone, isWanted, onChangeTask]);
 
   let read: TaskPaneRead;
-  if (detail.data !== undefined && standing !== null && survivorId === presentedId) {
-    read = { status: "ready", detail: detail.data, standing };
-  } else if (isGone) {
+  if (isGone) {
     read = { status: "gone" };
+  } else if (detail.data !== undefined && standing !== null && survivorId === presentedId) {
+    read = { status: "ready", detail: detail.data, standing };
   } else if (detail.isError) {
     read = { status: "failed", message: readErrorMessage(detail.error) };
   } else {
