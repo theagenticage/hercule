@@ -723,10 +723,10 @@ describe("the budget of reading pending claims", () => {
           const startMs = Date.now();
           const readClock = () => startMs + elapsedMs;
           // The real clock with only the wall time replaced, so nothing else that reads the clock breaks.
-          const clock: Clock.Clock = Object.create(yield* Clock.Clock, {
+          const clock = Object.create(yield* Clock.Clock, {
             currentTimeMillisUnsafe: { value: readClock },
             currentTimeMillis: { value: Effect.sync(readClock) },
-          });
+          }) as Clock.Clock;
           const windows = new Map<string, number>();
           yield* resolvePendingClaims(windows).pipe(Effect.provideService(Clock.Clock, clock));
           return { board: windows.get("board")! - readClock() };

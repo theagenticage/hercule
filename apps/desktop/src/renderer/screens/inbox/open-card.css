@@ -278,10 +278,14 @@
   white-space: pre;
 }
 
-/* The moves share one grid, so the first column is as wide as the longest name on this card and no wider. */
+/* The moves and the answers of an opened line (`.open-card-answers`) share one column for their names,
+   `--open-card-name-column` wide, so every description starts at the same place down the sheet. */
+.open-card {
+  --open-card-name-column: 136px;
+}
 .open-card-ledger {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
+  grid-template-columns: var(--open-card-name-column) minmax(0, 1fr) auto;
   margin-top: 2px;
   padding: 6px 6px 0;
   /* Not --divider: on the dark themes it is as dark as the stock, so on a sheet it would not show. */
@@ -510,10 +514,32 @@ button.open-card-signal-row:focus-visible {
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-/* The answers of the opened line, under it and in line with its words. A row's button has 4px of
-   padding before it, so the ledger starts 4px early and the buttons start where the words do. */
+/* The answers of the opened line, under it. They are the Intake ledger (`.ans`), drawn here as the
+   moves under them are: one column for the names, left-aligned, and the descriptions in the moves'
+   column. A row has 4px of padding before it, so the ledger starts 4px early and the name starts
+   where the words of the line do, which is where the text of "Take it" starts. The button that
+   carries the name reaches 6px further left, as the drawing's filled move does, and the ledger
+   reaches the sheet's 6px edge on the right, where the moves end. */
 .open-card-answers {
-  margin: 4px 0 6px -4px;
+  margin: 4px -6px 6px -4px;
+}
+/* 42px narrower than the moves' column: the answers' names start 28px further right (after the moves'
+   monogram), and the moves' column loses 14px to the ledger's and a row's padding. */
+.open-card-answers .ans {
+  grid-template-columns: calc(var(--open-card-name-column) - 42px) minmax(0, 1fr) auto;
+  column-gap: 12px;
+  min-height: 40px;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--r-sm);
+}
+.open-card-answers .ans > .btn {
+  justify-content: flex-start;
+  justify-self: start;
+  width: auto;
+  max-width: calc(100% + 6px);
+  height: 32px;
+  margin-left: -6px;
+  padding: 0 12px 0 6px;
 }
 .open-card-line-note {
   margin: 4px 0 6px;
