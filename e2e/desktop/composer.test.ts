@@ -513,9 +513,17 @@ describe("the composer", () => {
     const composer = locateComposer(page);
 
     // Scrolled up with the focus elsewhere, the composer shrinks. The
-    // paragraph is placed again once the card has its shrunk size.
-    await scrollParagraphToCardBottom(page, "Paragraph 20 ");
-    await expect.poll(() => composer.root.getAttribute("class")).toBe("composer is-scrolled");
+    // paragraph is placed again once the card has its shrunk size. The
+    // transcript is still being measured when the thread has just opened, and
+    // while it follows the bottom, a resize puts the view back at the bottom
+    // before the page has noted the scroll up. So the scroll and the check are
+    // one step that is retried: each try scrolls again.
+    await expect
+      .poll(async () => {
+        await scrollParagraphToCardBottom(page, "Paragraph 20 ");
+        return composer.root.getAttribute("class");
+      })
+      .toBe("composer is-scrolled");
     await waitForComposerTransitions(page);
     await scrollParagraphToCardBottom(page, "Paragraph 20 ");
     expect(await showsTranscriptBelowCard(page)).toBe(true);
