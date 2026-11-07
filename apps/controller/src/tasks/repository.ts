@@ -129,7 +129,7 @@ export interface LegHandoff {
   readonly next?: TrackedHandoff;
 }
 
-/** An open Task and one External Ref its provenance carries. */
+/** The active Task of one External Ref, with the columns Your work shows. */
 export interface OpenTaskOnRef {
   readonly ref: ExternalRef;
   readonly id: string;
@@ -1507,21 +1507,16 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns, for each open task (status `open` or `in-progress`, not
-     * deleted or merged) whose provenance carries one of `refs`, one row per ref it
-     * carries. It reads only the columns of the row, never the description or
-     * the provenance.
+     * Returns, for each of `refs` that has an active Task (see
+     * `findActiveTaskForRef`), one row: the ref and that Task's id, title,
+     * status and update time. A ref with no active Task has no row, and a Task
+     * linking several of the refs has one row per ref. It reads only the
+     * columns of the row, never the description.
      *
-     * One statement that starts from the ref index `task_provenance_ref`, so
-     * its work follows the tasks that carry the refs, not the tasks or the
-     * provenance entries there are. The unary `+` on the status keeps SQLite
-     * from starting at the status index and scanning every open task.
-     *
-     * This is not the active Task of a ref (`findActiveTaskForRef`), on
-     * purpose. A handoff continues one Task per thread, the oldest linked.
-     * Your work lists every open Task that carries the thread, so a second
-     * Task made from the same thread still shows. Both rules count a Task as
-     * open exactly while its stage is not finished.
+     * It follows the links in `task_entity_links`, the same as every other
+     * read of a Task's refs, so a ref has one meaning. Only the active Task
+     * counts, so a ref never shows on two Tasks. One statement, and its work
+     * follows the links of the refs given, not the Tasks there are.
      */
     listOpenOnRefs: (
       refs: ReadonlyArray<ExternalRef>,
@@ -1536,10 +1531,10 @@ const make = Effect.gen(function* () {
               readonly status: string;
               readonly updated_at: string;
             }>`
-              SELECT DISTINCT p.ref, t.id, t.title, t.status, t.updated_at
-              FROM task_provenance p JOIN tasks t ON t.id = p.task_id
-              WHERE p.ref IN ${sql.in(refs)}
-                AND +t.status IN ('open', 'in-progress') AND ${buildLiveTaskSql("t")}`,
+              SELECT live.ref, t.id, t.title, t.status, t.updated_at
+              FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
+              JOIN tasks t ON t.id = live.task_id
+              WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
             (rows) =>
               rows.map((row) => ({
                 ref: row.ref,

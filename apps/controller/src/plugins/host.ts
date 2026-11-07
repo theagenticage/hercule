@@ -76,6 +76,7 @@ import {
 import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "../intake-settings";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
+import { EntityRecognizer, EntityRecognizerLayer } from "./entity-recognition";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
 import type { EntityObservations } from "./entity-observations";
@@ -519,6 +520,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const ingest = yield* IngestLoops;
+  const recognizer = yield* EntityRecognizer;
   const promotion = yield* PromotionState;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
@@ -875,6 +877,19 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * Returns the event sources of every active plugin, in registry order. The
+   * ingest loops open these sources only: a plugin that is disabled, or that
+   * failed to start, ingests nothing.
+   */
+  const listActiveEventSources = (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
+    Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
+      sources.filter((source) => active.has(source.pluginId)),
+    );
+  // The ingest contexts recognize web addresses over the plugins that are
+  // active at the moment of each call, and cannot depend on this host.
+  yield* recognizer.useActiveSources(listActiveEventSources);
+
   return {
     /**
      * Loads the registry in four steps: check each manifest, register, write
@@ -1042,15 +1057,7 @@ const make = Effect.gen(function* () {
         [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
       ),
 
-    /**
-     * Returns the event sources of every active plugin, in registry order. The
-     * ingest loops open these sources only: a plugin that is disabled, or that
-     * failed to start, ingests nothing.
-     */
-    listActiveEventSources: (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
-      Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
-        sources.filter((source) => active.has(source.pluginId)),
-      ),
+    listActiveEventSources,
 
     readDefaultIntakeSettings,
 
@@ -1235,7 +1242,7 @@ const PluginIntakeLayer: Layer.Layer<PluginIntake, never, SqlClient.SqlClient | 
  * Ingest Executor, which the controller daemon provides.
  */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost | IngestLoops | ActivePlugins | PluginIntake,
+  PluginHost | IngestLoops | ActivePlugins | PluginIntake | EntityRecognizer,
   never,
   | SqlClient.SqlClient
   | Secrets
@@ -1247,7 +1254,13 @@ export const PluginHostLayer: Layer.Layer<
   | EntityObservations
   | PromotionState
 > = Layer.mergeAll(ActivePluginsLayer, PluginIntakeLayer).pipe(
-  Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),
+  Layer.provideMerge(
+    Layer.effect(PluginHost)(make).pipe(
+      Layer.provideMerge(IngestLoopsLayer),
+      // One recognizer for both: the ingest loops read it, the host fills it in.
+      Layer.provideMerge(EntityRecognizerLayer),
+    ),
+  ),
 );
 
 /**

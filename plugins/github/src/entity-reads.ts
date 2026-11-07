@@ -213,21 +213,18 @@ const decideIssueLifecycle = (node: IssueNode): "open" | "completed" | "abandone
 
 /**
  * Returns the `texts` of an item: its description, which the host searches for
- * references to other things. An empty description reports no text, because
- * the host's schema takes only a text of one character or more.
+ * references to other things. An empty description reports an empty text,
+ * which clears the hints its old description left.
  */
-const buildItemTexts = (node: ItemNode): Pick<EntityObservation, "texts"> =>
-  node.bodyText.trim() === ""
-    ? {}
-    : {
-        texts: [
-          {
-            evidenceKey: "description",
-            text: cutText(node.bodyText, MAX_ENTITY_TEXT_LENGTH),
-            revision: node.updatedAt,
-          },
-        ],
-      };
+const buildItemTexts = (node: ItemNode): Pick<EntityObservation, "texts"> => ({
+  texts: [
+    {
+      evidenceKey: "description",
+      text: node.bodyText.trim() === "" ? "" : cutText(node.bodyText, MAX_ENTITY_TEXT_LENGTH),
+      revision: node.updatedAt,
+    },
+  ],
+});
 
 /** Returns the address of a repository the way a plugin reports it: `github.com/owner/repo`, lowercase. */
 const buildRemote = (nameWithOwner: string): string => `github.com/${nameWithOwner.toLowerCase()}`;

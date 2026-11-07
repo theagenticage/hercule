@@ -74,6 +74,37 @@ export const EntityStatus = Schema.Struct({
 
 export type EntityStatus = Schema.Schema.Type<typeof EntityStatus>;
 
+/** The most characters the finished sentence of an `EntityReason` holds. */
+export const MAX_ENTITY_REASON_LENGTH = 200;
+
+/**
+ * The sentence a card shows for why it is on the Inbox when no signal gives
+ * one, such as "Mei asked for your review". It is finished text: the core has
+ * already put the person's name in.
+ */
+export const EntityReason = Schema.Struct({
+  say: bounded(1, MAX_ENTITY_REASON_LENGTH),
+  tone: Schema.Literals(ENTITY_REASON_TONES),
+});
+
+export type EntityReason = Schema.Schema.Type<typeof EntityReason>;
+
+/**
+ * Something that changed at the source, as the thing's timeline tells it:
+ * someone else was assigned, the status moved, a new link arrived. Hercule
+ * shows it and acts on nothing. `say` is finished text, with the person or
+ * the value already put in.
+ */
+export const EntityChange = Schema.Struct({
+  reason: Schema.Literals(["reassigned", "moved", "linked"]),
+  say: EntityReason,
+  at: Timestamp,
+  /** For a `linked` change, the ref of the linked thing, so a client can draw its mark and open it. */
+  ref: Schema.optionalKey(ExternalRef),
+});
+
+export type EntityChange = Schema.Schema.Type<typeof EntityChange>;
+
 /**
  * A record above the cards, such as a repository or a project. It has no
  * card, so it holds only what it says about itself.
@@ -104,6 +135,12 @@ export const EntityPlace = Schema.Struct({
   /** A date the source reports, for ordering places. */
   targetDate: Schema.optionalKey(Timestamp),
   restricted: Schema.Boolean,
+  /**
+   * The latest change at the source, from the thing's timeline, so a Task's
+   * linked thing shows it wherever the relation row is drawn. Absent when
+   * nothing has changed since the thing was first seen, and when `restricted`.
+   */
+  latestChange: Schema.optionalKey(EntityChange),
 });
 
 export type EntityPlace = Schema.Schema.Type<typeof EntityPlace>;

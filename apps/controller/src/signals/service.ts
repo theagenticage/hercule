@@ -122,6 +122,7 @@ import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { buildIgnoredOutcome } from "./outcome";
 import { ALREADY_RESOLVED, checkOffersHandoff, ONLY_THE_USER_HANDS_OFF } from "./handoffs";
 import { signalRepository } from "./repository";
+import { SignalEntities } from "./signal-entities";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
 export interface ActInput extends SignalActInput {
@@ -307,6 +308,29 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const claims = yield* SignalClaims;
   const offers = yield* ignoreRuleOffers;
+  const entities = yield* SignalEntities;
+
+  /**
+   * Returns the signals with `entity` set on each one that is about a work
+   * entity, and the others as they are. It asks for the whole list's thread
+   * refs in one call, however many signals there are, and asks for nothing
+   * when no signal came from an event. A signal raised through the API has no
+   * thread ref, so it never has an entity.
+   */
+  const attachEntities = (
+    list: ReadonlyArray<Signal>,
+  ): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
+    Effect.gen(function* () {
+      const refs = [
+        ...new Set(list.flatMap((s) => (s.origin.type === "event" ? [s.origin.threadRef] : []))),
+      ];
+      if (refs.length === 0) return list;
+      const found = yield* entities.readByRefs(refs);
+      return list.map((s) => {
+        const entity = s.origin.type === "event" ? found.get(s.origin.threadRef) : undefined;
+        return entity === undefined ? s : { ...s, entity };
+      });
+    });
 
   const readOrFail = (id: string): Effect.Effect<Signal, NotFound | SqlError> =>
     Effect.flatMap(
@@ -669,7 +693,8 @@ const make = Effect.gen(function* () {
               }),
             );
           }
-          return yield* readOrFail(input.id);
+          const [acted] = yield* attachEntities([yield* readOrFail(input.id)]);
+          return acted!;
         }),
       );
     });
@@ -725,7 +750,8 @@ const make = Effect.gen(function* () {
      * `kind` keeps one kind, and `source` the kinds of one plugin, such as
      * `github`. A core kind belongs to no plugin, so it never matches a
      * source. The describe lines are added only for the user, the only
-     * caller who can take an action.
+     * caller who can take an action. A signal about a work entity carries it
+     * in `entity`, read for the whole page in one call.
      *
      * Fails with `Validation` when the cursor belongs to another view or
      * another operation.
@@ -751,23 +777,26 @@ const make = Effect.gen(function* () {
                   nextCursor: undefined,
                 })),
         );
+        const described =
+          caller._tag === "user" ? yield* addDescribeLines(listing.items) : listing.items;
         return {
-          items: caller._tag === "user" ? yield* addDescribeLines(listing.items) : listing.items,
+          items: yield* attachEntities(described),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
 
     /**
      * Returns one signal by id. For the user, each action of an open signal
-     * carries its describe line. Fails with `NotFound` if it does not exist.
+     * carries its describe line. A signal about a work entity carries it in
+     * `entity`. Fails with `NotFound` if it does not exist.
      */
     read: (id: Id): Effect.Effect<Signal, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("signal.read");
         const signal = yield* readOrFail(id);
-        if (caller._tag !== "user") return signal;
-        const [described] = yield* addDescribeLines([signal]);
-        return described!;
+        const [described] = caller._tag === "user" ? yield* addDescribeLines([signal]) : [signal];
+        const [joined] = yield* attachEntities([described!]);
+        return joined!;
       }),
 
     /**
@@ -1135,5 +1164,5 @@ export class SignalService extends Context.Service<SignalService, Effect.Success
 export const SignalServiceLayer: Layer.Layer<
   SignalService,
   never,
-  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost | SignalClaims
+  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost | SignalClaims | SignalEntities
 > = Layer.effect(SignalService)(make);

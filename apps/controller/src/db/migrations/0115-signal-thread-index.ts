@@ -2,14 +2,19 @@
  * Prepares signals to live inside their External Entity, and gives an entity a
  * timeline.
  *
- * - `signals_open_thread_ref` serves the join of a signal to its entity by
- *   ref alone, with no Connection. The older `signals_open_thread` starts with
- *   `connection_id`, so it cannot answer that lookup. The partial index holds
- *   only open signals, so it stays small.
+ * - `signals_thread_ref` serves the join of a signal to its entity by ref
+ *   alone, with no Connection, for open and resolved signals alike. The older
+ *   `signals_open_thread` starts with `connection_id`, so it cannot answer
+ *   that lookup, and every other signal index is partial on open signals. The
+ *   card reads open signals by ref, and the detail also counts and lists the
+ *   resolved ones. `status` is the second column so a card's read seeks only
+ *   its open signals, however many resolved ones the ref has.
  * - `external_entity_timeline` has one row per thing that changed at the
  *   source: someone else was assigned (`reassigned`), the status changed
  *   (`moved`), or a new link arrived (`linked`). `person` and `value` hold the
- *   raw words the sentence is built from when the timeline is read. It keys on
+ *   raw words the sentence is built from when the timeline is read. For a
+ *   `linked` row, `target_ref` is the ref of the thing that was linked, so a
+ *   client can draw its mark and open it. It keys on
  *   the ref, not on an entity, so a row outlives the pruning of the entity
  *   until the entity's rows are deleted with it. The index on `(ref, id)`
  *   serves a ref's newest rows.
@@ -18,8 +23,17 @@
  *   `concern_reasons` is. A card's sentence for a signal, and the words of a
  *   timeline row, are built from it, so they read well after the plugin is
  *   gone.
+ * - `external_entity_relation_claims` gains what a claim needs to be found
+ *   again and to be resolved. A pending claim names a thing only by how a
+ *   plugin recognized it (`unresolved:...`), so it is not a ref yet:
+ *   `is_pending` is true while `to_ref` holds such a target, and every read of
+ *   links filters on it. `recognized_as` is the target as the recognizer first
+ *   named it, so a text claim that was resolved to a ref is still matched by
+ *   what its text says. `resolve_attempts` and `next_resolve_at` are the
+ *   backoff of the resolver loop, like the ones on observations ('' is due
+ *   now, and sorts before every time).
  *
- * The migration only adds an index, a table and a column, so the upgrade test
+ * The migration only adds indexes, tables and columns, so the upgrade test
  * needs no fixture for it.
  */
 import * as Effect from "effect/Effect";
@@ -29,8 +43,7 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
-    CREATE INDEX signals_open_thread_ref ON signals (thread_ref)
-    WHERE status = 'open'
+    CREATE INDEX signals_thread_ref ON signals (thread_ref, status)
   `;
 
   yield* sql`
@@ -40,6 +53,7 @@ export default Effect.gen(function* () {
       reason TEXT NOT NULL CHECK (reason IN ('reassigned', 'moved', 'linked')),
       person TEXT,
       value TEXT,
+      target_ref TEXT,
       observed_at TEXT NOT NULL
     )
   `;
@@ -48,5 +62,23 @@ export default Effect.gen(function* () {
   yield* sql`
     ALTER TABLE external_entities
       ADD COLUMN reason_templates TEXT CHECK (reason_templates IS NULL OR json_valid(reason_templates))
+  `;
+
+  yield* sql`ALTER TABLE external_entity_relation_claims ADD COLUMN recognized_as TEXT`;
+  yield* sql`
+    ALTER TABLE external_entity_relation_claims
+      ADD COLUMN resolve_attempts INTEGER NOT NULL DEFAULT 0`;
+  yield* sql`
+    ALTER TABLE external_entity_relation_claims
+      ADD COLUMN next_resolve_at TEXT NOT NULL DEFAULT ''`;
+  yield* sql`
+    ALTER TABLE external_entity_relation_claims
+      ADD COLUMN is_pending INTEGER GENERATED ALWAYS AS (substr(to_ref, 1, 11) = 'unresolved:') VIRTUAL`;
+  // Serves the resolver loop: which Connections have a pending claim that is
+  // due, and the oldest due claims of one Connection. With nothing pending,
+  // the index is empty.
+  yield* sql`
+    CREATE INDEX external_entity_claims_pending
+      ON external_entity_relation_claims (connection_id, next_resolve_at) WHERE is_pending = 1
   `;
 });

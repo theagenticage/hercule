@@ -56,6 +56,7 @@ import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
+import { EntityRecognizer } from "./entity-recognition";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
 import type { EntityObservations } from "./entity-observations";
@@ -593,5 +594,6 @@ export const IngestLoopsLayer: Layer.Layer<
   | IngestExecutor
   | OpenSignals
   | EntityObservations
+  | EntityRecognizer
   | PromotionState
 > = Layer.effect(IngestLoops)(make);

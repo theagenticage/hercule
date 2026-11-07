@@ -64,6 +64,7 @@ import {
   PipelineLayer,
   Placement,
   SignalBuildFailuresLayer,
+  SignalEntitiesLayer,
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
@@ -1087,7 +1088,7 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer)),
+      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer), Layer.provide(SignalEntitiesLayer)),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
@@ -1115,7 +1116,12 @@ const operationServices = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
-      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
+      Layer.provide(
+        SignalRaisesLayer.pipe(
+          Layer.provide(BoundOperationsDomainLayer),
+          Layer.provide(SignalEntitiesLayer),
+        ),
+      ),
       Layer.provide(RunDomainLayer),
     ),
   ).pipe(

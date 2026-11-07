@@ -22,6 +22,7 @@ import {
   type BoundAction,
   type Grant,
   type Signal,
+  type SignalEntity,
   type SignalMatch,
   type SignalRaiseInput,
   type SignalResolution,
@@ -42,9 +43,11 @@ import {
   IgnoreRuleServiceLayer,
   signalRepository,
   SignalClaimsLayer,
+  type SignalEntities,
   SignalService,
   SignalServiceLayer,
 } from "./index";
+import { buildSignalEntitiesDouble } from "./signal-entities.testing";
 
 type Deps = SignalService | IgnoreRuleService | SqlClient.SqlClient;
 
@@ -98,9 +101,13 @@ const IgnoreRuleCreatingOperationsLayer = Layer.effect(BoundOperations)(
  * claims as they do in the controller, so a rule created while an action
  * runs sees the action's claim.
  */
-const buildSignalServices = (operations: Layer.Layer<BoundOperations, never, IgnoreRuleService>) =>
+const buildSignalServices = (
+  operations: Layer.Layer<BoundOperations, never, IgnoreRuleService>,
+  entities: Layer.Layer<SignalEntities> = buildSignalEntitiesDouble().layer,
+) =>
   SignalServiceLayer.pipe(
     Layer.provide(operations),
+    Layer.provide(entities),
     Layer.provideMerge(IgnoreRuleServiceLayer),
     Layer.provide(SignalClaimsLayer),
     Layer.provide(PluginHostStub),
@@ -599,6 +606,98 @@ describe("signal.query and signal.read", () => {
     );
 
     expect(error).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("a signal's entity", () => {
+  const PULL_REQUEST: SignalEntity = {
+    id: "0199e0e7-0000-7000-8000-00000000e001",
+    kind: "github/pull-request",
+    identifier: "#87",
+    title: "Add the retry",
+  };
+  const ON_PULL_REQUEST = "github:pr:acme/web#87";
+  const ON_PLACE = "linear:project:acme/launch";
+
+  /** Builds an open signal raised from an event on the thread `threadRef`. */
+  const buildEventSignal = (n: number, threadRef: string): Signal => ({
+    id: `0199e0e7-0000-7000-8000-00000000c10${String(n)}`,
+    kind: PLUGIN_KIND,
+    origin: {
+      type: "event",
+      eventId: n,
+      connectionId: "0199e0e7-0000-7000-8000-00000000c002",
+      threadRef,
+    },
+    title: `Question ${String(n)}`,
+    priority: "normal",
+    blocks: [],
+    actions: [{ id: DONE_ACTION_ID, label: "Done", operation: null }],
+    match: {},
+    status: "open",
+    createdAt: `2026-10-10T10:00:0${String(n)}.000Z`,
+  });
+
+  /** Runs `effect` with a port that knows the pull request only, and returns what the port was asked. */
+  const runWithEntities = async <A>(effect: Effect.Effect<A, unknown, Deps>) => {
+    const { layer: entities, calls } = buildSignalEntitiesDouble(
+      new Map([[ON_PULL_REQUEST, PULL_REQUEST]]),
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(effect, buildSignalServices(IgnoreRuleCreatingOperationsLayer, entities)),
+    );
+    return { result, calls };
+  };
+
+  it("joins a whole page with one call, and gives none to a place or to a signal raised through the API", async () => {
+    const { result, calls } = await runWithEntities(
+      Effect.gen(function* () {
+        const repository = yield* signalRepository;
+        const signals = yield* service;
+        yield* inTransaction(
+          Effect.gen(function* () {
+            yield* repository.insert(buildEventSignal(1, ON_PULL_REQUEST), [1]);
+            yield* repository.insert(buildEventSignal(2, ON_PULL_REQUEST), [2]);
+            yield* repository.insert(buildEventSignal(3, ON_PLACE), [3]);
+          }),
+        );
+        yield* as(TRIAGE)(signals.raise(OFFER));
+        return (yield* as(USER)(signals.query({}))).items;
+      }),
+    );
+
+    expect(result.map((signal) => [signal.title, signal.entity?.identifier])).toEqual([
+      ["Question 1", "#87"],
+      ["Question 2", "#87"],
+      ["Question 3", undefined],
+      [OFFER.title, undefined],
+    ]);
+    expect(calls.reads).toEqual([[ON_PULL_REQUEST, ON_PLACE]]);
+  });
+
+  it("asks nothing when no signal on the page came from an event", async () => {
+    const { calls } = await runWithEntities(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        yield* as(TRIAGE)(signals.raise(OFFER));
+        return yield* as(USER)(signals.query({}));
+      }),
+    );
+
+    expect(calls.reads).toEqual([]);
+  });
+
+  it("joins signal.read the same way", async () => {
+    const signal = buildEventSignal(1, ON_PULL_REQUEST);
+    const { result } = await runWithEntities(
+      Effect.gen(function* () {
+        const repository = yield* signalRepository;
+        yield* inTransaction(repository.insert(signal, [1]));
+        return yield* as(USER)(Effect.flatMap(service, (signals) => signals.read(signal.id)));
+      }),
+    );
+
+    expect(result.entity).toEqual(PULL_REQUEST);
   });
 });
 

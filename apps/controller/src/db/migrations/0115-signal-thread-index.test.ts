@@ -20,16 +20,25 @@ const migrated = Effect.gen(function* () {
 });
 
 describe("the signal thread index migration", () => {
-  it("answers a lookup of open signals by ref alone from the partial index", async () => {
-    const plan = await Effect.runPromise(
+  it("answers a lookup of signals by ref alone, open or not, from one index", async () => {
+    const plans = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* migrated;
-        return yield* sql<{ readonly detail: string }>`
-          EXPLAIN QUERY PLAN
-          SELECT id FROM signals WHERE status = 'open' AND thread_ref IN ('a', 'b')`;
+        const explain = (where: string) =>
+          Effect.map(
+            sql.unsafe<{ readonly detail: string }>(
+              `EXPLAIN QUERY PLAN SELECT id FROM signals WHERE ${where}`,
+            ),
+            (rows) => rows.map((row) => row.detail).join("\n"),
+          );
+        return {
+          open: yield* explain("status = 'open' AND thread_ref IN ('a', 'b')"),
+          any: yield* explain("thread_ref = 'a'"),
+        };
       }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
-    expect(plan.map((row) => row.detail).join("\n")).toContain("signals_open_thread_ref");
+    expect(plans.open).toMatch(/SEARCH signals USING (COVERING )?INDEX signals_thread_ref/);
+    expect(plans.any).toMatch(/SEARCH signals USING (COVERING )?INDEX signals_thread_ref/);
   });
 
   it("refuses a timeline reason other than reassigned, moved and linked", async () => {
@@ -76,5 +85,29 @@ describe("the signal thread index migration", () => {
       }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
     expect(results).toEqual({ json: "Success", none: "Success", notJson: "Failure" });
+  });
+
+  it("marks a claim whose target is pending, and serves the due ones from a partial index", async () => {
+    const { pending, plan } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* migrated;
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
+          VALUES ('a:x:1', 'linked', 'unresolved:url:https://x.test', 'person', 'user', '', 'current', ${AT}),
+                 ('a:x:1', 'linked', 'a:x:2', 'person', 'user', '', 'current', ${AT})`;
+        const pending = yield* sql<{ readonly to_ref: string; readonly is_pending: number }>`
+          SELECT to_ref, is_pending FROM external_entity_relation_claims ORDER BY id`;
+        const plan = yield* sql<{ readonly detail: string }>`
+          EXPLAIN QUERY PLAN
+          SELECT id FROM external_entity_relation_claims
+          WHERE is_pending = 1 AND next_resolve_at <= ${AT}`;
+        return { pending, plan };
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
+    );
+    expect(pending).toEqual([
+      { to_ref: "unresolved:url:https://x.test", is_pending: 1 },
+      { to_ref: "a:x:2", is_pending: 0 },
+    ]);
+    expect(plan.map((row) => row.detail).join("\n")).toContain("external_entity_claims_pending");
   });
 });

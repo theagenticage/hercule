@@ -323,7 +323,7 @@ describe("the entities feed's inventory", () => {
     }
   });
 
-  it("reports an item's description as a text for the host to search, and no text for an empty one", async () => {
+  it("reports an item's description as a text for the host to search, and an empty text for an empty one", async () => {
     const stub = stubGraphql({
       [OPENED]: searchPages([
         {
@@ -346,7 +346,9 @@ describe("the entities feed's inventory", () => {
         revision: "2026-11-01T10:00:00Z",
       },
     ]);
-    expect(empty?.texts).toBeUndefined();
+    expect(empty?.texts).toEqual([
+      { evidenceKey: "description", text: "", revision: "2026-11-01T10:00:00Z" },
+    ]);
     expect(full(reconciledKind(reported, "issue").observations[0]).texts).toMatchObject([
       { evidenceKey: "description", text: "Blocked by SHOP-9" },
     ]);

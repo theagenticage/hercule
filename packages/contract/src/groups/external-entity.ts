@@ -34,9 +34,10 @@ import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import {
-  ENTITY_REASON_TONES,
+  EntityChange,
   EntityEdge,
   EntityPlace,
+  EntityReason,
   EntityStatus,
   MAX_GRAPH_EDGES,
 } from "./entity-context";
@@ -170,18 +171,6 @@ export const EntityFact = Schema.Union([
 export type EntityFact = Schema.Schema.Type<typeof EntityFact>;
 
 /**
- * The sentence a card shows for why it is on the Inbox when no signal gives
- * one, such as "Mei asked for your review". It is finished text: the core has
- * already put the person's name in.
- */
-export const EntityReason = Schema.Struct({
-  say: bounded(1, 200),
-  tone: Schema.Literals(ENTITY_REASON_TONES),
-});
-
-export type EntityReason = Schema.Schema.Type<typeof EntityReason>;
-
-/**
  * A claim the graph refused, with why. A `part of` claim that would close a
  * loop is stored as evidence and shown here, never drawn.
  */
@@ -206,6 +195,12 @@ export const EntityLink = Schema.Struct({
     type: Schema.Literals(["source", "person", "text"]),
     plugin: Schema.optionalKey(PluginId),
     actor: Schema.optionalKey(Actor),
+    /**
+     * Which text the reference was found in, such as "description". Set for a
+     * `text` claim only, so a client can say "The description of #6263". A
+     * `source` claim never carries one: the URL it came from stays on the server.
+     */
+    evidenceKey: Schema.optionalKey(bounded(1, 128)),
   }),
 });
 
@@ -224,6 +219,11 @@ export const EntitySignalLine = Schema.Struct({
   priority: TaskPriority,
   status: SignalStatus,
   createdAt: Timestamp,
+  /**
+   * The sentence the card says for this line, finished: the kind's own words
+   * for the signal with the asker put in, else the title.
+   */
+  say: EntityReason,
   /** `resolution.outcome`, when the signal has ended. */
   outcome: Schema.optionalKey(Schema.String),
   /** True while the signal is snoozed. */
@@ -233,26 +233,17 @@ export const EntitySignalLine = Schema.Struct({
 export type EntitySignalLine = Schema.Schema.Type<typeof EntitySignalLine>;
 
 /**
- * Something that changed at the source, as the thing's timeline tells it:
- * someone else was assigned, the status moved, a new link arrived. Hercule
- * shows it and acts on nothing. `say` is finished text, with the person or
- * the value already put in.
- */
-export const EntityChange = Schema.Struct({
-  reason: Schema.Literals(["reassigned", "moved", "linked"]),
-  say: EntityReason,
-  at: Timestamp,
-});
-
-export type EntityChange = Schema.Schema.Type<typeof EntityChange>;
-
-/**
  * A record at the far end of a link that has no card of its own: it is not on
  * the Inbox, and a card shows it as a quiet row. A `restricted` peer, one no
  * Connection can read, holds only `ref`, `kind` and `noun`, with `restricted`
  * true and `yours` false: no title, identifier, status or change.
  */
 export const EntityPeer = Schema.Struct({
+  /**
+   * The record's id when it is a full record of a work kind, so its quiet row
+   * can open through `externalEntity.read`. Absent when `restricted` and for a place.
+   */
+  id: Schema.optionalKey(Id),
   ref: ExternalRef,
   kind: Schema.String,
   noun: bounded(1, 40),

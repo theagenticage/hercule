@@ -455,6 +455,7 @@ describe("who may read the board", () => {
           TaskBoardLayer.pipe(
             Layer.provide(
               Layer.succeed(TaskBoardFacts)({
+                readStackCandidates: () => Effect.succeed({ candidates: [], truncated: false }),
                 readFacts: (tasks) =>
                   Effect.sync(() => {
                     asked.push(tasks.map((task) => task.id));

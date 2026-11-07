@@ -69,6 +69,9 @@ import {
   type TaskUndoRefusal,
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
+import { makeRefsAnnouncer } from "./claim-announce";
+import { isPendingTarget } from "./pending-target";
+import { relationClaimRepository } from "./relation-claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import {
   externalEntityRepository,
@@ -86,6 +89,9 @@ const buildSearchReply = (
   results: ReadonlyArray<EntitySearchResult> = [],
   incomplete = false,
 ): EntitySearchReply => ({ source, outcome, results, incomplete, linkSources });
+
+const ONLY_THE_USER_LINKS =
+  "only the user may link two things or take a link back: a person's link is the user's own word, so a session or a workflow step may not; ask the user instead";
 
 const ONLY_THE_USER_SEARCHES =
   "only the user may search a source: the search reads through the user's own accounts, so a session or a workflow step may not; ask the user instead";
@@ -179,6 +185,11 @@ const make = Effect.gen(function* () {
   const lookups = yield* EntityLookups;
   const ingest = yield* ExternalEntityIngest;
   const host = yield* PluginHost;
+  const claims = yield* relationClaimRepository;
+  const announceRefs = makeRefsAnnouncer({
+    sql,
+    listTaskIdsLinkedTo: entities.listTaskIdsLinkedTo,
+  });
 
   /** Reads the entity kinds and plugins that are active now. */
   const readCatalog: Effect.Effect<Catalog> = Effect.map(
@@ -586,7 +597,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
-        return yield* entities.countInbox();
+        return yield* entities.countInbox((yield* readEnvironment).now);
       }),
 
     /**
@@ -783,9 +794,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         const { contextRef } = query;
+        const environment = yield* readEnvironment;
         const found = yield* entities.listSuggestions({
           contextRef,
           limit: MAX_ENTITY_SUGGESTIONS + 1,
+          now: environment.now,
         });
         const truncated = found.length > MAX_ENTITY_SUGGESTIONS;
         const rows = truncated ? found.slice(0, MAX_ENTITY_SUGGESTIONS) : found;
@@ -800,7 +813,7 @@ const make = Effect.gen(function* () {
           maxAncestors: MAX_ENTITY_ANCESTORS,
           // Room for every ancestor of every row and of the context, so nothing is cut.
           maxPlaces: (MAX_ENTITY_SUGGESTIONS + 1) * MAX_ENTITY_ANCESTORS + 1,
-          environment: yield* readEnvironment,
+          environment,
         });
         const records = new Map(context.places.map((place) => [place.ref, place] as const));
         const aboveContext = new Set<string>();
@@ -893,25 +906,80 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Links two things as the user's own claim. The target may be a ref nobody
-     * has read. User only.
+     * Links two things as the user's own claim (a `person` claim, stamped with
+     * the user). The target may be a ref nobody has read: the next refresh
+     * reads it. The source is never told. Linking a pair the user already
+     * linked, in either direction, changes nothing.
+     *
+     * Fails with `NotFound` when Hercule holds no record of `fromRef`, and
+     * with `InvalidState` when the two refs are the same or one is not a ref.
+     * User only.
      */
-    // Filled in by the link and unlink slice; this stub keeps the route wired.
     link: (
       input: EntityLinkInput,
     ): Effect.Effect<
       Record<string, never>,
       Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
-    > => Effect.die(new Error(`externalEntity.link is not implemented yet: ${input.fromRef}`)),
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
+        const { fromRef, toRef } = input;
+        if (fromRef === toRef) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `${fromRef} cannot be linked to itself. Link it to another thing.`,
+            ),
+          );
+        }
+        const notARef = [fromRef, toRef].find(isPendingTarget);
+        if (notARef !== undefined) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `${notARef} is not a ref: "unresolved:" is reserved for the core's own use. Use the ref of the thing.`,
+            ),
+          );
+        }
+        const actor = yield* currentStamp;
+        const now = yield* nowIso;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const known = yield* sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM external_entities WHERE ref = ${fromRef}`;
+            if (known.length === 0) {
+              return yield* Effect.fail(
+                createNotFoundError(
+                  `Hercule holds no record of ${fromRef}, so it cannot be linked from.`,
+                ),
+              );
+            }
+            const { added } = yield* claims.addPersonLink({ fromRef, toRef, actor, now });
+            if (added) yield* announceRefs([fromRef, toRef]);
+          }),
+        );
+        return {};
+      }),
 
     /**
      * Removes the user's own claim between two things, in either direction,
-     * and returns what is left. A claim a source made stays. User only.
+     * and returns what is left. `removed` is false when the user made no link
+     * between them. A claim a source made, and a hint found in text, stay and
+     * are reported in `remaining`. User only.
      */
     unlink: (
       input: EntityLinkInput,
     ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      Effect.die(new Error(`externalEntity.unlink is not implemented yet: ${input.fromRef}`)),
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const result = yield* claims.removePersonLinks({ a: input.fromRef, b: input.toRef });
+            if (result.removed) yield* announceRefs([input.fromRef, input.toRef]);
+            return result;
+          }),
+        );
+      }),
 
     /**
      * Deletes the records nothing needs, and returns how many it deleted. The

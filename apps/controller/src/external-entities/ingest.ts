@@ -28,13 +28,14 @@ import {
 } from "@hercule/plugin-host";
 import { assertConnectionIngesting, canConnectionPoll, connectionRepository } from "../connections";
 import { announce, nowIso, withTransaction } from "../db";
-import type { EntityReporter } from "../plugins";
+import type { EntityReporter, RecognizedClaimsByRef } from "../plugins";
 import { announceEntityChanges } from "./announce";
 import {
   buildConflictWarning,
   buildIncompleteWarning,
   decideConnectionWarning,
 } from "./connection-warning";
+import { isPendingTarget } from "./pending-target";
 import {
   externalEntityRepository,
   type EntityEnvironment,
@@ -160,6 +161,8 @@ const assertFullObservationFits = (
  *   for example);
  * - a kind is not declared by the plugin, or is not `onlyKind`;
  * - a ref does not start with the `refPrefix` of its kind, or appears twice;
+ * - a parent or peer in `relations` starts with `unresolved:`, which is reserved
+ *   for the core's own pending targets;
  * - a full observation breaks `assertFullObservationFits`;
  * - the slots cannot be rendered.
  */
@@ -167,6 +170,7 @@ export const prepareObservations = (
   reporter: EntityReporter,
   input: ReadonlyArray<unknown>,
   onlyKind?: string,
+  recognized?: RecognizedClaimsByRef,
 ): Effect.Effect<ReadonlyArray<ObservedEntity>, PluginError> =>
   Effect.gen(function* () {
     if (input.length > MAX_ENTITY_OBSERVATIONS) {
@@ -215,10 +219,27 @@ export const prepareObservations = (
         );
       }
       seen.add(decoded.ref);
+      const pendingRef = [
+        ...(decoded.relations?.partOf ?? []),
+        ...(decoded.relations?.linked ?? []),
+      ].find(isPendingTarget);
+      if (pendingRef !== undefined) {
+        return yield* Effect.fail(
+          refuse(
+            `${decoded.ref}: "${pendingRef}" is not a ref. The prefix "unresolved:" is reserved for the core's own use. Report a web address in relations.linkedUrls instead.`,
+          ),
+        );
+      }
       if (decoded.partial !== true) yield* assertFullObservationFits(declaration, decoded);
       const observation = yield* normalizeTimes(decoded);
       const slots = yield* renderObservationSlots(declaration, observation);
-      prepared.push({ kind: declaration.word, observation, slots });
+      const claims = recognized?.get(decoded.ref);
+      prepared.push({
+        kind: declaration.word,
+        observation,
+        slots,
+        ...(claims === undefined ? {} : { recognized: claims }),
+      });
     }
     return prepared;
   });
@@ -300,6 +321,7 @@ const make = Effect.gen(function* () {
     reconcile: (
       reporter: EntityReporter,
       inventory: EntityInventory,
+      recognized?: RecognizedClaimsByRef,
     ): Effect.Effect<void, PluginError> =>
       Effect.gen(function* () {
         const declaration = findDeclaration(reporter, inventory.kind);
@@ -314,6 +336,7 @@ const make = Effect.gen(function* () {
           reporter,
           inventory.observations,
           inventory.kind,
+          recognized,
         );
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
@@ -352,9 +375,10 @@ const make = Effect.gen(function* () {
     refresh: (
       reporter: EntityReporter,
       observations: ReadonlyArray<EntityObservation>,
+      recognized?: RecognizedClaimsByRef,
     ): Effect.Effect<void, PluginError> =>
       Effect.gen(function* () {
-        const observed = yield* prepareObservations(reporter, observations);
+        const observed = yield* prepareObservations(reporter, observations, undefined, recognized);
         yield* writeAsReporter(reporter, (environment) =>
           refreshAndAnnounce(reporter.connectionId, observed, environment),
         );
@@ -419,6 +443,8 @@ const make = Effect.gen(function* () {
             refPrefix: declaration.refPrefix,
             limit: wanted,
             now,
+            // A place has no card, so a signal on one stays on its own.
+            includesSignalRefs: declaration.pace !== "context",
           }),
         );
       }),

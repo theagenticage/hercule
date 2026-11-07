@@ -29,6 +29,43 @@ export interface EntityReporter {
 }
 
 /**
+ * What recognition found a reference to. A `ref` names exactly one thing. A
+ * `scoped` target needs a read to place: `kind` is the qualified kind word
+ * and `scopeHint` the scope the text named, either of which may be absent.
+ */
+export type RecognizedTarget =
+  | { readonly recognized: "ref"; readonly ref: string }
+  | {
+      readonly recognized: "scoped";
+      readonly pluginId: string;
+      readonly kind?: string;
+      readonly scopeHint?: string;
+      readonly identifier: string;
+    };
+
+/**
+ * What the active plugins made of the web addresses and the texts of one
+ * observation. The plugins domain computes it before the port is called,
+ * because only it can reach the plugins' lookups.
+ */
+export interface RecognizedClaims {
+  /**
+   * One entry for each web address the observation's `relations.linkedUrls`
+   * lists. `target` is absent when no active plugin recognizes the address.
+   */
+  readonly urls: ReadonlyArray<{ readonly url: string; readonly target?: RecognizedTarget }>;
+  /** One entry for each text of the observation, with every thing the text names, each once. */
+  readonly texts: ReadonlyArray<{
+    readonly evidenceKey: string;
+    readonly revision?: string;
+    readonly targets: ReadonlyArray<RecognizedTarget>;
+  }>;
+}
+
+/** The recognized claims of a call, by the ref of the observation they belong to. */
+export type RecognizedClaimsByRef = ReadonlyMap<string, RecognizedClaims>;
+
+/**
  * The Entity Observations port, which the controller daemon implements. It has
  * the shape of `IngestContext.entities`, with the reporter first. A database
  * failure is a defect: the plugin cannot recover from it.
@@ -39,16 +76,20 @@ export class EntityObservations extends Context.Service<
     /**
      * Replaces what the reporter's Connection says about one kind, in one
      * transaction. Fails with a `PluginError`, before writing anything, when
-     * the inventory breaks a rule of the contract.
+     * the inventory breaks a rule of the contract. `claims` is what the
+     * plugins domain recognized in the observations' web addresses and texts;
+     * leave it out when nothing was recognized.
      */
     readonly reconcile: (
       reporter: EntityReporter,
       inventory: EntityInventory,
+      claims?: RecognizedClaimsByRef,
     ) => Effect.Effect<void, PluginError>;
     /** Updates what is known of entities without touching any concern. Fails like `reconcile`. */
     readonly refresh: (
       reporter: EntityReporter,
       observations: ReadonlyArray<EntityObservation>,
+      claims?: RecognizedClaimsByRef,
     ) => Effect.Effect<void, PluginError>;
     /**
      * Returns up to `limit` refs of the unqualified kind that the Connection

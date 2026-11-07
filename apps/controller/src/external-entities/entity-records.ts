@@ -8,6 +8,7 @@
  * functions decide what they mean, so a card, a detail and a place agree.
  */
 import type {
+  EntityChange,
   EntityConcern,
   EntityPlace,
   EntityRecord,
@@ -142,14 +143,18 @@ export const unionConcerns = (
  * told so, else `inaccessible`. One account's refusal never hides another
  * account's good read.
  */
-export const deriveAccess = (observations: ReadonlyArray<ObservationRow>): EntityAccess => {
+export const deriveAccess = (
+  observations: ReadonlyArray<Pick<ObservationRow, "access">>,
+): EntityAccess => {
   if (observations.some((observation) => observation.access === "ok")) return "ok";
   if (observations.some((observation) => observation.access === "deleted")) return "deleted";
   return "inaccessible";
 };
 
 /** Checks that any Connection reports the thing as the user's own. */
-export const deriveYours = (observations: ReadonlyArray<ObservationRow>): boolean =>
+export const deriveYours = (
+  observations: ReadonlyArray<Pick<ObservationRow, "owned_by_you">>,
+): boolean =>
   observations.some((observation) => observation.owned_by_you === 1);
 
 /** Checks that no Connection with a good read of the thing can poll now. */
@@ -303,6 +308,8 @@ export interface EntityReadInputs {
   readonly following: boolean;
   readonly ancestors: ReadonlyArray<string>;
   readonly contextComplete: boolean;
+  /** The latest change at the source, in words, when the thing has one. */
+  readonly latestChange: EntityChange | undefined;
 }
 
 /**
@@ -356,5 +363,6 @@ export const buildEntityFields = (input: EntityReadInputs): EntityRecord => {
     ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
     ancestors: input.ancestors,
     contextComplete: input.contextComplete,
+    ...(input.latestChange === undefined ? {} : { latestChange: input.latestChange }),
   };
 };

@@ -335,10 +335,14 @@ const observationFields = {
   title: buildBoundedString(1, MAX_EVENT_TITLE_LENGTH),
 };
 
-/** One text of an observation. `revision` lets the core skip a text it already searched. */
+/**
+ * One text of an observation. `revision` lets the core skip a text it already
+ * searched. An empty `text` is allowed: it clears the hints this Connection
+ * found under `evidenceKey`, as a description that was emptied needs.
+ */
 const ObservationText = Schema.Struct({
   evidenceKey: buildBoundedString(1, MAX_ENTITY_EVIDENCE_KEY_LENGTH),
-  text: buildBoundedString(1, MAX_ENTITY_TEXT_LENGTH),
+  text: buildBoundedString(0, MAX_ENTITY_TEXT_LENGTH),
   revision: Schema.optionalKey(buildBoundedString(1, 256)),
 });
 

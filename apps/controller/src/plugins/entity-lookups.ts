@@ -46,6 +46,7 @@ import {
 } from "../connections";
 import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
+import { recognizeInSources, type PluginRecognition } from "./entity-recognition";
 import { PluginHost } from "./host";
 
 /** How long one call to a plugin's lookup may run, in seconds. */
@@ -56,15 +57,6 @@ export const MAX_RESOLVE_CONNECTIONS = 8;
 
 /** The most Connections `search` asks. Eligible Connections beyond them are left out. */
 export const MAX_SEARCH_CONNECTIONS = 4;
-
-/** The most recognitions one plugin returns for a text. */
-const MAX_RECOGNITIONS = 20;
-
-/** One plugin's recognition of a text. The recognition's `kind`, when it has one, is qualified. */
-export interface PluginRecognition {
-  readonly pluginId: string;
-  readonly recognition: EntityRecognition;
-}
 
 /** An observation a lookup read, with the Connection that read it. `observation.kind` is unqualified. */
 export interface LookupObservation {
@@ -200,12 +192,6 @@ const removeKindQualifier = (pluginId: string, target: EntityRecognition): Entit
   return { ...target, kind: target.kind.slice(prefix.length) };
 };
 
-/** Returns the recognition with its `kind`, when it has one, qualified by the plugin id. */
-const qualifyKind = (pluginId: string, recognition: EntityRecognition): EntityRecognition =>
-  recognition.kind === undefined
-    ? recognition
-    : { ...recognition, kind: `${pluginId}/${recognition.kind}` };
-
 const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const connections = yield* connectionRepository;
@@ -330,33 +316,7 @@ const make = Effect.gen(function* () {
      * in the log names the plugin.
      */
     recognize: (text: string): Effect.Effect<ReadonlyArray<PluginRecognition>> =>
-      Effect.flatMap(host.listActiveEventSources(), (sources) =>
-        Effect.map(
-          Effect.forEach(sources, (source) => {
-            const lookup = source.entityLookup;
-            if (lookup === undefined) return Effect.succeed<ReadonlyArray<PluginRecognition>>([]);
-            try {
-              return Effect.succeed(
-                lookup
-                  .recognize(text)
-                  .slice(0, MAX_RECOGNITIONS)
-                  .map((recognition) => ({
-                    pluginId: source.pluginId,
-                    recognition: qualifyKind(source.pluginId, recognition),
-                  })),
-              );
-            } catch (error) {
-              return Effect.as(
-                Effect.logWarning(
-                  `The entity lookup of ${source.pluginId} failed to recognize a text: ${String(error)}`,
-                ),
-                [] as ReadonlyArray<PluginRecognition>,
-              );
-            }
-          }),
-          (perSource) => perSource.flat(),
-        ),
-      ),
+      Effect.flatMap(host.listActiveEventSources(), (sources) => recognizeInSources(sources, text)),
 
     /** Returns the ids of the active plugins whose lookup recognizes links, in registry order. */
     listLinkSources: (): Effect.Effect<ReadonlyArray<string>> =>

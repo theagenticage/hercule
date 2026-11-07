@@ -108,6 +108,7 @@ import {
   runAttachmentSweepLoop,
   runIngestReconciler,
   runHarnessReleaseCheckLoop,
+  runClaimResolverLoop,
   runEntityPruneLoop,
   runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
@@ -119,6 +120,8 @@ import {
   thawExpiredFreezes,
 } from "../daemon";
 import { stopWrites } from "../db";
+import { ClaimResolutionLayer } from "../external-entities";
+import { EntityLookupsLayer } from "../plugins";
 import { TaskSummariesLayer } from "../tasks";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
@@ -499,6 +502,13 @@ export const serve = (bundle: WebBundle | undefined) =>
     );
     // External Entities nothing needs are deleted once a day.
     yield* Effect.forkScoped(runEntityPruneLoop);
+    // Claims that point at a thing no plugin could place yet are resolved
+    // through the plugins' lookups, up to 20 for each Connection every 30 seconds.
+    yield* Effect.forkScoped(
+      runClaimResolverLoop.pipe(
+        Effect.provide(Layer.mergeAll(ClaimResolutionLayer, EntityLookupsLayer)),
+      ),
+    );
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);

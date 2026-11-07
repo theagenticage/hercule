@@ -145,6 +145,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
     const host = yield* PluginHost;
 
     return {
+      readStackCandidates: entities.listStackCandidates,
       readFacts: (tasks: ReadonlyArray<BoardFactsRequest>): Effect.Effect<BoardFacts, SqlError> =>
         Effect.gen(function* () {
           const taskIds = tasks.map((task) => task.id);

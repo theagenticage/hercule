@@ -702,6 +702,7 @@ describe("who may read the details", () => {
             Layer.provide(
               Layer.mergeAll(
                 Layer.succeed(TaskBoardFacts)({
+                  readStackCandidates: () => Effect.succeed({ candidates: [], truncated: false }),
                   readFacts: (tasks) =>
                     Effect.sync(() => {
                       asked.push("card facts");

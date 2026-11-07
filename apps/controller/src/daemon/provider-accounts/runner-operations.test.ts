@@ -436,9 +436,13 @@ describe("a sign-in checked while the account changes", () => {
       Effect.gen(function* () {
         const { runner, added } = yield* arrangeAliceCachedOnRunner;
         const sql = yield* SqlClient.SqlClient;
+        // Only the sign-in's own probe is looked at. A signed-in account also
+        // starts a catalog read that probes the runner a few milliseconds
+        // later, and that probe must not add a second entry.
         whileProbing.current = Effect.flatMap(readSnapshotAuth(added.id, runner), (auth) =>
           Effect.sync(() => {
             seen.push(auth);
+            whileProbing.current = Effect.void;
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie);
         yield* service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" });

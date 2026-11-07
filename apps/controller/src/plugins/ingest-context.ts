@@ -12,7 +12,8 @@
  *   plugin's manifest requested the `resources` capability;
  * - `entities`, which reports what the poll read of External Entities through
  *   the Entity Observations port, only when the manifest requested the
- *   `entities` capability.
+ *   `entities` capability. It recognizes the addresses and texts of the
+ *   observations first (see `buildIngestEntities`).
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -33,6 +34,7 @@ import {
   type IngestConnection,
   type EmittedEvent,
   type IngestContext,
+  type EntityObservation,
   type IngestEntities,
   type LinkedResource,
 } from "@hercule/plugin-host";
@@ -44,8 +46,10 @@ import {
 } from "../connections";
 import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
+import { recognizeClaims } from "./claim-recognition";
 import { describeFieldIssues } from "./errors";
 import { EntityObservations, type EntityReporter } from "./entity-observations";
+import { EntityRecognizer } from "./entity-recognition";
 import type { RegisteredEventSource } from "./event-sources";
 import { OpenSignals } from "./open-signals";
 
@@ -120,16 +124,35 @@ const toLinkedResource = (resource: StoredResource): LinkedResource => ({
   remote: resource.canonicalRemote,
 });
 
-/** Binds the Entity Observations port to one reporter, which gives a plugin its `entities` handle. */
+/**
+ * Binds the Entity Observations port to one reporter, which gives a plugin its
+ * `entities` handle. `reconcile` and `refresh` first recognize the web
+ * addresses and texts of the observations over the plugins that are active at
+ * that moment, because the External Entities domain cannot reach the plugins'
+ * lookups.
+ */
 const buildIngestEntities = (
   port: typeof EntityObservations.Service,
+  recognizer: typeof EntityRecognizer.Service,
   reporter: EntityReporter,
-): IngestEntities => ({
-  reconcile: (inventory) => port.reconcile(reporter, inventory),
-  refresh: (observations) => port.refresh(reporter, observations),
-  listWanted: (kind, limit) => port.listWanted(reporter, kind, limit),
-  reportMissing: (ref, reason) => port.reportMissing(reporter, ref, reason),
-});
+): IngestEntities => {
+  const recognizeObserved = (observations: ReadonlyArray<EntityObservation>) =>
+    Effect.flatMap(recognizer.readRecognizer(), (recognize) =>
+      recognizeClaims(observations, recognize),
+    );
+  return {
+    reconcile: (inventory) =>
+      Effect.flatMap(recognizeObserved(inventory.observations), (claims) =>
+        port.reconcile(reporter, inventory, claims),
+      ),
+    refresh: (observations) =>
+      Effect.flatMap(recognizeObserved(observations), (claims) =>
+        port.refresh(reporter, observations, claims),
+      ),
+    listWanted: (kind, limit) => port.listWanted(reporter, kind, limit),
+    reportMissing: (ref, reason) => port.reportMissing(reporter, ref, reason),
+  };
+};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -138,6 +161,7 @@ const make = Effect.gen(function* () {
   const resources = yield* resourceRepository;
   const openSignals = yield* OpenSignals;
   const entityObservations = yield* EntityObservations;
+  const recognizer = yield* EntityRecognizer;
 
   /**
    * Checks one emitted event and appends it to the log in its own short
@@ -234,7 +258,7 @@ const make = Effect.gen(function* () {
       openSignals: () => openSignals.listForConnection(connection.id),
       ...(source.entities
         ? {
-            entities: buildIngestEntities(entityObservations, {
+            entities: buildIngestEntities(entityObservations, recognizer, {
               connectionId: connection.id,
               pluginId: source.pluginId,
               kinds: source.entityKinds,
