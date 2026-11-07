@@ -258,6 +258,7 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 - **Grants.** The operation's row names `task.read`, and the service also checks `session.read` (as `session.query`) and `run.read` (as `run.query`) before it reads anything, because a card shows a Thread's question and a run's state. A caller with `task.read` alone is refused with `forbidden` naming the missing grant, not given a thinner board. The user holds all three.
 - **How it reads.** A fixed number of statements whatever the number of cards, with no transaction, so it runs on the read-only connection.
 - Its CLI row is `hercule task board`. Its help names the three grants.
+- *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **Entities on the board.** The reply gains `places` (`EntityPlace[]`, at most `MAX_BOARD_PLACES`), `edges` (at most `MAX_GRAPH_EDGES`), `groupings` (the kinds that can group things and have a place on this board, each with its caption) and `contextComplete`. A `WorkCard` gains `entityMarks` (at most 3, each a plugin id and kind) and `contextRefs` (the refs its Task links and everything above them, at most `MAX_CARD_CONTEXTS`). All are read in a fixed number of statements, with one walk up `part of` for every card. No new grant is needed ([./20-external-entities.md](./20-external-entities.md#11-works-context)).
 
 *(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* **`task.move`** puts a Task in a place on the board, in one transaction and one `task.updated`, stamped with the actor.
 
@@ -268,6 +269,32 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 - Its CLI row is `hercule task move <id> --stage <stage> [--project <id>] [--after <id>]`, with the id, project and card resolved from tails through `task.query` and `project.query`. Not a bound operation: `task.move` lists no `usableIn`.
 
 `task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* `priority` ascends `low, normal, high, urgent`, and `status` ascends `open, in-progress, done, cancelled`. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
+
+### externalEntity
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)* Semantics: [./20-external-entities.md](./20-external-entities.md). The group reuses the `task` grant family, as `modelProfile` reuses `infra`, so there is no new family and no grants migration. The CLI spells the noun `entity` (`hercule entity list`).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `externalEntity.queryInbox` | none -> `Inbox` | `task.read` | `GET /external-entities/inbox` |
+| `externalEntity.countInbox` | none -> `InboxCounts` | `task.read` | `GET /external-entities/inbox/count` |
+| `externalEntity.read` | `{ id }` -> `ExternalEntityDetail` | `task.read` | `GET /external-entities/{id}` |
+| `externalEntity.takeOn` | `{ id }` -> `{ taskId, created }` | `task.update`, user only | `POST /external-entities/{id}/take-on` |
+| `externalEntity.undoTakeOn` | `{ id, taskId }` -> `{ undone, reason? }` | `task.update`, user only | `POST /external-entities/{id}/take-on/undo` |
+| `externalEntity.dismiss` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/dismiss` |
+| `externalEntity.restore` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/restore` |
+| `externalEntity.search` | `{ source, text, scopeRef? }` -> `EntitySearchReply` | `task.read` and `connection.query`, user only | `GET /external-entities/search` |
+| `externalEntity.listSuggestions` | `{ contextRef? }` -> `EntitySuggestions` | `task.read` | `GET /external-entities/suggestions` |
+| `externalEntity.addToWork` | `{ ref, projectId? }` -> `{ id, taskId, created, stage, followed }` | `task.update`, user only | `POST /external-entities/add-to-work` |
+
+- **`queryInbox`** returns `{ cards: InboxCard[], places: EntityPlace[], edges: EntityEdge[], counts: InboxCounts, truncated }`: the whole Inbox in one reply, at most `MAX_INBOX_CARDS` (1,000) cards, oldest first inside each side, in a fixed number of statements. A dismissed card is not listed.
+- **`countInbox`** returns the same `counts`, from the same function, for the sidebar. It needs the same grants as `queryInbox`.
+- **`read`** returns one full record of a work kind with its places, edges, links and conflicts. A partial record, a context record and an unknown id answer `not_found`.
+- **`takeOn` and `addToWork`** fail `invalid_state` for a kind that cannot be taken on (a place) or a thing that could not be read, `conflict` when the entity changed while the Task was being made and the call should be repeated, and `not_found` for an unknown id (and, for `addToWork`, an unknown Project). A repeat returns the same Task.
+- **`undoTakeOn`** deletes the Task only when it is live, not merged and untouched since it was created. Otherwise it changes nothing and answers `{ undone: false, reason }`.
+- **`search`** answers an outcome in the reply, not an error, for everything the source can say: `results`, `no-match`, `inaccessible`, `not-found`, `unknown`, `ambiguous`, `incomplete`, `unknown-link` and `source-unavailable`. A scope the source cannot search by fails `validation`.
+- **A session** may call `queryInbox`, `countInbox`, `read` and `listSuggestions` with `task.read`. The user-only operations refuse a session with `forbidden`.
+- **The CLI rows.** `hercule entity list`, `read <id>`, `take-on <id>`, `dismiss <id>`, `restore <id>`, `search <source> <text> [--scope <ref>]`, `suggestions [--context <ref>]` and `add-to-work <ref> [--project <id>]`. `countInbox` and `undoTakeOn` are `hidden: true`: they exist only for the sidebar and the undo line. An entity's id is given whole; a tail is not accepted.
 
 ### workflow, trigger, run
 

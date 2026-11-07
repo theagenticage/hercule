@@ -13,7 +13,7 @@ import {
 export interface HeldSignalsState {
   /** The signals the list shows, in the order of `listed`, less the changes held back. */
   readonly shown: ReadonlyArray<Signal>;
-  /** Whether inbox zero plays its arrival: the user's own action emptied the list just now. */
+  /** Whether To do clear plays its arrival: the user's own action emptied the list just now. */
   readonly arriving: boolean;
   /**
    * Records that the user's own action changes `signalIds`. Call it when the

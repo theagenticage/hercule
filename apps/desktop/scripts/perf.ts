@@ -60,7 +60,7 @@
  *    memory and idle are read with Intake open. One more plain launch, which
  *    opens Intake again, measures what a signal raised costs, alone and in
  *    a burst, what opening and closing the split costs, and what the
- *    list's motion and inbox zero cost on screen (see `perf-intake.ts`).
+ *    list's motion and To do clear cost on screen (see `perf-intake.ts`).
  *    Pass `--intake-only` to run only that launch, on 40 threads and the
  *    signals of this step:
  *
@@ -1502,7 +1502,7 @@ const FLEET_ONLY = process.argv.includes("--fleet-only");
  * The launch opens Intake on To do, waits for its list to draw a row, and
  * reads the memory of Intake on To do to compare Everything with. So it first
  * raises `INTAKE_SIGNALS` signals onto To do. Without them, the full run would
- * find To do empty: Intake at work, measured just before, ends at inbox zero.
+ * find To do empty: Intake at work, measured just before, ends at To do clear.
  * The signals Intake at work marked done stay on Done, and the snoozed signal
  * stays on Later, so neither changes To do.
  */

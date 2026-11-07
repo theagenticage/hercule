@@ -28,10 +28,7 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 export const listBoardGroupings = (board: Pick<WorkBoard, "groupings">): readonly BoardGrouping[] =>
   board.groupings
     .map((grouping) => ({ ...grouping, pluginId: parsePluginId(grouping.kind) }))
-    .toSorted(
-      (a, b) =>
-        a.caption.localeCompare(b.caption) || compareText(a.kind, b.kind),
-    );
+    .toSorted((a, b) => a.caption.localeCompare(b.caption) || compareText(a.kind, b.kind));
 
 /** Returns `word` with its first letter in lower case, unless the word starts with an acronym ("PR"). */
 const lowerFirst = (word: string): string =>
@@ -50,7 +47,7 @@ const pluralizeNoun = (noun: string): string => {
 /** Returns what a card says when its Task stands under `places`, two or more of one kind. */
 const describeCardPlaces = (places: readonly EntityPlace[]): CardPlaces => ({
   summary: `In ${String(places.length)} ${pluralizeNoun(lowerFirst(places[0]?.noun ?? ""))}`,
-  names: places.map(readPlaceName),
+  names: places.map(readPlaceName).toSorted((a, b) => a.localeCompare(b)),
 });
 
 /**

@@ -1,0 +1,124 @@
+/* The rows that draw the outside graph: a place above a thing, or a thing
+   linked to it. They are the drawing's `.o-link` rows (`css/open.css` of the
+   Inbox) and its 4px progress bar (`.b-progress` of `css/inbox.css`). */
+.relation-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.relation-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  border-radius: var(--r-xs);
+  font: var(--type-summary);
+}
+.relation-go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  min-height: 24px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  text-align: left;
+  color: inherit;
+}
+button.relation-go:hover {
+  background: var(--hover);
+}
+.relation-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--mark-ink);
+}
+.relation-title {
+  min-width: 0;
+  flex: 1;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What the place says about itself, then its progress, at the end of the row. */
+.relation-end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  transition: opacity var(--m-quick);
+}
+.relation-facts {
+  white-space: nowrap;
+}
+
+/* A place no Connection can read: a lock and the words, all faint. */
+.relation-row.is-locked {
+  color: var(--faint);
+}
+.relation-row.is-locked .relation-title {
+  color: var(--faint);
+}
+
+/* Who claims a link stays quiet until the row is reached for. It lies over the
+   end of the row, so no height changes, and the words it covers fade out. */
+.relation-claim {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--stock);
+  color: var(--faint);
+  font: var(--type-meta);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick);
+}
+.relation-row:hover .relation-claim,
+.relation-row:focus-within .relation-claim {
+  opacity: 1;
+}
+.relation-row[data-claimed]:hover .relation-end,
+.relation-row[data-claimed]:focus-within .relation-end {
+  opacity: 0;
+}
+
+/* The source's own report of how far along something is. */
+.relation-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--faint);
+  font: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+.relation-progress.is-wide {
+  gap: 10px;
+  font: var(--type-summary);
+}
+.relation-bar {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.is-wide .relation-bar {
+  width: 72px;
+}
+.relation-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}

@@ -1,5 +1,5 @@
 /** Test cards for the Work board, in the invented Northwind Market world. */
-import type { WorkBoard, WorkCard } from "@hercule/contract";
+import type { EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
 
 /**
  * Returns a card of the given id and title at Exploring, in no Project, with
@@ -28,6 +28,24 @@ export const buildBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   edges: [],
   groupings: [],
   contextComplete: true,
+});
+
+/**
+ * Returns a place of the invented `acme/project` kind, a groupable kind with
+ * the noun "Project" and the caption "Acme project". `overrides` change any field.
+ */
+export const buildPlace = (
+  ref: string,
+  title: string,
+  overrides: Partial<EntityPlace> = {},
+): EntityPlace => ({
+  ref,
+  kind: "acme/project",
+  noun: "Project",
+  caption: "Acme project",
+  title,
+  restricted: false,
+  ...overrides,
 });
 
 /** A failure for a card, from the invented "Review PR" workflow. */

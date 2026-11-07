@@ -68,7 +68,9 @@ const buildSourceFacet = (
   cards: readonly WorkCard[],
   plugins: readonly PluginName[],
 ): FilterFacet<WorkCard> | undefined => {
-  const pluginIds = [...new Set(cards.flatMap((card) => card.entityMarks.map((mark) => mark.plugin)))];
+  const pluginIds = [
+    ...new Set(cards.flatMap((card) => card.entityMarks.map((mark) => mark.plugin))),
+  ];
   if (pluginIds.length === 0) return undefined;
   const values = pluginIds
     .map((pluginId) => ({ id: pluginId, name: namePlugin(pluginId, plugins) }))

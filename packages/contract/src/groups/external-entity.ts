@@ -223,6 +223,10 @@ const EntityFields = {
   noun: bounded(1, 40),
   /** Copied from the kind. */
   card: Schema.Literals(["rich", "compact"]),
+  /** Copied from the kind: the qualified kind of place it is usually grouped under, such as `linear/project`. */
+  home: Schema.optionalKey(Schema.String),
+  /** Copied from the kind: the qualified kind of the level a row shows below its home. */
+  section: Schema.optionalKey(Schema.String),
   /** Copied from the kind. `fast` has a clock, `slow` has none. */
   pace: Schema.Literals(["fast", "slow"]),
   /** Copied from the kind: the hours before a wait counts as due. */

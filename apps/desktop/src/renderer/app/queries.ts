@@ -1057,6 +1057,30 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads the Inbox whole: its cards, the places above them, and its counts.
+ * Not shell data: only the Inbox screen reads it, and it is read again for
+ * the pushes of the live topics while that screen is open. The sidebar reads the
+ * counts alone, see `inboxCountQuery`.
+ */
+export const inboxQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.inbox(),
+    queryFn: () => client.externalEntity.queryInbox(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
+ * every screen. A push on `task` reads it again, so the read is a small one.
+ */
+export const inboxCountQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.inboxCount(),
+    queryFn: () => client.externalEntity.countInbox(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
  * Reads every workflow: the workflow list's rows, and the name Intake gives a
  * signal a workflow's run raised. The shell holds no `workflow` topic,
  * because the controller pushes on it at every cron fire. The workflows page
@@ -2103,8 +2127,8 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, the Tasks Tracking lists and their runs (the count
  * takes in Tracking's waiting rows), the Tasks that To do's signals are
- * about (Your work, which makes a row Needs you), and the plugins that name
- * each signal's source.
+ * about (Your work, which makes a row Needs you), the Inbox's counts, and the
+ * plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -2143,6 +2167,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
     queryClient.ensureQueryData(trackingQuery(client)),
     queryClient.ensureQueryData(yourWorkQuery(client)),
+    queryClient.ensureQueryData(inboxCountQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

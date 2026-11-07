@@ -13,6 +13,8 @@
     "./fleet": "./src/fleet/fleet.ts",
     "./graph-layout": "./src/graph-layout.ts",
     "./graph-model": "./src/graph-model.ts",
+    "./inbox": "./src/inbox/index.ts",
+    "./inbox/testing": "./src/inbox/cards.testing.ts",
     "./list-time": "./src/list-time.ts",
     "./machine-activity": "./src/fleet/machine-activity.ts",
     "./machine-graphs": "./src/fleet/machine-graphs.ts",

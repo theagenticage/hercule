@@ -644,6 +644,8 @@
   --hover: color-mix(in oklab, var(--ink) 5%, transparent);
   --press: color-mix(in oklab, var(--ink) 9%, transparent);
   --selected: color-mix(in oklab, var(--ink) 7%, transparent);
+  /* The mark of a source in a row: ink, a little under full strength. */
+  --mark-ink: color-mix(in oklab, var(--ink) 84%, transparent);
   --field: color-mix(in oklab, var(--sunken) 70%, var(--surface));
 
   /* Glass, derived from --glass-level (0-1). At 0 every value is solid and flat.

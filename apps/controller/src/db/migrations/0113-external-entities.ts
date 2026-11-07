@@ -10,6 +10,10 @@
  *   'partial'`) knows only `kind`, `ref` and `title`, and a context record such
  *   as a repository has no card, no pace and no lifecycle, so every slot that
  *   only a work record fills is nullable. Structured slots are JSON text.
+ *   `home` and `section` are copies of the kind's qualified words of the same
+ *   names. `concerned_since` is when the entity last went from having no
+ *   concern to having one: the start of the wait a card shows when the source
+ *   does not report `waitingSince`.
  * - `external_entity_observations` has one row per ref and Connection: the
  *   concerns that Connection reported and whether it can read the ref. It
  *   keys on the ref, not on the entity, so a Connection can hold state for a
@@ -47,6 +51,8 @@ export default Effect.gen(function* () {
       pace TEXT CHECK (pace IN ('fast', 'slow', 'context')),
       patience INTEGER,
       caption TEXT,
+      home TEXT,
+      section TEXT,
       completeness TEXT NOT NULL CHECK (completeness IN ('full', 'partial')),
       identifier TEXT,
       title TEXT NOT NULL,
@@ -63,6 +69,7 @@ export default Effect.gen(function* () {
       waiting_since TEXT,
       source_updated_at TEXT,
       source_revision TEXT,
+      concerned_since TEXT,
       first_observed_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       presented_by BLOB REFERENCES connections (id) ON DELETE SET NULL,
@@ -154,6 +161,15 @@ export default Effect.gen(function* () {
     CREATE UNIQUE INDEX external_entity_claims_person
       ON external_entity_relation_claims (from_ref, relation, to_ref, actor)
       WHERE claim_type = 'person'
+  `;
+  // Serve the read of the claims the graph refused, by either end.
+  yield* sql`
+    CREATE INDEX external_entity_claims_conflicted_from
+      ON external_entity_relation_claims (from_ref) WHERE state = 'conflicted'
+  `;
+  yield* sql`
+    CREATE INDEX external_entity_claims_conflicted_to
+      ON external_entity_relation_claims (to_ref) WHERE state = 'conflicted'
   `;
   // Serve the walk up from a ref (`readAncestors`) and the walk down.
   yield* sql`

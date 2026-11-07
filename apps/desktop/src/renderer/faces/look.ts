@@ -52,7 +52,7 @@ export const WARDROBE: ReadonlyArray<ReadonlyArray<Accessory>> = [
 /**
  * Hercule's own look: sky, round, with a tache and a homburg, as the Bureau
  * book's crew.js casts it. It is fixed, not hashed from a seed, because
- * Hercule is one character the user meets in many places, such as inbox zero.
+ * Hercule is one character the user meets in many places, such as To do clear.
  */
 export const HERCULE_LOOK: Look = Object.freeze<Look>({
   hue: "sky",

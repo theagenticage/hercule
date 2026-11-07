@@ -123,6 +123,7 @@ describe("the menu commands", () => {
     "signOut",
     "newThread",
     "openOffice",
+    "openInbox",
     "openIntake",
     "openWorkflows",
     "openSettings",

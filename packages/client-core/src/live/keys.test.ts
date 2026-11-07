@@ -112,9 +112,85 @@ describe("the Work board's key", () => {
     }
   });
 
-  it("is the only read of a derived task push, which leaves Tracking and Your work alone", () => {
+  it("is read again, with the Inbox's reads only, by a derived task push, which leaves Tracking and Your work alone", () => {
     for (const ids of [[], ["t1"]]) {
-      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [queryKeys.workBoard()]);
+      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [
+        queryKeys.workBoard(),
+        queryKeys.inbox(),
+        queryKeys.inboxCount(),
+      ]);
+    }
+  });
+});
+
+describe("the Inbox's keys", () => {
+  const inboxKeys = [queryKeys.inbox(), queryKeys.inboxCount()];
+
+  // A poll, a claim or a place changing, and take, add, dismiss and restore.
+  it("are read again by an externalEntity push, with the board, the named entities' reads and the suggestions", () => {
+    assert.deepStrictEqual(buildQueryKeys("externalEntity", ["e1", "e2"]), [
+      ...inboxKeys,
+      queryKeys.workBoard(),
+      queryKeys.externalEntity("e1"),
+      queryKeys.externalEntity("e2"),
+      queryKeys.entitySuggestions(),
+    ]);
+  });
+
+  it("are read again with every entity's read after an externalEntity push naming no ids", () => {
+    assert.deepStrictEqual(buildQueryKeys("externalEntity", []), [
+      ...inboxKeys,
+      queryKeys.workBoard(),
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+    ]);
+  });
+
+  it("reach an open entity's read through the entity prefix, and no other entity's", () => {
+    const keys = buildQueryKeys("externalEntity", ["e1"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.externalEntity("e1"))));
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.externalEntity("e2"))));
+  });
+
+  // A Task finishing, being deleted or merged, or gaining or losing a link.
+  it("are read again by every ordinary task push, with or without ids", () => {
+    for (const ids of [[], ["t1"]]) {
+      const keys = buildQueryKeys("task", ids);
+      for (const key of inboxKeys) assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("are read again by a derived task push, which reads neither Tracking nor the entities' own reads", () => {
+    const keys = buildQueryKeys("task", [], undefined, true);
+    for (const key of inboxKeys) assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.externalEntity())));
+  });
+
+  // A Connection changing status, which changes `stale`.
+  it("are read again by every connection push, with or without ids", () => {
+    for (const ids of [[], ["c1"]]) {
+      const keys = buildQueryKeys("connection", ids);
+      for (const key of inboxKeys) assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  // A plugin being enabled or disabled, which changes `stale` and `kindAvailable`.
+  it("are read again by a plugin push", () => {
+    const keys = buildQueryKeys("plugin", []);
+    for (const key of inboxKeys) assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+  });
+
+  it("are left alone by a push that cannot change a card", () => {
+    for (const topic of ["run", "session", "signal", "workflow", "wikiPage"] as const) {
+      for (const ids of [[], ["x"]]) {
+        const keys = buildQueryKeys(topic, ids);
+        for (const key of inboxKeys) {
+          assert.isFalse(
+            keys.some((read) => isPrefixOf(read, key)),
+            `a ${topic} push naming ${ids.join() || "no ids"}`,
+          );
+        }
+      }
     }
   });
 });

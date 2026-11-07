@@ -443,7 +443,7 @@ describe("createLive", () => {
     );
   });
 
-  it("invalidates only the Work board for a derived task push", async () => {
+  it("invalidates only the Work board and the Inbox for a derived task push", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
 
@@ -459,7 +459,11 @@ describe("createLive", () => {
       { _tag: "invalidate", ids: ["task-1"], kind: "updated", derived: true },
     ]);
     await settleTimers();
-    assert.deepStrictEqual(invalidations[1], [queryKeys.workBoard()]);
+    assert.deepStrictEqual(invalidations[1], [
+      queryKeys.workBoard(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+    ]);
   });
 
   it("invalidates the current session of each conversation a session push names", async () => {
@@ -996,7 +1000,7 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read and Your work", () => {
+  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read, Your work and the Inbox", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
@@ -1005,6 +1009,8 @@ describe("buildQueryKeys", () => {
       ["trackingDetail", "a"],
       ["trackingDetail", "b"],
       ["your-work"],
+      ["inbox"],
+      ["inbox-count"],
     ]);
 
     // The same key builders the task queries use.
@@ -1014,6 +1020,8 @@ describe("buildQueryKeys", () => {
       queryKeys.tracking(),
       queryKeys.trackingDetail("a"),
       queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
     ]);
   });
 
@@ -1024,6 +1032,8 @@ describe("buildQueryKeys", () => {
       ["tracking"],
       ["trackingDetail"],
       ["your-work"],
+      ["inbox"],
+      ["inbox-count"],
     ]);
   });
 

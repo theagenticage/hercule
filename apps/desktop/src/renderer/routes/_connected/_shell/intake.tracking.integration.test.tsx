@@ -2717,13 +2717,13 @@ describe("Tracking's reads", () => {
 });
 
 describe("To do with Tracking", () => {
-  it("points to Tracking, instead of inbox zero, while rows wait on the user and no signal is open", async () => {
+  it("points to Tracking, instead of To do clear, while rows wait on the user and no signal is open", async () => {
     await openIntake("/intake", { signals: [] });
     expect(screen.getByText("No signals. What waits on you is in Tracking.")).toBeTruthy();
     expect(document.querySelector(".asks-zero")).toBeNull();
   });
 
-  it("is at inbox zero while the rows only work", async () => {
+  it("is at To do clear while the rows only work", async () => {
     await openIntake("/intake", {
       signals: [],
       extra: storeTracking([
@@ -2738,7 +2738,7 @@ describe("To do with Tracking", () => {
     expect(getRowButtons()).toHaveLength(2);
   });
 
-  it("is at inbox zero again once the last waiting row is marked done", async () => {
+  it("is at To do clear again once the last waiting row is marked done", async () => {
     await openIntake("/intake?tracking=true", {
       signals: [],
       extra: storeTracking([[FINISHED_TASK, "completed"]]),

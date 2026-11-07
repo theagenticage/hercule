@@ -10,7 +10,7 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
-export { taskRepository, type BoardTask, type NewTask } from "./repository";
+export { LIVE_TASK_LINKS_SQL, taskRepository, type BoardTask, type NewTask } from "./repository";
 export {
   buildWorkCard,
   TaskBoard,

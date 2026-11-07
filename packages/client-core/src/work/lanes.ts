@@ -11,8 +11,7 @@
 import {
   BOARD_STAGES,
   type BoardStage,
-  type EntityProgress,
-  type EntityStatus,
+  type EntityPlace,
   type WorkBoard,
   type WorkCard,
 } from "@hercule/contract";
@@ -39,7 +38,7 @@ export interface LaneCell {
 export interface CardPlaces {
   /** For example "In 2 projects". */
   readonly summary: string;
-  /** The title of each place, for the hover. */
+  /** The title of each place, ordered by name, for the hover. */
   readonly names: readonly string[];
 }
 
@@ -54,9 +53,9 @@ export interface OutsideLane {
   /** The words for the kind of place, such as "Linear project". */
   readonly caption: string;
   /** What the place says about itself. Absent for the "No <caption>" lane or when it reports none. */
-  readonly status?: EntityStatus;
+  readonly status?: EntityPlace["status"];
   /** Only when the source reports it. It is never worked out from the cards. */
-  readonly progress?: EntityProgress;
+  readonly progress?: EntityPlace["progress"];
   /** By Task id: the cards of this lane whose Task stands under more than one place of this kind. */
   readonly cardPlaces: Readonly<Record<string, CardPlaces>>;
 }

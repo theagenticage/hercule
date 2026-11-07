@@ -293,6 +293,24 @@ const COLUMNS =
   "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
+ * The SQL of a `SELECT` that lists the live links of Tasks to refs, one row per
+ * link: `task_id`, `ref`, `linked_at`, `following`, and `position`, the link's
+ * place among the live links of its ref, oldest first by `(linked_at,
+ * task_id)`. A link is live when its Task is not deleted and not finished
+ * (`done` or `dropped`). The active Task of a ref is the Task of the link at
+ * `position = 1`. This text is the one definition of both rules: the reads in
+ * this module and the Inbox's membership in `external-entities` build on it.
+ * A Task cannot be merged into another yet; when merging exists, a merged Task
+ * must be left out here.
+ */
+export const LIVE_TASK_LINKS_SQL = `
+  SELECT l.task_id, l.ref, l.linked_at, l.following,
+         ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
+  FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+  WHERE tasks.deleted_at IS NULL
+    AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
+
+/**
  * The rank of each priority, lowest first. It matches the `priority_rank`
  * column, so a cursor resumes on the value the `tasks_priority` index holds.
  */
@@ -1079,23 +1097,16 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the active Task of a ref, or none: the Task with the lowest
-     * `(linked_at, task_id)` among the Tasks that link the ref and are live.
-     * Live means not deleted and not finished (`done` or `dropped`). Oldest
-     * link wins, so a summary or any other update of a Task never changes the
-     * answer. A Task cannot be merged into another yet; when merging exists,
-     * both reads here must leave a merged Task out too.
-     *
-     * One statement that reads `task_entity_links_ref` in order and stops at
-     * the first live Task, so its work follows the Tasks that link the ref.
+     * Returns the active Task of a ref, or none: the Task of the oldest live
+     * link to the ref (see `LIVE_TASK_LINKS_SQL`). Oldest link wins, so a
+     * summary or any other update of a Task never changes the answer.
      */
     findActiveTaskForRef: (ref: ExternalRef): Effect.Effect<Option.Option<Task>, SqlError> =>
       sql<TaskRow>`
-        SELECT ${sql.literal(COLUMNS)}
-        FROM task_entity_links l CROSS JOIN tasks ON tasks.id = l.task_id
-        WHERE l.ref = ${ref} AND tasks.deleted_at IS NULL
-          AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}
-        ORDER BY l.linked_at, l.task_id LIMIT 1`.pipe(
+        SELECT ${sql.literal(COLUMNS)} FROM tasks
+        WHERE tasks.id = (
+          SELECT task_id FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
+          WHERE ref = ${ref} AND position = 1)`.pipe(
         Effect.flatMap(hydrate),
         Effect.map((found) => Option.fromNullishOr(found[0])),
       ),
@@ -1118,13 +1129,10 @@ const make = Effect.gen(function* () {
               readonly status: string;
               readonly stage: string;
             }>`
-              SELECT ref, id, title, status, stage FROM (
-                SELECT l.ref, tasks.id, tasks.title, tasks.status, tasks.stage,
-                       ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
-                FROM task_entity_links l CROSS JOIN tasks ON tasks.id = l.task_id
-                WHERE l.ref IN ${sql.in(refs)} AND tasks.deleted_at IS NULL
-                  AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}
-              ) WHERE position = 1`,
+              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage
+              FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
+              JOIN tasks ON tasks.id = live.task_id
+              WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
             (rows) =>
               rows.map((row) => ({
                 ref: row.ref,

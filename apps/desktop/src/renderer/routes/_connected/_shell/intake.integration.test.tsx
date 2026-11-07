@@ -470,7 +470,7 @@ describe("Intake's list", () => {
     expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("Triage · Proposal");
   });
 
-  it("shows inbox zero, still, when To do is empty as Intake opens", async () => {
+  it("shows To do clear, still, when To do is empty as Intake opens", async () => {
     await openIntake("/intake", storeSignals([]).handlers);
     const zero = getList().querySelector(".asks-zero")!;
     expect(zero).not.toBeNull();
@@ -1258,15 +1258,15 @@ describe("Intake's motion", () => {
       return zero!;
     });
 
-  it("plays inbox zero's arrival when the user's own Done clears To do", async () => {
+  it("plays To do clear's arrival when the user's own Done clears To do", async () => {
     await openIntake(`/intake?signal=${REVIEW.id}`, storeSignals([REVIEW]).handlers);
     await userEvent.click(within(await findPane()).getByRole("button", { name: "Done" }));
     expect((await findZero()).classList.contains("is-arriving")).toBe(true);
-    // Inbox zero counts what was cleared today itself, so the foot is gone.
+    // To do clear counts what was cleared today itself, so the foot is gone.
     expect(document.querySelector(".asks-cleared")).toBeNull();
   });
 
-  it("plays inbox zero's arrival when the user's answer in the pane clears To do", async () => {
+  it("plays To do clear's arrival when the user's answer in the pane clears To do", async () => {
     const { handlers, store } = storeSignals([REVIEW]);
     const { live } = await openIntake(`/intake?signal=${REVIEW.id}`, {
       ...handlers,
@@ -1284,7 +1284,7 @@ describe("Intake's motion", () => {
     expect((await findZero()).classList.contains("is-arriving")).toBe(true);
   });
 
-  it("shows inbox zero still when the last signal is resolved elsewhere", async () => {
+  it("shows To do clear still when the last signal is resolved elsewhere", async () => {
     const { handlers, store } = storeSignals([REVIEW]);
     const { live } = await openIntake("/intake", handlers);
     await waitForSignalTopic(live);

@@ -97,10 +97,10 @@
  * - `your-work-both`: the same pane with both Tasks, the tracked one first;
  * - `tracking-empty`: the same as folded, with nothing handed off, so folded
  *   Tracking is its head and the line that says what it is for;
- * - `tracking-zero`: no signal on To do while two rows only work: inbox zero,
+ * - `tracking-zero`: no signal on To do while two rows only work: To do clear,
  *   with folded Tracking under it;
  * - `tracking-waiting`: no signal on To do while two rows wait on the user:
- *   the list says what waits is in Tracking, and is not at inbox zero;
+ *   the list says what waits is in Tracking, and is not at To do clear;
  * - `settings-ignore-rules`: Settings > Intake, with the GitHub plugin's
  *   Ignore Rules under its kinds, and below them the section of a removed
  *   plugin, which holds its Ignore Rules only;

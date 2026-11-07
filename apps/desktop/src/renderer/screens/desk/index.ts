@@ -17,12 +17,18 @@
  * - `ViewPill`: the pill that names a place and switches between its views.
  * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
  *   headings.
+ * - `RelationRow`, `RelationRows`, `ClaimHint`, `ProgressBar`: the rows that
+ *   draw the places above a thing and the things linked to it, who claims a
+ *   link (shown on hover or focus), and the 4px bar of a source's reported
+ *   progress. A place the user cannot open is a locked row with no title.
  * - `SideSheet`, `UndoLine`, `Sunrise`: the sheet at the right, the line at
  *   the foot, and what shows when all is done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { FilterChips, FilterControl } from "./filter-control";
+export { ProgressBar } from "./progress-bar";
+export { ClaimHint, RelationRow, RelationRows } from "./relation-rows";
 export { SectionHeading } from "./section-heading";
 export { SideSheet } from "./side-sheet";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";

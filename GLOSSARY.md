@@ -612,7 +612,7 @@ _Avoid_: summary, preview, action description (the producer's own `description` 
 
 **Intake**:
 Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, with Tracking at the foot of To do, and Everything over the events behind them.
-_Avoid_: command center, inbox, dashboard; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+_Avoid_: command center, dashboard, inbox (the Inbox is a place of its own, over External Entities, not over Signals); the empty To do is **To do clear**, never "inbox zero"; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
 
 **Signal**:
 Something put in front of the user on Intake because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, snooze it, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. Its own record, never a Notification.

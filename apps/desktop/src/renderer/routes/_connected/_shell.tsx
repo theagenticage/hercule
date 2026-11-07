@@ -125,10 +125,10 @@ function ShellScreen(): JSX.Element {
     "Could not update the urgent signal notifications:",
   );
 
-  // Only a signed-in user can start a thread, open the Office, Intake,
+  // Only a signed-in user can start a thread, open the Office, Inbox, Intake,
   // Workflows or Settings, so only the shell listens for File > New Thread,
-  // Go > Office, Go > Intake, Go > Workflows and the app menu's Settings. The
-  // Office, Intake, Workflows and Settings, like a thread opened from the
+  // Go > Office, Go > Inbox, Go > Intake, Go > Workflows and the app menu's
+  // Settings. The Office, Inbox, Intake, Workflows and Settings, like a thread opened from the
   // menu, replace whatever the user was doing, the project picker included.
   useEffect(
     () =>
@@ -137,6 +137,10 @@ function ShellScreen(): JSX.Element {
         if (command === "openOffice") {
           setDialog(null);
           void navigate({ to: "/office" });
+        }
+        if (command === "openInbox") {
+          setDialog(null);
+          void navigate({ to: "/inbox" });
         }
         if (command === "openIntake") {
           setDialog(null);

@@ -68,6 +68,8 @@ export const EntityStatus = Schema.Struct({
   shape: Schema.Literals(ENTITY_STATUS_SHAPES),
   tone: Schema.Literals(ENTITY_STATUS_TONES),
   label: bounded(1, 60),
+  /** True for the usual state of the kind. A request shows a status shape only when it is not the norm. */
+  norm: Schema.optionalKey(Schema.Boolean),
 });
 
 export type EntityStatus = Schema.Schema.Type<typeof EntityStatus>;
