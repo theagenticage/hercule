@@ -15,7 +15,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import {
   MAX_BOARD_CARDS,
+  MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
+  MAX_ENTITY_MARKS,
   MAX_TRACKING_FAILURE_CAUSE,
   WorkCard,
   type Grant,
@@ -35,6 +37,7 @@ import {
   type BoardCardFacts,
   type BoardSessionFact,
 } from "./board";
+import { externalEntityRepository, type ObservedEntity } from "../external-entities/repository";
 import { taskRepository, type BoardTask, type NewTask } from "./repository";
 
 const AT = "2026-10-20T10:00:00.000Z";
@@ -59,6 +62,8 @@ const NO_FACTS: BoardCardFacts = {
   lastTurnEndedAt: undefined,
   lastRunEndedAt: undefined,
   failure: undefined,
+  entityMarks: [],
+  contextRefs: [],
 };
 
 const askQuestion = (
@@ -120,6 +125,8 @@ describe("buildWorkCard", () => {
       createdAt: AT,
       stageChangedAt: AT,
       lastActivityAt: AT,
+      entityMarks: [],
+      contextRefs: [],
     });
   });
 
@@ -360,6 +367,22 @@ describe("buildWorkCard", () => {
     });
   });
 
+  describe("the outside things", () => {
+    it("copies the marks and the context refs, and cuts them to what a card holds", () => {
+      const marks = ["a", "b", "c", "d"].map((kind) => ({ plugin: "acme", kind: `acme/${kind}` }));
+      const refs = Array.from(
+        { length: MAX_CARD_CONTEXTS + 1 },
+        (_, n) => `acme:thing:${String(n)}`,
+      );
+
+      const card = buildWorkCard(TASK, { ...NO_FACTS, entityMarks: marks, contextRefs: refs });
+
+      expect(card.entityMarks).toEqual(marks.slice(0, MAX_ENTITY_MARKS));
+      expect(card.contextRefs).toEqual(refs.slice(0, MAX_CARD_CONTEXTS));
+      expect(Schema.is(WorkCard)(card)).toBe(true);
+    });
+  });
+
   describe("the last activity", () => {
     it.each([
       ["the creation of a Task with no turn and no run", undefined, undefined, AT],
@@ -422,7 +445,10 @@ describe("who may read the board", () => {
                 readFacts: (tasks) =>
                   Effect.sync(() => {
                     asked.push(tasks.map((task) => task.id));
-                    return tasks.map(() => NO_FACTS);
+                    return {
+                      cards: tasks.map(() => NO_FACTS),
+                      context: { places: [], edges: [], groupings: [], contextComplete: true },
+                    };
                   }),
               }),
             ),
@@ -570,6 +596,258 @@ describe("the cost of the board read", () => {
     expect(small.board.cards.every((card) => card.openQuestion !== undefined)).toBe(true);
     expect(large.statements).toHaveLength(small.statements.length);
     expect(large.statements.some((text) => text.includes("session_stream"))).toBe(false);
+  });
+});
+
+const PLUGIN = "acme-tracker";
+const CONNECTION = "0199e0e7-0010-7000-8000-000000000001";
+const PROJECT_A = "acme-tracker:project:harbour";
+const PROJECT_B = "acme-tracker:project:lighthouse";
+const ticketRef = (name: string) => `acme-tracker:ticket:${name}`;
+
+type ObservedRelations = NonNullable<ObservedEntity["observation"]["relations"]>;
+
+const OBSERVED_AT = "2026-10-20T09:00:00.000Z";
+
+/** Builds the observation of a ticket: a compact, fast kind with no caption, so it cannot group. */
+const ticket = (name: string, relations?: ObservedRelations): ObservedEntity => ({
+  kind: `${PLUGIN}/ticket`,
+  slots: {
+    noun: "Ticket",
+    card: "compact",
+    pace: "fast",
+    patience: 24,
+    identifier: name.toUpperCase(),
+    facts: [],
+  },
+  observation: {
+    kind: "ticket",
+    ref: ticketRef(name),
+    title: `Ticket ${name}`,
+    url: `https://tracker.example/${name}`,
+    lifecycle: "open",
+    fields: {},
+    concerns: ["assigned"],
+    sourceUpdatedAt: OBSERVED_AT,
+    ...(relations === undefined ? {} : { relations }),
+  },
+});
+
+/** Builds the observation of a project: a place with a caption, so it can group. */
+const projectPlace = (ref: string, title: string): ObservedEntity => ({
+  kind: `${PLUGIN}/project`,
+  slots: { noun: "Project", pace: "context", caption: "Tracker project" },
+  observation: {
+    kind: "project",
+    ref,
+    title,
+    fields: {},
+    concerns: [],
+    sourceUpdatedAt: OBSERVED_AT,
+  },
+});
+
+const partOf = (...parents: ReadonlyArray<string>): ObservedRelations => ({
+  complete: true,
+  partOf: parents,
+  linked: [],
+});
+
+/**
+ * Stores the observations of one tracker plugin, as one Connection read them,
+ * and a Task on the board that links each of `linked`.
+ */
+const writeLinkedBoard = (input: {
+  readonly kinds: ReadonlyArray<{
+    readonly kind: string;
+    readonly observed: ReadonlyArray<ObservedEntity>;
+  }>;
+  readonly tasks: ReadonlyArray<ReadonlyArray<string>>;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tasks = yield* taskRepository;
+    const entities = yield* externalEntityRepository;
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO plugins (id, enabled, config, created_at, updated_at)
+          VALUES (${PLUGIN}, 1, '{}', ${AT}, ${AT})`;
+        yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
+            status, labels, config, created_at, updated_at)
+          VALUES (${uuidFromString(CONNECTION)}, ${PLUGIN}, ${`${PLUGIN}/account`}, 'a', 'a', 'a',
+            'connected', '[]', '{}', ${AT}, ${AT})`;
+        for (const { kind, observed } of input.kinds) {
+          yield* entities.reconcile({
+            connectionId: CONNECTION,
+            kind,
+            complete: true,
+            observed,
+            actor: `plugin:${PLUGIN}`,
+            environment: { now: AT, activePluginIds: [PLUGIN] },
+          });
+        }
+        for (const [index, refs] of input.tasks.entries()) {
+          yield* tasks.insert({
+            ...NEW_TASK,
+            title: `Task ${String(index)}`,
+            provenance: refs.map((ref) => ({ ref })),
+          });
+        }
+      }),
+    );
+  });
+
+const readLinkedBoard = (input: Parameters<typeof writeLinkedBoard>[0]) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      yield* writeLinkedBoard(input);
+      return yield* Effect.flatMap(TaskBoard, (board) => board.query());
+    }).pipe(
+      Effect.provideService(CurrentActor, USER),
+      Effect.provide(
+        TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(TestDatabase)),
+      ),
+    ),
+  );
+
+const TICKET_KIND = `${PLUGIN}/ticket`;
+const PROJECT_KIND = `${PLUGIN}/project`;
+
+describe("the context of the board", () => {
+  it("puts a Task under two places in both, and carries each place once for the whole board", async () => {
+    const board = await readLinkedBoard({
+      kinds: [
+        {
+          kind: PROJECT_KIND,
+          observed: [projectPlace(PROJECT_A, "Harbour"), projectPlace(PROJECT_B, "Lighthouse")],
+        },
+        {
+          kind: TICKET_KIND,
+          observed: [ticket("one", partOf(PROJECT_A, PROJECT_B)), ticket("two", partOf(PROJECT_A))],
+        },
+      ],
+      tasks: [[ticketRef("one")], [ticketRef("two")]],
+    });
+
+    const [first, second] = board.cards.toSorted((a, b) => a.title.localeCompare(b.title));
+    expect(first!.contextRefs).toEqual([ticketRef("one"), PROJECT_A, PROJECT_B]);
+    expect(second!.contextRefs).toEqual([ticketRef("two"), PROJECT_A]);
+    expect(first!.entityMarks).toEqual([{ plugin: PLUGIN, kind: TICKET_KIND }]);
+    expect(board.places.map((place) => place.ref)).toEqual(
+      [PROJECT_A, PROJECT_B, ticketRef("one"), ticketRef("two")].toSorted(),
+    );
+    expect(board.places.find((place) => place.ref === PROJECT_A)).toMatchObject({
+      title: "Harbour",
+      caption: "Tracker project",
+      restricted: false,
+    });
+    expect(board.edges).toEqual(
+      expect.arrayContaining([
+        { fromRef: ticketRef("one"), toRef: PROJECT_A },
+        { fromRef: ticketRef("one"), toRef: PROJECT_B },
+        { fromRef: ticketRef("two"), toRef: PROJECT_A },
+      ]),
+    );
+    expect(board.edges).toHaveLength(3);
+    expect(board.contextComplete).toBe(true);
+  });
+
+  it("never gives a Task the ancestors of a peer its link is only linked to", async () => {
+    const board = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        {
+          kind: TICKET_KIND,
+          observed: [
+            ticket("peer", partOf(PROJECT_A)),
+            ticket("mine", { complete: true, partOf: [], linked: [ticketRef("peer")] }),
+          ],
+        },
+      ],
+      tasks: [[ticketRef("mine")]],
+    });
+
+    expect(board.cards[0]!.contextRefs).toEqual([ticketRef("mine")]);
+    expect(board.places.map((place) => place.ref)).toEqual([ticketRef("mine")]);
+    expect(board.edges).toEqual([]);
+  });
+
+  it("lists a groupable kind with its caption only when a place of it is on the board", async () => {
+    const withProject = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        { kind: TICKET_KIND, observed: [ticket("one", partOf(PROJECT_A))] },
+      ],
+      tasks: [[ticketRef("one")]],
+    });
+    const withoutProject = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        { kind: TICKET_KIND, observed: [ticket("one")] },
+      ],
+      tasks: [[ticketRef("one")]],
+    });
+
+    expect(withProject.groupings).toEqual([{ kind: PROJECT_KIND, caption: "Tracker project" }]);
+    expect(withoutProject.groupings).toEqual([]);
+  });
+
+  it("says the context may be incomplete when a ref above a link has no record", async () => {
+    const board = await readLinkedBoard({
+      kinds: [{ kind: TICKET_KIND, observed: [ticket("one", partOf(PROJECT_A))] }],
+      tasks: [[ticketRef("one")]],
+    });
+
+    expect(board.cards[0]!.contextRefs).toEqual([ticketRef("one"), PROJECT_A]);
+    expect(board.contextComplete).toBe(false);
+  });
+
+  it("sends the same number of statements for 10 Tasks and for 300 that link things under places", async () => {
+    /** Reads a board of `count` Tasks, each linking its own ticket under one project, and returns the statements sent. */
+    const countContextStatements = (count: number) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const names = Array.from({ length: count }, (_, n) => `t${String(n)}`);
+          yield* writeLinkedBoard({
+            kinds: [
+              { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+              {
+                kind: TICKET_KIND,
+                observed: names.map((name) => ticket(name, partOf(PROJECT_A))),
+              },
+            ],
+            tasks: names.map((name) => [ticketRef(name)]),
+          });
+          const statements: Array<string> = [];
+          const board = yield* Effect.provideService(
+            Effect.flatMap(TaskBoard, (reader) => reader.query()),
+            Statement.CurrentTransformer,
+            (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+          );
+          return { statements, board };
+        }).pipe(
+          Effect.provideService(CurrentActor, USER),
+          Effect.provide(
+            TaskBoardLayer.pipe(
+              Layer.provide(TaskBoardFactsLayer),
+              Layer.provideMerge(TestDatabase),
+            ),
+          ),
+        ),
+      );
+
+    const small = await countContextStatements(10);
+    const large = await countContextStatements(300);
+
+    expect(large.board.cards).toHaveLength(300);
+    expect(large.board.cards.every((card) => card.contextRefs.includes(PROJECT_A))).toBe(true);
+    expect(large.board.places).toHaveLength(301);
+    expect(large.statements).toHaveLength(small.statements.length);
   });
 });
 

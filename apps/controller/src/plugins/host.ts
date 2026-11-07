@@ -78,6 +78,7 @@ import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
+import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
 import { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
@@ -1243,6 +1244,7 @@ export const PluginHostLayer: Layer.Layer<
   | ConnectionTypes
   | IngestExecutor
   | OpenSignals
+  | EntityObservations
   | PromotionState
 > = Layer.mergeAll(ActivePluginsLayer, PluginIntakeLayer).pipe(
   Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),

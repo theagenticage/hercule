@@ -378,8 +378,6 @@ const buildField = (
  * - A field with no row is missing from the contract's CLI table, so this
  *   throws rather than creating a flag with no name.
  * - A field whose row is hidden gets no flag.
- * - A query field whose row makes it positional throws, because the table is
- *   wrong.
  * - A field whose row asks for named values throws when its schema is not a
  *   record of text values, or when the row also makes it positional,
  *   because the table is wrong.
@@ -406,12 +404,6 @@ const buildFields = (
       const row = rows[name];
       if (row === undefined) throw new Error(`${id}: ${name} has no row`);
       if ("hidden" in row) return [];
-      // A positional is a route parameter or a payload field. A positional
-      // query parameter would be parsed and then sent nowhere, so the table
-      // is wrong, and this says so.
-      if (carriedIn === "query" && "positional" in row && type.context?.isOptional !== true) {
-        throw new Error(`${id}: ${name} is a required query parameter and cannot be a bare word`);
-      }
       // A field that takes named values is repeatable. As a bare word it
       // would take every word after it, so the table is wrong.
       if ("namedValues" in row && "positional" in row) {
@@ -541,7 +533,8 @@ const buildCommands = (): ReadonlyArray<Command> => {
       // the contract, not a string: the CLI would send a value nothing
       // decodes. Payload positionals come after the route parameters, so a
       // command whose only argument is its content takes it as a positional,
-      // not as a flag. A query field is positional only as a skill folder.
+      // not as a flag. A query field comes last, and is positional when its row
+      // says so: a skill folder, or the words of a search that is a GET.
       const positionals = [
         ...inPath.map((name) => params.get(name)!),
         ...payload.filter((field) => field.positional),

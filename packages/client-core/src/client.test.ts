@@ -301,6 +301,7 @@ describe("createClient", () => {
       status: { _tag: "active" },
       config: {},
       contributions: [],
+      entityKinds: [],
       intake: { eventKinds: [], signalKinds: [] },
     };
     const { fetch, sent } = stubFetch((request) =>

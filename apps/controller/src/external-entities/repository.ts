@@ -28,6 +28,7 @@ import {
   MAX_INBOX_CARDS,
   type EntityConflict,
   type EntityPlace,
+  type EntityStatus,
   type ExternalEntityDetail,
   type Inbox,
   type InboxCard,
@@ -141,6 +142,40 @@ export interface PruneResult {
 export interface EntityStanding {
   readonly standing: "known" | "on-work";
   readonly taskId: string | undefined;
+}
+
+/**
+ * What the service needs to know about a record before it makes a Task for
+ * it. Nothing here is a card: it is the record as the rows hold it now.
+ */
+export interface TaskableEntity {
+  readonly id: string;
+  readonly ref: string;
+  /** The qualified kind. A partial record may have none yet, and then this is the empty string. */
+  readonly kind: string;
+  readonly completeness: "full" | "partial";
+  /** True when the record is a full record of a work kind (fast or slow), the only kind of record a card is made from. */
+  readonly isWorkRecord: boolean;
+  /** Empty for a record that has no title yet. */
+  readonly title: string;
+  readonly status: EntityStatus | undefined;
+  /** The canonical remote of the repository the work lands in, when the record has one. */
+  readonly targetRemote: string | undefined;
+  /** What any Connection can read of the thing, as `buildEntityFields` derives it. */
+  readonly access: "ok" | "inaccessible" | "deleted";
+  /** True when some Connection reports a concern for the thing. */
+  readonly hasConcern: boolean;
+}
+
+/** One thing the sheet lists before the user types, as the rows hold it. */
+export interface SuggestionRow {
+  readonly ref: string;
+  readonly kind: string;
+  readonly noun: string;
+  readonly identifier: string;
+  readonly title: string;
+  readonly url: string;
+  readonly status: EntityStatus | undefined;
 }
 
 /** `readEntity` needs to know which kinds the catalog declares for an active plugin. */
@@ -1120,6 +1155,23 @@ const make = Effect.gen(function* () {
         return { cards, places, edges: walk.edges, counts, truncated };
       }),
 
+    /**
+     * Returns the place of each of `refs` that has a record, whatever kind of
+     * record it is, by the same rules as the Inbox: a place no Connection
+     * reads is restricted. A ref with no record has no entry. Two statements
+     * however many refs there are.
+     */
+    readPlaces: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, EntityPlace>, SqlError> =>
+      Effect.map(readRecords(refs), ({ records, observations }) => {
+        const places = new Map<string, EntityPlace>();
+        for (const [ref, record] of records) {
+          places.set(ref, buildPlace(record, observations.get(ref) ?? []));
+        }
+        return places;
+      }),
+
     /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
     countInbox: (): Effect.Effect<InboxCounts, SqlError> => readInboxCounts,
 
@@ -1190,6 +1242,90 @@ const make = Effect.gen(function* () {
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
         });
       }),
+
+    /**
+     * Returns the record of an entity, found by its id or by its ref, as the
+     * rows hold it now, or none when there is no such record. Any kind of
+     * record is returned, a partial one and a place included, because the
+     * caller decides what may become a Task.
+     */
+    readTaskableEntity: (
+      key: { readonly id: string } | { readonly ref: string },
+    ): Effect.Effect<Option.Option<TaskableEntity>, SqlError> =>
+      Effect.gen(function* () {
+        const found =
+          "id" in key
+            ? yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE id = ${uuidFromString(key.id)}`
+            : yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE ref = ${key.ref}`;
+        const row = found[0];
+        if (row === undefined) return Option.none();
+        const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
+        const status =
+          row.status === null ? undefined : (JSON.parse(String(row.status)) as EntityStatus);
+        const repository =
+          row.repository === null
+            ? undefined
+            : (JSON.parse(String(row.repository)) as { target: { remote: string } });
+        return Option.some({
+          id: uuidToString(row.id),
+          ref: row.ref,
+          kind: (row.kind as string | null) ?? "",
+          completeness: row.completeness as "full" | "partial",
+          isWorkRecord: isWorkRecord(row),
+          title: (row.title as string | null) ?? "",
+          status,
+          targetRemote: repository?.target.remote,
+          access: deriveAccess(observations),
+          hasConcern: unionConcerns(observations).length > 0,
+        });
+      }),
+
+    /**
+     * Returns the things that concern the user and have no live Task, for the
+     * sheet that lists suggestions: full records of a work kind, not
+     * dismissed, with a current concern from some Connection. Oldest first by
+     * `(firstObservedAt, id)`, at most `limit`. When `refs` is given, only
+     * those refs are considered, which is how a chosen context narrows the
+     * list. Context records are never listed.
+     */
+    listSuggestions: (input: {
+      readonly refs: ReadonlyArray<string> | undefined;
+      readonly limit: number;
+    }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly ref: string;
+          readonly kind: string;
+          readonly noun: string;
+          readonly identifier: string;
+          readonly title: string;
+          readonly url: string;
+          readonly status: string | null;
+        }>`
+          WITH live_links AS MATERIALIZED (${sql.literal(LIVE_TASK_LINKS_SQL)})
+          SELECT e.ref, e.kind, e.noun, e.identifier, e.title, e.url, e.status
+          FROM external_entities e
+          WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
+            AND EXISTS (SELECT 1 FROM external_entity_observations o
+                        WHERE o.ref = e.ref AND o.concerns <> '[]')
+            AND NOT EXISTS (SELECT 1 FROM live_links l WHERE l.ref = e.ref)
+            AND (${input.refs === undefined ? 1 : 0} = 1
+                 OR e.ref IN (SELECT value FROM json_each(${refsJson(input.refs ?? [])})))
+          ORDER BY e.first_observed_at, e.id
+          LIMIT ${input.limit}`,
+        (rows) =>
+          rows.map((row) => ({
+            ref: row.ref,
+            kind: row.kind,
+            noun: row.noun,
+            identifier: row.identifier,
+            title: row.title,
+            url: row.url,
+            status: row.status === null ? undefined : (JSON.parse(row.status) as EntityStatus),
+          })),
+      ),
 
     /**
      * Returns what Hercule holds of each ref, for the marks of a search:

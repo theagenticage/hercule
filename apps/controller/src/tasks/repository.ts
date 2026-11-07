@@ -1019,6 +1019,33 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the refs each of the Tasks links, in the order they were linked
+     * (then by ref). A Task with no link has no entry. One statement however
+     * many Tasks there are.
+     */
+    listEntityLinks: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+              SELECT task_id, ref FROM task_entity_links
+              WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+              ORDER BY linked_at, ref`,
+            (rows) => {
+              const links = new Map<string, Array<string>>();
+              for (const row of rows) {
+                const taskId = uuidToString(row.task_id);
+                const refs = links.get(taskId);
+                if (refs === undefined) links.set(taskId, [row.ref]);
+                else refs.push(row.ref);
+              }
+              return links;
+            },
+          ),
+
+    /**
      * Returns every Task that is not finished and has a handoff entry, the
      * most recently updated Task first. A Task is finished at `done` or
      * `dropped`; the other five stages are the board stages. Each Task holds

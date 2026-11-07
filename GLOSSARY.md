@@ -36,6 +36,26 @@ _Avoid_: history, audit trail (reserved for the event log)
 A fully-qualified canonical identifier for a thing outside Hercule (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
 _Avoid_: link, URL (a ref is an identity, not a location)
 
+**External Entity**:
+A durable record of one outside thing, such as a pull request, an issue or a repository, kept true by a plugin's polls and not by events. One record per External Ref, shared by every Connection that sees the thing. It holds what a card draws and is never a copy of the thing. A record of a kind with no card, such as a repository, is a place that things belong to. A word for code and docs only: the UI says the kind's noun, "Pull request", and "entity" never reaches a screen.
+_Avoid_: item, object, mirror, copy, resource (a **Resource** is something Hercule works in); "entity" in any text the user reads
+
+**Entity Kind**:
+One kind of External Entity that a plugin's event source declares as data: its noun, ref prefix, card size, pace and patience, the templates for its identifier, person and facts, its statuses and the sentence for each reason a card is here. The core renders every card from it and keeps copies on the row, so a card still draws after its plugin is gone. A kind with `pace: context` is a place and has no card. A kind is not a signal kind: `linear/issue` can be both, in two namespaces.
+_Avoid_: entity type, schema, template (the kind holds templates), signal kind
+
+**Observation**:
+What one Connection says about one External Ref: the Concerns it reported, whether it can read the ref, and when it last tried. Kept per ref and Connection, so one account's failure never hides another account's good read. An entity's concerns, access and freshness are worked out from its observations. Also what a plugin hands to `reconcile`: one thing it read from its source.
+_Avoid_: snapshot, sync, poll result
+
+**Concern**:
+Why an External Entity matters to the user: `assigned`, `opened`, `review-requested` or `mentioned`, each reported by a plugin for one Connection, or `following`, which is worked out from a live Task the user added to Work from nothing that concerned them. An entity's concerns are the union over its Connections plus `following`. When a complete read no longer lists a thing, its concerns become empty and its card leaves the Inbox, and the record stays.
+_Avoid_: reason (a card's *reason* is the sentence it shows; the concern is the fact behind it), interest, watch, subscription (reserved for events)
+
+**Relation Claim**:
+One reporter's word that two External Refs are related: `part-of`, from a child to a parent, or `linked`, between peers. A source (a Connection), a person or a piece of text makes it, and the core stamps which. `part-of` is a graph, not a chain: a thing can have many parents, and a claim that would close a loop is stored as conflicted and shown. Two reporters of one relation make two claims, and the pair shows once, under the firmest. A claim grants no permission and creates no Concern.
+_Avoid_: edge (the drawn step of a path), link (bare), hierarchy, parent (bare: there can be many)
+
 **Session**:
 One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
@@ -613,6 +633,10 @@ _Avoid_: summary, preview, action description (the producer's own `description` 
 **Intake**:
 Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, with Tracking at the foot of To do, and Everything over the events behind them.
 _Avoid_: command center, dashboard, inbox (the Inbox is a place of its own, over External Entities, not over Signals); the empty To do is **To do clear**, never "inbox zero"; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+
+**Inbox**:
+The desktop page of everything out there that concerns the user, before they take it on: External Entities with a current Concern, an open signal or a live Task, as small cards in Requests, as rows on the raised surface of their place under Ongoing, and under With someone else once a Task has them. What is on it is worked out on read, and its sidebar number counts what has a clock on it. A Task taken from a card is an ordinary Task on Work. Not Intake: Intake holds Signals, and the two sit side by side.
+_Avoid_: Intake, To do, queue, feed, notifications; "inbox zero" (the empty To do is **To do clear**, and the Inbox's own empty page is the sunrise)
 
 **Signal**:
 Something put in front of the user on Intake because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, snooze it, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. Its own record, never a Notification.

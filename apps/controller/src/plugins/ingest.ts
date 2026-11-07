@@ -59,6 +59,7 @@ import { toPluginError } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
+import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
 
 /** After this many failures in a row, of one feed or of the open, the Connection is set to `error`. */
@@ -591,5 +592,11 @@ export class IngestLoops extends Context.Service<IngestLoops, Effect.Success<typ
 export const IngestLoopsLayer: Layer.Layer<
   IngestLoops,
   never,
-  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor | OpenSignals | PromotionState
+  | SqlClient.SqlClient
+  | ConnectionTypes
+  | Notifier
+  | IngestExecutor
+  | OpenSignals
+  | EntityObservations
+  | PromotionState
 > = Layer.effect(IngestLoops)(make);

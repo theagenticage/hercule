@@ -57,6 +57,8 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
  * - `kinds` are the kinds it may emit, keyed by name.
  * - `resources` is whether the manifest requested the `resources` capability,
  *   which decides whether `open` receives the Connection's Resources.
+ * - `entities` is whether the manifest requested the `entities` capability,
+ *   which decides whether `open` receives `IngestContext.entities`.
  * - `signalKinds` are the checked, qualified signal kinds its events raise.
  * - `entityKinds` are the checked, qualified kinds of External Entity it
  *   reports. They are kept whatever the status of the plugin, so a disabled
@@ -71,6 +73,7 @@ export interface RegisteredEventSource {
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
   readonly kinds: ReadonlyMap<string, RegisteredEventKind>;
   readonly resources: boolean;
+  readonly entities: boolean;
   readonly signalKinds: ReadonlyArray<RegisteredSignalKind>;
   readonly entityKinds: ReadonlyArray<QualifiedEntityKindDeclaration>;
   readonly entityLookup?: EntityLookup;
@@ -356,6 +359,7 @@ export const registerEventSourceContribution = (
       feeds,
       kinds: sourceKinds,
       resources: manifest.capabilities.includes("resources"),
+      entities: manifest.capabilities.includes("entities"),
       signalKinds,
       entityKinds,
       ...(contribution.entityLookup === undefined

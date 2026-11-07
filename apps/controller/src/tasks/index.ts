@@ -17,6 +17,8 @@ export {
   TaskBoardFacts,
   TaskBoardLayer,
   type BoardCardFacts,
+  type BoardEntityContext,
+  type BoardFacts,
   type BoardFactsRequest,
   type BoardFailureFact,
   type BoardSessionFact,
