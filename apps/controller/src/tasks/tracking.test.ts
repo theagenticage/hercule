@@ -134,7 +134,7 @@ const runTracking = <A, E>(
   );
 
 describe("task.queryTracking", () => {
-  it("lists the in-progress Tasks that have a handoff entry, and no other Task", async () => {
+  it("lists the Tasks that are not finished and have a handoff entry, wherever on the board they stand, and no other Task", async () => {
     const asked: Array<ReadonlyArray<string>> = [];
     const titles = await runTracking(
       USER,
@@ -154,14 +154,16 @@ describe("task.queryTracking", () => {
             });
             yield* rows.insert({
               ...NEW_TASK,
-              title: "open",
+              title: "dragged back to planned",
               status: "open",
+              stage: "planned",
               provenance: [handoff],
             });
             yield* rows.insert({
               ...NEW_TASK,
               title: "done",
               status: "done",
+              stage: "done",
               provenance: [handoff],
             });
             const deleted = yield* rows.insert({
@@ -177,9 +179,9 @@ describe("task.queryTracking", () => {
       }),
     );
 
-    expect(titles).toEqual(["tracked"]);
+    expect(titles.toSorted()).toEqual(["dragged back to planned", "tracked"]);
     expect(asked).toHaveLength(1);
-    expect(asked[0]).toHaveLength(1);
+    expect(asked[0]).toHaveLength(2);
   });
 
   it("gives each row its handoffs newest first, and orders the rows by the Task's last update, newest first", async () => {
@@ -554,7 +556,7 @@ describe("task.readTracking", () => {
 });
 
 describe("the query plan of Tracking's Task statement", () => {
-  it("walks the in-progress Tasks and probes each one's newest handoffs, never the handoffs of other Tasks", async () => {
+  it("walks the unfinished Tasks on the stage index and probes each one's newest handoffs, never the handoffs of other Tasks", async () => {
     const plan = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -577,7 +579,7 @@ describe("the query plan of Tracking's Task statement", () => {
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(plan).toContain("SEARCH t USING INDEX tasks_status_updated_at (status=?)");
+    expect(plan).toContain("SEARCH t USING INDEX tasks_stage (stage=?)");
     expect(plan).toContain(
       "SEARCH task_provenance USING INDEX task_provenance_handoff (task_id=?)",
     );

@@ -3,7 +3,7 @@ import {
   MACHINE_ACTIVITY_FILTERS,
   type MachineActivityFilter,
 } from "@hercule/client-core/machine-activity";
-import { ViewSwitch } from "../workflows/view-switch";
+import { ViewSwitch } from "../view-switch";
 import "./machine-activity.css";
 
 /** The filters as the segmented control lists them. */

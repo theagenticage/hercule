@@ -302,7 +302,7 @@
 }
 
 /* With the drawer open the bar has about 650px: the counts keep their marks
-   and numbers, and the office's pill drops its title. */
+   and numbers, and the Overview pill drops its title, leaving its two tabs. */
 @container office-deck (width < 900px) {
   .sum-words,
   .office-top .pill-title {

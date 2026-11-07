@@ -91,12 +91,14 @@ const COMMANDS: Record<string, string> = {
   "secret.delete": "secret delete",
 
   "task.query": "task list",
+  "task.queryBoard": "task board",
   "task.queryTracking": "task tracking",
   "task.queryLegs": "task legs",
   "task.read": "task read",
   "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
+  "task.move": "task move",
   "task.delete": "task delete",
 
   "notification.query": "notification list",
@@ -346,6 +348,9 @@ const RESOLVES: Record<string, string> = {
   "task.read id": "task.query",
   "task.readTracking id": "task.query",
   "task.update id": "task.query",
+  "task.move id": "task.query",
+  "task.move projectId": "project.query",
+  "task.move afterTaskId": "task.query",
   "task.delete id": "task.query",
   "task.queryLegs runIds": "run.query",
 

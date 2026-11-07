@@ -2,7 +2,13 @@
  * The controller's database: one SQLite database, ambient transactions and
  * forward-only migrations.
  */
-export { afterCommit, AfterCommit, announce, type Change } from "./after-commit";
+export {
+  afterCommit,
+  AfterCommit,
+  announce,
+  announceTaskCardChange,
+  type Change,
+} from "./after-commit";
 export {
   DatabaseError,
   createDatabaseError,

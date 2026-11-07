@@ -3,6 +3,16 @@
  * Nothing here decides policy: placement, the access-mode fallback and status
  * changes are decided by the service and by the fold in `stream.ts`.
  *
+ * Every write that changes a session's status announces the card of the
+ * session's Task (`announceTaskCardChange`), here and nowhere else, so no path
+ * that changes a status can forget it. Writes that change a status are
+ * `insert`, `moved`, `started`, `resume`, `undoResume` and the `end*` methods.
+ * `setTaskId` announces too, because the session moves from one card to
+ * another. A write that does not change the status announces nothing, however
+ * often it runs. The announcement is sent once the caller's transaction
+ * commits (`db/after-commit.ts`). A question opening or closing changes no
+ * status, so the service announces that (`replaceOpenRequests`).
+ *
  * `resumable` is computed in the SELECT rather than stored, because a stored
  * copy would be out of date as soon as a runner is retired.
  */
@@ -32,8 +42,10 @@ import {
   type SessionStatus,
   type SortDirection,
   type ThreadDone,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import {
+  announceTaskCardChange,
   decodeCursor,
   decodeIntegerKeyCursor,
   encodeCursor,
@@ -547,6 +559,26 @@ const buildPassageScope = (direction: SortDirection): CursorScope => ({
   sort: [{ field: "at", direction }],
 });
 
+/** What the Work board reads of all the sessions of one Task. */
+export interface BoardSessionTotals {
+  readonly taskId: string;
+  /** How many of the Task's sessions are Threads. */
+  readonly threadCount: number;
+  /** When the latest of the Task's sessions ended a turn, or `undefined` if none did. */
+  readonly lastTurnEndedAt: string | undefined;
+}
+
+/** A session of a Task that the Work board looks into; see `listBoardFacts`. */
+export interface BoardSession {
+  readonly id: string;
+  readonly taskId: string;
+  readonly kind: SessionKind;
+  readonly status: SessionStatus;
+  readonly createdAt: string;
+  /** The Requests the session has open, oldest first. */
+  readonly openRequests: ReadonlyArray<SessionRequest>;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const COLUMNS = buildColumnList();
@@ -580,6 +612,19 @@ const make = Effect.gen(function* () {
         CROSS JOIN sessions ON id = active_id`;
 
   /**
+   * Announces the card of each Task that the given session rows belong to,
+   * once per Task. A row with no Task changes no card.
+   */
+  const announceCardChanges = (
+    rows: ReadonlyArray<{ readonly task_id: Uint8Array | null }>,
+  ): Effect.Effect<void> =>
+    Effect.forEach(
+      new Set(rows.flatMap((row) => (row.task_id === null ? [] : [uuidToString(row.task_id)]))),
+      announceTaskCardChange,
+      { discard: true },
+    );
+
+  /**
    * Moves every session that matches `condition` and has not exited to
    * `exited`, and returns those rows as they were just before, oldest first.
    * The caller needs the old rows, because what an end means depends on the
@@ -606,6 +651,7 @@ const make = Effect.gen(function* () {
           exited_at = ${at}
         WHERE id IN ${sql.in(rows.map((row) => row.id))} AND status <> 'exited'
       `;
+      yield* announceCardChanges(rows);
       return rows.map(toSession);
     });
 
@@ -653,6 +699,7 @@ const make = Effect.gen(function* () {
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.createdBy}, ${session.at}, ${session.at})
         `;
+        yield* announceCardChanges([{ task_id: task }]);
       }),
 
     one: (id: string): Effect.Effect<Option.Option<StoredSession>, SqlError> =>
@@ -1141,9 +1188,13 @@ const make = Effect.gen(function* () {
      * writers, ingest and a spawn that could not reach its runner, so a status
      * read before the transaction proves nothing inside it. Only `resume`
      * below moves a session out of `exited`.
+     *
+     * A move to the status the session already has changes nothing and
+     * announces nothing, so a caller need not check first.
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
         UPDATE sessions SET
           status = ${status},
           last_activity_at = CASE WHEN ${status} = 'exited' THEN last_activity_at ELSE ${at} END,
@@ -1153,7 +1204,11 @@ const make = Effect.gen(function* () {
           token_hash = CASE WHEN ${status} IN ('starting', 'idle', 'busy') THEN token_hash
                             ELSE NULL END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
-      `),
+          AND status <> ${status}
+        RETURNING task_id
+      `,
+        announceCardChanges,
+      ),
 
     /**
      * Moves a `queued` session to `exited`, and returns the row as it was
@@ -1179,14 +1234,18 @@ const make = Effect.gen(function* () {
      * Like `moved`, it never changes an exited session.
      */
     started: (sessionId: string, tokenHash: string, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET
-          status = 'starting',
-          last_activity_at = ${at},
-          process_started_at = ${at},
-          token_hash = ${tokenHash}
-        WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
-      `),
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
+          UPDATE sessions SET
+            status = 'starting',
+            last_activity_at = ${at},
+            process_started_at = ${at},
+            token_hash = ${tokenHash}
+          WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
+          RETURNING task_id
+        `,
+        announceCardChanges,
+      ),
 
     /**
      * Records the library skills the session got at the start that was just
@@ -1243,15 +1302,19 @@ const make = Effect.gen(function* () {
      * transcript is read in `position` order.
      */
     resume: (sessionId: string, spec: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET
-          status = 'queued',
-          spec = ${spec},
-          open_requests = '[]',
-          stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                         WHERE session_id = sessions.id)
-        WHERE id = ${uuidFromString(sessionId)}
-      `),
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
+          UPDATE sessions SET
+            status = 'queued',
+            spec = ${spec},
+            open_requests = '[]',
+            stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
+                           WHERE session_id = sessions.id)
+          WHERE id = ${uuidFromString(sessionId)}
+          RETURNING task_id
+        `,
+        announceCardChanges,
+      ),
 
     /**
      * Stores why the session exited. It decides nothing: the service writes
@@ -1283,16 +1346,16 @@ const make = Effect.gen(function* () {
      * input is waiting.
      */
     undoResume: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
           UPDATE sessions SET
             status = 'exited',
             crash_guard_armed = 0
           WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
             AND exited_at IS NOT NULL
-          RETURNING id
+          RETURNING task_id
         `,
-        (rows) => rows.length > 0,
+        (rows) => Effect.as(announceCardChanges(rows), rows.length > 0),
       ),
 
     /**
@@ -1414,12 +1477,22 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)} AND role IS NULL
       `),
 
-    /** Sets the Task the session belongs to. It checks nothing: the caller chose a Task that can be joined. */
+    /**
+     * Sets the Task the session belongs to, and announces the card of the Task
+     * it left and the card of the one it joined. It checks nothing: the caller
+     * chose a Task that can be joined.
+     */
     setTaskId: (sessionId: string, taskId: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET task_id = ${uuidFromString(taskId)}
-        WHERE id = ${uuidFromString(sessionId)}
-      `),
+      Effect.gen(function* () {
+        const left = yield* sql<{ readonly task_id: Uint8Array | null }>`
+          SELECT task_id FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        yield* sql`
+          UPDATE sessions SET task_id = ${uuidFromString(taskId)}
+          WHERE id = ${uuidFromString(sessionId)}
+        `;
+        yield* announceCardChanges([...left, { task_id: uuidFromString(taskId) }]);
+      }),
 
     /**
      * Sets the access mode the session asked for, the one it runs under, and
@@ -1465,6 +1538,97 @@ const make = Effect.gen(function* () {
     touched: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE sessions SET last_activity_at = ${at}
+            WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'`,
+      ),
+
+    /**
+     * Returns what the Work board reads of the sessions of the Tasks `taskIds`,
+     * in two statements whatever the number of Tasks and sessions:
+     *
+     * - `totals`: for each Task that has a session, how many of its sessions
+     *   are Threads and when one of them last ended a turn;
+     * - `notable`: the sessions the board looks into, which are the live ones
+     *   (`queued`, `starting` or `busy`), the ones with an open Request, the
+     *   newest Thread of each Task, and the newest session of each Task of any
+     *   kind. Other sessions, such as a long history of finished Threads, are
+     *   not returned.
+     *
+     * `totals` is answered from `sessions_task_turn_ended` alone. It counts
+     * Threads as the sessions with no agent, which is how `kind` is defined,
+     * because an index cannot cover the generated column `kind`. `notable`
+     * reads the Tasks' sessions on `sessions_task_id`. Neither reads a
+     * transcript.
+     *
+     * The ids reach SQLite as one JSON text, so the statements do not grow
+     * with the number of Tasks.
+     */
+    listBoardFacts: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<
+      {
+        readonly totals: ReadonlyArray<BoardSessionTotals>;
+        readonly notable: ReadonlyArray<BoardSession>;
+      },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const hexIds = JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")));
+        const totalRows = yield* sql<{
+          readonly task_id: Uint8Array;
+          readonly thread_count: number;
+          readonly last_turn_ended_at: string | null;
+        }>`
+          SELECT task_id, SUM(agent_id IS NULL) AS thread_count,
+                 MAX(last_turn_ended_at) AS last_turn_ended_at
+          FROM sessions
+          WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
+          GROUP BY task_id`;
+        const notableRows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly task_id: Uint8Array;
+          readonly kind: SessionKind;
+          readonly status: SessionStatus;
+          readonly created_at: string;
+          readonly open_requests: string;
+        }>`
+          SELECT id, task_id, kind, status, created_at, open_requests FROM (
+            SELECT id, task_id, kind, status, created_at, open_requests,
+                   ROW_NUMBER() OVER (PARTITION BY task_id, kind
+                                      ORDER BY created_at DESC, id DESC) AS recency_of_kind,
+                   ROW_NUMBER() OVER (PARTITION BY task_id
+                                      ORDER BY created_at DESC, id DESC) AS recency
+            FROM sessions
+            WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds})))
+          WHERE recency = 1
+             OR (kind = 'thread' AND recency_of_kind = 1)
+             OR status IN ${sql.in(WORKING_SESSION_STATUSES)}
+             OR open_requests <> '[]'
+          ORDER BY task_id, created_at, id`;
+        return {
+          totals: totalRows.map((row) => ({
+            taskId: uuidToString(row.task_id),
+            threadCount: row.thread_count,
+            lastTurnEndedAt: row.last_turn_ended_at ?? undefined,
+          })),
+          notable: notableRows.map((row) => ({
+            id: uuidToString(row.id),
+            taskId: uuidToString(row.task_id),
+            kind: row.kind,
+            status: row.status,
+            createdAt: row.created_at,
+            openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
+          })),
+        };
+      }),
+
+    /**
+     * Sets the time the session's own agent last ended a turn to `at`. An
+     * exited session is left alone, like `touched`. This is not the last
+     * activity time, which every tool event moves.
+     */
+    turnEnded: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE sessions SET last_turn_ended_at = ${at}
             WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'`,
       ),
 

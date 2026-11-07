@@ -182,7 +182,10 @@ async function readPoseCounts(page: Page): Promise<Array<string | null>> {
   return Promise.all(counts.map((count) => count.getAttribute("aria-label")));
 }
 
-/** Returns the Office's top-bar pill, which holds Overview and the room directory. */
+/**
+ * Returns the Office's own top-bar pill, which holds the Whole office button
+ * and the room directory. The Overview's view pill comes before it.
+ */
 const findOfficePill = (page: Page) =>
   page.getByRole("navigation", { name: "Office", exact: true });
 

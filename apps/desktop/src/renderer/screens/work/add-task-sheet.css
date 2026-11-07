@@ -1,0 +1,28 @@
+/* What Add to Work holds besides the shared sheet's head: the New Task field,
+   from the drawing's `.ad-new`, and the lines under it. */
+.add-task-field {
+  padding-right: 8px;
+  border-radius: var(--r-btn);
+}
+/* The drawing rings a field with an inset line, not the outline other fields get. */
+.add-task-field.field:focus-within {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+.add-task-landing {
+  margin: 5px 0 0;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.add-task-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--ink);
+  font: var(--type-summary);
+}
+.add-task-result .ic {
+  flex: none;
+  color: var(--ok);
+}

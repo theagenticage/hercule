@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DesktopPlatform } from "../../ipc/platform/desktop-platform";
-import { isOtherModifierHeld, isPrimaryModifierHeld } from "./primary-modifier";
+import { describeUndoKey, isOtherModifierHeld, isPrimaryModifierHeld } from "./primary-modifier";
 
 const WITH_COMMAND = { metaKey: true, ctrlKey: false };
 const WITH_CONTROL = { metaKey: false, ctrlKey: true };
@@ -19,4 +19,11 @@ describe("the primary modifier", () => {
       expect(events.map((event) => isOtherModifierHeld(event, platform))).toEqual(other);
     },
   );
+});
+
+describe("describeUndoKey", () => {
+  it("reads ⌘Z on a Mac and Ctrl Z on Linux", () => {
+    expect(describeUndoKey("mac")).toBe("⌘Z");
+    expect(describeUndoKey("linux")).toBe("Ctrl Z");
+  });
 });

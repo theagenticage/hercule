@@ -131,6 +131,11 @@ const TABLE = {
   },
 
   "task.query": { requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  // Reads a Thread's open question and the runs of each Task as well as the
+  // Tasks, so a caller also needs `session.query` and `run.query` (the grants
+  // `session.read` and `run.read`). A caller without them gets `Forbidden`,
+  // not a thinner board. A GET only reads, so the row needs no `readOnly`.
+  "task.queryBoard": { requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
   // Reads the Tasks and the runs of the work handed off from Intake, so the
   // service also needs `run.read`.
   "task.queryTracking": {
@@ -161,6 +166,7 @@ const TABLE = {
     path: "/api/v1/tasks/:id",
     usableIn: ["notification.answer", "signal.answer"],
   },
+  "task.move": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
 
   "notification.query": {

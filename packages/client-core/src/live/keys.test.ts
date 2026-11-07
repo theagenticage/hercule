@@ -103,6 +103,22 @@ describe("Your work's key", () => {
   });
 });
 
+describe("the Work board's key", () => {
+  it("is read again on every ordinary task push, with or without ids", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.workBoard())),
+      );
+    }
+  });
+
+  it("is the only read of a derived task push, which leaves Tracking and Your work alone", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [queryKeys.workBoard()]);
+    }
+  });
+});
+
 describe("signal pushes", () => {
   it("invalidates every list, the changed signals and Your work", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [

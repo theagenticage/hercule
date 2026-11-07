@@ -19,8 +19,8 @@ import { describe, expect, it } from "vitest";
  * It also checks that:
  *
  * - Reduce motion can stop every animation;
- * - only two animations may run forever: the working pose's paws and the
- *   spinner;
+ * - only three animations may run forever: the working pose's paws, the
+ *   spinner, and the paws on a card of the desk;
  * - no rule for every element (`*`) sets a transition, because an element
  *   transitions every property by default, layout included.
  *
@@ -69,12 +69,38 @@ const REDUCE = "@media (prefers-reduced-motion: reduce)";
  * - the working pose's paws, which tap only beside the open thread's running
  *   turn;
  * - the spinner, which turns only while Hercule starts or a provider login
- *   waits for the browser. Both waits end.
+ *   waits for the browser. Both waits end;
+ * - the paws of a colleague on a card of the desk, which tap in short bursts
+ *   with long pauses for as long as a Thread works on the card. The Still
+ *   colleagues setting stops them.
  */
 const ENDLESS_ANIMATIONS = [
   { file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" },
   { file: "styles/controls.css", rule: ".spin" },
+  {
+    file: "screens/desk/card.css",
+    rule: '.card-paws[data-pose="working"]:not([data-still]) i',
+  },
 ];
+
+/**
+ * The stylesheets of the desk (`screens/desk/`), which Work and the Inbox draw,
+ * and of the Work board (`screens/work/`) keep the amended motion rule for
+ * Work (spec 17 §Performance, rule 2). The drawing's motion tokens run longer
+ * than `--dur-3` and are named by who caused the motion, so these stylesheets
+ * may transition for a `--m-*` duration, up to `--m-long` (560 ms), which is
+ * for a one-off moment such as a landing ring. They may also transition
+ * `filter`, `background-color` and `rotate`, which cost a repaint or a
+ * composite as the paint properties do. Every other part of the rule holds
+ * for them: no delay, no layout property, no transition on every element, no
+ * new animation that runs forever, and an animation only when Reduce motion
+ * is not asked for. Nothing outside these folders gets this.
+ */
+const MOTION_FOLDERS = ["screens/desk/", "screens/work/"];
+const DESK_DURATIONS = ["--m-press", "--m-quick", "--m-base", "--m-slow", "--m-long"].map(
+  (token) => `var(${token})`,
+);
+const DESK_PAINT_PROPERTIES = ["filter", "background-color", "rotate"];
 
 /**
  * The rules allowed to transition a layout property, each with that property,
@@ -201,7 +227,10 @@ function splitOutsideParentheses(value: string, separator: RegExp): string[] {
 
 /** Checks whether a word of a `transition` value is a time: a duration or a delay. */
 const isTime = (word: string): boolean =>
-  DURATIONS.includes(word) || /^var\(--dur-/.test(word) || /^[\d.]+m?s$/.test(word);
+  DURATIONS.includes(word) ||
+  DESK_DURATIONS.includes(word) ||
+  /^var\(--dur-/.test(word) ||
+  /^[\d.]+m?s$/.test(word);
 
 /** Checks whether a word of a `transition` value is anything but the property it transitions. */
 const isTimingOrBehaviour = (word: string): boolean =>
@@ -230,7 +259,13 @@ function checkTransition(declaration: Declaration): string[] {
   const layoutProperties = LAYOUT_TRANSITIONS.filter(
     (entry) => entry.file === declaration.file && declaration.blocks.at(-1) === entry.rule,
   ).map((entry) => entry.property);
-  const allowed = [...PAINT_PROPERTIES, ...layoutProperties];
+  const isDesk = MOTION_FOLDERS.some((folder) => declaration.file.startsWith(folder));
+  const allowed = [
+    ...PAINT_PROPERTIES,
+    ...layoutProperties,
+    ...(isDesk ? DESK_PAINT_PROPERTIES : []),
+  ];
+  const allowedDurations = isDesk ? [...DURATIONS, ...DESK_DURATIONS] : DURATIONS;
   return splitOutsideParentheses(declaration.value, /,/).flatMap((item) => {
     const words = splitOutsideParentheses(item, /\s/);
     const times = words.filter(isTime);
@@ -242,9 +277,9 @@ function checkTransition(declaration: Declaration): string[] {
     for (const property of properties.filter((each) => !allowed.includes(each))) {
       messages.push(`${where}: "${item}" transitions ${property}, which is not a paint property.`);
     }
-    if (times.length !== 1 || !DURATIONS.includes(times[0]!)) {
+    if (times.length !== 1 || !allowedDurations.includes(times[0]!)) {
       messages.push(
-        `${where}: "${item}" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.`,
+        `${where}: "${item}" must last var(--dur-1), var(--dur-2) or var(--dur-3)${isDesk ? ", or a --m-* token" : ""}, with no delay.`,
       );
     }
     return messages;
@@ -532,6 +567,34 @@ describe("the renderer's motion", () => {
           isAnimation(declaration),
       ),
     ).toEqual([]);
+  });
+
+  it("lets only the desk's and the Work board's stylesheets transition for a --m-* duration, and holds them to the rest of the rule", () => {
+    const css = `
+      .card-stock { transition: box-shadow var(--m-base) var(--m-ease), filter var(--m-quick); }
+      .slow { transition: opacity 260ms; }
+      .tall { transition: height var(--m-base); }
+      .late { transition-delay: 50ms; }
+    `;
+    expect(
+      findMotionViolations(
+        parseDeclarations("screens/work/sample.css", ".turn { transition: rotate var(--m-base); }"),
+      ),
+    ).toEqual([]);
+    expect(findMotionViolations(parseDeclarations("screens/desk/sample.css", css))).toEqual([
+      'screens/desk/sample.css .slow: "opacity 260ms" must last var(--dur-1), var(--dur-2) or var(--dur-3), or a --m-* token, with no delay.',
+      'screens/desk/sample.css .tall: "height var(--m-base)" transitions height, which is not a paint property.',
+      "screens/desk/sample.css .late: a transition answers a user action at once, so it has no delay.",
+    ]);
+    // Outside the desk and the Work board the same durations and properties are refused.
+    expect(
+      findMotionViolations(
+        parseDeclarations("screens/other.css", ".card-stock { transition: filter var(--m-base); }"),
+      ),
+    ).toEqual([
+      'screens/other.css .card-stock: "filter var(--m-base)" transitions filter, which is not a paint property.',
+      'screens/other.css .card-stock: "filter var(--m-base)" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.',
+    ]);
   });
 
   it("reports each way a stylesheet can break the rule", () => {

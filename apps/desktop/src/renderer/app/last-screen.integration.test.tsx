@@ -83,6 +83,12 @@ describe("a launch", () => {
     expect(router.state.location.pathname).toBe(threadPath);
   });
 
+  it("opens Work stored as the last screen, which Where I left off covers like any other", async () => {
+    storeScreen("/work");
+    const { router } = await launch();
+    expect(router.state.location.pathname).toBe("/work");
+  });
+
   it("opens Intake stored as the last screen", async () => {
     storeScreen("/intake");
     const { router } = await launch();

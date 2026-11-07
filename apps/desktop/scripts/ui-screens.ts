@@ -224,6 +224,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
   },
   {
+    name: "work",
+    path: "work.html",
+    contentSelector: ".board-lanes .desk-card",
+    nonTextParts: [],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",

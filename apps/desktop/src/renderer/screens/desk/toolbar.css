@@ -1,0 +1,500 @@
+/* The toolbar's controls, from the drawing's `css/toolbar.css`: plain
+   controls on the same glass as the pill, 36px high, with words at 13
+   medium. Add is the one filled button. The drawing's `.chip` is named
+   `.desk-chip` here, because the app already has a global `.chip`. */
+.tool {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    var(--glass-shadow);
+  transition: background var(--m-quick);
+}
+.tool b {
+  font-weight: var(--w-medium);
+}
+.tool-key {
+  color: var(--muted);
+}
+.tool .ic {
+  color: var(--faint);
+}
+.tool:hover {
+  background: var(--glass-fill-raised);
+}
+/* While its menu is open, a control keeps its glass and gains a ring. The app
+   draws a button as pressed with a rule of the same weight as this one
+   (menus.css), so this one names the attribute too, and wins. */
+.tool[aria-haspopup="menu"]:has(+ .menu--tool:popover-open),
+.tool[aria-expanded="true"] {
+  background: var(--glass-fill);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 26%, transparent),
+    var(--glass-shadow);
+}
+.tool:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.tool--add {
+  padding: 0 12px 0 9px;
+  color: var(--answer-fg);
+  background: var(--answer);
+  box-shadow: var(--glass-shadow);
+}
+.tool--add .ic {
+  color: inherit;
+}
+.tool--add:hover {
+  background: color-mix(in oklab, var(--answer) 88%, var(--ink));
+}
+
+/* A square control on the same glass, with an icon, such as Display. */
+.icon-pill {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+}
+.icon-pill:hover {
+  color: var(--ink);
+}
+.icon-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* A removable filter. Chips share what room there is, and Clear stays in reach. */
+.desk-chip {
+  flex: 0 1 auto;
+  min-width: 54px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  max-width: 320px;
+  padding: 0 7px 0 9px;
+  border-radius: var(--r-btn);
+  background: var(--selected);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.desk-chip small {
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.desk-chip b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+.desk-chip .ic {
+  flex: none;
+  color: var(--faint);
+}
+.desk-chip:hover .ic {
+  color: var(--ink);
+}
+.desk-chip:focus-visible,
+.chip-clear:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.chip-clear {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+}
+.chip-clear:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* ---------- The tool menu ----------
+   One menu for Group by, Filter and Display, a popover that opens 8px under
+   its button with its left edge on the button's. It is drawn as the app's
+   popover menus are (menus.css), with the drawing's width, glass and rows. */
+.pop.popover-menu.menu--tool {
+  width: 280px;
+  max-height: calc(100vh - 80px);
+  margin-top: 8px;
+  overflow: auto;
+  position-area: block-end span-inline-end;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-2);
+}
+/* A menu for a button at the right end of the row opens toward the left, so it
+   stays inside the window, and lines its right edge up with the end of the
+   row (the Add button's), not with its own button's. */
+.pop.popover-menu.menu--tool.menu--tool-end {
+  width: 264px;
+  position-anchor: --tools-end;
+  position-area: block-end span-inline-start;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .menu--tool:popover-open {
+    animation: tool-menu-arrive var(--m-base) var(--m-ease) both;
+  }
+}
+@keyframes tool-menu-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.menu--tool .menu-pick {
+  justify-content: flex-start;
+  gap: 8px;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--r-xs);
+  font-weight: var(--w-regular);
+}
+.menu--tool .menu-pick > span:not(.menu-mark) {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-pick small {
+  color: var(--faint);
+  font: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+.menu-pick .ic {
+  color: var(--faint);
+}
+.menu--tool .menu-pick.is-on {
+  font-weight: var(--w-medium);
+}
+.menu-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.menu-mark:empty {
+  display: none;
+}
+.menu-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 34%, transparent);
+  color: var(--accent-fg);
+}
+.menu-pick.is-on .menu-box {
+  background: var(--accent);
+  box-shadow: none;
+}
+.menu-pick.is-on .menu-box .ic {
+  color: inherit;
+}
+.menu-h {
+  margin: 8px 8px 2px;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.menu-line {
+  display: block;
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--divider);
+}
+.menu--tool .menu-back {
+  justify-content: flex-start;
+  gap: 6px;
+  height: auto;
+  min-height: 32px;
+  padding: 6px 8px;
+  font-weight: var(--w-medium);
+}
+.menu-back .ic {
+  color: var(--faint);
+}
+
+/* ---------- The row ----------
+   The row floats over the page's top, 10px down and 14px in. Only its
+   controls take the pointer. The controls share the room between the two ends. */
+.desk-toolbar {
+  position: absolute;
+  z-index: 30;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.desk-toolbar > * {
+  pointer-events: auto;
+}
+.tools {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  min-width: 240px;
+  margin: 0 10px;
+  pointer-events: none;
+}
+.tools-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: clip;
+  overflow-clip-margin: 8px;
+  pointer-events: auto;
+}
+/* When room runs out, captions go first, so a chip always keeps its value. */
+.tools-main.has-many .desk-chip small {
+  display: none;
+}
+.tools-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  anchor-name: --tools-end;
+}
+
+/* ---------- Find ---------- */
+.find-wrap {
+  position: relative;
+}
+/* A glass button with a lens that is a text field while it has the focus or text. */
+.find {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  width: 36px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  overflow: hidden;
+}
+.find.is-on,
+.find:focus-within {
+  width: 240px;
+}
+.find:focus-within {
+  box-shadow:
+    inset 0 0 0 1.5px var(--focus),
+    var(--glass-shadow);
+}
+.find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--ink);
+}
+.find-list {
+  position: absolute;
+  z-index: 46;
+  right: 0;
+  top: 44px;
+  width: 360px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-2);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--m-quick),
+    transform var(--m-base) var(--m-ease);
+}
+.find-list.is-on {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.find-row {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-xs);
+  text-align: left;
+}
+.find-row.is-on,
+.find-row:hover {
+  background: var(--hover);
+}
+.find-row b {
+  display: block;
+  font: var(--type-card);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.find-row small {
+  display: block;
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.find-none,
+.find-more {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.find-more {
+  color: var(--faint);
+}
+
+/* ---------- Rows of Display ---------- */
+.menu-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.menu--tool .menu-action,
+.menu--tool .menu-switch {
+  height: auto;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: var(--r-xs);
+  font-weight: var(--w-medium);
+}
+.menu--tool .menu-switch {
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+.menu-switch-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.menu-switch-words b {
+  font-weight: var(--w-medium);
+}
+.menu-switch small {
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.menu-switch-track {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ink) 52%, transparent);
+  transition: background var(--m-quick);
+}
+.menu-switch-track::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--m-base) var(--m-settle);
+}
+.menu-switch.is-on .menu-switch-track {
+  background: var(--accent);
+}
+.menu-switch.is-on .menu-switch-track::after {
+  transform: translateX(12px);
+}
+/* A choice between two or three words, beside its name. */
+.menu-segment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+.menu-segment b {
+  font-weight: var(--w-medium);
+}
+.menu-segment .seg button {
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--t-12);
+}
+
+/* Two chips drop their captions in a window narrower than 1400px, as three or
+   more do at any width, so each keeps its value and Clear stays in reach. The
+   Clear button is there exactly when there are two or more chips. */
+@media (max-width: 1399.98px) {
+  .tools-main:has(.chip-clear) .desk-chip small {
+    display: none;
+  }
+}
+
+/* A facet with more than seven values opens with a Find box over them. */
+input.field.desk-menu-find {
+  display: block;
+  width: calc(100% - 8px);
+  height: 30px;
+  margin: 2px 4px 4px;
+  padding: 0 9px;
+  border-radius: var(--r-btn);
+}
+input.field.desk-menu-find:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+/* A long list of values scrolls inside the menu, under the Find box. */
+.desk-menu-values {
+  max-height: 320px;
+  overflow-y: auto;
+}

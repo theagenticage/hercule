@@ -17,6 +17,7 @@ import {
   SessionInputPayload,
   SessionRequest,
   SessionSpawnInput,
+  WORKING_SESSION_STATUSES,
 } from "./session";
 
 const request = {
@@ -238,6 +239,15 @@ describe("SessionInputPayload", () => {
     });
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("modelSelection");
+  });
+});
+
+describe("WORKING_SESSION_STATUSES", () => {
+  it("holds the live statuses in which a turn runs or is about to", () => {
+    expect([...WORKING_SESSION_STATUSES]).toEqual(["queued", "starting", "busy"]);
+    for (const status of WORKING_SESSION_STATUSES) {
+      expect(LIVE_SESSION_STATUSES).toContain(status);
+    }
   });
 });
 

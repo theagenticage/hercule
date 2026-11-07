@@ -86,6 +86,12 @@ Element.prototype.scrollIntoView = () => {};
 Element.prototype.getAnimations = () => [];
 
 /**
+ * jsdom has no `Element.animate`. The Work board fades the copy of a folding
+ * card with it and does not look at the result, so the stub starts nothing.
+ */
+Element.prototype.animate = () => ({ cancel: () => {} }) as unknown as Animation;
+
+/**
  * jsdom has no `document.fonts`. A screen waits for `document.fonts.ready`
  * before it reports itself to main (see `app/presented-frame.ts`), so without
  * this stub each test that shows the "connecting" screen logs an error. The

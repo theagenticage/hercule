@@ -1,0 +1,32 @@
+/* The right-hand sheet, from the drawing's `.adder` and the measures of the
+   details pane: 468px wide, 14px from the right, from 58px down to 14px from
+   the bottom, a 16px corner and `--h-carry`. It floats over the page, which
+   must not reflow, so its parent is positioned. */
+.side-sheet {
+  position: absolute;
+  z-index: 29;
+  top: 58px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  width: 468px;
+  max-width: calc(100% - 40px);
+  padding: 18px 24px 0;
+  border-radius: 16px;
+  background: var(--stock);
+  box-shadow: var(--h-carry);
+}
+.side-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.side-sheet-head h2 {
+  margin: 0;
+  font-size: var(--t-20);
+  line-height: 26px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.014em;
+}

@@ -1,0 +1,18 @@
+/* The Work board's toolbar: what the drawing's `css/toolbar.css` has beyond
+   the shared parts in `screens/desk/toolbar.css`. */
+
+/* The quiet line before Find, such as what just happened on the board. It
+   gives up its room first when the row is full. */
+.work-toolbar-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 12px;
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--type-summary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-toolbar-line:empty {
+  display: none;
+}

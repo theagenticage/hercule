@@ -49,3 +49,14 @@ The exact rules, and what happens to Threads that already exist, are in [spec 09
 - The tasks domain gains the rule that decides a session's Task. It takes plain values (ids, the session's title and project, the workspace's id) and reads the workspace's kind from the database, as the tasks repository reads `projects`. The sessions domain depends on tasks: `sessions.create` runs the rule inside its transaction, and reopening a Thread calls it. All Task writes stay in the tasks domain. The tasks domain reaches sessions only through a port.
 - Threads that exist at the upgrade and are not Done or Archived get Tasks in the migration, with no events, so no workflow starts for them.
 - Removing `status` altogether stays possible later. It is a separate decision, and needs the stored values to be rewritten first.
+
+## Note: what a card shows, and who decides it
+
+*(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030); the direction of [#823](https://github.com/theagenticage/hercule/issues/823).)* Work draws a Task as a card. Three facts about the card come from sessions and runs, not from the Task row: a Thread has an open question, the Task has a failed run, and a session is working on it. This note settles who works them out. It changes nothing above.
+
+- **The controller decides what a card shows.** It works the three facts out from real rows, in one place, and sends them on the card. A client does not join sessions, requests and runs to guess them. That is the end of the client-side joins #823 describes.
+- **"Wants you" means a Thread's open question, and nothing else.** A Thread of the Task has an open Request of kind `question`, asked by its own agent or by a subagent inside the Thread. An approval, a Permission Request, a signal, a summary, a finished run and a question in a session of kind `agent` or `run` do not set it. They keep the surfaces they already have. One meaning means a card can carry it, a filter can count it, and the user is never asked to tell two kinds of "waiting" apart.
+- **Clients keep only the words.** A client chooses how a fact reads, such as the question on the card's second line or "*Review PR* failed: *cause*", and nothing about whether the fact is true.
+- **The three facts are independent.** A card can show all of them, and there is no precedence between them and no combined field.
+
+The exact rules are in [spec 09](../spec/09-tasks.md#the-board), and how the desktop app draws them is in [spec 17](../spec/17-desktop-app.md#work).

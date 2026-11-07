@@ -133,11 +133,19 @@ import {
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
-import { AfterCommit, afterCommit, nowIso, UUID_PATTERN, withTransaction } from "../db";
+import {
+  AfterCommit,
+  afterCommit,
+  announceTaskCardChange,
+  nowIso,
+  UUID_PATTERN,
+  withTransaction,
+} from "../db";
 import { PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
+import { TaskService } from "../tasks";
 import { runnerRepository } from "../runners";
 import { runHeldSubscriptions } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
@@ -282,6 +290,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
   const promotion = yield* PromotionState;
+  const tasks = yield* TaskService;
   /**
    * Runs `effect` in a transaction of its own once the controller is
    * serving. Every write a run's execution makes on its own goes through
@@ -354,6 +363,15 @@ export const makeRunEngine = Effect.gen(function* () {
           yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
         }
         yield* runHeld.end(runId, at);
+        // Inside the guard above, so a delayed second failure of a run that
+        // has already ended changes nothing, and cannot undo a retry.
+        if (outcome.status === "failed" && run.taskId !== undefined) {
+          yield* tasks.recordRunFailure({ taskId: run.taskId, runId });
+        }
+        // A run's end moves the Task's last activity time, so the card changes
+        // whatever the outcome. A failure was announced just above, and the
+        // two announcements are collected into one push.
+        if (run.taskId !== undefined) yield* announceTaskCardChange(run.taskId);
         yield* workspaceSteps.stopSessions(run);
         const eventId = yield* platformEvents.emit(
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),

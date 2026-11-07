@@ -16,7 +16,8 @@
  *   to notice. Changes that come in a steady stream while an agent works, a
  *   subagent's progress and a session's Token Usage, are collected for a
  *   longer window instead, so a busy session costs each client at most one
- *   refetch per record per second. A subscription's first message is sent
+ *   refetch per record per second. So are the changes to a Task's card that
+ *   a working agent causes. A subscription's first message is sent
  *   at once, with no window: it says that every record may have changed.
  * - A log topic carries the records themselves. A commit only signals that
  *   the log grew, never which rows. Each follower then reads forward from its
@@ -76,9 +77,9 @@ export const COALESCE_WINDOW_MS = 50;
 
 /**
  * How long the changes of a slow-paced record are collected before they are
- * sent, in milliseconds: the `subagent` topic, and a session whose only
- * change is its Token Usage. Both change with almost every event a working
- * agent reports, and a client that refetched each time would read the same
+ * sent, in milliseconds: the `subagent` topic, a session whose only change is
+ * its Token Usage, and a Task whose card an agent changed. All three change
+ * with almost every event a working agent reports, and a client that refetched each time would read the same
  * record many times a second. Exported for the same reason as
  * `COALESCE_WINDOW_MS`.
  */
@@ -191,9 +192,18 @@ const buildEverythingChanged = (topic: MutableLiveTopic): LiveMessage =>
 /** A change to one record of a mutable topic. */
 type RecordChange = Extract<Change, { readonly _tag: "record" }>;
 
-/** Checks whether a record change is collected for the slow window rather than the short one. */
+/**
+ * Checks whether a record change is collected for the slow window rather than
+ * the short one: the `subagent` topic, a change of counts only, and a change
+ * to a Task's card that a working agent caused (`derived`).
+ *
+ * The two windows collect independently. A Task changed by a person and by an
+ * agent in the same moment is named by one push on each window, not by one in
+ * all, and that is accepted: each push is a read, and a read is cheap.
+ */
 const isSlowPaced = (change: RecordChange): boolean =>
-  change.topic === "subagent" || change.countsOnly === true;
+  change.topic === "subagent" ||
+  (change.topic === "task" ? change.derived === true : change.countsOnly === true);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -266,8 +276,12 @@ const make = Effect.gen(function* () {
    * A `session` message also maps each id to its session's conversation. The
    * map is kept by id from the moment a change is collected, so batching can
    * never pair an id with another session's conversation.
+   *
+   * With `marksTasksDerived`, a `task` message carries `derived: true`. Only
+   * the slow window sets it, because only a card change that an agent caused
+   * is collected there (see `isSlowPaced`).
    */
-  const startCoalescing = (windowMs: number) =>
+  const startCoalescing = (windowMs: number, marksTasksDerived: boolean) =>
     Effect.gen(function* () {
       /**
        * The records changed since the last send, by topic and by kind: each
@@ -294,7 +308,9 @@ const make = Effect.gen(function* () {
                     kind,
                     conversationIds: Object.fromEntries(changed),
                   }
-                : { _tag: "invalidate", ids, kind };
+                : topic === "task" && marksTasksDerived
+                  ? { _tag: "invalidate", ids, kind, derived: true }
+                  : { _tag: "invalidate", ids, kind };
             yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message, 0), {
               discard: true,
             });
@@ -331,8 +347,8 @@ const make = Effect.gen(function* () {
         });
     });
 
-  const collectChange = yield* startCoalescing(COALESCE_WINDOW_MS);
-  const collectSlowChange = yield* startCoalescing(SLOW_COALESCE_WINDOW_MS);
+  const collectChange = yield* startCoalescing(COALESCE_WINDOW_MS, false);
+  const collectSlowChange = yield* startCoalescing(SLOW_COALESCE_WINDOW_MS, true);
 
   /**
    * A log a subscription can read from: the event log for `event`, or one
@@ -614,8 +630,9 @@ const make = Effect.gen(function* () {
      * plus any `tap` changes, which never go through a transaction.
      *
      * - Mutable topic changes are collected and sent after the coalescing
-     *   window: the slow one for the `subagent` topic and for a change to a
-     *   session's Token Usage alone, the short one for everything else.
+     *   window: the slow one for the `subagent` topic, for a change to a
+     *   session's Token Usage alone and for a derived change to a Task's card,
+     *   the short one for everything else.
      * - For a log topic, nothing here reads the database: each follower is
      *   signalled that the log grew, and reads the new entries itself.
      * - A `tap` item is sent directly to every current subscriber, with no

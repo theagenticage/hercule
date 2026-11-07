@@ -50,8 +50,9 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * token repairs both, and costs almost nothing when the store is empty.
  *
  * Switching to another controller needs no rule here: main reloads the window
- * then, and the thread copies delete themselves when the reloaded page opens
- * them for another controller URL (see `createThreadCopies`).
+ * then, which builds a new undo stack, and the thread copies delete themselves
+ * when the reloaded page opens them for another controller URL (see
+ * `createThreadCopies`). Signing out empties the undo stack with the caches.
  *
  * The caches are emptied only once the navigation has ended, on the sign-in
  * screen or the connect screen. Emptied earlier, a screen still on display
@@ -88,6 +89,8 @@ export const createAppRouter = (context: RouterContext) => {
     if (signedIn && !hasToken) {
       context.queryClient.clear();
       router.clearCache();
+      // The gestures were the signed-out user's: Undo must not reach the next one.
+      context.controller?.undoStack.clear();
     }
     // A page that closes while signing out must not save its copy: the thread
     // copy hook saves nothing while the token is gone, and this delete also

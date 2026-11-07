@@ -1,0 +1,266 @@
+/* The card: one sheet at one height, for Work and for every page that shows
+   a card. It is the drawing's `.card` (`system/primitives.css`, with the
+   rules of `css/work.css` that draw a card on the desk), under the name
+   `.desk-card`, because the step page already has a global `.card`.
+
+   Three layers share one stacking context, back to front: what stands behind
+   the top edge (`.card-holder`), the sheet (`.card-stock`) and the words. The
+   sheet is its own element so it can hide the lower part of a head standing
+   behind it, and so React never rewrites it: the shadow transition below
+   would be lost. `.card-body` is `display: contents`, so no rule can be aimed
+   at it for opacity. */
+.desk-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* A minimum, so a larger Text size or a text-spacing override grows the card instead of clipping it. */
+  min-height: var(--card-h);
+  padding: var(--card-pad-y) var(--card-pad-x);
+  cursor: default;
+  outline: none;
+  color: var(--muted);
+}
+.card-body {
+  display: contents;
+}
+.card-stock {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--card-r);
+  background: var(--stock);
+  box-shadow: var(--h-rest);
+  transition:
+    box-shadow var(--m-base) var(--m-ease),
+    background-color var(--m-base) var(--m-ease),
+    opacity var(--m-base) var(--m-ease);
+}
+.card-stock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--stock-sheen);
+  pointer-events: none;
+}
+/* The height of a card in the hand rides the same spring as its scale: the
+   motion kernel moves --lift from 0 to 1, and this layer fades in over the
+   sheet, so the card visibly rises and comes down. */
+.card-stock::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--stock-carry);
+  box-shadow: var(--h-carry);
+  opacity: var(--lift, 0);
+  pointer-events: none;
+}
+.desk-card:not(.is-carried):hover {
+  z-index: 2;
+}
+.desk-card:not(.is-carried):hover .card-stock {
+  box-shadow: var(--h-hover);
+}
+.desk-card:focus-visible .card-stock,
+.desk-card.is-focus .card-stock {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Pressing is a dent, not an animation. */
+.desk-card:active:not(.is-carried) {
+  scale: 0.992;
+}
+
+/* A landed card is only words: no sheet, a faint regular title, and its words
+   stand on the column's left edge under the stage's name. */
+.desk-card[data-state="landed"] .card-stock {
+  background: transparent;
+  box-shadow: none;
+}
+.desk-card[data-state="landed"] .card-stock::before {
+  display: none;
+}
+.desk-card[data-state="landed"] {
+  padding-left: 0;
+  padding-right: 0;
+  min-height: 0;
+}
+.desk-card[data-state="landed"] .card-title {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.desk-card[data-state="landed"] .card-words {
+  min-height: 0;
+}
+.desk-card[data-state="landed"] .card-meta {
+  display: none;
+}
+
+/* Words. A title of up to two lines, then a summary of a few words: three
+   lines in all. The age sits alone at the bottom right. The height never
+   changes, so a new summary can never move a neighbour. */
+.card-words {
+  position: relative;
+  min-height: calc(54px + 3 * var(--text-size-step));
+  overflow: hidden;
+  font: var(--type-summary);
+  color: var(--muted);
+}
+.card-meta {
+  position: absolute;
+  right: var(--card-pad-x);
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 16px;
+  font: var(--type-meta);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  font: var(--type-card);
+  color: var(--ink);
+  letter-spacing: -0.003em;
+  text-wrap: pretty;
+}
+.card-now {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 2px 0 0;
+  text-wrap: pretty;
+}
+.desk-card.has-long-title .card-now {
+  -webkit-line-clamp: 1;
+}
+.desk-card:hover .card-title,
+.desk-card:focus-visible .card-title {
+  color: var(--ink);
+}
+.desk-card:hover .card-words,
+.desk-card:focus-visible .card-words {
+  color: var(--muted);
+}
+/* A Thread's open question: the second line is the question, and nothing else on the card changes. */
+.card-now.card-question {
+  color: var(--you-ink);
+}
+/* A failed run: the words are ink, and carry the meaning. */
+.card-now.card-failed {
+  color: var(--ink);
+}
+/* What was asked or what broke always gets two lines. The title gives one up. */
+.desk-card[data-now="failed"] .card-title,
+.desk-card[data-now="question"] .card-title {
+  -webkit-line-clamp: 1;
+}
+.desk-card.has-long-title .card-now.card-failed,
+.desk-card.has-long-title .card-now.card-question {
+  -webkit-line-clamp: 2;
+}
+
+/* Who is on it right now. Only a live Thread stands behind the top edge, 14px
+   from the right: a colleague's head, cut off by the sheet, and two paws on
+   the edge in front of it. */
+.card-holder {
+  position: absolute;
+  z-index: -2;
+  right: 14px;
+  bottom: calc(100% - 3px);
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+  transition: opacity var(--m-base) var(--m-ease);
+}
+/* The head clears the edge to just under the eyes. It rests at 62% saturation
+   and comes to full colour under the pointer. */
+.card-head {
+  display: block;
+  width: 30px;
+  height: 23px;
+  line-height: 0;
+  margin-bottom: 1px;
+  overflow: hidden;
+  filter: saturate(0.62);
+  transition: filter var(--m-base);
+}
+.desk-card:hover .card-head,
+.desk-card:focus-visible .card-head {
+  filter: none;
+}
+.card-head .cr {
+  display: block;
+  overflow: visible;
+}
+/* A raised palm is the one place a colleague carries marigold, so it keeps its full colour. */
+.card-head[data-pose="waiting"],
+.card-head[data-pose="failed"] {
+  filter: none;
+}
+.card-paws {
+  position: absolute;
+  z-index: 1;
+  right: var(--paw-right, 17px);
+  top: -2.5px;
+  display: flex;
+  gap: 10px;
+  pointer-events: none;
+}
+.card-paws i {
+  display: block;
+  width: 7px;
+  height: 5px;
+  border-radius: 50%;
+  background: oklch(var(--char-l) var(--char-c) var(--hue, var(--hue-iris)));
+  box-shadow:
+    inset 0 -1px 0
+      oklch(
+        calc(var(--char-l) - var(--char-shade)) calc(var(--char-c) * 1.05)
+          var(--hue, var(--hue-iris))
+      ),
+    0 0 0 0.5px oklch(0 0 0 / 0.18);
+}
+/* A failed run's colleague wears its plaster, with no paws on the edge. */
+.card-paws[data-pose="failed"] {
+  display: none;
+}
+/* Typing comes in short bursts with long pauses, as it does for a person.
+   Quieter than a loop. Still colleagues, and Reduce motion, stop it. */
+@media (prefers-reduced-motion: no-preference) {
+  .card-paws[data-pose="working"]:not([data-still]) i {
+    animation: paw-tap 3.4s ease-in-out var(--paw-delay, 0s) infinite;
+  }
+  .card-paws[data-pose="working"]:not([data-still]) i + i {
+    animation-delay: calc(var(--paw-delay, 0s) + 0.16s);
+  }
+  /* A card scrolled out of view stops tapping: the board marks it. */
+  .desk-card[data-offscreen] .card-paws[data-pose="working"] i {
+    animation-play-state: paused;
+  }
+}
+@keyframes paw-tap {
+  0%,
+  22%,
+  100% {
+    transform: none;
+  }
+  4%,
+  12% {
+    transform: translateY(-1.1px);
+  }
+  8%,
+  16% {
+    transform: none;
+  }
+}

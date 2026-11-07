@@ -9,7 +9,7 @@ import {
   rememberMachineView,
   type MachineView,
 } from "../../../../screens/fleet/machine-view";
-import { ViewSwitch } from "../../../../screens/workflows/view-switch";
+import { ViewSwitch } from "../../../../screens/view-switch";
 import { AllowSessionsButton } from "./-allow-sessions-button";
 import { CleanUpButton } from "./-clean-up-button";
 import { useMachineFaces } from "./-machine-faces";

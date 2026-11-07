@@ -80,7 +80,8 @@ export interface OpenColleague {
 
 /** A command from the panels and the keys to the scene. */
 export type OfficeCommand =
-  | { readonly kind: "overview" }
+  /** Flies the camera back to the whole office, and clears the selection, the room and the drawer. */
+  | { readonly kind: "show-whole-office" }
   /** Turns the camera around the point it looks at: a positive turn is clockwise from above. */
   | { readonly kind: "turn-camera"; readonly degrees: number }
   | { readonly kind: "zoom-camera"; readonly direction: "in" | "out" }

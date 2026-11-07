@@ -10,6 +10,7 @@
   "exclude": [
     "src/renderer/styles/motion.test.ts",
     "src/renderer/styles/fonts.test.ts",
+    "src/renderer/styles/tokens.test.ts",
     "src/renderer/routes/**/react-compiler.test.ts"
   ]
 }

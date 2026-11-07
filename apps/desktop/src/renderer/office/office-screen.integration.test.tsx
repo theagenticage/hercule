@@ -32,13 +32,18 @@
  *   leaves out; that work is read once as the Office opens, and not again
  *   when the drawer opens;
  * - opened again, the Office reads the ended work and the live runs afresh
- *   before it opens, so what ended while it was closed walks out.
+ *   before it opens, so what ended while it was closed walks out;
+ * - the Overview's view pill is in the top bar with the Office selected, and
+ *   Work opens from its tab and from ⌘2, and ⌘1 and ⌘2 are left alone in a
+ *   text field;
+ * - the sidebar's Overview row opens the Office when the Office was the view
+ *   used last.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
  */
 import { describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RunSummary, Session, SessionRequest } from "@hercule/contract";
 import { queryKeys } from "@hercule/client-core";
@@ -464,6 +469,80 @@ describe("an assistant in the Office", () => {
     expect(
       within(drawer).queryByRole("heading", { name: "This thread was not found." }),
     ).toBeNull();
+  });
+});
+
+describe("the Overview's view pill", () => {
+  /** Returns the pill's tabs, the Office and Work. */
+  const findTabs = () => {
+    const views = screen.getByRole("group", { name: "Overview views" });
+    return {
+      office: within(views).getByRole("button", { name: "Office" }),
+      work: within(views).getByRole("button", { name: "Work" }),
+    };
+  };
+
+  it("sits in the top bar with the Office selected, beside the button that shows the whole office", async () => {
+    await openOffice();
+
+    const { office, work } = findTabs();
+    expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+    expect(office.getAttribute("aria-pressed")).toBe("true");
+    expect(work.getAttribute("aria-pressed")).toBe("false");
+    expect(
+      within(screen.getByRole("navigation", { name: "Office" })).getByRole("button", {
+        name: "Whole office",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("opens Work from its tab", async () => {
+    const { user, router } = await openOffice();
+
+    await user.click(findTabs().work);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/work");
+    });
+  });
+
+  it("opens Work on ⌘2, and keeps ⌘1 to itself while the Office is open", async () => {
+    const { user, router } = await openOffice();
+
+    // The key press is handled where it leads nowhere, so that the Go menu's
+    // first item does not open a thread on top of the Office.
+    expect(fireEvent.keyDown(document.body, { key: "1", metaKey: true })).toBe(false);
+    expect(router.state.location.pathname).toBe("/office");
+
+    await user.keyboard("{Meta>}2{/Meta}");
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/work");
+    });
+  });
+
+  it("leaves ⌘2 to a text field, and a press with Shift or Alt to its own shortcut", async () => {
+    const { router } = await openOffice();
+    const field = document.body.appendChild(document.createElement("input"));
+
+    expect(fireEvent.keyDown(field, { key: "2", metaKey: true })).toBe(true);
+    expect(fireEvent.keyDown(document.body, { key: "2", metaKey: true, shiftKey: true })).toBe(
+      true,
+    );
+    expect(fireEvent.keyDown(document.body, { key: "2", metaKey: true, altKey: true })).toBe(true);
+
+    expect(router.state.location.pathname).toBe("/office");
+    field.remove();
+  });
+
+  it("is what the sidebar's Overview row opens again", async () => {
+    const { user, router } = await openOffice();
+    await act(() => router.navigate({ to: "/intake" }));
+    await user.click(await screen.findByRole("link", { name: "Overview" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/office");
+    });
   });
 });
 

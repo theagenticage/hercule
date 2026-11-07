@@ -2,11 +2,23 @@
 export {
   TaskService,
   TaskServiceLayer,
+  type FailureRestoration,
+  type FailureRestoreRefusal,
   type QueryInput,
   type TaskPage,
   type UpdateInput,
 } from "./service";
-export { taskRepository, type NewTask } from "./repository";
+export { taskRepository, type BoardTask, type NewTask } from "./repository";
+export {
+  buildWorkCard,
+  TaskBoard,
+  TaskBoardFacts,
+  TaskBoardLayer,
+  type BoardCardFacts,
+  type BoardFactsRequest,
+  type BoardFailureFact,
+  type BoardSessionFact,
+} from "./board";
 export {
   TaskTracking,
   TaskTrackingLayer,

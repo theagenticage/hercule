@@ -16,6 +16,7 @@
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows;
  * - fleet.tsx, which opens the Fleet page or a machine's page;
+ * - work.tsx, which opens the Work board;
  * - run.tsx, which opens a run's page;
  * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
  *   list with an open Discussion or page.
@@ -178,6 +179,7 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { createUndoStack } from "../app/undo-stack";
 import { CleanupProvider } from "../app/cleanup";
 import {
   decideStorageNow,
@@ -200,6 +202,7 @@ import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
+import { Route as WorkRoute } from "../routes/_connected/_shell/work";
 import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
 import { Route as MachineRoute } from "../routes/_connected/_shell/fleet/$runnerId";
 import { Route as MachineActivityRoute } from "../routes/_connected/_shell/fleet/$runnerId_.activity";
@@ -210,6 +213,11 @@ import { Route as DiscussionsRoute } from "../routes/_connected/_shell/discussio
 import { Route as OpenDiscussionRoute } from "../routes/_connected/_shell/discussions/$discussionId";
 import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
 import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
+import {
+  buildWorkViewKey,
+  DEFAULT_WORK_DISPLAY,
+  writeSavedWorkView,
+} from "../screens/work/work-view-storage";
 import { Shell } from "../shell";
 import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
@@ -217,6 +225,7 @@ import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
 import { createCleanupSession } from "./fleet-cleanup-fixture";
 import type { FleetRecords } from "./fleet-fixture";
+import type { WorkRecords } from "./work-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
@@ -459,6 +468,7 @@ interface OpenScreens {
   readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
   readonly fleet?: FleetRecords;
+  readonly work?: WorkRecords;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
@@ -621,6 +631,7 @@ const seedQueryCache = (
     intakeSettings,
     workflows,
     fleet,
+    work,
     run,
     discussions,
     wiki,
@@ -857,6 +868,9 @@ const seedQueryCache = (
       );
     }
   }
+  if (work !== undefined) {
+    queryClient.setQueryData(queryKeys.workBoard(), work.board);
+  }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
     queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
@@ -1058,6 +1072,7 @@ const buildRouter = (
         client,
         live: SILENT_LIVE,
         pendingSubmissions,
+        undoStack: createUndoStack(),
       },
     }),
   });
@@ -1128,6 +1143,14 @@ const buildRouter = (
     id: "/workflows",
     path: "/workflows",
     getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const workRoute = WorkRoute.update({
+    id: "/work",
+    path: "/work",
+    getParentRoute: () => shellRoute,
+    // The real loader reads the Projects and starts the board's read, and the
+    // cache already holds both.
     loader: undefined,
   } as never);
   const fleetRoute = FleetRoute.update({
@@ -1203,6 +1226,7 @@ const buildRouter = (
         }),
         intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
+        workRoute,
         fleetRoute,
         machineRoute,
         machineActivityRoute,
@@ -1266,6 +1290,9 @@ const findFleetDrawnSelector = (path: string): string => {
     ? ".machine-activity-row"
     : ".machine-page .machine-activity-row";
 };
+
+/** The selector of what the Work board draws last: a card, which the lanes draw after the first render. */
+const WORK_DRAWN_SELECTOR = ".board-lanes .desk-card";
 
 /**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
@@ -1383,6 +1410,9 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   ) {
     throw new Error("Fleet drew no machine. Check the page's console for the error.");
   }
+  if (screens.work !== undefined && document.querySelector(WORK_DRAWN_SELECTOR) === null) {
+    throw new Error("Work drew no card. Check the page's console for the error.");
+  }
   if (
     screens.discussions !== undefined &&
     document.querySelector(findListDrawnSelector(path, OPEN_DISCUSSION_PART)) === null
@@ -1499,6 +1529,7 @@ async function mountShellSpecimen(
     await waitForElement(findWorkflowsDrawnSelector(path));
   }
   if (screens.fleet !== undefined) await waitForElement(findFleetDrawnSelector(path));
+  if (screens.work !== undefined) await waitForElement(WORK_DRAWN_SELECTOR);
   if (screens.discussions !== undefined) {
     await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
   }
@@ -1718,6 +1749,22 @@ export async function mountWorkflowsSpecimen(
       : `/workflows/${workflows.openWorkflow.workflow.id}` +
         (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { workflows });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Work board open: the main pane shows the app's real Work screen,
+ * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
+ * folded, as if the user had folded them. Returns once a card is in the
+ * document. Fails when the page has no `#root`, draws no sidebar row and no
+ * card, or tries to read a record the cache does not hold.
+ */
+export async function mountWorkSpecimen(records: SidebarRecords, work: WorkRecords): Promise<void> {
+  writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
+    foldedLaneIds: work.foldedLaneIds,
+    display: DEFAULT_WORK_DISPLAY,
+  });
+  await mountShellSpecimen(records, "/work", { work });
 }
 
 /**

@@ -588,9 +588,15 @@ export const CLI = {
       },
     },
   },
+  "task.queryBoard": {
+    command: "task board",
+    help: "Lists every unfinished task as a card on the Work board. The cards come ordered by project, then stage, then the order the user gave them in, never by recent activity. Each card gives the task's stage and priority, its project, how many threads it has, a live session when one is working on it, the question a thread has open when it does (the only thing that means a card wants the user), and the failure the task still shows when a run of it failed. At most 1000 cards come back; the reply says when there were more. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
   "task.queryTracking": {
     command: "task tracking",
-    help: "Lists the work handed off from Intake that is still followed. It is every in-progress task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, its newest live run when one is going, the ids of all its live runs, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
+    help: "Lists the work handed off from Intake that is still followed. It is every unfinished task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, its newest live run when one is going, the ids of all its live runs, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -717,6 +723,36 @@ export const CLI = {
       provenance: {
         flag: "provenance",
         help: "A JSON entry to append to the record of what has touched this task; provenance is never edited and never removed.",
+      },
+    },
+  },
+  "task.move": {
+    command: "task move",
+    help: "Moves a task on the Work board: to another stage, project or place among the cards of its stage. Send at least one of the three; a field you leave out keeps its value. The task goes last among the cards of its new project and stage unless --after names the card it follows. A move to done or dropped is refused: use `hercule task update --stage` for those. Returns the task.",
+    examples: [
+      { args: ["1f3a9c2e", "--stage", "building"] },
+      { args: ["1f3a9c2e", "--stage", "in-review", "--after", "7b2d40aa"] },
+      { args: ["1f3a9c2e", "--project", "9c41d7e0", "--stage", "planned"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      stage: {
+        flag: "stage",
+        help: "The stage to move to: exploring, planned, building, in-review or landed. Leave it off to stay in the task's stage.",
+      },
+      projectId: {
+        flag: "project",
+        help: "The project lane to move to, by its id or a tail of eight or more characters; `null` moves it to the lane of no project.",
+        resolves: "project.query",
+      },
+      afterTaskId: {
+        flag: "after",
+        help: "The card this one now follows among the cards of the task's new project and stage, by its id or a tail of eight or more characters; `null` puts it first. Leave it off to put the task last.",
+        resolves: "task.query",
       },
     },
   },

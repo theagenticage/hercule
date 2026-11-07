@@ -85,6 +85,7 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
@@ -93,6 +94,7 @@ import { providerAccountRepository } from "../provider-accounts";
 import {
   afterCommit,
   announce,
+  announceTaskCardChange,
   buildMatchExpression,
   nowIso,
   buildPageInputFields,
@@ -598,9 +600,6 @@ const ONLY_A_THREAD_CAN_BE_ARCHIVED =
 
 /** The reason stored on the Queued Input an archive cancels. */
 const ARCHIVED_INPUT_REASON = "The session was archived, so it takes no more input.";
-
-/** The statuses of a session that is working, which an archive refuses to cut short. */
-const WORKING_STATUSES: ReadonlyArray<SessionStatus> = ["queued", "starting", "busy"];
 
 /**
  * Returns the end reason of a subscription whose holding session was
@@ -1201,6 +1200,15 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* sessions.setOpenRequests(session.id, after);
       const { closed, opened } = compareOpenRequests(session.openRequests, after);
+      // Only a question in a Thread shows on its Task's card. An approval
+      // does not, and neither does a question in another kind of session.
+      if (
+        session.taskId !== null &&
+        session.kind === "thread" &&
+        [...closed, ...opened].some((request) => request.kind === "question")
+      ) {
+        yield* announceTaskCardChange(session.taskId);
+      }
       // A new Request never closes an older one, so only the other events
       // can have closed any.
       if (closed.length > 0 && event._tag !== "request.opened") {
@@ -2116,7 +2124,7 @@ const make = Effect.gen(function* () {
             )).filter((session) => session.kind === "agent" && session.archived === null);
             const sessionsToArchive = [...moving, ...following];
             const working = sessionsToArchive.filter((session) =>
-              WORKING_STATUSES.includes(session.status),
+              WORKING_SESSION_STATUSES.includes(session.status),
             );
             if (working.length > 0) {
               return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));
@@ -3774,6 +3782,16 @@ const make = Effect.gen(function* () {
         // session becomes unfinished.
         if (event._tag === "item.completed" && event.editedFiles !== undefined) {
           yield* editObserver.filesEdited(id, event.editedFiles);
+        }
+        // Only the session's own agent's turn counts, not a subagent's, and
+        // only while the session accepts changes. The time is the one the
+        // board shows as the end of the turn.
+        if (
+          sessionAcceptsChanges &&
+          event._tag === "turn.completed" &&
+          attributeEvent(event) === undefined
+        ) {
+          yield* sessions.turnEnded(id, at);
         }
         // Written together with the status change from the same event, so a
         // session that reads `idle` already has its harness-native id.

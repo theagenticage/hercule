@@ -563,6 +563,27 @@ const parseSummaryRow = (
   return { ...fields, ...status, ...buildRunningFields(activeRecords, triggers) };
 };
 
+/**
+ * An SQL expression, over a row of `runs`, for what went wrong in a failed
+ * run: its `failure_message`, else the error message of the latest failed
+ * record of the step it failed at. It is null when the run records neither.
+ */
+const FAILURE_MESSAGE = `COALESCE(failure_message,
+  (SELECT json_extract(s.error, '$.message') FROM run_steps s
+   WHERE s.run_id = runs.id AND s.step_id = runs.failed_step_id
+     AND s.status = 'failed'
+   ORDER BY s.iteration DESC LIMIT 1))`;
+
+/** Why one run failed. */
+export interface RunFailure {
+  readonly runId: string;
+  /** The name of the run's workflow as it was when the run started. */
+  readonly workflowName: string;
+  readonly reason: FailureReason;
+  /** What went wrong, when the run says so. */
+  readonly message: string | undefined;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -934,11 +955,7 @@ const make = Effect.gen(function* () {
         ? Effect.succeed(new Map())
         : Effect.map(
             sql<{ readonly id: Uint8Array; readonly message: string | null }>`
-              SELECT id, COALESCE(failure_message,
-                (SELECT json_extract(s.error, '$.message') FROM run_steps s
-                 WHERE s.run_id = runs.id AND s.step_id = runs.failed_step_id
-                   AND s.status = 'failed'
-                 ORDER BY s.iteration DESC LIMIT 1)) AS message
+              SELECT id, ${sql.literal(FAILURE_MESSAGE)} AS message
               FROM runs WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
             (rows) =>
               new Map(
@@ -947,6 +964,59 @@ const make = Effect.gen(function* () {
                 ),
               ),
           ),
+
+    /**
+     * Returns why each run of `runIds` failed: the name of its workflow as it
+     * was when the run started, its failure reason, and what went wrong when
+     * the run says so (see `listFailureMessages`). A run that does not exist,
+     * or did not fail, is left out. One statement, whatever the number of
+     * runs.
+     */
+    listFailures: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<RunFailure>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly id: Uint8Array;
+              readonly workflow_name: string;
+              readonly failure_reason: FailureReason;
+              readonly message: string | null;
+            }>`
+              SELECT id, json_extract(plan, '$.name') AS workflow_name, failure_reason,
+                     ${sql.literal(FAILURE_MESSAGE)} AS message
+              FROM runs
+              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}
+                AND status = 'failed'`,
+            (rows) =>
+              rows.map((row) => ({
+                runId: uuidToString(row.id),
+                workflowName: row.workflow_name,
+                reason: row.failure_reason,
+                message: row.message ?? undefined,
+              })),
+          ),
+
+    /**
+     * Returns, for each of the Tasks `taskIds` that has a run that ended, when
+     * the latest of its runs ended, by Task id. One statement over the runs of
+     * those Tasks, found on `runs_task_id`.
+     */
+    listLastEndings: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array; readonly last_finished_at: string }>`
+          SELECT task_id, MAX(finished_at) AS last_finished_at FROM runs
+          WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(
+            taskIds.map((id) => id.replaceAll("-", "")),
+          )}))
+            AND finished_at IS NOT NULL
+          GROUP BY task_id`,
+        (rows) =>
+          new Map(rows.map((row) => [uuidToString(row.task_id), row.last_finished_at] as const)),
+      ),
 
     /**
      * Returns the newest `limit` runs of the Task as summaries, newest first

@@ -303,6 +303,102 @@ const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
  */
 const TASK_STAGES_MIGRATION = 110;
 
+/**
+ * The migration that gives a Task its place on the Work board (`board_rank`)
+ * and the failure it shows (`failed_run_id`), and a session the end of its
+ * last turn.
+ */
+const TASK_BOARD_RANK_MIGRATION = 112;
+
+/** The project of the board fixture's Tasks. */
+const BOARD_PROJECT_ID = "0199e0e7-0000-7000-8000-000000000b00";
+
+/**
+ * The Tasks the board fixture writes, each with when it was created and, when it
+ * has runs, how they ended, oldest first. The ids fall as the creation times
+ * rise, so a migration that orders a cell by id instead of by creation time
+ * shows. "Email receipts" and "Add a refund button" were created at the same
+ * instant, so the id breaks the tie. Their cells are:
+ *
+ * - the project's `building`: "Fix the cart total", "Email receipts",
+ *   "Add a refund button", in that order;
+ * - `planned`, no project: "Rename the sale banner", "Update the size guide";
+ * - `building`, no project: "Retry failed webhooks", "Speed up search" and
+ *   "Archive old carts", which is deleted and still holds a place.
+ *
+ * Only "Retry failed webhooks" shows a failure: its newest run failed. The
+ * failure of "Speed up search" is older than a run that completed, and the
+ * deleted Task is not on the board.
+ */
+const BOARD_TASKS = [
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b09",
+    title: "Fix the cart total",
+    stage: "building",
+    projectId: BOARD_PROJECT_ID,
+    created: "2026-10-02T09:00:00.000Z",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b08",
+    title: "Add a refund button",
+    stage: "building",
+    projectId: BOARD_PROJECT_ID,
+    created: "2026-10-02T09:05:00.000Z",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b07",
+    title: "Email receipts",
+    stage: "building",
+    projectId: BOARD_PROJECT_ID,
+    created: "2026-10-02T09:05:00.000Z",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b06",
+    title: "Rename the sale banner",
+    stage: "planned",
+    projectId: undefined,
+    created: "2026-10-02T09:10:00.000Z",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b05",
+    title: "Update the size guide",
+    stage: "planned",
+    projectId: undefined,
+    created: "2026-10-02T09:20:00.000Z",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b04",
+    title: "Retry failed webhooks",
+    stage: "building",
+    projectId: undefined,
+    created: "2026-10-02T09:30:00.000Z",
+    runs: [
+      { id: "0199e0e7-0000-7000-8000-000000000c41", status: "completed", minute: 31 },
+      { id: "0199e0e7-0000-7000-8000-000000000c42", status: "failed", minute: 32 },
+    ],
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b03",
+    title: "Speed up search",
+    stage: "building",
+    projectId: undefined,
+    created: "2026-10-02T09:40:00.000Z",
+    runs: [
+      { id: "0199e0e7-0000-7000-8000-000000000c31", status: "failed", minute: 41 },
+      { id: "0199e0e7-0000-7000-8000-000000000c32", status: "completed", minute: 42 },
+    ],
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000b02",
+    title: "Archive old carts",
+    stage: "building",
+    projectId: undefined,
+    created: "2026-10-02T09:50:00.000Z",
+    deleted: true,
+    runs: [{ id: "0199e0e7-0000-7000-8000-000000000c21", status: "failed", minute: 51 }],
+  },
+] as const;
+
 /** The times of every seeded Task: the three differ, so a migration that moves one shows. */
 const SEEDED_TASK_CREATED = "2026-10-01T09:00:00.000Z";
 const SEEDED_TASK_STATUS_CHANGED = "2026-10-03T09:00:00.000Z";
@@ -1533,6 +1629,76 @@ interface RunnerAuditFixture {
 }
 
 /**
+ * Writes the Tasks and runs of `BOARD_TASKS` into the database the edge binary
+ * created, when that database has not run migration 112. Returns true when it
+ * wrote them.
+ *
+ * A database that has not run migration 110 has no `stage`, so the Tasks are
+ * written by `status` alone, and migration 110 gives them the stages named in
+ * `BOARD_TASKS` (`planned` from `open`, `building` from `in-progress`). A
+ * database that ran 110 gets the stages written directly.
+ *
+ * The rows go straight into the database because the edge binary has no way to
+ * give a Task a finished run without a signed-in harness. The runs are all
+ * finished, so the controller's start-up resumes nothing.
+ */
+function persistTaskBoardRows(home: string): boolean {
+  const version = readMigrationVersion(home);
+  if (version >= TASK_BOARD_RANK_MIGRATION) return false;
+  const hasStage = version >= TASK_STAGES_MIGRATION;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    database
+      .query(
+        `INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, 'Northwind Storefront', ?, ?)`,
+      )
+      .run(uuidBlob(BOARD_PROJECT_ID), SEEDED_TASK_CREATED, SEEDED_TASK_CREATED);
+    const stageColumns = hasStage ? ", stage, stage_changed_at" : "";
+    const stageValues = hasStage ? ", ?, ?" : "";
+    const insertTask = database.query(
+      `INSERT INTO tasks (id, title, description, status, priority, labels, project_id,
+                          created_at, updated_at, status_changed_at, deleted_at${stageColumns})
+       VALUES (?, ?, '', ?, 'normal', '[]', ?, ?, ?, ?, ?${stageValues})`,
+    );
+    const insertRun = database.query(
+      `INSERT INTO runs (id, plan, inputs, origin, status, failure_reason, created_at, started_at,
+                         finished_at, task_id)
+       VALUES (?, ?, '{}', ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const task of BOARD_TASKS) {
+      insertTask.run(
+        uuidBlob(task.id),
+        task.title,
+        task.stage === "planned" ? "open" : "in-progress",
+        task.projectId === undefined ? null : uuidBlob(task.projectId),
+        task.created,
+        task.created,
+        task.created,
+        "deleted" in task ? task.created : null,
+        ...(hasStage ? [task.stage, task.created] : []),
+      );
+      for (const run of "runs" in task ? task.runs : []) {
+        const at = `2026-10-02T09:${String(run.minute)}:00.000Z`;
+        insertRun.run(
+          uuidBlob(run.id),
+          JSON.stringify({ name: "Check the cart total", steps: [] }),
+          JSON.stringify({ kind: "manual", actor: "user" }),
+          run.status,
+          run.status === "failed" ? "step-failed" : null,
+          at,
+          at,
+          at,
+          uuidBlob(task.id),
+        );
+      }
+    }
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/**
  * Collects the audit entries of `EDGE_RUNNER_AUDIT_KINDS` the edge binary wrote
  * about the real or the seeded runner, and inserts the other 14 kinds the
  * migration fills as legacy rows. Returns the entries to read back. When the
@@ -2420,6 +2586,7 @@ describe("upgrading from the previous edge release", () => {
         runnerId: SEEDED_RUNNER_ID,
         permissionProfileId: unrestricted.id,
       });
+      const taskBoardRowsSeeded = persistTaskBoardRows(home);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -3017,6 +3184,121 @@ describe("upgrading from the previous edge release", () => {
         await runCli(["workflow", "read", statusStepWorkflow.id, "--json"], upgraded),
       );
       expect(upgradedStatusStepWorkflow).not.toHaveProperty("invalidSince");
+      if (taskBoardRowsSeeded) {
+        // Migration 112 gave every Task a rank, deleted Tasks included. In
+        // each cell (project and stage), the ranks put the Tasks in the order
+        // they were created, the oldest first, and the id breaks a tie.
+        // Only the Task whose newest run failed shows that run's failure.
+        // A session that is not live takes its last activity as the end of
+        // its last turn, and a live one has none yet.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          const ranked = reader
+            .query(
+              // `hex` of a null is an empty string, so it is turned back into null.
+              `SELECT hex(id) AS id, nullif(hex(project_id), '') AS project, stage, created_at,
+                      board_rank, nullif(hex(failed_run_id), '') AS failed_run_id
+               FROM tasks`,
+            )
+            .all() as ReadonlyArray<{
+            id: string;
+            project: string | null;
+            stage: string;
+            created_at: string;
+            board_rank: string;
+            failed_run_id: string | null;
+          }>;
+          expect(ranked.length).toBeGreaterThanOrEqual(BOARD_TASKS.length);
+          const cells = new Map<string, Array<(typeof ranked)[number]>>();
+          for (const task of ranked) {
+            expect(task.board_rank, `rank of ${task.id}`).not.toBe("");
+            const key = `${task.project ?? "none"}/${task.stage}`;
+            cells.set(key, [...(cells.get(key) ?? []), task]);
+          }
+          for (const [key, cell] of cells) {
+            const oldestFirst = cell.toSorted(
+              (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+            );
+            const byRank = cell.toSorted((a, b) => (a.board_rank < b.board_rank ? -1 : 1));
+            expect(
+              byRank.map((task) => task.id),
+              `order of ${key}`,
+            ).toEqual(oldestFirst.map((task) => task.id));
+            expect(new Set(cell.map((task) => task.board_rank)).size, `ranks of ${key}`).toBe(
+              cell.length,
+            );
+          }
+          const hexId = (id: string) => uuidBlob(id).toString("hex").toUpperCase();
+          const failedTask = BOARD_TASKS.find((task) => task.title === "Retry failed webhooks")!;
+          expect(
+            Object.fromEntries(
+              ranked
+                .filter((task) => task.failed_run_id !== null)
+                .map((task) => [task.id, task.failed_run_id]),
+            ),
+          ).toEqual({ [hexId(failedTask.id)]: hexId(failedTask.runs[1].id) });
+          const sessions = reader
+            .query("SELECT status, last_turn_ended_at, last_activity_at FROM sessions")
+            .all() as ReadonlyArray<{
+            status: string;
+            last_turn_ended_at: string | null;
+            last_activity_at: string;
+          }>;
+          expect(sessions.length).toBeGreaterThan(0);
+          for (const session of sessions) {
+            expect(session.last_turn_ended_at, `turn end of a ${session.status} session`).toBe(
+              session.status === "idle" || session.status === "exited"
+                ? session.last_activity_at
+                : null,
+            );
+          }
+        } finally {
+          reader.close();
+        }
+
+        // The public read gives the same order, and the failure with its words.
+        const board = expectJson<{
+          cards: ReadonlyArray<{
+            title: string;
+            stage: string;
+            projectId?: string;
+            failure?: { workflowName: string };
+          }>;
+        }>(await runCli(["task", "board", "--json"], upgraded));
+        // Other fixtures write Tasks of their own into the same cells.
+        const boardTitles: ReadonlyArray<string> = BOARD_TASKS.map((task) => task.title);
+        const titlesOf = (stage: string, projectId: string | undefined) =>
+          board.cards
+            .filter(
+              (card) =>
+                card.stage === stage &&
+                card.projectId === projectId &&
+                boardTitles.includes(card.title),
+            )
+            .map((card) => card.title);
+        expect(titlesOf("building", BOARD_PROJECT_ID)).toEqual([
+          "Fix the cart total",
+          "Email receipts",
+          "Add a refund button",
+        ]);
+        expect(titlesOf("planned", undefined)).toEqual([
+          "Rename the sale banner",
+          "Update the size guide",
+        ]);
+        expect(titlesOf("building", undefined)).toEqual([
+          "Retry failed webhooks",
+          "Speed up search",
+        ]);
+        const failed = board.cards.filter((card) => card.failure !== undefined);
+        expect(failed.map((card) => [card.title, card.failure?.workflowName])).toEqual([
+          ["Retry failed webhooks", "Check the cart total"],
+        ]);
+      } else {
+        console.log(
+          `Skipping the task board fixture: the edge database already ran migration ${String(TASK_BOARD_RANK_MIGRATION)}.`,
+        );
+      }
+
       if (taskStageRows !== undefined) {
         const readTask = async (id: string) =>
           expectJson<ReadTask>(await runCli(["task", "read", id, "--json"], upgraded));
@@ -3441,7 +3723,8 @@ describe("upgrading from the previous edge release", () => {
             .get() as { count: number };
           expect(created).toBeGreaterThanOrEqual(3);
           expect(reader.query("SELECT count(*) AS count FROM tasks").get()).toEqual({
-            count: SEEDED_TASKS.length + 1 + created,
+            count:
+              SEEDED_TASKS.length + 1 + (taskBoardRowsSeeded ? BOARD_TASKS.length : 0) + created,
           });
           expect(
             reader

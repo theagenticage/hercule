@@ -125,6 +125,7 @@ const NEW_OPERATIONS = [
     method: "GET",
     path: "/api/v1/tasks/tracking",
   },
+  { id: "task.queryBoard", requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
   { id: "task.queryLegs", requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
   {
     id: "task.readTracking",
@@ -135,6 +136,7 @@ const NEW_OPERATIONS = [
   { id: "task.read", requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
   { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
+  { id: "task.move", requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
   { id: "task.delete", requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
   {
     id: "notification.query",

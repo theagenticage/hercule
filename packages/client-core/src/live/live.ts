@@ -337,6 +337,7 @@ export const createLive = (options: LiveOptions): Live => {
           subscription.topic as MutableLiveTopic,
           message.ids,
           message.conversationIds,
+          message.derived,
         ),
         { ids: message.ids, kind: message.kind },
       );
