@@ -263,20 +263,22 @@ export const buildLinkedRows = ({
   peers,
   plugins,
 }: LinkedThings): LinkedRows => {
-  const placeByRef = new Map(places.map((place) => [place.ref, place]));
-  const peerByRef = new Map(peers.map((peer) => [peer.ref, peer]));
+  // One lookup by ref: a place when the reply holds one, else the peer. A far end in neither has no row.
+  const farEnds = new Map<string, EntityPlace | EntityPeer>([
+    ...peers.map((peer) => [peer.ref, peer] as const),
+    ...places.map((place) => [place.ref, place] as const),
+  ]);
   const confirmed: PlaceRow[] = [];
   const hints: PlaceRow[] = [];
   for (const link of links) {
     const otherRef = link.fromRef === ref ? link.toRef : link.fromRef;
-    const place = placeByRef.get(otherRef);
-    const peer = peerByRef.get(otherRef);
-    const row = place !== undefined ? buildPlaceRow(place) : peer && buildPeerRow(peer);
-    if (row === undefined) continue;
+    const farEnd = farEnds.get(otherRef);
+    if (farEnd === undefined) continue;
+    const row = "yours" in farEnd ? buildPeerRow(farEnd) : buildPlaceRow(farEnd);
     const isHint = link.claim.type === "text";
     // A hint is offered to be linked, which nobody does to a thing they cannot even name.
     if (isHint && row.isLocked) continue;
-    const mentioner = link.fromRef === ref ? undefined : (place?.identifier ?? peer?.identifier);
+    const mentioner = link.fromRef === ref ? undefined : farEnd.identifier;
     const linked: PlaceRow = {
       ...row,
       link: {

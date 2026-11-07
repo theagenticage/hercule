@@ -232,6 +232,24 @@ describe("buildLinkedRows", () => {
     ]);
   });
 
+  it("draws a far end that a place and a peer both hold from the place", () => {
+    const rows = build(
+      [{ fromRef: ORDER, toRef: OTHER, claim: claimOf("source") }],
+      [
+        {
+          ref: OTHER,
+          kind: "quayside/order",
+          noun: "Order",
+          title: "Stale peer",
+          yours: false,
+          restricted: false,
+        },
+      ],
+    );
+
+    expect(rows.confirmed.map((row) => !row.isLocked && row.title)).toEqual(["Chilled crates"]);
+  });
+
   it("leaves out a hint whose far end the user cannot open", () => {
     const rows = build(
       [{ fromRef: ORDER, toRef: PEER, claim: claimOf("text") }],

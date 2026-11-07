@@ -549,6 +549,30 @@ describe("the Linked section of the open card", () => {
     });
   });
 
+  it("draws a link to a thing no Connection can read as a locked row, and never throws for a far end nobody holds", async () => {
+    const detail = buildDetail(ORDER, {
+      links: [
+        linkTo("acme:review:locked", { type: "source", plugin: "acme" }),
+        linkTo("acme:review:nobody", { type: "source", plugin: "acme" }),
+      ],
+      peers: [
+        {
+          ref: "acme:review:locked",
+          kind: "acme/review",
+          noun: "Review",
+          yours: false,
+          restricted: true,
+        },
+      ],
+    });
+    renderPage(ORDER, detail);
+    const sheet = await openTheCard();
+
+    const linked = (await within(sheet).findByRole("heading", { name: "Linked" })).parentElement!;
+    expect(within(linked).getByText("An acme review you cannot open")).toBeTruthy();
+    expect(within(linked).getAllByRole("listitem")).toHaveLength(1);
+  });
+
   it("offers a reference found in text as a hint that links when Link is pressed", async () => {
     const detail = buildDetail(ORDER, {
       places: [ROUND_A, ROUND_B, DEPOT, SPEC],
