@@ -23,7 +23,7 @@ import { StepSessionRefused, type OpenedStepSession, type StepSessionToOpen } fr
 import { sessionRepository, SessionService } from "../../sessions";
 import type { SettingError } from "../../settings";
 import { WorkspaceService } from "../../workspaces";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { makeForkAfterCommit } from "./after-commit";
 import { Live } from "./live";
 import { Placement } from "./placement";

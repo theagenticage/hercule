@@ -303,7 +303,7 @@ describe("the size of the board rank index", () => {
         yield* tasks.softDelete(removed.id, base.at);
         return yield* sql<{ readonly stage: string }>`
           SELECT stage FROM tasks INDEXED BY tasks_board_rank
-          WHERE stage NOT IN ('done', 'dropped') AND deleted_at IS NULL`;
+          WHERE stage NOT IN ('done', 'dropped') AND deleted_at IS NULL AND merged_into_id IS NULL`;
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 

@@ -44,6 +44,8 @@ import type {
   TaskPriority,
   TaskStage,
   TaskStatus,
+  TaskSummary,
+  TryAgainUndo,
 } from "@hercule/contract";
 import {
   buildMatchExpression,
@@ -103,6 +105,8 @@ export interface ProvenanceInput {
   readonly eventId?: number;
   readonly runId?: string;
   readonly signalId?: string;
+  /** The Task that was merged into this one. Only `task.merge` sets it. */
+  readonly mergedTaskId?: string;
 }
 
 /** One handoff of a Task: the provenance entry that names the signal and the run. */
@@ -157,6 +161,8 @@ export interface BoardTask {
   readonly stageChangedAt: string;
   /** The run whose failure the Task shows, if any. */
   readonly failedRunId: string | undefined;
+  /** What the Task's summary says, or `undefined` while it has no written summary. */
+  readonly summary: TaskSummary | undefined;
 }
 
 /** The fields of a new task row, with the defaults already applied. */
@@ -203,6 +209,8 @@ export interface TaskFailureState {
   readonly failureRevision: number;
   readonly stage: TaskStage;
   readonly deleted: boolean;
+  /** True when the Task was merged into another: it never shows or gets a failure again. */
+  readonly merged: boolean;
 }
 
 /** One row of `task_failure_recoveries`: a run start that ended a failure. */
@@ -215,6 +223,15 @@ export interface FailureRecovery {
   readonly revisionAfter: number;
   /** When the failure was restored, or `undefined` while it is not. */
   readonly restoredAt: string | undefined;
+  /** The first answer to the Undo of this run start, or `undefined` while none was decided. */
+  readonly undo: TryAgainUndo | undefined;
+}
+
+/** A Task whose summary the writer should write now, and the revision to write it for. */
+export interface SummaryAttempt {
+  readonly taskId: string;
+  /** The `dirty_revision` the claim saw. The write is dropped when the row's revision moved on. */
+  readonly dirtyRevision: number;
 }
 
 /** The columns an edit may set. An absent one is left as it was. */
@@ -253,6 +270,7 @@ interface ProvenanceRow {
   readonly event_id: number | null;
   readonly run_id: Uint8Array | null;
   readonly signal_id: Uint8Array | null;
+  readonly merged_task_id: Uint8Array | null;
   readonly at: string;
   readonly actor: string;
 }
@@ -340,13 +358,119 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
 });
 
 /**
- * The condition that the partial index `tasks_board_rank` carries, written as
- * the index writes it. SQLite uses a partial index only for a query whose
- * `WHERE` holds the index's own condition, character for character, so every
- * read of that index repeats this text. The index leaves out Tasks at `done`
- * and `dropped`, so its size follows the board and not the history.
+ * The stage condition that the partial index `tasks_board_rank` carries,
+ * written as the index writes it. SQLite uses a partial index only for a query
+ * whose `WHERE` holds each condition of the index, so every read of that index
+ * repeats this text and also states `deleted_at IS NULL` and
+ * `merged_into_id IS NULL`. The index leaves out Tasks at `done` and `dropped`,
+ * deleted Tasks and merged Tasks, so its size follows the board and not the
+ * history.
  */
 const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+
+/**
+ * Reads the stored answer to an Undo of Try again from a recovery row, or
+ * `undefined` when none was decided. The three columns are null together
+ * until the Undo is decided.
+ */
+const readStoredUndo = (row: {
+  readonly undo_outcome: TryAgainUndo["outcome"] | null;
+  readonly undo_stop_requested: number | null;
+  readonly undo_reason: string | null;
+}): TryAgainUndo | undefined =>
+  row.undo_outcome === null
+    ? undefined
+    : {
+        outcome: row.undo_outcome,
+        stopRequested: row.undo_stop_requested === 1,
+        ...(row.undo_reason === null ? {} : { reason: row.undo_reason }),
+      };
+
+/**
+ * The columns of `task_summaries` (aliased `s`) that a board read selects,
+ * and the shape `readBoardSummary` reads them in.
+ */
+const BOARD_SUMMARY_COLUMNS =
+  "s.line AS summary_line, s.standing_text AS summary_standing, s.left_text AS summary_left, " +
+  "s.generated_at AS summary_generated_at, " +
+  "s.dirty_at IS NOT NULL OR s.failed_at IS NOT NULL AS summary_stale";
+
+interface BoardSummaryColumns {
+  readonly summary_line: string | null;
+  readonly summary_standing: string | null;
+  readonly summary_left: string | null;
+  readonly summary_generated_at: string | null;
+  readonly summary_stale: number | null;
+}
+
+/**
+ * Returns a Task's summary from the columns of `BOARD_SUMMARY_COLUMNS`, or
+ * `undefined` while the Task has none: no row, or a row that was only marked
+ * dirty and has no line yet. The summary is stale while the Task changed
+ * since it was written or the last attempt to write it failed.
+ */
+const readBoardSummary = (row: BoardSummaryColumns): TaskSummary | undefined =>
+  row.summary_line === null || row.summary_generated_at === null
+    ? undefined
+    : {
+        line: row.summary_line,
+        standing: row.summary_standing ?? "",
+        left: row.summary_left ?? "",
+        generatedAt: row.summary_generated_at,
+        stale: row.summary_stale === 1,
+      };
+
+/**
+ * The columns of `tasks` (aliased `t`), the project (`p`) and the summary
+ * (`s`) that a board read selects, and the row they make. `readBoardTaskRow`
+ * turns the row into a `BoardTask`.
+ */
+const BOARD_TASK_COLUMNS =
+  "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank, " +
+  "t.created_at, t.stage_changed_at, t.failed_run_id, " +
+  BOARD_SUMMARY_COLUMNS;
+
+interface BoardTaskRow extends BoardSummaryColumns {
+  readonly id: Uint8Array;
+  readonly title: string;
+  readonly stage: BoardStage;
+  readonly priority: TaskPriority;
+  readonly project_id: Uint8Array | null;
+  readonly board_rank: string;
+  readonly created_at: string;
+  readonly stage_changed_at: string;
+  readonly failed_run_id: Uint8Array | null;
+}
+
+/**
+ * A row of `BOARD_TASK_COLUMNS` with the other columns of the Task that
+ * `readLiveWithCard` needs. The stage may be a finished one, which has no card,
+ * and `task_project_id` is the Task's own project, where `project_id` is the
+ * project the card is drawn in.
+ */
+interface TaskWithCardRow extends Omit<BoardTaskRow, "stage"> {
+  readonly stage: TaskStage;
+  readonly description: string;
+  readonly status: string;
+  readonly labels: string;
+  readonly updated_at: string;
+  readonly status_changed_at: string;
+  readonly task_project_id: Uint8Array | null;
+}
+
+/** Returns the `BoardTask` a row of `BOARD_TASK_COLUMNS` describes. */
+const readBoardTaskRow = (row: BoardTaskRow): BoardTask => ({
+  id: uuidToString(row.id),
+  title: row.title,
+  stage: row.stage,
+  priority: row.priority,
+  projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
+  boardRank: row.board_rank,
+  createdAt: row.created_at,
+  stageChangedAt: row.stage_changed_at,
+  failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
+  summary: readBoardSummary(row),
+});
 
 /** Returns true if the stage is one of the board's five stages. */
 const isBoardStage = (stage: TaskStage): stage is BoardStage =>
@@ -370,12 +494,44 @@ const compareBoardOrder = (left: BoardTask, right: BoardTask): number => {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * Builds the condition a Task meets to be live: it is not deleted and not
+   * merged into another Task. `table` is the name or alias the query gives
+   * the `tasks` table. Every query that needs a live Task uses it, so no query
+   * can forget that a merged Task is gone. A query that reads a merged Task
+   * on purpose does not: the failure and recovery reads and writes
+   * (`readFailureState`, `recordRunStart`, `endFailure`, `setFailedRun`),
+   * `resolveTaskId` and `markMerged`.
+   *
+   * The partial index `tasks_board_rank` carries the same two conditions, and
+   * SQLite matches them by their text, so this text must stay as it is.
+   */
+  const buildLiveTaskSql = (table: "t" | "tasks") =>
+    sql.literal(`${table}.deleted_at IS NULL AND ${table}.merged_into_id IS NULL`);
+
+  /**
+   * The condition a Task meets to hold a summary: it is live and not
+   * finished. The Task's table is named `t`.
+   */
+  const taskCanBeSummarized = sql`${buildLiveTaskSql("t")}
+                                  AND t.stage NOT IN ${sql.in(FINISHED_STAGES)}`;
+
+  /**
+   * Builds the expression for the id a Task id stands for: the id of the Task
+   * it was merged into, or the id itself when it was not merged. Reading it
+   * inside the statement that reads the Task means a merge that commits
+   * between two statements cannot make the read miss.
+   */
+  const buildSurvivorIdSql = (id: string) =>
+    sql`COALESCE((SELECT merged_into_id FROM tasks WHERE id = ${uuidFromString(id)}),
+                 ${uuidFromString(id)})`;
+
   /** Builds an `IN` clause over a list. An empty list gives a clause that matches nothing. */
   const buildAnyOfClause = (column: string, values: ReadonlyArray<unknown>) =>
     values.length === 0 ? sql`1 = 0` : sql`${sql.literal(column)} IN ${sql.in(values)}`;
 
   const buildConditions = (filter: TaskFilter) => {
-    const clauses = [sql`tasks.deleted_at IS NULL`];
+    const clauses = [sql`${buildLiveTaskSql("tasks")}`];
     if (filter.status !== undefined) {
       // Without statistics, SQLite starts a listing sorted by `updated_at`
       // from the status index and scans every open task. A listing that names
@@ -438,7 +594,7 @@ const make = Effect.gen(function* () {
       ? Effect.succeed([])
       : Effect.map(
           sql<ProvenanceRow>`
-            SELECT task_id, ref, event_id, run_id, signal_id, at, actor FROM task_provenance
+            SELECT task_id, ref, event_id, run_id, signal_id, merged_task_id, at, actor FROM task_provenance
             WHERE ${sql.in(
               "task_id",
               rows.map((row) => row.id),
@@ -455,6 +611,9 @@ const make = Effect.gen(function* () {
                 ...(entry.event_id === null ? {} : { eventId: entry.event_id }),
                 ...(entry.run_id === null ? {} : { runId: uuidToString(entry.run_id) }),
                 ...(entry.signal_id === null ? {} : { signalId: uuidToString(entry.signal_id) }),
+                ...(entry.merged_task_id === null
+                  ? {}
+                  : { mergedTaskId: uuidToString(entry.merged_task_id) }),
                 at: entry.at,
                 actor: entry.actor,
               });
@@ -491,10 +650,12 @@ const make = Effect.gen(function* () {
     Effect.forEach(
       entries,
       (entry) => sql`
-        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, at, actor)
+        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, merged_task_id,
+                                     at, actor)
         VALUES (${mintUuid()}, ${taskId}, ${entry.ref ?? null}, ${entry.eventId ?? null},
                 ${entry.runId === undefined ? null : uuidFromString(entry.runId)},
                 ${entry.signalId === undefined ? null : uuidFromString(entry.signalId)},
+                ${entry.mergedTaskId === undefined ? null : uuidFromString(entry.mergedTaskId)},
                 ${at}, ${actor})
       `,
       { discard: true },
@@ -529,8 +690,8 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Returns the live Tasks of a cell with their ranks, in rank order. The cell
-   * must be one `resolveCell` returned. A project cell reads `tasks_board_rank`
+   * Returns the live Tasks of a cell with their ranks, in rank order. A merged
+   * Task is not live. The cell must be one `resolveCell` returned. A project cell reads `tasks_board_rank`
    * in rank order. The cell of no project reads the same way, then adds the
    * Tasks of deleted projects, which are none unless a project was deleted.
    */
@@ -545,14 +706,14 @@ const make = Effect.gen(function* () {
           yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
             SELECT id, board_rank FROM tasks
             WHERE project_id = ${uuidFromString(cell.projectId)} AND stage = ${cell.stage}
-              AND deleted_at IS NULL AND ${sql.literal(ON_BOARD)}
+              AND ${buildLiveTaskSql("tasks")} AND ${sql.literal(ON_BOARD)}
             ORDER BY board_rank`,
         );
       }
       const own = readRanked(
         yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
           SELECT id, board_rank FROM tasks
-          WHERE project_id IS NULL AND stage = ${cell.stage} AND deleted_at IS NULL
+          WHERE project_id IS NULL AND stage = ${cell.stage} AND ${buildLiveTaskSql("tasks")}
             AND ${sql.literal(ON_BOARD)}
           ORDER BY board_rank`,
       );
@@ -560,7 +721,8 @@ const make = Effect.gen(function* () {
         yield* sql<{ readonly id: Uint8Array; readonly board_rank: string }>`
           SELECT tasks.id, tasks.board_rank FROM projects
           CROSS JOIN tasks ON tasks.project_id = projects.id AND tasks.stage = ${cell.stage}
-                          AND tasks.deleted_at IS NULL AND tasks.${sql.literal(ON_BOARD)}
+                          AND ${buildLiveTaskSql("tasks")}
+                          AND tasks.${sql.literal(ON_BOARD)}
           WHERE projects.deleted_at IS NOT NULL`,
       );
       return ofDeletedProjects.length === 0
@@ -593,13 +755,15 @@ const make = Effect.gen(function* () {
       const own = (yield* sql<{ readonly board_rank: string }>`
         SELECT board_rank FROM tasks
         WHERE project_id IS ${cell.projectId === null ? null : uuidFromString(cell.projectId)}
-          AND stage = ${cell.stage} AND deleted_at IS NULL AND ${sql.literal(ON_BOARD)}
+          AND stage = ${cell.stage} AND ${buildLiveTaskSql("tasks")}
+          AND ${sql.literal(ON_BOARD)}
         ORDER BY board_rank DESC LIMIT 1`)[0]?.board_rank;
       if (cell.projectId !== null) return own;
       const ofDeletedProjects = (yield* sql<{ readonly board_rank: string | null }>`
         SELECT MAX(tasks.board_rank) AS board_rank FROM projects
         CROSS JOIN tasks ON tasks.project_id = projects.id AND tasks.stage = ${cell.stage}
-                        AND tasks.deleted_at IS NULL AND tasks.${sql.literal(ON_BOARD)}
+                        AND ${buildLiveTaskSql("tasks")}
+                        AND tasks.${sql.literal(ON_BOARD)}
         WHERE projects.deleted_at IS NOT NULL`)[0]?.board_rank;
       // An aggregate over no rows gives one row holding null.
       const found = [own, ofDeletedProjects ?? undefined].filter((rank) => rank !== undefined);
@@ -631,23 +795,66 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Returns the task with that id, or none if it does not exist or has been deleted. */
+    /**
+     * Returns the task with that id, or none if it does not exist, has been
+     * deleted, or was merged into another Task. A merged Task is gone from
+     * every read: `resolveTaskId` gives the Task to read in its place.
+     */
     live: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
       sql<TaskRow>`SELECT ${sql.literal(COLUMNS)} FROM tasks
-                   WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`.pipe(
+                   WHERE tasks.id = ${uuidFromString(id)} AND ${buildLiveTaskSql("tasks")}`.pipe(
         Effect.flatMap(hydrate),
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
       ),
 
     /**
-     * Returns the stage of the Task with that id, or none if it does not exist
-     * or has been deleted. It reads one column, so it costs the same however
-     * much provenance the Task has.
+     * Returns the title and description of the live Task with that id, or
+     * none when it does not exist, is deleted, or was merged into another
+     * Task (as `live`). Reads only those two columns: it loads no
+     * provenance, so a caller that needs just the words pays for just them.
+     */
+    readTitleAndDescription: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly title: string; readonly description: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly title: string; readonly description: string }>`
+          SELECT title, description FROM tasks
+          WHERE id = ${uuidFromString(id)} AND ${buildLiveTaskSql("tasks")}`,
+        (rows) => Option.fromNullishOr(rows[0]),
+      ),
+
+    /**
+     * Returns the live Task an id stands for: the Task with that id, or the
+     * Task it was merged into. Like `live`, it gives none for a Task that does
+     * not exist or is deleted, and for a merged Task whose survivor is deleted.
+     *
+     * The id is followed to its survivor inside the one statement that reads
+     * the Task, so a merge that commits between two statements cannot make the
+     * read miss: it sees either the Task before the merge or the survivor
+     * after. One hop is enough, because a merge repoints every Task merged
+     * into its source (`markMerged`).
+     */
+    readLiveOrSurvivor: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
+      sql<TaskRow>`SELECT ${sql.literal(COLUMNS)} FROM tasks
+                   WHERE tasks.id = ${buildSurvivorIdSql(id)}
+                     AND ${buildLiveTaskSql("tasks")}`.pipe(
+        Effect.flatMap(hydrate),
+        Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
+      ),
+
+    /**
+     * Returns the stage of the Task with that id, or none if it does not exist,
+     * has been deleted, or was merged into another Task. It reads one column,
+     * so it costs the same however much provenance the Task has.
      */
     readStage: (id: string): Effect.Effect<Option.Option<TaskStage>, SqlError> =>
       Effect.map(
         sql<{ readonly stage: TaskStage }>`SELECT stage FROM tasks
-                                           WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+                                           WHERE id = ${uuidFromString(id)}
+                                             AND ${buildLiveTaskSql("tasks")}`,
         (rows) => Option.fromNullishOr(rows[0]?.stage),
       ),
 
@@ -681,7 +888,8 @@ const make = Effect.gen(function* () {
     readBoardRank: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly board_rank: string }>`SELECT board_rank FROM tasks
-                                             WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+                                             WHERE id = ${uuidFromString(id)}
+                                               AND ${buildLiveTaskSql("tasks")}`,
         (rows) => Option.fromNullishOr(rows[0]?.board_rank),
       ),
 
@@ -693,7 +901,8 @@ const make = Effect.gen(function* () {
           readonly failure_revision: number;
           readonly stage: TaskStage;
           readonly deleted_at: string | null;
-        }>`SELECT failed_run_id, failure_revision, stage, deleted_at FROM tasks
+          readonly merged_into_id: Uint8Array | null;
+        }>`SELECT failed_run_id, failure_revision, stage, deleted_at, merged_into_id FROM tasks
            WHERE id = ${uuidFromString(id)}`,
         (rows) => {
           const row = rows[0];
@@ -705,6 +914,7 @@ const make = Effect.gen(function* () {
                 failureRevision: row.failure_revision,
                 stage: row.stage,
                 deleted: row.deleted_at !== null,
+                merged: row.merged_into_id !== null,
               });
         },
       ),
@@ -747,6 +957,25 @@ const make = Effect.gen(function* () {
         return true;
       }),
 
+    /**
+     * Ends the failure the Task shows, because a Thread was started on it by
+     * name, and raises its failure revision whether or not it showed one, so
+     * that no older Undo of a Try again restores a failure over it. Does
+     * nothing for a Task that has no row. Returns true when a failure was
+     * cleared, else false.
+     */
+    endFailure: (taskId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const rows = yield* sql<{ readonly failed_run_id: Uint8Array | null }>`
+          SELECT failed_run_id FROM tasks WHERE id = ${key}`;
+        const row = rows[0];
+        if (row === undefined) return false;
+        yield* sql`UPDATE tasks SET failure_revision = failure_revision + 1, failed_run_id = NULL
+                   WHERE id = ${key}`;
+        return row.failed_run_id !== null;
+      }),
+
     /** Returns the row of the run start that ended a failure, or none. */
     readFailureRecovery: (runId: string): Effect.Effect<Option.Option<FailureRecovery>, SqlError> =>
       Effect.map(
@@ -755,26 +984,44 @@ const make = Effect.gen(function* () {
           readonly failed_run_id: Uint8Array;
           readonly revision_after: number;
           readonly restored_at: string | null;
-        }>`SELECT task_id, failed_run_id, revision_after, restored_at
+          readonly undo_outcome: TryAgainUndo["outcome"] | null;
+          readonly undo_stop_requested: number | null;
+          readonly undo_reason: string | null;
+        }>`SELECT task_id, failed_run_id, revision_after, restored_at,
+                  undo_outcome, undo_stop_requested, undo_reason
            FROM task_failure_recoveries WHERE run_id = ${uuidFromString(runId)}`,
         (rows) => {
           const row = rows[0];
-          return row === undefined
-            ? Option.none()
-            : Option.some({
-                runId,
-                taskId: uuidToString(row.task_id),
-                failedRunId: uuidToString(row.failed_run_id),
-                revisionAfter: row.revision_after,
-                restoredAt: row.restored_at ?? undefined,
-              });
+          if (row === undefined) return Option.none();
+          return Option.some({
+            runId,
+            taskId: uuidToString(row.task_id),
+            failedRunId: uuidToString(row.failed_run_id),
+            revisionAfter: row.revision_after,
+            restoredAt: row.restored_at ?? undefined,
+            undo: readStoredUndo(row),
+          });
         },
+      ),
+
+    /**
+     * Stores the first answer to the Undo of the run start `runId`, so that a
+     * repeat of the Undo returns it. Does nothing when an answer is stored
+     * already, or the run left no row.
+     */
+    storeTryAgainUndo: (runId: string, answer: TryAgainUndo): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE task_failure_recoveries
+            SET undo_outcome = ${answer.outcome},
+                undo_stop_requested = ${answer.stopRequested ? 1 : 0},
+                undo_reason = ${answer.reason ?? null}
+            WHERE run_id = ${uuidFromString(runId)} AND undo_outcome IS NULL`,
       ),
 
     /**
      * Puts back the failure that the start of the run `runId` ended, in one
      * statement that checks everything it depends on: the recovery row was
-     * not used, the Task is not deleted or finished, and its failure revision
+     * not used, the Task is not deleted, merged or finished, and its failure revision
      * is still the one right after that start. Then it raises the revision
      * and stamps the row. Returns the Task's id, or none when it changed
      * nothing.
@@ -787,7 +1034,8 @@ const make = Effect.gen(function* () {
                            failure_revision = tasks.failure_revision + 1
           FROM task_failure_recoveries r
           WHERE r.run_id = ${key} AND r.restored_at IS NULL AND tasks.id = r.task_id
-            AND tasks.deleted_at IS NULL AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}
+            AND ${buildLiveTaskSql("tasks")}
+            AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}
             AND tasks.failure_revision = r.revision_after
           RETURNING tasks.id`;
         const row = rows[0];
@@ -799,7 +1047,7 @@ const make = Effect.gen(function* () {
     /**
      * Returns the oldest handoff entry of a Task: the provenance entry that
      * names a signal, earliest `at` first. It is none when the Task does not
-     * exist, is deleted, or has no handoff entry. One lookup on
+     * exist, is deleted or merged, or has no handoff entry. One lookup on
      * `task_provenance_handoff` that reads one entry, however many the Task
      * has, and none of the Task's other provenance.
      */
@@ -815,7 +1063,7 @@ const make = Effect.gen(function* () {
             SELECT rowid FROM task_provenance
             WHERE task_id = t.id AND signal_id IS NOT NULL
             ORDER BY at, rowid LIMIT 1)
-          WHERE t.id = ${uuidFromString(id)} AND t.deleted_at IS NULL`,
+          WHERE t.id = ${uuidFromString(id)} AND ${buildLiveTaskSql("t")}`,
         (rows) => {
           const row = rows[0];
           // A handoff entry always names the run it started.
@@ -832,7 +1080,7 @@ const make = Effect.gen(function* () {
     /**
      * Returns, for each `{ runId, taskId }` pair, the handoff entry of the
      * Task `taskId` that started the run `runId`, with the Task's status and the
-     * Task's next handoff entry. A pair whose Task is deleted, or has no
+     * Task's next handoff entry. A pair whose Task is deleted or merged, or has no
      * handoff entry for that run, is left out. The next handoff entry is the
      * one that follows this one by time, then by the order it was appended
      * (`at`, then `rowid`): the same order `readFirstHandoff` and `listTracked`
@@ -872,7 +1120,7 @@ const make = Effect.gen(function* () {
               CROSS JOIN task_provenance p ON p.run_id = unhex(json_extract(j.value, '$[0]'))
                                           AND p.signal_id IS NOT NULL
                                           AND p.task_id = unhex(json_extract(j.value, '$[1]'))
-              CROSS JOIN tasks t ON t.id = p.task_id AND t.deleted_at IS NULL
+              CROSS JOIN tasks t ON t.id = p.task_id AND ${buildLiveTaskSql("t")}
               LEFT JOIN task_provenance n ON n.rowid = (
                 SELECT s.rowid FROM task_provenance s
                 WHERE s.task_id = p.task_id AND s.signal_id IS NOT NULL
@@ -898,8 +1146,60 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns the cards of the Work board: the live Tasks at a board stage,
-     * ordered by project (none first), then stage in the order of the board,
+     * Returns the live Task an id stands for (the Task with that id, or the
+     * Task it was merged into) together with its card on the Work board. The
+     * card is `undefined` for a Task at `done` or `dropped`, where the board
+     * draws none. Returns none when there is no such live Task.
+     *
+     * The Task's columns and the card's come from one row of one statement, so
+     * the Task and its card always describe the same Task at the same stage,
+     * whatever commits meanwhile. The provenance is read by the id of that
+     * row, so it belongs to the same Task too, though it may be newer. A Task
+     * of a deleted project has no `projectId` on its card, as in
+     * `listBoardTasks`, and keeps the one it has on the Task.
+     */
+    readLiveWithCard: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly task: Task; readonly card: BoardTask | undefined }>,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<TaskWithCardRow>`
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}, t.description, t.status, t.labels,
+                 t.updated_at, t.status_changed_at, t.project_id AS task_project_id
+          FROM tasks t
+          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+          LEFT JOIN task_summaries s ON s.task_id = t.id
+          WHERE t.id = ${buildSurvivorIdSql(id)} AND ${buildLiveTaskSql("t")}`;
+        const row = rows[0];
+        if (row === undefined) return Option.none();
+        const [task] = yield* hydrate([
+          {
+            id: row.id,
+            title: row.title,
+            description: row.description,
+            status: row.status,
+            stage: row.stage,
+            priority: row.priority,
+            labels: row.labels,
+            project_id: row.task_project_id,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            status_changed_at: row.status_changed_at,
+            stage_changed_at: row.stage_changed_at,
+            deleted_at: null,
+          },
+        ]);
+        const card = isBoardStage(row.stage)
+          ? readBoardTaskRow({ ...row, stage: row.stage })
+          : undefined;
+        return Option.some({ task: task!, card });
+      }),
+
+    /**
+     * Returns the cards of the Work board: the live Tasks at a board stage
+     * (neither deleted nor merged into another Task), ordered by project (none first), then stage in the order of the board,
      * then rank. It returns one Task more than `limit` at most, so the caller
      * can tell that there were more.
      *
@@ -913,41 +1213,22 @@ const make = Effect.gen(function* () {
      * rows are put in board order afterwards, in memory. It reads no
      * description and no provenance. The statement names the index, because
      * left to itself the planner reads `tasks_stage` and sorts.
+     *
+     * Each Task's summary comes in the same statement, from a join on the
+     * summary's primary key. A Task has a summary once it has a line. The
+     * summary is stale while the Task is dirty or its last attempt failed.
      */
     listBoardTasks: (limit: number): Effect.Effect<ReadonlyArray<BoardTask>, SqlError> =>
       Effect.map(
-        sql<{
-          readonly id: Uint8Array;
-          readonly title: string;
-          readonly stage: BoardStage;
-          readonly priority: TaskPriority;
-          readonly project_id: Uint8Array | null;
-          readonly board_rank: string;
-          readonly created_at: string;
-          readonly stage_changed_at: string;
-          readonly failed_run_id: Uint8Array | null;
-        }>`
-          SELECT t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank,
-                 t.created_at, t.stage_changed_at, t.failed_run_id
+        sql<BoardTaskRow>`
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
           FROM tasks t INDEXED BY tasks_board_rank
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
-          WHERE t.${sql.literal(ON_BOARD)} AND t.deleted_at IS NULL
+          LEFT JOIN task_summaries s ON s.task_id = t.id
+          WHERE t.${sql.literal(ON_BOARD)} AND ${buildLiveTaskSql("t")}
           ORDER BY t.project_id, t.stage, t.board_rank
           LIMIT ${limit + 1}`,
-        (rows) =>
-          rows
-            .map((row) => ({
-              id: uuidToString(row.id),
-              title: row.title,
-              stage: row.stage,
-              priority: row.priority,
-              projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
-              boardRank: row.board_rank,
-              createdAt: row.created_at,
-              stageChangedAt: row.stage_changed_at,
-              failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
-            }))
-            .toSorted(compareBoardOrder),
+        (rows) => rows.map(readBoardTaskRow).toSorted(compareBoardOrder),
       ),
 
     /**
@@ -956,7 +1237,7 @@ const make = Effect.gen(function* () {
      * `dropped`; the other five stages are the board stages. Each Task holds
      * its newest handoff entries, at most `MAX_TRACKING_HANDOFFS`, newest
      * first: by time, then by the order they were appended, as in
-     * `readFirstHandoff` and `listLegHandoffs`. A deleted Task is left out.
+     * `readFirstHandoff` and `listLegHandoffs`. A deleted or merged Task is left out.
      *
      * One statement, and its work follows the unfinished Tasks, not the
      * handoffs ever made. It walks them on the stage index (one range per
@@ -983,7 +1264,7 @@ const make = Effect.gen(function* () {
             SELECT rowid FROM task_provenance
             WHERE task_id = t.id AND signal_id IS NOT NULL
             ORDER BY at DESC, rowid DESC LIMIT ${MAX_TRACKING_HANDOFFS})
-          WHERE t.stage IN ${sql.in(BOARD_STAGES)} AND t.deleted_at IS NULL`,
+          WHERE t.stage IN ${sql.in(BOARD_STAGES)} AND ${buildLiveTaskSql("t")}`,
         (rows) => {
           const byTask = new Map<
             string,
@@ -1030,7 +1311,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns, for each open task (status `open` or `in-progress`, not
-     * deleted) whose provenance carries one of `refs`, one row per ref it
+     * deleted or merged) whose provenance carries one of `refs`, one row per ref it
      * carries. It reads only the columns of the row, never the description or
      * the provenance.
      *
@@ -1055,7 +1336,7 @@ const make = Effect.gen(function* () {
               SELECT DISTINCT p.ref, t.id, t.title, t.status, t.updated_at
               FROM task_provenance p JOIN tasks t ON t.id = p.task_id
               WHERE p.ref IN ${sql.in(refs)}
-                AND +t.status IN ('open', 'in-progress') AND t.deleted_at IS NULL`,
+                AND +t.status IN ('open', 'in-progress') AND ${buildLiveTaskSql("t")}`,
             (rows) =>
               rows.map((row) => ({
                 ref: row.ref,
@@ -1068,7 +1349,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the id of the Task that the workspace's row in `task_workspaces`
-     * names, or none when the workspace has no row or the Task is deleted or
+     * names, or none when the workspace has no row or the Task is deleted, merged or
      * finished (the contract's `FINISHED_STAGES`). One query that joins the
      * row to its Task. Only an ephemeral workspace ever has a row
      * (`recordWorkspaceTask`), so a main workspace always reads as none.
@@ -1080,7 +1361,7 @@ const make = Effect.gen(function* () {
         sql<{ readonly task_id: Uint8Array }>`
           SELECT w.task_id FROM task_workspaces w JOIN tasks ON tasks.id = w.task_id
           WHERE w.workspace_id = ${uuidFromString(workspaceId)}
-            AND tasks.deleted_at IS NULL AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}`,
+            AND ${buildLiveTaskSql("tasks")} AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}`,
         (rows) => {
           const row = rows[0];
           return row === undefined ? Option.none() : Option.some(uuidToString(row.task_id));
@@ -1191,6 +1472,278 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);
       }),
+
+    /**
+     * Records that something a Task's summary reads has changed: raises the
+     * row's `dirty_revision`. `dirty_at` is set to `at` only when it is empty,
+     * so it is the time of the first change since the last clean write: a
+     * Task that keeps changing is still due once the quiet time has passed
+     * since that first change. The row is made on the first change.
+     * `next_attempt_at` is kept, so a change never lifts the pacing of the
+     * model calls.
+     *
+     * Does nothing for a Task that is deleted, merged or finished. Returns
+     * `marked` (a row was written) and `becameStale`: the mark started a
+     * dirty cycle on a Task that has a written summary, so a card that shows
+     * the summary as current is out of date now. Later marks in the same
+     * cycle, and a Task with no summary yet, leave `becameStale` false.
+     */
+    markSummaryDirty: (
+      taskId: string,
+      at: string,
+    ): Effect.Effect<{ readonly marked: boolean; readonly becameStale: boolean }, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const held = yield* sql<{ readonly dirty_at: string | null; readonly line: string | null }>`
+          SELECT dirty_at, line FROM task_summaries WHERE task_id = ${key}`;
+        const rows = yield* sql`
+          INSERT INTO task_summaries (task_id, input_revision, dirty_revision, dirty_at, attempt_count)
+          SELECT t.id, 0, 1, ${at}, 0 FROM tasks t
+          WHERE t.id = ${key} AND ${taskCanBeSummarized}
+          ON CONFLICT (task_id) DO UPDATE SET dirty_revision = dirty_revision + 1,
+                                              dirty_at = COALESCE(dirty_at, excluded.dirty_at)
+          RETURNING task_id`;
+        const marked = rows.length > 0;
+        const before = held[0];
+        return {
+          marked,
+          becameStale:
+            marked && before !== undefined && before.dirty_at === null && before.line !== null,
+        };
+      }),
+
+    /**
+     * Marks a Task's summary as current, so no model call is spent on it: a
+     * Task that is finished, deleted or merged away is not waiting for one.
+     * Does nothing when the Task has no row or is not dirty.
+     */
+    clearSummaryDirty: (taskId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE task_summaries SET dirty_at = NULL
+            WHERE task_id = ${uuidFromString(taskId)} AND dirty_at IS NOT NULL`,
+      ),
+
+    /**
+     * Returns the Tasks whose summary is due, oldest change first, at most
+     * `limit` of them, and records an attempt on each: `last_attempt_at` is
+     * `at` and `next_attempt_at` is `nextAttemptAt`. A Task is due when it is
+     * live, has been dirty since `quietBefore` or earlier, and its
+     * `next_attempt_at` is empty or not after `at`.
+     *
+     * The read walks `task_summaries_dirty`, which holds only the dirty rows
+     * in `dirty_at` order (ties by the order the rows were made), so it sorts
+     * nothing and stops after `limit` due Tasks. The caller
+     * runs both statements in one transaction.
+     */
+    claimSummaryAttempts: (input: {
+      readonly limit: number;
+      readonly at: string;
+      readonly quietBefore: string;
+      readonly nextAttemptAt: string;
+    }): Effect.Effect<ReadonlyArray<SummaryAttempt>, SqlError> =>
+      Effect.gen(function* () {
+        const due = yield* sql<{
+          readonly task_id: Uint8Array;
+          readonly dirty_revision: number;
+        }>`SELECT s.task_id, s.dirty_revision
+           FROM task_summaries s JOIN tasks t ON t.id = s.task_id
+           WHERE s.dirty_at IS NOT NULL AND s.dirty_at <= ${input.quietBefore}
+             AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= ${input.at})
+             AND ${taskCanBeSummarized}
+           ORDER BY s.dirty_at, s.rowid
+           LIMIT ${input.limit}`;
+        if (due.length === 0) return [];
+        yield* sql`UPDATE task_summaries
+                   SET last_attempt_at = ${input.at}, next_attempt_at = ${input.nextAttemptAt}
+                   WHERE task_id IN ${sql.in(due.map((row) => row.task_id))}`;
+        return due.map((row) => ({
+          taskId: uuidToString(row.task_id),
+          dirtyRevision: row.dirty_revision,
+        }));
+      }),
+
+    /**
+     * Returns the time the first dirty Task becomes due, or none when no live
+     * Task is dirty: the least, over the dirty rows, of the later of
+     * `dirty_at` plus `quietSeconds` and `next_attempt_at`. That is the time
+     * `claimSummaryAttempts` would first pick a Task, when it is given the same
+     * quiet time. Walks `task_summaries_dirty`, so it reads only dirty rows; the
+     * planner would otherwise start from the status index of all Tasks.
+     */
+    readNextSummaryDueAt: (quietSeconds: number): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly due_at: string | null }>`
+          SELECT MIN(MAX(strftime('%Y-%m-%dT%H:%M:%fZ', s.dirty_at, ${`+${String(quietSeconds)} seconds`}),
+                         COALESCE(s.next_attempt_at, ''))) AS due_at
+          FROM task_summaries s INDEXED BY task_summaries_dirty JOIN tasks t ON t.id = s.task_id
+          WHERE s.dirty_at IS NOT NULL AND ${taskCanBeSummarized}`,
+        (rows) => Option.fromNullishOr(rows[0]?.due_at),
+      ),
+
+    /**
+     * Writes a summary the writer made for revision `dirtyRevision`, and
+     * records the revision it was made from (`input_revision`). It clears the
+     * failure and resets the failure count.
+     *
+     * - When the row's `dirty_revision` is still `dirtyRevision`, the summary
+     *   is current: it clears `dirty_at`.
+     * - When the Task changed meanwhile (`dirty_revision` is higher), the
+     *   summary is written anyway and `dirty_at` stays, so the Task is still
+     *   dirty and `next_attempt_at` paces the call that brings it up to date.
+     *   Dropping the answer would leave a Task that changes during every call
+     *   without a summary.
+     *
+     * Writes nothing, and returns false, when the Task is deleted, merged or
+     * finished, or when the row already holds a summary made from a newer
+     * revision. It never makes a row and never touches the Task itself.
+     */
+    writeSummary: (input: {
+      readonly taskId: string;
+      readonly dirtyRevision: number;
+      readonly summary: Pick<TaskSummary, "line" | "standing" | "left">;
+      readonly at: string;
+    }): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`UPDATE task_summaries
+            SET line = ${input.summary.line}, standing_text = ${input.summary.standing},
+                left_text = ${input.summary.left}, input_revision = ${input.dirtyRevision},
+                generated_at = ${input.at},
+                dirty_at = CASE WHEN dirty_revision = ${input.dirtyRevision} THEN NULL ELSE dirty_at END,
+                attempt_count = 0, failed_at = NULL, failed_reason = NULL
+            WHERE task_id = ${uuidFromString(input.taskId)}
+              AND dirty_revision >= ${input.dirtyRevision}
+              AND input_revision <= ${input.dirtyRevision}
+              AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_summaries.task_id
+                          AND ${taskCanBeSummarized})
+            RETURNING task_id`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Records that the attempt for revision `dirtyRevision` failed: keeps the
+     * last summary, raises `attempt_count`, stamps `failed_at` and
+     * `failed_reason`, and sets `next_attempt_at` to what `chooseNextAttempt`
+     * returns for the raised count. The row stays dirty. Writes nothing, and
+     * returns false, when the row's `dirty_revision` has moved on (a failure
+     * of an older attempt says nothing about the Task now) or the Task is
+     * deleted, merged or finished.
+     */
+    writeSummaryFailure: (input: {
+      readonly taskId: string;
+      readonly dirtyRevision: number;
+      readonly reason: string;
+      readonly at: string;
+      readonly chooseNextAttempt: (attemptCount: number) => string;
+    }): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(input.taskId);
+        const rows = yield* sql<{ readonly attempt_count: number }>`
+          UPDATE task_summaries
+          SET attempt_count = attempt_count + 1, failed_at = ${input.at},
+              failed_reason = ${input.reason}
+          WHERE task_id = ${key} AND dirty_revision = ${input.dirtyRevision}
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_summaries.task_id
+                        AND ${taskCanBeSummarized})
+          RETURNING attempt_count`;
+        const row = rows[0];
+        if (row === undefined) return false;
+        yield* sql`UPDATE task_summaries
+                   SET next_attempt_at = ${input.chooseNextAttempt(row.attempt_count)}
+                   WHERE task_id = ${key}`;
+        return true;
+      }),
+
+    /**
+     * Returns the Task a merged id stands for: the Task it was merged into, or
+     * the id itself when the Task was not merged (or does not exist). One hop,
+     * because a merge repoints every Task merged into the source
+     * (`markMerged`), so a chain never forms.
+     */
+    resolveTaskId: (id: string): Effect.Effect<string, SqlError> =>
+      Effect.map(
+        sql<{ readonly merged_into_id: Uint8Array | null }>`
+          SELECT merged_into_id FROM tasks WHERE id = ${uuidFromString(id)}`,
+        (rows) => {
+          const survivor = rows[0]?.merged_into_id;
+          return survivor === null || survivor === undefined ? id : uuidToString(survivor);
+        },
+      ),
+
+    /**
+     * Marks the Task `sourceId` as merged into `targetId`, and repoints every
+     * Task that was merged into the source, so that `resolveTaskId` stays one
+     * hop. The repoint reads `tasks_merged_into`, which holds only Tasks that
+     * are not deleted: a merged Task is never deleted, because a delete of its
+     * id is refused.
+     */
+    markMerged: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const source = uuidFromString(sourceId);
+        const target = uuidFromString(targetId);
+        yield* sql`UPDATE tasks SET merged_into_id = ${target}
+                   WHERE merged_into_id = ${source} AND deleted_at IS NULL`;
+        yield* sql`UPDATE tasks SET merged_into_id = ${target} WHERE id = ${source}`;
+      }),
+
+    /**
+     * Moves the provenance entries of the Task `sourceId` to `targetId`, whole:
+     * each keeps its own `at`, `actor` and fields. Tracking joins an entry to
+     * the run it names (`runs.task_id`), so the caller moves the runs in the
+     * same transaction.
+     */
+    moveProvenance: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE task_provenance SET task_id = ${uuidFromString(targetId)}
+            WHERE task_id = ${uuidFromString(sourceId)}`,
+      ),
+
+    /**
+     * Moves the workspaces recorded for the Task `sourceId` to `targetId`. A
+     * workspace has one row (its primary key), so the move cannot collide.
+     * The table has no index on `task_id` and holds one row per ephemeral
+     * workspace, so the statement reads all of it: a merge is rare.
+     */
+    moveWorkspaces: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE task_workspaces SET task_id = ${uuidFromString(targetId)}
+            WHERE task_id = ${uuidFromString(sourceId)}`,
+      ),
+
+    /**
+     * Returns whichever of the two runs ended later (`runs.finished_at`, ties
+     * broken by the greater run id). The tasks domain reads this one column of
+     * a table it does not own, as `projectExists` reads `projects`.
+     */
+    chooseNewerRun: (runIdA: string, runIdB: string): Effect.Effect<string, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE id IN (${uuidFromString(runIdA)}, ${uuidFromString(runIdB)})
+          ORDER BY finished_at DESC, id DESC LIMIT 1`,
+        (rows) => (rows[0] === undefined ? runIdA : uuidToString(rows[0].id)),
+      ),
+
+    /**
+     * Records that a merge changed who handles the failure of the Task
+     * `taskId`: raises its `failure_revision`, and makes the run `failedRunId`
+     * the failure it shows when one is given.
+     */
+    recordMergedFailure: (
+      taskId: string,
+      failedRunId: string | undefined,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        failedRunId === undefined
+          ? sql`UPDATE tasks SET failure_revision = failure_revision + 1
+                WHERE id = ${uuidFromString(taskId)}`
+          : sql`UPDATE tasks SET failure_revision = failure_revision + 1,
+                                 failed_run_id = ${uuidFromString(failedRunId)}
+                WHERE id = ${uuidFromString(taskId)}`,
+      ),
+
+    /** Deletes the summary row of a Task, if it has one. */
+    deleteSummary: (taskId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM task_summaries WHERE task_id = ${uuidFromString(taskId)}`),
 
     /** Marks the task deleted. The row and its provenance stay where they are. */
     softDelete: (id: string, at: string): Effect.Effect<void, SqlError> =>

@@ -200,11 +200,16 @@ export const flipByKey = (options: FlipByKeyOptions): FlipByKeyResult => {
  * page. The copy has no `id` or `tabindex`, and has the class `is-ghost`. The
  * caller moves the copy with `trackBody` and removes it. `layer` must be
  * positioned, with its top left at the origin of the coordinates it is given.
+ * `copy` is the element to put in the layer, a clone of `element` that has been
+ * made fit for it; without it, the layer gets a plain clone.
  */
-export const ghostElement = (element: HTMLElement, layer: HTMLElement): HTMLElement => {
+export const ghostElement = (
+  element: HTMLElement,
+  layer: HTMLElement,
+  copy: HTMLElement = element.cloneNode(true) as HTMLElement,
+): HTMLElement => {
   const rect = measureLayoutRect(element);
   const host = layer.getBoundingClientRect();
-  const copy = element.cloneNode(true) as HTMLElement;
   copy.removeAttribute("id");
   copy.removeAttribute("tabindex");
   copy.classList.add("is-ghost");

@@ -31,26 +31,38 @@ vi.mock("../../app/motion", async (importOriginal) => ({
 
 /**
  * Draws a card element per card the hook returns, so a test can see what is
- * drawn. `serverBoard` is the board as read, `board` that board with the
- * user's moves applied, and `unrelated` is a prop the hook does not use.
+ * drawn. `serverBoard` is the board as read, `board` the logical board (that
+ * board with the user's changes applied), `hiddenIds` the Tasks the logical
+ * board left out on purpose, and `unrelated` is a prop the hook does not use.
  */
+const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
+
 function Harness({
   board,
   serverBoard = board,
+  hiddenIds = NOTHING_HIDDEN,
   isCarrying = false,
 }: {
   readonly board: WorkBoard;
   readonly serverBoard?: WorkBoard;
+  readonly hiddenIds?: ReadonlySet<string>;
   readonly isCarrying?: boolean;
   readonly unrelated?: number;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const reads = useBoardReads({ board, serverBoard, projects: [], isCarrying, scrollRef });
+  const reads = useBoardReads({
+    logicalBoard: board,
+    hiddenIds,
+    serverBoard,
+    projects: [],
+    isCarrying,
+    scrollRef,
+  });
   return (
     <div className="work-desk">
       <div ref={scrollRef} className="board-scroll">
         <div className="board-cell" data-cell-id="no-project/exploring">
-          {reads.board?.cards.map((card) => (
+          {reads.drawnBoard?.cards.map((card) => (
             <div
               key={card.id}
               className="desk-card"
@@ -125,6 +137,24 @@ describe("a move the user made", () => {
     rerender(<Harness board={buildBoard(buildCard("b"), buildCard("a"))} serverBoard={server} />);
 
     expect(listDrawnIds()).toEqual(["b", "a"]);
+  });
+});
+
+describe("a card the user's own gesture hid", () => {
+  it("is drawn in its own render when it comes back, not held back as a Task that arrived", () => {
+    const server = buildBoard(buildCard("a"), buildCard("b"));
+    const merged = buildBoard(buildCard("a"));
+    const { rerender } = render(<Harness board={server} />);
+
+    // A merge held for the undo line hides "b".
+    rerender(<Harness board={merged} serverBoard={server} hiddenIds={new Set(["b"])} />);
+    expect(listDrawnIds()).toEqual(["a"]);
+
+    // Undo takes the merge back.
+    rerender(<Harness board={server} />);
+
+    expect(listDrawnIds()).toEqual(["a", "b"]);
+    expect(endWaits).toHaveLength(0);
   });
 });
 

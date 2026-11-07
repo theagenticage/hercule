@@ -325,9 +325,10 @@ export function DraftScreen({
               projectId={project.id}
               projectName={project.name}
               hasRepository={listProjectRepos(catalogs.resources, project.id).length > 0}
-              onStart={(message) => {
+              onStart={(message, taskId) => {
                 const { text } = pendingSubmissions.read(key).message;
                 pendingSubmissions.writeText(key, appendToMessage(text, message));
+                if (taskId !== undefined) pendingSubmissions.writeTask(key, taskId);
                 fieldRef.current?.focus();
               }}
             />

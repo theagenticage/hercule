@@ -36,7 +36,7 @@ import {
 } from "@hercule/contract";
 import { requireUserActor } from "../actor";
 import type { BoundOperationError } from "../bound-actions";
-import { mintUuid, uuidToString } from "../db";
+import { dropCursorError, mintUuid, uuidToString } from "../db";
 import { RunService } from "../runs";
 import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
@@ -115,8 +115,7 @@ export const findTaskToContinue = (
       },
     )
     .pipe(
-      // No cursor is given, so the listing has none to refuse.
-      Effect.catchTag("CursorError", (error) => Effect.die(error)),
+      dropCursorError,
       Effect.map((page) => Option.fromNullishOr(page.items[0])),
     );
 

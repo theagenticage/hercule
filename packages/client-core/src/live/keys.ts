@@ -57,6 +57,14 @@ export const queryKeys = {
    */
   workBoard: (): LiveQueryKey => [...queryKeys.tasks(), "board"],
   /**
+   * What the details pane of one Task draws (`task.readDetail`). It sits under
+   * `task(id)`, so an ordinary `task` push reads it again with the Task's
+   * record. A `derived` `task` push names it too (see `buildQueryKeys`),
+   * because a derived push is the one that a summary, a Thread or a run
+   * causes, and the pane shows all three.
+   */
+  taskDetail: (id: string): LiveQueryKey => [...queryKeys.task(id), "detail"],
+  /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
    * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
@@ -440,13 +448,15 @@ const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), 
  * `session` push carries.
  *
  * `derived` is the push's flag of the same name, which only a `task` push can
- * carry. It means a Task's card changed because of its sessions or runs, and
- * no field of the Task record changed. Only the Work board draws that, so the
- * push reads the board alone. Tracking already follows `run` pushes, and the
- * list, the Task's record and Your work read fields of the Task itself, so
- * reading them again would fetch the same data. A busy agent causes this push
- * every second, and the shell keeps Tracking and Your work active on every
- * screen.
+ * carry. It means a Task's card changed because of its sessions, runs or
+ * summary, and no field of the Task record changed. Only the Work board and
+ * the details pane of the named Tasks draw that, so the push reads the board
+ * and those details. Tracking already follows `run` pushes, and the list, the
+ * Task's record and Your work read fields of the Task itself, so reading them
+ * again would fetch the same data. A busy agent causes this push every
+ * second, and the shell keeps Tracking and Your work active on every screen.
+ * Only the open pane has a detail mounted, so the details of the other Tasks
+ * are marked out of date and cost no read.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
@@ -457,7 +467,8 @@ export const buildQueryKeys = (
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
   if (topic === "task") {
-    if (derived === true) return [queryKeys.workBoard()];
+    if (derived === true)
+      return [queryKeys.workBoard(), ...ids.map((id) => queryKeys.taskDetail(id))];
     return ids.length === 0
       ? [
           queryKeys.tasks(),

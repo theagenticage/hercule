@@ -153,6 +153,13 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/tasks/:id/tracking",
   },
+  // Reads a Task's sessions, their open Requests and its runs, so the service
+  // also needs `session.query` and `run.query`, as `task.queryBoard` does.
+  "task.readDetail": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/:id/detail",
+  },
   "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   "task.create": {
     requires: "task.create",
@@ -167,6 +174,14 @@ const TABLE = {
     usableIn: ["notification.answer", "signal.answer"],
   },
   "task.move": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
+  // Merging and undoing a Try again are the user's own corrections: a session
+  // token is refused whatever its profile holds.
+  "task.merge": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },
+  "task.undoTryAgain": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/try-again/undo",
+  },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
 
   "notification.query": {
@@ -791,6 +806,13 @@ const TABLE = {
     requires: "session.steer",
     method: "POST",
     path: "/api/v1/sessions/reopen",
+  },
+  // Moving a Thread to another Task changes how it is filed, as marking it
+  // Done does, so it takes the same grant. Only the user may do it.
+  "session.moveToTask": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/move-to-task",
   },
   // Archiving puts Threads away for good. The grant is the one the user
   // holds, but the operation is also refused to every session token, whatever

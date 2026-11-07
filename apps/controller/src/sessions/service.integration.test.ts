@@ -63,6 +63,7 @@ import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { TaskService, TaskServiceLayer } from "../tasks";
+import { TaskLinkOwnersLayer } from "../daemon/tasks";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { providerAccountRepository } from "../provider-accounts";
@@ -156,7 +157,7 @@ const buildWorkspaceLayer = () =>
 
 const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(buildWorkspaceLayer()),
-  Layer.provideMerge(TaskServiceLayer),
+  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
   Layer.provideMerge(
     Layer.mergeAll(
       AuditLogLayer,
@@ -305,7 +306,7 @@ const buildGatedCredentialStack = (
   );
   return SessionServiceLayer.pipe(
     Layer.provideMerge(buildWorkspaceLayer()),
-    Layer.provideMerge(TaskServiceLayer),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         AuditLogLayer,
@@ -2748,5 +2749,362 @@ describe("the card of a Task", () => {
     );
 
     expect(changes).toEqual([]);
+  });
+
+  describe("and its summary", () => {
+    /**
+     * Opens a busy Thread of a new Task, applies `events` one by one, and
+     * returns how many times the Task's summary was marked dirty after each.
+     */
+    const revisionsAfter = (events: ReadonlyArray<object>) =>
+      run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const taskId = (yield* Effect.provideService(
+            (yield* TaskService).create({ title: "Add a refund button", description: "" }),
+            CurrentActor,
+            USER,
+          )).id;
+          const runnerId = mintId();
+          const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0, taskId);
+          const revisions: Array<number> = [];
+          for (const [index, event] of events.entries()) {
+            yield* report(runnerId, sessionId, index + 1, event);
+            const rows = yield* sql<{ readonly dirty_revision: number }>`
+              SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(taskId)}`;
+            revisions.push(rows[0]?.dirty_revision ?? 0);
+          }
+          return revisions;
+        }),
+      );
+
+    const secondQuestion = { ...questionRequest, requestId: "q-2" };
+
+    it("is out of date when the Thread's first question opens and when its last one closes, and for an approval neither time", async () => {
+      const revisions = await revisionsAfter([
+        { _tag: "request.opened", request: approvalRequest },
+        { _tag: "request.resolved", requestId: "a-1", decision: "allow" },
+        { _tag: "request.opened", request: questionRequest },
+        { _tag: "request.opened", request: secondQuestion },
+        { _tag: "request.resolved", requestId: "q-1", answers: { Size: "Large" } },
+        { _tag: "request.resolved", requestId: "q-2", answers: { Size: "Large" } },
+      ]);
+
+      // The approval changes nothing. The second question, and the first one
+      // closing while another is open, change nothing either.
+      expect(revisions).toEqual([0, 0, 1, 1, 1, 2]);
+    });
+
+    it("is out of date when a question that a subagent asked opens", async () => {
+      const revisions = await revisionsAfter([
+        { _tag: "subagent.started", subagentId: "helper" },
+        { _tag: "request.opened", subagentId: "helper", request: questionRequest },
+      ]);
+
+      expect(revisions).toEqual([0, 1]);
+    });
+  });
+});
+
+describe("SessionService.moveToTask", () => {
+  /** A Thread on a Task, in an ephemeral workspace whose `task_workspaces` row names that Task. */
+  const arrangeThread = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tasks = yield* TaskService;
+    const oldTaskId = (yield* Effect.provideService(
+      tasks.create({ title: "Northwind gift card refunds", description: "", stage: "building" }),
+      CurrentActor,
+      USER,
+    )).id;
+    const runnerId = mintId();
+    const workspaceId = mintId();
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`
+        INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                             credential_hash, created_at, updated_at)
+        VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                'a hash', ${at}, ${at})`;
+        yield* sql`
+        INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
+                'ready', ${at})`;
+        yield* sql`
+        INSERT INTO task_workspaces (workspace_id, task_id, joined_at)
+        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(oldTaskId)}, ${at})`;
+      }),
+    );
+    const providerAccountId = mintId();
+    const sessionId = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec: buildSpec(providerAccountId, "clever"),
+      taskId: oldTaskId,
+    });
+    yield* withTransaction(
+      sql,
+      sql`
+        UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+        WHERE id = ${uuidFromString(sessionId)}`,
+    );
+    return { runnerId, workspaceId, sessionId, oldTaskId };
+  });
+
+  const createTaskAt = (stage: "building" | "done" | "dropped") =>
+    Effect.map(
+      Effect.flatMap(TaskService, (tasks) =>
+        Effect.provideService(
+          tasks.create({ title: "Fix the login redirect", description: "", stage }),
+          CurrentActor,
+          USER,
+        ),
+      ),
+      (task) => task.id,
+    );
+
+  const moveAs = (actor: Actor, sessionId: string, taskId?: string) =>
+    Effect.flatMap(SessionService, (sessions) =>
+      Effect.provideService(
+        sessions.moveToTask(sessionId, taskId === undefined ? {} : { taskId }),
+        CurrentActor,
+        actor,
+      ),
+    );
+
+  /** Returns the revision of the Task's summary: how many times it was marked dirty. */
+  const readDirtyRevision = (taskId: string) =>
+    Effect.map(
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) =>
+          sql<{ readonly dirty_revision: number }>`
+          SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(taskId)}`,
+      ),
+      (rows) => rows[0]?.dirty_revision ?? 0,
+    );
+
+  const readWorkspaceRows = Effect.map(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) =>
+        sql<{ readonly workspace_id: Uint8Array; readonly task_id: Uint8Array }>`
+        SELECT workspace_id, task_id FROM task_workspaces`,
+    ),
+    (rows) =>
+      rows.map((row) => [uuidToString(row.workspace_id), uuidToString(row.task_id)] as const),
+  );
+
+  it("moves a Thread to another Task: the session changes, nothing else, and both Tasks are marked dirty", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { workspaceId, sessionId, oldTaskId } = yield* arrangeThread;
+        const newTaskId = yield* createTaskAt("building");
+        const before = [yield* readDirtyRevision(oldTaskId), yield* readDirtyRevision(newTaskId)];
+        const moved = yield* moveAs(USER, sessionId, newTaskId);
+        return {
+          moved,
+          newTaskId,
+          workspaceId,
+          oldTaskId,
+          before,
+          after: [yield* readDirtyRevision(oldTaskId), yield* readDirtyRevision(newTaskId)],
+          workspaceRows: yield* readWorkspaceRows,
+          audit: yield* readEventsOfKind("session.movedToTask"),
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.newTaskId);
+    expect(result.after).toEqual([result.before[0]! + 1, result.before[1]! + 1]);
+    expect(result.workspaceRows).toEqual([[result.workspaceId, result.oldTaskId]]);
+    expect(result.audit.map((entry) => [entry.actor, entry.payload])).toEqual([
+      [
+        "user",
+        {
+          sessionId: result.moved.id,
+          fromTaskId: result.oldTaskId,
+          toTaskId: result.newTaskId,
+        },
+      ],
+    ]);
+  });
+
+  it("moves a Thread that names a Task merged away onto the Task it was merged into", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { sessionId } = yield* arrangeThread;
+        const tasks = yield* TaskService;
+        const mergedAway = yield* createTaskAt("building");
+        const survivor = yield* createTaskAt("building");
+        yield* Effect.provideService(
+          tasks.merge(mergedAway, { intoTaskId: survivor }),
+          CurrentActor,
+          USER,
+        );
+        const moved = yield* moveAs(USER, sessionId, mergedAway);
+        return { moved, survivor, audit: yield* readEventsOfKind("session.movedToTask") };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.survivor);
+    expect(result.audit.map((entry) => entry.payload["toTaskId"])).toEqual([result.survivor]);
+  });
+
+  it("moves a Thread to a new Task made from it, without recording a workspace for it, so the next Thread in the folder still joins the old Task", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { workspaceId, sessionId, oldTaskId } = yield* arrangeThread;
+        const moved = yield* moveAs(USER, sessionId);
+        const tasks = yield* TaskService;
+        const next = yield* tasks.joinSession({
+          requestedTaskId: undefined,
+          callerTaskId: undefined,
+          workspaceId,
+          sessionKind: "thread",
+          title: "Another thread",
+          projectId: undefined,
+        });
+        return {
+          moved,
+          oldTaskId,
+          workspaceId,
+          newTask: yield* Effect.provideService(tasks.read(moved.taskId!), CurrentActor, USER),
+          dirtyOfNew: yield* readDirtyRevision(moved.taskId!),
+          dirtyOfOld: yield* readDirtyRevision(oldTaskId),
+          workspaceRows: yield* readWorkspaceRows,
+          next,
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).not.toBe(result.oldTaskId);
+    expect(result.newTask).toMatchObject({ title: "a session", stage: "exploring" });
+    expect(result.workspaceRows).toEqual([[result.workspaceId, result.oldTaskId]]);
+    expect(result.next).toEqual({ taskId: result.oldTaskId, created: false });
+    expect(result.dirtyOfNew).toBeGreaterThan(0);
+    expect(result.dirtyOfOld).toBeGreaterThan(0);
+  });
+
+  it("returns the Thread unchanged, and writes nothing, when it moves to the Task it is on", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { sessionId, oldTaskId } = yield* arrangeThread;
+        const dirtyBefore = yield* readDirtyRevision(oldTaskId);
+        const moved = yield* moveAs(USER, sessionId, oldTaskId);
+        return {
+          moved,
+          oldTaskId,
+          dirtyBefore,
+          dirtyAfter: yield* readDirtyRevision(oldTaskId),
+          audit: yield* readEventsOfKind("session.movedToTask"),
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.oldTaskId);
+    expect(result.dirtyAfter).toBe(result.dirtyBefore);
+    expect(result.audit).toEqual([]);
+  });
+
+  describe("refuses", () => {
+    /** Runs `move` after the arrangement, and returns the error it fails with and the Thread's Task afterwards. */
+    const refusedWith = (
+      move: (
+        arranged: { readonly sessionId: string; readonly runnerId: string },
+        sessionTaskId: string,
+      ) => Effect.Effect<unknown, unknown, Layer.Success<typeof layer>>,
+    ) =>
+      run(
+        Effect.gen(function* () {
+          const arranged = yield* arrangeThread;
+          const error = yield* Effect.flip(move(arranged, arranged.oldTaskId));
+          const sessions = yield* sessionRepository;
+          const stored = Option.getOrThrow(yield* sessions.one(arranged.sessionId));
+          return {
+            error: error as { readonly error: { readonly code: string } },
+            stayed: stored.taskId === arranged.oldTaskId,
+          };
+        }),
+      );
+
+    it("a session that is not a Thread", async () => {
+      const { error, stayed } = await refusedWith(({ runnerId }) =>
+        Effect.gen(function* () {
+          const providerAccountId = mintId();
+          const agentSessionId = yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+            agentId: mintId(),
+          });
+          return yield* moveAs(USER, agentSessionId);
+        }),
+      );
+
+      expect(error.error.code).toBe("invalid_state");
+      expect(stayed).toBe(true);
+    });
+
+    it("a Task that does not exist, and a Task that was deleted", async () => {
+      const missing = await refusedWith(({ sessionId }) => moveAs(USER, sessionId, mintId()));
+      const deleted = await refusedWith(({ sessionId }) =>
+        Effect.gen(function* () {
+          const taskId = yield* createTaskAt("building");
+          yield* Effect.provideService(
+            Effect.flatMap(TaskService, (tasks) => tasks.delete(taskId)),
+            CurrentActor,
+            USER,
+          );
+          return yield* moveAs(USER, sessionId, taskId);
+        }),
+      );
+
+      expect([missing.error.error.code, deleted.error.error.code]).toEqual([
+        "not_found",
+        "not_found",
+      ]);
+      expect([missing.stayed, deleted.stayed]).toEqual([true, true]);
+    });
+
+    it("a Task that is done or dropped, and leaves the Thread where it was", async () => {
+      const done = await refusedWith(({ sessionId }) =>
+        Effect.flatMap(createTaskAt("done"), (taskId) => moveAs(USER, sessionId, taskId)),
+      );
+      const dropped = await refusedWith(({ sessionId }) =>
+        Effect.flatMap(createTaskAt("dropped"), (taskId) => moveAs(USER, sessionId, taskId)),
+      );
+
+      expect([done.error.error.code, dropped.error.error.code]).toEqual([
+        "invalid_state",
+        "invalid_state",
+      ]);
+      expect([done.stayed, dropped.stayed]).toEqual([true, true]);
+    });
+
+    it("a caller that is a session, and makes no Task", async () => {
+      const refused = await run(
+        Effect.gen(function* () {
+          const { sessionId, oldTaskId } = yield* arrangeThread;
+          const grants = ["session.steer"] as const;
+          const asSession: Actor = {
+            _tag: "session",
+            sessionId,
+            profileId: mintId(),
+            grants,
+            profileGrants: grants,
+            assistantId: null,
+            agentId: null,
+          };
+          const error = (yield* Effect.flip(moveAs(asSession, sessionId))) as {
+            readonly error: { readonly code: string };
+          };
+          const sql = yield* SqlClient.SqlClient;
+          const count = yield* sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM tasks`;
+          return { error, oldTaskId, taskCount: count[0]!.n };
+        }),
+      );
+
+      expect(refused.error.error.code).toBe("forbidden");
+      expect(refused.taskCount).toBe(1);
+    });
   });
 });

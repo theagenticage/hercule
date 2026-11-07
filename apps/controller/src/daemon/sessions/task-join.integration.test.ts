@@ -1089,3 +1089,87 @@ describe("the Task follows the Thread's generated title", () => {
     });
   });
 });
+
+/* ------------------------------------------------------------------------ */
+/* A Thread started on a Task by name ends that Task's failure.              */
+/* ------------------------------------------------------------------------ */
+
+/** The run a Task shows as failed in the rows below. It never has to exist. */
+const FAILED_RUN_ID = "0199f0b7-0000-7000-8000-00000000fa11";
+
+/** Makes the Task show the failure of `FAILED_RUN_ID`, and returns its failure revision. */
+const showFailure = async (arranged: Arranged, taskId: string): Promise<number> => {
+  await runWrite(
+    arranged,
+    arranged.harness.sql`UPDATE tasks
+      SET failed_run_id = unhex(${compact(FAILED_RUN_ID)}), failure_revision = failure_revision + 1
+      WHERE id = unhex(${compact(taskId)})`,
+  );
+  return (await readFailure(arranged, taskId)).failureRevision;
+};
+
+/** Reads the failure the Task shows and its failure revision. */
+const readFailure = async (arranged: Arranged, taskId: string) => {
+  const [row] = await runSql(
+    arranged.harness.sql<{
+      readonly failed_run_id: string | null;
+      readonly failure_revision: number;
+    }>`SELECT NULLIF(lower(hex(failed_run_id)), '') AS failed_run_id, failure_revision
+       FROM tasks WHERE id = unhex(${compact(taskId)})`,
+  );
+  return { failedRunId: row!.failed_run_id, failureRevision: row!.failure_revision };
+};
+
+describe("the failure a Task shows, when a Thread joins it", () => {
+  it("ends when a Thread is started on the Task by name, and the revision rises so an older Undo cannot restore it", async () => {
+    await withFleet(async (arranged) => {
+      const task = await createTask(arranged, "Refund button");
+      const revision = await showFailure(arranged, task.id);
+
+      const session = await spawnOk(arranged, { taskId: task.id });
+
+      expect(session.taskId).toBe(task.id);
+      expect(await readFailure(arranged, task.id)).toEqual({
+        failedRunId: null,
+        failureRevision: revision + 1,
+      });
+    });
+  });
+
+  it.each([
+    [
+      "the workspace's Task",
+      async (arranged: Arranged, repo: string) => {
+        const first = await spawnInNewWorkspace(arranged, repo);
+        return {
+          taskId: first.taskId!,
+          join: () => spawnOk(arranged, { workspace: buildExistingWorkspace(first) }),
+        };
+      },
+    ],
+    [
+      "the Task of the session that starts it",
+      async (arranged: Arranged) => {
+        const caller = await startCaller(arranged);
+        return {
+          taskId: caller.session.taskId!,
+          join: () => spawnOk(arranged, {}, caller.token),
+        };
+      },
+    ],
+  ])("is kept when a Thread joins %s", async (_name, arrange) => {
+    await withFleet(async (arranged) => {
+      const repo = await createRepo(arranged, "https://github.com/acme/web");
+      const { taskId, join } = await arrange(arranged, repo);
+      const revision = await showFailure(arranged, taskId);
+
+      const session = await join();
+
+      expect(session.taskId).toBe(taskId);
+      expect(await readFailure(arranged, taskId)).toEqual({
+        failedRunId: FAILED_RUN_ID.replaceAll("-", ""),
+        failureRevision: revision,
+      });
+    });
+  });
+});

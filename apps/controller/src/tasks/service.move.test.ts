@@ -17,9 +17,11 @@ import { NotifierLayer } from "../notifications";
 import { MAX_BOARD_RANK_LENGTH } from "./board-rank";
 import { taskRepository } from "./repository";
 import { TaskService, TaskServiceLayer } from "./index";
+import { TaskLinkOwnersLayer } from "../daemon/tasks";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
+  Layer.provideMerge(TaskLinkOwnersLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

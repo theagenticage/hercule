@@ -130,8 +130,11 @@ export const readPlacement = (board: WorkBoard, taskId: string): CardPlacement |
   };
 };
 
-/** The move that puts a card back, and whether it puts it back exactly. */
-export interface RestoreMove {
+/**
+ * The move that puts a card at a placement: back on the board after Undo, or
+ * out of Done or Dropped. Also says whether it lands exactly there.
+ */
+export interface MoveToPlacement {
   readonly move: CardMove;
   /**
    * False when the card it followed is no longer in that cell. The card then
@@ -142,17 +145,17 @@ export interface RestoreMove {
 }
 
 /**
- * Returns the move that puts a card back where `placement` says, over the
- * board as it is now. Returns `undefined` when the card is gone.
+ * Returns the move that puts a card at `placement`, over the board as it is
+ * now. The card itself need not be on the board: it is not when a Task that
+ * was marked Done comes back.
  *
  * The move always names `afterTaskId`: with the card's own cell unchanged, an
  * absent one would do nothing.
  */
-export const buildRestoreMove = (
+export const buildMoveToPlacement = (
   board: WorkBoard,
   placement: CardPlacement,
-): RestoreMove | undefined => {
-  if (!board.cards.some((card) => card.id === placement.taskId)) return undefined;
+): MoveToPlacement => {
   const cell = board.cards.filter(
     (card) =>
       card.id !== placement.taskId &&
@@ -171,6 +174,18 @@ export const buildRestoreMove = (
     },
   };
 };
+
+/**
+ * Returns the move that puts a card back where `placement` says, over the
+ * board as it is now. Returns `undefined` when the card is gone.
+ */
+export const buildRestoreMove = (
+  board: WorkBoard,
+  placement: CardPlacement,
+): MoveToPlacement | undefined =>
+  board.cards.some((card) => card.id === placement.taskId)
+    ? buildMoveToPlacement(board, placement)
+    : undefined;
 
 /** What the undo line adds when a card could not be put exactly where it was meant to go: the card it followed is gone. */
 export const CARD_NOT_EXACT_NOTE = "The card it followed has gone, so it went last in that stage.";

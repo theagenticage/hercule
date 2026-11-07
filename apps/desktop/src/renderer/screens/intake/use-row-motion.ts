@@ -14,7 +14,8 @@
  * does a change while the window is hidden, which no one would see.
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { copyElementWithoutIds, isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
+import { copyElementWithoutIds } from "../../app/motion";
+import { isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
 import { readMotionDuration, readMotionEasing, type MotionDuration } from "./motion-tokens";
 
 /** The attribute on each drawn item's element that holds its key, so the motion can find it. */

@@ -20,7 +20,7 @@
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { TriggerEffects } from "../../../workflows";
-import { absorbFailures } from "../../absorbing";
+import { absorbFailures } from "../../../absorbing";
 import type { Delivery } from "../event-router";
 
 export const triggerEffectDelivery: Effect.Effect<Delivery, never, TriggerEffects> = Effect.gen(

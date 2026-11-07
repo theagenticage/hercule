@@ -999,6 +999,8 @@ A compact workspace details surface shows runner, actual or last-observed branch
   - "Start working on task <id>: <title>" otherwise.
 
   The thread's agent reads the rest itself, with `gh` or `hercule task read`. The message stays short, and text written outside Hercule, such as an issue's body, is never sent as the user's own words. The line goes after a blank line when the field already holds text, and the click focuses the field. The section shows only when the project has planned Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
+
+  *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* The message also carries the card's Task, as `taskId`, when it is sent. So the Thread joins that Task ([./09-tasks.md](./09-tasks.md#which-task-a-session-gets), row 1) and ends its failure, and does not wait for the join rule to guess. The Task stays on the draft until the message is sent, is emptied, or another card is picked.
 - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **Starter threads take the start cards' place while ~~Intake is empty~~ the project has no planned Task,** *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Intake now holds Signals, and the start cards draw open Tasks, so the condition names Tasks)* as the book's `session-empty.html?state=first` and `?state=first-no-repo` draw them. A new user then still has something to start from.
   - Three starters sit under "Or start from one of these", each with the book's glyph and title, such as "Get to know it" or "Something to plan". `@hercule/client-core` picks the set:
     - a project with a repository gets starters about code, such as "Walk me through how webshop is put together";
@@ -1267,8 +1269,9 @@ Work and the Inbox are one product, and every later slice draws on the same part
 |---|---|---|
 | Tokens | `styles/tokens.css` | The tokens of `SHARED.md`'s `primitives.css`, in all six themes: the desk and the card stock with its shadows (`--desk`, `--stock*`, `--h-rest`, `--h-hover`, `--h-carry`), the colours that mean a person is needed (`--answer`, `--you-ink`) or something got hurt (`--fail-ink`), the initiatives' (`--plan-l`, `--plan-c`), the card shape (`--card-*`), the type roles (`--type-*`) and the motion curves and durations (`--m-*`). `styles/tokens.test.ts` checks that each exists in all six themes |
 | Motion | `app/motion/` | The kernel of the drawing's `motion.js`: the three springs `hand`, `travel` and `self`, FLIP by element and by key, the value and body helpers, and the Reduce motion check. Everything is interruptible and moves only `transform` and `opacity` |
-| Components | `screens/desk/` | What both pages draw: the card sheet, the colleague (head, paws, plaster), the toolbar's controls and menus, the view pill, the section heading with its small count, the status shape and failed mark, the right-hand sheet, the undo line and the sunrise |
+| Components | `screens/desk/` | What both pages draw: the card sheet, the colleague (head, paws, plaster), the toolbar's controls and menus, the view pill, the section heading with its small count, the status shape and failed mark, the right-hand sheet, *(added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031))* `OpeningSheet` (a sheet that grows out of the element it opens from and closes back into it, with the pane's words laid out at final size), the undo line and the sunrise |
 | Undo | `app/undo-stack.ts` | One stack of gestures for both pages: what the user did, newest last, each with its own inverse |
+| Held decisions | `app/pending-intents.ts` | *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* One store of the decisions that wait out an undo line before they are sent: an answer to a Thread's question, and a merge. It belongs to the shell, is kept per controller and user, and never sends one by itself after a restart |
 | Interpretation | `packages/client-core/src/desk/`, the subpath `@hercule/client-core/desk` | What both pages work out: the filter and its chips, the count each filter value would leave, and the words for an age. Slice 4 adds the relation rows here |
 
 The rules for this layer:
@@ -1285,7 +1288,7 @@ The rules for this layer:
 
 - **The route** is `/work`, in `routes/_connected/_shell/work.tsx`, a chunk of its own (rule 6), exporting `Route` with `staticData: { title: "Work" }`. The screen's components are in `screens/work/`, and what it works out is in `@hercule/client-core/work`. The route's loader starts the board's read without waiting for it, so the screen draws its loading state, with the stages and lanes in place, at once.
 - **The stages** are the five Stages Exploring, Planned, Building, In review and Landed, drawn side by side. Done and Dropped are ends, and Work has no place for them: an unfinished Task is one at the first five stages ([./09-tasks.md](./09-tasks.md#the-board)). **A lane** is one Project, and Tasks with no Project are in the lane "No project", last. Lanes sort by project name. The sidebar's activity order does not leak in. A **cell** is one lane at one stage.
-- **A card** shows its title, the foot, and a colleague behind its top edge while a Thread of the Task works. A Thread's question takes the card's second line, in `--you-ink`. Cards have no summary yet, and no details pane. A click, Return or Space opens the card's newest Thread (`openSessionId`). A Task with no Thread opens nothing yet, and the undo line says "This Task has no Thread yet." Every Task added with Add starts that way, until the details pane (slice 3) opens it.
+- **A card** shows its title, a second line, the foot, and a colleague behind its top edge while a Thread of the Task works. The second line is what broke, what a Thread asks (in `--you-ink`), or the Task's summary ([The summary on a card](#the-summary-on-a-card)). A click, Return or Space opens the card's details ([The details pane](#the-details-pane)), which also holds the Task's Threads. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A card used to open its newest Thread, and a Task with no Thread opened nothing.
 - **Lanes open on a first visit,** so the first screen is proper cards. The Threads open at the upgrade are there, at Exploring.
 
 ### What Work reads and writes
@@ -1297,9 +1300,16 @@ The rules for this layer:
 | Tells a clear desk from a first run | `task.query` with `limit: 1`, only while the board is empty. A controller with no Task shows "Nothing here yet." and a **Start a thread** button, which opens the new thread's draft with the focus in its message. The button shows ⌘N, as the sidebar's New thread row does on every platform |
 | Moves a card | `task.move` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)) |
 | Adds a Task | `task.create`, with the lane's Project and the stage `exploring` |
+| Reads one Task's details | `task.readDetail`, when the pane opens, and again when a `task` push names the Task. Never ahead of an open pane |
+| Answers a question | `session.respondToQuestion`, after the undo line |
+| Marks a Task Done or Dropped | `task.update` with `stage` `done` or `dropped`. Undo is `task.move` |
+| Tries a failed run again | `run.rerun`. Undo is `task.undoTryAgain` |
+| Starts a Thread on a Task | `session.spawn`, with the Task's id as `taskId` |
+| Moves a Thread to a new Task | `session.moveToTask` |
+| Merges two Tasks | `task.merge`, after the undo line |
 
 - **The controller decides what a card shows** ([./09-tasks.md](./09-tasks.md#the-board), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)): a question open in a Thread, a failure, and a working session are three independent facts on the card. The desktop keeps only the words. "Wants you" means a Thread's open question and nothing else; an approval, a Permission Request, a signal and a finished run never set it, and no screen joins sessions or runs itself to guess it.
-- **Live updates.** The board's key sits under `queryKeys.tasks`, so every `task` push reads it again, and Work adds no live topic. It does not follow the `session` topic: that would read the board about once a second for every busy agent. The controller announces a card that changed with a `task` push of its own, collected for one second ([./14-web-app.md](./14-web-app.md)). After a reconnect the first push names no ids, so the board reads again.
+- **Live updates.** The board's key sits under `queryKeys.tasks`, so every `task` push reads it again, and Work adds no live topic. It does not follow the `session` topic: that would read the board about once a second for every busy agent. The controller announces a card that changed with a `task` push of its own, collected for one second ([./14-web-app.md](./14-web-app.md)). After a reconnect the first push names no ids, so the board reads again. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A summary that is written is such a push too, so a burst of summaries is still one board read a second, and an open pane reads its own Task again.
 - **A hidden window reads no board.** The query is enabled only while the window is visible ([Rules](#rules), rule 3). A push that arrives meanwhile marks it out of date, and the board is read once when the window shows.
 - **Project names have no live topic** ([#279](https://github.com/theagenticage/hercule/issues/279)). A lane renamed from the CLI shows at the next read. That is accepted.
 - **A board past `MAX_BOARD_CARDS` (1,000)** says so on the screen, in a line under the lanes. It never hides it.
@@ -1322,7 +1332,7 @@ So the page holds a few rows per cell however many Tasks exist, unless the user 
 
 - **An open question** is the palm raised on the colleague's head, the question on the second line, a 6px marigold dot in a folded lane, and the Filter row "Has a question". It stays small on purpose: there is no count on the board, no lane headline and no walk from one question to the next.
 - **A failed run** stays until it ends. Looking at it clears nothing, and a drag does not repair a run. The card leads its cell and outranks everything else about it: it shows as a card even in Landed. The colleague's head wears its plaster, with no paws on the edge. The failed mark is the shared status shape, `cross` in its `bad` tone. The words are "*Review PR* failed: *cause*." in ink, or "*Review PR* failed." when no cause is known. They take the summary's place and nothing replaces them, and a title keeps to one line so they always get two. Failed is a Filter row and a chip, and when the last failure ends the filter lifts itself, as Has a question does. Waiting on you does not list a failure: it counts open questions, and a stopped run has none.
-- **The card's order of reading** is its title, what it asks or what broke, its stage, then its age. Colour is never the only signal: the failed mark has a shape and the words.
+- **The card's order of reading** is its title, what it asks or what broke, its stage, its summary, then its age. Colour is never the only signal: the failed mark has a shape and the words.
 
 ### The toolbar
 
@@ -1330,7 +1340,7 @@ One row of 36px glass controls, from the shared parts, 10px from the top. It sta
 
 - **Group by** lists Project alone for now. The menu takes its rows from data, so later slices add Initiative and the sources' kinds.
 - **Filter** has the state rows Has a question, Failed and With an agent (`workingSessionId`, whatever the Task's other facts), then Project. Each value shows how many Tasks it would leave. Values of one facet add up, and facets narrow. What is on sits beside Filter as chips, a click removes one, and Esc clears them. What does not match leaves the page, and lanes with nothing left go. Filtering runs in client-core over the board already read, so it costs no read.
-- **Find** (`/`) narrows the board by title as you type, and lists the top matches. Return opens the first.
+- **Find** (`/`) narrows the board by title and summary as you type, and lists the top matches. Return opens the first.
 - **Display** holds Side labels or Bands, Still colleagues, Single-key shortcuts and Fold everything. Below 1320px, lanes are bands. The choices, and the lanes the user folded, are kept in `localStorage`, one entry per controller and user.
 - **Add** (the button, `A`, or the `+` on a lane's head) opens the shared right-hand sheet with New Task: type, Return, and `task.create` runs in the lane it came from. A line says where the Task landed, and the board does not scroll.
 
@@ -1342,6 +1352,76 @@ One row of 36px glass controls, from the shared parts, 10px from the top. It sta
 - **A failed move rolls back and says why.** The drawing's moves while offline, marked with a clock until they sync, are left out: an offline queue is its own piece of work.
 - **A Task that arrives by itself,** or changes stage by anything but a drag, goes last in its cell, so nothing the user is looking at moves.
 
+### The summary on a card
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031), [ADR 0053](../adr/0053-a-text-generation-describes-a-task-it-never-moves-one.md).)* A card's second line is the Task's summary line when nothing outranks it: about six words, such as "Three designs, depots worried."
+
+- **What takes the line, in order:** what broke, then what a Thread asks, then the summary line. The summary is never drawn beside a failure or a question, and it stays in the details.
+- **Before the first summary,** the card shows its title and "Writing a summary" in `--faint`. When Text Generation cannot run (the setting is Off, or no runner can run it), no summary is coming, so the card shows its title alone and promises nothing.
+- **A stale summary draws exactly like a fresh one.** The card has no mark for "newer work since". The pane says it, quietly ([The details pane](#the-details-pane)).
+- **Title and line share three lines,** and the foot sits alone at the bottom right. A two-line title leaves the line one line, with an ellipsis if it must, so a new summary never moves a neighbour.
+- **A screen reader reads** the title, what broke, what it asks, the stage, the summary, then the age. A card with no summary yet reads "Summary being written".
+- **Find** looks through summaries as well as titles, in client-core, over the board already read.
+
+### The details pane
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A click, Return or Space on a card opens its details: a sheet 468px wide that floats over the board, 14px from the right, from 58px down to 14px from the bottom. It does not split the board, so no card moves. It is the shared opening sheet (`OpeningSheet`, in `screens/desk/`): it grows out of the card and closes back into it ([Work's motion](#works-motion)). The pane is a dialog named by the Task, not modal, so the user keeps working beside it.
+
+From the top:
+
+1. **Crumbs and title.** The Project, then the title at 20/26. A colleague on the Task rides the sheet's top edge.
+2. **The stage path.** The five stages, the current one in ink. Choosing a stage moves the Task there, as a move on the board does.
+3. **Where it stands.** The summary's `standing` text, with a faint line under it: "Written 12 minutes ago", and " · newer work since" when the summary is stale, which is as soon as the Task changes. It is never red. With no summary yet, the line reads "Writing a summary". When Text Generation is Off or cannot run, it reads "Summaries are off", linked to the Text Generation setting; a stale summary then adds " · summaries are off".
+4. **A failure or an open question,** only if the Task has one. A failure leads: the colleague with the plaster, the card's words with the failed mark, **Try again** (filled, and Return does it), then **Open the run**. A question sits under it when both exist. See [Answering from the pane](#answering-from-the-pane).
+5. **What is left.** The summary's `left` text, when there is one.
+6. **Threads.** Up to 10 rows, the unfinished first, then newest, each with the Thread's title, its state (Asks, Waiting, Working, Done) and **Move to a new Task**. "and 12 more" names the rest. The Thread that asks the card's question is always listed.
+7. **The foot.** Done, Start a thread and Merge at the left, and Drop alone at the right, far from Done. With a failure, the order down the sheet is Try again, Open the run, Done, Drop.
+
+Blocked by and Blocks come with slice 8. Part of, Linked and Mentioned come with slice 4.
+
+- **The summary is the card's.** The pane draws no summary of its own: the summary comes with the card in the same read, so the board and the pane cannot disagree.
+- **It opens at once.** The pane opens from what the board already has, with its words laid out at final size and loading bars where the read is still coming. The read makes no sheet move twice.
+- **Another card swaps the words.** With the pane open, choosing another card, or walking to one with the arrow keys, swaps the words in 200 ms. The sheet stays still and the card's dent moves.
+- **A Task that is no longer there.** A Task merged into another shows the survivor in place: the sheet stays open and swaps the words, with no second history entry. A deleted Task shows "This Task no longer exists." for a moment, then the pane closes the way Esc closes it. A read that fails shows the reason and Try again, and keeps the sheet.
+- **A finished Task has no pane.** Done and Dropped Tasks leave the board, and the pane for one closes.
+- **Esc** closes the pane, and the focus returns to the card. Once the pane links to other Tasks (slices 4 and 8), Esc goes back to the Task the user came from first, and closes after that.
+- **Live.** The pane reads again when a `task` push names its Task, so a summary that arrives, a Thread that asks, and a failure show without a click.
+
+### Answering from the pane
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A question shows the Thread that asks, the question at 17/24 bold, its answers as compact chips with the suggested one filled in `--answer`, and a line to say something else. Return sends the suggested answer, unless a failure leads. **Open thread** stays on every question.
+
+- **Which questions the pane answers.** One kind: a Request of kind `question` on a Thread of this Task, with one question, a single choice, and not marked secret. A Request with several questions, several choices or a secret shows the first question's words and Open thread only, because the thread's composer handles those well. An approval is not a question: the pane does not offer it, and it stays on the thread and in Waiting on you.
+- **Nothing a model wrote can be sent.** The chips are the Request's own options. A summary holds no question, so the pane reads questions from the Request only.
+- **Answering sends it after an undo line.** The sheet closes at once. A line says what was answered and offers **Undo** for 5 seconds. Undo stops the send: nothing is sent. Without it, the answer is sent with `session.respondToQuestion`, to the Request it was picked for. So an answer cannot reach another Thread, and the controller refuses it if that Request has closed.
+- **While it waits, the card shows the question as answered,** as display only. Nothing counts as answered until the controller accepts it.
+- **The same store holds merges.** One store of held decisions (`app/pending-intents.ts`) keeps the answers and the merges that wait out their undo line. It belongs to the shell, so closing the pane, changing route or hiding the window changes nothing, and it is kept per controller and signed-in user.
+- **A send that fails keeps the words.** The mark comes back on the card, and the pane shows what the user said as not sent, with **Send again** and **Discard**. When the Request had closed before the first send, the pane says "This question closed before your answer was sent", and when it closed before a second send, "This question is no longer open, and your answer may have reached it". Either way it keeps the words and offers Open thread and Discard, never Send again, and it never sends them anywhere else.
+- **Words that were not sent follow their Task.** When the Task was merged into another, they show on the pane of the Task it merged into. They are discarded only when the Task is confirmed deleted (a read of it says not found), never because the board does not show it, and never when it is finished: a finished Task can be moved back and its Thread's question may still be open, so its words stay. A lookup that could not reach the controller is made again after the next board read.
+- **Quitting, reloading or signing out never sends it by itself.** A decision still waiting then comes back as not sent, on its card, and waits for the user. Another controller or another user cannot see it.
+- **There is no offline queue.** Being offline is a failed send, with the words kept.
+
+### Done, Drop and Start a thread
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **Done** (`D`) and **Drop** (`⌫`) are on the card, in the pane's foot and on a selection. Each is one `task.update` that moves the Task to `done` or `dropped`, so the card leaves the board ([./09-tasks.md](./09-tasks.md#finishing-a-task)). The toast offers **Undo** while it lasts. Undo puts the Task back where it was, in its cell after the card it followed. Done does nothing to the Task's Threads, and marking a Thread Done does nothing to the Task: they are separate acts.
+
+**Start a thread** (`T`, or the button) asks what the thread should do, on one line, before anything starts. Then it starts a Thread on the Task with that line, in the Task's Project and, when it is still usable, in the folder of the Task's newest Thread. The Thread joins the Task ([./09-tasks.md](./09-tasks.md#which-task-a-session-gets), row 1), and being started by name ends the Task's failure. The start cards of a new thread's draft send the card's Task the same way, so a card picked there joins its Task.
+
+**Move to a new Task** is on each Thread row of the pane. The Thread moves to a Task of its own, and the old card loses it. The row says where the Thread's folder stays: "The next thread here still joins *Old task*."
+
+**Try again** starts the failed run again and keeps the card on its row: the plaster goes and the colleague starts again. The line offers Undo, which puts the failure back unless something newer holds the Task. The line says what happened, and never says the run has stopped: only that it was asked to.
+
+### Selecting and merging
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **Selecting.** `X` or ⌘-click marks a card, with a 1.5px ink ring and a check in its top-left corner. A quiet bar offers Done, Drop and Clear. Dragging any selected card carries them all, and they land in order at the slot. One Undo puts them all back. A bulk action is one call per card. The click that marks is ⌘-click on a Mac and Ctrl-click on Linux. The selection is client state of the Work screen, not the address, and only holds cards the board draws: a card that leaves the board, is filtered out or sits in a folded lane leaves it, so the count always matches the marked cards in view and a bulk action never touches a card out of sight. The bar stands one line above the undo line and says how many are marked, with a hint to drag when there are several. Esc steps back one thing at a time, and the selection is the last thing it clears. Done and Drop on the bar call the same action as `D` and `⌫` once for each card in the order the board draws them, then clear the selection; the toast says "Marked 3 Tasks Done" and one Undo puts them back in the places they stood. Carried, the other cards ride behind the first as a stack on `travel`, each 5px further and 2% smaller, with the count on top; they land in order after the first, 40ms apart, each by its own `task.move`, and one Undo puts them all back. Several cards in the hand never merge. Pressing a card that is not selected carries only that card.
+
+**Merging.** Two cards can become one. All three ways name the target and what stays before anything is sent: the target keeps its title, stage, project, priority and place, and takes the other's labels, description, Threads and runs.
+
+- **By key.** `M` on a card, or the pane's Merge: pick the target with the arrows, and Return confirms.
+- **By gesture.** Carry a card and hold it still over the middle 40% of another for one second, or hold Option for an instant merge. Moving more than 6px starts the wait again. The target takes a focus ring and a label naming it, "Merge into *Serve smaller…*".
+- **The merge waits out an undo line, then is sent.** The merged card leaves the board at once, and a line offers Undo for 5 seconds. Undo brings the card back and sends nothing. After the line, `task.merge` is sent. It is held in the same store as answers, so quitting or reloading during the line never sends it by itself.
+- **A refused merge is never lost without a word.** When `task.merge` fails, the card comes back and the line shows the controller's reason. Merging a finished Task, or a result with too many labels or too long a description, is refused this way, with what to do. The CLI's `hercule task merge` sends at once, with no line.
+
 ### Keys
 
 The screen owns its keys; there is no registry. Single keys work only with focus on the board, never with a modifier, and not in a text field. Display's "Single-key shortcuts" turns them off. While a card is carried, only Esc means anything.
@@ -1350,15 +1430,19 @@ The screen owns its keys; there is no registry. Single keys work only with focus
 |---|---|
 | Arrows, H J K L | Walk the board. Up and down stay in the stage's column, and cross to the next lane at its end; left and right go to the nearest stage of the lane that has a card, at the same row or the last one there |
 | `[` `]` | The previous and next lane |
-| Return, Space | Opens the card |
+| Return, Space | Opens the card's details. In the pane, Return tries a failed run again, else sends the suggested answer |
 | ⇧← ⇧→ | Moves the card back or on one stage |
 | 1 to 5 | Moves the card to Exploring, Planned, Building, In review or Landed |
+| D, ⌫ | Done, Drop. *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* |
+| M | Merge: pick the target with the arrows, Return confirms |
+| T | Start a thread on the card's Task |
+| X | Marks the card, or unmarks it |
 | A | Add to Work |
 | F, ⇧F | Folds this lane, or folds every lane |
 | / | Find |
 | ⌘Z (Ctrl Z on Linux) | Undoes the user's last gesture. It works from anywhere but a text field, not only with focus on the board |
 | ? | Shows the keys, and hides them again |
-| Esc | Steps back one thing at a time: a drag, then the keys sheet, the Add sheet, the Find text, and last the chips |
+| Esc | Steps back one thing at a time: a drag, then the keys sheet, the Add sheet, the details pane, the Find text, and last the chips |
 
 ### Work's motion
 
@@ -1371,15 +1455,19 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 | `self` | 90, 19 | about 1 s | Nobody here: a thing moving by itself |
 
 - **Direct manipulation** follows the pointer or answers a key at once. Pressing a card dents it. A carried card lifts past 5px of movement, follows the pointer one to one with no lag, leans at most 1.2 degrees and stands straight 60 ms after the pointer stops. The slot and the neighbours moving aside answer on `hand`. A card cancelled with Esc goes home on `travel`. The view pill's puck slides on `hand`.
-- **One-shot motion** plays once for a cause and ends: opening a cell in place and folding a lane (`travel`); filtering and regrouping (`travel`; what leaves simply goes); the Add to Work sheet sliding in (`hand`) and a new Task fading into its cell (`travel`); a card's shadow growing on hover (a transition of `--m-base`); the first board's words fading in over the skeleton; and switching views, as `MOTION.md` draws it.
+- **One-shot motion** plays once for a cause and ends: opening a cell in place and folding a lane (`travel`); filtering and regrouping (`travel`; what leaves simply goes); the Add to Work sheet sliding in (`hand`) and a new Task fading into its cell (`travel`); a card's shadow growing on hover (a transition of `--m-base`); the first board's words fading in over the skeleton; switching views, as `MOTION.md` draws it; and, *(added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031))* the four below.
+- **Opening a card (`travel`).** One number from 0 to 1 drives it, so Esc halfway simply reverses it, keeping the speed it has. The sheet interpolates its place and size from the card to the pane, and its corner from 12px to 16px. The card's words ride on the sheet and fade out by 0.55, while the pane's words fade in from 0.3 to 0.85 and rise 10px, so there is never a blank sheet. The board dims 34% toward the desk and never moves, and the card's place stays as a faint dent while the pane is open. A Task with no card on screen opens from its lane's count or the button that holds it, so the sheet always comes from somewhere. Choosing another card swaps the words in 200 ms with the sheet still. A merged Task's sheet stays open and swaps the same way.
+- **Done and Dropped (`travel`).** Done: the card shrinks into its stage's count, and the count rolls down. Dropped: it sinks 12px with a small tilt and fades. Undo plays either one back.
+- **Merging (`hand`).** The target scales to 1.02 and takes a focus ring and a label naming it. The carried card docks on the target's corner, shrinks to 0.96, tilts 1.6 degrees, and the slot closes. Moving away undoes all of it at once. On release the carried card slides in under the target and fades, then the target settles from 1.03 to 1 and a thin ring fades over `--m-long`. Undo plays it back.
+- **A hand-off (`travel`).** Starting a Thread, or Try again, is one chain: the colleague's head rises from behind the card's edge and its paws reach the edge 90 ms later. Undo plays it back.
 - **A fact that moves a card waits for a still hand.** A Task arriving rises at the end of its cell on `self`, and a failed run takes the top of its cell on `self`, with the colleague's head changing to its plaster. Neither starts while the user drags, while the pointer moves within 280px of the card, or while it rests within 120px of it, and never later than 8 seconds after the fact. A card the user is hovering is never sorted away.
 - **The working paws** are a further continuous animation, in short bursts: see rule 2 of [Rules](#rules). Still colleagues in Display stops them.
 - **Reduce motion** (the system's; the Appearance setting is not wired yet, see [Motion](#motion)): every spring jumps to its end, except opacity, which fades on `travel`, so the cause is told in the same order. The paws stop.
 - **Everything is interruptible,** because every change starts from what is on screen with the speed it has. FLIP measures once before and once after a change, and commits the React change synchronously in between.
 
-The drawing's other motions come with later slices: a card opening into the details pane, merging, a card moving by itself, the morning replay, Done and Dropped.
+The drawing's other motions come with later slices: a card moving by itself and the morning replay.
 
-**Left out of Work,** and so out of Display and Keys: the summary, the details pane, selecting and bulk moves, merging, Done and Drop (slice 3); "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5); stacks (slice 5); the sidebar's dot (slice 6); a card moving by itself and the morning replay (slice 7); initiatives, plans, the Blocked state and Filter row (slice 8); Wear.
+**Left out of Work,** and so out of Display and Keys: "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5); stacks (slice 5); the sidebar's dot (slice 6); a card moving by itself and the morning replay (slice 7); initiatives, plans, the Blocked state and Filter row (slice 8); Wear.
 
 ### What Work costs
 
@@ -1396,6 +1484,10 @@ Stated before the slices build it ([Performance](#performance), as [ADR 0037](..
 | Memory | 300 cards in a few rows per cell, against a thread | The perf script |
 | Drag | No dropped frame; no frame over 2 ms of style and layout | The perf script's frame collector |
 | Switching to the Office and back | The Office's cost as measured today, plus the board's first read | The perf script |
+| Summary pushes | *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A written summary is one derived `task` push, so a burst is still at most one board read a second; the board reply grows by about 300 bytes for each card with a summary | A speed test; the perf script, with 4 busy agents |
+| Opening the pane | One `task.readDetail`, under 15 ms; the open moves one empty sheet by size and everything else by `transform` and `opacity`; no timer while it is open | A speed test and the perf script |
+| Summary model calls | At most one per Task every 5 minutes and 2 at once, none while the board is quiet; at most 24 KiB in and three short fields out. This is a controller cost, not the desktop's | A controller test with a fake clock, which stays ([./09-tasks.md](./09-tasks.md#task-summaries)) |
+| Bundle, the pane | Inside the `/work` chunk; the growth is stated in the PR | `scripts/check-bundle-budget.ts` |
 
 ## The Hercule face
 
@@ -3449,6 +3541,7 @@ These rules keep the budgets:
      - *(Amended 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030); decided by Rogier.)* **Work's motion is a named exception to "plays once, at most `--dur-3`".** The drawing's motion ([Work's motion](#works-motion)) is named by who caused it, and it runs longer than `--dur-3`: `--m-long` is 560 ms, and the `self` spring takes about a second. The exception is this, and nothing else in the rule gives way: the motion is `transform` and `opacity` of HTML elements, it ends at rest, nothing loops but the paws below, and Reduce motion keeps its place. There are three springs, `hand`, `travel` and `self`, named for who caused the movement.
        - **Direct manipulation** follows the pointer or answers a key at once, so it lasts as long as the user's hand does, and `--dur-3` does not limit it: the press dent, a carried card (the lift, the follow, the lean, the slot, the neighbours moving aside, the landing, the way home after Esc) and the view pill's puck. All on `hand`, except the way home, on `travel`.
        - **One-shot motion** is made by a cause and plays once: opening a cell in place and folding a lane (`travel`); filtering and regrouping (`travel`); a Task arriving, with its ring (`self`, then a ring of opacity over 3.2 s); a failed run taking the top of its cell (`self`); the Add to Work sheet (`hand`) and a new Task fading into its cell (`travel`); switching views; the first board's words fading in; and a card's shadow growing on hover, a transition of `--m-base`.
+       - *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **One thing moves by size: the opening sheet.** The details pane opens from its card by growing an empty sheet, and the drawing's `MOTION.md` ("Opening a card") makes it the one thing on Work not moved by `transform`, because a scaled sheet would distort its corners and its shadow. The sheet's `left`, `top`, `width` and `height` are written on one `travel` value, and nothing else changes size: the pane's words stay laid out at their final size, and the sheet only reveals them. Its cost is one box, with nothing inside it relaid. It ends at rest, and under Reduce motion it fades instead. Everything else of the opening is `transform` and `opacity`.
        - **A fact waits for a still hand.** A Task arriving and a failed run move a card the user did not touch, so neither starts while the pointer drags, moves near the card or rests on it, and neither waits longer than 8 seconds.
        - **CSS in `screens/desk/`** may transition for a `--m-*` duration up to `--m-long`, and may transition `filter` and `background-color`, besides the paint properties. It may use no layout property and no delay. `styles/motion.test.ts` holds the desk's stylesheets to this, and refuses it outside the folder.
        - **The clock.** One `requestAnimationFrame` clock runs only while a body moves, and `will-change` is set only while it does. The kernel also writes one custom property, `--lift`, on the card in hand, which the card's stylesheet reads as the opacity of the layer that holds the carried shadow.

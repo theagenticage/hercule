@@ -191,6 +191,7 @@ export {
   isConflict,
   isInvalidState,
   isNotFound,
+  isRequestClosed,
   readErrorMessage,
   readValidationIssues,
   RequestError,

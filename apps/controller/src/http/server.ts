@@ -111,11 +111,14 @@ import {
   runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
   runScheduler,
+  runTaskSummaryLoop,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
+  TaskTrackingRunsLayer,
   thawExpiredFreezes,
 } from "../daemon";
 import { stopWrites } from "../db";
+import { TaskSummariesLayer } from "../tasks";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
 import {
@@ -485,6 +488,14 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(runAttachmentSweepLoop);
     // Runner Metrics rows older than the retention window are deleted once an hour.
     yield* Effect.forkScoped(runRunnerMetricsPruneLoop);
+    // Task Summaries that are due are written, at most two at a time. The model
+    // call reads the Task's runs through the port the tasks domain declares,
+    // which only the controller daemon can answer.
+    yield* Effect.forkScoped(
+      runTaskSummaryLoop.pipe(
+        Effect.provide(Layer.mergeAll(TaskTrackingRunsLayer, TaskSummariesLayer)),
+      ),
+    );
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);

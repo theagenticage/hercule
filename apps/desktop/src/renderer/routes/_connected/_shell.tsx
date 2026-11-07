@@ -9,7 +9,7 @@ import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
 import { SessionPresentationProvider } from "../../app/session-presentation";
 import { SnoozeTimer } from "../../app/snooze-timer";
-import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
+import { ensureShellData, pluginsQuery, signalsToDoQuery, userQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
@@ -21,7 +21,8 @@ import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
  * route, so the sidebar is mounted once and stays mounted across navigation.
  *
  * Its loader reads everything the sidebar shows before the shell renders, so
- * the first frame holds the whole sidebar and nothing in it waits. While the
+ * the first frame holds the whole sidebar and nothing in it waits. It also
+ * opens the account scope of the signed-in user (see `AccountScope`). While the
  * shell is mounted, the live connection runs and keeps those reads current.
  *
  * The shell also owns the project picker, which File > New Thread (⌘N) and
@@ -43,6 +44,10 @@ export const Route = createFileRoute("/_connected/_shell")({
     const { client } = controller;
     try {
       await ensureShellData(queryClient, client);
+      // The shell now knows the user, so the window can hold what is theirs.
+      // Opening is idempotent: the loader runs again on later navigations.
+      const { username } = await queryClient.ensureQueryData(userQuery(client));
+      controller.accountScopes.open(username);
     } catch (error) {
       // The entry guard only checks that a token is saved. When the
       // controller rejects it, such as a token revoked from another device,

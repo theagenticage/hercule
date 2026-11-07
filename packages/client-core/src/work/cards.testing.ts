@@ -38,6 +38,22 @@ export const QUESTION: NonNullable<WorkCard["openQuestion"]> = {
   text: "Should refunds go back to the original card?",
 };
 
+/**
+ * Returns a summary for a card. `line` is its card line, and the other fields
+ * are set so a test can override one: written, not stale.
+ */
+export const buildSummary = (
+  line: string,
+  overrides: Partial<NonNullable<WorkCard["summary"]>> = {},
+): NonNullable<WorkCard["summary"]> => ({
+  line,
+  standing: "",
+  left: "",
+  generatedAt: "2026-11-02T09:00:00.000Z",
+  stale: false,
+  ...overrides,
+});
+
 /** Returns the ids of these cards, for a short comparison. */
 export const listIds = (cards: readonly WorkCard[]): readonly string[] =>
   cards.map((card) => card.id);

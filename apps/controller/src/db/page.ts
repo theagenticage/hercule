@@ -105,6 +105,19 @@ export class CursorError extends Schema.TaggedError<CursorError>()("CursorError"
   message: Schema.String,
 }) {}
 
+/**
+ * Treats a `CursorError` as a defect. Use it for a listing that is given no
+ * cursor: the repository then has none to refuse, so the error cannot happen.
+ */
+export const dropCursorError = <A, E, R>(
+  effect: Effect.Effect<A, E | CursorError, R>,
+): Effect.Effect<A, Exclude<E, CursorError>, R> =>
+  Effect.catchTag(effect, "CursorError", Effect.die) as Effect.Effect<
+    A,
+    Exclude<E, CursorError>,
+    R
+  >;
+
 const NOT_OURS = "The cursor is not one this listing issued.";
 const OTHER_ORDER = "The cursor was issued under a different sort order.";
 

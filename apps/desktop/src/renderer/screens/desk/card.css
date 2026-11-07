@@ -69,6 +69,42 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+/* Selected: a 1.5px ink ring on the sheet, and a check in the top left corner
+   that grows in. The ring also holds under the pointer. */
+.desk-card.is-selected .card-stock,
+.desk-card.is-selected:not(.is-carried):hover .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 1.5px var(--ink);
+}
+.card-check {
+  position: absolute;
+  z-index: 2;
+  left: -6px;
+  top: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--desk);
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity var(--m-quick),
+    transform var(--m-base) var(--m-settle);
+  pointer-events: none;
+}
+.desk-card.is-selected .card-check {
+  opacity: 1;
+  transform: none;
+  /* A check that is drawn already selected grows in from the hidden look. */
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
 /* Pressing is a dent, not an animation. */
 .desk-card:active:not(.is-carried) {
   scale: 0.992;
@@ -158,6 +194,10 @@
 /* A failed run: the words are ink, and carry the meaning. */
 .card-now.card-failed {
   color: var(--ink);
+}
+/* A Task whose summary is not written yet. */
+.card-now.card-pending {
+  color: var(--faint);
 }
 /* What was asked or what broke always gets two lines. The title gives one up. */
 .desk-card[data-now="failed"] .card-title,

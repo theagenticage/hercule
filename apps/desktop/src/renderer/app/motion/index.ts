@@ -6,7 +6,7 @@
  * while a body moves, by the `is-moving` class; and the clock asks for a frame
  * only while something moves.
  */
-export { findBody, trackBody, type MotionBody, type Velocity } from "./body";
+export { findBody, MOVING_CLASS, trackBody, type MotionBody, type Velocity } from "./body";
 export {
   computeCenter,
   flipByKey,
@@ -17,6 +17,7 @@ export {
   type FlipByKeyOptions,
   type LayoutRect,
 } from "./layout";
+export { copyElementWithoutIds } from "./copy-element";
 export { isMotionReduced } from "./reduced";
 export type { SpringName } from "./springs";
 export { animateValue, type MotionValue } from "./value";

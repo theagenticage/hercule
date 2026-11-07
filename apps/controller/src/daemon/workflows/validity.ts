@@ -7,7 +7,7 @@ import { type AuditLog, EventKindsLayer } from "../../events";
 import type { Notifier } from "../../notifications";
 import { EventKindCatalogLayer, PluginObserver, type PluginHost } from "../../plugins";
 import { WorkflowValidity, WorkflowValidityLayer } from "../../workflows";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * Validates every stored workflow again and logs a failure instead of

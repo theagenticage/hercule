@@ -21,8 +21,8 @@ import {
   type TrackingRun,
 } from "@hercule/contract";
 import { runRepository } from "../../runs";
+import { cutText } from "../../text";
 import {
-  cutText,
   TaskTrackingRuns,
   type HandoffRun,
   type TrackedRunHistory,

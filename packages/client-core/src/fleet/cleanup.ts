@@ -28,6 +28,7 @@ import {
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
+import { dropClosingFullStops } from "../text";
 import { buildSessionGroups } from "../threads/session-groups";
 import { describeAge } from "../threads/age";
 import { formatDiskSize } from "./machine";
@@ -112,7 +113,7 @@ export interface IdleWorkspaceRow {
 
 /** Lowercases the first letter of `text` and ends it with a single full stop. */
 const toSentenceTail = (text: string): string => {
-  const trimmed = text.trim().replace(/\.+$/, "");
+  const trimmed = dropClosingFullStops(text.trim());
   return `${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}.`;
 };
 
@@ -474,7 +475,7 @@ export const archiveAndRemoveWorkspaces = async (
       if (error instanceof ApiError && error.code !== "internal") {
         return { status: "archiveFailed", message: error.message };
       }
-      const reason = (error instanceof Error ? error.message : String(error)).replace(/\.+$/, "");
+      const reason = dropClosingFullStops(error instanceof Error ? error.message : String(error));
       return {
         status: "archiveFailed",
         message: `Could not confirm that the threads were archived: ${reason}. Check them before you try again.`,

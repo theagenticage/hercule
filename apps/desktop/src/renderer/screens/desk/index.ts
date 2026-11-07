@@ -6,7 +6,8 @@
  * second page could use belongs here.
  *
  * - `Card`, `Colleague`: the card sheet, and the colleague standing behind
- *   its top edge.
+ *   its top edge. `copyCardForMotion`: a copy of a drawn card to move or to
+ *   show where the card was.
  * - `Toolbar`, `ToolButton`, `IconPill`, `FilterChip`, `ClearChipsButton`,
  *   `FindBox`, `ToolMenu` and the menu rows: the toolbar's row, its controls
  *   and its menus.
@@ -17,13 +18,17 @@
  * - `ViewPill`: the pill that names a place and switches between its views.
  * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
  *   headings.
- * - `SideSheet`, `UndoLine`, `Sunrise`: the sheet at the right, the line at
- *   the foot, and what shows when all is done.
+ * - `SideSheet`, `OpeningSheet`, `UndoLine`, `Sunrise`: the sheet at the
+ *   right that slides in, the one that opens out of a card, the line at the
+ *   foot, and what shows when all is done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
+export { copyCardForMotion } from "./copy-card-for-motion";
 export { FilterChips, FilterControl } from "./filter-control";
 export { SectionHeading } from "./section-heading";
+export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-sheet";
+export type { SheetRect } from "./opening-sheet-geometry";
 export { SideSheet } from "./side-sheet";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
 export { Sunrise } from "./sunrise";

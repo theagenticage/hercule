@@ -13,7 +13,9 @@
  * - `hercule task update <id> --stage in-review` run in a terminal moves the
  *   card live to the end of its new cell, and `hercule task board` shows it
  *   there;
- * - ⌘1 and ⌘2 (Ctrl on Linux) switch between the Office and Work.
+ * - ⌘1 and ⌘2 (Ctrl on Linux) switch between the Office and Work;
+ * - a Thread started from a card with the T key joins that card's Task, and
+ *   D on the card marks the Task Done and takes it off the board.
  *
  * The Thread comes from a scripted runner. The Tasks that fill the other
  * stages are created through the API, like the Thread's Project and its
@@ -322,5 +324,61 @@ describe("Work", () => {
       .poll(() => views.getByRole("button", { name: "Work" }).getAttribute("aria-pressed"))
       .toBe("true");
     await expect.poll(() => readBoard(reopened, titles, laneNames)).toEqual(afterTerminal);
+  }, 180_000);
+
+  it("starts a Thread on a card with T, which joins its Task, and takes the card off the board with D", async () => {
+    const { arranged, laneNames } = await arrangeBoard();
+    const { app, page } = await openSignedIn(arranged.url);
+    await keepWindowOnTop(app);
+    await openWork(page);
+
+    // "Update shipping rates" has no Thread yet, so any Thread on its Task is the one the journey starts.
+    const cards = await readBoardCards(arranged);
+    const titles = new Map(cards.map((card) => [card.id, card.title]));
+    const shippingRates = cards.find((card) => card.title === "Update shipping rates")!;
+    const readThreadsOfTask = async () =>
+      (
+        await arranged.client.session.query({
+          query: { taskId: shippingRates.id, kind: "thread", limit: 10 },
+        })
+      ).items;
+    expect(await readThreadsOfTask()).toEqual([]);
+    const card = findCard(page, shippingRates.id);
+    await card.waitFor();
+
+    // T on the focused card opens the pane with a line for what the Thread
+    // should do. Return sends it, and the pane closes.
+    await card.focus();
+    await page.keyboard.press("t");
+    const line = page.getByRole("textbox", { name: "What should this thread do?" });
+    await line.fill("Compare the carriers' rates");
+    await line.press("Enter");
+    await line.waitFor({ state: "detached" });
+
+    // The Thread joined the Task by name, in the Task's Project.
+    await expect
+      .poll(async () =>
+        (await readThreadsOfTask()).map(({ taskId, projectId }) => ({ taskId, projectId })),
+      )
+      .toEqual([{ taskId: shippingRates.id, projectId: shippingRates.projectId }]);
+
+    // D on the card marks the Task Done. The card leaves the board and
+    // nothing else moves.
+    await card.focus();
+    await page.keyboard.press("d");
+    await card.waitFor({ state: "detached" });
+    await expect
+      .poll(
+        async () => (await arranged.client.task.read({ params: { id: shippingRates.id } })).stage,
+      )
+      .toBe("done");
+    await expect
+      .poll(() => readBoard(page, titles, laneNames))
+      .toEqual({
+        "Back office: exploring": ["Reconcile the weekly payouts"],
+        "Storefront: exploring": ["Fix the cart total"],
+        "Storefront: building": ["Rewrite the returns page"],
+        "Storefront: in-review": ["Refresh the sale banner"],
+      });
   }, 180_000);
 });

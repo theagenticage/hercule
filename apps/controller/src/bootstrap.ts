@@ -51,6 +51,7 @@ import {
   DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskServiceWithLinkOwnersLayer,
   WorkflowValidityObserversLayer,
   type ProviderAccountProbing,
   type RunServiceReference,
@@ -127,7 +128,6 @@ import { seed } from "./seed";
 import { makeTelemetryLayer } from "./telemetry";
 import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
-import { TaskServiceLayer } from "./tasks";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
 import { AccountUsage, AccountUsageLayer } from "./usage";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
@@ -433,7 +433,7 @@ export const bootWith = <A, E>(
       Layer.provide(SessionEditObserverLayer),
       Layer.provide(ConversationMessagesLayer),
       // A reopened Thread joins a Task through the task service.
-      Layer.provide(TaskServiceLayer),
+      Layer.provide(TaskServiceWithLinkOwnersLayer),
     );
 
     /**

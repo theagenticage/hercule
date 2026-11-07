@@ -133,10 +133,23 @@ const NEW_OPERATIONS = [
     method: "GET",
     path: "/api/v1/tasks/:id/tracking",
   },
+  {
+    id: "task.readDetail",
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/:id/detail",
+  },
   { id: "task.read", requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
   { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
   { id: "task.move", requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
+  { id: "task.merge", requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },
+  {
+    id: "task.undoTryAgain",
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/try-again/undo",
+  },
   { id: "task.delete", requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
   {
     id: "notification.query",
@@ -285,6 +298,12 @@ const NEW_OPERATIONS = [
     requires: "session.steer",
     method: "POST",
     path: "/api/v1/sessions/:id/respond-to-question",
+  },
+  {
+    id: "session.moveToTask",
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/move-to-task",
   },
   {
     id: "controller.update",

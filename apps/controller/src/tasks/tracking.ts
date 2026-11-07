@@ -31,7 +31,8 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository } from "./repository";
-import { cutText, shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
+import { cutText } from "../text";
+import { shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
 
 /**
  * The runs Tracking reads of a Task: its newest run, its newest live run when

@@ -54,7 +54,7 @@ import { withTransaction, mintUuid, uuidToString } from "../../db";
 import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService, type StoredWorkspace, type SweepDisposal } from "../../workspaces";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { makeArchivedSessionsBuilder, makeRemovalSender } from "./removal";
 
 const decodeDispose = Schema.decodeUnknownEffect(WorkspaceDisposeInput);

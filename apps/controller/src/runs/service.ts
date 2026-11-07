@@ -23,6 +23,7 @@ import {
   createNotFoundError,
   DEFAULT_PAGE_LIMIT,
   Id,
+  InvalidState,
   RUN_SORT_FIELDS,
   RunFilter,
   type Forbidden,
@@ -30,10 +31,12 @@ import {
   type Run,
   type RunSummary,
   type SortDirection,
+  type TaskUndoTryAgainInput,
+  type TryAgainUndo,
   type Unauthenticated,
-  type Validation,
+  Validation,
 } from "@hercule/contract";
-import { requireGrant } from "../actor";
+import { requireGrant, requireUserActor } from "../actor";
 import type { ConnectionTypes } from "../connections";
 import {
   buildPageInputFields,
@@ -49,13 +52,14 @@ import type { PromotionState } from "../promotion";
 import type { ProviderAccountRunners } from "../provider-accounts";
 import type { Settings } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
-import type { TaskService } from "../tasks";
+import { TaskService, type FailureRestoreRefusal } from "../tasks";
 import type { TextGeneration } from "../text-generation";
 import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
+import { isUnfinished } from "./step-records";
 import type { WorkspaceSteps } from "./workspace-steps";
 
 const QueryInput = Schema.Struct({
@@ -76,11 +80,39 @@ export interface RunPage {
   readonly nextCursor?: string;
 }
 
+/** The refusal of `task.undoTryAgain` for a caller who is not the user. */
+const ONLY_THE_USER_UNDOES_TRY_AGAIN =
+  "only the user may undo a Try again: it is the user's own correction, so a session or a workflow step may not; ask the user instead";
+
+/**
+ * The refusals of `restoreRecoveredFailure` that `undoTryAgain` can meet. It
+ * has read the recovery row itself and nothing else restores a failure, so
+ * `no-such-start` and `already-restored` cannot reach it.
+ */
+type UndoRefusal = Exclude<FailureRestoreRefusal, "no-such-start" | "already-restored">;
+
+/**
+ * What the undo line says when the failure was not put back. Each sentence
+ * names why, and none says the run has stopped: the run was only asked to.
+ */
+const UNDO_REFUSAL_WORDS: Record<UndoRefusal, string> = {
+  "task-deleted": "The Task was deleted.",
+  "task-merged": "The Task was merged into another, which now holds its failure.",
+  "task-finished": "The Task is already done or dropped.",
+  "handled-since":
+    "A newer failure, run or Thread took over this Task, so what it shows now stays.",
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const tasks = yield* TaskService;
   const runs = yield* runRepository;
   const runHeld = yield* runHeldSubscriptions;
   const engine = yield* makeRunEngine;
+
+  /** Stores the first answer of an Undo on its recovery row, and returns it. */
+  const storeAnswer = (runId: string, answer: TryAgainUndo) =>
+    Effect.as(tasks.storeTryAgainUndo(runId, answer), answer);
 
   return {
     start: engine.start,
@@ -101,6 +133,78 @@ const make = Effect.gen(function* () {
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
     stopSessionsOfEndedRuns: engine.stopSessionsOfEndedRuns,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
+
+    /**
+     * `task.undoTryAgain`: undoes the Try again that started the run
+     * `input.runId` on the Task `taskId`, as the user, and returns the first
+     * answer decided for it. A repeat returns that answer again and changes
+     * nothing.
+     *
+     * It lives here, not in the tasks domain, because it asks a run to stop
+     * and the runs domain imports the tasks domain. In one transaction it
+     * decides before it cancels anything:
+     *
+     * 1. With no recovery row for the run, or one whose Task is not exactly
+     *    `taskId` (compared as stored, not through the merge redirect), it
+     *    fails with `NotFound` and cancels nothing.
+     * 2. When the recovery was already decided, it returns that answer.
+     * 3. When the run has ended, the answer is `too-late` and nothing changes.
+     * 4. Otherwise it asks the run to stop, as `run.cancel` does, and restores
+     *    the failure when nothing newer holds the Task (`restored`), else
+     *    leaves the Task as it is (`stopped`) with the reason.
+     *
+     * Only the user undoes: a session is refused with `Forbidden`.
+     */
+    undoTryAgain: (
+      taskId: Id,
+      input: TaskUndoTryAgainInput,
+    ): Effect.Effect<TryAgainUndo, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.undoTryAgain", ONLY_THE_USER_UNDOES_TRY_AGAIN);
+        yield* requireGrant("run.cancel");
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const recovery = yield* tasks.readFailureRecovery(input.runId);
+            if (Option.isNone(recovery) || recovery.value.taskId !== taskId) {
+              return yield* Effect.fail(createNotFoundError("no such Try again on this Task"));
+            }
+            if (recovery.value.undo !== undefined) return recovery.value.undo;
+            // The row was written with the run in one transaction, and runs
+            // are never deleted.
+            const run = Option.getOrThrow(yield* runs.read(input.runId));
+            if (!isUnfinished(run.status)) {
+              return yield* storeAnswer(input.runId, { outcome: "too-late", stopRequested: false });
+            }
+            // The run is unfinished and the user holds the grant, so `cancel`
+            // cannot refuse it.
+            yield* engine
+              .cancel(input.runId, {})
+              .pipe(
+                Effect.catchIf(
+                  (error): error is Validation | InvalidState =>
+                    error instanceof Validation || error instanceof InvalidState,
+                  Effect.die,
+                ),
+              );
+            const restoration = yield* tasks.restoreRecoveredFailure({ runId: input.runId });
+            if (restoration.restored) {
+              return yield* storeAnswer(input.runId, { outcome: "restored", stopRequested: true });
+            }
+            const { reason } = restoration;
+            if (reason === "no-such-start" || reason === "already-restored") {
+              return yield* Effect.die(
+                new Error(`the Undo of ${input.runId} was refused: ${reason}`),
+              );
+            }
+            return yield* storeAnswer(input.runId, {
+              outcome: "stopped",
+              stopRequested: true,
+              reason: UNDO_REFUSAL_WORDS[reason],
+            });
+          }),
+        );
+      }),
 
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */
     query: (

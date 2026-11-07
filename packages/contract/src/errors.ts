@@ -135,12 +135,25 @@ export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
   { description: "Conflict", httpApiStatus: ERROR_STATUS.conflict },
 ) {}
 
+/**
+ * The details of an `invalid_state` error, present only when a client can act
+ * on the reason, not just show the message:
+ *
+ * - `request-closed`: the Request that a decision or an answer was for is
+ *   not open (the session waits on no Request, waits on another, or has
+ *   exited). A client that sent the answer before may find it was taken.
+ */
+export const InvalidStateDetails = Schema.Struct({ reason: Schema.Literal("request-closed") });
+
+export type InvalidStateDetails = Schema.Schema.Type<typeof InvalidStateDetails>;
+
 /** The entity is in a state that does not allow the operation. */
 export class InvalidState extends Schema.Error<InvalidState>("hercule/InvalidState")(
   {
     error: Schema.Struct({
       code: Schema.Literal("invalid_state"),
       message: Schema.String,
+      details: Schema.optionalKey(InvalidStateDetails),
     }),
   },
   { description: "InvalidState", httpApiStatus: ERROR_STATUS.invalid_state },
@@ -271,9 +284,17 @@ export const createNotFoundError = (message: string): NotFound =>
 export const createConflictError = (message: string): Conflict =>
   new Conflict({ error: { code: "conflict", message } });
 
-/** Creates the error for an entity whose state does not allow the operation. */
-export const createInvalidStateError = (message: string): InvalidState =>
-  new InvalidState({ error: { code: "invalid_state", message } });
+/**
+ * Creates the error for an entity whose state does not allow the operation.
+ * `details` is set only for the reasons `InvalidStateDetails` lists.
+ */
+export const createInvalidStateError = (
+  message: string,
+  details?: InvalidStateDetails,
+): InvalidState =>
+  new InvalidState({
+    error: { code: "invalid_state", message, ...(details === undefined ? {} : { details }) },
+  });
 
 /** Creates the error for a sealed controller, naming the new address. */
 export const createControllerSealedError = (

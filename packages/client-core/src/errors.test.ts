@@ -4,6 +4,7 @@ import {
   ConnectionError,
   isInvalidState,
   isNotFound,
+  isRequestClosed,
   readErrorMessage,
   readValidationIssues,
   RequestError,
@@ -56,6 +57,23 @@ describe("isInvalidState", () => {
       isInvalidState(new ConnectionError("http://controller.test", new Error("refused"))),
     ).toBe(false);
     expect(isInvalidState(null)).toBe(false);
+  });
+});
+
+describe("isRequestClosed", () => {
+  it("is true for a gone session and for an invalid_state that names the closed Request, and for nothing else", () => {
+    expect(isRequestClosed(new ApiError("not_found", "No such session."))).toBe(true);
+    expect(
+      isRequestClosed(
+        new ApiError("invalid_state", "Not one it waits on.", { reason: "request-closed" }),
+      ),
+    ).toBe(true);
+    expect(isRequestClosed(new ApiError("invalid_state", "The runner is away."))).toBe(false);
+    expect(
+      isRequestClosed(new ApiError("invalid_state", "Other.", { reason: "something-else" })),
+    ).toBe(false);
+    expect(isRequestClosed(new ApiError("conflict", "Changed."))).toBe(false);
+    expect(isRequestClosed(new Error("cannot reach"))).toBe(false);
   });
 });
 

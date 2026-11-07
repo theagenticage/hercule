@@ -84,7 +84,8 @@ const flyAway = (scroller: HTMLElement, carry: EndedCarry): void => {
  * because a card that changed cell is a new one to React, so it is found by
  * its id. When it is not on the page (it went into a folded lane, or left the
  * board) the copy flies to where it went, or fades. `move` is the move the
- * drop sent, if any.
+ * drop sent, if any. The card starts to come down `delay` milliseconds
+ * after the copy leaves, standing where the copy stood meanwhile.
  */
 export const landCard = (
   scroller: HTMLElement,
@@ -92,6 +93,7 @@ export const landCard = (
   pose: ReleasePose,
   spring: SpringName,
   move: CardMove | undefined,
+  delay: number,
 ): void => {
   const card = scroller.querySelector<HTMLElement>(`[data-card-id="${carry.card.id}"]`);
   if (card === null) {
@@ -108,6 +110,7 @@ export const landCard = (
   );
   card.dataset["landing"] = "";
   body.to({ x: 0, y: 0, s: 1, r: 0, l: 0 }, spring, {
+    delay,
     done: () => {
       delete card.dataset["landing"];
       // Gives the card back to its stylesheet: no inline style stays on it.

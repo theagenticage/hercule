@@ -2334,7 +2334,7 @@ describe("the pane's trip", () => {
 
     // A new run fails at once. Tracking's read answers, and the Task's read is still on its way.
     newerRunStarted = true;
-    act(() => live.pushInvalidation("run", [NEWER_RUN_ID], undefined, "created"));
+    act(() => live.pushInvalidation("run", [NEWER_RUN_ID], { kind: "created" }));
 
     await waitFor(() => {
       expect(getPane()!.querySelector(".ad-kind")?.textContent).toContain("Failed");
@@ -2622,7 +2622,7 @@ describe("Tracking's reads", () => {
     await live.waitForFirstPushes();
     const before = findTrackingReads(calls).length;
     act(() =>
-      live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000ff"], undefined, "created"),
+      live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000ff"], { kind: "created" }),
     );
     await waitFor(() => {
       expect(findTrackingReads(calls)).toHaveLength(before + 1);

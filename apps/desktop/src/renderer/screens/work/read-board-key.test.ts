@@ -27,6 +27,13 @@ describe("readBoardKey", () => {
     [press("1"), { kind: "pick-stage", stage: "exploring" }],
     [press("5"), { kind: "pick-stage", stage: "landed" }],
     [press("a"), { kind: "add" }],
+    [press("d"), { kind: "end", stage: "done" }],
+    [press("Backspace"), { kind: "end", stage: "dropped" }],
+    [press("Delete"), { kind: "end", stage: "dropped" }],
+    [press("t"), { kind: "start-thread" }],
+    [press("m"), { kind: "merge" }],
+    [press("x"), { kind: "select" }],
+    [press("X", { shiftKey: true }), null],
     [press("f"), { kind: "fold-lane" }],
     [press("F", { shiftKey: true }), { kind: "fold-all-lanes" }],
     [press("/"), { kind: "find" }],
@@ -37,7 +44,7 @@ describe("readBoardKey", () => {
     expect(readBoardKey(pressed, true, "mac")).toEqual(command);
   });
 
-  it.each(["6", "0", "d", "m", "t", "x", "w", "Backspace", "Tab", "Delete"])(
+  it.each(["6", "0", "w", "Tab"])(
     "does not use %s, which later slices own or nobody does",
     (key) => {
       expect(readBoardKey(press(key), true, "mac")).toBeNull();
@@ -51,9 +58,26 @@ describe("readBoardKey", () => {
   });
 
   it("turns off the keys that type a character with the single-keys switch, and no other", () => {
-    const typed = ["h", "j", "k", "l", "[", "]", "1", "5", "a", "f", "/", "?"].map((key) =>
-      press(key, { shiftKey: key === "?" }),
-    );
+    const typed = [
+      "h",
+      "j",
+      "k",
+      "l",
+      "[",
+      "]",
+      "1",
+      "5",
+      "a",
+      "d",
+      "t",
+      "m",
+      "x",
+      "Backspace",
+      "Delete",
+      "f",
+      "/",
+      "?",
+    ].map((key) => press(key, { shiftKey: key === "?" }));
     expect(typed.map((pressed) => readBoardKey(pressed, false, "mac"))).toEqual(
       typed.map(() => null),
     );
@@ -68,6 +92,10 @@ describe("readBoardKey", () => {
     expect(readBoardKey(press(" "), false, "mac")).toEqual({ kind: "open-card" });
     expect(readBoardKey(press("Escape"), false, "mac")).toEqual({ kind: "step-back" });
     expect(readBoardKey(press("z", { metaKey: true }), false, "mac")).toEqual({ kind: "undo" });
+  });
+
+  it("does not drop a card for Shift and Backspace", () => {
+    expect(readBoardKey(press("Backspace", { shiftKey: true }), true, "mac")).toBeNull();
   });
 
   it("keeps a single key with ⌘, Ctrl or Alt held for the app, and undoes only with the primary modifier", () => {

@@ -1,0 +1,468 @@
+/* A Task's details, drawn on the opening sheet (`screens/desk/opening-sheet.css`).
+   From the drawing's `css/pane.css`, with the `pn-` classes renamed to
+   `task-pane-`. The words are laid out at the sheet's open size, 468px. */
+
+/* ---------- The sheet's words ---------- */
+.task-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.task-pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 24px 18px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.task-pane-head {
+  margin-bottom: 10px;
+}
+.task-pane-crumb {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 16px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.task-pane-crumb-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-pane-title {
+  margin: 0 0 12px;
+  font-size: var(--t-20);
+  line-height: 26px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.014em;
+  color: var(--ink);
+}
+.task-pane-title:focus {
+  outline: none;
+}
+
+/* ---------- The stage path ---------- */
+.task-pane-path {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-pane-path li {
+  position: relative;
+  flex: 1;
+}
+.task-pane-path button {
+  display: block;
+  width: 100%;
+  padding: 7px 0 0;
+  text-align: left;
+  font: var(--type-meta);
+  color: var(--faint);
+  border-top: 2px solid color-mix(in oklab, var(--ink) 10%, transparent);
+  transition:
+    color var(--m-quick),
+    border-color var(--m-quick);
+}
+.task-pane-path button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--ink) 30%, transparent);
+}
+.task-pane-path .is-past button {
+  border-color: color-mix(in oklab, var(--ink) 30%, transparent);
+  color: var(--muted);
+}
+.task-pane-path .is-here button {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- Where it stands ---------- */
+.task-pane-where {
+  margin: 16px 0 0;
+  font-size: var(--t-14);
+  line-height: 21px;
+  color: var(--ink);
+}
+.task-pane-note {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.task-pane-where + .task-pane-note {
+  margin-top: 6px;
+}
+.task-pane-head + .task-pane-note {
+  margin-top: 16px;
+}
+/* A note that leads to the Text Generation setting. */
+button.task-pane-note {
+  display: block;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--faint) 50%, transparent);
+  text-underline-offset: 2px;
+}
+button.task-pane-note:hover {
+  color: var(--muted);
+}
+
+/* ---------- Sections ---------- */
+.task-pane-sec {
+  margin-top: 22px;
+}
+.task-pane-sec h3 {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 7px;
+  color: var(--muted);
+  font: var(--type-summary);
+  font-weight: var(--w-medium);
+}
+.task-pane-sec h3 span {
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.task-pane-left {
+  margin: 0;
+  line-height: 19px;
+  color: var(--ink);
+}
+
+/* ---------- A failure and a question ---------- */
+.task-pane-who {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font: var(--type-summary);
+  font-size: var(--t-13);
+  line-height: 18px;
+  color: var(--muted);
+}
+.task-pane-who b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.task-pane-who > span {
+  min-width: 0;
+}
+.task-pane-open-thread {
+  margin-left: auto;
+  flex: none;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: var(--type-meta);
+  transition:
+    background var(--m-quick),
+    color var(--m-quick);
+}
+.task-pane-open-thread:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.task-pane-ask {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.008em;
+  color: var(--ink);
+}
+.task-pane-failed .failed-mark {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+  margin-right: 5px;
+}
+/* What the user said: held for sending, or not sent. Quiet, under the question. */
+.task-pane-said {
+  margin: 10px 0 0;
+  font-size: var(--t-14);
+  line-height: 21px;
+  color: var(--ink);
+}
+.task-pane-unsent-note {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.task-pane-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.task-pane-answer {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--r-btn);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+  font-weight: var(--w-medium);
+  transition: background var(--m-quick);
+}
+.task-pane-answer:hover {
+  background: var(--hover);
+}
+.task-pane-answer.is-suggested {
+  background: var(--answer);
+  color: var(--answer-fg);
+  box-shadow: none;
+}
+.task-pane-answer.is-suggested:hover {
+  background: color-mix(in oklab, var(--answer) 88%, var(--ink));
+}
+.task-pane-reply {
+  margin-top: 10px;
+}
+.task-pane-reply input,
+.task-pane-thread input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-btn);
+  outline: none;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 55%, transparent);
+  transition: box-shadow var(--m-quick);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.task-pane-reply input:focus,
+.task-pane-thread input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+
+/* ---------- Thread and run rows ---------- */
+.task-pane-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  width: calc(100% + 16px);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--m-quick);
+}
+.task-pane-row:hover,
+.task-pane-row:focus-within {
+  background: var(--hover);
+}
+.task-pane-row-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  text-align: left;
+}
+.task-pane-row-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-pane-row small {
+  flex: none;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+/* A run's mark, in the place a Thread's face has. */
+.task-pane-row .shape {
+  margin: 0 3px;
+}
+/* An action of a row (move a Thread to a new Task, stop a run) is not for every pass over the row: it shows on approach and gives the state's place to it. */
+.task-pane-row-action {
+  display: none;
+  flex: none;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.task-pane-row-action:hover {
+  color: var(--ink);
+}
+.task-pane-row:hover .task-pane-row-action,
+.task-pane-row:focus-within .task-pane-row-action {
+  display: inline;
+}
+.task-pane-row:hover:has(.task-pane-row-action) small,
+.task-pane-row:focus-within:has(.task-pane-row-action) small {
+  display: none;
+}
+/* The question before a Thread moves to a new Task: one quiet line under its row, indented to the row's words. */
+.task-pane-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px 8px;
+  margin: 0 -8px 4px;
+  padding: 0 8px 0 37px;
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.task-pane-confirm p {
+  flex: 1 1 200px;
+  margin: 0;
+}
+.task-pane-confirm-buttons {
+  display: flex;
+  gap: 4px;
+}
+.task-pane-more {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+
+/* ---------- Loading, a failed read, a Task that is gone ---------- */
+/* The sections' places while the read is on its way: quiet bars, no spinner, and nothing moves when the words arrive. */
+.task-pane-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 22px;
+}
+.task-pane-bars i {
+  display: block;
+  height: 11px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.task-pane-bars i:nth-child(1) {
+  width: 92%;
+  height: 14px;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+.task-pane-bars i:nth-child(2) {
+  width: 68%;
+}
+.task-pane-bars i:nth-child(3) {
+  width: 40%;
+  margin-top: 13px;
+}
+.task-pane-bars i:nth-child(4) {
+  width: 80%;
+}
+.task-pane-title-bar {
+  display: block;
+  width: 70%;
+  height: 20px;
+  margin: 3px 0 15px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+.task-pane-read-failed {
+  margin: 16px 0 0;
+  color: var(--muted);
+}
+.task-pane-read-failed button {
+  margin-top: 10px;
+}
+
+/* ---------- The foot ---------- */
+.task-pane-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 12px;
+  border-top: 1px solid var(--divider);
+}
+/* The foot while it asks what a new Thread should do: one line, with the Return key beside it. */
+.task-pane-thread {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.task-pane-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition:
+    background var(--m-quick),
+    color var(--m-quick);
+}
+.task-pane-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* The key hint is the drawing's kbd: an 18px grid cell, in the medium weight. */
+.task-pane-btn kbd {
+  display: inline-grid;
+  place-items: center;
+  height: 18px;
+  background: none;
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  padding: 0;
+  min-width: 0;
+}
+.task-pane-btn--end {
+  margin-left: auto;
+  color: var(--faint);
+}
+
+/* ---------- The Task's place on the board ---------- */
+/* The card's place stays open while its sheet is up, as a faint outline,
+   so the eye knows where it goes back to. The attribute is set from outside
+   React, and the rules beat the card's hover shadow. */
+.work-desk .desk-card[data-away] > .card-body {
+  visibility: hidden;
+}
+.work-desk .desk-card[data-away]:not(.is-carried) .card-stock {
+  background: color-mix(in oklab, var(--ink) 2%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 8%, transparent);
+  outline: none;
+}
+.work-desk .desk-card[data-away] .card-stock::before,
+.work-desk .desk-card[data-away] .card-stock::after {
+  display: none;
+}
+
+/* ---------- What the opening sheet carries along ---------- */
+/* The board dims 34% toward the desk as the sheet opens, and never moves. The
+   toolbar (z-index 30) stays above it. */
+.task-sheet-dim {
+  position: absolute;
+  inset: 0;
+  background: var(--desk);
+  opacity: calc(var(--sheet-progress) * 0.34);
+}
+/* A colleague on the sheet's top edge stands where it stood on the card, 14px
+   from the right, and slides clear of the toolbar's right end as the sheet
+   opens, 200px to the left. It moves by transform: `right` would lay the sheet
+   out again on every frame. */
+.task-sheet > .card-holder {
+  transform: translateX(calc(-200px * var(--sheet-progress)));
+}
+.task-sheet > .card-paws {
+  transform: translateX(calc(-200px * var(--sheet-progress)));
+}

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkCard } from "@hercule/contract";
 import { buildCard } from "./cards.testing";
-import { describeCardMove } from "./describe-card-move";
+import { describeCardMove, describeCardsMove, describeMoveFailure } from "./describe-card-move";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
 
@@ -53,5 +53,48 @@ describe("describeCardMove", () => {
     );
 
     expect(words).toBe(`Moved "${"x".repeat(31)}…" to Planned`);
+  });
+});
+
+describe("describeCardsMove", () => {
+  it.each([
+    [
+      "cards that change only their stage",
+      [
+        { taskId: "a", stage: "in-review" as const, afterTaskId: null },
+        { taskId: "b", stage: "in-review" as const, afterTaskId: "a" },
+      ],
+      "in-review" as const,
+      "Moved 2 Tasks to In review",
+    ],
+    [
+      "a card that changes Project",
+      [
+        { taskId: "a", stage: "planned" as const },
+        { taskId: "b", stage: "planned" as const, projectId: "storefront" },
+        { taskId: "c", stage: "planned" as const, projectId: "storefront" },
+      ],
+      "planned" as const,
+      "Moved 3 Tasks to Planned in Storefront",
+    ],
+    [
+      "cards that go to No project",
+      [
+        { taskId: "a", stage: "planned" as const, projectId: null },
+        { taskId: "b", stage: "planned" as const, projectId: null, afterTaskId: "a" },
+      ],
+      "planned" as const,
+      "Moved 2 Tasks to Planned in No project",
+    ],
+  ])("names the place for %s", (_name, moves, stage, words) => {
+    expect(describeCardsMove(moves, stage, PROJECTS)).toBe(words);
+  });
+});
+
+describe("describeMoveFailure", () => {
+  it("says the card went back and why, ending in one full stop", () => {
+    expect(describeMoveFailure("The Task is gone.")).toBe(
+      "The move did not save, so the card went back: The Task is gone. Try the move again.",
+    );
   });
 });

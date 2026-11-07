@@ -371,7 +371,11 @@ export const makeRunEngine = Effect.gen(function* () {
         // A run's end moves the Task's last activity time, so the card changes
         // whatever the outcome. A failure was announced just above, and the
         // two announcements are collected into one push.
-        if (run.taskId !== undefined) yield* announceTaskCardChange(run.taskId);
+        if (run.taskId !== undefined) {
+          yield* announceTaskCardChange(run.taskId);
+          // The summary lists the Task's runs and how they ended.
+          yield* tasks.markSummaryDirty(run.taskId);
+        }
         yield* workspaceSteps.stopSessions(run);
         const eventId = yield* platformEvents.emit(
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),

@@ -38,6 +38,7 @@ import {
   type WorkspaceStepToStart,
   type WorkspaceStepToSettle,
 } from "./workspace-steps";
+import { TaskLinkOwnersLayer } from "../daemon/tasks";
 
 const at = "2026-09-25T10:00:00.000Z";
 
@@ -129,7 +130,7 @@ const runTest = <A, E>(
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
     Layer.provideMerge(
       hookedWorkspaces.pipe(
         Layer.provide(

@@ -13,6 +13,7 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import { addSeconds } from "../db";
 import {
   buildSetupTargetRow,
   parseSetupTargetRow,
@@ -70,10 +71,6 @@ const parseDeviceSetupRow = (row: DeviceSetupRow): StoredDeviceSetup => ({
   interval: row.interval_seconds,
   expiresAt: row.expires_at,
 });
-
-/** Returns the timestamp `seconds` after `timestamp`. */
-const addSeconds = (timestamp: string, seconds: number): string =>
-  new Date(Date.parse(timestamp) + seconds * 1000).toISOString();
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

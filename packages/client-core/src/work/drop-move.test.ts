@@ -7,7 +7,7 @@ import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes } from "./arrange-lanes";
 import { applyCardMove } from "./card-move";
 import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
-import { buildDropMove } from "./drop-move";
+import { buildDropMove, buildFollowerMoves, settleGroupDrop } from "./drop-move";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [
@@ -34,7 +34,11 @@ const buildDrop = (
   laneId: string,
   stage: BoardStage | null,
   beforeCardId: string | null,
-  { cards = CARDS, foldedLaneId }: { cards?: typeof CARDS; foldedLaneId?: string } = {},
+  {
+    cards = CARDS,
+    foldedLaneId,
+    followerIds,
+  }: { cards?: typeof CARDS; foldedLaneId?: string; followerIds?: readonly string[] } = {},
 ) => {
   const lane = arrangeLanes(buildLanes({ cards }, PROJECTS), {
     foldedLaneIds: new Set(foldedLaneId === undefined ? [] : [foldedLaneId]),
@@ -46,6 +50,7 @@ const buildDrop = (
     lane,
     stage,
     beforeCardId,
+    ...(followerIds === undefined ? {} : { followerIds }),
   });
 };
 
@@ -175,5 +180,132 @@ describe("buildDropMove", () => {
       stage: "planned",
       afterTaskId: "p",
     });
+  });
+});
+
+describe("dropping several cards", () => {
+  /** Drops `leadId` with the cards `followerIds` and returns the order of the cell it lands in. */
+  const dropGroup = (
+    leadId: string,
+    followerIds: readonly string[],
+    laneId: string,
+    stage: BoardStage,
+    beforeCardId: string | null,
+    options: { foldedLaneId?: string } = {},
+  ) => {
+    const drop = buildDrop(leadId, laneId, stage, beforeCardId, { ...options, followerIds });
+    const followers = followerIds.map((id) => CARDS.find((card) => card.id === id)!);
+    const settled = settleGroupDrop({ cards: CARDS }, PROJECTS, drop, followers);
+    if (settled.kind === "refuse") throw new Error(settled.reason);
+    const after = settled.moves.reduce(applyCardMove, buildBoard(...CARDS));
+    return {
+      settled,
+      cell: listIds(
+        after.cards.filter(
+          (card) => card.stage === stage && (card.projectId ?? null) === drop.targetProjectId,
+        ),
+      ),
+    };
+  };
+
+  it("leaves the cards that travel out when it looks for the card to follow", () => {
+    // Cell Exploring of Storefront is a, b, c. Dropping d in front of c, with b along: it follows a.
+    expect(dropOn("d", "storefront", "exploring", "c", { followerIds: ["b"] })).toEqual({
+      taskId: "d",
+      stage: "exploring",
+      afterTaskId: "a",
+    });
+  });
+
+  it("lands the cards in order right after the lead card, whatever the cell held", () => {
+    const { settled, cell } = dropGroup("a", ["c", "e"], "storefront", "building", null);
+
+    expect(settled.moves.map((move) => move.afterTaskId)).toEqual(["d", "a", "c"]);
+    expect(cell).toEqual(["d", "a", "c", "e"]);
+  });
+
+  it("names the Project only for the cards that stand in another one", () => {
+    const { settled } = dropGroup("e", ["a", "f"], "checkout", "planned", null);
+
+    expect(settled.moves).toEqual([
+      { taskId: "e", stage: "planned", afterTaskId: null },
+      { taskId: "a", stage: "planned", projectId: "checkout", afterTaskId: "e" },
+      { taskId: "f", stage: "planned", projectId: "checkout", afterTaskId: "a" },
+    ]);
+  });
+
+  it("sends the cards to the No project lane with a null Project", () => {
+    const { settled } = dropGroup("f", ["a"], "no-project", "planned", null);
+
+    expect(settled.moves[1]).toEqual({
+      taskId: "a",
+      stage: "planned",
+      projectId: null,
+      afterTaskId: "f",
+    });
+  });
+
+  it("names no card to follow on a folded lane, so the cards go last in turn", () => {
+    const { settled } = dropGroup("a", ["b", "c"], "checkout", "planned", null, {
+      foldedLaneId: "checkout",
+    });
+
+    expect(settled.moves.map((move) => move.afterTaskId)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(settled.moves.map((move) => move.taskId)).toEqual(["a", "b", "c"]);
+  });
+
+  it("leaves a follower that left the board out, and says how many", () => {
+    const drop = buildDrop("a", "storefront", "building", null, { followerIds: ["b", "c"] });
+    const followers = [CARDS[1]!, CARDS[2]!];
+    const board = { cards: CARDS.filter((card) => card.id !== "c") };
+
+    const settled = settleGroupDrop(board, PROJECTS, drop, followers);
+
+    expect(settled).toEqual({
+      kind: "send",
+      moves: [
+        { taskId: "a", stage: "building", afterTaskId: "d" },
+        { taskId: "b", stage: "building", afterTaskId: "a" },
+      ],
+      note: "1 of the selected Tasks had left the board, so it was not moved.",
+    });
+  });
+
+  it("refuses the whole drop when the lead card has left the board", () => {
+    const drop = buildDrop("a", "storefront", "building", null);
+    const board = { cards: CARDS.filter((card) => card.id !== "a") };
+
+    expect(settleGroupDrop(board, PROJECTS, drop, [CARDS[1]!])).toEqual({
+      kind: "refuse",
+      reason: "The Task has left the board, so it was not moved.",
+    });
+  });
+
+  it("keeps the note of the lead card when the card it follows has gone", () => {
+    const drop = buildDrop("a", "storefront", "building", null);
+    const board = { cards: CARDS.filter((card) => card.id !== "d") };
+
+    const settled = settleGroupDrop(board, PROJECTS, drop, [CARDS[1]!]);
+
+    expect(settled).toMatchObject({
+      kind: "send",
+      moves: [
+        { taskId: "a", afterTaskId: null },
+        { taskId: "b", afterTaskId: "a" },
+      ],
+      note: "The card it followed has gone, so it went last in that stage.",
+    });
+  });
+});
+
+describe("buildFollowerMoves", () => {
+  it("builds nothing for no followers", () => {
+    expect(
+      buildFollowerMoves({ move: { taskId: "a", stage: "planned" }, targetProjectId: null }, []),
+    ).toEqual([]);
   });
 });

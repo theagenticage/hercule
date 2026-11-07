@@ -32,7 +32,7 @@ erDiagram
   WORKSPACE |o--o{ SESSION : "cwd (optional)"
   TASK |o--o{ SESSION : "taskId (always on a Thread)"
   TASK |o--o{ RUN : "optional link"
-  TASK ||--o{ PROVENANCE_ENTRY : "append-only"
+  TASK ||--o{ PROVENANCE_ENTRY : "never edited"
   PROVENANCE_ENTRY }o--o| EVENT : "eventId (optional)"
   PROVENANCE_ENTRY }o--o| RUN : "runId (optional)"
   WORKFLOW |o--o{ RUN : "stamped from (optional)"
@@ -128,7 +128,7 @@ Fields (pinned):
 | `priority` | enum | `urgent` / `high` / `normal` / `low`; optional, default `normal`; user and agents write the same field through the same op |
 | `labels` | string[] | Bare strings, flat namespace, implicit creation |
 | `projectId` | Hercule id, optional | At most one project |
-| `provenance` | Provenance entry[] | Append-only |
+| `provenance` | Provenance entry[] | Entries are never edited or removed; a merge can move them to another Task ([09-tasks.md](./09-tasks.md#merging-tasks)) |
 | `createdAt`, `updatedAt`, `stageChangedAt`, `statusChangedAt` | timestamps | `stageChangedAt` moves only when `stage` changes, and `statusChangedAt` only when `status` changes |
 | `deletedAt` | timestamp, optional | soft delete: set by `task.delete`, the row stays (Deletion rules, below) |
 
@@ -144,7 +144,7 @@ Platform events: `task.created` carries a full snapshot (it fires for the Task t
 
 ### Provenance entry
 
-Purpose: one append-only record of an event, run or external thing that created or touched a task.
+Purpose: one record of an event, run or external thing that created or touched a task. New entries are only appended, and an entry is never edited or removed. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A merge of two Tasks moves the merged Task's entries to the survivor, whole and unchanged ([09-tasks.md](./09-tasks.md#merging-tasks)).
 
 Shape (pinned): `{ ref?: ExternalRef, eventId?: Hercule id, runId?: Hercule id, at: timestamp, actor: Actor }`. Entries are never edited or removed.
 

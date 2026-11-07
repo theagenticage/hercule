@@ -649,7 +649,7 @@ if (domains.length > 0) {
  * as one node, so it cannot see how the daemon's folders use each other. Here
  * each folder of `daemon/` is a node, and so is each file at its top level.
  * The top level is not one node, because `index.ts` imports every folder and
- * every folder imports `absorbing.ts`: one node for both would be a cycle by
+ * folders import the top-level helpers: one node for both would be a cycle by
  * construction.
  *
  * Two rules hold:

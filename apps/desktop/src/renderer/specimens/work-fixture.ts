@@ -20,9 +20,15 @@
  * Platform and Insights exist as Projects but hold no card, so the board
  * leaves their lanes out.
  */
-import type { Project, WorkBoard, WorkCard } from "@hercule/contract";
+import type {
+  Project,
+  TaskDetail,
+  TrackingDetailRun,
+  WorkBoard,
+  WorkCard,
+} from "@hercule/contract";
 import { buildProject } from "@hercule/client-core/threads/testing";
-import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
+import { buildBoard, buildCard, buildSummary } from "@hercule/client-core/work/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -37,6 +43,24 @@ const daysAgo = (days: number): string => new Date(SPECIMEN_NOW - days * DAY_MS)
 
 /** Returns the id of the Task numbered `n`. */
 const taskId = (n: number): string => `01a0d1c0-6e80-7000-8000-${String(n).padStart(12, "0")}`;
+
+/** Returns the id of the run numbered `n`. Run 1 is the one the failed card's failure names. */
+const runId = (n: number): string => taskId(799 + n);
+
+/** Returns a run of the workflow `workflowName` that has the given `status`, created `hours` hours before the specimen's clock. */
+const buildRun = (
+  n: number,
+  workflowName: string,
+  status: TrackingDetailRun["status"],
+  hours: number,
+): TrackingDetailRun => ({
+  id: runId(n),
+  workflowId: null,
+  workflowName,
+  status,
+  createdAt: hoursAgo(hours),
+  awaitedSignalIds: [],
+});
 
 /** Returns the id of the Thread numbered `n`. */
 const sessionId = (n: number): string =>
@@ -130,7 +154,7 @@ const PLACED: ReadonlyArray<Placed> = [
   }),
   depot("in-review", "Start the refund when the depot confirms", 0.2, {
     failure: {
-      runId: taskId(800),
+      runId: runId(1),
       workflowName: "Review PR",
       cause: "the branch changed mid-run",
     },
@@ -207,6 +231,8 @@ export interface WorkRecords {
   readonly board: WorkBoard;
   /** The ids of the lanes the user folded, which the screen keeps in `localStorage`. */
   readonly foldedLaneIds: readonly string[];
+  /** What `task.readDetail` returns for the Tasks whose details the specimen opens. None when left out. */
+  readonly details?: readonly TaskDetail[];
 }
 
 /** The board of the Work specimen. */
@@ -220,3 +246,137 @@ export const WORK_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
   projects: [...SPECIMEN_RECORDS.projects, ...NORTHWIND_PROJECTS],
 };
+
+/** The Task whose details the `work-details` specimen has open: the one that asks a question. */
+const ASKING_CARD = WORK_RECORDS.board.cards.find(
+  (card) => card.title === "Restore a basket after sign-in",
+)!;
+
+/** The Task with a failed run, on the board of the specimen. */
+const FAILED_CARD = WORK_RECORDS.board.cards.find(
+  (card) => card.title === "Start the refund when the depot confirms",
+)!;
+
+/**
+ * The Work specimen with the details of the Task that asks open beside the
+ * board: its summary and what is left, the question with two answers, and two
+ * Threads, one of which asks.
+ */
+export const WORK_DETAILS_RECORDS: WorkRecords = {
+  ...WORK_RECORDS,
+  details: [
+    {
+      task: {
+        id: ASKING_CARD.id,
+        title: ASKING_CARD.title,
+        description: "",
+        status: "open",
+        stage: ASKING_CARD.stage,
+        priority: "normal",
+        labels: [],
+        projectId: STOREFRONT.id,
+        provenance: [],
+        createdAt: ASKING_CARD.createdAt,
+        updatedAt: ASKING_CARD.lastActivityAt,
+        statusChangedAt: ASKING_CARD.stageChangedAt,
+        stageChangedAt: ASKING_CARD.stageChangedAt,
+      },
+      card: {
+        ...ASKING_CARD,
+        summary: buildSummary("One question is left on the PR.", {
+          standing:
+            "One question is left on the PR: which quantity wins when both baskets hold an item.",
+          left: "Answer the quantity question",
+          generatedAt: hoursAgo(1),
+        }),
+      },
+      sessions: [
+        {
+          id: ASKING_THREAD,
+          title: "Restore a basket after sign-in",
+          role: null,
+          kind: "thread",
+          status: "idle",
+          openRequests: [
+            {
+              requestId: "request-restore-basket",
+              itemId: "item-restore-basket",
+              kind: "question",
+              detail: {
+                questions: [
+                  {
+                    header: "Quantity",
+                    question: "Highest quantity, or add them?",
+                    options: [{ label: "Highest quantity" }, { label: "Add them together" }],
+                    multiSelect: false,
+                  },
+                ],
+              },
+            },
+          ],
+          done: false,
+        },
+        {
+          id: sessionId(4),
+          title: "Merge the two baskets",
+          role: null,
+          kind: "thread",
+          status: "idle",
+          openRequests: [],
+          done: true,
+        },
+      ],
+      sessionCount: 2,
+      runs: [
+        buildRun(2, "Review PR", "running", 1),
+        buildRun(3, "Check the refund rules", "completed", 5),
+      ],
+      runCount: 3,
+    },
+    {
+      task: {
+        id: FAILED_CARD.id,
+        title: FAILED_CARD.title,
+        description: "",
+        status: "open",
+        stage: FAILED_CARD.stage,
+        priority: "normal",
+        labels: [],
+        projectId: DEPOT_OPS.id,
+        provenance: [],
+        createdAt: FAILED_CARD.createdAt,
+        updatedAt: FAILED_CARD.lastActivityAt,
+        statusChangedAt: FAILED_CARD.stageChangedAt,
+        stageChangedAt: FAILED_CARD.stageChangedAt,
+      },
+      card: {
+        ...FAILED_CARD,
+        summary: buildSummary("The review stopped early.", {
+          standing: "The review stopped before it left any comments on the refund change.",
+          left: "A review",
+          generatedAt: hoursAgo(2),
+        }),
+      },
+      sessions: [
+        {
+          id: FAILED_THREAD,
+          title: "Start the refund when the depot confirms",
+          role: null,
+          kind: "thread",
+          status: "idle",
+          openRequests: [],
+          done: false,
+        },
+      ],
+      sessionCount: 1,
+      runs: [buildRun(1, "Review PR", "failed", 3)],
+      runCount: 1,
+    },
+  ],
+};
+
+/** The id of the Task whose details `WORK_DETAILS_RECORDS` opens first: the one that asks. */
+export const WORK_OPEN_TASK_ID: string = ASKING_CARD.id;
+
+/** The id of the Task with a failed run, whose details `WORK_DETAILS_RECORDS` also holds. */
+export const WORK_FAILED_TASK_ID: string = FAILED_CARD.id;

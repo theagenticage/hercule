@@ -23,6 +23,7 @@ export { buildMatchExpression } from "./full-text";
 export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
+  dropCursorError,
   decodeCursor,
   decodeIntegerKeyCursor,
   decodeOffsetCursor,
@@ -46,7 +47,7 @@ export {
   type SortColumn,
 } from "./page";
 export { MigrationMasterKey } from "./migration-master-key";
-export { nowIso } from "./time";
+export { addSeconds, nowIso } from "./time";
 export {
   backupBeforeMigration,
   copyDatabaseTo,

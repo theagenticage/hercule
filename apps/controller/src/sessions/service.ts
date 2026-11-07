@@ -77,6 +77,7 @@ import {
   type Passage,
   type Session,
   type SessionIdsInput,
+  type SessionMoveToTaskInput,
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
@@ -87,7 +88,14 @@ import {
   type Validation,
   WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
-import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
+import {
+  buildSessionStamp,
+  currentStamp,
+  requireGrant,
+  requireUserActor,
+  SYSTEM_ACTOR,
+  type Actor,
+} from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
@@ -593,6 +601,14 @@ const describeMarkDoneRefusal = (id: string, kind: SessionKind): string =>
  */
 const describeReopenRefusal = (id: string, kind: SessionKind): string =>
   `${id} is not a Thread (its kind is ${kind}), so it is never Done and there is nothing to reopen. Nothing was reopened, so remove that id and try again`;
+
+/** The refusal of `session.moveToTask` for a caller who is not the user. */
+const ONLY_THE_USER_MOVES_A_THREAD =
+  "only the user may move a Thread to another Task: it is the user's decision about what belongs together, so a session may not; ask the user instead";
+
+/** Returns the refusal of `session.moveToTask` for the session `id`, which is not a Thread. */
+const describeMoveToTaskRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), and only a Thread belongs to a Task that can be changed; leave this session where it is`;
 
 /** The refusal of `session.archive` for a session that is not a Thread. */
 const ONLY_A_THREAD_CAN_BE_ARCHIVED =
@@ -1176,6 +1192,9 @@ const make = Effect.gen(function* () {
           reason,
         );
 
+  /** Returns true if the Request is a question, as opposed to an approval. */
+  const isQuestion = (request: SessionRequest): boolean => request.kind === "question";
+
   /**
    * Stores the Requests a session waits on after one reported event, and
    * keeps the approval notifications in step with them, in the caller's
@@ -1205,9 +1224,16 @@ const make = Effect.gen(function* () {
       if (
         session.taskId !== null &&
         session.kind === "thread" &&
-        [...closed, ...opened].some((request) => request.kind === "question")
+        [...closed, ...opened].some(isQuestion)
       ) {
         yield* announceTaskCardChange(session.taskId);
+        // The Task's summary says what a Thread waits on, so it is out of
+        // date when the Thread's first question opens or its last one closes.
+        // A session parked on a question ends no turn, so this is the only
+        // place that sees it. A change among several open questions is not.
+        if (session.openRequests.some(isQuestion) !== after.some(isQuestion)) {
+          yield* tasks.markSummaryDirty(session.taskId);
+        }
       }
       // A new Request never closes an older one, so only the other events
       // can have closed any.
@@ -1984,6 +2010,61 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Moves one Thread to another Task, or to a new Task made from it, as the
+     * user, and returns the Thread. Only the user moves a Thread: a session is
+     * refused with `Forbidden`. It writes a `session.movedToTask` audit entry
+     * and marks both Tasks' summaries out of date.
+     *
+     * Only this Thread moves. Its runs stay where they are, and so does the
+     * workspace's link to its Task, so the next Thread started in that folder
+     * still joins the old Task. Moving to a new Task records no workspace link.
+     *
+     * Fails with `NotFound` when the session or the Task named by `taskId`
+     * does not exist or is deleted, and with `InvalidState` when the session is
+     * not a Thread or the Task is at `done` or `dropped`.
+     */
+    moveToTask: (
+      id: Id,
+      input: SessionMoveToTaskInput,
+    ): Effect.Effect<Session, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("session.moveToTask", ONLY_THE_USER_MOVES_A_THREAD);
+        const stamp = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const thread = yield* readThread(id, describeMoveToTaskRefusal);
+            const toTaskId = yield* tasks.chooseTaskForMovedThread({
+              requestedTaskId: input.taskId,
+              title: thread.title,
+              projectId: thread.projectId ?? undefined,
+              actor: stamp,
+            });
+            const fromTaskId = thread.taskId ?? undefined;
+            if (toTaskId !== fromTaskId) {
+              // `setTaskId` announces the cards of both Tasks.
+              yield* sessions.setTaskId(id, toTaskId);
+              if (fromTaskId !== undefined) yield* tasks.markSummaryDirty(fromTaskId);
+              yield* tasks.markSummaryDirty(toTaskId);
+              yield* audit.append({
+                kind: "session.movedToTask",
+                actor: stamp,
+                record: { topic: "session", id, conversationId: thread.conversationId },
+                payload: {
+                  sessionId: id,
+                  ...(fromTaskId === undefined ? {} : { fromTaskId }),
+                  toTaskId,
+                },
+                at: yield* nowIso,
+              });
+            }
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.map(readSession(id), composeRecord);
+          }),
+        );
+      }),
+
+    /**
      * Takes the Done mark off Threads, as the caller, all at one time, and
      * returns the Threads in the order given. A Thread that is not Done is
      * returned as it is, and nothing is written for it, so its `reopenedAt`
@@ -2325,7 +2406,8 @@ const make = Effect.gen(function* () {
      * decided by dispatch, the same way for a new session as for any other.
      *
      * The session's Task is decided here, because the session and its Task
-     * are written together. A `fixed` task source stores its Task as it is. A
+     * are written together. A `fixed` task source stores its Task, or the Task
+     * it was merged into. A
      * `joining` one runs the join rule of the tasks domain
      * (`TaskService.joinSession`) with the session's title, workspace and
      * project, before the session is stored. A retried call that the caller
@@ -2373,7 +2455,15 @@ const make = Effect.gen(function* () {
                 title,
                 projectId: open.projectId,
               });
-        const taskId = open.taskSource._tag === "fixed" ? open.taskSource.taskId : joined?.taskId;
+        // A `fixed` Task is followed to its survivor here, in the transaction
+        // that stores the session, so a run that read its Task before a merge
+        // cannot store the merged id. A joined Task is already resolved.
+        const taskId =
+          open.taskSource._tag === "fixed"
+            ? open.taskSource.taskId === undefined
+              ? undefined
+              : yield* tasks.resolveTaskId(open.taskSource.taskId)
+            : joined?.taskId;
         yield* sessions.insert({
           id: open.id,
           title,

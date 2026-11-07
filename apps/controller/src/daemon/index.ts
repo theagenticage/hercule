@@ -54,8 +54,7 @@
  *   audit entry.
  *
  * The top level holds what belongs to no single folder: the steps run once at
- * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
- * and the test helpers several folders share (`testing.ts`).
+ * boot (`boot.ts`) and the test helpers several folders share (`testing.ts`).
  *
  * A check shared by two use cases lives where its data lives:
  *
@@ -167,7 +166,13 @@ export {
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,
 } from "./workflows";
-export { TaskBoardFactsLayer } from "./tasks";
+export {
+  runTaskSummaryLoop,
+  TaskBoardFactsLayer,
+  TaskDetailFactsLayer,
+  TaskLinkOwnersLayer,
+  TaskServiceWithLinkOwnersLayer,
+} from "./tasks";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {
   forwardTargetChanges,

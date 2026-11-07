@@ -120,6 +120,7 @@ import planLabelProbedAt from "./0109-plan-label-probed-at";
 import taskStages from "./0110-task-stages";
 import threadTasks from "./0111-thread-tasks";
 import taskBoardRank from "./0112-task-board-rank";
+import taskSummaries from "./0113-task-summaries";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -234,6 +235,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [110, "task-stages", Effect.succeed(taskStages)],
   [111, "thread-tasks", Effect.succeed(threadTasks)],
   [112, "task-board-rank", Effect.succeed(taskBoardRank)],
+  [113, "task-summaries", Effect.succeed(taskSummaries)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

@@ -32,7 +32,7 @@ import type { SessionService } from "../../sessions";
 import type { SignalRaises } from "../../signals";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
 import { buildRoutingTables, buildTickDeliveries, signalRaiseDelivery } from "./routing";

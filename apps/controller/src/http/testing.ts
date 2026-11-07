@@ -73,6 +73,7 @@ import {
   ProviderAccountSignInDeadline,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskServiceWithLinkOwnersLayer,
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
@@ -120,7 +121,6 @@ import {
   ProviderKeyRequestsLayer,
 } from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
-import { TaskServiceLayer } from "../tasks";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { RunnerMetricsServiceLayer } from "../runner-metrics";
@@ -184,7 +184,7 @@ const buildServices = (
           Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
           // As in the real boot: a reopened Thread joins a Task.
-          Layer.provide(TaskServiceLayer),
+          Layer.provide(TaskServiceWithLinkOwnersLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.

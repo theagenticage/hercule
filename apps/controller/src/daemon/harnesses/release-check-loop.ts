@@ -12,7 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { HarnessReleases } from "../../harnesses";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /** How often the latest releases are read. Three small requests an hour. */
 const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);

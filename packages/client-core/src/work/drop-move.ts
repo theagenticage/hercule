@@ -1,6 +1,7 @@
-import type { BoardStage, WorkCard } from "@hercule/contract";
+import type { BoardStage, WorkBoard, WorkCard } from "@hercule/contract";
 import type { ArrangedLane } from "./arrange-lanes";
-import { chooseAfterTaskId, type CardMove, type DropMove } from "./card-move";
+import { chooseAfterTaskId, settleDropMove, type CardMove, type DropMove } from "./card-move";
+import type { WorkProject } from "./lanes";
 
 /**
  * Where a carried card is let go:
@@ -33,6 +34,12 @@ export interface DropRequest {
    * slot is after the last card shown. Not used for a folded lane.
    */
   readonly beforeCardId: string | null;
+  /**
+   * The ids of the other cards carried with the moving card. They leave their
+   * cells with it, so the card to follow is never one of them. Absent for a
+   * card carried alone.
+   */
+  readonly followerIds?: readonly string[];
 }
 
 /**
@@ -66,8 +73,9 @@ export const buildDropMove = (request: DropRequest): DropMove => {
   const targetProjectId = lane.lane.projectId;
   if (lane.isFolded) return { move, targetProjectId };
 
+  const leavingIds = new Set([movingCard.id, ...(request.followerIds ?? [])]);
   const storedCell = (lane.lane.cells.find((cell) => cell.stage === stage)?.cards ?? []).filter(
-    (card) => card.id !== movingCard.id,
+    (card) => !leavingIds.has(card.id),
   );
   const firstHiddenCardId =
     lane.cells.find((cell) => cell.stage === stage)?.arrangement.hiddenCards[0]?.id ?? null;
@@ -77,4 +85,79 @@ export const buildDropMove = (request: DropRequest): DropMove => {
     movingCardFailed: movingCard.failure !== undefined,
   });
   return { move: { ...move, afterTaskId }, targetProjectId };
+};
+
+/**
+ * Returns the moves of the cards carried along with the lead card of a drop,
+ * in the order given. Each card lands right after the one before it, the
+ * first right after the lead card (`leadMove`), so they keep their relative
+ * order. On a folded lane the lead card has no card to follow, and each
+ * follower goes last in the cell in turn, which gives the same order.
+ *
+ * A follower names a Project (`targetProjectId`) only when it stands in
+ * another one, as the lead card's move does.
+ */
+export const buildFollowerMoves = (
+  { move: leadMove, targetProjectId }: DropMove,
+  followers: readonly WorkCard[],
+): readonly CardMove[] => {
+  let previousId = leadMove.taskId;
+  return followers.map((card) => {
+    const move: CardMove = {
+      taskId: card.id,
+      ...(leadMove.stage === undefined ? {} : { stage: leadMove.stage }),
+      ...((card.projectId ?? null) === targetProjectId ? {} : { projectId: targetProjectId }),
+      ...(leadMove.afterTaskId === undefined ? {} : { afterTaskId: previousId }),
+    };
+    previousId = card.id;
+    return move;
+  });
+};
+
+/**
+ * What to do with a drop of several cards: send `moves`, the lead card's first
+ * and then one for each follower still on the board, with `note` added to the
+ * undo line when there is one, or send nothing and say why in `reason`.
+ */
+export type SettledGroupDrop =
+  | { readonly kind: "send"; readonly moves: readonly CardMove[]; readonly note?: string }
+  | { readonly kind: "refuse"; readonly reason: string };
+
+/** Returns the note for an undo line when `count` followers left the board during the carry. */
+export const describeFollowersGone = (count: number): string =>
+  count === 1
+    ? "1 of the selected Tasks had left the board, so it was not moved."
+    : `${String(count)} of the selected Tasks had left the board, so they were not moved.`;
+
+/**
+ * Returns what to do with `drop` of the lead card `leadCardId`, which carries
+ * `followers` along, over `board` as it is now. The lead card's move is
+ * settled as for a single card (`settleDropMove`); when it is refused, so is
+ * the whole drop. A follower that has left the board is left out, and the note
+ * says how many. The others follow the lead card in the order given.
+ */
+export const settleGroupDrop = (
+  board: Pick<WorkBoard, "cards">,
+  projects: readonly WorkProject[],
+  drop: DropMove,
+  followers: readonly WorkCard[],
+): SettledGroupDrop => {
+  const settled = settleDropMove(board, projects, drop);
+  if (settled.kind === "refuse") return settled;
+  const present = followers.flatMap((follower) => {
+    const current = board.cards.find((card) => card.id === follower.id);
+    return current === undefined ? [] : [current];
+  });
+  const gone = followers.length - present.length;
+  const notes = [settled.note, gone === 0 ? undefined : describeFollowersGone(gone)].filter(
+    (each) => each !== undefined,
+  );
+  return {
+    kind: "send",
+    moves: [
+      settled.move,
+      ...buildFollowerMoves({ move: settled.move, targetProjectId: drop.targetProjectId }, present),
+    ],
+    ...(notes.length === 0 ? {} : { note: notes.join(" ") }),
+  };
 };

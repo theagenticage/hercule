@@ -10,6 +10,17 @@ export {
 } from "./service";
 export { taskRepository, type BoardTask, type NewTask } from "./repository";
 export {
+  SUMMARY_CONCURRENCY,
+  SUMMARY_MIN_INTERVAL_SECONDS,
+  SUMMARY_QUIET_SECONDS,
+  TaskSummaries,
+  TaskSummariesLayer,
+  type SummaryDescriber,
+  type SummaryText,
+} from "./summaries";
+export { TaskLinkOwners } from "./link-owners";
+export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
+export {
   buildWorkCard,
   TaskBoard,
   TaskBoardFacts,
@@ -19,6 +30,7 @@ export {
   type BoardFailureFact,
   type BoardSessionFact,
 } from "./board";
+export { TaskDetailFacts, TaskDetails, TaskDetailsLayer } from "./detail";
 export {
   TaskTracking,
   TaskTrackingLayer,
@@ -28,4 +40,3 @@ export {
   type TrackedRunHistory,
   type TrackedRuns,
 } from "./tracking";
-export { cutText } from "./tracking-output";

@@ -142,24 +142,39 @@ interface Harness {
   readonly moveCard: ReturnType<
     typeof vi.fn<(move: CardMove, words: string, note?: string) => void>
   >;
+  readonly moveCards: ReturnType<
+    typeof vi.fn<
+      (
+        moves: readonly CardMove[],
+        describe: (moves: readonly CardMove[]) => string,
+        note?: string,
+      ) => void
+    >
+  >;
+  readonly selectedIds: ReadonlySet<string>;
   readonly say: ReturnType<typeof vi.fn<(text: string) => void>>;
+  readonly holdMerge: ReturnType<
+    typeof vi.fn<(sourceCardId: string, targetCardId: string) => boolean>
+  >;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
 }
 
 /** Renders the board as the Work screen does, with the drag hook on it. */
 function Board({
+  drawnCards,
   cards,
-  currentCards,
   foldedLaneIds,
   harness,
 }: {
+  /** The cards the board draws. */
+  readonly drawnCards: readonly WorkCard[];
+  /** The cards of the logical board, which the hook reads. They differ from the drawn ones while the screen holds changes back. */
   readonly cards: readonly WorkCard[];
-  readonly currentCards: readonly WorkCard[];
   readonly foldedLaneIds: ReadonlySet<string>;
   readonly harness: Harness;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const arrangedLanes = arrangeLanes(buildLanes({ cards }, PROJECTS), {
+  const arrangedLanes = arrangeLanes(buildLanes({ cards: drawnCards }, PROJECTS), {
     foldedLaneIds,
     openedCellIds: new Set(),
     isFiltering: false,
@@ -168,11 +183,13 @@ function Board({
   useBoardDrag({
     scrollRef,
     cards,
-    currentCards,
     projects: PROJECTS,
     arrangedLanes,
+    selectedIds: harness.selectedIds,
     moveCard: harness.moveCard,
+    moveCards: harness.moveCards,
     say: harness.say,
+    holdMerge: harness.holdMerge,
     onCarryingChange: setIsCarrying,
   });
   return (
@@ -195,10 +212,12 @@ function Board({
             arrangedLane={each}
             tabStopCardId={null}
             isStill
+            canWriteSummaries={false}
+            selectedIds={harness.selectedIds}
             onToggleLane={() => {}}
             onToggleCell={() => {}}
             onAddTask={() => {}}
-            onOpenCard={harness.onOpenCard}
+            onPressCard={harness.onOpenCard}
             onFocusCard={() => {}}
           />
         ))}
@@ -211,15 +230,25 @@ function Board({
 const renderBoard = (
   cards: readonly WorkCard[] = CARDS,
   foldedLaneIds: ReadonlySet<string> = new Set(),
+  selectedIds: ReadonlySet<string> = new Set(),
 ) => {
-  const harness: Harness = { moveCard: vi.fn(), say: vi.fn(), onOpenCard: vi.fn() };
+  const harness: Harness = {
+    selectedIds,
+    moveCard: vi.fn(),
+    moveCards: vi.fn(),
+    say: vi.fn(),
+    holdMerge: vi.fn(() => true),
+    onOpenCard: vi.fn(),
+  };
   const view = render(
-    <Board cards={cards} currentCards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
+    <Board drawnCards={cards} cards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
   );
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
     moveCard: harness.moveCard,
+    moveCards: harness.moveCards,
     say: harness.say,
+    holdMerge: harness.holdMerge,
     onOpenCard: harness.onOpenCard,
     /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
     isCarrying: (): boolean =>
@@ -227,7 +256,7 @@ const renderBoard = (
     scroller,
     rerenderWith: (next: readonly WorkCard[], folded: ReadonlySet<string> = foldedLaneIds) => {
       view.rerender(
-        <Board cards={next} currentCards={next} foldedLaneIds={folded} harness={harness} />,
+        <Board drawnCards={next} cards={next} foldedLaneIds={folded} harness={harness} />,
       );
     },
     /**
@@ -238,8 +267,8 @@ const renderBoard = (
     changeBoardBehindCarry: (current: readonly WorkCard[]) => {
       view.rerender(
         <Board
-          cards={cards}
-          currentCards={current}
+          drawnCards={cards}
+          cards={current}
           foldedLaneIds={foldedLaneIds}
           harness={harness}
         />,
@@ -399,9 +428,10 @@ describe("pressing a card", () => {
     press(board.card("refund-emails"), 220, 70);
     moveTo(board.scroller, 220, 76);
 
-    // A fast sweep to the right: 400px in one frame.
+    // A fast sweep to the right: 400px in one frame. It ends in the gap below a card: resting over a
+    // card's middle for a second would draw the two together, and the card in the hand would stay tilted.
     vi.advanceTimersByTime(16);
-    moveTo(board.scroller, 620, 76);
+    moveTo(board.scroller, 620, 135);
     vi.advanceTimersByTime(48);
     const tilt = findBody(board.ghost()!)!.values.r;
     expect(tilt).toBeGreaterThan(0.2);
@@ -740,6 +770,226 @@ describe("a carry that ends without a drop", () => {
   });
 });
 
+describe("merging by holding a carried card over another", () => {
+  /** Where the pointer is over the middle of the second card of the first lane's Exploring column. */
+  const MIDDLE_OF_DELIVERY_SLOTS = { x: 270, y: 195 } as const;
+
+  /** Fakes the clock the wait for the merge and the springs run on. */
+  const useFakeClock = (): void => {
+    vi.useFakeTimers({
+      toFake: [
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+        "performance",
+        "setTimeout",
+        "clearTimeout",
+      ],
+    });
+  };
+
+  /** Lifts the first card and brings it over the middle of the second, where the wait for a merge starts. */
+  const carryOverDeliverySlots = (board: ReturnType<typeof renderBoard>): void => {
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+  };
+
+  /** Moves the pointer with Option held. */
+  const moveWithOption = (scroller: Element, x: number, y: number): void => {
+    fireEvent.pointerMove(scroller, {
+      pointerId: 1,
+      isPrimary: true,
+      clientX: x,
+      clientY: y,
+      altKey: true,
+    });
+  };
+
+  /** Returns whether the card is drawn as the one to merge into. */
+  const isTarget = (card: HTMLElement): boolean => card.hasAttribute("data-merge-target");
+
+  it("makes the card the target once the pointer has rested over its middle for one second", () => {
+    useFakeClock();
+    const board = renderBoard();
+    carryOverDeliverySlots(board);
+    const target = board.card("delivery-slots");
+
+    vi.advanceTimersByTime(999);
+    expect(isTarget(target)).toBe(false);
+    vi.advanceTimersByTime(1);
+
+    expect(isTarget(target)).toBe(true);
+    expect(target.dataset["mergeLabel"]).toBe("Merge into Delivery slots");
+    expect(target.dataset["mergeKeeps"]).toBe("Keeps its title, stage and place");
+    // The slot closes but keeps its room, so nothing jumps.
+    expect(board.slot()?.classList.contains("is-shut")).toBe(true);
+
+    // The target swells to 1.02, and the card in the hand docks on its corner, smaller and tilted.
+    vi.advanceTimersByTime(800);
+    expect(findBody(target)!.values.s).toBeCloseTo(1.02, 2);
+    const hand = findBody(board.ghost()!)!.values;
+    expect(hand.s).toBeCloseTo(0.96, 2);
+    expect(hand.r).toBeCloseTo(1.6, 1);
+    expect(hand.x).toBeGreaterThan(8);
+    expect(hand.x).toBeLessThan(13);
+    expect(hand.y).toBeGreaterThan(115);
+    expect(hand.y).toBeLessThan(122);
+  });
+
+  it("starts the wait again when the pointer moves more than 6px, and keeps it for 6px or less", () => {
+    useFakeClock();
+    const board = renderBoard();
+    carryOverDeliverySlots(board);
+    const target = board.card("delivery-slots");
+
+    vi.advanceTimersByTime(600);
+    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x + 6, MIDDLE_OF_DELIVERY_SLOTS.y);
+    vi.advanceTimersByTime(400);
+    expect(isTarget(target)).toBe(true);
+  });
+
+  it("does not choose a card for a pointer that moved more than 6px since it began to rest", () => {
+    useFakeClock();
+    const board = renderBoard();
+    carryOverDeliverySlots(board);
+    const target = board.card("delivery-slots");
+
+    vi.advanceTimersByTime(600);
+    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x + 7, MIDDLE_OF_DELIVERY_SLOTS.y);
+    vi.advanceTimersByTime(600);
+    expect(isTarget(target)).toBe(false);
+    vi.advanceTimersByTime(400);
+    expect(isTarget(target)).toBe(true);
+  });
+
+  it("chooses the card at once when Option is held, and when Option goes down over a resting pointer", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    expect(isTarget(board.card("delivery-slots"))).toBe(true);
+
+    // Away from every card, and back with the pointer still and Option pressed afterwards.
+    moveTo(board.scroller, 220, 76);
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    fireEvent.keyDown(window, { key: "Alt", altKey: true });
+    expect(isTarget(board.card("delivery-slots"))).toBe(true);
+  });
+
+  it("starts no wait over the top or the bottom of a card, only over its middle 40%", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    // The second card spans 150 to 240: its top 30% ends at 177, its bottom 30% starts at 213.
+    moveTo(board.scroller, 270, 170);
+    vi.advanceTimersByTime(1500);
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    moveTo(board.scroller, 270, 220);
+    vi.advanceTimersByTime(1500);
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+  });
+
+  it("undoes it all at once when the pointer leaves the middle of the target", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    vi.advanceTimersByTime(500);
+
+    moveTo(board.scroller, 270, 225);
+
+    const target = board.card("delivery-slots");
+    expect(isTarget(target)).toBe(false);
+    expect(target.hasAttribute("data-merge-label")).toBe(false);
+    expect(board.slot()?.classList.contains("is-shut")).toBe(false);
+    vi.advanceTimersByTime(1500);
+    // The card in the hand is back under the pointer, at its size.
+    const hand = findBody(board.ghost()!)!.values;
+    expect(hand.s).toBeCloseTo(1.03, 2);
+    expect(hand.x).toBeCloseTo(270 - 20 - 200 + 0, -1);
+  });
+
+  it("holds the merge when the card is let go over the target, and moves nothing", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    vi.advanceTimersByTime(300);
+
+    release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+    expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    expect(board.moveCard).not.toHaveBeenCalled();
+    expect(board.isCarrying()).toBe(false);
+    expect(board.slot()).toBeNull();
+    expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    // The copy slides in under the cards of the board, as the card is not a card to the keyboard, and then goes.
+    const under = board.scroller.querySelector(".board-canvas > .board-merge-under .desk-card");
+    expect(under?.textContent).toContain("Refund emails");
+    expect(under?.hasAttribute("data-card-id")).toBe(false);
+    expect(board.ghost()).toBeNull();
+    vi.advanceTimersByTime(3000);
+    expect(board.scroller.querySelector(".board-merge-under")).toBeNull();
+  });
+
+  it("says nothing was merged, and sends the card home, when a card left the board meanwhile", () => {
+    useFakeClock();
+    const board = renderBoard();
+    board.holdMerge.mockReturnValue(false);
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+    release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+    expect(board.say).toHaveBeenCalledExactlyOnceWith(
+      "A card left the board, so nothing was merged.",
+    );
+    expect(board.moveCard).not.toHaveBeenCalled();
+    expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+  });
+
+  it("merges nothing when the card is let go before the wait is over", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    // The middle of the one card in Building, reached from another cell.
+    moveTo(board.scroller, columnX("building"), 85);
+    vi.advanceTimersByTime(900);
+
+    release(board.scroller, columnX("building"), 85);
+
+    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.moveCard).toHaveBeenCalledOnce();
+  });
+
+  it("sends the card home on Esc, and merges nothing", () => {
+    useFakeClock();
+    const board = renderBoard();
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    expect(isTarget(board.card("delivery-slots"))).toBe(true);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+
+    expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.ghost()).toBeNull();
+    expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+  });
+});
+
 describe("a board that scrolls under a carried card", () => {
   /** Makes the board report that it is scrolled `top` pixels, and tells it so as a browser does. */
   const scrollTo = (scroller: HTMLElement, top: number): void => {
@@ -778,5 +1028,189 @@ describe("a board that scrolls under a carried card", () => {
       "delivery-slots",
       "slot",
     ]);
+  });
+});
+
+describe("carrying several selected cards", () => {
+  /** The cards selected in these tests: the first of the lane, one at the bottom of its column, and one in Building. */
+  const SELECTED = new Set(["refund-emails", "gift-wrap", "promo-codes"]);
+
+  /** Fakes the clock the springs run on, so a test can play them out. */
+  const useFakeClock = (): void => {
+    // Motion runs unless the page asks for none.
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+    vi.useFakeTimers({
+      toFake: [
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+        "performance",
+        "setTimeout",
+        "clearTimeout",
+      ],
+    });
+  };
+
+  /** Lifts the first card of the lane, which is selected with two others, and moves it to (x, y). */
+  const carrySelection = (board: ReturnType<typeof renderBoard>, x: number, y: number): void => {
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveTo(board.scroller, x, y);
+  };
+
+  const followers = (): HTMLElement[] => [
+    ...document.querySelectorAll<HTMLElement>(".board-carry .desk-card.is-follower"),
+  ];
+
+  it("picks up the other selected cards in board order, hides them in the page, and counts all of them on the first", () => {
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+
+    carrySelection(board, 500, 300);
+
+    expect(followers().map((each) => each.textContent)).toEqual([
+      expect.stringContaining("Gift wrap"),
+      expect.stringContaining("Promo codes"),
+    ]);
+    // The copies are not cards for the keyboard, the screen reader or a lookup by id.
+    expect(followers().every((each) => !each.hasAttribute("data-card-id"))).toBe(true);
+    expect(board.ghost()?.classList.contains("has-followers")).toBe(true);
+    expect(board.ghost()?.dataset["count"]).toBe("3");
+    expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(true);
+    expect(board.card("promo-codes").hasAttribute("data-dragged")).toBe(true);
+    // Cards not selected stay where they are.
+    expect(board.card("delivery-slots").hasAttribute("data-dragged")).toBe(false);
+  });
+
+  it("stacks them behind the first, each 5px further and 2% smaller, one behind the other", () => {
+    useFakeClock();
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    carrySelection(board, 500, 300);
+    vi.advanceTimersByTime(3000);
+
+    // The first card was lifted when the pointer was 20px across and 36px down from its corner,
+    // so its corner is at (480, 264). Gift wrap stood at (200, 260) and Promo codes at (500, 40).
+    const [giftWrap, promoCodes] = followers().map((each) => findBody(each)!.values);
+    expect(giftWrap).toMatchObject({ x: 480 + 5 - 200, y: 264 + 5 - 260 });
+    expect(giftWrap!.s).toBeCloseTo(0.98, 3);
+    expect(promoCodes).toMatchObject({ x: 480 + 10 - 500, y: 264 + 10 - 40 });
+    expect(promoCodes!.s).toBeCloseTo(0.96, 3);
+    expect(followers().map((each) => each.style.zIndex)).toEqual(["-1", "-2"]);
+  });
+
+  it("carries only the pressed card when it is not selected", () => {
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+
+    press(board.card("delivery-slots"), 220, rowY(1));
+    moveTo(board.scroller, 220, rowY(1) + 6);
+
+    expect(followers()).toEqual([]);
+    expect(board.ghost()?.hasAttribute("data-count")).toBe(false);
+    expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(false);
+  });
+
+  it("sends one gesture for all of them on release, the first card first, each following the one before", () => {
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    // The pointer is in the empty cell of Planned.
+    carrySelection(board, columnX("planned"), rowY(0) + 20);
+    expect(board.slot()).not.toBeNull();
+
+    release(board.scroller, columnX("planned"), rowY(0) + 20);
+
+    expect(board.moveCard).not.toHaveBeenCalled();
+    expect(board.moveCards).toHaveBeenCalledOnce();
+    const [moves, describe, note] = board.moveCards.mock.calls[0]!;
+    expect(moves).toEqual([
+      { taskId: "refund-emails", stage: "planned", afterTaskId: null },
+      { taskId: "gift-wrap", stage: "planned", afterTaskId: "refund-emails" },
+      { taskId: "promo-codes", stage: "planned", afterTaskId: "gift-wrap" },
+    ]);
+    expect(describe(moves)).toBe(`Moved 3 Tasks to ${STAGE_NAMES.planned}`);
+    expect(note).toBeUndefined();
+    // Nothing of the carry is left in the page.
+    expect(board.slot()).toBeNull();
+    expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(false);
+    expect(board.card("promo-codes").hasAttribute("data-dragged")).toBe(false);
+    expect(board.isCarrying()).toBe(false);
+  });
+
+  it("names a single card when the others left the board during the carry", () => {
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    carrySelection(board, columnX("planned"), rowY(0) + 20);
+    board.changeBoardBehindCarry(
+      CARDS.filter((card) => card.id !== "gift-wrap" && card.id !== "promo-codes"),
+    );
+
+    release(board.scroller, columnX("planned"), rowY(0) + 20);
+
+    const [moves, describe, note] = board.moveCards.mock.calls[0]!;
+    expect(moves).toEqual([{ taskId: "refund-emails", stage: "planned", afterTaskId: null }]);
+    expect(describe(moves)).toBe(`Moved "Refund emails" to ${STAGE_NAMES.planned}`);
+    expect(note).toBe("2 of the selected Tasks had left the board, so they were not moved.");
+  });
+
+  it("sends them all home on Esc, and sends nothing", () => {
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    carrySelection(board, columnX("planned"), rowY(0) + 20);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+
+    expect(board.moveCard).not.toHaveBeenCalled();
+    expect(board.moveCards).not.toHaveBeenCalled();
+    expect(board.ghost()).toBeNull();
+    expect(followers()).toEqual([]);
+    expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(false);
+    expect(board.card("promo-codes").hasAttribute("data-dragged")).toBe(false);
+    expect(board.readCell("storefront", "exploring")).toEqual([
+      "refund-emails",
+      "delivery-slots",
+      "gift-wrap",
+    ]);
+  });
+
+  it("lands each card 40ms after the one before it", () => {
+    useFakeClock();
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    carrySelection(board, columnX("planned"), rowY(0) + 20);
+    vi.advanceTimersByTime(1000);
+
+    release(board.scroller, columnX("planned"), rowY(0) + 20);
+
+    // Each copy is replaced at once by the card, which stays where the copy was until its turn.
+    expect(followers()).toEqual([]);
+    const speedAt = (id: string): number => {
+      const { x, y } = findBody(board.card(id))!.velocity;
+      return Math.hypot(x, y);
+    };
+    vi.advanceTimersByTime(20);
+    expect(speedAt("refund-emails")).toBeGreaterThan(0);
+    expect(speedAt("gift-wrap")).toBe(0);
+    expect(speedAt("promo-codes")).toBe(0);
+    vi.advanceTimersByTime(40);
+    expect(speedAt("gift-wrap")).toBeGreaterThan(0);
+    expect(speedAt("promo-codes")).toBe(0);
+    vi.advanceTimersByTime(40);
+    expect(speedAt("promo-codes")).toBeGreaterThan(0);
+  });
+
+  it("merges nothing: holding the hand over a card, or Option, draws no merge", () => {
+    useFakeClock();
+    const board = renderBoard(CARDS, new Set(), SELECTED);
+    // The middle of the second card of the lane's Exploring column.
+    carrySelection(board, 270, 195);
+    vi.advanceTimersByTime(1500);
+    fireEvent.pointerMove(board.scroller, {
+      pointerId: 1,
+      isPrimary: true,
+      clientX: 270,
+      clientY: 195,
+      altKey: true,
+    });
+
+    expect(board.card("delivery-slots").hasAttribute("data-merge-target")).toBe(false);
+
+    release(board.scroller, 270, 195);
+    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.moveCards).toHaveBeenCalledOnce();
   });
 });

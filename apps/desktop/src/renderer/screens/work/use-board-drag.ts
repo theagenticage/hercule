@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import {
   buildDropMove,
   describeCardMove,
-  settleDropMove,
+  describeCardsMove,
+  settleGroupDrop,
   type ArrangedLane,
   type CardMove,
   type DropPlace,
@@ -16,17 +17,25 @@ import {
   measureLayoutRect,
   trackBody,
   type LayoutRect,
-  type MotionBody,
   type SpringName,
 } from "../../app/motion";
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
+  findMergeCandidate,
   isSameDropPlace,
   toBoardPoint,
-  type BoardGeometry,
-  type BoardView,
 } from "./board-drag-geometry";
+import { CARRY_SCALE, type Carry } from "./board-drag-carry";
+import {
+  FOLLOWER_LAND_GAP,
+  liftFollowers,
+  moveFollowers,
+  readFollowerPose,
+} from "./board-drag-followers";
+import { createMergeGesture, type MergeChoice } from "./board-drag-merge";
+import { copyCardForMotion } from "../desk";
+import { playMergeIn } from "./board-flights";
 import { flipBoard } from "./flip-board";
 import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
@@ -34,9 +43,6 @@ import "./drag.css";
 
 /** How far the pointer moves, in pixels, before a press becomes a carry. Less than this is a click. */
 const LIFT_DISTANCE = 5;
-
-/** How much bigger a card is in the hand. */
-const CARRY_SCALE = 1.03;
 
 /** The most a carried card leans, in degrees, to either side. */
 const MOST_LEAN = 1.2;
@@ -63,24 +69,46 @@ const CLICK_GUARD_MS = 50;
 export interface BoardDragOptions {
   /** The element that scrolls the board. It stays mounted for the life of the screen, so it holds the pointer. */
   readonly scrollRef: RefObject<HTMLDivElement | null>;
-  /** The cards the board draws, in stored order, with the pending moves applied. */
-  readonly cards: readonly WorkCard[];
   /**
-   * Every card of the board as it is now. During a carry the screen holds
-   * back changes nobody caused, so this can differ from `cards`: a drop is
-   * checked against it.
+   * The cards of the logical board, in stored order: the board as it is now.
+   * The carry looks cards up in it, and a drop is checked against it. The
+   * board the screen draws can differ from it during a carry, because changes
+   * nobody caused wait for the hand to let go.
    */
-  readonly currentCards: readonly WorkCard[];
+  readonly cards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
   /** The lanes the board draws: which are folded, and which cards a cell hides. */
   readonly arrangedLanes: readonly ArrangedLane[];
+  /**
+   * The ids of the selected cards. Pressing one of them and carrying it
+   * carries every selected card the board draws behind it.
+   */
+  readonly selectedIds: ReadonlySet<string>;
   /**
    * Moves a card and shows the move on the undo line, with `note` added to the
    * line when there is one. A move that changes nothing does nothing.
    */
   readonly moveCard: (move: CardMove, words: string, note?: string) => void;
+  /**
+   * Moves the cards of a drop of several as one gesture (see
+   * `CardMoves.moveCards`). `describe` returns the words for the undo line
+   * for the moves that remain.
+   */
+  readonly moveCards: (
+    moves: readonly CardMove[],
+    describe: (moves: readonly CardMove[]) => string,
+    note?: string,
+  ) => void;
   /** Shows `text` on the undo line, with no Undo, for a drop that sent nothing. */
   readonly say: (text: string) => void;
+  /**
+   * Merges the card `sourceCardId` into the card `targetCardId`: holds the
+   * merge for the undo line and shows it done, so the source card leaves the
+   * board. Called inside the drag's committed change (`flushSync`), so the
+   * board is measured after it. Returns `false`, and holds nothing, when
+   * either card is no longer on the board.
+   */
+  readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
   /**
    * Called with `true` when a card enters the hand and with `false` when it
    * leaves it. The screen keeps the value and draws it as the desk's
@@ -89,15 +117,6 @@ export interface BoardDragOptions {
    * screen was holding back for the carry shows as part of the drop.
    */
   readonly onCarryingChange: (isCarrying: boolean) => void;
-}
-
-/** The pointer's last place, and how fast it moves (pixels per millisecond, smoothed). */
-interface Hand {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  movedAt: number;
 }
 
 /** A press on a card that has not moved far enough to be a carry. */
@@ -109,40 +128,14 @@ interface Press {
   readonly startY: number;
 }
 
-/** A card in the hand. */
-interface Carry {
-  readonly pointerId: number;
-  readonly card: WorkCard;
-  /** The card's element in the page. It stays mounted and hidden for the whole carry. */
-  readonly source: HTMLElement;
-  readonly root: HTMLElement;
-  readonly layer: HTMLElement;
-  /** The copy of the card in the hand, the only child of `layer`. */
-  readonly ghost: HTMLElement;
-  readonly body: MotionBody;
-  /** The hollow that shows where the card would land. It lives in the cell, outside React's reach. */
-  readonly slot: HTMLElement;
-  /** Where the layout puts the copy in the hand, in window pixels. */
-  readonly home: LayoutRect;
-  /** Where in the card the pointer took hold of it. */
-  readonly grab: { readonly x: number; readonly y: number };
-  readonly reduced: boolean;
-  readonly watcher: MutationObserver;
-  readonly hand: Hand;
-  geometry: BoardGeometry;
-  /** The scroller in the window, and how far it is scrolled. */
-  view: BoardView;
-  place: DropPlace | null;
-  uprightTimer: number | undefined;
-  scrollFrame: number;
-  /** The folded lane that is marked as the target, if one is. */
-  markedLane: HTMLElement | null;
-}
-
-/** What a drop sends, with the words for the undo line and the note that follows them, if any. */
+/**
+ * What a drop sends: the moves, the card in the hand first and then the cards
+ * behind it, the words for the undo line (`describe` is given the moves that
+ * are sent) and the note that follows them, if any.
+ */
 interface DropChange {
-  readonly move: CardMove;
-  readonly words: string;
+  readonly moves: readonly CardMove[];
+  readonly describe: (moves: readonly CardMove[]) => string;
   readonly note: string | undefined;
 }
 
@@ -278,11 +271,31 @@ const createBoardDrag = (
     moveSlot(c, cell.element, before?.element ?? findCellFoot(cell.element));
   };
 
-  /** Works out which place the pointer points at, from the measurements, and shows it when it changed. */
+  /**
+   * Works out which place the pointer points at, from the measurements, and
+   * shows it when it changed. Over the middle of a card, the place is the
+   * one right after that card, and it is only opened when the slot is in
+   * another cell: the card must stay under the pointer.
+   */
   const choosePlace = (c: Carry): void => {
     const point = toBoardPoint(c.view, c.hand.x, c.hand.y);
-    const place = chooseDropPlace(c.geometry, point.x, point.y);
-    if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
+    // A merge joins two cards, so several cards in the hand never merge.
+    const candidate =
+      c.followers.length > 0 ? null : findMergeCandidate(c.geometry, point.x, point.y);
+    if (candidate === null) {
+      c.merge.update(c.hand, null);
+      const place = chooseDropPlace(c.geometry, point.x, point.y);
+      if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
+      return;
+    }
+    const { place } = candidate;
+    const isSlotInCell =
+      c.place?.kind === "cell" &&
+      place.kind === "cell" &&
+      c.place.laneId === place.laneId &&
+      c.place.stage === place.stage;
+    if (!isSlotInCell) showPlace(c, place);
+    c.merge.update(c.hand, candidate.cardId);
   };
 
   /** Scrolls the board for as long as the card is held near its top or bottom edge. */
@@ -312,16 +325,29 @@ const createBoardDrag = (
     hand.x = x;
     hand.y = y;
     hand.movedAt = now;
-    c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
-    if (!c.reduced) {
+    // Drawn into a card, the card in the hand stays docked until the pointer
+    // leaves the card. It is docked when the card is chosen, and again when the
+    // card moves (`onScroll`, `onPageChanged`), not when the pointer does.
+    const handMotion = c.merge.handMotion();
+    if (handMotion !== "docked") {
+      if (handMotion === "gliding") {
+        c.body.to({ x: x - c.grab.x - c.home.left, y: y - c.grab.y - c.home.top }, "hand", {
+          reduced: c.reduced,
+        });
+      } else {
+        c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
+      }
+    }
+    if (!c.reduced && handMotion !== "docked") {
       c.body.to({ r: limitSymmetric(hand.vx * LEAN_PER_SPEED, MOST_LEAN) }, "hand", {
         reduced: false,
       });
       window.clearTimeout(c.uprightTimer);
       c.uprightTimer = window.setTimeout(() => {
-        c.body.to({ r: 0 }, "hand", { reduced: false });
+        if (c.merge.handMotion() !== "docked") c.body.to({ r: 0 }, "hand", { reduced: false });
       }, STILL_AFTER_MS);
     }
+    moveFollowers(c);
     choosePlace(c);
     scrollAtEdge(c);
   };
@@ -356,6 +382,7 @@ const createBoardDrag = (
 
   /** Takes the marks of a carry off the page. */
   const clearMarks = (c: Carry): void => {
+    c.merge.cancel();
     delete c.root.dataset["dragStage"];
     if (c.markedLane !== null) delete c.markedLane.dataset["dropTarget"];
   };
@@ -366,6 +393,12 @@ const createBoardDrag = (
     readOptions().onCarryingChange(false);
     c.slot.remove();
     delete c.source.dataset["dragged"];
+    for (const follower of c.followers) {
+      scroller
+        .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
+        ?.removeAttribute("data-dragged");
+      follower.body.clear();
+    }
     clearMarks(c);
     c.body.clear();
     c.layer.remove();
@@ -374,23 +407,74 @@ const createBoardDrag = (
   /**
    * Puts the card on the page at the place of `change`, or back where it was when
    * there is none, and lets it come down from where it looks now. The card
-   * leaves the hand, and the move is sent, in one committed change, so the
-   * board is measured after both.
+   * leaves the hand, and the moves are sent, in one committed change, so the
+   * board is measured after both. The cards behind it come down after it, each
+   * 40ms after the one before, at their places or at home.
    */
   const releaseCarry = (c: Carry, spring: SpringName, change: DropChange | undefined): void => {
     const pose = readReleasePose(c);
+    const followerPoses = c.followers.map(readFollowerPose);
     endCarry(c);
     flipBoard(scroller, spring, () => {
       c.slot.remove();
       delete c.source.dataset["dragged"];
+      for (const follower of c.followers) {
+        scroller
+          .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
+          ?.removeAttribute("data-dragged");
+      }
       clearMarks(c);
       flushSync(() => {
         const options = readOptions();
         options.onCarryingChange(false);
-        if (change !== undefined) options.moveCard(change.move, change.words, change.note);
+        if (change === undefined) return;
+        if (c.followers.length === 0) {
+          options.moveCard(change.moves[0]!, change.describe(change.moves), change.note);
+        } else {
+          options.moveCards(change.moves, change.describe, change.note);
+        }
       });
     });
-    landCard(scroller, c, pose, spring, change?.move);
+    landCard(scroller, c, pose, spring, change?.moves[0], 0);
+    c.followers.forEach((follower, index) => {
+      landCard(
+        scroller,
+        { ...follower, layer: c.layer, place: c.place },
+        followerPoses[index]!,
+        spring,
+        change?.moves.find((move) => move.taskId === follower.card.id),
+        (index + 1) * FOLLOWER_LAND_GAP,
+      );
+    });
+  };
+
+  /**
+   * Lets go of the card over the card it is drawn into. The merge is held for
+   * the undo line, and the copy in the hand slides in under the card it
+   * merged into and fades. When either card has left the board meanwhile,
+   * nothing is merged: the card goes home and the undo line says so.
+   */
+  const mergeCarry = (c: Carry, target: MergeChoice): void => {
+    swallowNextClick(true);
+    const pose = readReleasePose(c);
+    endCarry(c);
+    const options = readOptions();
+    let isHeld = false;
+    flipBoard(scroller, "hand", () => {
+      c.slot.remove();
+      delete c.source.dataset["dragged"];
+      clearMarks(c);
+      flushSync(() => {
+        options.onCarryingChange(false);
+        isHeld = options.holdMerge(c.card.id, target.cardId);
+      });
+    });
+    if (isHeld) {
+      playMergeIn(scroller, c.ghost, target.cardId);
+      return;
+    }
+    landCard(scroller, c, pose, "travel", undefined, 0);
+    options.say("A card left the board, so nothing was merged.");
   };
 
   /**
@@ -401,6 +485,11 @@ const createBoardDrag = (
    * gone nothing is sent and the line says why.
    */
   const dropCard = (c: Carry): void => {
+    const target = c.merge.commit();
+    if (target !== null) {
+      mergeCarry(c, target);
+      return;
+    }
     swallowNextClick(true);
     const options = readOptions();
     const { place } = c;
@@ -409,24 +498,33 @@ const createBoardDrag = (
       releaseCarry(c, "travel", undefined);
       return;
     }
+    const followers = c.followers.map((follower) => follower.card);
     const drop = buildDropMove({
       movingCard: c.card,
       lane,
       stage: place.stage,
       beforeCardId: place.kind === "cell" ? place.beforeCardId : null,
+      followerIds: followers.map((card) => card.id),
     });
-    const settled = settleDropMove({ cards: options.currentCards }, options.projects, drop);
+    const settled = settleGroupDrop({ cards: options.cards }, options.projects, drop, followers);
     if (settled.kind === "refuse") {
       releaseCarry(c, "travel", undefined);
       options.say(settled.reason);
       return;
     }
-    const card = options.currentCards.find((each) => each.id === c.card.id) ?? c.card;
-    releaseCarry(c, "hand", {
-      move: settled.move,
-      words: describeCardMove(card, settled.move, options.projects),
-      note: settled.note,
-    });
+    // The words name the cards as they stood before the move, which is how the board is now.
+    const describe = (moves: readonly CardMove[]): string => {
+      const [only] = moves;
+      const card =
+        only === undefined
+          ? undefined
+          : (options.cards.find((each) => each.id === only.taskId) ??
+            [c.card, ...followers].find((each) => each.id === only.taskId));
+      return only !== undefined && moves.length === 1 && card !== undefined
+        ? describeCardMove(card, only, options.projects)
+        : describeCardsMove(moves, place.stage ?? c.card.stage, options.projects);
+    };
+    releaseCarry(c, "hand", { moves: settled.moves, describe, note: settled.note });
   };
 
   /**
@@ -475,12 +573,8 @@ const createBoardDrag = (
     layer.className = "board-carry";
     layer.setAttribute("aria-hidden", "true");
     root.appendChild(layer);
-    const ghost = ghostElement(source, layer);
+    const ghost = ghostElement(source, layer, copyCardForMotion(source));
     source.style.removeProperty("scale");
-    ghost.style.removeProperty("scale");
-    for (const name of ["data-card-id", "role", "aria-label", "tabindex"]) {
-      ghost.removeAttribute(name);
-    }
     ghost.classList.add("is-carried");
 
     const slot = document.createElement("div");
@@ -489,6 +583,12 @@ const createBoardDrag = (
     slot.style.height = `${String(home.height)}px`;
     cell.insertBefore(slot, source);
     source.dataset["dragged"] = "";
+    const followers = liftFollowers(scroller, layer, card, options);
+    if (followers.length > 0) {
+      // A count on the card in the hand: itself and the cards behind it.
+      ghost.classList.add("has-followers");
+      ghost.dataset["count"] = String(followers.length + 1);
+    }
 
     const body = trackBody(ghost);
     const reduced = isMotionReduced();
@@ -500,6 +600,7 @@ const createBoardDrag = (
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     const measured = measureBoardGeometry(scroller, options.arrangedLanes);
+    const grab = { x: event.clientX - seen.left, y: event.clientY - seen.top };
     const c: Carry = {
       pointerId: held.pointerId,
       card,
@@ -508,9 +609,10 @@ const createBoardDrag = (
       layer,
       ghost,
       body,
+      followers,
       slot,
       home,
-      grab: { x: event.clientX - seen.left, y: event.clientY - seen.top },
+      grab,
       reduced,
       watcher,
       hand: { x: event.clientX, y: event.clientY, vx: 0, vy: 0, movedAt: performance.now() },
@@ -520,6 +622,17 @@ const createBoardDrag = (
       uprightTimer: undefined,
       scrollFrame: 0,
       markedLane: null,
+      merge: createMergeGesture({
+        scroller,
+        readCards: () => readOptions().cards,
+        slot,
+        body,
+        home,
+        grab,
+        reduced,
+        pointer: { x: event.clientX, y: event.clientY },
+        isOptionHeld: event.altKey,
+      }),
     };
     carry = c;
     followHand(c, event.clientX, event.clientY);
@@ -541,6 +654,7 @@ const createBoardDrag = (
       return;
     }
     remeasure(c);
+    c.merge.refresh();
   }
 
   /**
@@ -554,6 +668,7 @@ const createBoardDrag = (
     if (c === null) return;
     c.view = { ...c.view, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop };
     choosePlace(c);
+    c.merge.refresh();
   }
 
   /** Runs when the system took the pointer away from the board other than by letting it go. */
@@ -563,7 +678,10 @@ const createBoardDrag = (
 
   function onPointerMove(event: PointerEvent): void {
     if (carry !== null) {
-      if (event.pointerId === carry.pointerId) followHand(carry, event.clientX, event.clientY);
+      if (event.pointerId === carry.pointerId) {
+        carry.merge.setOptionHeld(event.altKey);
+        followHand(carry, event.clientX, event.clientY);
+      }
       return;
     }
     if (press === null || event.pointerId !== press.pointerId) return;
@@ -595,12 +713,27 @@ const createBoardDrag = (
     }
   }
 
-  /** Sends the card home on Esc while a card is in the hand, and keeps the key from reaching anything else. No other key is handled. */
+  /**
+   * Sends the card home on Esc while a card is in the hand, and keeps the key
+   * from reaching anything else. Option chooses the card under the pointer to
+   * merge into at once. No other key is handled.
+   */
   function onKeyDown(event: KeyboardEvent): void {
-    if (carry === null || event.key !== "Escape") return;
+    if (carry === null) return;
+    if (event.key === "Alt") {
+      carry.merge.setOptionHeld(true);
+      choosePlace(carry);
+      return;
+    }
+    if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopImmediatePropagation();
     cancelCarry(false);
+  }
+
+  /** Notes that Option was let go. A card already chosen to merge into stays chosen until the pointer leaves it. */
+  function onKeyUp(event: KeyboardEvent): void {
+    if (carry !== null && event.key === "Alt") carry.merge.setOptionHeld(false);
   }
 
   /** Sends the card home when the window loses the focus: the pointer's release may never arrive. */
@@ -618,6 +751,7 @@ const createBoardDrag = (
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("blur", onWindowAway);
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
@@ -627,6 +761,7 @@ const createBoardDrag = (
     window.removeEventListener("pointerup", onPointerUp);
     window.removeEventListener("pointercancel", onPointerCancel);
     window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("keyup", onKeyUp, true);
     window.removeEventListener("blur", onWindowAway);
     document.removeEventListener("visibilitychange", onVisibilityChange);
   }
@@ -681,6 +816,12 @@ const createBoardDrag = (
  * - A folded lane is a target as a whole, since it has no cells to put a slot
  *   in. A slot after the last card of a cell that hides some lands before the
  *   first hidden card.
+ * - Held still for a second over the middle 40% of another card, or with
+ *   Option held, the carry is drawn into that card to merge: the card in the
+ *   hand docks on its corner, and the target takes a ring and two labels
+ *   (whom it is merged into, and what stays). Moving more than 6px starts
+ *   the wait again, and moving off the middle undoes it at once. Letting go
+ *   calls `holdMerge`, and the copy slides in under the target.
  * - The page is scrolled at the top and bottom edges. The board is measured
  *   when a carry starts and when the page or the slot changes, never when the
  *   pointer moves or the board scrolls.

@@ -156,6 +156,14 @@ describe("buildSubmission: a draft thread", () => {
     });
   });
 
+  it("names the Task a start card pointed the message at, and leaves it out otherwise", () => {
+    const joined = buildDraftSubmission(NO_CATALOGS, CONFIG, {}, { ...MESSAGE, taskId: "task-1" });
+    expect(joined).toMatchObject({ kind: "spawn", input: { prompt: "ship it", taskId: "task-1" } });
+
+    const alone = buildDraftSubmission(NO_CATALOGS, CONFIG, {}, MESSAGE);
+    expect(alone.kind === "spawn" && "taskId" in alone.input).toBe(false);
+  });
+
   it("sends the harness the draft names, and leaves it out while the account's default applies", () => {
     const named = buildDraftSubmission(CATALOGS, { ...CONFIG, harnessId: "pi/pi" }, {}, MESSAGE);
     expect(named).toMatchObject({

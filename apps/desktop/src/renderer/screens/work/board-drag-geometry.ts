@@ -22,16 +22,27 @@ const BOTTOM_EDGE_ZONE = 70;
 /** How many pixels the board scrolls per frame for each pixel the pointer is inside an edge zone, as a divisor. */
 const EDGE_SCROLL_DIVISOR = 6;
 
+/**
+ * The share of a card's height, at the top and at the bottom, that does not
+ * count as its middle. The middle 40% of a card is the part where a carried
+ * card that rests means a merge.
+ */
+const MERGE_EDGE_SHARE = 0.3;
+
 /** The left edge of one stage, where its cells start. */
 export interface StageEdge {
   readonly stage: BoardStage;
   readonly left: number;
 }
 
-/** A card standing in a cell: its id, the element, and the vertical middle of the place the layout gave it. */
+/** A card standing in a cell: its id, the element, the place the layout gave it, and the vertical middle of that place. */
 export interface CellRow {
   readonly id: string;
   readonly element: HTMLElement;
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
   readonly middle: number;
 }
 
@@ -179,4 +190,50 @@ export const computeEdgeScrollSpeed = (y: number, viewTop: number, viewBottom: n
   if (y > viewBottom - BOTTOM_EDGE_ZONE)
     return (y - (viewBottom - BOTTOM_EDGE_ZONE)) / EDGE_SCROLL_DIVISOR;
   return 0;
+};
+
+/** The card a carried card would merge into, and the place the carry shows while it is over that card. */
+export interface MergeCandidate {
+  readonly cardId: string;
+  /** The place right after the card, so the card stays under the pointer when the slot opens in its cell. */
+  readonly place: DropPlace;
+}
+
+/**
+ * Returns the card whose middle 40% the point (`x`, `y`) is over, or `null`.
+ * The middle means merge, and it moves no slot: a place beside it is the
+ * only one that keeps the card under the pointer. A card in a folded lane,
+ * behind a "13 more" line, or in the hand is not on the board, so none is
+ * found.
+ */
+export const findMergeCandidate = (
+  geometry: BoardGeometry,
+  x: number,
+  y: number,
+): MergeCandidate | null => {
+  for (const lane of geometry.lanes) {
+    if (lane.isFolded || y < lane.top || y > lane.bottom) continue;
+    for (const [stage, cell] of lane.cells) {
+      const index = cell.rows.findIndex(
+        (row) =>
+          x > row.left &&
+          x < row.right &&
+          y > row.top + (row.bottom - row.top) * MERGE_EDGE_SHARE &&
+          y < row.bottom - (row.bottom - row.top) * MERGE_EDGE_SHARE,
+      );
+      const row = cell.rows[index];
+      if (row === undefined) continue;
+      const nextIndex = Math.min(index + 1, cell.lastIndex ?? Infinity);
+      return {
+        cardId: row.id,
+        place: {
+          kind: "cell",
+          laneId: lane.id,
+          stage,
+          beforeCardId: cell.rows[nextIndex]?.id ?? null,
+        },
+      };
+    }
+  }
+  return null;
 };

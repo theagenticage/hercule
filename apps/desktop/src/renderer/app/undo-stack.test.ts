@@ -122,4 +122,25 @@ describe("createUndoStack", () => {
 
     expect(await stack.undo(PAGE)).toEqual({ kind: "empty" });
   });
+
+  it("tells whether a gesture is still on the stack", async () => {
+    const stack = createUndoStack<string>();
+    const first = buildGesture("Moved A", []);
+    const second = buildGesture("Moved B", []);
+    const third = buildGesture("Moved C", []);
+    stack.push(first);
+    stack.push(second);
+    stack.push(third);
+
+    stack.remove(second);
+    await stack.undo(PAGE);
+    expect([stack.holds(first), stack.holds(second), stack.holds(third)]).toEqual([
+      true,
+      false,
+      false,
+    ]);
+
+    stack.clear();
+    expect(stack.holds(first)).toBe(false);
+  });
 });

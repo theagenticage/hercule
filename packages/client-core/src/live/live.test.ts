@@ -443,7 +443,7 @@ describe("createLive", () => {
     );
   });
 
-  it("invalidates only the Work board for a derived task push", async () => {
+  it("invalidates only the Work board and the pushed Task's detail for a derived task push", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
 
@@ -459,7 +459,10 @@ describe("createLive", () => {
       { _tag: "invalidate", ids: ["task-1"], kind: "updated", derived: true },
     ]);
     await settleTimers();
-    assert.deepStrictEqual(invalidations[1], [queryKeys.workBoard()]);
+    assert.deepStrictEqual(invalidations[1], [
+      queryKeys.workBoard(),
+      queryKeys.taskDetail("task-1"),
+    ]);
   });
 
   it("invalidates the current session of each conversation a session push names", async () => {

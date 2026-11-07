@@ -44,6 +44,7 @@ import {
   deriveTaskStatus,
   Id,
   isFinishedStage,
+  MAX_TASK_DESCRIPTION_LENGTH,
   MAX_TASK_LABELS,
   TASK_SORT_FIELDS,
   TaskCreateInput,
@@ -61,11 +62,14 @@ import {
   type TaskPriority,
   type TaskStage,
   type TaskStatus,
+  type TaskMergeInput,
   type TaskUpdatedEventPayload,
+  type TryAgainUndo,
   type Unauthenticated,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
+  afterCommit,
   announce,
   announceTaskCardChange,
   nowIso,
@@ -79,12 +83,15 @@ import {
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
+import { TaskLinkOwners } from "./link-owners";
+import { TaskSummaryWake } from "./summary-wake";
 import {
   taskRepository,
   type BoardCell,
   type NewTask,
   type ProvenanceInput,
   type TaskEdit,
+  type TaskFailureState,
   type TaskOrder,
   type TaskSortField,
 } from "./repository";
@@ -157,6 +164,8 @@ export type FailureRestoreRefusal =
   /** The failure was already restored once. */
   | "already-restored"
   | "task-deleted"
+  /** The Task was merged into another, which now owns its failure. */
+  | "task-merged"
   /** The Task is at `done` or `dropped`. */
   | "task-finished"
   /** Something changed who handles the failure since the start: a newer failure, run start, Done or Drop. */
@@ -166,6 +175,10 @@ export type FailureRestoreRefusal =
 export type FailureRestoration =
   | { readonly restored: true; readonly taskId: string }
   | { readonly restored: false; readonly reason: FailureRestoreRefusal };
+
+/** The refusal of `merge` for a caller who is not the user. */
+const ONLY_THE_USER_MERGES =
+  "only the user may merge Tasks: merging is the user's correction of how work is grouped, so a session or a workflow step may not; ask the user instead";
 
 /** The refusal of `recordHandoff` for a caller who is not the user. */
 const ONLY_THE_USER_RECORDS_HANDOFF =
@@ -222,6 +235,20 @@ const chooseStageForStatus = (current: TaskStage, status: TaskStatus): TaskStage
   }
 };
 
+/**
+ * Returns the description a Task has after another Task is merged into it:
+ * its own, then the other's under a line naming the other's title. A merged
+ * Task with an empty description adds nothing.
+ */
+const joinMergedDescriptions = (
+  target: Pick<Task, "description">,
+  source: Pick<Task, "title" | "description">,
+): string => {
+  if (source.description.trim() === "") return target.description;
+  const appended = `Merged from "${source.title}":\n${source.description}`;
+  return target.description === "" ? appended : `${target.description}\n\n${appended}`;
+};
+
 /** Returns the values with duplicates removed, keeping the first of each. */
 const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
 
@@ -259,12 +286,77 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const platformEvents = yield* PlatformEvents;
 
+  const linkOwners = yield* TaskLinkOwners;
+
+  /**
+   * Reads the live Task `id` stands for. When `id` was merged into another
+   * Task (`resolveTaskId`), that is the survivor, whose `id` differs. Fails
+   * with `NotFound` when the Task does not exist or is deleted.
+   */
   const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
-    Effect.flatMap(
-      tasks.live(id),
-      Option.match({
-        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_TASK)),
-        onSome: Effect.succeed,
+    Effect.gen(function* () {
+      const found = yield* tasks.readLiveOrSurvivor(id);
+      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_TASK));
+      return found.value;
+    });
+
+  /**
+   * Checks that the Task `id`, taken as it is and never followed to a
+   * survivor, can be merged, and returns its state. Fails with `NotFound` when
+   * it does not exist or is deleted, with `Validation` when it was already
+   * merged into another Task, and with `InvalidState` when it is at `done` or
+   * `dropped`.
+   */
+  const requireMergeableTask = (
+    id: string,
+  ): Effect.Effect<TaskFailureState, NotFound | Validation | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const state = yield* tasks.readFailureState(id);
+      if (Option.isNone(state) || state.value.deleted) {
+        return yield* Effect.fail(createNotFoundError(NO_SUCH_TASK));
+      }
+      if (state.value.merged) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["id"],
+              message:
+                `the task ${id} was already merged into another task; ` +
+                "read it to find that task, and merge that one instead",
+            },
+          ]),
+        );
+      }
+      if (isFinishedStage(state.value.stage)) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            `the task ${id} is at the stage ${state.value.stage}, and a finished task cannot be merged; ` +
+              "reopen it by moving it to another stage first, then merge",
+          ),
+        );
+      }
+      return state.value;
+    });
+
+  /**
+   * Marks the summary of the Task `taskId` dirty in the caller's transaction,
+   * and wakes the summary writer once that transaction commits. The first mark
+   * of a dirty cycle on a Task with a written summary also announces the Task
+   * as a derived change, so its card shows the summary as stale. A Task that is
+   * deleted, merged or finished is left alone. It writes one row and waits for
+   * nothing, so any change a summary reads can call it.
+   */
+  const markSummaryDirty = (taskId: string): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const wake = yield* TaskSummaryWake;
+        const { marked, becameStale } = yield* tasks.markSummaryDirty(taskId, yield* nowIso);
+        if (marked) yield* afterCommit(wake.wake);
+        // The card shows a written summary as current until told otherwise.
+        // Only the first mark of a dirty cycle says so; the rest change nothing
+        // a client draws.
+        if (becameStale) yield* announceTaskCardChange(taskId);
       }),
     );
 
@@ -282,8 +374,8 @@ const make = Effect.gen(function* () {
         );
 
   /**
-   * Applies `patch` to the task `id` in the caller's transaction, and returns
-   * the task as stored. The `task.updated` event lists what changed. See
+   * Applies `patch` to the task `id` (or to the Task it was merged into) in
+   * the caller's transaction, and returns the task as stored. The `task.updated` event lists what changed. See
    * `update` for the rules; the patch is already decoded. The `actor` stamps
    * the event and the provenance entries the patch appends.
    *
@@ -293,7 +385,7 @@ const make = Effect.gen(function* () {
    * `changes.status` whenever the coarse status changes with it.
    */
   const updateTask = (
-    id: string,
+    requestedId: string,
     patch: TaskPatch,
     actor: string,
   ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
@@ -301,7 +393,9 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const before = yield* readLiveTaskOrFail(id);
+        const before = yield* readLiveTaskOrFail(requestedId);
+        // A merged id lands on the survivor, and everything below is about it.
+        const id = before.id;
         yield* ensureProjectExists(patch.projectId);
 
         // Each field is compared on its own, rather than in a loop over
@@ -400,6 +494,17 @@ const make = Effect.gen(function* () {
         if (Object.keys(changes).length === 0) return before;
 
         yield* tasks.update(id, edit, appended, at, actor);
+        // A finished Task waits for no summary. Taking it back to a live stage,
+        // or changing the words a summary reads, makes the summary out of date.
+        if (edit.stage !== undefined && isFinishedStage(edit.stage)) {
+          yield* tasks.clearSummaryDirty(id);
+        } else if (
+          edit.title !== undefined ||
+          edit.description !== undefined ||
+          (edit.stage !== undefined && isFinishedStage(before.stage))
+        ) {
+          yield* markSummaryDirty(id);
+        }
         yield* platformEvents.emit({
           kind: "task.updated",
           actor,
@@ -476,21 +581,27 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Moves the Task `id` as `task.move` describes, in the caller's
-   * transaction. The write goes through `updateTask`, so one `task.updated`
+   * Moves the Task `id` (or the Task it was merged into) as `task.move`
+   * describes, in the caller's transaction. The write goes through `updateTask`, so one `task.updated`
    * reports what changed and the actor is stamped.
    */
   const moveTask = (
-    id: string,
+    requestedId: string,
     placement: Omit<MoveInput, "id">,
     actor: string,
   ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const before = yield* readLiveTaskOrFail(id);
+        const before = yield* readLiveTaskOrFail(requestedId);
+        // A merged id, for the Task or for the card it follows, stands for the
+        // survivor, and the comparisons and the rank below are about it.
+        const id = before.id;
         yield* ensureProjectExists(placement.projectId);
-        const { afterTaskId } = placement;
+        const afterTaskId =
+          placement.afterTaskId === undefined || placement.afterTaskId === null
+            ? placement.afterTaskId
+            : (yield* readLiveTaskOrFail(placement.afterTaskId)).id;
         if (afterTaskId === id) {
           return yield* Effect.fail(
             createValidationError([
@@ -501,9 +612,6 @@ const make = Effect.gen(function* () {
               },
             ]),
           );
-        }
-        if (afterTaskId !== undefined && afterTaskId !== null) {
-          yield* readLiveTaskOrFail(afterTaskId);
         }
         const stage = placement.stage ?? before.stage;
         if (stage === "done" || stage === "dropped") {
@@ -637,19 +745,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Makes the Task of a Thread that found none to join, and returns it. It
-   * also records the new Task as the workspace's Task, replacing a row that
-   * names a Task that is deleted or finished. Nothing is recorded for a main
-   * workspace or for a Thread with no workspace.
+   * Makes a new Task from a Thread and returns it, without recording any
+   * workspace for it.
    *
    * The new Task is `exploring`, with priority `normal`, no description, no
    * labels and no provenance. It has the Thread's project only when that
    * project still exists: a fork can carry a deleted one, and a Task cannot
    * name it. The `task.created` event is stamped with `actor`.
    */
-  const makeThreadTask = (
+  const makeTaskFromThread = (
     session: { readonly title: string; readonly projectId: string | undefined },
-    workspaceId: string | null,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
     Effect.gen(function* () {
@@ -657,7 +762,7 @@ const make = Effect.gen(function* () {
         session.projectId !== undefined && (yield* tasks.projectExists(session.projectId))
           ? session.projectId
           : undefined;
-      const task = yield* insertTask(
+      return yield* insertTask(
         {
           title: session.title.trim() === "" ? UNTITLED_THREAD_TITLE : session.title,
           description: "",
@@ -669,6 +774,22 @@ const make = Effect.gen(function* () {
         },
         actor,
       );
+    });
+
+  /**
+   * Makes the Task of a Thread that found none to join, and returns it. It
+   * also records the new Task as the workspace's Task, replacing a row that
+   * names a Task that is deleted or finished. Nothing is recorded for a main
+   * workspace or for a Thread with no workspace. See `makeTaskFromThread` for
+   * the new Task.
+   */
+  const makeThreadTask = (
+    session: { readonly title: string; readonly projectId: string | undefined },
+    workspaceId: string | null,
+    actor: string,
+  ): Effect.Effect<Task, SqlError> =>
+    Effect.gen(function* () {
+      const task = yield* makeTaskFromThread(session, actor);
       if (workspaceId !== null) {
         yield* tasks.recordWorkspaceTask(workspaceId, task.id, yield* nowIso);
       }
@@ -676,6 +797,18 @@ const make = Effect.gen(function* () {
     });
 
   return {
+    /**
+     * Returns the Task an id stands for: the Task it was merged into, or the
+     * id itself when the Task was not merged or does not exist. It follows one
+     * hop, because a merge repoints everything merged into its source. It
+     * checks no grant and reads one row.
+     *
+     * A writer that stores a Task id on a row of its own (a session, a run, a
+     * workspace) calls this in the transaction that writes it, so a merge
+     * cannot bring the old id back.
+     */
+    resolveTaskId: tasks.resolveTaskId,
+
     /** Returns one page of the tasks that match a filter. */
     query: (
       input: QueryInput,
@@ -696,7 +829,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns one task by id, including its provenance. Fails with `NotFound`
-     * if the task does not exist or has been deleted.
+     * if the task does not exist or has been deleted. The id of a Task that
+     * was merged into another returns the survivor, whose `id` differs: the
+     * caller should replace the id it holds.
      */
     read: (id: Id): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
@@ -852,6 +987,130 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Merges the Task `id` (the source) into the Task `input.intoTaskId` (the
+     * survivor), as the user, and returns the survivor. Only the user merges:
+     * a session or a workflow step is refused with `Forbidden`.
+     *
+     * The survivor keeps its title, stage, project, priority and board rank.
+     * Labels are united, and a non-empty source description is appended under
+     * a line naming the source's title. In one transaction the source's
+     * sessions, runs, workspace links and provenance move to the survivor, the
+     * survivor gains a provenance entry naming the source, and a failure the
+     * source shows moves too. A read of the source's id then returns the
+     * survivor (`resolveTaskId`).
+     *
+     * Fails with `NotFound` when either Task does not exist or is deleted, with
+     * `InvalidState` when either is at `done` or `dropped`, and with
+     * `Validation` when the Tasks are the same, one is already merged, or the
+     * result would hold more labels or a longer description than a Task may.
+     */
+    merge: (
+      id: Id,
+      input: TaskMergeInput,
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.merge", ONLY_THE_USER_MERGES);
+        const stamp = yield* currentStamp;
+        if (id === input.intoTaskId) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["intoTaskId"],
+                message: "a task cannot be merged into itself; name another task to merge it into",
+              },
+            ]),
+          );
+        }
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            // Both ids are taken as they are, never followed to a survivor:
+            // merging into or from a merged Task would hide the redirect.
+            const sourceId = id;
+            const targetId = input.intoTaskId;
+            const sourceState = yield* requireMergeableTask(sourceId);
+            const targetState = yield* requireMergeableTask(targetId);
+            const source = Option.getOrThrow(yield* tasks.live(sourceId));
+            const target = Option.getOrThrow(yield* tasks.live(targetId));
+
+            const addedLabels = source.labels.filter((label) => !target.labels.includes(label));
+            if (target.labels.length + addedLabels.length > MAX_TASK_LABELS) {
+              return yield* Effect.fail(
+                createValidationError([
+                  {
+                    path: ["intoTaskId"],
+                    message:
+                      `merging would give the task ${String(target.labels.length + addedLabels.length)} labels, ` +
+                      `and a task carries at most ${String(MAX_TASK_LABELS)}; ` +
+                      "remove some labels from either task, then merge again",
+                  },
+                ]),
+              );
+            }
+            const description = joinMergedDescriptions(target, source);
+            if (description.length > MAX_TASK_DESCRIPTION_LENGTH) {
+              return yield* Effect.fail(
+                createValidationError([
+                  {
+                    path: ["intoTaskId"],
+                    message:
+                      `merging would make the description ${String(description.length)} characters long, ` +
+                      `and a task holds at most ${String(MAX_TASK_DESCRIPTION_LENGTH)}; ` +
+                      "shorten the description of either task, then merge again",
+                  },
+                ]),
+              );
+            }
+
+            yield* tasks.markMerged(sourceId, targetId);
+            yield* linkOwners.moveTaskLinks(sourceId, targetId);
+            yield* tasks.moveWorkspaces(sourceId, targetId);
+            // The entries move before the survivor gains its own, and unedited:
+            // Tracking joins them to the runs, which moved just above.
+            yield* tasks.moveProvenance(sourceId, targetId);
+
+            // The failure the survivor shows is the newer of the two, and a
+            // merge always raises the revision, so a recovery from before it
+            // cannot overwrite the result.
+            const failedRunId =
+              sourceState.failedRunId === undefined || targetState.failedRunId === undefined
+                ? (sourceState.failedRunId ?? targetState.failedRunId)
+                : yield* tasks.chooseNewerRun(sourceState.failedRunId, targetState.failedRunId);
+            yield* tasks.recordMergedFailure(targetId, failedRunId);
+
+            // Through `updateTask`, so the survivor gets its `task.updated`
+            // event, with the merge entry and what the labels and the
+            // description gained.
+            const survivor = yield* updateTask(
+              targetId,
+              {
+                ...(description === target.description ? {} : { description }),
+                ...(addedLabels.length === 0 ? {} : { addLabels: addedLabels }),
+                provenance: [{ mergedTaskId: sourceId }],
+              },
+              stamp,
+            );
+            yield* tasks.deleteSummary(sourceId);
+            // The survivor gained Threads and runs. `updateTask` has marked its summary when the
+            // description changed, and marking twice would raise the revision twice.
+            if (description === target.description) yield* markSummaryDirty(targetId);
+            // The entry names both Tasks, so clients read both again.
+            yield* audit.append({
+              kind: "task.merged",
+              actor: stamp,
+              record: { topic: "task", ids: [targetId, sourceId] },
+              payload: { taskId: sourceId, intoTaskId: targetId, snapshot: source },
+              at: survivor.updatedAt,
+            });
+            return survivor;
+          }),
+        );
+      }),
+
+    /**
      * Returns the Task a session being written joins, or `undefined` when it
      * joins none. `created` is true when the join made the Task for this
      * session, and false when the session joined an existing one. The first
@@ -861,7 +1120,10 @@ const make = Effect.gen(function* () {
      *    that can be refused: it fails with `NotFound` when there is no such
      *    Task or it is deleted, and with `InvalidState` when it is at `done`
      *    or `dropped`, because new work on a finished Task is a contradiction
-     *    the caller should hear about.
+     *    the caller should hear about. A `thread` that the user starts this
+     *    way also ends the Task's failure and raises its `failure_revision`,
+     *    because the user has taken the Task up. A Thread started this way by
+     *    a session leaves the failure as it is, and no other source ends it.
      * 2. `callerTaskId`, the Task of the session that spawned this one, or of
      *    the parent of a fork. Only a joinable Task counts.
      * 3. The Task of the workspace, when the workspace is ephemeral and the
@@ -898,17 +1160,44 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const joinableTaskId =
+          // A Task merged into another is joined as the survivor. This reads
+          // inside the transaction that writes the join, so a merge cannot come
+          // between the read and the write.
+          const requestedTaskId =
             input.requestedTaskId === undefined
-              ? yield* readJoinableTaskId(input.callerTaskId)
-              : yield* requireJoinableTask(input.requestedTaskId);
+              ? undefined
+              : yield* tasks.resolveTaskId(input.requestedTaskId);
+          const callerTaskId =
+            input.callerTaskId === undefined
+              ? undefined
+              : yield* tasks.resolveTaskId(input.callerTaskId);
+          const joinableTaskId =
+            requestedTaskId === undefined
+              ? yield* readJoinableTaskId(callerTaskId)
+              : yield* requireJoinableTask(requestedTaskId);
+          // The user took the Task up by naming it, so its failure is handled. An agent that
+          // starts a Thread on the Task has handled nothing yet.
+          const actor = yield* CurrentActor;
+          if (
+            requestedTaskId !== undefined &&
+            input.sessionKind === "thread" &&
+            actor._tag === "user"
+          ) {
+            if (yield* tasks.endFailure(requestedTaskId)) {
+              yield* announceTaskCardChange(requestedTaskId);
+            }
+          }
           const taskId = yield* joinExistingTaskRecordingWorkspace({
             joinableTaskId,
             workspaceId: input.workspaceId,
           });
-          if (taskId !== undefined) return { taskId, created: false };
+          if (taskId !== undefined) {
+            if (input.sessionKind === "thread") yield* markSummaryDirty(taskId);
+            return { taskId, created: false };
+          }
           if (input.sessionKind === "agent") return undefined;
           const task = yield* makeThreadTask(input, input.workspaceId, yield* currentStamp);
+          yield* markSummaryDirty(task.id);
           return { taskId: task.id, created: true };
         }),
       ),
@@ -937,14 +1226,52 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const keptTaskId = yield* readJoinableTaskId(input.currentTaskId);
-          if (keptTaskId !== undefined) return keptTaskId;
-          const taskId = yield* joinExistingTaskRecordingWorkspace({
-            joinableTaskId: undefined,
-            workspaceId: input.workspaceId,
-          });
-          if (taskId !== undefined) return taskId;
-          return (yield* makeThreadTask(input, input.workspaceId, input.actor)).id;
+          // A Thread whose Task was merged away keeps the survivor.
+          const keptTaskId = yield* readJoinableTaskId(
+            input.currentTaskId === undefined
+              ? undefined
+              : yield* tasks.resolveTaskId(input.currentTaskId),
+          );
+          const taskId =
+            keptTaskId ??
+            (yield* joinExistingTaskRecordingWorkspace({
+              joinableTaskId: undefined,
+              workspaceId: input.workspaceId,
+            })) ??
+            (yield* makeThreadTask(input, input.workspaceId, input.actor)).id;
+          // The Task has a live Thread again, in each of the three cases.
+          yield* markSummaryDirty(taskId);
+          return taskId;
+        }),
+      ),
+
+    /**
+     * Returns the id of the Task a Thread is moved to (`session.moveToTask`).
+     * With `requestedTaskId` it is that Task, or its survivor when it was
+     * merged (`resolveTaskId`), and it must be joinable: it fails with
+     * `NotFound` when there is no such Task or it is deleted, and with
+     * `InvalidState` when it is at `done` or `dropped`. Without it, it makes a
+     * new Task from the Thread (`title` and `projectId`), stamped with
+     * `actor`, and returns that.
+     *
+     * Unlike a join, it records no workspace for a new Task: the workspace
+     * keeps its Task, so the next Thread started there still joins that one.
+     * It checks no grant and joins the caller's transaction. It does not move
+     * the Thread, and marks no summary: the caller does both.
+     */
+    chooseTaskForMovedThread: (input: {
+      readonly requestedTaskId: string | undefined;
+      readonly title: string;
+      readonly projectId: string | undefined;
+      readonly actor: string;
+    }): Effect.Effect<string, NotFound | InvalidState | SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (input.requestedTaskId !== undefined) {
+            return yield* requireJoinableTask(yield* tasks.resolveTaskId(input.requestedTaskId));
+          }
+          return (yield* makeTaskFromThread(input, input.actor)).id;
         }),
       ),
 
@@ -1004,7 +1331,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Puts back the failure that the start of the run `runId` ended: the
-     * Undo of Try again, and of a Thread started by name. Runs in the
+     * Undo of Try again. A Thread started by name ends a failure too, but it
+     * writes no row to restore from, so it has no Undo. Runs in the
      * caller's transaction, and checks everything in one statement. It
      * restores only when the start left a row not used before, the Task is
      * not deleted or finished, and the Task's `failure_revision` is still the
@@ -1012,7 +1340,8 @@ const make = Effect.gen(function* () {
      * Drop all raise the revision, so none of them is ever overwritten.
      *
      * Returns `{ restored: true }`, or `{ restored: false, reason }` having
-     * changed nothing.
+     * changed nothing. A restore writes a `task.failureRestored` audit entry
+     * stamped with the current actor, which dies when there is none.
      */
     restoreRecoveredFailure: (input: {
       readonly runId: string;
@@ -1020,8 +1349,15 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const taskId = yield* tasks.restoreFailure(input.runId, yield* nowIso);
+          const at = yield* nowIso;
+          const taskId = yield* tasks.restoreFailure(input.runId, at);
           if (Option.isSome(taskId)) {
+            yield* audit.append({
+              kind: "task.failureRestored",
+              actor: yield* currentStamp,
+              payload: { taskId: taskId.value, runId: input.runId },
+              at,
+            });
             yield* announceTaskCardChange(taskId.value);
             return { restored: true, taskId: taskId.value } as const;
           }
@@ -1034,6 +1370,7 @@ const make = Effect.gen(function* () {
           if (Option.isNone(state) || state.value.deleted) {
             return { restored: false, reason: "task-deleted" } as const;
           }
+          if (state.value.merged) return { restored: false, reason: "task-merged" } as const;
           if (isFinishedStage(state.value.stage)) {
             return { restored: false, reason: "task-finished" } as const;
           }
@@ -1042,11 +1379,49 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the row that the start of the run `runId` left when it ended a
+     * failure (the Task, the failure it ended, and the first answer to its
+     * Undo), or none when the start ended no failure. Checks no grant: the
+     * caller of `task.undoTryAgain` has done that.
+     */
+    readFailureRecovery: (runId: string) => tasks.readFailureRecovery(runId),
+
+    /**
+     * Stores the first answer to the Undo of the run start `runId`, in the
+     * caller's transaction, so that a repeat of the Undo returns it. Does
+     * nothing when an answer is stored already.
+     */
+    storeTryAgainUndo: (runId: string, answer: TryAgainUndo): Effect.Effect<void, SqlError> =>
+      tasks.storeTryAgainUndo(runId, answer),
+
+    /**
+     * Marks the summary of the Task `taskId` as out of date, in the caller's
+     * transaction, and wakes the summary writer once that transaction
+     * commits (`TaskSummaryWake`). Call it from the transaction of the change
+     * the summary reads, so a crash cannot lose the change.
+     *
+     * When the mark starts a dirty cycle on a Task that has a written summary,
+     * it announces the Task as a derived change (as the summary writer does), so
+     * clients draw the summary as stale. Later marks of the same cycle announce
+     * nothing.
+     *
+     * It raises the row's `dirty_revision`. It sets `dirty_at` to now only
+     * when the row is clean, so `dirty_at` is the first change since the last
+     * summary and the writer waits `SUMMARY_QUIET_SECONDS` after that one;
+     * later changes do not push it back. It keeps
+     * `next_attempt_at`, so changes never lift the pacing of the model calls.
+     * A Task that is deleted, merged or finished is left alone. It checks no
+     * grant and waits for nothing.
+     */
+    markSummaryDirty,
+
+    /**
      * Gives the Task made for a Thread the Thread's generated title. It
-     * renames the Task only when the Task is not deleted or finished, its
-     * title is still `from` (the title it was made with), and `to` is a
+     * renames the Task only when the Task is not deleted, merged or finished,
+     * its title is still `from` (the title it was made with), and `to` is a
      * different title. A Task someone renamed since is left alone. Does
-     * nothing otherwise.
+     * nothing otherwise. `taskId` is taken as it is, never followed to a
+     * survivor: a Task merged away must not rename the Task it joined.
      *
      * It runs after a commit with no request behind it, so the rename is
      * stamped with the system actor and never reads the current one
@@ -1078,7 +1453,9 @@ const make = Effect.gen(function* () {
      * Soft-deletes a task, and withdraws the open decisions about it. The row
      * stays, so the log and the runs that reference the task still point at
      * something. Fails with `NotFound` if the task does not exist or is
-     * already deleted.
+     * already deleted. It also fails with
+     * `NotFound` for a task that was merged into another, naming the survivor,
+     * because an old id must never delete the task that took over.
      */
     delete: (
       id: Id,
@@ -1090,18 +1467,32 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const actor = yield* currentStamp;
+            // The id is taken as it is, never followed to a survivor: a stale id
+            // (an old link, a CLI call) must not delete the Task that took over.
+            const survivorId = yield* tasks.resolveTaskId(id);
+            if (survivorId !== id) {
+              const survivor = yield* tasks.live(survivorId);
+              return yield* Effect.fail(
+                createNotFoundError(
+                  Option.isSome(survivor)
+                    ? `this task was merged into ${survivor.value.title} (${survivorId}); delete that task if you mean it`
+                    : `this task was merged into another task (${survivorId}), which no longer exists`,
+                ),
+              );
+            }
             const task = yield* readLiveTaskOrFail(id);
-            yield* tasks.softDelete(id, at);
+            yield* tasks.softDelete(task.id, at);
+            yield* tasks.clearSummaryDirty(task.id);
             // The event holds a final snapshot, because nothing can read the
             // row afterwards.
             yield* audit.append({
               kind: "task.deleted",
               actor,
-              record: { topic: "task", id },
-              payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
+              record: { topic: "task", id: task.id },
+              payload: { taskId: task.id, snapshot: { ...task, deletedAt: at } },
               at,
             });
-            yield* notifier.withdrawDecisionsAbout([{ kind: "task", id }], "task deleted");
+            yield* notifier.withdrawDecisionsAbout([{ kind: "task", id: task.id }], "task deleted");
             return {};
           }),
         );
@@ -1117,5 +1508,5 @@ export class TaskService extends Context.Service<TaskService, Effect.Success<typ
 export const TaskServiceLayer: Layer.Layer<
   TaskService,
   never,
-  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier
+  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier | TaskLinkOwners
 > = Layer.effect(TaskService)(make);

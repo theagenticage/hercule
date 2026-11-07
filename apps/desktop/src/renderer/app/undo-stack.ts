@@ -63,6 +63,8 @@ export interface UndoStack<Page> {
    * stack, such as when an undo has already taken it.
    */
   readonly remove: (gesture: Gesture<Page>) => void;
+  /** Whether `gesture` is on the stack now. False once it was removed, undone or cleared. */
+  readonly holds: (gesture: Gesture<Page>) => boolean;
   /**
    * Reverses the newest gesture and removes it. Never rejects: a failure is
    * an outcome the screen can say. `page` goes to the gesture (see
@@ -87,6 +89,7 @@ export const createUndoStack = <Page>(): UndoStack<Page> => {
     remove: (gesture) => {
       gestures = gestures.filter((each) => each !== gesture);
     },
+    holds: (gesture) => gestures.includes(gesture),
     undo: async (page) => {
       if (running) return { kind: "busy" };
       const newest = gestures.at(-1);

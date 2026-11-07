@@ -18,11 +18,13 @@ import { NotifierLayer } from "../notifications";
 import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer, type QueryInput, type TaskPage } from "./index";
+import { TaskLinkOwnersLayer } from "../daemon/tasks";
 
 type Deps = TaskService | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
+  Layer.provideMerge(TaskLinkOwnersLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

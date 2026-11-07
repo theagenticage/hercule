@@ -8,6 +8,7 @@ import type { DropPlace } from "@hercule/client-core/work";
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
+  findMergeCandidate,
   isSameDropPlace,
   toBoardPoint,
   type BoardGeometry,
@@ -23,6 +24,10 @@ const cellWithMiddles = (...middles: number[]): CellBox => ({
   rows: middles.map((middle, index) => ({
     id: `card-${String(index)}`,
     element: element(),
+    left: 500,
+    right: 640,
+    top: middle - 40,
+    bottom: middle + 40,
     middle,
   })),
 });
@@ -203,5 +208,59 @@ describe("computeEdgeScrollSpeed", () => {
   it("measures the edges from the board's own top and bottom", () => {
     expect(computeEdgeScrollSpeed(300, 200, 900)).toBeLessThan(0);
     expect(computeEdgeScrollSpeed(300, 0, 900)).toBe(0);
+  });
+});
+
+describe("findMergeCandidate", () => {
+  // The cards of the Building cell are 80 tall and span x 500 to 640, with middles at 150, 260 and 370.
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly x: number;
+    readonly y: number;
+    readonly expected: string | null;
+  }> = [
+    { name: "finds a card for a point at its middle", x: 570, y: 260, expected: "card-1" },
+    {
+      name: "finds it a little off the middle, inside its middle 40%",
+      x: 510,
+      y: 260 + 15,
+      expected: "card-1",
+    },
+    { name: "finds none in the top 30% of a card", x: 570, y: 260 - 40 + 23, expected: null },
+    { name: "finds none in the bottom 30% of a card", x: 570, y: 260 + 40 - 23, expected: null },
+    { name: "finds none left of the card", x: 499, y: 260, expected: null },
+    { name: "finds none right of the card", x: 641, y: 260, expected: null },
+    { name: "finds none in the gap between two cards", x: 570, y: 205, expected: null },
+    { name: "finds none in a folded lane", x: 570, y: 420, expected: null },
+  ];
+  it.each(cases)("$name", ({ x, y, expected }) => {
+    expect(findMergeCandidate(GEOMETRY, x, y)?.cardId ?? null).toBe(expected);
+  });
+
+  it("names the place right after the card, so the card stays under the pointer", () => {
+    expect(findMergeCandidate(GEOMETRY, 570, 150)?.place).toEqual({
+      kind: "cell",
+      laneId: "storefront",
+      stage: "building",
+      beforeCardId: "card-1",
+    });
+    expect(findMergeCandidate(GEOMETRY, 570, 370)?.place).toEqual({
+      kind: "cell",
+      laneId: "storefront",
+      stage: "building",
+      beforeCardId: null,
+    });
+  });
+
+  it("does not name a place past the last one a drop may take", () => {
+    const closed: BoardGeometry = {
+      ...GEOMETRY,
+      lanes: [
+        openLane("storefront", 100, 400, {
+          building: { ...cellWithMiddles(150, 260, 370), lastIndex: 2 },
+        }),
+      ],
+    };
+    expect(findMergeCandidate(closed, 570, 370)?.place).toMatchObject({ beforeCardId: "card-2" });
   });
 });

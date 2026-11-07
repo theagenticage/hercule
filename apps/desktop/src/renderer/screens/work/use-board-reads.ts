@@ -3,11 +3,12 @@ import { flushSync } from "react-dom";
 import {
   buildArrivalKey,
   holdBackBoardChanges,
+  type EndStage,
   type HeldChange,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
-import { fadeInCards, riseArrival } from "./board-flights";
+import { fadeInCards, returnCard, riseArrival } from "./board-flights";
 import { flipBoard } from "./flip-board";
 import { useHeldChanges } from "./use-held-changes";
 import "./motion.css";
@@ -16,8 +17,13 @@ const NOTHING_RELEASED: ReadonlySet<string> = new Set();
 
 /** The board the screen draws, and what the reads did to it. */
 export interface BoardReads {
-  /** The board to draw, or `undefined` until the first read ends. */
-  readonly board: WorkBoard | undefined;
+  /**
+   * The drawn board: the logical board with the changes nobody here caused
+   * held back. Only what the screen draws reads it (the lanes, the Filter,
+   * Find, the counts); every action reads the logical board. `undefined`
+   * until the first read ends.
+   */
+  readonly drawnBoard: WorkBoard | undefined;
   /** What the board did by itself last, such as "Review PR failed", for the toolbar's line. `null` when nothing is worth saying. */
   readonly note: string | null;
   /**
@@ -26,6 +32,14 @@ export interface BoardReads {
    * user's hand is still.
    */
   readonly noteAddedTask: (taskId: string) => void;
+  /**
+   * Tells the board that the card of `taskId`, which was marked Done or
+   * Dropped (`how`), is about to be drawn again, because the user pressed Undo
+   * or the update was refused. The card is then let in at once and plays its
+   * way back (`returnCard`), instead of waiting for a still hand as a Task
+   * that arrived by itself does.
+   */
+  readonly noteReturnedTask: (taskId: string, how: EndStage) => void;
 }
 
 /** What the board has drawn, the read it was made from, and the changes released when it was made. */
@@ -33,11 +47,14 @@ interface Picture {
   readonly board: WorkBoard;
   readonly server: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
+  /** The Tasks the logical board left out when this picture was made. */
+  readonly hidden: ReadonlySet<string>;
 }
 
 /** What the screen gave `useBoardReads` at its last render. */
 interface Inputs {
-  readonly board: WorkBoard | undefined;
+  readonly logicalBoard: WorkBoard | undefined;
+  readonly hiddenIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
   readonly picture: Picture | undefined;
@@ -46,22 +63,28 @@ interface Inputs {
 /** Returns the picture to draw next, and the changes it holds back until the hand is still. */
 const decidePicture = (
   picture: Picture | undefined,
-  board: WorkBoard,
+  logicalBoard: WorkBoard,
+  hiddenIds: ReadonlySet<string>,
   serverBoard: WorkBoard | undefined,
   released: ReadonlySet<string>,
 ): { readonly next: Picture; readonly held: readonly HeldChange[] } => {
   const decided =
     picture === undefined
-      ? { board, held: [] }
-      : holdBackBoardChanges(picture.board, board, released);
-  return { next: { board: decided.board, server: serverBoard, released }, held: decided.held };
+      ? { board: logicalBoard, held: [] }
+      : holdBackBoardChanges(picture.board, logicalBoard, released, picture.hidden);
+  return {
+    next: { board: decided.board, server: serverBoard, released, hidden: hiddenIds },
+    held: decided.held,
+  };
 };
 
 /**
  * Decides what the Work board draws from what it reads, and plays what a read
- * changes. `board` is the board with the user's pending moves applied and
- * `serverBoard` the board as the last read gave it; a change of the second is
- * a read, and a change of only the first is the user's own move.
+ * changes. `logicalBoard` is the board with everything the user did applied
+ * (`buildLogicalBoard`), `hiddenIds` the Tasks it left out on purpose, and
+ * `serverBoard` the board as the last read gave it; a change of the last is a
+ * read, and a change of only the logical board is the user's own change.
+ * Returns the drawn board.
  *
  * - A user's own move is drawn at once, in the render: the code that makes it
  *   plays it.
@@ -85,13 +108,15 @@ const decidePicture = (
  * Nothing is measured unless a read changes what is drawn.
  */
 export const useBoardReads = ({
-  board,
+  logicalBoard,
+  hiddenIds,
   serverBoard,
   projects,
   isCarrying,
   scrollRef,
 }: {
-  readonly board: WorkBoard | undefined;
+  readonly logicalBoard: WorkBoard | undefined;
+  readonly hiddenIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly projects: readonly WorkProject[];
   readonly isCarrying: boolean;
@@ -104,11 +129,11 @@ export const useBoardReads = ({
 
   // The drawn board is derived while rendering, and the picture is kept to
   // compare the next render with.
-  let drawn = board;
+  let drawn = logicalBoard;
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
-  if (board !== undefined) {
-    const decided = decidePicture(picture, board, serverBoard, released);
+  if (logicalBoard !== undefined) {
+    const decided = decidePicture(picture, logicalBoard, hiddenIds, serverBoard, released);
     held = decided.held;
     const isRead =
       picture !== undefined && (serverBoard !== picture.server || released !== picture.released);
@@ -126,10 +151,11 @@ export const useBoardReads = ({
     }
   }
 
-  const latest = useRef<Inputs>({ board, serverBoard, released, picture });
+  const latest = useRef<Inputs>({ logicalBoard, hiddenIds, serverBoard, released, picture });
   const ownTaskIds = useRef(new Set<string>());
+  const returnedTasks = useRef(new Map<string, EndStage>());
   useLayoutEffect(() => {
-    latest.current = { board, serverBoard, released, picture };
+    latest.current = { logicalBoard, hiddenIds, serverBoard, released, picture };
   });
 
   // Draws a read: measures the board, commits the new picture, and plays what
@@ -140,9 +166,20 @@ export const useBoardReads = ({
     let isCancelled = false;
     queueMicrotask(() => {
       if (isCancelled) return;
-      const { board: latestBoard, serverBoard: latestServer, picture: shown } = latest.current;
+      const {
+        logicalBoard: latestBoard,
+        hiddenIds: latestHidden,
+        serverBoard: latestServer,
+        picture: shown,
+      } = latest.current;
       if (latestBoard === undefined || shown === undefined) return;
-      const { next } = decidePicture(shown, latestBoard, latestServer, latest.current.released);
+      const { next } = decidePicture(
+        shown,
+        latestBoard,
+        latestHidden,
+        latestServer,
+        latest.current.released,
+      );
       const commit = (): void => {
         flushSync(() => {
           setPicture(next);
@@ -154,19 +191,25 @@ export const useBoardReads = ({
         return;
       }
       const shownIds = new Set(shown.board.cards.map((card) => card.id));
-      const isAddedByUser = next.board.cards.some(
-        (card) => !shownIds.has(card.id) && ownTaskIds.current.has(card.id),
+      const isCausedByUser = next.board.cards.some(
+        (card) =>
+          !shownIds.has(card.id) &&
+          (ownTaskIds.current.has(card.id) || returnedTasks.current.has(card.id)),
       );
-      const { born } = flipBoard(scroller, isAddedByUser ? "travel" : "self", commit);
+      const { born } = flipBoard(scroller, isCausedByUser ? "travel" : "self", commit);
       for (const card of born) {
         const id = card.dataset["cardId"];
         if (id === undefined) continue;
         const arrivalKey = buildArrivalKey(id);
-        if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
+        const returnedHow = returnedTasks.current.get(id);
+        if (returnedHow !== undefined) {
+          returnCard(scroller, card, returnedHow, card.dataset["stage"] ?? "");
+        } else if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
         else if (next.released.has(arrivalKey) && !shown.released.has(arrivalKey))
           riseArrival(card);
         else fadeInCards([card], "self");
       }
+      returnedTasks.current.clear();
     });
     return () => {
       isCancelled = true;
@@ -175,7 +218,7 @@ export const useBoardReads = ({
 
   const note = useHeldChanges({
     held,
-    board,
+    board: logicalBoard,
     projects,
     isCarrying,
     scrollRef,
@@ -189,5 +232,10 @@ export const useBoardReads = ({
     setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
   }, []);
 
-  return { board: drawn, note, noteAddedTask };
+  const noteReturnedTask = useCallback((taskId: string, how: EndStage): void => {
+    returnedTasks.current.set(taskId, how);
+    setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
+  }, []);
+
+  return { drawnBoard: drawn, note, noteAddedTask, noteReturnedTask };
 };

@@ -51,6 +51,7 @@ const TASK: BoardTask = {
   createdAt: AT,
   stageChangedAt: AT,
   failedRunId: undefined,
+  summary: undefined,
 };
 
 const NO_FACTS: BoardCardFacts = {
@@ -637,5 +638,83 @@ describe("the query plan of the board's Task statement", () => {
     expect(plan).toContain("SCAN t USING INDEX tasks_board_rank");
     expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
     expect(plan.some((step) => step.startsWith("SCAN t") && !step.includes("INDEX"))).toBe(false);
+  });
+});
+
+describe("the summary on a card", () => {
+  const WRITTEN_AT = "2026-10-20T11:00:00.000Z";
+  const SUMMARY = {
+    line: "Three designs, depots worried.",
+    standing: "Three refund designs are drawn. The depots object to the second.",
+    left: "Pick a design.",
+  };
+
+  /** Writes one Task, lets `arrange` write its summary row, and returns the Task's card from the board. */
+  const readCardAfter = (
+    arrange: (taskId: string) => Effect.Effect<unknown, unknown, SqlClient.SqlClient>,
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* taskRepository;
+        const task = yield* inTransaction(repository.insert(NEW_TASK));
+        yield* inTransaction(arrange(task.id));
+        const board = yield* Effect.flatMap(TaskBoard, (reader) => reader.query());
+        return board.cards[0]!;
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(TestDatabase)),
+        ),
+        Effect.orDie,
+      ),
+    );
+
+  const write = (taskId: string) =>
+    Effect.flatMap(taskRepository, (repository) =>
+      repository.writeSummary({ taskId, dirtyRevision: 1, summary: SUMMARY, at: WRITTEN_AT }),
+    );
+  const markDirty = (taskId: string) =>
+    Effect.flatMap(taskRepository, (repository) => repository.markSummaryDirty(taskId, AT));
+  const fail = (taskId: string) =>
+    Effect.flatMap(taskRepository, (repository) =>
+      repository.writeSummaryFailure({
+        taskId,
+        dirtyRevision: 2,
+        reason: "no model",
+        at: AT,
+        chooseNextAttempt: () => AT,
+      }),
+    );
+
+  it.each([
+    ["no row", () => Effect.void, undefined],
+    ["a row that was only marked dirty", markDirty, undefined],
+    [
+      "a written summary",
+      (taskId: string) => Effect.andThen(markDirty(taskId), write(taskId)),
+      { ...SUMMARY, generatedAt: WRITTEN_AT, stale: false },
+    ],
+    [
+      "a written summary and a change since",
+      (taskId: string) =>
+        Effect.andThen(Effect.andThen(markDirty(taskId), write(taskId)), markDirty(taskId)),
+      { ...SUMMARY, generatedAt: WRITTEN_AT, stale: true },
+    ],
+    [
+      "a written summary and a failed attempt since",
+      (taskId: string) =>
+        Effect.andThen(
+          Effect.andThen(Effect.andThen(markDirty(taskId), write(taskId)), markDirty(taskId)),
+          fail(taskId),
+        ),
+      { ...SUMMARY, generatedAt: WRITTEN_AT, stale: true },
+    ],
+  ])("shows, for %s, the summary %j", async (_name, arrange, expected) => {
+    const card = await readCardAfter(arrange);
+
+    expect(card.summary).toEqual(expected);
+    // A summary is a description: the facts a card shows from real rows are unchanged.
+    expect(card).not.toHaveProperty("openQuestion");
+    expect(card).not.toHaveProperty("failure");
   });
 });
