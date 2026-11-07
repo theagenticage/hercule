@@ -21,8 +21,9 @@
  * The service also decides which Task a new or reopened Thread belongs to
  * (`joinSession`, `rejoinThread`) and keeps the Task made for a Thread in step
  * with the Thread's generated title (`adoptGeneratedTitle`). It takes plain
- * values and reads no other domain: the sessions and the workspaces are known
- * to it only by the ids and the workspace kind its caller passes. A Task is
+ * values: the sessions and the workspaces are known to it only by the ids its
+ * caller passes. The one thing it reads from them is the kind of a workspace,
+ * in the repository, as it reads `projects`. A Task is
  * joinable when it is neither deleted nor finished (`isFinishedStage`).
  */
 import type * as Arr from "effect/Array";
@@ -61,7 +62,6 @@ import {
   type TaskStatus,
   type TaskUpdatedEventPayload,
   type Unauthenticated,
-  type Workspace,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
@@ -158,13 +158,6 @@ const NO_SUCH_PROJECT = "no such project";
  * of the Task fail.
  */
 const UNTITLED_THREAD_TITLE = "Untitled thread";
-
-/** The Task a session joined, and the title stored on it when the join made it. */
-export interface JoinedTask {
-  readonly taskId: string;
-  /** The Task's title when the join made the Task, or undefined when it joined an existing one. */
-  readonly madeTitle: string | undefined;
-}
 
 /** The message for a spawn that names a finished Task. */
 const buildFinishedTaskRefusal = (stage: TaskStage): string =>
@@ -376,7 +369,7 @@ const make = Effect.gen(function* () {
    * reads its `stage`. The `actor` stamps the row's provenance and the event.
    * The caller has checked that the project, if any, exists.
    */
-  const writeTask = (
+  const insertTask = (
     fields: Pick<
       NewTask,
       "id" | "title" | "description" | "stage" | "priority" | "labels" | "projectId" | "provenance"
@@ -398,22 +391,6 @@ const make = Effect.gen(function* () {
         yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
         yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
         return task;
-      }),
-    );
-
-  /**
-   * Checks that the project exists and writes a new task (`writeTask`), in the
-   * caller's transaction. Fails with `NotFound` if the project does not exist.
-   */
-  const insertTask = (
-    fields: Parameters<typeof writeTask>[0],
-    actor: string,
-  ): Effect.Effect<Task, NotFound | SqlError> =>
-    withTransaction(
-      sql,
-      Effect.gen(function* () {
-        yield* ensureProjectExists(fields.projectId);
-        return yield* writeTask(fields, actor);
       }),
     );
 
@@ -454,36 +431,35 @@ const make = Effect.gen(function* () {
    *
    * 1. `joinableTaskId`, a Task the caller has already checked is joinable;
    * 2. the Task of the workspace, when the workspace is ephemeral. A main
-   *    workspace is never read: sharing one says nothing about being the same
-   *    work.
+   *    workspace has no row to read: sharing one says nothing about being the
+   *    same work.
    *
    * Returns `undefined` when neither gives a Task. When a Task is returned and
-   * the workspace is ephemeral with no joinable Task of its own, this writes
-   * the workspace's row (`task_workspaces`) to name the returned Task, so the
-   * next Thread in the workspace joins it too.
+   * the workspace had no joinable Task of its own, this records the Task as the
+   * workspace's (`task_workspaces`), so the next Thread in the workspace joins
+   * it too. That write does nothing for a main workspace.
    */
   const joinExistingTaskRecordingWorkspace = (input: {
     readonly joinableTaskId: string | undefined;
-    readonly workspace: Pick<Workspace, "id" | "kind"> | undefined;
+    readonly workspaceId: string | null;
   }): Effect.Effect<string | undefined, SqlError> =>
     Effect.gen(function* () {
-      const ephemeral = input.workspace?.kind === "ephemeral" ? input.workspace : undefined;
       const workspaceTaskId =
-        ephemeral === undefined
+        input.workspaceId === null
           ? undefined
-          : Option.getOrUndefined(yield* tasks.readJoinableTaskIdOfWorkspace(ephemeral.id));
+          : Option.getOrUndefined(yield* tasks.readJoinableTaskIdOfWorkspace(input.workspaceId));
       const taskId = input.joinableTaskId ?? workspaceTaskId;
-      if (taskId !== undefined && ephemeral !== undefined && workspaceTaskId === undefined) {
-        yield* tasks.recordWorkspaceTask(ephemeral.id, taskId, yield* nowIso);
+      if (taskId !== undefined && input.workspaceId !== null && workspaceTaskId === undefined) {
+        yield* tasks.recordWorkspaceTask(input.workspaceId, taskId, yield* nowIso);
       }
       return taskId;
     });
 
   /**
-   * Makes the Task of a Thread that found none to join, and returns it. When
-   * the workspace is ephemeral, it also records the new Task as the
-   * workspace's Task, replacing a row that names a Task that is deleted or
-   * finished.
+   * Makes the Task of a Thread that found none to join, and returns it. It
+   * also records the new Task as the workspace's Task, replacing a row that
+   * names a Task that is deleted or finished. Nothing is recorded for a main
+   * workspace or for a Thread with no workspace.
    *
    * The new Task is `exploring`, with priority `normal`, no description, no
    * labels and no provenance. It has the Thread's project only when that
@@ -492,7 +468,7 @@ const make = Effect.gen(function* () {
    */
   const makeThreadTask = (
     session: { readonly title: string; readonly projectId: string | undefined },
-    workspace: Pick<Workspace, "id" | "kind"> | undefined,
+    workspaceId: string | null,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
     Effect.gen(function* () {
@@ -500,7 +476,7 @@ const make = Effect.gen(function* () {
         session.projectId !== undefined && (yield* tasks.projectExists(session.projectId))
           ? session.projectId
           : undefined;
-      const task = yield* writeTask(
+      const task = yield* insertTask(
         {
           title: session.title.trim() === "" ? UNTITLED_THREAD_TITLE : session.title,
           description: "",
@@ -512,8 +488,8 @@ const make = Effect.gen(function* () {
         },
         actor,
       );
-      if (workspace?.kind === "ephemeral") {
-        yield* tasks.recordWorkspaceTask(workspace.id, task.id, yield* nowIso);
+      if (workspaceId !== null) {
+        yield* tasks.recordWorkspaceTask(workspaceId, task.id, yield* nowIso);
       }
       return task;
     });
@@ -568,17 +544,24 @@ const make = Effect.gen(function* () {
           caller._tag === "run" && !given.some((entry) => entry.runId === caller.runId)
             ? [...given, { runId: caller.runId }]
             : given;
-        return yield* insertTask(
-          {
-            title: decoded.title,
-            description: decoded.description,
-            stage: decoded.stage ?? "planned",
-            priority: decoded.priority ?? "normal",
-            labels: removeDuplicates(decoded.labels ?? []),
-            projectId: decoded.projectId,
-            provenance,
-          },
-          yield* currentStamp,
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* ensureProjectExists(decoded.projectId);
+            return yield* insertTask(
+              {
+                title: decoded.title,
+                description: decoded.description,
+                stage: decoded.stage ?? "planned",
+                priority: decoded.priority ?? "normal",
+                labels: removeDuplicates(decoded.labels ?? []),
+                projectId: decoded.projectId,
+                provenance,
+              },
+              actor,
+            );
+          }),
         );
       }),
 
@@ -656,9 +639,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the Task a session being written joins, or `undefined` when it
-     * joins none. `madeTitle` is the title stored on the Task when the join
-     * made the Task, and `undefined` when the session joined an existing one.
-     * The first source that gives a Task wins:
+     * joins none. `created` is true when the join made the Task for this
+     * session, and false when the session joined an existing one. The first
+     * source that gives a Task wins:
      *
      * 1. `requestedTaskId`, the Task the spawn named. It is the one source
      *    that can be refused: it fails with `NotFound` when there is no such
@@ -690,11 +673,14 @@ const make = Effect.gen(function* () {
     joinSession: (input: {
       readonly requestedTaskId: string | undefined;
       readonly callerTaskId: string | undefined;
-      readonly workspace: Pick<Workspace, "id" | "kind"> | undefined;
+      readonly workspaceId: string | null;
       readonly sessionKind: "thread" | "agent";
       readonly title: string;
       readonly projectId: string | undefined;
-    }): Effect.Effect<JoinedTask | undefined, NotFound | InvalidState | SqlError> =>
+    }): Effect.Effect<
+      { readonly taskId: string; readonly created: boolean } | undefined,
+      NotFound | InvalidState | SqlError
+    > =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -704,12 +690,12 @@ const make = Effect.gen(function* () {
               : yield* requireJoinableTask(input.requestedTaskId);
           const taskId = yield* joinExistingTaskRecordingWorkspace({
             joinableTaskId,
-            workspace: input.workspace,
+            workspaceId: input.workspaceId,
           });
-          if (taskId !== undefined) return { taskId, madeTitle: undefined };
+          if (taskId !== undefined) return { taskId, created: false };
           if (input.sessionKind === "agent") return undefined;
-          const task = yield* makeThreadTask(input, input.workspace, yield* currentStamp);
-          return { taskId: task.id, madeTitle: task.title };
+          const task = yield* makeThreadTask(input, input.workspaceId, yield* currentStamp);
+          return { taskId: task.id, created: true };
         }),
       ),
 
@@ -729,7 +715,7 @@ const make = Effect.gen(function* () {
      */
     rejoinThread: (input: {
       readonly currentTaskId: string | undefined;
-      readonly workspace: Pick<Workspace, "id" | "kind"> | undefined;
+      readonly workspaceId: string | null;
       readonly title: string;
       readonly projectId: string | undefined;
       readonly actor: string;
@@ -741,10 +727,10 @@ const make = Effect.gen(function* () {
           if (keptTaskId !== undefined) return keptTaskId;
           const taskId = yield* joinExistingTaskRecordingWorkspace({
             joinableTaskId: undefined,
-            workspace: input.workspace,
+            workspaceId: input.workspaceId,
           });
           if (taskId !== undefined) return taskId;
-          return (yield* makeThreadTask(input, input.workspace, input.actor)).id;
+          return (yield* makeThreadTask(input, input.workspaceId, input.actor)).id;
         }),
       ),
 

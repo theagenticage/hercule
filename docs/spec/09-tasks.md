@@ -205,7 +205,8 @@ Rules:
 - **A new Task** (row 4) takes the session's title, stage `exploring`, priority `normal` and the session's project, when that project still exists. A fork can carry a project that was deleted, and a Task cannot name one, so the project is left out then. A Task's title is never empty, so a session with a blank title gets a Task titled `Untitled thread`.
 - **The actor.** The Task made for a Thread is stamped with the actor behind the spawn or the reopen, and `task.created` fires for it ([Platform events](#platform-events)). When a matched event wakes the Thread (below), no request is behind it, so that actor is the system.
 - **No grant is checked.** Starting a Thread was already allowed by `session.spawn`, and the Task follows from it.
-- **It is atomic.** The Task is chosen in the same transaction as the session's write and the check that stops a retried call from placing a second session ([./11](./11-public-api-and-agent-surface.md) section 2, "Retrying a call"). A retried spawn makes no second Task. Writes are serial, so two first Threads started at once in one workspace run one after the other, and the second finds the first's row.
+- **The rule belongs to the tasks domain.** The rule and every write to a Task stay in the tasks domain (`TaskService.joinSession` and `rejoinThread`); the sessions domain only calls it. The rule takes plain values: the ids the spawn named, the session's kind, title and project, and its workspace's id. It reads the workspace's kind from the database, as the tasks domain reads `projects` to check a project id.
+- **It is atomic.** The session store (`sessions.create`) runs the rule inside its transaction, just before it writes the session. So the Task is chosen in the same transaction as the session's write and the check that stops a retried call from placing a second session ([./11](./11-public-api-and-agent-surface.md) section 2, "Retrying a call"). A retried spawn makes no second Task. Writes are serial, so two first Threads started at once in one workspace run one after the other, and the second finds the first's row.
 - **A join adds no provenance entry.** The link lives on the session, as links do ([Relations](#relations-project-runs-sessions)).
 
 ### A workspace's Task
@@ -214,7 +215,7 @@ A workspace's Task is an explicit row, never "the most recent session in this wo
 
 - **Reading (row 3).** The row's Task is accepted only when it is live. A row that points at a finished or deleted Task is ignored and then replaced by the next session that joins a Task, so reusing a folder after its Task is Done starts a new Task.
 - **Writing.** A row is written when a session joins a Task in an ephemeral workspace and the workspace has no row with a live Task. Keeping a Task is not joining: a Thread taken off Done that keeps its live Task writes no row.
-- **A main workspace never gets a row.** It is long-lived and shared by whatever runs in it, so sharing one says nothing about being the same work. This limits the inference only: rows 1 and 2 still apply, so a Thread in a main workspace gets row 1, 2 or 4. A workspace-less session has no row to read either.
+- **A main workspace never gets a row.** The row is written only when the workspace's kind is ephemeral, and the tasks domain reads that kind itself when it writes the row; a main workspace therefore has no row to read either. It is long-lived and shared by whatever runs in it, so sharing one says nothing about being the same work. This limits the inference only: rows 1 and 2 still apply, so a Thread in a main workspace gets row 1, 2 or 4. A workspace-less session has no row to read either.
 
 ### Taking a Thread off Done
 
@@ -235,7 +236,7 @@ A Thread's title may be replaced once by a generated one ([./02](./02-domain-mod
 - the Task is live; and
 - the Task's title still equals the cut-short title, so a title the user renamed is left alone.
 
-The rename is an ordinary Task update, stamped with the system actor because it runs after the request has finished.
+The rename is an ordinary Task update, stamped with the system actor because it runs after the request has finished. It happens in the same transaction as the Thread's own title change, so a failed rename leaves both titles as they were. The cut-short title to compare with is the Thread's title just before that change, because a Thread's title changes only through the generated title.
 
 ### Threads that exist at the upgrade
 

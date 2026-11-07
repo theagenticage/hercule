@@ -2064,11 +2064,15 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
         );
 
         yield* sessions
-          .setGeneratedTitleAndRole(sessionId, {
-            title: generated.title,
-            needsRefinement: generated.needsRefinement ?? false,
-            role: generated.role ?? "",
-          })
+          .setGeneratedTitleAndRole(
+            sessionId,
+            {
+              title: generated.title,
+              needsRefinement: generated.needsRefinement ?? false,
+              role: generated.role ?? "",
+            },
+            undefined,
+          )
           .pipe(Effect.provide(listener));
 
         const [stored] = yield* sql<{ readonly needs_refinement: number | null }>`

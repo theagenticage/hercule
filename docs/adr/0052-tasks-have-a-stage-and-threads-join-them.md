@@ -46,6 +46,6 @@ The exact rules, and what happens to Threads that already exist, are in [spec 09
 - Reusing a folder after its Task is Done starts a new Task, because the old link points at a finished Task.
 - Taking a Done Thread off Done can create a Task too, when the Thread has none or its Task is finished. A matched event can do that with no request behind it, so that Task is stamped with the system actor.
 - A harness resume is not a join. A Thread that was never marked Done keeps its Task, whatever stage the Task is at.
-- The tasks domain gains a method that decides a session's Task from plain values, and the sessions domain depends on tasks for reopening a Thread. The tasks domain reaches sessions only through a port.
+- The tasks domain gains the rule that decides a session's Task. It takes plain values (ids, the session's title and project, the workspace's id) and reads the workspace's kind from the database, as the tasks repository reads `projects`. The sessions domain depends on tasks: `sessions.create` runs the rule inside its transaction, and reopening a Thread calls it. All Task writes stay in the tasks domain. The tasks domain reaches sessions only through a port.
 - Threads that exist at the upgrade and are not Done or Archived get Tasks in the migration, with no events, so no workflow starts for them.
 - Removing `status` altogether stays possible later. It is a separate decision, and needs the stored values to be rewritten first.

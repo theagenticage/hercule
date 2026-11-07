@@ -642,10 +642,11 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns the id of the Task that the ephemeral workspace's row in
-     * `task_workspaces` names, or none when the workspace has no row or the
-     * Task is deleted or finished (the contract's `FINISHED_STAGES`). One
-     * query that joins the row to its Task.
+     * Returns the id of the Task that the workspace's row in `task_workspaces`
+     * names, or none when the workspace has no row or the Task is deleted or
+     * finished (the contract's `FINISHED_STAGES`). One query that joins the
+     * row to its Task. Only an ephemeral workspace ever has a row
+     * (`recordWorkspaceTask`), so a main workspace always reads as none.
      */
     readJoinableTaskIdOfWorkspace: (
       workspaceId: string,
@@ -665,6 +666,12 @@ const make = Effect.gen(function* () {
      * Records that the workspace belongs to the Task, replacing the row the
      * workspace already has. A row that names a finished Task is replaced this
      * way when the workspace is used again.
+     *
+     * Writes a row only for an ephemeral workspace: a main workspace is shared
+     * by whatever runs in it, so it has no Task of its own. A workspace that no
+     * longer exists writes nothing either. This is the one place that reads the
+     * workspace's `kind`. The repository reads this one column of a table it
+     * does not own, as `projectExists` reads `projects`.
      */
     recordWorkspaceTask: (
       workspaceId: string,
@@ -673,7 +680,8 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         INSERT INTO task_workspaces (workspace_id, task_id, joined_at)
-        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(taskId)}, ${at})
+        SELECT id, ${uuidFromString(taskId)}, ${at} FROM workspaces
+        WHERE id = ${uuidFromString(workspaceId)} AND kind = 'ephemeral'
         ON CONFLICT (workspace_id) DO UPDATE SET task_id = excluded.task_id,
                                                  joined_at = excluded.joined_at`),
 
