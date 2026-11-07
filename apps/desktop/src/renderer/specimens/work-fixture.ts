@@ -24,7 +24,6 @@ import type { Project, WorkBoard, WorkCard } from "@hercule/contract";
 import { buildProject } from "@hercule/client-core/threads/testing";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import type { WorkDisplay } from "../screens/work/work-toolbar";
 import type { SidebarRecords } from "./shell-page";
 
 const HOUR_MS = 3_600_000;
@@ -208,8 +207,6 @@ export interface WorkRecords {
   readonly board: WorkBoard;
   /** The ids of the lanes the user folded, which the screen keeps in `localStorage`. */
   readonly foldedLaneIds: readonly string[];
-  /** The Display menu's lane labels choice. The screen's default when left out. */
-  readonly laneLabels?: WorkDisplay["laneLabels"];
 }
 
 /** The board of the Work specimen. */

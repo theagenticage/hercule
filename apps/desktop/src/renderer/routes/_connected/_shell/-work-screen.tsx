@@ -79,11 +79,11 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
-  const moves = useCardMoves({ client, undoStack, serverBoard: board.data });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const moves = useCardMoves({ client, undoStack, serverBoard: board.data, scrollRef });
   const savedView = useWorkView(buildWorkViewKey(url, username));
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
   const offlineSince = useOfflineSince(live);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const findRef = useRef<HTMLInputElement>(null);
 
   // The board's motion: what the user does to the view plays as motion, and a
@@ -315,6 +315,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
           onFoldEverything={() => {
             view.foldEverything(lanes.map((lane) => lane.id));
           }}
+          onShowKeys={keys.showKeysSheet}
           onAdd={() => {
             openAddSheet(chooseAddLane());
           }}

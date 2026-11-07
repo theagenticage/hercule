@@ -107,22 +107,32 @@
 }
 
 /* ---------- Landing ---------- */
-/* A card that landed in Landed gets a thin ring that fades away. */
-.desk-card[data-just-landed] .card-stock {
-  animation: board-landed var(--m-long) var(--m-ease);
+/* A card that landed in Landed gets a thin ring that fades away. The ring is a
+   pseudo-element that fades by opacity alone, so nothing repaints per frame.
+   Under Reduce motion it is never drawn. */
+@media (prefers-reduced-motion: no-preference) {
+  .desk-card[data-just-landed]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--card-r);
+    box-shadow: 0 0 0 1.5px var(--focus);
+    pointer-events: none;
+    animation: board-landed var(--m-long) var(--m-ease) both;
+  }
+
+  /* A stage's count rises into place when it changes. */
+  .desk-heading-count[data-rolling] {
+    animation: board-count-roll var(--m-base) var(--m-ease);
+  }
 }
 @keyframes board-landed {
   from {
-    box-shadow: 0 0 0 1.5px var(--focus);
+    opacity: 1;
   }
   to {
-    box-shadow: 0 0 0 0 transparent;
+    opacity: 0;
   }
-}
-
-/* A stage's count rises into place when it changes. */
-.desk-heading-count[data-rolling] {
-  animation: board-count-roll var(--m-base) var(--m-ease);
 }
 @keyframes board-count-roll {
   from {
@@ -135,9 +145,5 @@
   .board-slot,
   .work-desk[data-carrying] .board-cell::before {
     transition: none;
-  }
-  .desk-card[data-just-landed] .card-stock,
-  .desk-heading-count[data-rolling] {
-    animation: none;
   }
 }

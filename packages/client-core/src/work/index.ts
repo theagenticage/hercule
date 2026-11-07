@@ -7,6 +7,7 @@
  * `@hercule/client-core/desk`.
  */
 export * from "./arrange-cell";
+export * from "./board-key";
 export * from "./card-move";
 export * from "./card-words";
 export * from "./facets";

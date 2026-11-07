@@ -289,17 +289,19 @@ function FilterControl({
 
 /**
  * Renders the Display button, a square with sliders, and its menu: how lanes
- * label themselves, the two switches, and Fold everything. A change is sent
- * to `onChange` as the whole new `display`.
+ * label themselves, the two switches, Fold everything, and Keys, which opens
+ * the sheet of keys. A change is sent to `onChange` as the whole new `display`.
  */
 function DisplayControl({
   display,
   onChange,
   onFoldEverything,
+  onShowKeys,
 }: {
   readonly display: WorkDisplay;
   readonly onChange: (display: WorkDisplay) => void;
   readonly onFoldEverything: () => void;
+  readonly onShowKeys: () => void;
 }): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   return (
@@ -345,6 +347,15 @@ function DisplayControl({
             onFoldEverything();
           }}
         />
+        <MenuAction
+          itemProps={buildItemProps("keys")}
+          name="Keys"
+          shortcut="?"
+          onPick={() => {
+            close();
+            onShowKeys();
+          }}
+        />
       </ToolMenu>
     </>
   );
@@ -379,7 +390,7 @@ const describeFindMatch = (card: WorkCard, facets: readonly FilterFacet<WorkCard
  *   and two or more offer Clear.
  * - `find` is the Find box (see `WorkFind`).
  * - `display` and `onDisplayChange` are the Display menu, and Fold
- *   everything calls `onFoldEverything`.
+ *   everything calls `onFoldEverything` and Keys calls `onShowKeys`.
  * - `onAdd` opens Add to Work.
  * - `line` is a quiet line before Find, such as what just happened on the
  *   board. It gives its room to the chips, so it is not drawn while a filter
@@ -395,6 +406,7 @@ export function WorkToolbar({
   display,
   onDisplayChange,
   onFoldEverything,
+  onShowKeys,
   onAdd,
   line,
 }: {
@@ -407,6 +419,7 @@ export function WorkToolbar({
   readonly display: WorkDisplay;
   readonly onDisplayChange: (display: WorkDisplay) => void;
   readonly onFoldEverything: () => void;
+  readonly onShowKeys: () => void;
   readonly onAdd: () => void;
   readonly line: ReactNode;
 }): JSX.Element {
@@ -434,6 +447,7 @@ export function WorkToolbar({
             display={display}
             onChange={onDisplayChange}
             onFoldEverything={onFoldEverything}
+            onShowKeys={onShowKeys}
           />
           <ToolButton
             name="Add"

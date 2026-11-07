@@ -11,12 +11,17 @@
  *   finished and the board has been read again.
  * - Each move the user makes is one gesture on the undo stack, holding the
  *   place the card came from. An undo is a move too, but it adds no gesture.
+ * - A move by key and an undo glide the cards on `hand`, and a card that goes
+ *   back after a refused move glides home on `travel`. A move by drag is
+ *   played by the drag, as the card lands.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import {
   applyCardMove,
+  buildWorkBoardKey,
   buildRestoreMove,
   readPlacement,
   reapplyCardMoves,
@@ -24,8 +29,10 @@ import {
   type CardPlacement,
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
+import { flipByKey, type SpringName } from "../../../app/motion";
 import type { UndoStack } from "../../../app/undo-stack";
-import { WORK_BOARD_KEY, workBoardQuery } from "./-work-board";
+import { MOVABLE_SELECTOR, readMotionKey } from "../../../screens/work/board-layouts";
+import { workBoardQuery } from "./-work-board";
 
 /** How long the undo line stays after a move, and after a failure, which takes longer to read. */
 const MOVE_LINE_MS = 5_200;
@@ -104,8 +111,12 @@ export interface CardMoves {
    * Moves a card. The card moves on screen at once, and a failure puts it
    * back and says why. `words` say what happened, in the past tense, such as
    * "Moved Review PR to In review". A move that changes nothing does nothing.
+   * The board jumps to the new place: the caller plays the movement, as the
+   * drag does when its card lands.
    */
   readonly moveCard: (move: CardMove, words: string) => void;
+  /** Does what `moveCard` does, and glides the cards to their new places on `hand`. For a move by key. */
+  readonly moveCardWithMotion: (move: CardMove, words: string) => void;
   /** Reverses the newest gesture on the undo stack, and says what happened. */
   readonly undoLastMove: () => void;
   /** What the undo line shows. */
@@ -143,7 +154,7 @@ const readBoardAfterMoves = async (
   client: HerculeClient,
   pending: PendingMoves,
 ): Promise<void> => {
-  await queryClient.cancelQueries({ queryKey: WORK_BOARD_KEY });
+  await queryClient.cancelQueries({ queryKey: buildWorkBoardKey() });
   // A move made while the reads were stopping reads again when it finishes.
   if (pending.hasUnanswered()) return;
   try {
@@ -156,7 +167,8 @@ const readBoardAfterMoves = async (
 
 /**
  * Moves cards for `client` and returns the board to draw. `serverBoard` is the
- * board as the last read gave it.
+ * board as the last read gave it, and `scrollRef` is the element that scrolls
+ * the board, which the motion of a move measures.
  *
  * - `moveCard` shows the move at once, sends `task.move` after the moves
  *   before it, and pushes a gesture on `undoStack`. A move that fails leaves
@@ -171,10 +183,12 @@ export const useCardMoves = ({
   client,
   undoStack,
   serverBoard,
+  scrollRef,
 }: {
   readonly client: HerculeClient;
   readonly undoStack: UndoStack;
   readonly serverBoard: WorkBoard | undefined;
+  readonly scrollRef: RefObject<HTMLElement | null>;
 }): CardMoves => {
   const queryClient = useQueryClient();
   const [pending] = useState(createPendingMoves);
@@ -200,8 +214,30 @@ export const useCardMoves = ({
     };
   }, [line.serial, line.isShown, line.canUndo]);
 
+  /**
+   * Makes `change` and glides every part of the board that moves because of
+   * it on `spring`. The change is committed at once, because the board is
+   * measured again right after it. With no board on screen, only makes it.
+   */
+  const playBoardChange = (spring: SpringName, change: () => void): void => {
+    const scroller = scrollRef.current;
+    if (scroller === null) {
+      change();
+      return;
+    }
+    flipByKey({
+      root: scroller,
+      selector: MOVABLE_SELECTOR,
+      readKey: readMotionKey,
+      spring,
+      mutate: () => {
+        flushSync(change);
+      },
+    });
+  };
+
   const readShownBoard = (): WorkBoard | undefined => {
-    const server = queryClient.getQueryData<WorkBoard>(WORK_BOARD_KEY);
+    const server = queryClient.getQueryData<WorkBoard>(buildWorkBoardKey());
     return server === undefined
       ? undefined
       : reapplyCardMoves(
@@ -222,7 +258,9 @@ export const useCardMoves = ({
       pending.markAnswered(id);
     },
     onError: (error, { id }) => {
-      pending.remove(id);
+      playBoardChange("travel", () => {
+        pending.remove(id);
+      });
       sayLine(describeMoveFailure(error), false);
     },
     // Runs after the answer or the error. The move being settled still counts
@@ -234,21 +272,30 @@ export const useCardMoves = ({
     },
   });
 
-  /** Shows `move` and queues it. Resolves when it was accepted, rejects when it was not. */
-  const sendMove = (move: CardMove): Promise<unknown> => {
+  /**
+   * Shows `move` and queues it. Resolves when it was accepted, rejects when it
+   * was not. The cards glide on `hand` when `isPlayed` is true.
+   */
+  const sendMove = (move: CardMove, isPlayed: boolean): Promise<unknown> => {
     const request: PendingMove = { id: nextId.current++, move, isAnswered: false };
-    pending.add(request);
+    if (isPlayed) {
+      playBoardChange("hand", () => {
+        pending.add(request);
+      });
+    } else {
+      pending.add(request);
+    }
     return mutateAsync(request);
   };
 
-  const moveCard = (move: CardMove, words: string): void => {
+  const makeMove = (move: CardMove, words: string, isPlayed: boolean): void => {
     const board = readShownBoard();
     if (board === undefined) return;
     const from = readPlacement(board, move.taskId);
     if (from === undefined) return;
     if (isSamePlace(from, readPlacement(applyCardMove(board, move), move.taskId))) return;
 
-    const wasSaved = sendMove(move).then(
+    const wasSaved = sendMove(move, isPlayed).then(
       () => true,
       () => false,
     );
@@ -262,7 +309,7 @@ export const useCardMoves = ({
         const restore = current === undefined ? undefined : buildRestoreMove(current, from);
         if (restore === undefined) throw new Error("The card is no longer on the board.");
         wasInexact.current = !restore.exact;
-        await sendMove(restore.move);
+        await sendMove(restore.move, true);
       },
     };
     undoStack.push(gesture);
@@ -273,6 +320,14 @@ export const useCardMoves = ({
     void wasSaved.then((saved) => {
       if (!saved && undoStack.peek() === gesture) void undoStack.undo();
     });
+  };
+
+  const moveCard = (move: CardMove, words: string): void => {
+    makeMove(move, words, false);
+  };
+
+  const moveCardWithMotion = (move: CardMove, words: string): void => {
+    makeMove(move, words, true);
   };
 
   const undoLastMove = (): void => {
@@ -307,6 +362,7 @@ export const useCardMoves = ({
             pendingMoves.map((each) => each.move),
           ),
     moveCard,
+    moveCardWithMotion,
     undoLastMove,
     line,
     sayFailure: (text) => {

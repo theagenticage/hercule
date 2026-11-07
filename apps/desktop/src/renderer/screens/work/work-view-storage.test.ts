@@ -24,6 +24,18 @@ describe("the saved Work view", () => {
     expect(readSavedWorkView(KEY)).toEqual(view);
   });
 
+  it("starts with lane names in bands, and keeps side labels once chosen", () => {
+    expect(EMPTY_WORK_VIEW.display.laneLabels).toBe("bands");
+
+    const view = {
+      foldedLaneIds: [],
+      display: { ...DEFAULT_WORK_DISPLAY, laneLabels: "side-labels" },
+    } as const;
+    writeSavedWorkView(KEY, view);
+
+    expect(readSavedWorkView(KEY)).toEqual(view);
+  });
+
   it("keeps each user's view apart", () => {
     writeSavedWorkView(KEY, { foldedLaneIds: ["lane-1"], display: DEFAULT_WORK_DISPLAY });
 

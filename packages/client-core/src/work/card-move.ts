@@ -172,7 +172,10 @@ export interface DropTarget {
    * The card that follows the dropped card on screen, or `null` for the end of
    * the cell. When the drop is at the end of the cards shown and some are
    * hidden behind "13 more", this is the first hidden card, so the card lands
-   * before them and stays in view.
+   * right after the last card shown and does not jump over cards the user has
+   * not seen. It then waits behind "13 more" itself: a drop with the pointer
+   * never asks for this place (see `lastIndex` in `board-drag-geometry.ts`),
+   * and a move by key may.
    */
   readonly nextVisibleCardId: string | null;
   /** Whether the card being moved has a failure. */

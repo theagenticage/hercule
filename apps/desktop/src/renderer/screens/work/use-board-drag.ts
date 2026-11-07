@@ -280,14 +280,24 @@ const createBoardDrag = (
         for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
           const stage = readStage(cell.dataset["stage"]);
           if (stage === undefined) continue;
-          const rows = [...cell.children].flatMap((child) => {
-            if (!(child instanceof HTMLElement)) return [];
+          const shownCards = [...cell.children].filter(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement && child.dataset["cardId"] !== undefined,
+          );
+          const rows = shownCards.flatMap((child) => {
             const { cardId, dragged } = child.dataset;
             if (cardId === undefined || dragged !== undefined) return [];
             const place = measureLayoutRect(child);
             return [{ id: cardId, element: child, middle: place.top + place.height / 2 }];
           });
-          cells.set(stage, { element: cell, rows });
+          // The card in the hand still counts as shown: it leaves a place that a drop may take again.
+          const hasClosedMoreLine =
+            stage !== "landed" && findCellFoot(cell)?.getAttribute("aria-expanded") === "false";
+          cells.set(stage, {
+            element: cell,
+            rows,
+            ...(hasClosedMoreLine ? { lastIndex: shownCards.length - 1 } : {}),
+          });
         }
         return {
           id: element.dataset["laneId"] ?? "",

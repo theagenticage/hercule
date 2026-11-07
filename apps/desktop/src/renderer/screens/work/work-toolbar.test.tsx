@@ -51,6 +51,7 @@ const DISPLAY: WorkDisplay = { laneLabels: "side-labels", isStill: false, hasSin
 
 interface Spies {
   readonly onFoldEverything: () => void;
+  readonly onShowKeys: () => void;
   readonly onDisplayChange: (display: WorkDisplay) => void;
 }
 
@@ -99,6 +100,7 @@ function Harness({
         spies?.onDisplayChange?.(next);
       }}
       onFoldEverything={spies?.onFoldEverything ?? vi.fn()}
+      onShowKeys={spies?.onShowKeys ?? vi.fn()}
       onAdd={vi.fn()}
       line={null}
     />
@@ -243,6 +245,16 @@ describe("WorkToolbar", () => {
     await user.click(getRow(/Fold everything/));
 
     expect(onFoldEverything).toHaveBeenCalledOnce();
+  });
+
+  it("opens the keys from the Display menu", async () => {
+    const user = userEvent.setup();
+    const onShowKeys = vi.fn();
+    render(<Harness spies={{ onShowKeys }} />);
+
+    await user.click(getRow(/Keys/));
+
+    expect(onShowKeys).toHaveBeenCalledOnce();
   });
 
   it("lists each Find match with its Project and its stage", () => {

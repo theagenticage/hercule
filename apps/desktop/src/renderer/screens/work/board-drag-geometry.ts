@@ -36,6 +36,13 @@ export interface CellRow {
 export interface CellBox {
   readonly element: HTMLElement;
   readonly rows: readonly CellRow[];
+  /**
+   * The last place a drop may take, set for a closed cell that has a "13 more"
+   * line. A card dropped behind that line would be hidden at once, so a drop
+   * below the last row shown takes that row's place and the card it displaces
+   * slips into "13 more". Absent when the cell lets a drop go anywhere.
+   */
+  readonly lastIndex?: number;
 }
 
 /** One lane: its vertical extent, and its cells when it is open. */
@@ -130,7 +137,8 @@ const pickRowIndex = (rows: readonly CellRow[], y: number): number =>
  * - The lane is the one under `y`, else the nearest. The stage is the column
  *   at `x`.
  * - In an open lane, the card takes the place after every card whose middle
- *   is above `y`. A cell with no card gives place 0.
+ *   is above `y`, but never past the cell's `lastIndex`. A cell with no card
+ *   gives place 0.
  * - A folded lane is a target as a whole: nothing in it can hold a slot.
  */
 export const chooseDropPlace = (
@@ -150,7 +158,8 @@ export const chooseDropPlace = (
   const stage = pickStage(geometry.columns, x);
   const cell = stage === undefined ? undefined : lane.cells.get(stage);
   if (stage === undefined || cell === undefined) return null;
-  return { kind: "cell", laneId: lane.id, stage, index: pickRowIndex(cell.rows, y) };
+  const index = Math.min(pickRowIndex(cell.rows, y), cell.lastIndex ?? Infinity);
+  return { kind: "cell", laneId: lane.id, stage, index };
 };
 
 /**

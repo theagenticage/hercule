@@ -6,18 +6,9 @@
  */
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { buildWorkBoardKey } from "@hercule/client-core/work";
 import { LIVE_KEPT_READ_OPTIONS } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
-
-/**
- * The key of the board's read. It sits under the Tasks' key, so every `task`
- * push reads the board again (see `buildQueryKeys`), and no new live topic is
- * needed. The controller announces a change to what a card shows, such as a
- * question opening or a run failing, as a `task` change as well, so the board
- * does not follow the `session` topic, which would read it about once a
- * second for every busy agent.
- */
-export const WORK_BOARD_KEY: readonly unknown[] = [...queryKeys.tasks(), "board"];
 
 /**
  * Returns the query that reads the board: the cards of every unfinished Task,
@@ -26,7 +17,7 @@ export const WORK_BOARD_KEY: readonly unknown[] = [...queryKeys.tasks(), "board"
  */
 export const workBoardQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: WORK_BOARD_KEY,
+    queryKey: buildWorkBoardKey(),
     queryFn: () => client.task.queryBoard(),
     ...LIVE_KEPT_READ_OPTIONS,
   });

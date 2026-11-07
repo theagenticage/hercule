@@ -435,6 +435,26 @@ describe("dropping a card", () => {
     });
   });
 
+  it("keeps a drop below the last row of a cell with a more line on that row, so the card stays in view", () => {
+    const building = ["b1", "b2", "b3", "b4", "b5", "b6"].map((id) =>
+      buildCard(id, { title: id, projectId: "storefront", stage: "building" }),
+    );
+    const board = renderBoard([...STOREFRONT_CARDS.slice(0, 3), ...building]);
+    press(board.card("gift-wrap"), 220, rowY(2));
+    moveTo(board.scroller, 220, rowY(2) + 6);
+    moveTo(board.scroller, columnX("building"), rowY(3) + 80);
+
+    // The last child is the more line, which has no card id.
+    expect(board.readCell("storefront", "building")).toEqual(["b1", "b2", "b3", "slot", "b4", "?"]);
+    release(board.scroller, columnX("building"), rowY(3) + 80);
+
+    expect(board.moveCard.mock.calls[0]![0]).toEqual({
+      taskId: "gift-wrap",
+      stage: "building",
+      afterTaskId: "b3",
+    });
+  });
+
   it("names the other lane's Project when the card is dropped in that lane", () => {
     const board = renderBoard();
     press(board.card("refund-emails"), 220, 70);

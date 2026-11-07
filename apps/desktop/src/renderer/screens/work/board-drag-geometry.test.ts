@@ -135,6 +135,22 @@ describe("chooseDropPlace", () => {
     expect(chooseDropPlace(GEOMETRY, x, y)).toEqual(expected);
   });
 
+  it("keeps a drop below the last row of a closed long cell on that row, not behind its more line", () => {
+    const closed: CellBox = { ...cellWithMiddles(150, 200, 250, 300), lastIndex: 3 };
+    const geometry: BoardGeometry = {
+      ...GEOMETRY,
+      lanes: [openLane("storefront", 100, 400, { building: closed })],
+    };
+
+    expect(chooseDropPlace(geometry, 520, 395)).toEqual({
+      kind: "cell",
+      laneId: "storefront",
+      stage: "building",
+      index: 3,
+    });
+    expect(chooseDropPlace(geometry, 520, 210)).toMatchObject({ index: 2 });
+  });
+
   it("finds no place on a board with no lane", () => {
     expect(chooseDropPlace({ ...GEOMETRY, lanes: [] }, 520, 300)).toBeNull();
   });

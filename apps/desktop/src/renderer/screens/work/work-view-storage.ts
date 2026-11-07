@@ -8,7 +8,7 @@ import type { WorkDisplay } from "./work-toolbar";
 
 /** The choices of the Display menu before the user makes any. */
 export const DEFAULT_WORK_DISPLAY: WorkDisplay = {
-  laneLabels: "side-labels",
+  laneLabels: "bands",
   isStill: false,
   hasSingleKeys: true,
 };
@@ -49,7 +49,10 @@ export const readSavedWorkView = (key: string): SavedWorkView => {
       ? foldedLaneIds.filter((id): id is string => typeof id === "string")
       : [],
     display: {
-      laneLabels: shown["laneLabels"] === "bands" ? "bands" : DEFAULT_WORK_DISPLAY.laneLabels,
+      laneLabels:
+        shown["laneLabels"] === "bands" || shown["laneLabels"] === "side-labels"
+          ? shown["laneLabels"]
+          : DEFAULT_WORK_DISPLAY.laneLabels,
       isStill:
         typeof shown["isStill"] === "boolean" ? shown["isStill"] : DEFAULT_WORK_DISPLAY.isStill,
       hasSingleKeys:

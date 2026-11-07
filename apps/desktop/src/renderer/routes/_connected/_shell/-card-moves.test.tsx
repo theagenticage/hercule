@@ -2,7 +2,8 @@
  * Tests moving cards through `useCardMoves`: a move shows at once and is sent
  * in order, a read that lands meanwhile cannot undo it, a failed move goes
  * back and says why, and Undo waits for its own request and puts the card
- * back where it stood.
+ * back where it stood. What the cards do on screen needs a real layout, so
+ * these tests only check which spring a change is played on.
  */
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -10,10 +11,26 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testing";
+import { buildWorkBoardKey } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
+import { flipByKey } from "../../../app/motion";
 import { createUndoStack } from "../../../app/undo-stack";
 import { useCardMoves } from "./-card-moves";
-import { WORK_BOARD_KEY } from "./-work-board";
+
+// The motion kernel measures a real layout. Here it only makes the change it is given and notes the spring.
+vi.mock("../../../app/motion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../app/motion")>()),
+  flipByKey: vi.fn((options: { readonly mutate: () => void }) => {
+    options.mutate();
+  }),
+}));
+
+/** Returns the springs the board has been played on since the last call, oldest first. */
+const takePlayedSprings = (): unknown[] => {
+  const springs = vi.mocked(flipByKey).mock.calls.map(([options]) => options.spring);
+  vi.mocked(flipByKey).mockClear();
+  return springs;
+};
 
 const BOARD = buildBoard(
   buildCard("a", { stage: "building" }),
@@ -59,14 +76,19 @@ const buildClient = (readBoard: () => WorkBoard) => {
 const setUp = (readBoard: () => WorkBoard = () => BOARD) => {
   const { client, held } = buildClient(readBoard);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(WORK_BOARD_KEY, BOARD);
+  queryClient.setQueryData(buildWorkBoardKey(), BOARD);
   const undoStack = createUndoStack();
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  const view = renderHook(() => useCardMoves({ client, undoStack, serverBoard: BOARD }), {
-    wrapper,
-  });
+  const scrollRef = { current: document.createElement("div") };
+  const view = renderHook(
+    () => useCardMoves({ client, undoStack, serverBoard: BOARD, scrollRef }),
+    {
+      wrapper,
+    },
+  );
+  takePlayedSprings();
   const stageOf = (id: string) =>
     view.result.current.board?.cards.find((card) => card.id === id)?.stage;
   return { ...view, held, queryClient, undoStack, stageOf };
@@ -227,6 +249,56 @@ describe("useCardMoves", () => {
     // The board the screen was given stands for that read, which holds no move.
     await waitFor(() => {
       expect(stageOf("a")).toBe("building");
+    });
+  });
+
+  describe("motion", () => {
+    it("plays a move by key and its undo on hand, and a plain move not at all", async () => {
+      const { result, held } = setUp();
+
+      act(() => {
+        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      expect(takePlayedSprings()).toEqual([]);
+
+      act(() => {
+        result.current.moveCardWithMotion({ taskId: "b", stage: "planned" }, "Moved b");
+      });
+      expect(takePlayedSprings()).toEqual(["hand"]);
+
+      act(() => {
+        result.current.undoLastMove();
+      });
+      await waitForRequests(held, 1);
+      await act(() => {
+        held[0]!.accept();
+        return Promise.resolve();
+      });
+      await waitForRequests(held, 2);
+      await act(() => {
+        held[1]!.accept();
+        return Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(takePlayedSprings()).toEqual(["hand"]);
+      });
+    });
+
+    it("sends a card home on travel when the controller refuses its move", async () => {
+      const { result, held } = setUp();
+      act(() => {
+        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      await waitForRequests(held, 1);
+
+      await act(() => {
+        held[0]!.refuse("the Task is gone.");
+        return Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(takePlayedSprings()).toEqual(["travel"]);
+      });
     });
   });
 });

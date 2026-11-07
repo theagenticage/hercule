@@ -98,6 +98,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import { computeDayStart } from "@hercule/client-core/list-time";
+import { buildWorkBoardKey } from "@hercule/client-core/work";
 import {
   buildMachineFiveMinuteScope,
   FLEET_HOUR_METRICS_SCOPE,
@@ -869,10 +870,7 @@ const seedQueryCache = (
     }
   }
   if (work !== undefined) {
-    // The key is the one `workBoardQuery` reads under. The route's own file
-    // keeps it local, so it is spelled here: a wrong key makes the board read
-    // again, which the client refuses, and the specimen then fails.
-    queryClient.setQueryData([...queryKeys.tasks(), "board"], work.board);
+    queryClient.setQueryData(buildWorkBoardKey(), work.board);
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1765,10 +1763,7 @@ export async function mountWorkflowsSpecimen(
 export async function mountWorkSpecimen(records: SidebarRecords, work: WorkRecords): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
     foldedLaneIds: work.foldedLaneIds,
-    display: {
-      ...DEFAULT_WORK_DISPLAY,
-      laneLabels: work.laneLabels ?? DEFAULT_WORK_DISPLAY.laneLabels,
-    },
+    display: DEFAULT_WORK_DISPLAY,
   });
   await mountShellSpecimen(records, "/work", { work });
 }

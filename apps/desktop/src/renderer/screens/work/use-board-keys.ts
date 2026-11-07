@@ -43,8 +43,8 @@ export interface BoardKeysInput {
   /** The platform decides whether undo is ⌘Z or Ctrl Z. */
   readonly platform: DesktopPlatform;
   readonly moves: {
-    /** Moves a card on screen at once and sends the move. */
-    readonly moveCard: (move: CardMove, words: string) => void;
+    /** Moves a card on screen at once, gliding the cards, and sends the move. */
+    readonly moveCardWithMotion: (move: CardMove, words: string) => void;
     /** Puts back the newest gesture of the user. */
     readonly undoLastMove: () => void;
   };
@@ -67,6 +67,8 @@ export interface BoardKeysInput {
 /** What `useBoardKeys` gives back to the screen. */
 export interface BoardKeys {
   readonly isKeysSheetOpen: boolean;
+  /** Opens the sheet of keys, as the `?` key does. */
+  readonly showKeysSheet: () => void;
   /** The id of the Find match the arrow keys are on, or `null` when Find lists none. */
   readonly activeFindId: string | null;
   /** Takes the keys of the Find box: the arrows walk the matches, Return opens one, Esc clears the text. */
@@ -166,7 +168,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     const move: CardMove = { taskId: card.id, stage };
     // Committed at once: the card is a new element in its new cell, and focus can only go to it once it is there.
     flushSync(() => {
-      moves.moveCard(move, describeCardMove(card, move, projects));
+      moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
     });
     if (!hadFocus || focusCard(card.id) || laneId === undefined) return;
     // The cell shows only some of its cards, and the moved one is behind its
@@ -319,5 +321,12 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     };
   }, [scrollRef]);
 
-  return { isKeysSheetOpen, activeFindId, handleFindKeys };
+  return {
+    isKeysSheetOpen,
+    showKeysSheet: () => {
+      setKeysSheetOpen(true);
+    },
+    activeFindId,
+    handleFindKeys,
+  };
 };

@@ -111,10 +111,13 @@
   padding-right: 14px;
   font: inherit;
 }
+/* The name's first line keeps its place, with or without the "1 failed" row
+   under it: the button's items start at the top, the words leave 4px above
+   the name, and the chevron and folder are as tall as that first row. */
 .board-lane-button {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   min-width: 0;
   min-height: 28px;
@@ -130,7 +133,7 @@
   display: grid;
   place-items: center;
   width: 14px;
-  height: 14px;
+  height: calc(28px + var(--text-size-step));
   color: var(--faint);
 }
 .board-lane-button[aria-expanded="true"] .board-chevron {
@@ -146,12 +149,14 @@
   flex: none;
   display: grid;
   place-items: center;
+  height: calc(28px + var(--text-size-step));
   color: var(--muted);
 }
 .board-lane-words {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  padding-top: 4px;
 }
 .board-lane-line {
   display: flex;
@@ -187,6 +192,9 @@
   place-items: center;
   width: 24px;
   height: 24px;
+  /* Centred on the name's first line, whatever stands under it. */
+  align-self: flex-start;
+  margin-top: 2px;
   border-radius: var(--r-btn);
   color: var(--faint);
   opacity: 0;
@@ -208,7 +216,7 @@
 /* A folded lane is its head and one line: how much sits in each stage, under
    that stage. No beads and no line, so a page of folded lanes reads as a plain table. */
 .board-lane.is-folded {
-  align-items: center;
+  align-items: start;
   min-height: 44px;
   padding: 8px 0;
 }
@@ -260,6 +268,10 @@
   flex-direction: row;
   align-items: baseline;
   gap: 8px;
+}
+.work-desk[data-lanes="band"] .board-lane-add {
+  align-self: center;
+  margin-top: 0;
 }
 .work-desk[data-lanes="band"] .board-lane-name {
   white-space: nowrap;
