@@ -30,6 +30,8 @@ import {
   type Run,
   type RunSummary,
   type SortDirection,
+  type TaskUndoTryAgainInput,
+  type TryAgainUndo,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -101,6 +103,33 @@ const make = Effect.gen(function* () {
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
     stopSessionsOfEndedRuns: engine.stopSessionsOfEndedRuns,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
+
+    /**
+     * `task.undoTryAgain`: undoes the Try again that started the run
+     * `input.runId` on the Task `taskId`, as the user, and returns the first
+     * answer decided for it. A repeat returns that answer again and changes
+     * nothing.
+     *
+     * It lives here, not in the tasks domain, because it asks a run to stop
+     * and the runs domain imports the tasks domain. In one transaction it
+     * decides before it cancels anything:
+     *
+     * 1. With no recovery row for the run, or one whose Task is not exactly
+     *    `taskId` (compared as stored, not through the merge redirect), it
+     *    fails with `NotFound` and cancels nothing.
+     * 2. When the recovery was already decided, it returns that answer.
+     * 3. When the run has ended, the answer is `too-late` and nothing changes.
+     * 4. Otherwise it asks the run to stop, as `run.cancel` does, and restores
+     *    the failure when nothing newer holds the Task (`restored`), else
+     *    leaves the Task as it is (`stopped`) with the reason.
+     *
+     * Only the user undoes: a session is refused with `Forbidden`.
+     */
+    undoTryAgain: (
+      taskId: Id,
+      input: TaskUndoTryAgainInput,
+    ): Effect.Effect<TryAgainUndo, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.die(new Error(`not built yet: #1031 (task.undoTryAgain ${taskId} ${input.runId})`)),
 
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */
     query: (

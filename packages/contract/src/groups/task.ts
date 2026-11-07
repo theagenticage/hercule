@@ -15,13 +15,21 @@ import { Fact } from "@hercule/protocol";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { DEFAULT_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event-record";
 import { RunStatus } from "./run-status";
+import { Session, SessionRequest } from "./session";
 
 /** The longest title. A title is a line, not a paragraph. */
 export const MAX_TASK_TITLE_LENGTH = 512;
@@ -146,6 +154,14 @@ export const ProvenanceEntry = Schema.Struct({
    * work the user handed off from Intake.
    */
   signalId: Schema.optionalKey(Id),
+  /**
+   * The Task that was merged into this one, when this entry records that
+   * merge (`task.merge`). Only the core writes it, so a Task with such an
+   * entry gained work from another Task. A merge moves the source's own
+   * entries to the survivor unedited, so they keep their original `at` and
+   * `actor`.
+   */
+  mergedTaskId: Schema.optionalKey(Id),
   at: Timestamp,
   actor: Actor,
 });
@@ -173,6 +189,7 @@ const ProvenanceInput = Schema.Struct({
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
   signalId: Schema.optionalKey(CoreStampedField),
+  mergedTaskId: Schema.optionalKey(CoreStampedField),
   at: Schema.optionalKey(CoreStampedField),
   actor: Schema.optionalKey(CoreStampedField),
 }).check(
@@ -700,6 +717,37 @@ export const MAX_BOARD_CARDS = 1000;
  */
 export const MAX_CARD_QUESTION = 300;
 
+/** The most characters of `TaskSummary.line`: about six words. A longer line is cut at a word. */
+export const MAX_SUMMARY_LINE = 60;
+
+/** The most characters of `TaskSummary.standing`. A longer text is cut at a word. */
+export const MAX_SUMMARY_STANDING = 400;
+
+/** The most characters of `TaskSummary.left`. A longer text is cut at a word. */
+export const MAX_SUMMARY_LEFT = 200;
+
+/**
+ * What a cheap model wrote to describe a Task. It is description only: it
+ * holds no question, no answer and no judgement of what comes next. An open
+ * question and a failure come from real rows (`WorkCard.openQuestion` and
+ * `WorkCard.failure`), never from a summary, and a summary never moves a card
+ * or changes the Task.
+ */
+export const TaskSummary = Schema.Struct({
+  /** What the card shows: about six words, such as "Three designs, depots worried." */
+  line: bounded(0, MAX_SUMMARY_LINE),
+  /** Where the Task stands, for the details pane. */
+  standing: bounded(0, MAX_SUMMARY_STANDING),
+  /** What is left to do, for the details pane. */
+  left: bounded(0, MAX_SUMMARY_LEFT),
+  /** When the summary was written. */
+  generatedAt: Timestamp,
+  /** True when something changed since this was written, or the last attempt failed. */
+  stale: Schema.Boolean,
+});
+
+export type TaskSummary = Schema.Schema.Type<typeof TaskSummary>;
+
 /**
  * One Task as a card on Work: the Task's place and the three facts a card
  * shows, each worked out on the controller from real rows. The facts are
@@ -759,6 +807,8 @@ export const WorkCard = Schema.Struct({
   stageChangedAt: Timestamp,
   /** The last time a session of the Task ended a turn, or a run of it ended. For the age a card shows. */
   lastActivityAt: Timestamp,
+  /** Absent until a summary has been written for the Task. */
+  summary: Schema.optionalKey(TaskSummary),
 });
 
 export type WorkCard = Schema.Schema.Type<typeof WorkCard>;
@@ -775,6 +825,91 @@ export const WorkBoard = Schema.Struct({
 });
 
 export type WorkBoard = Schema.Schema.Type<typeof WorkBoard>;
+
+/** The most sessions a `TaskDetail` lists. `sessionCount` says how many the Task has. */
+export const MAX_DETAIL_SESSIONS = 10;
+
+/**
+ * One session of a Task as the details pane lists it: what a row needs to
+ * show the session and to answer its open question, without reading the
+ * session itself. The types are the session contract's own.
+ */
+export const TaskDetailSession = Schema.Struct({
+  id: Id,
+  title: Session.fields.title,
+  role: Session.fields.role,
+  kind: Session.fields.kind,
+  status: Session.fields.status,
+  /** The Requests the session has open, oldest first. */
+  openRequests: Schema.Array(SessionRequest),
+  /** True while the Thread is marked Done (`session.markDone`). Only a Thread can be. */
+  done: Schema.Boolean,
+});
+
+export type TaskDetailSession = Schema.Schema.Type<typeof TaskDetailSession>;
+
+/**
+ * What `task.readDetail` returns: everything the details pane of one Task
+ * draws, in one reply, so the pane never joins reads itself.
+ */
+export const TaskDetail = Schema.Struct({
+  /** The Task in full: description, labels and provenance. */
+  task: Task,
+  /** The same facts the board shows for the Task. */
+  card: WorkCard,
+  summary: Schema.optionalKey(TaskSummary),
+  /** At most `MAX_DETAIL_SESSIONS`, the unfinished first, then newest. */
+  sessions: atMost(TaskDetailSession, MAX_DETAIL_SESSIONS),
+  /**
+   * How many sessions the Task has. The pane says "and 12 more", and links to
+   * the session list filtered by `taskId`.
+   */
+  sessionCount: Schema.Int,
+  /** At most `MAX_TRACKING_DETAIL_RUNS` runs of the Task, as Tracking lists them. */
+  runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
+  /** How many runs the Task has, with a link to `run.query` by `taskIds`, the same way. */
+  runCount: Schema.Int,
+  /** What the newest run's last agent step produced, as Tracking shows it. */
+  output: Schema.optionalKey(TrackingOutput),
+});
+
+export type TaskDetail = Schema.Schema.Type<typeof TaskDetail>;
+
+/** The input of `task.merge`, beside the source Task's id in the path. */
+export const TaskMergeInput = Schema.Struct({
+  /** The survivor: the Task the source is merged into. It keeps its title, stage, project, priority and place. */
+  intoTaskId: Id,
+});
+
+export type TaskMergeInput = Schema.Schema.Type<typeof TaskMergeInput>;
+
+/** The input of `task.undoTryAgain`, beside the Task's id in the path. */
+export const TaskUndoTryAgainInput = Schema.Struct({
+  /** The run that Try again started, whose start ended the Task's failure. */
+  runId: Id,
+});
+
+export type TaskUndoTryAgainInput = Schema.Schema.Type<typeof TaskUndoTryAgainInput>;
+
+/**
+ * What `task.undoTryAgain` answers. A repeat of the call returns the first
+ * answer again.
+ *
+ * - `restored`: the failure is back on the Task.
+ * - `stopped`: the run was asked to stop, and the failure was not restored,
+ *   because something newer holds the Task: another failure, a second retry,
+ *   a named Thread, a merge, Done or Drop. The current state stays.
+ * - `too-late`: the run had already ended. Nothing changed.
+ */
+export const TryAgainUndo = Schema.Struct({
+  outcome: Schema.Literals(["restored", "stopped", "too-late"]),
+  /** True when the run was asked to stop. The run may not have stopped yet. */
+  stopRequested: Schema.Boolean,
+  /** Why the failure stayed as it is, in words for the undo line. */
+  reason: Schema.optionalKey(Schema.String),
+});
+
+export type TryAgainUndo = Schema.Schema.Type<typeof TryAgainUndo>;
 
 export const task = HttpApiGroup.make("task")
   .add(
@@ -832,6 +967,13 @@ export const task = HttpApiGroup.make("task")
       success: TrackingDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    // `/tasks/:id/detail` has one more segment than `/tasks/:id`, so the router
+    // never takes it for that route.
+    HttpApiEndpoint.get("readDetail", "/tasks/:id/detail", {
+      params: { id: Id },
+      success: TaskDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
     HttpApiEndpoint.get("read", "/tasks/:id", {
       params: { id: Id },
       success: Task,
@@ -859,6 +1001,29 @@ export const task = HttpApiGroup.make("task")
       params: { id: Id },
       payload: TaskMoveInput,
       success: Task,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Merges a Task into another: the Task in the path is the source, and
+     * `intoTaskId` is the survivor. Returns the survivor. Only the user merges.
+     * Fails `InvalidState` when either Task is `done` or `dropped`.
+     */
+    HttpApiEndpoint.post("merge", "/tasks/:id/merge", {
+      params: { id: Id },
+      payload: TaskMergeInput,
+      success: Task,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Undoes a Try again: asks the run it started to stop, and puts the
+     * Task's failure back when nothing newer holds the Task. Only the user
+     * undoes. Fails `NotFound` when the run did not end a failure of this
+     * Task.
+     */
+    HttpApiEndpoint.post("undoTryAgain", "/tasks/:id/try-again/undo", {
+      params: { id: Id },
+      payload: TaskUndoTryAgainInput,
+      success: TryAgainUndo,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/tasks/:id", {

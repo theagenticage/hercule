@@ -63,6 +63,7 @@ const HIDDEN = [
   "attachment.create",
   "attachment.readContent",
   "attachment.delete",
+  "task.undoTryAgain",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -95,10 +96,12 @@ const COMMANDS: Record<string, string> = {
   "task.queryTracking": "task tracking",
   "task.queryLegs": "task legs",
   "task.read": "task read",
+  "task.readDetail": "task details",
   "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
   "task.move": "task move",
+  "task.merge": "task merge",
   "task.delete": "task delete",
 
   "notification.query": "notification list",
@@ -278,6 +281,7 @@ const COMMANDS: Record<string, string> = {
   "session.respondToQuestion": "session respond-to-question",
   "session.stop": "session stop",
   "session.continue": "session continue",
+  "session.moveToTask": "session move-to-task",
   "session.markDone": "session done",
   "session.reopen": "session reopen",
   "session.archive": "session archive",
@@ -348,6 +352,9 @@ const RESOLVES: Record<string, string> = {
   "task.read id": "task.query",
   "task.readTracking id": "task.query",
   "task.update id": "task.query",
+  "task.readDetail id": "task.query",
+  "task.merge id": "task.query",
+  "task.merge intoTaskId": "task.query",
   "task.move id": "task.query",
   "task.move projectId": "project.query",
   "task.move afterTaskId": "task.query",
@@ -495,6 +502,8 @@ const RESOLVES: Record<string, string> = {
   "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
   "session.continue id": "session.query",
+  "session.moveToTask id": "session.query",
+  "session.moveToTask taskId": "task.query",
   "session.markDone sessionIds": "session.query",
   "session.archive sessionIds": "session.query",
   "session.query workspaceId": "workspace.query",
@@ -737,6 +746,8 @@ const USER_ONLY = [
   "signal.handOff",
   "signal.markDone",
   "signal.lowerPriority",
+  "task.merge",
+  "session.moveToTask",
 ];
 
 /**

@@ -125,6 +125,8 @@ import { Setup, SetupLayer } from "../setup";
 import {
   TaskBoard,
   TaskBoardLayer,
+  TaskDetails,
+  TaskDetailsLayer,
   TaskService,
   TaskServiceLayer,
   TaskTracking,
@@ -284,12 +286,15 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     const tasks = yield* TaskService;
     const tracking = yield* TaskTracking;
     const board = yield* TaskBoard;
+    const details = yield* TaskDetails;
+    const runs = yield* RunService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryBoard", () => withApiErrors(board.query()))
       .handle("queryTracking", () => withApiErrors(tracking.query()))
       .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
       .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
+      .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
@@ -297,6 +302,10 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       )
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
+      )
+      .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
+      .handle("undoTryAgain", ({ params, payload }) =>
+        withApiErrors(runs.undoTryAgain(params.id, payload)),
       )
       .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
   }),
@@ -760,6 +769,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
         withApiErrors(placement.continueSession({ id: params.id, ...payload })),
       )
       .handle("markDone", ({ payload }) => withApiErrors(sessions.markDone(payload)))
+      .handle("moveToTask", ({ params, payload }) =>
+        withApiErrors(sessions.moveToTask(params.id, payload)),
+      )
       .handle("reopen", ({ payload }) => withApiErrors(sessions.reopen(payload)))
       .handle("archive", ({ payload }) => withApiErrors(live.archive(payload)));
   }),
@@ -993,6 +1005,8 @@ const operationServices = Layer.mergeAll(
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
   // The board's read gets each Task's sessions and runs the same way.
   TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
+  // The details pane's read will get the Task's sessions and runs the same way.
+  TaskDetailsLayer,
   YourWorkLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner

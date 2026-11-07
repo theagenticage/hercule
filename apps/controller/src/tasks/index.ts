@@ -19,6 +19,7 @@ export {
   type BoardFailureFact,
   type BoardSessionFact,
 } from "./board";
+export { TaskDetails, TaskDetailsLayer } from "./detail";
 export {
   TaskTracking,
   TaskTrackingLayer,

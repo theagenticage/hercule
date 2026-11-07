@@ -627,6 +627,18 @@ export const CLI = {
       },
     },
   },
+  "task.readDetail": {
+    command: "task details",
+    help: "Shows one task with everything its details pane draws. The reply holds the task in full, the card the board shows for it, the summary a cheap model wrote of it (absent until one exists, and marked stale when something changed since), up to 10 of its sessions with their open questions (unfinished first, then newest) and how many it has, up to 20 of its runs with how many it has, and what the newest run produced. A summary only describes: an open question or a failure is always read from the sessions and runs. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters. A task that was merged into another answers with the one it was merged into.",
+        resolves: "task.query",
+      },
+    },
+  },
   "task.readTracking": {
     command: "task read-tracking",
     help: "Shows what Intake's Tracking pane draws for one handed-off task. It gives the first handoff (the signal, the run it started and when), the newest runs oldest first with the session of each run's last agent step, what the newest run's last agent step produced, and the action step the run ended on when it ended on one. The output is cut to a short text, or to the top-level fields of a structured output with their labels; arrays and objects are counted, not shown. Fails with not_found for a task that was never handed off. Needs the run read grant as well as the task read grant.",
@@ -756,6 +768,34 @@ export const CLI = {
       },
     },
   },
+  "task.merge": {
+    command: "task merge",
+    help: "Merges one task into another, as you. The task you name is merged away; the one named by --into survives and stays exactly where it is on the board, with its title, stage, project and priority. The labels of both are kept, the merged task's description is appended to the survivor's under a line naming its title, and its threads, runs and workspaces move to the survivor. A failure the merged task still shows moves too, so a merge never hides one. Reading the merged task's old id afterwards returns the survivor. Returns the survivor.",
+    examples: [{ args: ["1f3a9c2e", "--into", "7b2d40aa"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task to merge away, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      intoTaskId: {
+        flag: "into",
+        help: "The task that survives, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "one of the tasks is done or dropped; reopen it with `hercule task update --stage` first. Merging a task into itself, or a task already merged, is refused as invalid input",
+      validation:
+        "the merged task would hold more labels or a longer description than a task may; shorten one of them first, or leave the merge",
+    },
+  },
+  // Undoes a Try again. It exists only for the Undo line of Try again, which
+  // the desktop app shows for a few seconds after it starts a run again. A
+  // terminal user stops the run with `hercule run cancel`.
+  "task.undoTryAgain": { hidden: true },
   "task.delete": {
     command: "task delete",
     help: "Deletes a task. The delete is soft and cannot be undone: reading the task fails with not_found, and it no longer appears in `hercule task list` or in search.",
@@ -4349,6 +4389,29 @@ export const CLI = {
         "you lack session.spawn, which a Permission Request can get you. Or you are a session forking a Thread without thread.start, which a Permission Request can also get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a fork keeps its parent's profile, and a session may fork only a session on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no harness-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
+    },
+  },
+  "session.moveToTask": {
+    command: "session move-to-task",
+    help: "Moves one Thread to another task, or to a new task made from it, as you. Use it when a Thread joined the wrong task. Only this Thread moves: its runs stay where they are, and so does the folder's link to its old task, so the next Thread started in that folder still joins the old task. Returns the Thread.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--task", "7b2d40aa"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --kind thread`.",
+        resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
+      },
+      taskId: {
+        flag: "task",
+        help: "The task to move the Thread to, by its id or a tail of eight or more characters; find it with `hercule task list`. Leave it off to move the Thread to a new task.",
+        resolves: "task.query",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the session is not a Thread (it was spawned from an Agent, by a run or by an assistant), or the task is done or dropped; reopen the task first, or leave --task off to move the Thread to a new task",
     },
   },
   "session.markDone": {

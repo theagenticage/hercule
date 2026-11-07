@@ -61,6 +61,7 @@ import {
   type TaskPriority,
   type TaskStage,
   type TaskStatus,
+  type TaskMergeInput,
   type TaskUpdatedEventPayload,
   type Unauthenticated,
 } from "@hercule/contract";
@@ -850,6 +851,32 @@ const make = Effect.gen(function* () {
         );
         return yield* moveTask(id, placement, yield* currentStamp);
       }),
+
+    /**
+     * Merges the Task `id` (the source) into the Task `input.intoTaskId` (the
+     * survivor), as the user, and returns the survivor. Only the user merges:
+     * a session or a workflow step is refused with `Forbidden`.
+     *
+     * The survivor keeps its title, stage, project, priority and board rank.
+     * Labels are united, and a non-empty source description is appended under
+     * a line naming the source's title. In one transaction the source's
+     * sessions, runs, workspace links and provenance move to the survivor, the
+     * survivor gains a provenance entry naming the source, and a failure the
+     * source shows moves too. A read of the source's id then returns the
+     * survivor (`resolveTaskId`).
+     *
+     * Fails with `NotFound` when either Task does not exist or is deleted, with
+     * `InvalidState` when either is at `done` or `dropped`, and with
+     * `Validation` when the Tasks are the same, one is already merged, or the
+     * result would hold more labels or a longer description than a Task may.
+     */
+    merge: (
+      id: Id,
+      input: TaskMergeInput,
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > => Effect.die(new Error(`not built yet: #1031 (task.merge ${id} ${input.intoTaskId})`)),
 
     /**
      * Returns the Task a session being written joins, or `undefined` when it

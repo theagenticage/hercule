@@ -971,6 +971,18 @@ export const SessionIdsInput = Schema.Struct({
 
 export type SessionIdsInput = Schema.Schema.Type<typeof SessionIdsInput>;
 
+/** The payload of `session.moveToTask`. */
+export const SessionMoveToTaskInput = Schema.Struct({
+  /**
+   * The Task to move the Thread to. It must be live: `NotFound` for a Task
+   * that does not exist or was deleted, `InvalidState` for one that is `done`
+   * or `dropped`. When absent, the Thread moves to a new Task made from it.
+   */
+  taskId: Schema.optionalKey(Id),
+});
+
+export type SessionMoveToTaskInput = Schema.Schema.Type<typeof SessionMoveToTaskInput>;
+
 export const session = HttpApiGroup.make("session")
   .add(
     HttpApiEndpoint.get("query", "/sessions", {
@@ -1050,6 +1062,20 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("continue", "/sessions/:id/continue", {
       params: { id: Id },
       payload: SessionContinueInput,
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Moves one Thread to another Task, or to a new Task made from it, when
+     * the join rule put it on the wrong one. Returns the Thread. Only the user
+     * moves a Thread. Only this Thread moves: its runs stay where they are,
+     * and so does the workspace's link to its Task, so the next Thread started
+     * in that folder still joins the old Task. Fails `InvalidState` when the
+     * session is not a Thread.
+     */
+    HttpApiEndpoint.post("moveToTask", "/sessions/:id/move-to-task", {
+      params: { id: Id },
+      payload: SessionMoveToTaskInput,
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

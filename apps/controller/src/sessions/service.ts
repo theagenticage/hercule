@@ -77,6 +77,7 @@ import {
   type Passage,
   type Session,
   type SessionIdsInput,
+  type SessionMoveToTaskInput,
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
@@ -1982,6 +1983,26 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+
+    /**
+     * Moves one Thread to another Task, or to a new Task made from it, as the
+     * user, and returns the Thread. Only the user moves a Thread: a session is
+     * refused with `Forbidden`. It writes a `session.movedToTask` audit entry
+     * and marks both Tasks' summaries out of date.
+     *
+     * Only this Thread moves. Its runs stay where they are, and so does the
+     * workspace's link to its Task, so the next Thread started in that folder
+     * still joins the old Task. Moving to a new Task records no workspace link.
+     *
+     * Fails with `NotFound` when the session or the Task named by `taskId`
+     * does not exist or is deleted, and with `InvalidState` when the session is
+     * not a Thread or the Task is at `done` or `dropped`.
+     */
+    moveToTask: (
+      id: Id,
+      input: SessionMoveToTaskInput,
+    ): Effect.Effect<Session, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.die(new Error(`not built yet: #1031 (session.moveToTask ${id} ${input.taskId})`)),
 
     /**
      * Takes the Done mark off Threads, as the caller, all at one time, and

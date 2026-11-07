@@ -47,6 +47,8 @@ export const AUDIT_KINDS = [
   "secret.deleted",
   "event.enriched",
   "task.deleted",
+  "task.summarized",
+  "task.merged",
   "project.created",
   "project.updated",
   "project.deleted",
@@ -124,6 +126,7 @@ export const AUDIT_KINDS = [
   "session.markedDone",
   "session.reopened",
   "session.archived",
+  "session.movedToTask",
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
@@ -176,6 +179,12 @@ export const SECURITY_KINDS: ReadonlyArray<AuditKind> = AUDIT_KINDS.filter((kind
  */
 const RECORD_KINDS = {
   "task.deleted": "deleted",
+  // The entry names both Tasks: the survivor, which gained the source's work,
+  // and the source, which is gone from every read. `task.summarized` is not
+  // here: a summary write announces the Task itself, as a derived change that
+  // rides the slow window, so a burst of summaries does not re-read the board
+  // once each.
+  "task.merged": "updated",
   "runner.joined": "created",
   "runner.updated": "updated",
   "runner.stateChanged": "updated",
@@ -219,6 +228,7 @@ const RECORD_KINDS = {
   "session.markedDone": "updated",
   "session.reopened": "updated",
   "session.archived": "updated",
+  "session.movedToTask": "updated",
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
