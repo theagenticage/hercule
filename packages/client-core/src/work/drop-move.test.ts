@@ -3,10 +3,11 @@
  * card the dropped card follows in stored order.
  */
 import { describe, expect, it } from "vitest";
-import { arrangeCell } from "./arrange-cell";
+import type { BoardStage } from "@hercule/contract";
+import { arrangeLanes } from "./arrange-lanes";
 import { applyCardMove } from "./card-move";
 import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
-import { buildDropMove, type DropRequest } from "./drop-move";
+import { buildDropMove } from "./drop-move";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [
@@ -23,64 +24,66 @@ const CARDS = [
   buildCard("f", { stage: "exploring" }),
 ];
 
-/** Builds the request for dropping `movingCardId` at `place`, on the lanes `CARDS` make. */
-const requestFor = (
+/**
+ * Drops the card `movingCardId` of `cards` on the lane `laneId` at `stage`,
+ * in front of the card `beforeCardId` (`null` for last), on the lanes as the
+ * board draws them. `foldedLaneId` names a lane the user folded.
+ */
+const dropOn = (
   movingCardId: string,
-  place: DropRequest["place"],
-  nextShownCardId: string | null,
-  cards = CARDS,
-): DropRequest => ({
-  cards,
-  projects: PROJECTS,
-  arrangedLanes: buildLanes({ cards }, PROJECTS).map((lane) => ({
+  laneId: string,
+  stage: BoardStage | null,
+  beforeCardId: string | null,
+  { cards = CARDS, foldedLaneId }: { cards?: typeof CARDS; foldedLaneId?: string } = {},
+) => {
+  const lane = arrangeLanes(buildLanes({ cards }, PROJECTS), {
+    foldedLaneIds: new Set(foldedLaneId === undefined ? [] : [foldedLaneId]),
+    openedCellIds: new Set(),
+    isFiltering: false,
+  }).find((each) => each.lane.id === laneId)!;
+  return buildDropMove({
+    movingCard: cards.find((card) => card.id === movingCardId)!,
     lane,
-    cells: lane.cells.map(({ stage, cards: cellCards }) => ({
-      stage,
-      arrangement: arrangeCell(cellCards, { stage, opened: false, filtered: false }),
-    })),
-  })),
-  movingCardId,
-  place,
-  nextShownCardId,
-});
+    stage,
+    beforeCardId,
+  });
+};
 
 describe("buildDropMove", () => {
   it("follows the card before the one the slot is in front of, and names no Project in the card's own lane", () => {
-    const move = buildDropMove(
-      requestFor("a", { kind: "cell", laneId: "storefront", stage: "building", index: 1 }, null),
-    );
-    expect(move).toEqual({ taskId: "a", stage: "building", afterTaskId: "d" });
+    expect(dropOn("a", "storefront", "building", null)).toEqual({
+      taskId: "a",
+      stage: "building",
+      afterTaskId: "d",
+    });
   });
 
   it("puts the card first in a cell when the slot is in front of the first card", () => {
-    const move = buildDropMove(
-      requestFor("a", { kind: "cell", laneId: "storefront", stage: "building", index: 0 }, "d"),
-    );
-    expect(move).toEqual({ taskId: "a", stage: "building", afterTaskId: null });
+    expect(dropOn("a", "storefront", "building", "d")).toEqual({
+      taskId: "a",
+      stage: "building",
+      afterTaskId: null,
+    });
   });
 
   it("leaves the moving card out when it reorders inside its own cell", () => {
-    const move = buildDropMove(
-      requestFor("a", { kind: "cell", laneId: "storefront", stage: "exploring", index: 1 }, "c"),
-    );
     // Dropped in front of c: it now follows b.
-    expect(move).toEqual({ taskId: "a", stage: "exploring", afterTaskId: "b" });
+    expect(dropOn("a", "storefront", "exploring", "c")).toEqual({
+      taskId: "a",
+      stage: "exploring",
+      afterTaskId: "b",
+    });
   });
 
   it("sends a move that leaves the order as it was for a drop on the card's own place", () => {
-    const move = buildDropMove(
-      requestFor("b", { kind: "cell", laneId: "storefront", stage: "exploring", index: 1 }, "c"),
-    );
-    expect(move).toBeDefined();
-    const after = applyCardMove(buildBoard(...CARDS), move!);
+    const move = dropOn("b", "storefront", "exploring", "c");
+
+    const after = applyCardMove(buildBoard(...CARDS), move);
     expect(listIds(after.cards)).toEqual(listIds(CARDS));
   });
 
   it("names the lane's Project when the card goes to another lane", () => {
-    const move = buildDropMove(
-      requestFor("a", { kind: "cell", laneId: "checkout", stage: "exploring", index: 1 }, null),
-    );
-    expect(move).toEqual({
+    expect(dropOn("a", "checkout", "exploring", null)).toEqual({
       taskId: "a",
       stage: "exploring",
       projectId: "checkout",
@@ -89,17 +92,16 @@ describe("buildDropMove", () => {
   });
 
   it("names no Project (null) when the card goes to the No project lane", () => {
-    const move = buildDropMove(
-      requestFor("a", { kind: "cell", laneId: "no-project", stage: "exploring", index: 0 }, "f"),
-    );
-    expect(move).toEqual({ taskId: "a", stage: "exploring", projectId: null, afterTaskId: null });
+    expect(dropOn("a", "no-project", "exploring", "f")).toEqual({
+      taskId: "a",
+      stage: "exploring",
+      projectId: null,
+      afterTaskId: null,
+    });
   });
 
   it("sends a card that came from No project to a Project's lane with that Project", () => {
-    const move = buildDropMove(
-      requestFor("f", { kind: "cell", laneId: "checkout", stage: "planned", index: 0 }, null),
-    );
-    expect(move).toEqual({
+    expect(dropOn("f", "checkout", "planned", null)).toEqual({
       taskId: "f",
       stage: "planned",
       projectId: "checkout",
@@ -107,17 +109,27 @@ describe("buildDropMove", () => {
     });
   });
 
+  it("does not touch the Project of a card whose Project is gone when it is dropped in the lane it stands in", () => {
+    const orphan = buildCard("orphan", { projectId: "deleted-project", stage: "exploring" });
+
+    expect(dropOn("orphan", "no-project", "planned", null, { cards: [...CARDS, orphan] })).toEqual({
+      taskId: "orphan",
+      stage: "planned",
+      afterTaskId: null,
+    });
+  });
+
   it("leaves afterTaskId out for a folded lane, and keeps the card's stage when the drop names none", () => {
-    expect(
-      buildDropMove(
-        requestFor("a", { kind: "folded-lane", laneId: "checkout", stage: null }, null),
-      ),
-    ).toEqual({ taskId: "a", stage: "exploring", projectId: "checkout" });
-    expect(
-      buildDropMove(
-        requestFor("a", { kind: "folded-lane", laneId: "checkout", stage: "in-review" }, null),
-      ),
-    ).toEqual({ taskId: "a", stage: "in-review", projectId: "checkout" });
+    expect(dropOn("a", "checkout", null, null, { foldedLaneId: "checkout" })).toEqual({
+      taskId: "a",
+      stage: "exploring",
+      projectId: "checkout",
+    });
+    expect(dropOn("a", "checkout", "in-review", null, { foldedLaneId: "checkout" })).toEqual({
+      taskId: "a",
+      stage: "in-review",
+      projectId: "checkout",
+    });
   });
 
   it("goes before the first hidden card when the slot is after the last card a cell shows", () => {
@@ -127,16 +139,13 @@ describe("buildDropMove", () => {
       ),
       buildCard("x", { projectId: "storefront", stage: "exploring" }),
     ];
+
     // The cell shows m1 to m4, and m5 and m6 wait behind "2 more".
-    const move = buildDropMove(
-      requestFor(
-        "x",
-        { kind: "cell", laneId: "storefront", stage: "planned", index: 4 },
-        null,
-        crowded,
-      ),
-    );
-    expect(move).toEqual({ taskId: "x", stage: "planned", afterTaskId: "m4" });
+    expect(dropOn("x", "storefront", "planned", null, { cards: crowded })).toEqual({
+      taskId: "x",
+      stage: "planned",
+      afterTaskId: "m4",
+    });
   });
 
   it("reads the stored order, not the order on screen, when a failed card leads the cell", () => {
@@ -146,32 +155,12 @@ describe("buildDropMove", () => {
       buildCard("r", { projectId: "storefront", stage: "planned", failure: FAILURE }),
       buildCard("x", { projectId: "storefront", stage: "exploring" }),
     ];
-    // On screen the cell reads r, p, q. Dropped in front of q, x follows p.
-    const move = buildDropMove(
-      requestFor(
-        "x",
-        { kind: "cell", laneId: "storefront", stage: "planned", index: 2 },
-        "q",
-        withFailure,
-      ),
-    );
-    expect(move).toEqual({ taskId: "x", stage: "planned", afterTaskId: "p" });
-  });
 
-  it("returns nothing when the card or the lane is not on the board any more", () => {
-    expect(
-      buildDropMove(
-        requestFor(
-          "gone",
-          { kind: "cell", laneId: "storefront", stage: "building", index: 0 },
-          null,
-        ),
-      ),
-    ).toBeUndefined();
-    expect(
-      buildDropMove(
-        requestFor("a", { kind: "cell", laneId: "vanished", stage: "building", index: 0 }, null),
-      ),
-    ).toBeUndefined();
+    // On screen the cell reads r, p, q. Dropped in front of q, x follows p.
+    expect(dropOn("x", "storefront", "planned", "q", { cards: withFailure })).toEqual({
+      taskId: "x",
+      stage: "planned",
+      afterTaskId: "p",
+    });
   });
 });

@@ -1,21 +1,59 @@
 /** Tests walking the board with the keys, over what is on screen. */
 import { describe, expect, it } from "vitest";
-import { walkBoard, type BoardWalk, type ShownBoard, type WalkStop } from "./walk";
+import type { BoardStage } from "@hercule/contract";
+import { arrangeLanes } from "./arrange-lanes";
+import { buildBoard, buildCard } from "./cards.testing";
+import { buildLanes } from "./lanes";
+import { walkBoard, type BoardWalk, type WalkStop } from "./walk";
+
+const PROJECTS = [
+  { id: "cart", name: "Cart" },
+  { id: "delivery", name: "Delivery" },
+  { id: "returns", name: "Returns" },
+  { id: "storefront", name: "Storefront" },
+];
+
+/** Returns a card of `id` in the lane `projectId` at `stage`. */
+const at = (id: string, projectId: string, stage: BoardStage) =>
+  buildCard(id, { projectId, stage });
 
 /**
- * Four lanes of five columns (Exploring to Landed).
+ * Four lanes of five columns (Exploring to Landed), in the order of their names.
  *
- *   storefront:  [a1 a2 a3] [ ]      [b1]      [ ]  [ ]
- *   billing:     [ ]        [ ]      [ ]       [ ]  [ ]      (folded)
- *   support:     [c1]       [c2 c3]  [ ]       [ ]  [d1 d2]
- *   archive:     [ ]        [ ]      [ ]       [ ]  [ ]      (open, no card)
+ *   cart:        [a1 a2 a3] [ ]      [b1]      [ ]  [ ]
+ *   delivery:    [x]        [ ]      [ ]       [ ]  [ ]      (folded)
+ *   returns:     [c1]       [c2 c3]  [ ]       [ ]  [d1 d2]
+ *   storefront:  [ ]        [ ]      [ ]       [ ]  [e]      (open, but "1 landed" hides e)
  */
-const SHOWN: ShownBoard = [
-  { id: "storefront", isFolded: false, columns: [["a1", "a2", "a3"], [], ["b1"], [], []] },
-  { id: "billing", isFolded: true, columns: [[], [], [], [], []] },
-  { id: "support", isFolded: false, columns: [["c1"], ["c2", "c3"], [], [], ["d1", "d2"]] },
-  { id: "archive", isFolded: false, columns: [[], [], [], [], []] },
-];
+const LANES = arrangeLanes(
+  buildLanes(
+    buildBoard(
+      at("a1", "cart", "exploring"),
+      at("a2", "cart", "exploring"),
+      at("a3", "cart", "exploring"),
+      at("b1", "cart", "building"),
+      at("x", "delivery", "exploring"),
+      at("c1", "returns", "exploring"),
+      at("c2", "returns", "planned"),
+      at("c3", "returns", "planned"),
+      {
+        ...at("d1", "returns", "landed"),
+        openQuestion: { sessionId: "s", requestId: "r", text: "?" },
+      },
+      {
+        ...at("d2", "returns", "landed"),
+        openQuestion: { sessionId: "s", requestId: "r", text: "?" },
+      },
+      at("e", "storefront", "landed"),
+    ),
+    PROJECTS,
+  ),
+  {
+    foldedLaneIds: new Set(["delivery"]),
+    openedCellIds: new Set<string>(),
+    isFiltering: false,
+  },
+);
 
 const card = (cardId: string): WalkStop => ({ kind: "card", cardId });
 const head = (laneId: string): WalkStop => ({ kind: "lane", laneId });
@@ -45,44 +83,45 @@ describe("walkBoard", () => {
     ["left from the first column stays", card("a1"), "left", undefined],
     ["right from the last column stays", card("d1"), "right", undefined],
     ["right never leaves the lane", card("b1"), "right", undefined],
-    ["next lane stops on a folded lane", card("a2"), "nextLane", head("billing")],
+    ["next lane stops on a folded lane", card("a2"), "nextLane", head("delivery")],
     [
       "next lane from a folded lane goes to the first card of the lane below",
-      head("billing"),
+      head("delivery"),
       "nextLane",
       card("c1"),
     ],
-    ["previous lane stops on a folded lane", card("c2"), "previousLane", head("billing")],
+    ["previous lane stops on a folded lane", card("c2"), "previousLane", head("delivery")],
     [
       "previous lane from a folded lane goes to the first card above",
-      head("billing"),
+      head("delivery"),
       "previousLane",
       card("a1"),
     ],
     [
-      "next lane from the last lane with cards stays, passing over an empty open lane",
+      "next lane from the last lane with cards stays, passing over an open lane that shows none",
       card("c2"),
       "nextLane",
       undefined,
     ],
     ["previous lane from the first lane stays", card("b1"), "previousLane", undefined],
-    ["a folded lane head has no card to go down from", head("billing"), "down", undefined],
+    ["a folded lane head has no card to go down from", head("delivery"), "down", undefined],
+    ["a card hidden behind a line is not on screen", card("e"), "left", card("a1")],
   ])("%s", (_, from, walk, expected) => {
-    expect(walkBoard(SHOWN, from, walk)).toEqual(expected);
+    expect(walkBoard(LANES, from, walk)).toEqual(expected);
   });
 
   it("starts at the first card when nothing, or a card not shown, has focus", () => {
-    expect(walkBoard(SHOWN, undefined, "down")).toEqual(card("a1"));
-    expect(walkBoard(SHOWN, card("gone"), "left")).toEqual(card("a1"));
+    expect(walkBoard(LANES, undefined, "down")).toEqual(card("a1"));
+    expect(walkBoard(LANES, card("gone"), "left")).toEqual(card("a1"));
   });
 
   it("starts a lane walk at the first stop, which may be a folded lane", () => {
-    const foldedFirst: ShownBoard = [SHOWN[1]!, SHOWN[0]!];
+    const foldedFirst = [LANES[1]!, LANES[0]!];
 
-    expect(walkBoard(foldedFirst, undefined, "nextLane")).toEqual(head("billing"));
+    expect(walkBoard(foldedFirst, undefined, "nextLane")).toEqual(head("delivery"));
   });
 
-  it("goes nowhere on a board with no card", () => {
-    expect(walkBoard([SHOWN[3]!], undefined, "down")).toBeUndefined();
+  it("goes nowhere on a board with no card on screen", () => {
+    expect(walkBoard([LANES[3]!], undefined, "down")).toBeUndefined();
   });
 });

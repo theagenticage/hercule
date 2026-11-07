@@ -11,7 +11,7 @@ import { isMotionReduced } from "./reduced";
 import type { SpringName } from "./springs";
 
 /** The longest a stagger may delay an element, in milliseconds. A long list never takes longer because it is long. */
-export const LONGEST_STAGGER = 130;
+const LONGEST_STAGGER = 130;
 
 /** A move further than this many pixels is a jump in place: it is more than a screen, and nobody could follow the journey. */
 const LONGEST_JOURNEY = 1400;
@@ -22,14 +22,6 @@ const SMALLEST_MOVE = 0.5;
 /** Returns the delay for the element at `index` when elements start `gap` milliseconds apart, never more than `LONGEST_STAGGER`. */
 export const staggerDelay = (index: number, gap: number): number =>
   Math.min(index * gap, LONGEST_STAGGER);
-
-/** How `flipElements` moves the elements. */
-export interface FlipOptions {
-  /** The spring they move on. Defaults to `hand`. */
-  readonly spring?: SpringName;
-  /** Returns the milliseconds to delay the element at `index`, counted in the list given to `flipElements`. The delay is cut to `LONGEST_STAGGER`. */
-  readonly stagger?: (element: HTMLElement, index: number) => number;
-}
 
 /** The place and size of an element as the layout has it, with no animation offset. */
 export interface LayoutRect {
@@ -100,41 +92,6 @@ const springFrom = (
   body.to({ x: 0, y: 0 }, spring, { delay: Math.min(delay, LONGEST_STAGGER), reduced });
 };
 
-/**
- * Runs `mutate`, then moves every element in `elements` from where it was on
- * screen to where `mutate` put it. "Where it was" is what the user saw,
- * including a move still under way, so changing the page again halfway turns
- * the elements around with the speed they have. An element `mutate` removed
- * is left alone. Under Reduce motion, and for a move of more than a screen,
- * the elements go straight to their places.
- */
-export const flipElements = (
-  elements: readonly HTMLElement[],
-  mutate: () => void,
-  options: FlipOptions = {},
-): void => {
-  const before = elements.map((element) => element.getBoundingClientRect());
-  mutate();
-  const reduced = isMotionReduced();
-  const after = elements.map((element) =>
-    element.isConnected ? measureLayoutRect(element) : null,
-  );
-  const spring = options.spring ?? "hand";
-  elements.forEach((element, index) => {
-    const from = before[index];
-    const to = after[index];
-    if (from === undefined || to === undefined || to === null) return;
-    springFrom(
-      element,
-      { rect: from },
-      to,
-      spring,
-      options.stagger?.(element, index) ?? 0,
-      reduced,
-    );
-  });
-};
-
 /** How `flipByKey` finds and moves the elements. */
 export interface FlipByKeyOptions {
   /** The element that holds every element to move, before and after `mutate`. It must stay on the page. */
@@ -174,9 +131,13 @@ export interface FlipByKeyResult {
 }
 
 /**
- * Like `flipElements`, for a page where React may replace an element with a
- * new one for the same thing, such as a card that moves to another column.
- * Measures every element under `root` that matches `selector`, by key, runs
+ * Runs `mutate`, then moves every element from where it was on screen to
+ * where `mutate` put it. It is made for a page where React may replace an
+ * element with a new one for the same thing, such as a card that moves to
+ * another column. "Where it was" is what the user saw, including a move still
+ * under way, so changing the page again halfway turns the elements around with
+ * the speed they have. Under Reduce motion, and for a move of more than a
+ * screen, the elements go straight to their places. Measures every element under `root` that matches `selector`, by key, runs
  * `mutate`, finds the elements again by key, and moves each from where it
  * looked to where it is now.
  *

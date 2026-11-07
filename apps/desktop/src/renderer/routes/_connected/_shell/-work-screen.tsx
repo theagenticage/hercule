@@ -4,6 +4,7 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import { dropEmptyValues, filterItems } from "@hercule/client-core/desk";
 import {
+  arrangeLanes,
   buildLanes,
   buildWorkFacets,
   chooseLaneId,
@@ -24,7 +25,6 @@ import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
-import { arrangeLanes, listShownCards } from "../../../screens/work/arrange-lanes";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
@@ -124,7 +124,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     openedCellIds: view.openedCellIds,
     isFiltering: view.isFiltering,
   });
-  const shownIds = listShownCardIds(listShownCards(arrangedLanes));
+  const shownIds = listShownCardIds(arrangedLanes);
   const firstShownId = shownIds[0] ?? null;
   const tabStopCardId =
     view.currentCardId !== null && shownIds.includes(view.currentCardId)
@@ -215,9 +215,11 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   useBoardDrag({
     scrollRef,
     cards,
+    currentCards: moves.board?.cards ?? EMPTY_CARDS,
     projects,
     arrangedLanes,
     moveCard: moves.moveCard,
+    say: moves.sayWithoutUndo,
     onCarryingChange: setIsCarrying,
   });
 
@@ -235,8 +237,8 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     scrollRef,
     findRef,
     onOpenCard: openCard,
-    onAdd: () => {
-      openAddSheet(chooseAddLane());
+    onAdd: (laneId) => {
+      openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
   });
@@ -357,7 +359,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
           />
         </>
       }
-      stageCounts={shownBoard === undefined ? null : countCardsByStage(visibleCards)}
+      stageCounts={shownBoard === undefined ? null : countCardsByStage(arrangedLanes)}
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}

@@ -9,7 +9,7 @@ import type { FilterFacet, FilterValue } from "../desk/filter";
 import { chooseLaneId, type WorkLane } from "./lanes";
 
 /** The id of the State facet, whose values are Has a question, Failed and With an agent. */
-export const STATE_FACET_ID = "state";
+const STATE_FACET_ID = "state";
 
 /** The id of the Project facet, which is also the id of the grouping by Project. */
 export const PROJECT_FACET_ID = "project";

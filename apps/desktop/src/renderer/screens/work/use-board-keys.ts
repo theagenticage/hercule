@@ -8,10 +8,13 @@ import {
 } from "react";
 import { EMPTY_FILTER, isFilterOn } from "@hercule/client-core/desk";
 import {
+  buildCellId,
+  chooseLaneId,
   chooseTargetStage,
   describeCardMove,
   listShownCardIds,
   walkBoard,
+  type ArrangedLane,
   type CardMove,
   type WalkStop,
   type WorkProject,
@@ -19,10 +22,9 @@ import {
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
-import { listShownCards, type ArrangedLane } from "./arrange-lanes";
 import { keepCardInView } from "./keep-in-view";
 import { readBoardKey } from "./read-board-key";
-import { buildCellId, type WorkView } from "./use-work-view";
+import type { WorkView } from "./use-work-view";
 
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
 const POINTER_MOVE_MIN = 4;
@@ -61,8 +63,8 @@ export interface BoardKeysInput {
   /** The Find box's input. */
   readonly findRef: RefObject<HTMLInputElement | null>;
   readonly onOpenCard: (card: WorkCard) => void;
-  /** Opens Add to Work in the lane of the current card. */
-  readonly onAdd: () => void;
+  /** Opens Add to Work in the lane `laneId`: the lane of the current card, or its focused head. `undefined` when the keys have none. */
+  readonly onAdd: (laneId: string | undefined) => void;
   /** The Add to Work sheet: whether it is open, and a way to close it. */
   readonly addSheet: { readonly isOpen: boolean; readonly close: () => void };
 }
@@ -78,19 +80,6 @@ export interface BoardKeys {
   readonly handleFindKeys: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
 }
 
-/** Returns the lane that holds the card `cardId`, shown or hidden, or `undefined`. */
-const findLaneOfCard = (
-  arrangedLanes: readonly ArrangedLane[],
-  cardId: string | null,
-): ArrangedLane | undefined =>
-  arrangedLanes.find(({ cells }) =>
-    cells.some(
-      ({ arrangement: cell }) =>
-        cell.cards.some((card) => card.id === cardId) ||
-        cell.hiddenCards.some((card) => card.id === cardId),
-    ),
-  );
-
 /**
  * Listens to the keys of the Work board for as long as the screen is mounted,
  * and returns the state those keys leave on the screen: the keys sheet, and
@@ -100,7 +89,10 @@ const findLaneOfCard = (
  *   something inside the board, and never in a text field, a menu, a dialog or
  *   the Add to Work sheet. Undo and Esc also work from the toolbar.
  * - The current card is the one under the pointer, until an arrow key takes
- *   over from the pointer, and then the card with focus.
+ *   over from the pointer, and then the card with focus. Every key that acts
+ *   on a card or on its lane (the arrows, the stage keys, Return, A and F)
+ *   uses that one card. While focus is on a lane's head there is no card with
+ *   focus, so A and F act on that lane unless the pointer rests on a card.
  * - Esc steps back one thing at a time: the keys sheet, the Add to Work sheet,
  *   the Find text, then the filter. An open menu closes itself first.
  * - While a card is in the hand of a drag, no key does anything here.
@@ -178,12 +170,12 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   /** Moves the card to the end of the cell of `stage` in its own lane, and keeps focus on it when it had focus. */
   const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
     const hadFocus = document.activeElement === findCardElement(card.id);
-    const laneId = findLaneOfCard(arrangedLanes, card.id)?.lane.id;
+    const laneId = chooseLaneId(card, new Set(projects.map((project) => project.id)));
     const move: CardMove = { taskId: card.id, stage };
     // The move is committed before it returns: the card is a new element in
     // its new cell, and focus can only go to it once it is there.
     moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
-    if (!hadFocus || focusCard(card.id) || laneId === undefined) return;
+    if (!hadFocus || focusCard(card.id)) return;
     // The cell shows only some of its cards, and the moved one is behind its
     // line ("3 landed", "13 more"). Focus goes to that line.
     scrollRef.current
@@ -225,31 +217,32 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     }
     if (!isOnBoard) return;
 
-    const shown = listShownCards(arrangedLanes);
-    const shownIds = new Set(listShownCardIds(shown));
-    const hoveredId = hoveredCardId.current;
-    // The card under a resting pointer, else the one with focus.
-    const currentId =
-      hoveredId !== null && shownIds.has(hoveredId)
-        ? hoveredId
-        : view.currentCardId !== null && shownIds.has(view.currentCardId)
-          ? view.currentCardId
-          : null;
+    const shownIds = new Set(listShownCardIds(arrangedLanes));
+    const headLaneId = target?.closest<HTMLElement>("[data-lane-head]")?.dataset.laneHead;
+    // The card under a resting pointer, else the one with focus. A lane's head
+    // having focus means no card has it, whichever card had it last.
+    const focusedId = headLaneId === undefined ? view.currentCardId : null;
+    const currentId = [hoveredCardId.current, focusedId].find(
+      (id) => id !== null && shownIds.has(id),
+    );
     const currentCard = cards.find((card) => card.id === currentId);
+    const currentLaneId =
+      currentCard === undefined
+        ? headLaneId
+        : chooseLaneId(currentCard, new Set(projects.map((project) => project.id)));
 
     switch (command.kind) {
       case "walk": {
         event.preventDefault();
         // A lane walk that starts on a lane head goes on from that lane.
-        const headLaneId = target?.closest<HTMLElement>("[data-lane-head]")?.dataset.laneHead;
         const isLaneWalk = command.walk === "previousLane" || command.walk === "nextLane";
         const from: WalkStop | undefined =
-          isLaneWalk && headLaneId !== undefined
-            ? { kind: "lane", laneId: headLaneId }
-            : currentId === null
+          currentCard === undefined || (isLaneWalk && headLaneId !== undefined)
+            ? headLaneId === undefined
               ? undefined
-              : { kind: "card", cardId: currentId };
-        const next = walkBoard(shown, from, command.walk);
+              : { kind: "lane", laneId: headLaneId }
+            : { kind: "card", cardId: currentCard.id };
+        const next = walkBoard(arrangedLanes, from, command.walk);
         if (next?.kind === "card") focusCard(next.cardId);
         else if (next?.kind === "lane") focusLaneHead(next.laneId);
         return;
@@ -271,24 +264,21 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       }
       case "add":
         event.preventDefault();
-        input.onAdd();
+        input.onAdd(currentLaneId);
         return;
       case "fold-lane": {
-        const laneId =
-          target?.closest<HTMLElement>("[data-lane-id]")?.dataset.laneId ??
-          findLaneOfCard(arrangedLanes, view.currentCardId)?.lane.id;
-        if (laneId === undefined) return;
+        if (currentLaneId === undefined) return;
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
-          view.toggleLane(laneId);
-        }, laneId);
+          view.toggleLane(currentLaneId);
+        }, currentLaneId);
         return;
       }
       case "fold-all-lanes":
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
           view.foldEverything(arrangedLanes.map((each) => each.lane.id));
-        }, findLaneOfCard(arrangedLanes, view.currentCardId)?.lane.id);
+        }, currentLaneId);
         return;
       case "find":
         event.preventDefault();

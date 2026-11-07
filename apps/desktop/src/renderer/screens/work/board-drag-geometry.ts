@@ -40,10 +40,11 @@ export interface CellBox {
   readonly element: HTMLElement;
   readonly rows: readonly CellRow[];
   /**
-   * The last place a drop may take, set for a closed cell that has a "13 more"
-   * line. A card dropped behind that line would be hidden at once, so a drop
-   * below the last row shown takes that row's place and the card it displaces
-   * slips into "13 more". Absent when the cell lets a drop go anywhere.
+   * The index in `rows` of the last place a drop may take, set for a closed
+   * cell that has a "13 more" line. A card dropped behind that line would be
+   * hidden at once, so a drop below the last row shown takes that row's place
+   * and the card it displaces slips into "13 more". Absent when the cell lets
+   * a drop go anywhere.
    */
   readonly lastIndex?: number;
 }
@@ -88,7 +89,7 @@ export const toBoardPoint = (
 export const isSameDropPlace = (a: DropPlace | null, b: DropPlace | null): boolean => {
   if (a === null || b === null) return a === b;
   if (a.kind === "cell" && b.kind === "cell") {
-    return a.laneId === b.laneId && a.stage === b.stage && a.index === b.index;
+    return a.laneId === b.laneId && a.stage === b.stage && a.beforeCardId === b.beforeCardId;
   }
   return (
     a.kind === "folded-lane" &&
@@ -138,8 +139,8 @@ const pickRowIndex = (rows: readonly CellRow[], y: number): number =>
  * - The lane is the one under `y`, else the nearest. The stage is the one at
  *   `x`.
  * - In an open lane, the card takes the place after every card whose middle
- *   is above `y`, but never past the cell's `lastIndex`. A cell with no card
- *   gives place 0.
+ *   is above `y`, but never past the cell's `lastIndex`. The place is named by
+ *   the card it goes before, or `null` at the end of the cell.
  * - A folded lane is a target as a whole: nothing in it can hold a slot.
  */
 export const chooseDropPlace = (
@@ -162,7 +163,7 @@ export const chooseDropPlace = (
   const cell = stage === undefined ? undefined : lane.cells.get(stage);
   if (stage === undefined || cell === undefined) return null;
   const index = Math.min(pickRowIndex(cell.rows, y), cell.lastIndex ?? Infinity);
-  return { kind: "cell", laneId: lane.id, stage, index };
+  return { kind: "cell", laneId: lane.id, stage, beforeCardId: cell.rows[index]?.id ?? null };
 };
 
 /**

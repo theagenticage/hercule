@@ -98,7 +98,6 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import { computeDayStart } from "@hercule/client-core/list-time";
-import { buildWorkBoardKey } from "@hercule/client-core/work";
 import {
   buildMachineFiveMinuteScope,
   FLEET_HOUR_METRICS_SCOPE,
@@ -870,7 +869,7 @@ const seedQueryCache = (
     }
   }
   if (work !== undefined) {
-    queryClient.setQueryData(buildWorkBoardKey(), work.board);
+    queryClient.setQueryData(queryKeys.workBoard(), work.board);
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);

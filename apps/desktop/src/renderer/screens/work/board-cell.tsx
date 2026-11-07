@@ -1,8 +1,7 @@
 import type { JSX } from "react";
-import { STAGE_NAMES } from "@hercule/client-core/work";
+import { STAGE_NAMES, type ArrangedLaneCell } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import { ChevronDownIcon } from "../../icons/chevron-down";
-import type { ArrangedLaneCell } from "./arrange-lanes";
 import { WorkCardView } from "./work-card";
 
 /**

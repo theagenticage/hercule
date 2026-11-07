@@ -8,7 +8,7 @@
  * filter itself is in `@hercule/client-core/desk`.
  */
 export * from "./arrange-cell";
-export * from "./board-key";
+export * from "./arrange-lanes";
 export * from "./card-move";
 export * from "./card-pose";
 export * from "./card-words";
@@ -17,7 +17,5 @@ export * from "./drop-move";
 export * from "./facets";
 export * from "./find";
 export * from "./hold-back-board";
-export * from "./lane-summary";
 export * from "./lanes";
-export * from "./stage-counts";
 export * from "./walk";

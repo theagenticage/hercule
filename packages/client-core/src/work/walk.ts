@@ -1,21 +1,11 @@
 /**
  * Walking the board with the arrow keys, `[` and `]`. The walk is over what is
  * on screen, not over the stored cards: a card hidden behind "13 more", or in
- * a folded lane, is not on it.
+ * a folded lane, is not on it. Each lane has a column for each board stage,
+ * left to right, and a folded lane has only empty columns.
  */
-
-/** The ids of the cards one cell shows, top to bottom. */
-export type ShownColumn = readonly string[];
-
-/** One lane that is drawn: a column for each board stage, left to right. A folded lane has only empty columns. */
-export interface ShownLane {
-  readonly id: string;
-  readonly isFolded: boolean;
-  readonly columns: readonly ShownColumn[];
-}
-
-/** Every lane that is drawn, top to bottom. */
-export type ShownBoard = readonly ShownLane[];
+import type { WorkCard } from "@hercule/contract";
+import type { ArrangedLane } from "./arrange-lanes";
 
 /** A step of the walk. */
 export type BoardWalk = "up" | "down" | "left" | "right" | "previousLane" | "nextLane";
@@ -34,29 +24,36 @@ interface Spot {
   readonly row: number;
 }
 
-const findSpot = (shown: ShownBoard, cardId: string): Spot | undefined => {
-  for (const [lane, { columns }] of shown.entries()) {
-    for (const [column, ids] of columns.entries()) {
-      const row = ids.indexOf(cardId);
-      if (row >= 0) return { lane, column, row };
+/** Returns the cards one column of `lane` shows, top to bottom. A folded lane shows none. */
+const readColumn = (lane: ArrangedLane, column: number): readonly WorkCard[] =>
+  lane.isFolded ? [] : (lane.cells[column]?.arrangement.cards ?? []);
+
+const findSpot = (lanes: readonly ArrangedLane[], cardId: string): Spot | undefined => {
+  for (const [laneIndex, lane] of lanes.entries()) {
+    for (const column of lane.cells.keys()) {
+      const row = readColumn(lane, column).findIndex((card) => card.id === cardId);
+      if (row >= 0) return { lane: laneIndex, column, row };
     }
   }
   return undefined;
 };
 
 /** Returns the ids of every card on screen, lane by lane, column by column, top to bottom. */
-export const listShownCardIds = (shown: ShownBoard): readonly string[] =>
-  shown.flatMap(({ columns }) => columns.flat());
+export const listShownCardIds = (lanes: readonly ArrangedLane[]): readonly string[] =>
+  lanes.flatMap((lane) =>
+    lane.cells.flatMap((_cell, column) => readColumn(lane, column).map((card) => card.id)),
+  );
 
 /**
  * Returns where a lane walk stops in `lane`: its head when it is folded, else
  * its first card (the top of its leftmost column that has one). An open lane
- * with no card is not a stop.
+ * with no card on screen is not a stop.
  */
-const findLaneStop = (lane: ShownLane | undefined): WalkStop | undefined => {
+const findLaneStop = (lane: ArrangedLane | undefined): WalkStop | undefined => {
   if (lane === undefined) return undefined;
-  if (lane.isFolded) return { kind: "lane", laneId: lane.id };
-  const cardId = lane.columns.find((ids) => ids.length > 0)?.[0];
+  if (lane.isFolded) return { kind: "lane", laneId: lane.lane.id };
+  const cardId = lane.cells.find((cell) => cell.arrangement.cards.length > 0)?.arrangement.cards[0]
+    ?.id;
   return cardId === undefined ? undefined : { kind: "card", cardId };
 };
 
@@ -81,53 +78,53 @@ const findLaneStop = (lane: ShownLane | undefined): WalkStop | undefined => {
  * only a lane walk: the other steps have no card to go from there.
  */
 export const walkBoard = (
-  shown: ShownBoard,
+  lanes: readonly ArrangedLane[],
   from: WalkStop | undefined,
   walk: BoardWalk,
 ): WalkStop | undefined => {
   const isLaneWalk = walk === "previousLane" || walk === "nextLane";
   const lane =
     from?.kind === "lane"
-      ? shown.findIndex(({ id }) => id === from.laneId)
+      ? lanes.findIndex((each) => each.lane.id === from.laneId)
       : from === undefined
         ? -1
-        : (findSpot(shown, from.cardId)?.lane ?? -1);
+        : (findSpot(lanes, from.cardId)?.lane ?? -1);
   if (lane < 0) {
-    if (isLaneWalk) return shown.map(findLaneStop).find((stop) => stop !== undefined);
-    const first = listShownCardIds(shown)[0];
+    if (isLaneWalk) return lanes.map(findLaneStop).find((stop) => stop !== undefined);
+    const first = listShownCardIds(lanes)[0];
     return first === undefined ? undefined : { kind: "card", cardId: first };
   }
 
   if (isLaneWalk) {
     const step = walk === "previousLane" ? -1 : 1;
-    for (let other = lane + step; other >= 0 && other < shown.length; other += step) {
-      const stop = findLaneStop(shown[other]);
+    for (let other = lane + step; other >= 0 && other < lanes.length; other += step) {
+      const stop = findLaneStop(lanes[other]);
       if (stop !== undefined) return stop;
     }
     return undefined;
   }
   if (from?.kind !== "card") return undefined;
-  const { column, row } = findSpot(shown, from.cardId)!;
+  const { column, row } = findSpot(lanes, from.cardId)!;
 
   if (walk === "up" || walk === "down") {
-    const here = shown[lane]?.columns[column];
-    const sibling = here?.[walk === "up" ? row - 1 : row + 1];
-    if (sibling !== undefined) return { kind: "card", cardId: sibling };
+    const here = readColumn(lanes[lane]!, column);
+    const sibling = here[walk === "up" ? row - 1 : row + 1];
+    if (sibling !== undefined) return { kind: "card", cardId: sibling.id };
     const step = walk === "up" ? -1 : 1;
-    for (let other = lane + step; other >= 0 && other < shown.length; other += step) {
-      const ids = shown[other]?.columns[column];
-      const cardId = walk === "up" ? ids?.at(-1) : ids?.[0];
-      if (cardId !== undefined) return { kind: "card", cardId };
+    for (let other = lane + step; other >= 0 && other < lanes.length; other += step) {
+      const cards = readColumn(lanes[other]!, column);
+      const card = walk === "up" ? cards.at(-1) : cards[0];
+      if (card !== undefined) return { kind: "card", cardId: card.id };
     }
     return undefined;
   }
 
-  const columns = shown[lane]?.columns ?? [];
+  const here = lanes[lane]!;
   const step = walk === "left" ? -1 : 1;
-  for (let other = column + step; other >= 0 && other < columns.length; other += step) {
-    const ids = columns[other];
-    const cardId = ids?.[Math.min(row, ids.length - 1)];
-    if (cardId !== undefined) return { kind: "card", cardId };
+  for (let other = column + step; other >= 0 && other < here.cells.length; other += step) {
+    const cards = readColumn(here, other);
+    const card = cards[Math.min(row, cards.length - 1)];
+    if (card !== undefined) return { kind: "card", cardId: card.id };
   }
   return undefined;
 };

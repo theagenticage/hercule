@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { EMPTY_FILTER, isFilterOn, type Filter } from "@hercule/client-core/desk";
-import type { BoardStage } from "@hercule/contract";
 import { readSavedWorkView, writeSavedWorkView, type SavedWorkView } from "./work-view-storage";
 
 /** How the lanes label themselves: in a strip at the side, or in a band across the top. */
@@ -14,9 +13,6 @@ export interface WorkDisplay {
   /** Whether single keys, such as A and F, work on the board. */
   readonly hasSingleKeys: boolean;
 }
-
-/** Returns the id of one cell of the board, the key `openedCellIds` holds. */
-export const buildCellId = (laneId: string, stage: BoardStage): string => `${laneId}/${stage}`;
 
 /**
  * Returns the ids with every one of `laneIds` taken out when all of them are
@@ -53,7 +49,7 @@ export interface WorkView {
   readonly setFindText: (text: string) => void;
   /** Whether a filter or a Find text is on, which opens the folded lanes and lifts the limit of a cell. */
   readonly isFiltering: boolean;
-  /** The ids (`buildCellId`) of the cells the user opened to show every card. */
+  /** The ids (`buildCellId` in client-core) of the cells the user opened to show every card. */
   readonly openedCellIds: ReadonlySet<string>;
   readonly toggleCell: (cellId: string) => void;
   /**

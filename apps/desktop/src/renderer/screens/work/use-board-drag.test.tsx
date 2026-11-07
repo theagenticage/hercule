@@ -10,11 +10,16 @@
 import { useRef, useState, type JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { buildLanes, STAGE_NAMES, type CardMove } from "@hercule/client-core/work";
+import {
+  arrangeLanes,
+  buildLanes,
+  CARD_NOT_EXACT_NOTE,
+  STAGE_NAMES,
+  type CardMove,
+} from "@hercule/client-core/work";
 import { buildCard } from "@hercule/client-core/work/testing";
 import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
 import { findBody } from "../../app/motion/body";
-import { arrangeLanes } from "./arrange-lanes";
 import { BoardDesk } from "./board-desk";
 import { BoardLane } from "./board-lane";
 import { useBoardDrag } from "./use-board-drag";
@@ -134,17 +139,22 @@ const layOut = (element: HTMLElement): DOMRect => {
 // ---------- The board under test ----------
 
 interface Harness {
-  readonly moveCard: ReturnType<typeof vi.fn<(move: CardMove, words: string) => void>>;
+  readonly moveCard: ReturnType<
+    typeof vi.fn<(move: CardMove, words: string, note?: string) => void>
+  >;
+  readonly say: ReturnType<typeof vi.fn<(text: string) => void>>;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
 }
 
 /** Renders the board as the Work screen does, with the drag hook on it. */
 function Board({
   cards,
+  currentCards,
   foldedLaneIds,
   harness,
 }: {
   readonly cards: readonly WorkCard[];
+  readonly currentCards: readonly WorkCard[];
   readonly foldedLaneIds: ReadonlySet<string>;
   readonly harness: Harness;
 }): JSX.Element {
@@ -158,9 +168,11 @@ function Board({
   useBoardDrag({
     scrollRef,
     cards,
+    currentCards,
     projects: PROJECTS,
     arrangedLanes,
     moveCard: harness.moveCard,
+    say: harness.say,
     onCarryingChange: setIsCarrying,
   });
   return (
@@ -200,18 +212,38 @@ const renderBoard = (
   cards: readonly WorkCard[] = CARDS,
   foldedLaneIds: ReadonlySet<string> = new Set(),
 ) => {
-  const harness: Harness = { moveCard: vi.fn(), onOpenCard: vi.fn() };
-  const view = render(<Board cards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />);
+  const harness: Harness = { moveCard: vi.fn(), say: vi.fn(), onOpenCard: vi.fn() };
+  const view = render(
+    <Board cards={cards} currentCards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
+  );
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
     moveCard: harness.moveCard,
+    say: harness.say,
     onOpenCard: harness.onOpenCard,
     /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
     isCarrying: (): boolean =>
       view.container.querySelector(".work-desk")?.hasAttribute("data-carrying") === true,
     scroller,
     rerenderWith: (next: readonly WorkCard[], folded: ReadonlySet<string> = foldedLaneIds) => {
-      view.rerender(<Board cards={next} foldedLaneIds={folded} harness={harness} />);
+      view.rerender(
+        <Board cards={next} currentCards={next} foldedLaneIds={folded} harness={harness} />,
+      );
+    },
+    /**
+     * Changes the board as it is now while the board drawn stays as it is,
+     * which is what a push does during a carry: the screen holds the changes
+     * back until the card is let go.
+     */
+    changeBoardBehindCarry: (current: readonly WorkCard[]) => {
+      view.rerender(
+        <Board
+          cards={cards}
+          currentCards={current}
+          foldedLaneIds={foldedLaneIds}
+          harness={harness}
+        />,
+      );
     },
     unmount: view.unmount,
     /** The element of a card in the page (the hidden one, while it is carried). */
@@ -394,7 +426,7 @@ describe("pressing a card", () => {
 });
 
 describe("dropping a card", () => {
-  it("calls moveCard once with the stage, the card to follow, and the words for the undo line", () => {
+  it("calls moveCard once with the stage, the card to follow, and the words for the undo line, and no note", () => {
     const board = renderBoard();
     press(board.card("refund-emails"), 220, 70);
     moveTo(board.scroller, 220, 76);
@@ -406,6 +438,7 @@ describe("dropping a card", () => {
     expect(board.moveCard).toHaveBeenCalledExactlyOnceWith(
       { taskId: "refund-emails", stage: "building", afterTaskId: "promo-codes" },
       `Moved "Refund emails" to ${STAGE_NAMES.building}`,
+      undefined,
     );
     expect(board.ghost()).toBeNull();
     expect(board.slot()).toBeNull();
@@ -465,6 +498,71 @@ describe("dropping a card", () => {
       taskId: "refund-emails",
       stage: "planned",
       projectId: "warehouse",
+    });
+  });
+
+  describe("when a push changed the board during the carry", () => {
+    const WITH_SECOND_BUILDING = [
+      ...CARDS,
+      buildCard("stock-sync", { title: "Stock sync", projectId: "storefront", stage: "building" }),
+    ];
+
+    /** Carries "Refund emails" to Building, between "Promo codes" and "Stock sync". */
+    const carryBetweenBuildingCards = (board: ReturnType<typeof renderBoard>): void => {
+      press(board.card("refund-emails"), 220, 70);
+      moveTo(board.scroller, 220, 76);
+      moveTo(board.scroller, columnX("building"), rowY(0) + 60);
+      expect(board.readCell("storefront", "building")).toEqual([
+        "promo-codes",
+        "slot",
+        "stock-sync",
+      ]);
+    };
+
+    it("puts the card last in its cell, and says so, when the card it follows has left the board", () => {
+      const board = renderBoard(WITH_SECOND_BUILDING);
+      carryBetweenBuildingCards(board);
+      board.changeBoardBehindCarry(
+        WITH_SECOND_BUILDING.filter((card) => card.id !== "promo-codes"),
+      );
+      release(board.scroller, columnX("building"), rowY(0) + 60);
+
+      expect(board.moveCard).toHaveBeenCalledExactlyOnceWith(
+        { taskId: "refund-emails", stage: "building", afterTaskId: "stock-sync" },
+        `Moved "Refund emails" to ${STAGE_NAMES.building}`,
+        CARD_NOT_EXACT_NOTE,
+      );
+    });
+
+    it("sends nothing, and says why, when the Task has left the board", () => {
+      const board = renderBoard(WITH_SECOND_BUILDING);
+      carryBetweenBuildingCards(board);
+      board.changeBoardBehindCarry(
+        WITH_SECOND_BUILDING.filter((card) => card.id !== "refund-emails"),
+      );
+      release(board.scroller, columnX("building"), rowY(0) + 60);
+
+      expect(board.moveCard).not.toHaveBeenCalled();
+      expect(board.say).toHaveBeenCalledExactlyOnceWith(
+        "The Task has left the board, so it was not moved.",
+      );
+      expect(board.isCarrying()).toBe(false);
+      expect(board.slot()).toBeNull();
+    });
+
+    it("sends the move as it is, with no note, when the card it follows is still there", () => {
+      const board = renderBoard(WITH_SECOND_BUILDING);
+      carryBetweenBuildingCards(board);
+      board.changeBoardBehindCarry(WITH_SECOND_BUILDING.filter((card) => card.id !== "pick-lists"));
+      release(board.scroller, columnX("building"), rowY(0) + 60);
+
+      expect(board.moveCard.mock.calls[0]![0]).toEqual({
+        taskId: "refund-emails",
+        stage: "building",
+        afterTaskId: "promo-codes",
+      });
+      expect(board.moveCard.mock.calls[0]![2]).toBeUndefined();
+      expect(board.say).not.toHaveBeenCalled();
     });
   });
 

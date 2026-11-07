@@ -1,7 +1,7 @@
 import {
   flipByKey,
   type FlipByKeyResult,
-  type FlipOptions,
+  type FlipByKeyOptions,
   type SpringName,
 } from "../../app/motion";
 
@@ -38,7 +38,7 @@ export const flipBoard = (
   scroller: HTMLElement,
   spring: SpringName,
   mutate: () => void,
-  stagger?: FlipOptions["stagger"],
+  stagger?: FlipByKeyOptions["stagger"],
 ): FlipByKeyResult =>
   flipByKey({
     root: scroller,

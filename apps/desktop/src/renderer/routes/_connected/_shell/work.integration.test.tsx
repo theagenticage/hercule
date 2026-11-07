@@ -567,6 +567,30 @@ describe("the Work screen's keys", () => {
     expect(await screen.findByRole("textbox", { name: "New Task" })).toBeTruthy();
   });
 
+  it("acts on the card under the pointer for every key, also when focus is on a card of another lane", async () => {
+    const user = userEvent.setup();
+    const { listMoves } = await openMovableWork();
+    await user.click(await screen.findByRole("button", { name: /^Tidy the depot labels/ }));
+    // Focus is on a card in No project, and the pointer rests on a card in ops.
+    await user.pointer({
+      target: getCard("Renew the payment gateway certificate"),
+      coords: { clientX: 100, clientY: 100 },
+    });
+
+    await user.keyboard("a");
+    expect(await screen.findByText("Starts in Exploring, in ops.")).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    await user.keyboard(withShift("{ArrowRight}"));
+    await waitFor(() => {
+      expect(listMoves()).toHaveLength(1);
+    });
+    expect(listMoves()[0]).toMatchObject({
+      path: `/api/v1/tasks/${buildTaskId(4)}/move`,
+      body: { stage: "in-review" },
+    });
+  });
+
   it("folds the current lane with F and every lane with Shift F", async () => {
     const user = userEvent.setup();
     await openWork();

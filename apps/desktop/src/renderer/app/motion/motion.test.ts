@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   animateValue,
   flipByKey,
-  flipElements,
+  type FlipByKeyOptions,
   ghostElement,
   staggerDelay,
   trackBody,
@@ -222,93 +222,6 @@ describe("a value", () => {
   });
 });
 
-describe("flipping elements", () => {
-  it("starts each element from the place it was on screen, then settles it in its new place", () => {
-    const element = makeElement();
-    placeOnScreen(element, 100);
-
-    flipElements([element], () => layoutTop.set(element, 300));
-    expect(seenTop(element)).toBe(100);
-    play(FRAME * 3);
-    expect(seenTop(element)).toBeGreaterThan(100);
-    expect(seenTop(element)).toBeLessThan(300);
-
-    play(SETTLE_TIME);
-    expect(seenTop(element)).toBe(300);
-    expect(element.style.transform).toBe("");
-  });
-
-  it("turns around from where an element is on screen when the page changes again halfway", () => {
-    const element = makeElement();
-    placeOnScreen(element, 100);
-    flipElements([element], () => layoutTop.set(element, 300));
-    play(FRAME * 4);
-    const seenMidway = seenTop(element);
-
-    flipElements([element], () => layoutTop.set(element, 100), { spring: "self" });
-    expect(seenTop(element)).toBeCloseTo(seenMidway, 5);
-
-    // It was heading down, so it carries on down for a moment before it turns.
-    play(FRAME);
-    expect(seenTop(element)).toBeGreaterThan(seenMidway);
-
-    play(SETTLE_TIME);
-    expect(seenTop(element)).toBe(100);
-  });
-
-  it("leaves alone an element the change removed, and one that did not move", () => {
-    const gone = makeElement();
-    const still = makeElement();
-    placeOnScreen(gone, 100);
-    placeOnScreen(still, 200);
-
-    flipElements([gone, still], () => gone.remove());
-
-    expect(vi.getTimerCount()).toBe(0);
-    expect(still.style.transform).toBe("");
-  });
-
-  it("puts elements in their places at once under Reduce motion", () => {
-    setReduced(true);
-    const element = makeElement();
-    placeOnScreen(element, 100);
-    flipElements([element], () => layoutTop.set(element, 300));
-    expect(element.style.transform).toBe("");
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("puts an element in its place at once when it moves more than a screen", () => {
-    const element = makeElement();
-    placeOnScreen(element, 100);
-    flipElements([element], () => layoutTop.set(element, 3000));
-    expect(element.style.transform).toBe("");
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("starts a staggered list late, but never later than the cap, however long the list is", () => {
-    const elements = Array.from({ length: 100 }, (_, index) => {
-      const element = makeElement();
-      placeOnScreen(element, index * 60);
-      return element;
-    });
-
-    flipElements(
-      elements,
-      () => elements.forEach((element) => layoutTop.set(element, layoutTop.get(element)! + 60)),
-      {
-        stagger: (_element, index) => index * 16,
-      },
-    );
-
-    const last = elements.at(-1)!;
-    play(120);
-    expect(last.style.transform).toContain("translate3d(0.00px,-60.00px");
-    play(SETTLE_TIME / 4);
-    expect(vi.getTimerCount()).toBe(0);
-    expect(last.style.transform).toBe("");
-  });
-});
-
 describe("flipping by key", () => {
   /** Makes an element for `key` at layout `top`. */
   const makeKeyed = (key: string, top: number): HTMLElement => {
@@ -319,7 +232,7 @@ describe("flipping by key", () => {
   };
 
   /** Flips the keyed elements of the page around `mutate`. */
-  const flip = (mutate: () => void, options: { spring?: "self" } = {}) =>
+  const flip = (mutate: () => void, options: Pick<FlipByKeyOptions, "spring" | "stagger"> = {}) =>
     flipByKey({
       root: document.body,
       selector: "[data-key]",
@@ -395,12 +308,68 @@ describe("flipping by key", () => {
     expect(places.has("gone")).toBe(false);
   });
 
-  it("flips an element that stays the same element, as flipElements does", () => {
+  it("starts an element that stays the same from the place it was on screen, then settles it in its new place", () => {
     const element = makeKeyed("a", 100);
+
     flip(() => layoutTop.set(element, 300));
     expect(seenTop(element)).toBe(100);
+    play(FRAME * 3);
+    expect(seenTop(element)).toBeGreaterThan(100);
+    expect(seenTop(element)).toBeLessThan(300);
+
     play(SETTLE_TIME);
     expect(seenTop(element)).toBe(300);
+    expect(element.style.transform).toBe("");
+  });
+
+  it("turns around from where an element is on screen when the page changes again halfway", () => {
+    const element = makeKeyed("a", 100);
+    flip(() => layoutTop.set(element, 300));
+    play(FRAME * 4);
+    const seenMidway = seenTop(element);
+
+    flip(() => layoutTop.set(element, 100), { spring: "self" });
+    expect(seenTop(element)).toBeCloseTo(seenMidway, 5);
+
+    // It was heading down, so it carries on down for a moment before it turns.
+    play(FRAME);
+    expect(seenTop(element)).toBeGreaterThan(seenMidway);
+
+    play(SETTLE_TIME);
+    expect(seenTop(element)).toBe(100);
+  });
+
+  it("puts elements in their places at once under Reduce motion", () => {
+    setReduced(true);
+    const element = makeKeyed("a", 100);
+    flip(() => layoutTop.set(element, 300));
+    expect(element.style.transform).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("puts an element in its place at once when it moves more than a screen", () => {
+    const element = makeKeyed("a", 100);
+    flip(() => layoutTop.set(element, 3000));
+    expect(element.style.transform).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts a staggered list late, but never later than the cap, however long the list is", () => {
+    const elements = Array.from({ length: 100 }, (_, index) =>
+      makeKeyed(`k${String(index)}`, index * 60),
+    );
+
+    flip(
+      () => elements.forEach((element) => layoutTop.set(element, layoutTop.get(element)! + 60)),
+      { stagger: (_element, index) => index * 16 },
+    );
+
+    const last = elements.at(-1)!;
+    play(120);
+    expect(last.style.transform).toContain("translate3d(0.00px,-60.00px");
+    play(SETTLE_TIME / 4);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(last.style.transform).toBe("");
   });
 });
 

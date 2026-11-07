@@ -20,6 +20,7 @@ import {
   type WorkBoard,
   type WorkCard,
 } from "@hercule/contract";
+import type { WorkProject } from "./lanes";
 
 /** One move of one card, as `task.move` takes it. */
 export type CardMove = TaskMoveInput & { readonly taskId: string };
@@ -171,6 +172,59 @@ export const buildRestoreMove = (
   };
 };
 
+/** What the undo line adds when a card could not be put exactly where it was meant to go: the card it followed is gone. */
+export const CARD_NOT_EXACT_NOTE = "The card it followed has gone, so it went last in that stage.";
+
+/**
+ * What to do with a drop's move once the board is as it is now: send it as it
+ * is, send it with the card last in its cell and say so in `note`, or send
+ * nothing and say why in `reason`.
+ */
+export type SettledDrop =
+  | { readonly kind: "send"; readonly move: CardMove; readonly note?: string }
+  | { readonly kind: "refuse"; readonly reason: string };
+
+/**
+ * Returns what to do with `move`, a drop built from the board the user saw
+ * while carrying, over `board` as it is now. A push can change the board
+ * during a carry, and a move that names a card that is gone would change
+ * nothing and say nothing.
+ *
+ * - The Task is gone from `board`, or the Project the drop names is no longer
+ *   one of `projects`: nothing is sent, and `reason` says why.
+ * - The card to follow is gone from the target cell: the card goes last in the
+ *   cell, with `CARD_NOT_EXACT_NOTE` as the note.
+ * - Otherwise the move is sent as it is.
+ */
+export const settleDropMove = (
+  board: Pick<WorkBoard, "cards">,
+  projects: readonly WorkProject[],
+  move: CardMove,
+): SettledDrop => {
+  const moving = board.cards.find((card) => card.id === move.taskId);
+  if (moving === undefined) {
+    return { kind: "refuse", reason: "The Task has left the board, so it was not moved." };
+  }
+  if (typeof move.projectId === "string" && !projects.some((each) => each.id === move.projectId)) {
+    return {
+      kind: "refuse",
+      reason: "The Project it was dropped on has gone, so the card was not moved.",
+    };
+  }
+  if (typeof move.afterTaskId !== "string") return { kind: "send", move };
+  const stage = move.stage ?? moving.stage;
+  const projectId = chooseProjectId(moving, move);
+  const cell = board.cards.filter(
+    (card) => card.id !== moving.id && isInCell(card, stage, projectId),
+  );
+  if (cell.some((card) => card.id === move.afterTaskId)) return { kind: "send", move };
+  return {
+    kind: "send",
+    move: { ...move, afterTaskId: cell.at(-1)?.id ?? null },
+    note: CARD_NOT_EXACT_NOTE,
+  };
+};
+
 /** What a drop knows about the cell it lands in. */
 export interface DropTarget {
   /** The cards of the target cell in stored order, without the card being moved. */
@@ -181,7 +235,7 @@ export interface DropTarget {
    * hidden behind "13 more", this is the first hidden card, so the card lands
    * right after the last card shown and does not jump over cards the user has
    * not seen. It then waits behind "13 more" itself: a drop with the pointer
-   * never asks for this place (see `lastIndex` in `board-drag-geometry.ts`),
+   * never asks for this place (the drag keeps a drop on the last row shown),
    * and a move by key may.
    */
   readonly nextVisibleCardId: string | null;

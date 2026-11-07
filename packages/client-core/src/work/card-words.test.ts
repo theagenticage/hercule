@@ -1,14 +1,9 @@
 /** Tests the line a failed card shows and the name a screen reader reads for a card. */
 import { describe, expect, it } from "vitest";
 import { buildCard, FAILURE, QUESTION } from "./cards.testing";
-import {
-  chooseCardSecondLine,
-  describeCardFailure,
-  describeCardForReader,
-  describeCardQuestion,
-} from "./card-words";
+import { chooseCardSecondLine, describeCardForReader } from "./card-words";
 
-describe("describeCardFailure", () => {
+describe("the line of a failed card", () => {
   it.each([
     ["with a cause", "the branch changed mid-run", "Review PR failed: the branch changed mid-run."],
     ["with no cause", "", "Review PR failed."],
@@ -20,17 +15,21 @@ describe("describeCardFailure", () => {
     ],
     ["with a cause of several lines", "first\n  second", "Review PR failed: first second."],
   ])("writes the line %s", (_, cause, expected) => {
-    expect(describeCardFailure({ ...FAILURE, cause })).toBe(expected);
+    expect(chooseCardSecondLine(buildCard("a", { failure: { ...FAILURE, cause } }))?.text).toBe(
+      expected,
+    );
   });
 });
 
-describe("describeCardQuestion", () => {
+describe("the line of a card that asks a question", () => {
   it.each([
     ["the question", "Which refund window?", "Which refund window?"],
     ["a blank question", "", "Has a question"],
     ["a question of only whitespace", " \n ", "Has a question"],
-  ])("returns %s", (_, text, expected) => {
-    expect(describeCardQuestion({ ...QUESTION, text })).toBe(expected);
+  ])("is %s", (_, text, expected) => {
+    expect(
+      chooseCardSecondLine(buildCard("a", { openQuestion: { ...QUESTION, text } }))?.text,
+    ).toBe(expected);
   });
 });
 

@@ -1,18 +1,17 @@
 /**
  * Tests moving cards through `useCardMoves`: a move shows at once and is sent
- * in order, a read that lands meanwhile cannot undo it, a failed move goes
- * back and says why, and Undo takes its place in the queue the moment it is
- * pressed and puts the card back where it stood. What the cards do on screen
- * needs a real layout, so these tests only check which spring a change is
- * played on.
+ * in order, a read that lands meanwhile cannot undo it, an answered move is
+ * written into the cached board, a failed move goes back and says why, and
+ * Undo takes its place in the queue the moment it is pressed and puts the
+ * card back where it stood. What the cards do on screen needs a real layout,
+ * so these tests only check which spring a change is played on.
  */
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { HerculeClient } from "@hercule/client-core";
+import { notifyManager, QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
 import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testing";
-import { buildWorkBoardKey } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import { flipByKey } from "../../../app/motion";
 import type { CardMover } from "../../../app/card-mover";
@@ -53,7 +52,7 @@ interface HeldMove {
  * Returns a client whose `task.move` waits for the test to accept or refuse
  * each request, and whose board read answers with `readBoard()`.
  */
-const buildClient = (readBoard: () => WorkBoard) => {
+const buildClient = (readBoard: () => WorkBoard | Promise<WorkBoard>) => {
   const held: HeldMove[] = [];
   const client = {
     task: {
@@ -76,20 +75,45 @@ const buildClient = (readBoard: () => WorkBoard) => {
   return { client, held };
 };
 
-const setUp = (readBoard: () => WorkBoard = () => BOARD) => {
+/** A read the test answers when it chooses. */
+interface HeldRead {
+  readonly resolve: (board: WorkBoard) => void;
+  readonly reject: () => void;
+}
+
+/** Returns a `readBoard` for `setUp` whose every read waits for the test, and the reads so far, oldest first. */
+const holdReads = () => {
+  const reads: HeldRead[] = [];
+  const readBoard = () =>
+    new Promise<WorkBoard>((resolve, reject) => {
+      reads.push({
+        resolve,
+        reject: () => {
+          reject(new Error("offline"));
+        },
+      });
+    });
+  return { reads, readBoard };
+};
+
+const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) => {
   const { client, held } = buildClient(readBoard);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(buildWorkBoardKey(), BOARD);
+  queryClient.setQueryData(queryKeys.workBoard(), BOARD);
   const undoStack = createUndoStack<CardMover>();
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  /** Mounts the hook as the Work screen does, with the board the last read gave it. */
-  const mount = (serverBoard: WorkBoard = BOARD) => {
+  /** Mounts the hook as the Work screen does, with the board in the query cache. */
+  const mount = () => {
     const scrollRef = { current: document.createElement("div") };
-    const view = renderHook(() => useCardMoves({ client, undoStack, serverBoard, scrollRef }), {
-      wrapper,
-    });
+    const view = renderHook(
+      () => {
+        const { data } = useQuery(workBoardQuery(client));
+        return useCardMoves({ client, undoStack, serverBoard: data, scrollRef });
+      },
+      { wrapper },
+    );
     takePlayedSprings();
     return view;
   };
@@ -109,6 +133,9 @@ const waitForRequests = (held: readonly HeldMove[], count: number) =>
 const settleQueue = async (): Promise<void> => {
   for (let turn = 0; turn < 80; turn++) await Promise.resolve();
 };
+
+/** Lets the timer pass that delivers a changed query to the screen. */
+const settleNews = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 20));
 
 describe("useCardMoves", () => {
   it("shows a move at once, and says what happened with an Undo", async () => {
@@ -170,6 +197,19 @@ describe("useCardMoves", () => {
     });
     await waitFor(() => {
       expect(result.current.line.text).toBe("Nothing to undo.");
+    });
+  });
+
+  it("adds the note to the line after the words, with Undo kept", () => {
+    const { result } = setUp();
+
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a", "A note.");
+    });
+
+    expect(result.current.line).toMatchObject({
+      text: "Moved a. A note.",
+      canUndo: true,
     });
   });
 
@@ -251,7 +291,7 @@ describe("useCardMoves", () => {
   });
 
   it("puts the card back through the Work screen that is open now, after a visit elsewhere", async () => {
-    const { result, held, mount, findStage, unmount } = setUp();
+    const { result, held, mount, findStage, queryClient, unmount } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -268,7 +308,8 @@ describe("useCardMoves", () => {
       buildCard("b", { stage: "building" }),
       buildCard("c", { stage: "in-review" }),
     );
-    const again = mount(movedBoard);
+    queryClient.setQueryData(queryKeys.workBoard(), movedBoard);
+    const again = mount();
     expect(findStage("a", again.result.current.board)).toBe("in-review");
     act(() => {
       again.result.current.undoLastMove();
@@ -312,7 +353,7 @@ describe("useCardMoves", () => {
     act(() => {
       // Another client moved the card to Landed. Undo is pressed before the refusal arrives.
       queryClient.setQueryData(
-        buildWorkBoardKey(),
+        queryKeys.workBoard(),
         buildBoard(
           buildCard("a", { stage: "landed" }),
           buildCard("b", { stage: "building" }),
@@ -402,91 +443,215 @@ describe("useCardMoves", () => {
     });
   });
 
-  it("reads the board again after the last move finishes, and stops applying the move once it has", async () => {
-    const reads = vi.fn(() => BOARD);
-    const { result, held, findStage } = setUp(reads);
-    act(() => {
-      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
-    });
-    await waitForRequests(held, 1);
-
-    await act(() => {
-      held[0]!.accept();
-      return Promise.resolve();
-    });
-    await waitFor(() => {
-      expect(reads).toHaveBeenCalledTimes(1);
-    });
-    // The board the screen was given stands for that read, which holds no move.
-    await waitFor(() => {
-      expect(findStage("a")).toBe("building");
-    });
-  });
-
-  describe("after a read that failed", () => {
-    it("retires an answered move when a later read succeeds, so another client's change shows", async () => {
-      let isReadFailing = true;
-      const { result, held, findStage, client, queryClient } = setUp(() => {
-        if (isReadFailing) throw new Error("offline");
-        return BOARD;
-      });
+  describe("when the controller answers", () => {
+    /** Moves a to In review and b to Planned, and returns once the move of a is sent. */
+    const moveAThenB = async (setup: ReturnType<typeof setUp>) => {
       act(() => {
-        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+        setup.result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+        setup.result.current.moveCard({ taskId: "b", stage: "planned" }, "Moved b");
       });
-      await waitForRequests(held, 1);
-      await act(() => {
+      await waitForRequests(setup.held, 1);
+    };
+
+    const BOARD_WITH_A_MOVED = buildBoard(
+      buildCard("a", { stage: "in-review" }),
+      buildCard("b", { stage: "building" }),
+      buildCard("c", { stage: "in-review" }),
+    );
+
+    it("keeps a later pending move drawn when a read that started after the answer lands", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, findStage, queryClient } = setup;
+      await moveAThenB(setup);
+      // A push starts a read, which is still running when the controller answers.
+      act(() => {
+        invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+
+      await act(async () => {
         held[0]!.accept();
-        return Promise.resolve();
+        await settleQueue();
       });
-      // The read after the last move fails, so the move stays applied.
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // The answer cancelled that read, so the push starts another one.
+      await waitFor(() => {
+        expect(reads).toHaveLength(2);
+      });
+      await act(async () => {
+        reads[1]!.resolve(BOARD_WITH_A_MOVED);
+        await settleQueue();
+        await settleNews();
+      });
+
       expect(findStage("a")).toBe("in-review");
-
-      // Another client moved the card back, and the next read shows that.
-      isReadFailing = false;
-      await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
-
-      await waitFor(() => {
-        expect(findStage("a")).toBe("building");
-      });
-    });
-
-    it("keeps a move that was made after the answer", async () => {
-      let isReadFailing = true;
-      const { result, held, findStage, client, queryClient } = setUp(() => {
-        if (isReadFailing) throw new Error("offline");
-        return BOARD;
-      });
-      act(() => {
-        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
-      });
-      await waitForRequests(held, 1);
-      await act(() => {
-        held[0]!.accept();
-        return Promise.resolve();
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      act(() => {
-        result.current.moveCard({ taskId: "b", stage: "planned" }, "Moved b");
-      });
-      await waitForRequests(held, 2);
-
-      isReadFailing = false;
-      await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
-
-      await waitFor(() => {
-        expect(findStage("a")).toBe("building");
-      });
-      // The read may have started before b was sent, so b is still shown.
       expect(findStage("b")).toBe("planned");
     });
 
-    it("keeps a move that was answered after a read that has already succeeded, when that read's news arrives late", async () => {
-      let isReadFailing = false;
-      const { result, held, findStage, client, queryClient } = setUp(() => {
-        if (isReadFailing) throw new Error("offline");
-        return BOARD;
+    it("shows the answered move when a read that ended before the answer left it out", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, findStage, queryClient } = setup;
+      act(() => {
+        setup.result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
       });
+      await waitForRequests(held, 1);
+      act(() => {
+        invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+      await act(async () => {
+        reads[0]!.resolve(BOARD);
+        await settleQueue();
+        await settleNews();
+      });
+      expect(findStage("a")).toBe("in-review");
+
+      await act(async () => {
+        held[0]!.accept();
+        await settleQueue();
+      });
+
+      expect(findStage("a")).toBe("in-review");
+    });
+
+    it("cancels a read that started before the answer, so it never publishes", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, findStage, queryClient } = setup;
+      act(() => {
+        setup.result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      await waitForRequests(held, 1);
+      act(() => {
+        invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+
+      await act(async () => {
+        held[0]!.accept();
+        await settleQueue();
+      });
+      // The controller had not saved the move when this read began, so it holds the old board.
+      await act(async () => {
+        reads[0]!.resolve(BOARD);
+        await settleQueue();
+        await settleNews();
+      });
+
+      expect(findStage("a")).toBe("in-review");
+    });
+
+    it("reads the board again after the last move, and shows what that read holds", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, findStage, result } = setup;
+      act(() => {
+        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      await waitForRequests(held, 1);
+
+      await act(async () => {
+        held[0]!.accept();
+        await settleQueue();
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+      await act(async () => {
+        reads[0]!.resolve(
+          buildBoard(
+            buildCard("a", { stage: "landed" }),
+            buildCard("b", { stage: "building" }),
+            buildCard("c", { stage: "in-review" }),
+          ),
+        );
+        await settleQueue();
+      });
+
+      await waitFor(() => {
+        expect(findStage("a")).toBe("landed");
+      });
+    });
+
+    it("does not make the next move wait for the read after the last one", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, result } = setup;
+      act(() => {
+        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      await waitForRequests(held, 1);
+      await act(async () => {
+        held[0]!.accept();
+        await settleQueue();
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+
+      act(() => {
+        result.current.moveCard({ taskId: "b", stage: "planned" }, "Moved b");
+      });
+
+      // The read is still running, and the move is already sent.
+      await waitForRequests(held, 2);
+    });
+
+    it("shows another client's move of the card when a read after a failed read succeeds", async () => {
+      const { readBoard, reads } = holdReads();
+      const setup = setUp(readBoard);
+      const { held, findStage, queryClient } = setup;
+      act(() => {
+        setup.result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      });
+      await waitForRequests(held, 1);
+      await act(async () => {
+        held[0]!.accept();
+        await settleQueue();
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(1);
+      });
+      // The read after the last move fails, so the screen keeps the answered move.
+      await act(async () => {
+        reads[0]!.reject();
+        await settleQueue();
+      });
+      expect(findStage("a")).toBe("in-review");
+
+      // The connection comes back, and another client has moved the card on.
+      act(() => {
+        invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+      });
+      await waitFor(() => {
+        expect(reads).toHaveLength(2);
+      });
+      await act(async () => {
+        reads[1]!.resolve(
+          buildBoard(
+            buildCard("a", { stage: "landed" }),
+            buildCard("b", { stage: "building" }),
+            buildCard("c", { stage: "in-review" }),
+          ),
+        );
+        await settleQueue();
+      });
+
+      await waitFor(() => {
+        expect(findStage("a")).toBe("landed");
+      });
+    });
+
+    it("keeps a move that is pending when an older read's news arrives late", async () => {
+      const { readBoard, reads } = holdReads();
+      const { result, held, findStage, queryClient } = setUp(readBoard);
       // Hold back the news of reads, as the default scheduler does with a timer.
       const delayed: (() => void)[] = [];
       notifyManager.setScheduler((callback) => {
@@ -494,19 +659,34 @@ describe("useCardMoves", () => {
       });
       try {
         // This read ends before the move below is made.
-        await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
+        act(() => {
+          invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+        });
+        await waitFor(() => {
+          expect(reads).toHaveLength(1);
+        });
+        await act(async () => {
+          reads[0]!.resolve(BOARD);
+          await settleQueue();
+        });
         act(() => {
           result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
         });
         await waitForRequests(held, 1);
-        isReadFailing = true;
         await act(async () => {
           held[0]!.accept();
           await settleQueue();
         });
+        await waitFor(() => {
+          expect(reads).toHaveLength(2);
+        });
+        await act(async () => {
+          reads[1]!.reject();
+          await settleQueue();
+        });
         expect(findStage("a")).toBe("in-review");
 
-        // The news of the older read arrives now. It predates the move, so it cannot retire it.
+        // The news of the older read arrives now. It predates the move, so it cannot undo it.
         await act(async () => {
           while (delayed.length > 0) delayed.shift()!();
           await settleQueue();

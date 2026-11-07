@@ -26,7 +26,7 @@ const cleanCause = (cause: string): string | undefined =>
  * mid-run." with a cause, and "Review PR failed." without one. A cause that
  * spans several lines is joined into one.
  */
-export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): string => {
+const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): string => {
   const cause = cleanCause(failure.cause);
   return `${failure.workflowName} failed${cause === undefined ? "" : `: ${cause}`}.`;
 };
@@ -36,7 +36,7 @@ export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): 
  * or "Has a question" when the agent asked an empty one or one of only
  * whitespace.
  */
-export const describeCardQuestion = (question: NonNullable<WorkCard["openQuestion"]>): string =>
+const describeCardQuestion = (question: NonNullable<WorkCard["openQuestion"]>): string =>
   question.text.trim() === "" ? "Has a question" : question.text;
 
 /** The line under a card's title, and how it reads: what broke, or what a Thread asks. */

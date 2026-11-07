@@ -1,20 +1,16 @@
-import type { CardMove, DropPlace } from "@hercule/client-core/work";
-import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
+import { buildCellId, type CardMove, type DropPlace } from "@hercule/client-core/work";
+import type { WorkCard } from "@hercule/contract";
 import {
-  computeCenter,
   measureLayoutRect,
   trackBody,
   type MotionBody,
   type SpringName,
   type Velocity,
 } from "../../app/motion";
-import { buildCellId } from "./use-work-view";
+import { flyFlightsTo, INTO_PLACE, removeFlight } from "./board-flights";
 
 /** How long the thin ring on a card that landed in Landed stays on it, in milliseconds. A little longer than the ring's fade. */
 const LANDED_RING_MS = 600;
-
-/** How long the roll of a stage's changed count stays marked, in milliseconds. A little longer than the roll. */
-const COUNT_ROLL_MS = 260;
 
 /** How the card in the hand looked at the moment it was let go, which the landing starts from. */
 export interface ReleasePose {
@@ -30,6 +26,8 @@ export interface ReleasePose {
 export interface EndedCarry {
   /** The card as it was when it was lifted. */
   readonly card: WorkCard;
+  /** The copy in the hand. It is the only child of `layer`. */
+  readonly ghost: HTMLElement;
   /** The body of the copy in the hand. */
   readonly body: MotionBody;
   /** The layer that holds the copy. */
@@ -37,33 +35,6 @@ export interface EndedCarry {
   /** Where the card was dropped, or `null` when it was sent home. */
   readonly place: DropPlace | null;
 }
-
-/** Returns the text of each stage's count, by stage: an empty text for a stage that shows none. */
-export const readStageCounts = (scroller: HTMLElement): ReadonlyMap<BoardStage, string> =>
-  new Map(
-    BOARD_STAGES.map((stage) => [
-      stage,
-      scroller.querySelector(`.board-rule [data-stage="${stage}"] .desk-heading-count`)
-        ?.textContent ?? "",
-    ]),
-  );
-
-/** Rolls the number of each stage whose count changed since `before`, so the new count rises into place. */
-export const rollChangedCounts = (
-  scroller: HTMLElement,
-  before: ReadonlyMap<BoardStage, string>,
-): void => {
-  for (const stage of BOARD_STAGES) {
-    const count = scroller.querySelector<HTMLElement>(
-      `.board-rule [data-stage="${stage}"] .desk-heading-count`,
-    );
-    if (count === null || count.textContent === before.get(stage)) continue;
-    count.dataset["rolling"] = "";
-    window.setTimeout(() => {
-      delete count.dataset["rolling"];
-    }, COUNT_ROLL_MS);
-  }
-};
 
 /**
  * Returns the element that stands for a card dropped at the carry's place,
@@ -94,27 +65,17 @@ const findHidingPlace = (scroller: HTMLElement, carry: EndedCarry): Element | nu
  * "3 landed" line of a cell that hides it. A card with no such place fades
  * where it is.
  */
-const flyAway = (scroller: HTMLElement, carry: EndedCarry, pose: ReleasePose): void => {
+const flyAway = (scroller: HTMLElement, carry: EndedCarry): void => {
   const target = findHidingPlace(scroller, carry);
-  const remove = (): void => {
-    carry.body.clear();
-    carry.layer.remove();
-  };
   if (target === null) {
-    carry.body.to({ s: 0.96, o: 0 }, "travel", { done: remove });
+    carry.body.to({ s: 0.96, o: 0 }, "travel", {
+      done: () => {
+        removeFlight(carry.ghost);
+      },
+    });
     return;
   }
-  const goal = computeCenter(target.getBoundingClientRect());
-  carry.body.to(
-    {
-      x: goal.x - (pose.centerX - carry.body.values.x),
-      y: goal.y - (pose.centerY - carry.body.values.y),
-      s: 0.1,
-      o: 0,
-    },
-    "travel",
-    { done: remove },
-  );
+  flyFlightsTo([{ ghost: carry.ghost, delay: 0 }], () => target, INTO_PLACE);
 };
 
 /**
@@ -134,7 +95,7 @@ export const landCard = (
 ): void => {
   const card = scroller.querySelector<HTMLElement>(`[data-card-id="${carry.card.id}"]`);
   if (card === null) {
-    flyAway(scroller, carry, pose);
+    flyAway(scroller, carry);
     return;
   }
   const place = measureLayoutRect(card);
@@ -153,8 +114,7 @@ export const landCard = (
       body.clear();
     },
   });
-  carry.body.clear();
-  carry.layer.remove();
+  removeFlight(carry.ghost);
   // Hiding the card dropped its focus; the keyboard goes on from where the card now is.
   if (document.activeElement === null || document.activeElement === document.body) {
     card.focus({ preventScroll: true });

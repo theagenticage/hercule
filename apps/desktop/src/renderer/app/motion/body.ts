@@ -16,7 +16,7 @@ import {
 } from "./springs";
 
 /** How a body is sent somewhere. */
-export interface MoveOptions {
+interface MoveOptions {
   /** Milliseconds to wait before the body starts. Ignored under Reduce motion. */
   readonly delay?: number;
   /** Runs when the body comes to rest on this move's goal. A later move replaces it. */
@@ -38,7 +38,7 @@ export interface Velocity {
 /** The class the stylesheet turns into `will-change`, set only while the body moves. */
 export const MOVING_CLASS = "is-moving";
 
-/** The class `flipElements` puts on an element that rises, so a stylesheet can stack it over what it passes. */
+/** The class `flipByKey` puts on an element that rises, so a stylesheet can stack it over what it passes. */
 export const RISING_CLASS = "is-rising";
 
 /** A body that has left rest but waits for its delay, and where it goes then. */

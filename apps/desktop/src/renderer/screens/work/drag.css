@@ -120,11 +120,6 @@
     pointer-events: none;
     animation: board-landed var(--m-long) var(--m-ease) both;
   }
-
-  /* A stage's count rises into place when it changes. */
-  .desk-heading-count[data-rolling] {
-    animation: board-count-roll var(--m-base) var(--m-ease);
-  }
 }
 @keyframes board-landed {
   from {
@@ -132,12 +127,6 @@
   }
   to {
     opacity: 0;
-  }
-}
-@keyframes board-count-roll {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
   }
 }
 

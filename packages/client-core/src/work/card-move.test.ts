@@ -1,7 +1,8 @@
 /**
  * Tests moving a card before the controller answers: the projection over the
  * board, pending moves applied again, where a card stood, which card a drop
- * follows in stored order, and which stage a key moves a card to.
+ * follows in stored order, and which stage a key moves a card to, and what a drop becomes on a board
+ * that changed under it.
  */
 import { describe, expect, it } from "vitest";
 import type { WorkBoard } from "@hercule/contract";
@@ -9,9 +10,11 @@ import {
   applyCardMove,
   buildRestoreMove,
   chooseAfterTaskId,
+  CARD_NOT_EXACT_NOTE,
   chooseTargetStage,
   readPlacement,
   reapplyCardMoves,
+  settleDropMove,
 } from "./card-move";
 import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
 import { buildLanes } from "./lanes";
@@ -271,5 +274,105 @@ describe("chooseTargetStage", () => {
     ["building", { kind: "pick-stage", stage: "building" }, undefined],
   ] as const)("moves a card at %s on %j to %s", (stage, change, expected) => {
     expect(chooseTargetStage({ stage }, change)).toBe(expected);
+  });
+});
+
+describe("settleDropMove", () => {
+  const withoutCard = (id: string): WorkBoard =>
+    buildBoard(...BOARD.cards.filter((card) => card.id !== id));
+
+  it("sends a drop as it is while the card it follows is still in the target cell", () => {
+    const move = { taskId: "a", stage: "building" as const, afterTaskId: "d" };
+
+    expect(settleDropMove(BOARD, PROJECTS, move)).toEqual({ kind: "send", move });
+  });
+
+  it("sends a drop that names no card to follow as it is", () => {
+    for (const afterTaskId of [null, undefined]) {
+      const move = {
+        taskId: "a",
+        stage: "building" as const,
+        ...(afterTaskId === undefined ? {} : { afterTaskId }),
+      };
+
+      expect(settleDropMove(BOARD, PROJECTS, move)).toEqual({ kind: "send", move });
+    }
+  });
+
+  it("puts the card last in the cell, and says so, when the card it follows has left the board", () => {
+    const board = withoutCard("c");
+    const settled = settleDropMove(board, PROJECTS, {
+      taskId: "d",
+      stage: "exploring",
+      afterTaskId: "c",
+    });
+
+    expect(settled).toEqual({
+      kind: "send",
+      move: { taskId: "d", stage: "exploring", afterTaskId: "b" },
+      note: CARD_NOT_EXACT_NOTE,
+    });
+    if (settled.kind !== "send") throw new Error("expected a move");
+    expect(readCell(applyCardMove(board, settled.move), "depots", "exploring")).toEqual([
+      "a",
+      "b",
+      "d",
+    ]);
+  });
+
+  it("puts the card last when the card it follows has moved to another cell", () => {
+    const settled = settleDropMove(BOARD, PROJECTS, {
+      taskId: "a",
+      stage: "building",
+      afterTaskId: "b",
+    });
+
+    expect(settled).toMatchObject({ move: { afterTaskId: "d" }, note: CARD_NOT_EXACT_NOTE });
+  });
+
+  it("puts the card first, and says so, in a cell that has emptied", () => {
+    const settled = settleDropMove(withoutCard("d"), PROJECTS, {
+      taskId: "a",
+      stage: "building",
+      afterTaskId: "d",
+    });
+
+    expect(settled).toMatchObject({ move: { afterTaskId: null }, note: CARD_NOT_EXACT_NOTE });
+  });
+
+  it("looks for the card to follow in the lane the drop names", () => {
+    const settled = settleDropMove(BOARD, PROJECTS, {
+      taskId: "a",
+      stage: "exploring",
+      projectId: "pricing",
+      afterTaskId: "b",
+    });
+
+    // b is in the Depot returns lane, not in Pricing rules.
+    expect(settled).toMatchObject({ move: { afterTaskId: "e" }, note: CARD_NOT_EXACT_NOTE });
+  });
+
+  it("sends nothing, and says why, when the Task has left the board", () => {
+    const settled = settleDropMove(withoutCard("a"), PROJECTS, {
+      taskId: "a",
+      stage: "building",
+      afterTaskId: "d",
+    });
+
+    expect(settled).toEqual({
+      kind: "refuse",
+      reason: "The Task has left the board, so it was not moved.",
+    });
+  });
+
+  it("sends nothing, and says why, when the Project it was dropped on is gone", () => {
+    const settled = settleDropMove(BOARD, [PROJECTS[0]!], {
+      taskId: "a",
+      stage: "exploring",
+      projectId: "pricing",
+      afterTaskId: null,
+    });
+
+    expect(settled).toMatchObject({ kind: "refuse" });
   });
 });

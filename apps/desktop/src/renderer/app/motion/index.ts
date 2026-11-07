@@ -10,12 +10,11 @@ export { findBody, trackBody, type MotionBody, type Velocity } from "./body";
 export {
   computeCenter,
   flipByKey,
-  flipElements,
   ghostElement,
   measureLayoutRect,
   staggerDelay,
   type FlipByKeyResult,
-  type FlipOptions,
+  type FlipByKeyOptions,
   type LayoutRect,
 } from "./layout";
 export { isMotionReduced } from "./reduced";

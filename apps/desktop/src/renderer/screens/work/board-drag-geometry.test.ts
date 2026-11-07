@@ -72,49 +72,49 @@ describe("chooseDropPlace", () => {
       name: "puts the card first in a cell when the pointer is above the first middle",
       x: 520,
       y: 120,
-      expected: { kind: "cell", laneId: "storefront", stage: "building", index: 0 },
+      expected: { kind: "cell", laneId: "storefront", stage: "building", beforeCardId: "card-0" },
     },
     {
       name: "puts the card after each card whose middle the pointer is below",
       x: 520,
       y: 300,
-      expected: { kind: "cell", laneId: "storefront", stage: "building", index: 2 },
+      expected: { kind: "cell", laneId: "storefront", stage: "building", beforeCardId: "card-2" },
     },
     {
       name: "puts the card last when the pointer is below every middle",
       x: 520,
       y: 395,
-      expected: { kind: "cell", laneId: "storefront", stage: "building", index: 3 },
+      expected: { kind: "cell", laneId: "storefront", stage: "building", beforeCardId: null },
     },
     {
-      name: "gives place 0 in a cell with no card",
+      name: "puts the card before nothing in a cell with no card",
       x: 220,
       y: 300,
-      expected: { kind: "cell", laneId: "storefront", stage: "exploring", index: 0 },
+      expected: { kind: "cell", laneId: "storefront", stage: "exploring", beforeCardId: null },
     },
     {
       name: "counts a pointer in the gap before a stage as inside that stage",
       x: 345,
       y: 300,
-      expected: { kind: "cell", laneId: "storefront", stage: "planned", index: 0 },
+      expected: { kind: "cell", laneId: "storefront", stage: "planned", beforeCardId: null },
     },
     {
       name: "picks the first stage for a pointer left of all stages",
       x: 20,
       y: 300,
-      expected: { kind: "cell", laneId: "storefront", stage: "exploring", index: 0 },
+      expected: { kind: "cell", laneId: "storefront", stage: "exploring", beforeCardId: null },
     },
     {
       name: "picks the last stage for a pointer right of all stages",
       x: 1190,
       y: 500,
-      expected: { kind: "cell", laneId: "no-project", stage: "landed", index: 0 },
+      expected: { kind: "cell", laneId: "no-project", stage: "landed", beforeCardId: null },
     },
     {
       name: "picks the nearest lane for a pointer above the first lane",
       x: 520,
       y: 20,
-      expected: { kind: "cell", laneId: "storefront", stage: "building", index: 0 },
+      expected: { kind: "cell", laneId: "storefront", stage: "building", beforeCardId: "card-0" },
     },
     {
       name: "targets a folded lane as a whole, with the stage the pointer is over",
@@ -141,13 +141,14 @@ describe("chooseDropPlace", () => {
       lanes: [openLane("storefront", 100, 400, { building: closed })],
     };
 
+    // The cell has four rows, so the last place a drop may take is in front of the last row.
     expect(chooseDropPlace(geometry, 520, 395)).toEqual({
       kind: "cell",
       laneId: "storefront",
       stage: "building",
-      index: 3,
+      beforeCardId: "card-3",
     });
-    expect(chooseDropPlace(geometry, 520, 210)).toMatchObject({ index: 2 });
+    expect(chooseDropPlace(geometry, 520, 210)).toMatchObject({ beforeCardId: "card-2" });
   });
 
   it("finds no place on a board with no lane", () => {
@@ -156,11 +157,16 @@ describe("chooseDropPlace", () => {
 });
 
 describe("isSameDropPlace", () => {
-  const place: DropPlace = { kind: "cell", laneId: "storefront", stage: "building", index: 1 };
+  const place: DropPlace = {
+    kind: "cell",
+    laneId: "storefront",
+    stage: "building",
+    beforeCardId: "card-1",
+  };
 
   it("tells places apart by lane, stage and row, and a folded lane by lane and stage", () => {
     expect(isSameDropPlace(place, { ...place })).toBe(true);
-    expect(isSameDropPlace(place, { ...place, index: 2 })).toBe(false);
+    expect(isSameDropPlace(place, { ...place, beforeCardId: "card-2" })).toBe(false);
     expect(isSameDropPlace(place, { ...place, stage: "planned" })).toBe(false);
     expect(isSameDropPlace(place, { ...place, laneId: "checkout" })).toBe(false);
     expect(

@@ -1,15 +1,16 @@
 import { flushSync } from "react-dom";
 import type { RefObject } from "react";
+import { ROWS_BEFORE_HIDING } from "@hercule/client-core/work";
 import {
   fadeInCards,
-  flyFlightsIntoCounts,
-  flyFlightsToButton,
+  flyFlightsTo,
+  FOLD_GAP,
   growCardsFromOrigins,
-  launchCloseFlights,
-  launchFoldFlights,
+  INTO_COUNT,
+  launchFlights,
   recordGrowthOrigins,
+  TO_BUTTON,
 } from "./board-flights";
-import { isLaneFolded } from "./board-dom";
 import { flipBoard } from "./flip-board";
 import type { WorkView } from "./use-work-view";
 
@@ -89,6 +90,10 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
 const findLane = (scroller: HTMLElement, laneId: string): HTMLElement | null =>
   scroller.querySelector<HTMLElement>(`.board-lane[data-lane-id="${laneId}"]`);
 
+/** Returns the cards under `elements`, in order. */
+const listCards = (elements: readonly Element[]): HTMLElement[] =>
+  elements.flatMap((element) => [...element.querySelectorAll<HTMLElement>("[data-card-id]")]);
+
 /**
  * Returns a change that folds `lanes`: the lanes below glide up after a short
  * wait, and, when `hasFlights` is true, a copy of each card in view flies to
@@ -102,9 +107,16 @@ const buildFold = (
   anchor,
   wait: LANES_BELOW_WAIT,
   prepare: () => {
-    const flights = hasFlights ? launchFoldFlights(scroller, lanes) : [];
+    const flights = hasFlights ? launchFlights(scroller, listCards(lanes), FOLD_GAP) : [];
     return () => {
-      flyFlightsIntoCounts(scroller, flights);
+      flyFlightsTo(
+        flights,
+        (flight) =>
+          scroller.querySelector(
+            `[data-fold-row="${flight.laneId}"] [data-stage="${flight.stage}"]`,
+          ),
+        INTO_COUNT,
+      );
     };
   },
 });
@@ -132,6 +144,13 @@ const listCardIds = (element: Element): Set<string> =>
     ),
   );
 
+/**
+ * Returns the cards of `cell` that a closed cell does not show: all of them
+ * in the Landed cell, and the ones past the first rows in the other cells.
+ */
+const listCardsPastTheLimit = (cell: HTMLElement): HTMLElement[] =>
+  listCards([cell]).slice(cell.dataset["stage"] === "landed" ? 0 : ROWS_BEFORE_HIDING);
+
 /** Fades in, from 6px above, every card under `root` that is not in `before`: a card the change brought in. */
 const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
   const born = [...root.querySelectorAll<HTMLElement>("[data-card-id]")].filter(
@@ -142,7 +161,8 @@ const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
 
 /**
  * Returns `view` with each change the user makes played as the board's
- * motion (MOTION.md):
+ * motion (MOTION.md). What a change does to the lanes and cells is read from
+ * `view`, not from the page:
  *
  * - Folding a lane, or Fold everything: a copy of each card in view flies to
  *   its count and shrinks, 12ms apart, and the lanes below wait 70ms and glide
@@ -154,7 +174,8 @@ const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
  * - Filter and Find: one change. What stays glides from where it was; what
  *   leaves just goes; what comes back fades in.
  *
- * Every spring is `travel`: the user asked for these. The change to the screen
+ * `scrollRef` holds the element that scrolls the board; it is read when a
+ * change is made, never while rendering. Every spring is `travel`: the user asked for these. The change to the screen
  * is committed at once (`flushSync`), because the board is measured right
  * after it. Call the returned functions from events, not from effects.
  */
@@ -175,7 +196,7 @@ export const useViewMotion = (
     const request = { lanes: [lane], commit, anchor: lane };
     playChange(
       scroller,
-      isLaneFolded(lane)
+      view.foldedLaneIds.has(laneId)
         ? buildUnfold(scroller, request)
         : buildFold(scroller, { ...request, hasFlights: !view.isFiltering }),
     );
@@ -198,13 +219,13 @@ export const useViewMotion = (
       return;
     }
     // Fold everything opens the lanes when all are folded, and folds the open ones otherwise.
-    const isOpening = lanes.every(isLaneFolded);
+    const isOpening = laneIds.every((id) => view.foldedLaneIds.has(id));
     playChange(
       scroller,
       isOpening
         ? buildUnfold(scroller, { lanes, commit, anchor: "top" })
         : buildFold(scroller, {
-            lanes: lanes.filter((lane) => !isLaneFolded(lane)),
+            lanes: lanes.filter((lane) => !view.foldedLaneIds.has(lane.dataset["laneId"] ?? "")),
             commit,
             anchor: "top",
             hasFlights: true,
@@ -219,19 +240,27 @@ export const useViewMotion = (
       view.toggleCell(cellId);
       return;
     }
-    const button = scroller.querySelector(`[data-more-cell-id="${cellId}"]`);
-    const isClosing = button?.getAttribute("aria-expanded") === "true";
+    const isClosing = view.openedCellIds.has(cellId);
     playChange(scroller, {
       commit: () => {
         view.toggleCell(cellId);
       },
       anchor: cell.closest<HTMLElement>(".board-lane") ?? "none",
       prepare: () => {
-        const flights = isClosing ? launchCloseFlights(scroller, cell) : [];
+        const flights = isClosing ? launchFlights(scroller, listCardsPastTheLimit(cell), 0) : [];
         const before = listCardIds(cell);
         return () => {
           if (isClosing) {
-            flyFlightsToButton(scroller, cellId, flights);
+            // A copy flies back to the button of its cell only if its card left the page.
+            const button = scroller.querySelector(`[data-more-cell-id="${cellId}"]`);
+            flyFlightsTo(
+              flights,
+              (flight) =>
+                scroller.querySelector(`[data-card-id="${flight.cardId}"]`) === null
+                  ? button
+                  : null,
+              TO_BUTTON,
+            );
             return;
           }
           fadeInCardsNotIn(cell, before);

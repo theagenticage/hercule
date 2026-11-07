@@ -1,8 +1,10 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import {
   buildDropMove,
   describeCardMove,
+  settleDropMove,
+  type ArrangedLane,
   type CardMove,
   type DropPlace,
   type WorkProject,
@@ -17,7 +19,6 @@ import {
   type MotionBody,
   type SpringName,
 } from "../../app/motion";
-import type { ArrangedLane } from "./arrange-lanes";
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
@@ -26,9 +27,8 @@ import {
   type BoardGeometry,
   type BoardView,
 } from "./board-drag-geometry";
-import { findCellFoot } from "./board-dom";
 import { flipBoard } from "./flip-board";
-import { landCard, readStageCounts, rollChangedCounts, type ReleasePose } from "./land-card";
+import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
 import "./drag.css";
 
@@ -63,13 +63,24 @@ const CLICK_GUARD_MS = 50;
 export interface BoardDragOptions {
   /** The element that scrolls the board. It stays mounted for the life of the screen, so it holds the pointer. */
   readonly scrollRef: RefObject<HTMLDivElement | null>;
-  /** Every card of the board in stored order, with the pending moves applied. */
+  /** The cards the board draws, in stored order, with the pending moves applied. */
   readonly cards: readonly WorkCard[];
+  /**
+   * Every card of the board as it is now. During a carry the screen holds
+   * back changes nobody caused, so this can differ from `cards`: a drop is
+   * checked against it.
+   */
+  readonly currentCards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
-  /** What each lane shows, which tells which cards a cell hides. */
+  /** The lanes the board draws: which are folded, and which cards a cell hides. */
   readonly arrangedLanes: readonly ArrangedLane[];
-  /** Moves a card and shows the move on the undo line. A move that changes nothing does nothing. */
-  readonly moveCard: (move: CardMove, words: string) => void;
+  /**
+   * Moves a card and shows the move on the undo line, with `note` added to the
+   * line when there is one. A move that changes nothing does nothing.
+   */
+  readonly moveCard: (move: CardMove, words: string, note?: string) => void;
+  /** Shows `text` on the undo line, with no Undo, for a drop that sent nothing. */
+  readonly say: (text: string) => void;
   /**
    * Called with `true` when a card enters the hand and with `false` when it
    * leaves it. The screen keeps the value and draws it as the desk's
@@ -106,6 +117,8 @@ interface Carry {
   readonly source: HTMLElement;
   readonly root: HTMLElement;
   readonly layer: HTMLElement;
+  /** The copy of the card in the hand, the only child of `layer`. */
+  readonly ghost: HTMLElement;
   readonly body: MotionBody;
   /** The hollow that shows where the card would land. It lives in the cell, outside React's reach. */
   readonly slot: HTMLElement;
@@ -126,10 +139,11 @@ interface Carry {
   markedLane: HTMLElement | null;
 }
 
-/** What a drop sends, with the words for the undo line. */
+/** What a drop sends, with the words for the undo line and the note that follows them, if any. */
 interface DropChange {
   readonly move: CardMove;
   readonly words: string;
+  readonly note: string | undefined;
 }
 
 /** Returns `value` limited to the range from `-limit` to `limit`. */
@@ -145,11 +159,12 @@ const findNextShownSibling = (element: Element): Element | null => {
   return next;
 };
 
-/** Returns the id of the card shown right after `slot`, or `null` when the cards end there. */
-const findNextShownCardId = (slot: HTMLElement): string | null => {
-  const next = findNextShownSibling(slot);
-  return next instanceof HTMLElement ? (next.dataset["cardId"] ?? null) : null;
-};
+/** Returns the line under the cards of `cell` ("13 more" or "3 landed"), or `null` when it has none. */
+const findCellFoot = (cell: Element): HTMLElement | null =>
+  [...cell.children].find(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.classList.contains("board-more"),
+  ) ?? null;
 
 /**
  * Swallows the click that follows a carry, which would otherwise open the card
@@ -201,7 +216,7 @@ const createBoardDrag = (
    * places a flip just measured, which spares measuring the cards twice.
    */
   const remeasure = (c: Carry, places?: ReadonlyMap<string, LayoutRect>): void => {
-    const measured = measureBoardGeometry(scroller, places);
+    const measured = measureBoardGeometry(scroller, readOptions().arrangedLanes, places);
     c.geometry = measured.geometry;
     c.view = measured.view;
   };
@@ -259,7 +274,8 @@ const createBoardDrag = (
     }
     const cell = c.geometry.lanes.find((lane) => lane.id === place.laneId)?.cells.get(place.stage);
     if (cell === undefined) return;
-    moveSlot(c, cell.element, cell.rows[place.index]?.element ?? findCellFoot(cell.element));
+    const before = cell.rows.find((row) => row.id === place.beforeCardId);
+    moveSlot(c, cell.element, before?.element ?? findCellFoot(cell.element));
   };
 
   /** Works out which place the pointer points at, from the measurements, and shows it when it changed. */
@@ -363,7 +379,6 @@ const createBoardDrag = (
    */
   const releaseCarry = (c: Carry, spring: SpringName, change: DropChange | undefined): void => {
     const pose = readReleasePose(c);
-    const countsBefore = readStageCounts(scroller);
     endCarry(c);
     flipBoard(scroller, spring, () => {
       c.slot.remove();
@@ -372,35 +387,46 @@ const createBoardDrag = (
       flushSync(() => {
         const options = readOptions();
         options.onCarryingChange(false);
-        if (change !== undefined) options.moveCard(change.move, change.words);
+        if (change !== undefined) options.moveCard(change.move, change.words, change.note);
       });
     });
     landCard(scroller, c, pose, spring, change?.move);
-    rollChangedCounts(scroller, countsBefore);
   };
 
-  /** Lets go of the card where the slot is, and sends the move. */
+  /**
+   * Lets go of the card where the slot is, and sends the move. The move is
+   * built from the board the carry showed, then checked against the board as it
+   * is now (`settleDropMove`): when the card it follows has gone it lands last
+   * in its cell and the undo line says so, and when the Task or the Project is
+   * gone nothing is sent and the line says why.
+   */
   const dropCard = (c: Carry): void => {
     swallowNextClick(true);
     const options = readOptions();
     const { place } = c;
-    const move =
-      place === null
-        ? undefined
-        : buildDropMove({
-            cards: options.cards,
-            projects: options.projects,
-            arrangedLanes: options.arrangedLanes,
-            movingCardId: c.card.id,
-            place,
-            nextShownCardId: place.kind === "cell" ? findNextShownCardId(c.slot) : null,
-          });
-    if (move === undefined) {
+    const lane = options.arrangedLanes.find((each) => each.lane.id === place?.laneId);
+    if (place === null || lane === undefined) {
       releaseCarry(c, "travel", undefined);
       return;
     }
-    const card = options.cards.find((each) => each.id === c.card.id) ?? c.card;
-    releaseCarry(c, "hand", { move, words: describeCardMove(card, move, options.projects) });
+    const drop = buildDropMove({
+      movingCard: c.card,
+      lane,
+      stage: place.stage,
+      beforeCardId: place.kind === "cell" ? place.beforeCardId : null,
+    });
+    const settled = settleDropMove({ cards: options.currentCards }, options.projects, drop);
+    if (settled.kind === "refuse") {
+      releaseCarry(c, "travel", undefined);
+      options.say(settled.reason);
+      return;
+    }
+    const card = options.currentCards.find((each) => each.id === c.card.id) ?? c.card;
+    releaseCarry(c, "hand", {
+      move: settled.move,
+      words: describeCardMove(card, settled.move, options.projects),
+      note: settled.note,
+    });
   };
 
   /**
@@ -473,13 +499,14 @@ const createBoardDrag = (
     scroller.addEventListener("lostpointercapture", onLostCapture);
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
-    const measured = measureBoardGeometry(scroller);
+    const measured = measureBoardGeometry(scroller, options.arrangedLanes);
     const c: Carry = {
       pointerId: held.pointerId,
       card,
       source,
       root,
       layer,
+      ghost,
       body,
       slot,
       home,
@@ -647,6 +674,10 @@ const createBoardDrag = (
  * - Esc, a cancelled or lost pointer, a hidden window, and a live push that
  *   removes the card or the place it was going to cancel the carry, and the
  *   card goes home.
+ * - A drop is built from the board the carry showed, and checked against the
+ *   board as it is now. If the card it follows has left, the card lands last
+ *   in its cell and the undo line says so. If the Task or the Project has
+ *   left, nothing is sent and the line says why.
  * - A folded lane is a target as a whole, since it has no cells to put a slot
  *   in. A slot after the last card of a cell that hides some lands before the
  *   first hidden card.
@@ -659,7 +690,9 @@ const createBoardDrag = (
  */
 export function useBoardDrag(options: BoardDragOptions): void {
   const latest = useRef(options);
-  useEffect(() => {
+  // A layout effect, so the options match the page when the observer of the
+  // page's changes measures it.
+  useLayoutEffect(() => {
     latest.current = options;
   });
   const { scrollRef } = options;

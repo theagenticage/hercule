@@ -3,8 +3,7 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import { FolderIcon } from "../../icons/folder";
 import { PlusIcon } from "../../icons/plus";
 import type { WorkCard } from "@hercule/contract";
-import { STAGE_NAMES } from "@hercule/client-core/work";
-import type { ArrangedLane, ArrangedLaneCell } from "./arrange-lanes";
+import { STAGE_NAMES, type ArrangedLane, type ArrangedLaneCell } from "@hercule/client-core/work";
 import { BoardCell } from "./board-cell";
 
 /**
@@ -60,7 +59,7 @@ export function BoardLane({
   readonly onOpenCard: (card: WorkCard) => void;
   readonly onFocusCard: (cardId: string) => void;
 }): JSX.Element {
-  const { lane, isFolded, summary, cells } = arrangedLane;
+  const { lane, isFolded, failedCount, cells } = arrangedLane;
   const total = cells.reduce((sum, cell) => sum + cell.cardCount, 0);
   return (
     <section className={isFolded ? "board-lane is-folded" : "board-lane"} data-lane-id={lane.id}>
@@ -84,9 +83,7 @@ export function BoardLane({
               <span className="board-lane-name">{lane.name}</span>
               <span className="board-lane-total">{total}</span>
             </span>
-            {summary.failedCount > 0 && (
-              <span className="board-failed-count">{summary.failedCount} failed</span>
-            )}
+            {failedCount > 0 && <span className="board-failed-count">{failedCount} failed</span>}
           </span>
         </button>
         <button

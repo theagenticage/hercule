@@ -16,3 +16,17 @@
   font-weight: var(--w-regular);
   font-variant-numeric: tabular-nums;
 }
+
+/* A count that changed rises into place. Only `transform` and `opacity` move,
+   and nothing moves under Reduce motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .desk-heading-count[data-rises] {
+    animation: desk-count-rise var(--m-base) var(--m-ease);
+  }
+}
+@keyframes desk-count-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

@@ -6,7 +6,6 @@
  */
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
-import { buildWorkBoardKey } from "@hercule/client-core/work";
 import { LIVE_KEPT_READ_OPTIONS } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
 
@@ -17,7 +16,7 @@ import { useWindowVisible } from "../../../app/window-visibility";
  */
 export const workBoardQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: buildWorkBoardKey(),
+    queryKey: queryKeys.workBoard(),
     queryFn: () => client.task.queryBoard(),
     ...LIVE_KEPT_READ_OPTIONS,
   });
