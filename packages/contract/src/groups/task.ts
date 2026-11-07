@@ -66,12 +66,12 @@ export const TaskStatus = Schema.Literals(TASK_STATUSES);
 
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
-/** The five stages that are columns on Work, in the order the columns stand. */
+/** The five stages Work draws, in the order it draws them. */
 export const BOARD_STAGES = ["exploring", "planned", "building", "in-review", "landed"] as const;
 
 /**
- * Where a Task stands. The five board stages are columns on Work; `done` and
- * `dropped` are the ends.
+ * Where a Task stands. The five board stages are the ones Work draws; `done`
+ * and `dropped` are the ends.
  */
 export const TASK_STAGES = [...BOARD_STAGES, "done", "dropped"] as const;
 
@@ -80,7 +80,7 @@ export const TaskStage = Schema.Literals(TASK_STAGES);
 export type TaskStage = Schema.Schema.Type<typeof TaskStage>;
 
 /**
- * A stage that is a column on Work: any stage but `done` and `dropped`. The
+ * A stage that Work draws: any stage but `done` and `dropped`. The
  * board shows no Task at an end, and `task.move` refuses to put one there.
  */
 export const BoardStage = Schema.Literals(BOARD_STAGES);
@@ -245,7 +245,7 @@ export const TaskUpdatedEventPayload = Schema.Struct({
     /** `null` when the task had, or now has, no project. */
     projectId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
     /**
-     * The Task's place in its cell of the board. A move inside a column reports
+     * The Task's place in its cell of the board. A move inside a cell reports
      * only this, so a trigger on `changes.stage` or `changes.status` does not
      * see it.
      */

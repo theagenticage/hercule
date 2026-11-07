@@ -2449,7 +2449,7 @@ describe("SessionService.queryPassages", () => {
 });
 
 describe("the card of a Task", () => {
-  const cardChangeOf = (taskId: string): Change => ({
+  const buildCardChange = (taskId: string): Change => ({
     _tag: "record",
     topic: "task",
     id: taskId,
@@ -2516,7 +2516,7 @@ describe("the card of a Task", () => {
       yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
     });
 
-  const insertQueuedSessionOf = (runnerId: string, taskId: string) => {
+  const insertQueuedSessionForTask = (runnerId: string, taskId: string) => {
     const providerAccountId = mintId();
     return Effect.flatMap(aProfile, (permissionProfileId) =>
       insertQueuedSession(runnerId, {
@@ -2547,18 +2547,18 @@ describe("the card of a Task", () => {
 
   it("is announced when a session joins the Task", async () => {
     const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
-      Effect.succeed(Effect.asVoid(insertQueuedSessionOf(runnerId, taskId))),
+      Effect.succeed(Effect.asVoid(insertQueuedSessionForTask(runnerId, taskId))),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when dispatch starts a session of the Task", async () => {
     const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
-      Effect.as(insertQueuedSessionOf(runnerId, taskId), claimStarting(runnerId, 1)),
+      Effect.as(insertQueuedSessionForTask(runnerId, taskId), claimStarting(runnerId, 1)),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced once when a report changes the status of a session of the Task, and not by the reports that follow", async () => {
@@ -2585,7 +2585,7 @@ describe("the card of a Task", () => {
       ),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when the runner of a session of the Task is retired", async () => {
@@ -2599,12 +2599,12 @@ describe("the card of a Task", () => {
       ),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when a queued session of the Task is cancelled", async () => {
     const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
-      Effect.map(insertQueuedSessionOf(runnerId, taskId), (sessionId) =>
+      Effect.map(insertQueuedSessionForTask(runnerId, taskId), (sessionId) =>
         Effect.flatMap(SessionService, (sessions) =>
           Effect.flatMap(SqlClient.SqlClient, (sql) =>
             withTransaction(sql, sessions.endQueued(sessionId, at)),
@@ -2613,7 +2613,7 @@ describe("the card of a Task", () => {
       ),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when a start that could not be sent puts the session back on the queue", async () => {
@@ -2623,7 +2623,7 @@ describe("the card of a Task", () => {
       ),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when an exited session of the Task is resumed", async () => {
@@ -2680,7 +2680,7 @@ describe("the card of a Task", () => {
       }),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId)]);
   });
 
   it("is announced when a question opens and when it closes, and for an approval neither time", async () => {
@@ -2711,7 +2711,7 @@ describe("the card of a Task", () => {
 
     // One for the question opening and one for it closing. The coalescing
     // window merges them for the client.
-    expect(changes).toEqual([cardChangeOf(taskId), cardChangeOf(taskId)]);
+    expect(changes).toEqual([buildCardChange(taskId), buildCardChange(taskId)]);
   });
 
   it("is announced for both Tasks when a session moves from one to the other, as a reopened Thread does", async () => {
@@ -2728,7 +2728,7 @@ describe("the card of a Task", () => {
       ),
     );
     const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
-      Effect.map(insertQueuedSessionOf(runnerId, taskId), (sessionId) =>
+      Effect.map(insertQueuedSessionForTask(runnerId, taskId), (sessionId) =>
         Effect.flatMap(SqlClient.SqlClient, (sql) =>
           Effect.flatMap(sessionRepository, (rows) =>
             withTransaction(sql, rows.setTaskId(sessionId, otherTaskId)),
@@ -2737,7 +2737,7 @@ describe("the card of a Task", () => {
       ),
     );
 
-    expect(changes).toEqual([cardChangeOf(taskId), cardChangeOf(otherTaskId)]);
+    expect(changes).toEqual([buildCardChange(taskId), buildCardChange(otherTaskId)]);
   });
 
   it("is not announced for a session with no Task", async () => {

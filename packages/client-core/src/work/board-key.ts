@@ -5,7 +5,8 @@ import { queryKeys, type LiveQueryKey } from "../live/keys";
  * key, so every `task` push reads the board again (see `buildQueryKeys`) and
  * the board needs no live topic of its own. The controller announces a change
  * to what a card shows, such as a question opening or a run failing, as a
- * `task` change as well, so the board does not follow the `session` topic,
- * which would read it about once a second for every busy agent.
+ * `task` push marked `derived`, which reads the board alone. The board does
+ * not follow the `session` topic, which would read it about once a second for
+ * every busy agent.
  */
-export const buildWorkBoardKey = (): LiveQueryKey => [...queryKeys.tasks(), "board"];
+export const buildWorkBoardKey = (): LiveQueryKey => queryKeys.workBoard();

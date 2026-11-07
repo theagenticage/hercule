@@ -7,7 +7,7 @@
  * ghost and the slot look, scrolling at the edges) is left to the end-to-end
  * test.
  */
-import { useEffect, useRef, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { buildLanes, STAGE_NAMES, type CardMove } from "@hercule/client-core/work";
@@ -17,7 +17,7 @@ import { findBody } from "../../app/motion/body";
 import { arrangeLanes } from "./arrange-lanes";
 import { BoardDesk } from "./board-desk";
 import { BoardLane } from "./board-lane";
-import { useBoardDrag, type BoardDrag } from "./use-board-drag";
+import { useBoardDrag } from "./use-board-drag";
 
 const PROJECTS = [
   { id: "storefront", name: "Storefront" },
@@ -87,11 +87,12 @@ const laneTop = (lane: Element): number => {
   return top;
 };
 
-/** Returns the rectangle the layout gives `element`, with the offset its body shows, as a browser reports it. */
+/** Returns the rectangle the layout gives `element`, with the offset its body shows and the scroll of the board taken off, as a browser reports it. */
 const layOut = (element: HTMLElement): DOMRect => {
   const offset = findBody(element)?.values ?? { x: 0, y: 0 };
+  const scrolled = element.closest(".board-scroll")?.scrollTop ?? 0;
   const rect = (left: number, top: number, width: number, height: number): DOMRect =>
-    new DOMRect(left + offset.x, top + offset.y, width, height);
+    new DOMRect(left + offset.x, top + offset.y - scrolled, width, height);
   const lane = element.closest(".board-lane");
   if (element.classList.contains("board-scroll")) return new DOMRect(0, 0, 1200, 800);
   if (element.classList.contains("board-stage")) {
@@ -134,8 +135,6 @@ const layOut = (element: HTMLElement): DOMRect => {
 interface Harness {
   readonly moveCard: ReturnType<typeof vi.fn<(move: CardMove, words: string) => void>>;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
-  /** Called after each render with the hook's result. */
-  readonly onDrag: (drag: BoardDrag) => void;
 }
 
 /** Renders the board as the Work screen does, with the drag hook on it. */
@@ -149,21 +148,19 @@ function Board({
   readonly harness: Harness;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const arranged = arrangeLanes(buildLanes({ cards }, PROJECTS), {
+  const arrangedLanes = arrangeLanes(buildLanes({ cards }, PROJECTS), {
     foldedLaneIds,
     openedCellIds: new Set(),
     isFiltering: false,
   });
-  const drag = useBoardDrag({
+  const [isCarrying, setIsCarrying] = useState(false);
+  useBoardDrag({
     scrollRef,
     cards,
     projects: PROJECTS,
-    arranged,
+    arrangedLanes,
     moveCard: harness.moveCard,
-  });
-  const { onDrag } = harness;
-  useEffect(() => {
-    onDrag(drag);
+    onCarryingChange: setIsCarrying,
   });
   return (
     <BoardDesk
@@ -172,16 +169,17 @@ function Board({
       stageCounts={null}
       laneLabels="side-labels"
       isOffline={false}
+      isCarrying={isCarrying}
       hasSheet={false}
       isArriving={false}
       state="board"
       scrollRef={scrollRef}
     >
       <div className="board-lanes">
-        {arranged.map((each) => (
+        {arrangedLanes.map((each) => (
           <BoardLane
             key={each.lane.id}
-            arranged={each}
+            arrangedLane={each}
             tabStopCardId={null}
             isStill
             onToggleLane={() => {}}
@@ -201,21 +199,15 @@ const renderBoard = (
   cards: readonly WorkCard[] = CARDS,
   foldedLaneIds: ReadonlySet<string> = new Set(),
 ) => {
-  let latest: BoardDrag | undefined;
-  const harness: Harness = {
-    moveCard: vi.fn(),
-    onOpenCard: vi.fn(),
-    onDrag: (drag) => {
-      latest = drag;
-    },
-  };
+  const harness: Harness = { moveCard: vi.fn(), onOpenCard: vi.fn() };
   const view = render(<Board cards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />);
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
     moveCard: harness.moveCard,
     onOpenCard: harness.onOpenCard,
-    /** Whether a card is in the hand right now. */
-    isCarrying: (): boolean => latest?.isCarrying() ?? false,
+    /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
+    isCarrying: (): boolean =>
+      view.container.querySelector(".work-desk")?.hasAttribute("data-carrying") === true,
     scroller,
     rerenderWith: (next: readonly WorkCard[], folded: ReadonlySet<string> = foldedLaneIds) => {
       view.rerender(<Board cards={next} foldedLaneIds={folded} harness={harness} />);
@@ -418,21 +410,6 @@ describe("dropping a card", () => {
     expect(board.slot()).toBeNull();
     expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
     expect(board.isCarrying()).toBe(false);
-  });
-
-  it("puts the card first when the pointer is above the middle of the first card", () => {
-    const board = renderBoard();
-    press(board.card("gift-wrap"), 220, rowY(2));
-    moveTo(board.scroller, 220, rowY(2) + 6);
-    moveTo(board.scroller, columnX("building"), rowY(0) - 10);
-    release(board.scroller, columnX("building"), rowY(0) - 10);
-
-    expect(board.moveCard).toHaveBeenCalledOnce();
-    expect(board.moveCard.mock.calls[0]![0]).toEqual({
-      taskId: "gift-wrap",
-      stage: "building",
-      afterTaskId: null,
-    });
   });
 
   it("keeps a drop below the last row of a cell with a more line on that row, so the card stays in view", () => {
@@ -661,5 +638,46 @@ describe("a carry that ends without a drop", () => {
     await waitFor(() => {
       expect(board.ghost()).toBeNull();
     });
+  });
+});
+
+describe("a board that scrolls under a carried card", () => {
+  /** Makes the board report that it is scrolled `top` pixels, and tells it so as a browser does. */
+  const scrollTo = (scroller: HTMLElement, top: number): void => {
+    Object.defineProperty(scroller, "scrollTop", {
+      value: top,
+      configurable: true,
+      writable: true,
+    });
+    fireEvent.scroll(scroller);
+  };
+
+  it("moves the slot to the row that came under the pointer, and reads the page only for that move", () => {
+    const board = renderBoard();
+    press(board.card("gift-wrap"), 220, rowY(2));
+    moveTo(board.scroller, 220, rowY(2) + 6);
+    moveTo(board.scroller, columnX("exploring"), rowY(0) - 10);
+    expect(board.readCell("storefront", "exploring")).toEqual([
+      "slot",
+      "refund-emails",
+      "delivery-slots",
+    ]);
+    // The layout stub is already a spy: forget what it counted until now.
+    const reads = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    reads.mockClear();
+
+    // A pointer that stays over the same place reads nothing, and neither does a scroll that keeps it there.
+    moveTo(board.scroller, columnX("exploring"), rowY(0) - 12);
+    scrollTo(board.scroller, 10);
+    expect(reads).not.toHaveBeenCalled();
+    expect(board.readCell("storefront", "exploring")[0]).toBe("slot");
+
+    // A scroll by three rows puts the pointer under both cards, so the slot goes after them.
+    scrollTo(board.scroller, 3 * (CARD_HEIGHT + CARD_GAP));
+    expect(board.readCell("storefront", "exploring")).toEqual([
+      "refund-emails",
+      "delivery-slots",
+      "slot",
+    ]);
   });
 });

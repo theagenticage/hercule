@@ -1,6 +1,6 @@
 /**
- * Task Board Facts: answers, for `task.queryBoard`, what the sessions and runs
- * of the listed Tasks say about each card.
+ * Task Board Facts: reads, for `task.queryBoard`, the facts from the sessions
+ * and runs of the listed Tasks that their cards show.
  *
  * It lives in the controller daemon because the port belongs to the tasks
  * domain and is answered from the sessions and runs repositories, and both of
@@ -12,12 +12,7 @@ import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { runRepository } from "../../runs";
 import { sessionRepository } from "../../sessions";
-import {
-  TaskBoardFacts,
-  type BoardCardFacts,
-  type BoardFactsRequest,
-  type BoardSessionFact,
-} from "../../tasks";
+import { TaskBoardFacts, type BoardCardFacts, type BoardFactsRequest } from "../../tasks";
 
 /** Groups the items by their Task id, keeping their order. */
 const groupByTask = <Item extends { readonly taskId: string }>(
@@ -68,9 +63,7 @@ export const TaskBoardFactsLayer: Layer.Layer<TaskBoardFacts, never, SqlClient.S
             return tasks.map((task): BoardCardFacts => {
               const total = totalsByTask.get(task.id);
               return {
-                sessions: (notableByTask.get(task.id) ?? []).map(
-                  (session): BoardSessionFact => session,
-                ),
+                sessions: notableByTask.get(task.id) ?? [],
                 threadCount: total?.threadCount ?? 0,
                 lastTurnEndedAt: total?.lastTurnEndedAt,
                 lastRunEndedAt: lastRunEndings.get(task.id),

@@ -1,6 +1,5 @@
 import { flushSync } from "react-dom";
 import type { RefObject } from "react";
-import { flipByKey } from "../../app/motion";
 import {
   fadeInCards,
   flyFlightsIntoCounts,
@@ -10,7 +9,8 @@ import {
   launchFoldFlights,
   recordGrowthOrigins,
 } from "./board-flights";
-import { MOVABLE_SELECTOR, readMotionKey } from "./board-layouts";
+import { isLaneFolded } from "./board-dom";
+import { flipBoard } from "./flip-board";
 import type { WorkView } from "./use-work-view";
 
 /** How long the lanes below a folding lane wait before they glide up, in milliseconds. */
@@ -25,14 +25,21 @@ interface BoardChange {
   readonly commit: () => void;
   /**
    * The lane that stays exactly where it is on screen while everything else
-   * moves around it: the one the user clicked. `undefined` means the lane at
-   * the top of the view; `null` means none, so the page does not scroll.
+   * moves around it: the one the user clicked, `"top"` for the lane at the top
+   * of the view, or `"none"` so that the page does not scroll.
    */
-  readonly anchor?: HTMLElement | null | undefined;
+  readonly anchor: HTMLElement | "top" | "none";
   /** The milliseconds each part waits before it glides. */
   readonly wait?: number | undefined;
   /** Runs before the change and returns what runs after it. It makes the copies in flight and records where cards grow from. */
   readonly prepare?: () => () => void;
+}
+
+/** What a fold or an unfold needs to know: the lanes it changes, how to commit it, and the lane that stays still. */
+interface FoldRequest {
+  readonly lanes: readonly HTMLElement[];
+  readonly commit: () => void;
+  readonly anchor: BoardChange["anchor"];
 }
 
 /** Returns the lane at the top of the view: the first whose bottom is clear of the toolbar and the stage names. */
@@ -55,23 +62,26 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
     change.commit();
     return;
   }
-  const anchor = change.anchor === undefined ? findLaneAtTop(scroller) : change.anchor;
+  const anchor =
+    change.anchor === "top"
+      ? findLaneAtTop(scroller)
+      : change.anchor === "none"
+        ? null
+        : change.anchor;
   const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
   const finish = change.prepare?.();
   const wait = change.wait ?? 0;
-  flipByKey({
-    root: scroller,
-    selector: MOVABLE_SELECTOR,
-    readKey: readMotionKey,
-    spring: "travel",
-    ...(wait > 0 ? { stagger: () => wait } : {}),
-    mutate: () => {
+  flipBoard(
+    scroller,
+    "travel",
+    () => {
       flushSync(change.commit);
       if (anchor?.isConnected === true) {
         scroller.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
       }
     },
-  });
+    wait > 0 ? () => wait : undefined,
+  );
   finish?.();
 };
 
@@ -79,23 +89,20 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
 const findLane = (scroller: HTMLElement, laneId: string): HTMLElement | null =>
   scroller.querySelector<HTMLElement>(`.board-lane[data-lane-id="${laneId}"]`);
 
-/** Returns whether a lane shows folded: its line of counts stands where its cells would. */
-const isLaneFolded = (lane: HTMLElement): boolean =>
-  lane.querySelector(":scope > [data-fold-row]") !== null;
-
-/** Returns a change that folds `lanes`: a copy of each card in view flies to its count, and the lanes below glide up after a short wait. */
+/**
+ * Returns a change that folds `lanes`: the lanes below glide up after a short
+ * wait, and, when `hasFlights` is true, a copy of each card in view flies to
+ * its count first.
+ */
 const buildFold = (
   scroller: HTMLElement,
-  lanes: readonly HTMLElement[],
-  commit: () => void,
-  anchor: HTMLElement | null | undefined,
-  withFlights: boolean,
+  { lanes, commit, anchor, hasFlights }: FoldRequest & { readonly hasFlights: boolean },
 ): BoardChange => ({
   commit,
   anchor,
   wait: LANES_BELOW_WAIT,
   prepare: () => {
-    const flights = withFlights ? launchFoldFlights(scroller, lanes) : [];
+    const flights = hasFlights ? launchFoldFlights(scroller, lanes) : [];
     return () => {
       flyFlightsIntoCounts(scroller, flights);
     };
@@ -105,9 +112,7 @@ const buildFold = (
 /** Returns a change that opens `lanes`: each card grows out of its count, or out of the copy still flying there. */
 const buildUnfold = (
   scroller: HTMLElement,
-  lanes: readonly HTMLElement[],
-  commit: () => void,
-  anchor: HTMLElement | null | undefined,
+  { lanes, commit, anchor }: FoldRequest,
 ): BoardChange => ({
   commit,
   anchor,
@@ -167,11 +172,12 @@ export const useViewMotion = (
     const commit = (): void => {
       view.toggleLane(laneId);
     };
+    const request = { lanes: [lane], commit, anchor: lane };
     playChange(
       scroller,
       isLaneFolded(lane)
-        ? buildUnfold(scroller, [lane], commit, lane)
-        : buildFold(scroller, [lane], commit, lane, !view.isFiltering),
+        ? buildUnfold(scroller, request)
+        : buildFold(scroller, { ...request, hasFlights: !view.isFiltering }),
     );
   };
 
@@ -196,14 +202,13 @@ export const useViewMotion = (
     playChange(
       scroller,
       isOpening
-        ? buildUnfold(scroller, lanes, commit, undefined)
-        : buildFold(
-            scroller,
-            lanes.filter((lane) => !isLaneFolded(lane)),
+        ? buildUnfold(scroller, { lanes, commit, anchor: "top" })
+        : buildFold(scroller, {
+            lanes: lanes.filter((lane) => !isLaneFolded(lane)),
             commit,
-            undefined,
-            true,
-          ),
+            anchor: "top",
+            hasFlights: true,
+          }),
     );
   };
 
@@ -220,7 +225,7 @@ export const useViewMotion = (
       commit: () => {
         view.toggleCell(cellId);
       },
-      anchor: cell.closest<HTMLElement>(".board-lane"),
+      anchor: cell.closest<HTMLElement>(".board-lane") ?? "none",
       prepare: () => {
         const flights = isClosing ? launchCloseFlights(scroller, cell) : [];
         const before = listCardIds(cell);
@@ -244,7 +249,7 @@ export const useViewMotion = (
     const scroller = scrollRef.current;
     playChange(scroller, {
       commit,
-      anchor: null,
+      anchor: "none",
       prepare: () => {
         const before = scroller === null ? new Set<string>() : listCardIds(scroller);
         return () => {

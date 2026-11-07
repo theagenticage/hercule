@@ -10,11 +10,11 @@ import { WorkCardView } from "./work-card";
  * landed" while it hides some, and "Show fewer" while the user has it open.
  */
 const describeFoot = (cell: ArrangedLaneCell): string => {
-  switch (cell.arranged.foot) {
+  switch (cell.arrangement.foot) {
     case "more":
-      return `${String(cell.arranged.hiddenCards.length)} more`;
+      return `${String(cell.arrangement.hiddenCards.length)} more`;
     case "landed":
-      return `${String(cell.arranged.hiddenCards.length)} landed`;
+      return `${String(cell.arrangement.hiddenCards.length)} landed`;
     case "fewer":
     case "none":
       return "Show fewer";
@@ -50,8 +50,8 @@ export function BoardCell({
   readonly onOpenCard: (card: WorkCard) => void;
   readonly onFocusCard: (cardId: string) => void;
 }): JSX.Element {
-  const { arranged, stage, cellId } = cell;
-  const isOpen = arranged.foot === "fewer";
+  const { arrangement, stage, cellId } = cell;
+  const isOpen = arrangement.foot === "fewer";
   return (
     <div
       className="board-cell"
@@ -61,7 +61,7 @@ export function BoardCell({
       data-lane-id={laneId}
       data-stage={stage}
     >
-      {arranged.cards.map((card) => (
+      {arrangement.cards.map((card) => (
         <WorkCardView
           key={card.id}
           card={card}
@@ -71,7 +71,7 @@ export function BoardCell({
           onFocus={onFocusCard}
         />
       ))}
-      {arranged.foot !== "none" && (
+      {arrangement.foot !== "none" && (
         <button
           type="button"
           className="board-more"

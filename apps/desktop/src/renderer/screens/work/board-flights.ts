@@ -5,7 +5,9 @@
  * `transform` and `opacity` only, through the motion kernel, and does nothing
  * at all under Reduce motion except where a function says otherwise.
  */
+import { ROWS_BEFORE_HIDING } from "@hercule/client-core/work";
 import {
+  computeCenter,
   findBody,
   ghostElement,
   isMotionReduced,
@@ -20,14 +22,6 @@ const FLIGHT_LAYER_CLASS = "board-flights";
 /** How many milliseconds apart the cards of a folding lane leave, and of an opening lane arrive. */
 const FOLD_GAP = 12;
 const UNFOLD_GAP = 16;
-
-/**
- * How many cards a closed cell shows before it hides any; the ones after them
- * are the ones that may leave when it closes. The Landed cell shows none: all
- * its cards may leave.
- */
-const CARDS_BEFORE_MORE = 4;
-const CARDS_BEFORE_LANDED = 0;
 
 /** When a card flying into a count starts to fade, and how long the fade takes, in milliseconds after it left. It stays solid until it is small. */
 const FADE_AFTER = 210;
@@ -72,19 +66,13 @@ const removeFlight = (ghost: HTMLElement): void => {
 };
 
 /** A copy of a card that is about to leave the page, and where its Task goes. */
-export interface Flight {
+interface Flight {
   readonly ghost: HTMLElement;
   readonly cardId: string;
   readonly laneId: string;
   readonly stage: string;
   readonly delay: number;
 }
-
-/** Returns the center of a rectangle. */
-const centerOf = (rect: { left: number; top: number; width: number; height: number }) => ({
-  x: rect.left + rect.width / 2,
-  y: rect.top + rect.height / 2,
-});
 
 /** Returns whether any of the card is inside the visible part of the scroller. */
 const isInView = (card: HTMLElement, view: DOMRect): boolean => {
@@ -134,15 +122,15 @@ export const flyFlightsIntoCounts = (scroller: HTMLElement, flights: readonly Fl
       removeFlight(flight.ghost);
       continue;
     }
-    const from = centerOf(measureLayoutRect(flight.ghost));
-    const to = centerOf(count.getBoundingClientRect());
+    const from = computeCenter(measureLayoutRect(flight.ghost));
+    const to = computeCenter(count.getBoundingClientRect());
     trackBody(flight.ghost).to({ x: to.x - from.x, y: to.y - from.y, s: 0.1 }, "travel", {
       delay: flight.delay,
       done: () => {
         removeFlight(flight.ghost);
       },
     });
-    flight.ghost.animate?.([{ opacity: 1 }, { opacity: 0 }], {
+    flight.ghost.animate([{ opacity: 1 }, { opacity: 0 }], {
       delay: flight.delay + FADE_AFTER,
       duration: FADE_FOR,
       fill: "forwards",
@@ -151,11 +139,11 @@ export const flyFlightsIntoCounts = (scroller: HTMLElement, flights: readonly Fl
 };
 
 /** Returns the key of the count a card grows from (`laneId` and `stage`), or of its copy in flight (`""` and the card's id). */
-export const buildGrowthKey = (laneId: string, stageOrCardId: string): string =>
+const buildGrowthKey = (laneId: string, stageOrCardId: string): string =>
   `${laneId}/${stageOrCardId}`;
 
 /** Where a card that is about to grow out of a count starts: the center and size of the count, or of the copy still flying there. */
-export interface GrowthOrigin {
+interface GrowthOrigin {
   readonly x: number;
   readonly y: number;
   readonly scale: number;
@@ -180,7 +168,7 @@ export const recordGrowthOrigins = (
   for (const lane of lanes) {
     const laneId = lane.dataset["laneId"] ?? "";
     for (const count of lane.querySelectorAll<HTMLElement>("[data-fold-row] [data-stage]")) {
-      const place = centerOf(count.getBoundingClientRect());
+      const place = computeCenter(count.getBoundingClientRect());
       origins.set(buildGrowthKey(laneId, count.dataset["stage"] ?? ""), {
         ...place,
         scale: 0.1,
@@ -191,14 +179,14 @@ export const recordGrowthOrigins = (
   }
   const layer = scroller.closest(".work-desk")?.querySelector(`:scope > .${FLIGHT_LAYER_CLASS}`);
   for (const ghost of layer?.querySelectorAll<HTMLElement>("[data-card-id]") ?? []) {
-    const place = centerOf(ghost.getBoundingClientRect());
+    const place = computeCenter(ghost.getBoundingClientRect());
     origins.set(buildGrowthKey("", ghost.dataset["cardId"] ?? ""), {
       ...place,
       scale: findBody(ghost)?.values.s ?? 1,
       opacity: 1,
       isLive: true,
     });
-    for (const animation of ghost.getAnimations?.() ?? []) animation.cancel();
+    for (const animation of ghost.getAnimations()) animation.cancel();
     removeFlight(ghost);
   }
   return origins;
@@ -228,7 +216,7 @@ export const growCardsFromOrigins = (
         body.to({ o: 1 }, "travel", { reduced });
         continue;
       }
-      const to = centerOf(measureLayoutRect(card));
+      const to = computeCenter(measureLayoutRect(card));
       body.set({ x: origin.x - to.x, y: origin.y - to.y, s: origin.scale, o: origin.opacity });
       body.to({ x: 0, y: 0, s: 1, o: 1 }, "travel", {
         delay: origin.isLive ? 0 : staggerDelay(index, UNFOLD_GAP),
@@ -239,8 +227,8 @@ export const growCardsFromOrigins = (
 };
 
 /**
- * Makes a copy of each card of `cell` past the fourth (past none, in the
- * Landed cell), which may leave when the cell closes. The copies of cards that
+ * Makes a copy of each card of `cell` past the rows a closed cell shows (all
+ * of them, in the Landed cell), which may leave when the cell closes. The copies of cards that
  * stay are thrown away by `flyFlightsToButton`. Call it before the change.
  */
 export const launchCloseFlights = (scroller: HTMLElement, cell: HTMLElement): readonly Flight[] => {
@@ -248,7 +236,7 @@ export const launchCloseFlights = (scroller: HTMLElement, cell: HTMLElement): re
   if (layer === null) return [];
   const view = scroller.getBoundingClientRect();
   return [...cell.querySelectorAll<HTMLElement>("[data-card-id]")]
-    .slice(cell.dataset["stage"] === "landed" ? CARDS_BEFORE_LANDED : CARDS_BEFORE_MORE)
+    .slice(cell.dataset["stage"] === "landed" ? 0 : ROWS_BEFORE_HIDING)
     .filter((card) => isInView(card, view))
     .map((card) => ({
       ghost: ghostElement(card, layer),
@@ -276,8 +264,8 @@ export const flyFlightsToButton = (
       removeFlight(flight.ghost);
       continue;
     }
-    const from = centerOf(measureLayoutRect(flight.ghost));
-    const to = centerOf(button.getBoundingClientRect());
+    const from = computeCenter(measureLayoutRect(flight.ghost));
+    const to = computeCenter(button.getBoundingClientRect());
     trackBody(flight.ghost).to({ x: to.x - from.x, y: to.y - from.y, s: 0.9, o: 0 }, "travel", {
       done: () => {
         removeFlight(flight.ghost);

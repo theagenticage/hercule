@@ -328,6 +328,7 @@ export {
   SESSION_UPDATE_FIELDS,
   SUBAGENT_SORT_FIELDS,
   SUBAGENT_STATUSES,
+  WORKING_SESSION_STATUSES,
   Session,
   SessionContinueInput,
   SessionFilter,

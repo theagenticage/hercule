@@ -1,34 +1,16 @@
-import {
-  useState,
-  type JSX,
-  type KeyboardEvent,
-  type ReactNode,
-  type Ref,
-  type ToggleEvent,
-} from "react";
-import { flushSync } from "react-dom";
-import {
-  buildFilterChips,
-  countFacetValues,
-  EMPTY_FILTER,
-  toggleFilterValue,
-  type Filter,
-  type FilterFacet,
-  type FilterValue,
-} from "@hercule/client-core/desk";
-import { PROJECT_FACET_ID, STAGE_NAMES, STATE_FACET_ID } from "@hercule/client-core/work";
+import type { JSX, KeyboardEvent, ReactNode, Ref } from "react";
+import { buildFilterChips, type Filter, type FilterFacet } from "@hercule/client-core/desk";
+import { PROJECT_FACET_ID, STAGE_NAMES } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
-import { FilterIcon } from "../../icons/filter";
 import { FolderIcon } from "../../icons/folder";
 import { PlusIcon } from "../../icons/plus";
 import { SlidersIcon } from "../../icons/sliders";
 import {
-  ClearChipsButton,
-  FilterChip,
+  FilterChips,
+  FilterControl,
   FindBox,
   IconPill,
   MenuAction,
-  MenuBack,
   MenuLine,
   MenuPick,
   MenuSegment,
@@ -38,21 +20,9 @@ import {
   ToolMenu,
   type FindMatch,
 } from "../desk";
-import { FOCUSABLE_MENU_ITEM_SELECTOR } from "../move-menu-focus";
 import { usePopoverMenu } from "../use-popover-menu";
+import type { WorkDisplay } from "./use-work-view";
 import "./work-toolbar.css";
-
-/** How the lanes label themselves: in a column at the side, or in a band across the top. */
-export type LaneLabels = "side-labels" | "bands";
-
-/** The choices of the Display menu. */
-export interface WorkDisplay {
-  readonly laneLabels: LaneLabels;
-  /** Whether the colleagues on the cards hold still: no typing paws, no blinking. */
-  readonly isStill: boolean;
-  /** Whether single keys, such as A and F, work on the board. */
-  readonly hasSingleKeys: boolean;
-}
 
 /** What the Find box needs from the board. */
 export interface WorkFind {
@@ -72,9 +42,6 @@ export interface WorkFind {
   /** Called with the id of the card to open. */
   readonly onOpen: (id: string) => void;
 }
-
-/** A facet with more values than this opens with a Find box over them. */
-const MOST_VALUES_WITHOUT_FIND = 7;
 
 /** The mark in front of a grouping, a facet or a value, by the id of the grouping or facet. */
 const MARKS: Readonly<Record<string, ReactNode>> = {
@@ -98,14 +65,6 @@ const LANE_LABEL_CHOICES = [
   { view: "side-labels", label: "Side labels" },
   { view: "bands", label: "Bands" },
 ] as const;
-
-/**
- * Moves the keyboard focus to the first element of `menu` that matches
- * `selector`. Does nothing when `menu` is null or none matches.
- */
-const focusInMenu = (menu: HTMLElement | null, selector: string): void => {
-  menu?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
-};
 
 /**
  * Renders the Group by button and its menu. The menu lists `GROUPINGS` as a
@@ -137,151 +96,6 @@ function GroupByControl(): JSX.Element {
             />
           );
         })}
-      </ToolMenu>
-    </>
-  );
-}
-
-/**
- * Renders the Filter button and its menu. The menu opens on the State facet's
- * values as checkboxes, then one row for each other facet. A facet row opens
- * that facet's values in the same menu, with a Back row, and a Find box over
- * the values when there are more than seven. Each value shows how many cards
- * the filter would leave if it were chosen.
- *
- * Closing the menu, by Esc or a click outside it, returns it to the first view.
- */
-function FilterControl({
-  facets,
-  filter,
-  cards,
-  onFilterChange,
-}: {
-  readonly facets: readonly FilterFacet<WorkCard>[];
-  readonly filter: Filter;
-  readonly cards: readonly WorkCard[];
-  readonly onFilterChange: (filter: Filter) => void;
-}): JSX.Element {
-  const { triggerProps, menuProps, buildItemProps } = usePopoverMenu();
-  const [openFacetId, setOpenFacetId] = useState<string | null>(null);
-  const [valueWords, setValueWords] = useState("");
-
-  const stateFacet = facets.find((facet) => facet.id === STATE_FACET_ID);
-  const otherFacets = facets.filter((facet) => facet.id !== STATE_FACET_ID);
-  const openFacet = facets.find((facet) => facet.id === openFacetId);
-
-  const handleToggle = (event: ToggleEvent<HTMLDivElement>): void => {
-    menuProps.onToggle(event);
-    if (event.newState === "open") return;
-    setOpenFacetId(null);
-    setValueWords("");
-  };
-
-  /**
-   * Switches the menu to a facet's values, or back to the first view with
-   * `null`, and puts the focus on what the user can act on: the Find box, the
-   * first row, or the row that opened the facet.
-   */
-  const showFacet = (facetId: string | null, focusSelector: string): void => {
-    flushSync(() => {
-      setOpenFacetId(facetId);
-      setValueWords("");
-    });
-    focusInMenu(menuProps.ref.current, focusSelector);
-  };
-
-  /** Renders the rows of a facet's values, each a checkbox with the count it would leave. */
-  const renderValueRows = (
-    facet: FilterFacet<WorkCard>,
-    values: readonly FilterValue[],
-  ): JSX.Element[] => {
-    const counts = countFacetValues(cards, filter, facets, facet);
-    const chosen = filter[facet.id] ?? [];
-    return values.map((value) => {
-      const isOn = chosen.includes(value.id);
-      return (
-        <MenuPick
-          key={value.id}
-          itemProps={buildItemProps(`value:${facet.id}:${value.id}`, { checked: isOn })}
-          kind="toggle"
-          name={value.name}
-          isOn={isOn}
-          mark={facet.id === STATE_FACET_ID ? undefined : MARKS[facet.id]}
-          count={counts[value.id] ?? 0}
-          onPick={() => {
-            onFilterChange(toggleFilterValue(filter, facet.id, value.id));
-          }}
-        />
-      );
-    });
-  };
-
-  const renderFacetValues = (facet: FilterFacet<WorkCard>): JSX.Element => {
-    const needle = valueWords.trim().toLowerCase();
-    const values = facet.values.filter((value) => value.name.toLowerCase().includes(needle));
-    return (
-      <>
-        <MenuBack
-          itemProps={buildItemProps("back")}
-          name={facet.caption}
-          onBack={() => {
-            showFacet(null, `[data-item="open:${facet.id}"]`);
-          }}
-        />
-        {facet.values.length > MOST_VALUES_WITHOUT_FIND && (
-          <input
-            className="field work-menu-find"
-            placeholder="Find"
-            aria-label={`Find in ${facet.caption}`}
-            value={valueWords}
-            onChange={(event) => {
-              setValueWords(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              // Home and End move the caret in a text field. The menu would
-              // take them to move between rows.
-              if (event.key === "Home" || event.key === "End") event.stopPropagation();
-            }}
-          />
-        )}
-        <div className="work-menu-values">{renderValueRows(facet, values)}</div>
-      </>
-    );
-  };
-
-  const renderFirstView = (): JSX.Element => (
-    <>
-      {stateFacet !== undefined && renderValueRows(stateFacet, stateFacet.values)}
-      {stateFacet !== undefined && otherFacets.length > 0 && <MenuLine />}
-      {otherFacets.map((facet) => (
-        <MenuPick
-          key={facet.id}
-          itemProps={buildItemProps(`open:${facet.id}`)}
-          kind="opens"
-          name={facet.caption}
-          isOn={false}
-          mark={MARKS[facet.id]}
-          count={(filter[facet.id] ?? []).length}
-          onPick={() => {
-            const hasFind = facet.values.length > MOST_VALUES_WITHOUT_FIND;
-            showFacet(facet.id, hasFind ? ".work-menu-find" : FOCUSABLE_MENU_ITEM_SELECTOR);
-          }}
-        />
-      ))}
-    </>
-  );
-
-  return (
-    <>
-      <ToolButton
-        {...triggerProps}
-        icon={<FilterIcon size={14} />}
-        name="Filter"
-        hasMenu={false}
-        isFilled={false}
-      />
-      <ToolMenu menuProps={{ ...menuProps, onToggle: handleToggle }} label="Filter" edge="start">
-        {openFacet === undefined ? renderFirstView() : renderFacetValues(openFacet)}
       </ToolMenu>
     </>
   );
@@ -464,26 +278,11 @@ export function WorkToolbar({
       <FilterControl
         facets={facets}
         filter={filter}
-        cards={cards}
+        items={cards}
+        marks={MARKS}
         onFilterChange={onFilterChange}
       />
-      {chips.map((chip) => (
-        <FilterChip
-          key={`${chip.facetId}:${chip.valueId}`}
-          caption={chip.caption}
-          name={chip.name}
-          onRemove={() => {
-            onFilterChange(toggleFilterValue(filter, chip.facetId, chip.valueId));
-          }}
-        />
-      ))}
-      {chips.length > 1 && (
-        <ClearChipsButton
-          onClear={() => {
-            onFilterChange(EMPTY_FILTER);
-          }}
-        />
-      )}
+      <FilterChips chips={chips} filter={filter} onFilterChange={onFilterChange} />
     </Toolbar>
   );
 }

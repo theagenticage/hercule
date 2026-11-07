@@ -67,7 +67,7 @@
 .pop.popover-menu {
   padding: 6px;
 }
-.popover-menu :where([role="menuitem"], [role="menuitemradio"]) {
+.popover-menu :where([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -80,13 +80,15 @@
   text-align: left;
   text-decoration: none;
 }
-.popover-menu :is([role="menuitem"], [role="menuitemradio"]).is-active {
+.popover-menu :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]).is-active {
   background: var(--hover);
 }
-.popover-menu :is([role="menuitem"], [role="menuitemradio"]):focus-visible {
+.popover-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):focus-visible {
   outline: none;
 }
-.popover-menu :is([role="menuitem"], [role="menuitemradio"])[aria-disabled="true"] {
+.popover-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"])[aria-disabled="true"] {
   color: var(--faint);
   cursor: default;
 }

@@ -78,8 +78,8 @@ export const COALESCE_WINDOW_MS = 50;
 /**
  * How long the changes of a slow-paced record are collected before they are
  * sent, in milliseconds: the `subagent` topic, a session whose only change is
- * its Token Usage, and a Task whose card an agent changed. All three change with almost every event a working
- * agent reports, and a client that refetched each time would read the same
+ * its Token Usage, and a Task whose card an agent changed. All three change
+ * with almost every event a working agent reports, and a client that refetched each time would read the same
  * record many times a second. Exported for the same reason as
  * `COALESCE_WINDOW_MS`.
  */
@@ -276,8 +276,12 @@ const make = Effect.gen(function* () {
    * A `session` message also maps each id to its session's conversation. The
    * map is kept by id from the moment a change is collected, so batching can
    * never pair an id with another session's conversation.
+   *
+   * With `marksTasksDerived`, a `task` message carries `derived: true`. Only
+   * the slow window sets it, because only a card change that an agent caused
+   * is collected there (see `isSlowPaced`).
    */
-  const startCoalescing = (windowMs: number) =>
+  const startCoalescing = (windowMs: number, marksTasksDerived: boolean) =>
     Effect.gen(function* () {
       /**
        * The records changed since the last send, by topic and by kind: each
@@ -304,7 +308,9 @@ const make = Effect.gen(function* () {
                     kind,
                     conversationIds: Object.fromEntries(changed),
                   }
-                : { _tag: "invalidate", ids, kind };
+                : topic === "task" && marksTasksDerived
+                  ? { _tag: "invalidate", ids, kind, derived: true }
+                  : { _tag: "invalidate", ids, kind };
             yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message, 0), {
               discard: true,
             });
@@ -341,8 +347,8 @@ const make = Effect.gen(function* () {
         });
     });
 
-  const collectChange = yield* startCoalescing(COALESCE_WINDOW_MS);
-  const collectSlowChange = yield* startCoalescing(SLOW_COALESCE_WINDOW_MS);
+  const collectChange = yield* startCoalescing(COALESCE_WINDOW_MS, false);
+  const collectSlowChange = yield* startCoalescing(SLOW_COALESCE_WINDOW_MS, true);
 
   /**
    * A log a subscription can read from: the event log for `event`, or one

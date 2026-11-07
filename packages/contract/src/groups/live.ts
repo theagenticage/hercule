@@ -238,12 +238,18 @@ export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
  * that shows an assistant's current session then re-reads it only when a
  * session of that assistant's conversation changed, without knowing every
  * session in advance. A push on any other topic leaves it out.
+ *
+ * A `task` push may carry `derived: true`. It then names Tasks whose card
+ * changed only because of their sessions or runs (a session changed status, a
+ * question opened, a run ended), and no field of the Task record changed. A
+ * client reads only what draws such a card, which is the Work board.
  */
 export const Invalidate = Schema.Struct({
   _tag: Schema.Literal("invalidate"),
   ids: Schema.Array(Schema.String),
   kind: InvalidateKind,
   conversationIds: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+  derived: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type Invalidate = Schema.Schema.Type<typeof Invalidate>;

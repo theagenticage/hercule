@@ -59,6 +59,12 @@ export const measureLayoutRect = (element: HTMLElement): LayoutRect => {
   };
 };
 
+/** Returns the center of a rectangle, in the same coordinates. */
+export const computeCenter = (rect: LayoutRect): { readonly x: number; readonly y: number } => ({
+  x: rect.left + rect.width / 2,
+  y: rect.top + rect.height / 2,
+});
+
 /** Where an element looked before the page changed, and the speed it moved at. */
 interface FlipStart {
   readonly rect: DOMRect;
@@ -159,6 +165,14 @@ const collectByKey = (
   return found;
 };
 
+/** What `flipByKey` found after `mutate`. */
+export interface FlipByKeyResult {
+  /** Where the layout put each element, by key, in window pixels, with no animation offset. */
+  readonly places: ReadonlyMap<string, LayoutRect>;
+  /** The elements whose key was not on the page before `mutate`: the things that are new. */
+  readonly born: readonly HTMLElement[];
+}
+
 /**
  * Like `flipElements`, for a page where React may replace an element with a
  * new one for the same thing, such as a card that moves to another column.
@@ -169,11 +183,13 @@ const collectByKey = (
  * - An element that was mid-flight starts from what is on screen. When the
  *   element is a new one, it takes over the old element's speed too, and the
  *   old element's body is stopped.
- * - A key found only before `mutate` (the thing left) or only after (it is
- *   new) is left alone.
- * - Reads the page once before `mutate` and once after, then writes.
+ * - A key found only before `mutate` (the thing left) is left alone. One found
+ *   only after (it is new) is left alone too, and is returned in `born`.
+ * - Reads the page once before `mutate` and once after, then writes. The
+ *   places measured after are returned, so a caller that needs them does not
+ *   measure again.
  */
-export const flipByKey = (options: FlipByKeyOptions): void => {
+export const flipByKey = (options: FlipByKeyOptions): FlipByKeyResult => {
   const { root, selector, readKey, mutate } = options;
   const before = new Map<string, FlipStart & { readonly element: HTMLElement }>();
   for (const [key, element] of collectByKey(root, selector, readKey)) {
@@ -186,17 +202,25 @@ export const flipByKey = (options: FlipByKeyOptions): void => {
   mutate();
   const reduced = isMotionReduced();
   const spring = options.spring ?? "hand";
-  const after = [...collectByKey(root, selector, readKey)].flatMap(([key, element], index) => {
+  const places = new Map<string, LayoutRect>();
+  const born: HTMLElement[] = [];
+  const after: {
+    readonly element: HTMLElement;
+    readonly index: number;
+    readonly start: FlipStart & { readonly element: HTMLElement };
+    readonly to: LayoutRect;
+  }[] = [];
+  [...collectByKey(root, selector, readKey)].forEach(([key, element], index) => {
+    const to = measureLayoutRect(element);
+    places.set(key, to);
     const start = before.get(key);
-    return start === undefined ? [] : [{ element, index, start, to: measureLayoutRect(element) }];
+    if (start === undefined) born.push(element);
+    else after.push({ element, index, start, to });
   });
   for (const { element, index, start, to } of after) {
     const isReplaced = start.element !== element;
-    if (isReplaced) {
-      // The old element may be gone, or may still be on the page: either way
-      // it no longer shows the thing, so its body must stop moving.
-      if (!start.element.isConnected) findBody(start.element)?.clear();
-    }
+    // An old element that left the page must stop moving: its body keeps the clock awake.
+    if (isReplaced && !start.element.isConnected) findBody(start.element)?.clear();
     springFrom(
       element,
       isReplaced ? start : { rect: start.rect },
@@ -206,6 +230,7 @@ export const flipByKey = (options: FlipByKeyOptions): void => {
       reduced,
     );
   }
+  return { places, born };
 };
 
 /**

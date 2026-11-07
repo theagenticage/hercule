@@ -670,7 +670,7 @@ _Avoid_: dashboard, home; "overview" for the Office's camera button or for a cam
 
 **Work**:
 The view of the Overview that draws every unfinished Task as a card, placed by Stage in a lane for each Project. A view, not a record: the cards are Tasks, and nothing is stored as a board. What a card shows (a Thread's open question, a failed run, a working session) is decided on the controller. The sidebar's section is headed Work too, and the view is only ever a tab in the Overview's pill.
-_Avoid_: board as the name of a record, table or type (the read `task.queryBoard` returns what Work draws; nothing is stored as a board), kanban, column (a Stage, how Work draws it)
+_Avoid_: board as a record name, kanban
 
 **Office**:
 One of the two views of the Overview. It shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.

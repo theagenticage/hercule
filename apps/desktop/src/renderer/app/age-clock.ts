@@ -6,8 +6,9 @@
  *   the user (`useAgeLabel`), which changes minutes or hours apart
  *   (`findNextAgeChange`);
  * - a card's age on the Overview, such as "today", "2d" or "3w"
- *   (`useDeskAgeLabel`), which counts whole days and so changes at most once
- *   a day (`findNextDeskAgeChange`);
+ *   (`useDeskAgeLabel`, in the desk's own module so it loads with Work and
+ *   stays off the first screen), which counts whole days and so changes at
+ *   most once a day (`findNextDeskAgeChange`);
  * - a duration, such as a live turn's "Working for 12s"
  *   (`useDurationText`), which changes every second under an hour
  *   (`findNextDurationChange`);
@@ -43,7 +44,6 @@ import {
   findNextDurationChange,
   formatAge,
 } from "@hercule/client-core";
-import { describeDeskAge, findNextDeskAgeChange, formatDeskAge } from "@hercule/client-core/desk";
 
 /**
  * The longest delay `setTimeout` keeps. A longer one runs after 1 ms instead,
@@ -266,23 +266,6 @@ export const useAgeLabel = (at: string, onScreen: boolean): string =>
  */
 export const useAgeWords = (at: string, onScreen: boolean): string =>
   useClockValue(at, onScreen, findNextAgeChange, (now) => describeAge(at, now));
-
-/**
- * Returns the age of `at` that a card on the Overview shows, such as "today",
- * "2d" or "3w" (`formatDeskAge`), and keeps it current while `onScreen` is
- * true. It counts whole days, so a board of cards draws its ages again about
- * once a day.
- */
-export const useDeskAgeLabel = (at: string, onScreen: boolean): string =>
-  useClockValue(at, onScreen, findNextDeskAgeChange, (now) => formatDeskAge(at, now));
-
-/**
- * Returns the age of `at` in words, such as "3 weeks ago" (`describeDeskAge`),
- * for a screen reader to say where a card shows `useDeskAgeLabel`. It changes
- * at the same moments as the short label.
- */
-export const useDeskAgeWords = (at: string, onScreen: boolean): string =>
-  useClockValue(at, onScreen, findNextDeskAgeChange, (now) => describeDeskAge(at, now));
 
 /**
  * Returns `describe(now)`, where `now` is the age clock's current time in

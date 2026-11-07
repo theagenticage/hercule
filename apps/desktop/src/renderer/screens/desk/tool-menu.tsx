@@ -3,7 +3,7 @@ import { CheckIcon } from "../../icons/check";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { PopoverMenu } from "../use-popover-menu";
-import { ViewSwitch, type ViewChoice } from "../workflows/view-switch";
+import { ViewSwitch, type ViewChoice } from "../view-switch";
 import "../thread/menus.css";
 import "./toolbar.css";
 

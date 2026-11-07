@@ -1,6 +1,6 @@
 /**
  * The words a card carries: the stage names, the line that says a run failed,
- * and the name a screen reader reads for a card.
+ * the second line a card shows, and the name a screen reader reads for a card.
  */
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { describeDeskAge } from "../desk/age";
@@ -14,15 +14,6 @@ export const STAGE_NAMES: Readonly<Record<BoardStage, string>> = {
   landed: "Landed",
 };
 
-/** The failure of a card, in the parts a screen needs to style the name of the workflow. */
-export interface FailureWords {
-  readonly workflowName: string;
-  /** What follows the name, such as " failed: the branch changed mid-run." */
-  readonly outcome: string;
-  /** The whole line, `workflowName` then `outcome`. */
-  readonly text: string;
-}
-
 /**
  * Returns the cause on one line, without a closing full stop (the line adds
  * its own), or `undefined` when nothing is left.
@@ -35,14 +26,9 @@ const cleanCause = (cause: string): string | undefined =>
  * mid-run." with a cause, and "Review PR failed." without one. A cause that
  * spans several lines is joined into one.
  */
-export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): FailureWords => {
+export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): string => {
   const cause = cleanCause(failure.cause);
-  const outcome = cause === undefined ? " failed." : ` failed: ${cause}.`;
-  return {
-    workflowName: failure.workflowName,
-    outcome,
-    text: `${failure.workflowName}${outcome}`,
-  };
+  return `${failure.workflowName} failed${cause === undefined ? "" : `: ${cause}`}.`;
 };
 
 /**
@@ -53,6 +39,26 @@ export const describeCardFailure = (failure: NonNullable<WorkCard["failure"]>): 
 export const describeCardQuestion = (question: NonNullable<WorkCard["openQuestion"]>): string =>
   question.text.trim() === "" ? "Has a question" : question.text;
 
+/** The line under a card's title, and how it reads: what broke, or what a Thread asks. */
+export interface CardSecondLine {
+  readonly text: string;
+  readonly tone: "failed" | "question";
+}
+
+/**
+ * Returns the second line of `card`, or `null` when the card has none. A
+ * failure outranks a question, as it does everywhere on a card.
+ */
+export const chooseCardSecondLine = (card: WorkCard): CardSecondLine | null => {
+  if (card.failure !== undefined) {
+    return { text: describeCardFailure(card.failure), tone: "failed" };
+  }
+  if (card.openQuestion !== undefined) {
+    return { text: describeCardQuestion(card.openQuestion), tone: "question" };
+  }
+  return null;
+};
+
 /**
  * Returns the name a screen reader reads for a card, in this order: the
  * title, what broke, what it asks, the stage, the age. What broke comes
@@ -60,7 +66,7 @@ export const describeCardQuestion = (question: NonNullable<WorkCard["openQuestio
  * `now` is a parameter so a test can fix it.
  */
 export const describeCardForReader = (card: WorkCard, now: Date): string => {
-  const failure = card.failure === undefined ? [] : [describeCardFailure(card.failure).text];
+  const failure = card.failure === undefined ? [] : [describeCardFailure(card.failure)];
   const question = card.openQuestion === undefined ? [] : [describeCardQuestion(card.openQuestion)];
   return [
     card.title,

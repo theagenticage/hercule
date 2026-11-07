@@ -29,13 +29,18 @@ export interface AsyncQuestionItem {
  * Returns the async questions a notification carries, or `undefined` when it
  * is not an `item/completed` for an `agentMessage` that asks some. Throws when
  * an `item/completed` frame has no readable params.
+ *
+ * A question with an empty title is dropped, as for a blocking question: the
+ * protocol refuses a question with no text, and there is nothing to show for
+ * it. When none is left, the item asks nothing and the result is `undefined`.
  */
 export const readAsyncQuestionItem = (frame: NotificationFrame): AsyncQuestionItem | undefined => {
   if (frame.method !== "item/completed") return undefined;
   const { item } = frame.params as ItemCompletedNotification;
   if (item.type !== "agentMessage" || item.delivery !== "async") return undefined;
-  if (item.questions == null || item.questions.length === 0) return undefined;
-  return { id: item.id, questions: item.questions };
+  const questions = (item.questions ?? []).filter((native) => native.title !== "");
+  if (questions.length === 0) return undefined;
+  return { id: item.id, questions };
 };
 
 /**

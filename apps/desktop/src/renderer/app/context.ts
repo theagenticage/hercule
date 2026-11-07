@@ -21,6 +21,7 @@ import { createPendingSubmissions, type PendingSubmissions } from "./pending-sub
 import { createQueryClient } from "./query-client";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
 import { createDesktopTokenStore } from "./token-store";
+import type { CardMover } from "./card-mover";
 import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
@@ -66,7 +67,7 @@ export interface SavedController {
    * and the router clears this one when the user signs out (see
    * `createAppRouter`). Nothing is saved.
    */
-  readonly undoStack: UndoStack;
+  readonly undoStack: UndoStack<CardMover>;
 }
 
 export interface RouterContext {

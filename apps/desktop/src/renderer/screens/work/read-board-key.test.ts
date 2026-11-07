@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseTargetStage, readBoardKey, type BoardKeyPress } from "./read-board-key";
+import { readBoardKey, type BoardKeyPress } from "./read-board-key";
 
 const NO_MODIFIERS = { shiftKey: false, altKey: false, metaKey: false, ctrlKey: false };
 
@@ -81,19 +81,5 @@ describe("readBoardKey", () => {
     expect(readBoardKey(press("z", { ctrlKey: true }), true, "linux")).toEqual({ kind: "undo" });
     // Shift with Z is redo, which the board does not have.
     expect(readBoardKey(press("Z", { metaKey: true, shiftKey: true }), true, "mac")).toBeNull();
-  });
-});
-
-describe("chooseTargetStage", () => {
-  it.each([
-    ["exploring", { kind: "shift-stage", direction: 1 }, "planned"],
-    ["building", { kind: "shift-stage", direction: -1 }, "planned"],
-    ["exploring", { kind: "shift-stage", direction: -1 }, undefined],
-    ["landed", { kind: "shift-stage", direction: 1 }, undefined],
-    ["building", { kind: "pick-stage", stage: "landed" }, "landed"],
-    ["building", { kind: "pick-stage", stage: "building" }, undefined],
-    ["building", { kind: "add" }, undefined],
-  ] as const)("moves a card at %s on %j to %s", (stage, command, expected) => {
-    expect(chooseTargetStage({ stage }, command)).toBe(expected);
   });
 });

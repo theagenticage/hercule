@@ -67,6 +67,7 @@ import {
 import { currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
   announce,
+  announceTaskCardChange,
   nowIso,
   buildPageInputFields,
   refuseCursor,
@@ -423,8 +424,8 @@ const make = Effect.gen(function* () {
    * When no rank fits between the neighbours, because ranks have grown to the
    * length limit or the neighbours share a rank, the ranks of the cell are
    * spread again and the rank is chosen once more. A respread is rank
-   * maintenance: it keeps the order of the cards and writes only their rank
-   * column, so it is not a placement event. Only the moved Task gets a
+   * maintenance: it keeps the order of the cards and writes only their rank,
+   * so it is not a placement event. Only the moved Task gets a
    * `task.updated`, and the other cards stay where they are.
    */
   const chooseRankAfter = (
@@ -493,7 +494,11 @@ const make = Effect.gen(function* () {
         if (afterTaskId === id) {
           return yield* Effect.fail(
             createValidationError([
-              { path: ["afterTaskId"], message: "a Task cannot be placed after itself" },
+              {
+                path: ["afterTaskId"],
+                message:
+                  "a task cannot be placed after itself; name another card, or leave afterTaskId out to put it last",
+              },
             ]),
           );
         }
@@ -507,8 +512,8 @@ const make = Effect.gen(function* () {
               {
                 path: ["stage"],
                 message:
-                  `the task is at the stage ${stage}, which is not a column of the board; ` +
-                  "name the stage to move it to",
+                  `the task is at the stage ${stage}, which the board does not show; ` +
+                  "name one of exploring, planned, building, in-review or landed to move it to",
               },
             ]),
           );
@@ -824,7 +829,7 @@ const make = Effect.gen(function* () {
      * - It fails with `NotFound` for a Task, a project or an `afterTaskId` that
      *   does not exist, and with `Validation` when `afterTaskId` is the Task
      *   itself or is not a card of the cell the Task goes to. A move to
-     *   `done` or `dropped` fails to decode: the board has no such column.
+     *   `done` or `dropped` fails to decode: the board has no such stage.
      * - A Task whose project was deleted is in the "No project" cell, as every
      *   client shows it.
      * - A move that changes nothing writes nothing, like `update`.
@@ -832,7 +837,7 @@ const make = Effect.gen(function* () {
      * One transaction reads the neighbours, chooses the rank and writes it. It
      * writes one `task.updated`, which lists `boardRank` beside whatever else
      * changed. Filters on `changes.stage` or `changes.status` do not see a
-     * move inside a column.
+     * move inside a cell.
      */
     move: (
       input: MoveInput,
@@ -966,14 +971,8 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const clearedFailure = yield* tasks.recordRunStart(input.taskId, input.runId);
-          if (clearedFailure === true) {
-            yield* announce({
-              _tag: "record",
-              topic: "task",
-              id: input.taskId,
-              kind: "updated",
-              derived: true,
-            });
+          if (clearedFailure) {
+            yield* announceTaskCardChange(input.taskId);
           }
         }),
       ),
@@ -998,13 +997,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           if (yield* tasks.setFailedRun(input.taskId, input.runId)) {
-            yield* announce({
-              _tag: "record",
-              topic: "task",
-              id: input.taskId,
-              kind: "updated",
-              derived: true,
-            });
+            yield* announceTaskCardChange(input.taskId);
           }
         }),
       ),
@@ -1029,13 +1022,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const taskId = yield* tasks.restoreFailure(input.runId, yield* nowIso);
           if (Option.isSome(taskId)) {
-            yield* announce({
-              _tag: "record",
-              topic: "task",
-              id: taskId.value,
-              kind: "updated",
-              derived: true,
-            });
+            yield* announceTaskCardChange(taskId.value);
             return { restored: true, taskId: taskId.value } as const;
           }
           const recovery = yield* tasks.readFailureRecovery(input.runId);

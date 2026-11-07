@@ -975,6 +975,35 @@ describe("listing the sessions active since an instant", () => {
   });
 });
 
+describe("the query plan of the board's session totals", () => {
+  it("reads the thread count and the last turn end of each Task from sessions_task_turn_ended alone", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* sessions.listBoardFacts(["0190c000-0000-7000-8000-0000000000b1"]).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) => {
+            statements.push(statement.compile());
+            return Effect.succeed(statement);
+          }),
+        );
+        const [text, params] = statements.find(([text]) => text.includes("thread_count"))!;
+        const steps = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return steps.map((step) => step.detail);
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(plan.some((step) => step.includes("COVERING INDEX sessions_task_turn_ended"))).toBe(
+      true,
+    );
+    expect(plan.some((step) => step.startsWith("SCAN sessions"))).toBe(false);
+  });
+});
+
 describe("ending a queued session", () => {
   it("ends a session that is still queued", async () => {
     const { ended, status } = await run(

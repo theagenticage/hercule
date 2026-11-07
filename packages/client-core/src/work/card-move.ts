@@ -1,7 +1,8 @@
 /**
  * Moving a card on the board, as the client sees it before the controller
- * answers: the projection of a move over the board, and the two questions a
- * drop asks (which card to follow, and where a card stood before).
+ * answers: the projection of a move over the board, the two questions a
+ * drop asks (which card to follow, and where a card stood before), and which
+ * stage a key moves a card to.
  *
  * Order. The cards of `WorkBoard.cards` are in stored order: for one cell
  * (a Project and a stage), the order of their `boardRank`. The client does not
@@ -12,7 +13,13 @@
  * is the order. A fresh read from the controller replaces the whole list, with
  * the real ranks, in the same order convention.
  */
-import type { BoardStage, TaskMoveInput, WorkBoard, WorkCard } from "@hercule/contract";
+import {
+  BOARD_STAGES,
+  type BoardStage,
+  type TaskMoveInput,
+  type WorkBoard,
+  type WorkCard,
+} from "@hercule/contract";
 
 /** One move of one card, as `task.move` takes it. */
 export type CardMove = TaskMoveInput & { readonly taskId: string };
@@ -204,4 +211,28 @@ export const chooseAfterTaskId = (target: DropTarget): string | null => {
   }
   const predecessor = nextIndex < 0 ? storedCell.at(-1) : storedCell[nextIndex - 1];
   return predecessor?.id ?? null;
+};
+
+/**
+ * A key that moves the card to another stage: one step to the stage before
+ * (`-1`) or after (`1`), or straight to a given stage.
+ */
+export type StageChange =
+  | { readonly kind: "shift-stage"; readonly direction: -1 | 1 }
+  | { readonly kind: "pick-stage"; readonly stage: BoardStage };
+
+/**
+ * Returns the stage that `change` moves `card` to, or `undefined` when it
+ * moves nowhere: the card already stands there, or it is at the first or last
+ * stage and the change goes past it.
+ */
+export const chooseTargetStage = (
+  card: Pick<WorkCard, "stage">,
+  change: StageChange,
+): BoardStage | undefined => {
+  const target =
+    change.kind === "pick-stage"
+      ? change.stage
+      : BOARD_STAGES[BOARD_STAGES.indexOf(card.stage) + change.direction];
+  return target === card.stage ? undefined : target;
 };

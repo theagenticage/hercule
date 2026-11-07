@@ -208,6 +208,16 @@ describe("the Work screen", () => {
     });
   });
 
+  it("says a Task has no Thread yet, and goes nowhere, when a card with no Thread is pressed", async () => {
+    const user = userEvent.setup();
+    const { router } = await openWork();
+
+    await user.click(await screen.findByRole("button", { name: /^Tidy the depot labels/ }));
+
+    expect(await screen.findByText("This Task has no Thread yet.")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/work");
+  });
+
   it("narrows the board to the failed cards with the Failed filter, and shows its chip", async () => {
     const user = userEvent.setup();
     await openWork();
@@ -315,7 +325,28 @@ describe("the Work screen", () => {
     cleanup();
     await openWork({ board: () => buildBoard(), hasAnyTask: false });
     expect(await screen.findByText("Nothing here yet.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Start a thread" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Start a thread/ })).toBeTruthy();
+  });
+
+  it("shows the failure, with a way to try again, when it cannot tell whether any Task exists", async () => {
+    let answers = 0;
+    await openWork({
+      board: () => buildBoard(),
+      retryFailedReads: false,
+      handlers: {
+        "GET /api/v1/tasks": () => {
+          answers += 1;
+          if (answers === 1) throw new Error("connection refused");
+          return { body: { items: [buildCreatedTask("Any", undefined)] } };
+        },
+      },
+    });
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("All clear.")).toBeTruthy();
   });
 
   it("says when the board shows only some of the Tasks", async () => {
@@ -591,5 +622,70 @@ describe("the Work screen's keys", () => {
     // "c" keeps the cancelled items among its matches, but the choice was made for "ca".
     await user.keyboard("{Backspace}");
     expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(1)}`);
+  });
+});
+
+describe("the Work screen's board changes by themselves", () => {
+  it("draws a run that failed, and says so on the toolbar's line", async () => {
+    let hasFailed = false;
+    const { live } = await openWork({
+      board: () =>
+        buildBoard(
+          ...CARDS.map((card) =>
+            card.id === idOf(3) && hasFailed
+              ? {
+                  ...card,
+                  failure: { runId: idOf(910), workflowName: "Deploy", cause: "the build broke" },
+                }
+              : card,
+          ),
+        ),
+    });
+    await screen.findByRole("button", { name: /^Order history hides cancelled items/ });
+    await live.waitForFirstPushes();
+
+    hasFailed = true;
+    live.pushInvalidation("task", [idOf(3)]);
+
+    expect(await screen.findByText("Deploy failed")).toBeTruthy();
+    expect(getCard("Order history hides cancelled items").textContent).toContain(
+      "Deploy failed: the build broke.",
+    );
+  });
+
+  it("draws a Task that arrives in its cell, and says so on the toolbar's line", async () => {
+    let hasArrived = false;
+    const arrival = buildCard(idOf(60), { title: "Count the pallets", projectId: OPS.id });
+    const { live } = await openWork({
+      board: () => buildBoard(...CARDS, ...(hasArrived ? [arrival] : [])),
+    });
+    await screen.findByRole("button", { name: /^Tidy the depot labels/ });
+    await live.waitForFirstPushes();
+
+    hasArrived = true;
+    live.pushInvalidation("task", [idOf(60)]);
+
+    expect(await screen.findByText("New: Count the pallets")).toBeTruthy();
+    expect(getCard("Count the pallets")).toBeTruthy();
+  });
+
+  it("moves nothing for a Task that arrives past the rows its cell shows, and says it arrived", async () => {
+    const crowded = Array.from({ length: 8 }, (_, index) =>
+      buildCard(idOf(100 + index), { title: `Crowded card ${String(index)}`, projectId: OPS.id }),
+    );
+    let hasArrived = false;
+    const arrival = buildCard(idOf(110), { title: "Crowded card late", projectId: OPS.id });
+    const { live } = await openWork({
+      board: () => buildBoard(...crowded, ...(hasArrived ? [arrival] : [])),
+    });
+    await screen.findByRole("button", { name: "4 more" });
+    await live.waitForFirstPushes();
+
+    hasArrived = true;
+    live.pushInvalidation("task", [idOf(110)]);
+
+    expect(await screen.findByText("New: Crowded card late")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "5 more" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Crowded card late/ })).toBeNull();
   });
 });

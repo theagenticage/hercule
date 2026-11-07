@@ -7,30 +7,34 @@ import {
   buildLanes,
   buildWorkFacets,
   chooseLaneId,
+  countCardsByStage,
   findCardsByTitle,
   listShownCardIds,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
   STAGE_NAMES,
 } from "@hercule/client-core/work";
-import { BOARD_STAGES, MAX_BOARD_CARDS, type BoardStage, type WorkCard } from "@hercule/contract";
+import { BOARD_STAGES, MAX_BOARD_CARDS, type WorkCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
 import { projectsQuery, userQuery } from "../../../app/queries";
+import { describeUndoKey } from "../../../app/primary-modifier";
+import { useOfflineSince } from "../../../app/use-offline-since";
 import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { arrangeLanes, listShownCards } from "../../../screens/work/arrange-lanes";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
-import { DeskClear, FirstRun, NoMatch } from "../../../screens/work/board-empty";
+import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
-import { useBoardMotion } from "../../../screens/work/use-board-motion";
-import { useOfflineSince } from "../../../screens/work/use-offline-since";
+import { useBoardReads } from "../../../screens/work/use-board-reads";
+import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
+import { useViewMotion } from "../../../screens/work/use-view-motion";
 import { useWorkView } from "../../../screens/work/use-work-view";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
@@ -48,31 +52,21 @@ const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
 
-/** Returns how many of `cards` stand at each stage. */
-const countByStage = (cards: readonly WorkCard[]): Readonly<Record<BoardStage, number>> => {
-  const counts = Object.fromEntries(BOARD_STAGES.map((stage) => [stage, 0])) as Record<
-    BoardStage,
-    number
-  >;
-  for (const card of cards) counts[card.stage] += 1;
-  return counts;
-};
-
 /** Returns the line that says since when the controller cannot be reached. */
 const describeOffline = (since: Date): string =>
   `Offline since ${since.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 
 /**
- * The Work screen: the board of cards by stage and lane, with the toolbar
- * over it. It reads the board, holds what the user does with it (the filter,
- * Find, folds, the Display choices, the current card), moves cards, and owns
- * Add to Work. What it draws is in `screens/work/`.
+ * Renders the Work screen: the board of cards by stage and lane, with the
+ * toolbar over it. It reads the board, holds what the user does with it (the
+ * filter, Find, folds, the Display choices, the current card), moves cards,
+ * and owns Add to Work. What it draws is in `screens/work/`.
  *
  * - The board is read while the window is visible, and read again on every
  *   `task` push. A move shows at once and is sent in order (`useCardMoves`).
  * - Filtering and Find run over the board already read, in the client.
- * - A card opens its newest Thread. A Task with no Thread opens nothing: the
- *   details pane that would show it comes in a later slice.
+ * - A card opens its newest Thread. A Task with no Thread opens nothing yet,
+ *   and the undo line says so, because there is no details pane to show it in.
  */
 export function WorkScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
   const { client, url, live, undoStack } = controller;
@@ -87,16 +81,23 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const offlineSince = useOfflineSince(live);
   const findRef = useRef<HTMLInputElement>(null);
 
-  // The board's motion: what the user does to the view plays as motion, and a
-  // Task that arrives or a run that fails waits for a still hand.
-  const motion = useBoardMotion({
+  // Whether a card is in the hand of a drag. The drag sets it; the reads wait
+  // for it, the keys stand still for it, and the desk draws it for the stylesheet.
+  const [isCarrying, setIsCarrying] = useState(false);
+
+  // The board's motion: what the user does to the view plays as motion, a
+  // Task that arrives or a run that fails waits for a still hand, and a
+  // working colleague whose card is scrolled out of view stops tapping.
+  const reads = useBoardReads({
     board: moves.board,
     serverBoard: board.data,
-    view: savedView,
+    projects,
+    isCarrying,
     scrollRef,
   });
-  const view = motion.view;
-  const shownBoard = motion.board;
+  const view = useViewMotion(savedView, scrollRef);
+  usePausePawsOffScreen(scrollRef);
+  const shownBoard = reads.board;
   const cards = shownBoard?.cards ?? EMPTY_CARDS;
 
   // The lanes of the whole board, for the Filter menu: a Project the filter
@@ -118,8 +119,12 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const found = findCardsByTitle(cards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
   const lanes = buildLanes({ cards: visibleCards }, projects);
-  const arranged = arrangeLanes(lanes, view);
-  const shownIds = listShownCardIds(listShownCards(arranged));
+  const arrangedLanes = arrangeLanes(lanes, {
+    foldedLaneIds: view.foldedLaneIds,
+    openedCellIds: view.openedCellIds,
+    isFiltering: view.isFiltering,
+  });
+  const shownIds = listShownCardIds(listShownCards(arrangedLanes));
   const firstShownId = shownIds[0] ?? null;
   const tabStopCardId =
     view.currentCardId !== null && shownIds.includes(view.currentCardId)
@@ -127,7 +132,8 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       : firstShownId;
 
   const isBoardEmpty = shownBoard !== undefined && cards.length === 0;
-  const { data: hasAnyTask } = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
+  const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
+  const hasAnyTask = hasAnyTaskRead.data;
 
   // The first board fades its words in from the top left, once.
   const [startedLoading] = useState(board.data === undefined);
@@ -144,7 +150,10 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   }, [startedLoading, hasBoard]);
 
   const openCard = (card: WorkCard): void => {
-    if (card.openSessionId === undefined) return;
+    if (card.openSessionId === undefined) {
+      moves.sayWithoutUndo("This Task has no Thread yet.");
+      return;
+    }
     void navigate({ to: "/threads/$sessionId", params: { sessionId: card.openSessionId } });
   };
 
@@ -168,7 +177,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       ? { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null }
       : { id: lane.id, name: lane.name, projectId: lane.projectId };
   };
-  /** The lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
+  /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
   const chooseAddLane = (): AddTaskLane => {
     const projectIds = new Set(projects.map((project) => project.id));
     const current = cards.find((card) => card.id === tabStopCardId);
@@ -194,21 +203,22 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       const stage = BOARD_STAGES.find((each) => each === task.stage);
       const where = stage === undefined ? task.stage : STAGE_NAMES[stage];
       setAddResult(`Added to ${where}${lane.projectId === null ? "" : ` in ${lane.name}`}.`);
-      motion.noteAddedTask(task.id);
+      reads.noteAddedTask(task.id);
     },
     onError: (error) => {
       setAddResult(null);
-      moves.sayFailure(`Could not add the Task: ${readErrorMessage(error)}`);
+      moves.sayWithoutUndo(`Could not add the Task: ${readErrorMessage(error)}`);
     },
   });
 
   // ---------- Dragging ----------
-  const drag = useBoardDrag({
+  useBoardDrag({
     scrollRef,
     cards,
     projects,
-    arranged,
+    arrangedLanes,
     moveCard: moves.moveCard,
+    onCarryingChange: setIsCarrying,
   });
 
   // ---------- Keys ----------
@@ -216,12 +226,12 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   const keys = useBoardKeys({
     view,
     cards,
-    arranged,
+    arrangedLanes,
     findMatches: found.topMatches,
     projects,
     platform: bridge.platform,
     moves,
-    isCarrying: drag.isCarrying,
+    isCarrying,
     scrollRef,
     findRef,
     onOpenCard: openCard,
@@ -237,43 +247,46 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
   if (shownBoard === undefined) {
     state = "loading";
     body = board.isError ? (
-      <p className="board-note" role="alert">
-        The board could not be read: {readErrorMessage(board.error)}
-        <button
-          type="button"
-          onClick={() => {
-            void board.refetch();
-          }}
-        >
-          Try again
-        </button>
-      </p>
+      <ReadFailure
+        what="The board"
+        reason={readErrorMessage(board.error)}
+        onRetry={() => {
+          void board.refetch();
+        }}
+      />
     ) : (
       <BoardLoading laneNames={projects.slice(0, LOADING_LANES).map((project) => project.name)} />
     );
   } else if (isBoardEmpty) {
     state = hasAnyTask === false ? "first-run" : hasAnyTask === true ? "clear" : "board";
-    body =
-      hasAnyTask === false ? (
-        <FirstRun
-          onStartThread={() => {
-            void navigate({ to: "/", search: {} }).then(() => {
-              document.getElementById(DRAFT_MESSAGE_ID)?.focus();
-            });
-          }}
-        />
-      ) : hasAnyTask === true ? (
-        <DeskClear />
-      ) : null;
-  } else if (arranged.length === 0) {
+    body = hasAnyTaskRead.isError ? (
+      <ReadFailure
+        what="Whether you have any Task"
+        reason={readErrorMessage(hasAnyTaskRead.error)}
+        onRetry={() => {
+          void hasAnyTaskRead.refetch();
+        }}
+      />
+    ) : hasAnyTask === false ? (
+      <FirstRun
+        onStartThread={() => {
+          void navigate({ to: "/", search: {} }).then(() => {
+            document.getElementById(DRAFT_MESSAGE_ID)?.focus();
+          });
+        }}
+      />
+    ) : hasAnyTask === true ? (
+      <DeskClear />
+    ) : null;
+  } else if (arrangedLanes.length === 0) {
     body = <NoMatch />;
   } else {
     body = (
       <div className="board-lanes">
-        {arranged.map((each) => (
+        {arrangedLanes.map((each) => (
           <BoardLane
             key={each.lane.id}
-            arranged={each}
+            arrangedLane={each}
             tabStopCardId={tabStopCardId}
             isStill={view.display.isStill}
             onToggleLane={view.toggleLane}
@@ -320,7 +333,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
           onAdd={() => {
             openAddSheet(chooseAddLane());
           }}
-          line={offlineSince === null ? motion.note : describeOffline(offlineSince)}
+          line={offlineSince === null ? reads.note : describeOffline(offlineSince)}
         />
       }
       overlays={
@@ -339,13 +352,15 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
           <UndoLine
             text={moves.line.text}
             onUndo={moves.line.canUndo ? moves.undoLastMove : null}
+            undoKey={describeUndoKey(bridge.platform)}
             isShown={moves.line.isShown}
           />
         </>
       }
-      stageCounts={shownBoard === undefined ? null : countByStage(visibleCards)}
+      stageCounts={shownBoard === undefined ? null : countCardsByStage(visibleCards)}
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
+      isCarrying={isCarrying}
       hasSheet={addLane !== null}
       isArriving={startedLoading && hasBoard && !arrivalOver}
       state={state}

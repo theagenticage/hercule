@@ -157,6 +157,19 @@ export const LIVE_SESSION_STATUSES = [
   "busy",
 ] as const satisfies ReadonlyArray<SessionStatus>;
 
+/**
+ * The statuses of a session that is working: it is running a turn, or it is
+ * about to (queued for a runner, or starting). An idle session is live but not
+ * working. The Work board shows such a session as an agent at work, and an
+ * archive refuses to cut one short. Typed as a plain list of statuses, so that
+ * `includes` accepts any session's status.
+ */
+export const WORKING_SESSION_STATUSES: ReadonlyArray<SessionStatus> = [
+  "queued",
+  "starting",
+  "busy",
+];
+
 export const SessionStatus = Schema.Literals(SESSION_STATUSES);
 
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;

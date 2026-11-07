@@ -1,5 +1,6 @@
 import { useId, type JSX } from "react";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
+import { describeUndoKey } from "../../app/primary-modifier";
 import "./keys-sheet.css";
 
 /** The keys of the Work board and what each does, as the sheet lists them. */
@@ -26,7 +27,7 @@ export function KeysSheet({ platform }: { readonly platform: DesktopPlatform }):
   const titleId = useId();
   const rows: typeof KEY_ROWS = [
     ...KEY_ROWS,
-    [platform === "mac" ? "⌘Z" : "Ctrl Z", "Undo"],
+    [describeUndoKey(platform), "Undo"],
     ["Esc", "Step back"],
   ];
   return (

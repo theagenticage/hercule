@@ -1,10 +1,7 @@
-import {
-  NO_PROJECT_LANE_NAME,
-  STAGE_NAMES,
-  type CardMove,
-  type WorkProject,
-} from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
+import type { CardMove } from "./card-move";
+import { STAGE_NAMES } from "./card-words";
+import { NO_PROJECT_LANE_NAME, type WorkProject } from "./lanes";
 
 /** The most characters of a title the undo line quotes. */
 const MOST_TITLE_CHARACTERS = 32;

@@ -443,6 +443,25 @@ describe("createLive", () => {
     );
   });
 
+  it("invalidates only the Work board for a derived task push", async () => {
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("task", (keys) => invalidations.push(keys));
+    started.start();
+    await settleTimers();
+
+    const socket = readLastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [
+      { _tag: "invalidate", ids: ["task-1"], kind: "updated", derived: true },
+    ]);
+    await settleTimers();
+    assert.deepStrictEqual(invalidations[1], [queryKeys.workBoard()]);
+  });
+
   it("invalidates the current session of each conversation a session push names", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);

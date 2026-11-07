@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { NO_PROJECT_LANE_ID } from "@hercule/client-core/work";
-import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { waitForStillHand } from "../../app/motion";
-import { glideFromLayouts, measureBoardLayouts, type BoardLayouts } from "./board-layouts";
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
+import type { WorkProject } from "@hercule/client-core/work";
+import type { WorkBoard } from "@hercule/contract";
 import { fadeInCards, riseArrival } from "./board-flights";
+import { flipBoard } from "./flip-board";
 import { buildArrivalKey, holdBackBoardChanges, type HeldChange } from "./hold-back-board";
+import { useHeldChanges } from "./use-held-changes";
 import "./motion.css";
-
-/** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
-const NOTE_SHOWN_MS = 10_000;
 
 const NOTHING_RELEASED: ReadonlySet<string> = new Set();
 
@@ -26,226 +24,160 @@ export interface BoardReads {
   readonly noteAddedTask: (taskId: string) => void;
 }
 
-/** What the board has shown, the read it was made from, and the changes released when it was made. */
+/** What the board has drawn, the read it was made from, and the changes released when it was made. */
 interface Picture {
   readonly board: WorkBoard;
   readonly server: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
 }
 
-/** Returns whether a card is in the hand, from the mark the drag puts on the desk, and re-renders when it changes. */
-const useIsCarrying = (scrollRef: RefObject<HTMLElement | null>): boolean => {
-  const [isCarrying, setIsCarrying] = useState(false);
-  useEffect(() => {
-    const desk = scrollRef.current?.closest(".work-desk");
-    if (desk === null || desk === undefined) return;
-    const watcher = new MutationObserver(() => {
-      setIsCarrying(desk.hasAttribute("data-carrying"));
-    });
-    watcher.observe(desk, { attributes: true, attributeFilter: ["data-carrying"] });
-    return () => {
-      watcher.disconnect();
-    };
-  }, [scrollRef]);
-  return isCarrying;
-};
+/** What the screen gave `useBoardReads` at its last render. */
+interface Inputs {
+  readonly board: WorkBoard | undefined;
+  readonly serverBoard: WorkBoard | undefined;
+  readonly released: ReadonlySet<string>;
+  readonly picture: Picture | undefined;
+}
 
-/** Returns the element a held change would happen at: the failing card, or the cell where the new Task would land. */
-const findChangeTarget = (
-  scroller: HTMLElement | null,
-  change: HeldChange,
-  card: WorkCard | undefined,
-): Element | null => {
-  if (scroller === null) return null;
-  if (change.kind === "failure") return scroller.querySelector(`[data-card-id="${change.cardId}"]`);
-  if (card === undefined) return null;
-  const lanes = [card.projectId, NO_PROJECT_LANE_ID];
-  for (const lane of lanes) {
-    if (lane === undefined) continue;
-    const cell = scroller.querySelector(`[data-lane-id="${lane}"][data-stage="${card.stage}"]`);
-    if (cell !== null) return cell;
-  }
-  return null;
-};
-
-/** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */
-const describeChange = (change: HeldChange, card: WorkCard | undefined): string | null => {
-  if (card === undefined) return null;
-  return change.kind === "arrival"
-    ? `New: ${card.title}`
-    : `${card.failure?.workflowName ?? "A run"} failed`;
+/** Returns the picture to draw next, and the changes it holds back until the hand is still. */
+const decidePicture = (
+  picture: Picture | undefined,
+  board: WorkBoard,
+  serverBoard: WorkBoard | undefined,
+  released: ReadonlySet<string>,
+): { readonly next: Picture; readonly held: readonly HeldChange[] } => {
+  const decided =
+    picture === undefined
+      ? { board, held: [] }
+      : holdBackBoardChanges(picture.board, board, released);
+  return { next: { board: decided.board, server: serverBoard, released }, held: decided.held };
 };
 
 /**
  * Decides what the Work board draws from what it reads, and plays what a read
  * changes. `board` is the board with the user's pending moves applied and
- * `serverBoard` the board as the last read gave it; the first tells the
- * second's changes from the user's own.
+ * `serverBoard` the board as the last read gave it; a change of the second is
+ * a read, and a change of only the first is the user's own move.
  *
+ * - A user's own move is drawn at once, in the render: the code that makes it
+ *   plays it.
+ * - A read is drawn right after the render that brought it. The board is
+ *   measured then, before and after, and everything that moved glides on
+ *   `self`, because nobody here caused it (`flipBoard`).
  * - A Task that arrives, and a run that fails, wait for a still hand
- *   (`waitForStillHand`), eight seconds at most. Until then the card is not
+ *   (`useHeldChanges`), eight seconds at most. Until then the card is not
  *   drawn (an arrival) or keeps the look it had, so it does not rise to the
  *   top of its cell under the pointer (`holdBackBoardChanges`). Then the Task
  *   rises at the end of its cell on `self`, or the failing card takes the top
- *   of its cell, and the toolbar's line says so. A Task that lies past what
+ *   of its cell, and the toolbar's line shows what happened. A Task that lies past what
  *   its cell shows, or under a folded lane, moves nothing: only the counts
  *   change.
- * - Any other change a read brings glides on `self`, because nobody here
- *   caused it. A move the user makes is not a read: the code that makes it
- *   plays it.
- * - While a card is in the hand, nothing that nobody caused is drawn: not a
- *   read, new or old, and not a held change that was released. It all shows
- *   after the drop, as one change. What the user does themselves, such as the
- *   move that the drop makes, is drawn at once.
+ * - While a card is in the hand (`isCarrying`), nothing that nobody caused is
+ *   drawn. It all shows when the card is let go, in the same change as the
+ *   drop.
  * - A Task the user added (`noteAddedTask`) fades in on `travel` and waits
  *   for nothing.
+ *
+ * Nothing is measured unless a read changes what is drawn.
  */
 export const useBoardReads = ({
   board,
   serverBoard,
+  projects,
+  isCarrying,
   scrollRef,
 }: {
   readonly board: WorkBoard | undefined;
   readonly serverBoard: WorkBoard | undefined;
+  readonly projects: readonly WorkProject[];
+  readonly isCarrying: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): BoardReads => {
   const [picture, setPicture] = useState<Picture | undefined>(undefined);
   const [released, setReleased] = useState(NOTHING_RELEASED);
-  const [note, setNote] = useState<{ readonly text: string } | null>(null);
-  const isCarrying = useIsCarrying(scrollRef);
+  const [wasCarrying, setWasCarrying] = useState(false);
+  if (wasCarrying !== isCarrying) setWasCarrying(isCarrying);
 
-  // Which of the board's changes to draw now. This is derived while rendering,
-  // and the picture is kept to compare the next read with.
+  // The drawn board is derived while rendering, and the picture is kept to
+  // compare the next render with.
   let drawn = board;
   let held: readonly HeldChange[] = [];
+  let isDeferred = false;
   if (board !== undefined) {
-    const decided =
-      picture === undefined
-        ? { board, held }
-        : holdBackBoardChanges(picture.board, board, released);
+    const decided = decidePicture(picture, board, serverBoard, released);
     held = decided.held;
-    // A change nobody here caused waits for the drop: a read that landed, or
-    // a held change that was released, whichever read it belongs to.
-    const isFrozen =
-      picture !== undefined &&
-      isCarrying &&
-      (serverBoard !== picture.server || released !== picture.released);
-    drawn = isFrozen ? picture.board : decided.board;
-    if (
-      !isFrozen &&
-      (decided.board !== picture?.board ||
-        serverBoard !== picture?.server ||
-        released !== picture?.released)
-    ) {
-      setPicture({ board: decided.board, server: serverBoard, released });
+    const isRead =
+      picture !== undefined && (serverBoard !== picture.server || released !== picture.released);
+    // The render that ends a carry is the drop's own change, and it also
+    // draws the reads that waited. Any other read is drawn after this render.
+    const isShownNow = !isRead || (wasCarrying && !isCarrying);
+    isDeferred = isRead && !isCarrying && !isShownNow;
+    if (picture === undefined || isShownNow) {
+      drawn = decided.next.board;
+      if (picture === undefined || decided.next.board !== picture.board || isRead) {
+        setPicture(decided.next);
+      }
+    } else {
+      drawn = picture.board;
     }
   }
 
-  // The board as read, not as drawn: a held card is only in this one.
-  const latest = useRef({ board, held });
-  useEffect(() => {
-    latest.current = { board, held };
-  });
+  const latest = useRef<Inputs>({ board, serverBoard, released, picture });
   const ownTaskIds = useRef(new Set<string>());
-  const justReleased = useRef(new Map<string, HeldChange>());
-
-  // ---------- Waiting for a still hand ----------
-  const waits = useRef(new Map<string, AbortController>());
-  const heldKeys = held.map((change) => change.key).join("|");
-  useEffect(() => {
-    const wanted = new Map(latest.current.held.map((change) => [change.key, change]));
-    for (const [key, controller] of waits.current) {
-      if (wanted.has(key)) continue;
-      controller.abort();
-      waits.current.delete(key);
-    }
-    for (const [key, change] of wanted) {
-      if (waits.current.has(key)) continue;
-      const controller = new AbortController();
-      waits.current.set(key, controller);
-      const findCard = (): WorkCard | undefined =>
-        latest.current.board?.cards.find((each) => each.id === change.cardId);
-      void waitForStillHand({
-        target: () => findChangeTarget(scrollRef.current, change, findCard()),
-        isDragging: () =>
-          scrollRef.current?.closest(".work-desk")?.hasAttribute("data-carrying") === true,
-        signal: controller.signal,
-      }).then((isStill) => {
-        if (!isStill) return;
-        waits.current.delete(key);
-        justReleased.current.set(key, change);
-        setReleased((before) => new Set(before).add(key));
-        const text = describeChange(change, findCard());
-        if (text !== null) setNote({ text });
-      });
-    }
-  }, [heldKeys, scrollRef]);
-  useEffect(() => {
-    const running = waits.current;
-    return () => {
-      for (const controller of running.values()) controller.abort();
-      running.clear();
-    };
-  }, []);
-
-  // ---------- The toolbar's line ----------
-  useEffect(() => {
-    if (note === null) return;
-    const timer = setTimeout(() => {
-      setNote(null);
-    }, NOTE_SHOWN_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [note]);
-
-  // ---------- Playing what a read changed ----------
-  const layouts = useRef<BoardLayouts | null>(null);
-  const seen = useRef<{ drawn: WorkBoard | undefined; server: WorkBoard | undefined }>({
-    drawn: undefined,
-    server: undefined,
-  });
-  const isWaitingForDrop = useRef(false);
-  // No dependency list: the board is measured after every commit, so the next
-  // read starts from where the cards stand.
   useLayoutEffect(() => {
-    const scroller = scrollRef.current;
-    const wasRead = serverBoard !== seen.current.server;
-    const hasChanged = drawn !== seen.current.drawn;
-    const before = layouts.current;
-    const isPlayed =
-      scroller !== null &&
-      before !== null &&
-      seen.current.drawn !== undefined &&
-      hasChanged &&
-      (wasRead || justReleased.current.size > 0 || isWaitingForDrop.current);
-    if (isPlayed) {
-      const arrived = new Set(
-        [...justReleased.current.values()]
-          .filter((change) => change.kind === "arrival" && !ownTaskIds.current.has(change.cardId))
-          .map((change) => change.cardId),
+    latest.current = { board, serverBoard, released, picture };
+  });
+
+  // Draws a read: measures the board, commits the new picture, and plays what
+  // moved. `flushSync` is refused inside a React lifecycle, so this runs from a
+  // microtask, which comes before the browser paints.
+  useLayoutEffect(() => {
+    if (!isDeferred) return;
+    let isCancelled = false;
+    queueMicrotask(() => {
+      if (isCancelled) return;
+      const { board: latestBoard, serverBoard: latestServer, picture: shown } = latest.current;
+      if (latestBoard === undefined || shown === undefined) return;
+      const { next } = decidePicture(shown, latestBoard, latestServer, latest.current.released);
+      const commit = (): void => {
+        flushSync(() => {
+          setPicture(next);
+        });
+      };
+      const scroller = scrollRef.current;
+      if (scroller === null || next.board === shown.board) {
+        commit();
+        return;
+      }
+      const shownIds = new Set(shown.board.cards.map((card) => card.id));
+      const isAddedByUser = next.board.cards.some(
+        (card) => !shownIds.has(card.id) && ownTaskIds.current.has(card.id),
       );
-      // A Task the user added is something they asked for: all of it plays on `travel`.
-      const isAddedByUser = [...ownTaskIds.current].some(
-        (id) =>
-          !before.parts.has(`card:${id}`) &&
-          scroller.querySelector(`[data-card-id="${id}"]`) !== null,
-      );
-      const born = glideFromLayouts(scroller, before, isAddedByUser ? "travel" : "self");
+      const { born } = flipBoard(scroller, isAddedByUser ? "travel" : "self", commit);
       for (const card of born) {
-        const id = card.dataset["cardId"] ?? "";
-        if (arrived.has(id)) riseArrival(card);
-        else if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
+        const id = card.dataset["cardId"];
+        if (id === undefined) continue;
+        const arrivalKey = buildArrivalKey(id);
+        if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
+        else if (next.released.has(arrivalKey) && !shown.released.has(arrivalKey))
+          riseArrival(card);
         else fadeInCards([card], "self");
       }
-      isWaitingForDrop.current = false;
-    } else if ((wasRead || justReleased.current.size > 0) && isCarrying) {
-      isWaitingForDrop.current = true;
-    }
-    // A change released during a carry is played after the drop, so it is kept until then.
-    if (!isWaitingForDrop.current) justReleased.current.clear();
-    seen.current = { drawn, server: serverBoard };
-    layouts.current = scroller === null ? null : measureBoardLayouts(scroller);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [isDeferred, serverBoard, released, scrollRef]);
+
+  const note = useHeldChanges({
+    held,
+    board,
+    projects,
+    isCarrying,
+    scrollRef,
+    release: (key) => {
+      setReleased((before) => new Set(before).add(key));
+    },
   });
 
   const noteAddedTask = useCallback((taskId: string): void => {
@@ -253,5 +185,5 @@ export const useBoardReads = ({
     setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
   }, []);
 
-  return { board: drawn, note: note?.text ?? null, noteAddedTask };
+  return { board: drawn, note, noteAddedTask };
 };

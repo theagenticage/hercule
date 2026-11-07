@@ -1,31 +1,35 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { describeCardMove } from "./describe-card-move";
-import type { CardMove, WorkProject } from "@hercule/client-core/work";
-import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
 import {
-  flipByKey,
+  buildDropMove,
+  describeCardMove,
+  type CardMove,
+  type DropPlace,
+  type WorkProject,
+} from "@hercule/client-core/work";
+import type { WorkCard } from "@hercule/contract";
+import {
   ghostElement,
   isMotionReduced,
   measureLayoutRect,
   trackBody,
+  type LayoutRect,
   type MotionBody,
   type SpringName,
-  type Velocity,
 } from "../../app/motion";
 import type { ArrangedLane } from "./arrange-lanes";
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
   isSameDropPlace,
+  toBoardPoint,
   type BoardGeometry,
-  type CellBox,
-  type DropPlace,
-  type LaneBox,
-  type StageColumn,
+  type BoardView,
 } from "./board-drag-geometry";
-import { buildDropMove } from "./board-drop";
-import { buildCellId } from "./use-work-view";
+import { findCellFoot } from "./board-dom";
+import { flipBoard } from "./flip-board";
+import { landCard, readStageCounts, rollChangedCounts, type ReleasePose } from "./land-card";
+import { measureBoardGeometry } from "./measure-board-geometry";
 import "./drag.css";
 
 /** How far the pointer moves, in pixels, before a press becomes a carry. Less than this is a click. */
@@ -55,15 +59,6 @@ const FASTEST_THROW = 2500;
 /** How long, in milliseconds, a click right after a carry is swallowed. */
 const CLICK_GUARD_MS = 50;
 
-/** How long the thin ring on a card that landed in Landed stays on it, in milliseconds. A little longer than the ring's fade. */
-const LANDED_RING_MS = 600;
-
-/** How long the roll of a stage's changed count stays marked, in milliseconds. A little longer than the roll. */
-const COUNT_ROLL_MS = 260;
-
-/** What moves when the page changes around a carried card: cards, lane heads, folded rows and the "13 more" lines. */
-const FLIP_SELECTOR = "[data-card-id], [data-lane-head], [data-fold-row], [data-more-cell-id]";
-
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
   /** The element that scrolls the board. It stays mounted for the life of the screen, so it holds the pointer. */
@@ -71,31 +66,18 @@ export interface BoardDragOptions {
   /** Every card of the board in stored order, with the pending moves applied. */
   readonly cards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
-  /** What each lane shows, which says which cards a cell hides. */
-  readonly arranged: readonly ArrangedLane[];
-  /** Moves a card and says so on the undo line. A move that changes nothing does nothing. */
+  /** What each lane shows, which tells which cards a cell hides. */
+  readonly arrangedLanes: readonly ArrangedLane[];
+  /** Moves a card and shows the move on the undo line. A move that changes nothing does nothing. */
   readonly moveCard: (move: CardMove, words: string) => void;
-}
-
-/** What `useBoardDrag` returns. */
-export interface BoardDrag {
   /**
-   * Returns whether a card is in the hand right now. While one is, only Esc
-   * means anything, and the drag handles it. A function, not a value, so a
-   * key press asks at the moment it happens and the screen does not draw again
-   * when a card is lifted.
+   * Called with `true` when a card enters the hand and with `false` when it
+   * leaves it. The screen keeps the value and draws it as the desk's
+   * `data-carrying` mark. The drag commits the change at once (`flushSync`),
+   * and the one that ends a carry inside the drop's own flip, so whatever the
+   * screen was holding back for the carry shows as part of the drop.
    */
-  readonly isCarrying: () => boolean;
-}
-
-/** How the card in the hand looked at the moment it was let go, which the landing starts from. */
-interface Look {
-  readonly centerX: number;
-  readonly centerY: number;
-  readonly scale: number;
-  readonly tilt: number;
-  readonly lift: number;
-  readonly velocity: Velocity;
+  readonly onCarryingChange: (isCarrying: boolean) => void;
 }
 
 /** The pointer's last place, and how fast it moves (pixels per millisecond, smoothed). */
@@ -120,30 +102,23 @@ interface Press {
 interface Carry {
   readonly pointerId: number;
   readonly card: WorkCard;
-  /** The id of the lane the card came from. */
-  readonly originLaneId: string;
   /** The card's element in the page. It stays mounted and hidden for the whole carry. */
   readonly source: HTMLElement;
   readonly root: HTMLElement;
   readonly layer: HTMLElement;
-  /** The copy in the hand, in the carry layer. */
-  readonly ghost: HTMLElement;
   readonly body: MotionBody;
   /** The hollow that shows where the card would land. It lives in the cell, outside React's reach. */
   readonly slot: HTMLElement;
-  /** Where the layout puts the ghost, in window pixels. */
-  readonly home: {
-    readonly left: number;
-    readonly top: number;
-    readonly width: number;
-    readonly height: number;
-  };
+  /** Where the layout puts the copy in the hand, in window pixels. */
+  readonly home: LayoutRect;
   /** Where in the card the pointer took hold of it. */
   readonly grab: { readonly x: number; readonly y: number };
   readonly reduced: boolean;
   readonly watcher: MutationObserver;
   readonly hand: Hand;
   geometry: BoardGeometry;
+  /** The scroller in the window, and how far it is scrolled. */
+  view: BoardView;
   place: DropPlace | null;
   uprightTimer: number | undefined;
   scrollFrame: number;
@@ -161,10 +136,6 @@ interface DropChange {
 const limitSymmetric = (value: number, limit: number): number =>
   Math.max(-limit, Math.min(limit, value));
 
-/** Returns the stage `value` names, or `undefined` when it names none. */
-const readStage = (value: string | undefined): BoardStage | undefined =>
-  BOARD_STAGES.find((stage) => stage === value);
-
 /** Returns the element after `element` that takes room in the layout, which is the next one not hidden because it is in the hand. */
 const findNextShownSibling = (element: Element): Element | null => {
   let next = element.nextElementSibling;
@@ -180,36 +151,9 @@ const findNextShownCardId = (slot: HTMLElement): string | null => {
   return next instanceof HTMLElement ? (next.dataset["cardId"] ?? null) : null;
 };
 
-/** Returns the element under `scroller` whose data attribute `attribute` (such as `data-card-id`) holds `value`, or `null`. Compared in code, so an id needs no escaping in a selector. */
-const findByData = (scroller: HTMLElement, attribute: string, value: string): HTMLElement | null =>
-  [...scroller.querySelectorAll<HTMLElement>(`[${attribute}]`)].find(
-    (element) => element.getAttribute(attribute) === value,
-  ) ?? null;
-
-/** Returns the line under the cards of `cell` ("13 more"), or `null` when it has none. */
-const findCellFoot = (cell: HTMLElement): HTMLElement | null =>
-  [...cell.children].find(
-    (child): child is HTMLElement =>
-      child instanceof HTMLElement && child.classList.contains("board-more"),
-  ) ?? null;
-
-/**
- * Returns the key that tells a thing on the board apart across a change, or
- * `null` for the card in the hand, which is moved by its own landing.
- */
-const readFlipKey =
-  (movingCardId: string) =>
-  (element: HTMLElement): string | null => {
-    const { cardId, laneHead, foldRow, moreCellId } = element.dataset;
-    if (cardId !== undefined) return cardId === movingCardId ? null : `card:${cardId}`;
-    if (laneHead !== undefined) return `head:${laneHead}`;
-    if (foldRow !== undefined) return `fold:${foldRow}`;
-    return moreCellId === undefined ? null : `more:${moreCellId}`;
-  };
-
 /**
  * Swallows the click that follows a carry, which would otherwise open the card
- * that was dropped. `isPointerUp` says whether the button is already up. When
+ * that was dropped. `isPointerUp` is whether the button is already up. When
  * it is not (Esc was pressed with the button held), the click comes when the
  * user lets go, so the guard waits for that. A new press ends the guard, so a
  * release that never arrives cannot swallow a later click.
@@ -236,92 +180,30 @@ const swallowNextClick = (isPointerUp: boolean): void => {
   else window.addEventListener("pointerup", startTimer, { capture: true, once: true });
 };
 
-/** Returns the text of each stage's count, by stage: an empty text for a stage that shows none. */
-const readStageCounts = (scroller: HTMLElement): ReadonlyMap<BoardStage, string> =>
-  new Map(
-    BOARD_STAGES.map((stage) => [
-      stage,
-      scroller.querySelector(`.board-rule [data-stage="${stage}"] .desk-heading-count`)
-        ?.textContent ?? "",
-    ]),
-  );
-
 /**
- * The imperative half of dragging. Everything a carry touches outside React
- * (the ghost, the slot, the markers) is made, moved and removed here, so the
- * hook only has to start it on mount and stop it on unmount.
+ * Handles the pointer on `scroller` for as long as it lives. Everything a
+ * carry touches outside React (the copy in the hand, the slot, the marks) is
+ * made, moved and removed here, so the hook only has to start it on mount and
+ * stop it on unmount. Returns `destroy`, which stops listening and, if a card
+ * is in the hand, puts the page back as it was.
  *
- * `readOptions` returns the newest options each time it is called, and
- * `announceCarrying` is told when a card enters and leaves the hand.
+ * `readOptions` returns the newest options each time it is called.
  */
 const createBoardDrag = (
   scroller: HTMLElement,
   readOptions: () => BoardDragOptions,
-  announceCarrying: (isCarrying: boolean) => void,
 ): { readonly destroy: () => void } => {
   let press: Press | null = null;
   let carry: Carry | null = null;
 
   /**
-   * Measures the board once. The rows are where the layout puts them, with the
-   * offsets of cards that are still gliding taken away, so the answer is the
-   * same whether or not a spring is running.
+   * Measures the board again after the page changed. `places` are the card
+   * places a flip just measured, which spares measuring the cards twice.
    */
-  const measureBoard = (): BoardGeometry => {
-    const columns: StageColumn[] = [];
-    for (const element of scroller.querySelectorAll<HTMLElement>(".board-rule [data-stage]")) {
-      const stage = readStage(element.dataset["stage"]);
-      if (stage !== undefined) columns.push({ stage, left: element.getBoundingClientRect().left });
-    }
-    const lanes = [...scroller.querySelectorAll<HTMLElement>(".board-lane[data-lane-id]")].map(
-      (element): LaneBox => {
-        const rect = element.getBoundingClientRect();
-        const cells = new Map<BoardStage, CellBox>();
-        for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
-          const stage = readStage(cell.dataset["stage"]);
-          if (stage === undefined) continue;
-          const shownCards = [...cell.children].filter(
-            (child): child is HTMLElement =>
-              child instanceof HTMLElement && child.dataset["cardId"] !== undefined,
-          );
-          const rows = shownCards.flatMap((child) => {
-            const { cardId, dragged } = child.dataset;
-            if (cardId === undefined || dragged !== undefined) return [];
-            const place = measureLayoutRect(child);
-            return [{ id: cardId, element: child, middle: place.top + place.height / 2 }];
-          });
-          // The card in the hand still counts as shown: it leaves a place that a drop may take again.
-          const hasClosedMoreLine =
-            stage !== "landed" && findCellFoot(cell)?.getAttribute("aria-expanded") === "false";
-          cells.set(stage, {
-            element: cell,
-            rows,
-            ...(hasClosedMoreLine ? { lastIndex: shownCards.length - 1 } : {}),
-          });
-        }
-        return {
-          id: element.dataset["laneId"] ?? "",
-          element,
-          top: rect.top,
-          bottom: rect.bottom,
-          isFolded: element.querySelector(":scope > [data-fold-row]") !== null,
-          cells,
-        };
-      },
-    );
-    const view = scroller.getBoundingClientRect();
-    return { columns, lanes, viewTop: view.top, viewBottom: view.bottom };
-  };
-
-  /** Changes the page, and glides everything that moves because of it, except the card in the hand. */
-  const flipAround = (movingCardId: string, mutate: () => void, spring: SpringName): void => {
-    flipByKey({
-      root: scroller,
-      selector: FLIP_SELECTOR,
-      readKey: readFlipKey(movingCardId),
-      mutate,
-      spring,
-    });
+  const remeasure = (c: Carry, places?: ReadonlyMap<string, LayoutRect>): void => {
+    const measured = measureBoardGeometry(scroller, places);
+    c.geometry = measured.geometry;
+    c.view = measured.view;
   };
 
   /** Returns whether the slot is already in `cell`, right before `before`. */
@@ -331,33 +213,25 @@ const createBoardDrag = (
   /** Moves the slot to `cell`, before `before`, fades it in there, and lets everything below glide aside. */
   const moveSlot = (c: Carry, cell: HTMLElement, before: Element | null): void => {
     if (isSlotAt(c, cell, before)) return;
-    flipAround(
-      c.card.id,
-      () => {
-        c.slot.classList.add("is-new");
-        cell.insertBefore(c.slot, before);
-      },
-      "hand",
-    );
+    const { places } = flipBoard(scroller, "hand", () => {
+      c.slot.classList.add("is-new");
+      cell.insertBefore(c.slot, before);
+    });
     // The hidden slot is drawn once, so removing the class starts a fade from it.
     void c.slot.offsetHeight;
     c.slot.classList.remove("is-new");
     c.watcher.takeRecords();
-    c.geometry = measureBoard();
+    remeasure(c, places);
   };
 
   /** Takes the slot out of the page, for a pointer over a folded lane. */
   const removeSlot = (c: Carry): void => {
     if (c.slot.parentElement === null) return;
-    flipAround(
-      c.card.id,
-      () => {
-        c.slot.remove();
-      },
-      "hand",
-    );
+    const { places } = flipBoard(scroller, "hand", () => {
+      c.slot.remove();
+    });
     c.watcher.takeRecords();
-    c.geometry = measureBoard();
+    remeasure(c, places);
   };
 
   /** Marks the target of the carry on the page: the stage that answers, and the folded lane under the pointer. */
@@ -388,7 +262,31 @@ const createBoardDrag = (
     moveSlot(c, cell.element, cell.rows[place.index]?.element ?? findCellFoot(cell.element));
   };
 
-  /** Follows the pointer: the ghost goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
+  /** Works out which place the pointer points at, from the measurements, and shows it when it changed. */
+  const choosePlace = (c: Carry): void => {
+    const point = toBoardPoint(c.view, c.hand.x, c.hand.y);
+    const place = chooseDropPlace(c.geometry, point.x, point.y);
+    if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
+  };
+
+  /** Scrolls the board for as long as the card is held near its top or bottom edge. */
+  const scrollAtEdge = (c: Carry): void => {
+    if (c.scrollFrame !== 0) return;
+    const step = (): void => {
+      c.scrollFrame = 0;
+      if (carry !== c) return;
+      const speed = computeEdgeScrollSpeed(c.hand.y, c.view.top, c.view.bottom);
+      if (speed === 0) return;
+      const before = scroller.scrollTop;
+      scroller.scrollTop = before + speed;
+      if (scroller.scrollTop === before) return;
+      c.scrollFrame = requestAnimationFrame(step);
+    };
+    if (computeEdgeScrollSpeed(c.hand.y, c.view.top, c.view.bottom) === 0) return;
+    c.scrollFrame = requestAnimationFrame(step);
+  };
+
+  /** Follows the pointer: the copy goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
   const followHand = (c: Carry, x: number, y: number): void => {
     const now = performance.now();
     const elapsed = Math.max(SHORTEST_MOVE_MS, now - c.hand.movedAt);
@@ -412,31 +310,8 @@ const createBoardDrag = (
     scrollAtEdge(c);
   };
 
-  /** Works out which place the pointer points at, from the measurements, and shows it when it changed. */
-  const choosePlace = (c: Carry): void => {
-    const place = chooseDropPlace(c.geometry, c.hand.x, c.hand.y);
-    if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
-  };
-
-  /** Scrolls the board for as long as the card is held near its top or bottom edge. */
-  const scrollAtEdge = (c: Carry): void => {
-    if (c.scrollFrame !== 0) return;
-    const step = (): void => {
-      c.scrollFrame = 0;
-      if (carry !== c) return;
-      const speed = computeEdgeScrollSpeed(c.hand.y, c.geometry.viewTop, c.geometry.viewBottom);
-      if (speed === 0) return;
-      const before = scroller.scrollTop;
-      scroller.scrollTop = before + speed;
-      if (scroller.scrollTop === before) return;
-      c.scrollFrame = requestAnimationFrame(step);
-    };
-    if (computeEdgeScrollSpeed(c.hand.y, c.geometry.viewTop, c.geometry.viewBottom) === 0) return;
-    c.scrollFrame = requestAnimationFrame(step);
-  };
-
-  /** Reads how the ghost looks now, and how fast the hand moves, for the landing to start from. */
-  const readLook = (c: Carry): Look => {
+  /** Reads how the copy looks now, and how fast the hand moves, for the landing to start from. */
+  const readReleasePose = (c: Carry): ReleasePose => {
     const shown = c.body.values;
     const isStill = performance.now() - c.hand.movedAt > STILL_AFTER_MS;
     const toPixelsASecond = (speed: number): number =>
@@ -451,10 +326,9 @@ const createBoardDrag = (
     };
   };
 
-  /** Stops watching the pointer, the page and the keys, and lets the pointer go. The ghost and the slot are left to the caller. */
+  /** Stops watching the pointer, the page and the keys, and lets the pointer go. The copy, the slot and the carrying value are left to the caller. */
   const endCarry = (c: Carry): void => {
     carry = null;
-    announceCarrying(false);
     window.clearTimeout(c.uprightTimer);
     cancelAnimationFrame(c.scrollFrame);
     c.watcher.disconnect();
@@ -466,7 +340,6 @@ const createBoardDrag = (
 
   /** Takes the marks of a carry off the page. */
   const clearMarks = (c: Carry): void => {
-    delete c.root.dataset["carrying"];
     delete c.root.dataset["dragStage"];
     if (c.markedLane !== null) delete c.markedLane.dataset["dropTarget"];
   };
@@ -474,6 +347,7 @@ const createBoardDrag = (
   /** Ends a carry at once, with no motion, and puts the page as it was. Used when the screen goes away. */
   const abandonCarry = (c: Carry): void => {
     endCarry(c);
+    readOptions().onCarryingChange(false);
     c.slot.remove();
     delete c.source.dataset["dragged"];
     clearMarks(c);
@@ -482,135 +356,27 @@ const createBoardDrag = (
   };
 
   /**
-   * Puts the card on the page where `change` says, or back where it was when
-   * there is none, and lets it come down from where it looks now.
+   * Puts the card on the page at the place of `change`, or back where it was when
+   * there is none, and lets it come down from where it looks now. The card
+   * leaves the hand, and the move is sent, in one committed change, so the
+   * board is measured after both.
    */
   const releaseCarry = (c: Carry, spring: SpringName, change: DropChange | undefined): void => {
-    const look = readLook(c);
+    const pose = readReleasePose(c);
     const countsBefore = readStageCounts(scroller);
     endCarry(c);
-    flipAround(
-      c.card.id,
-      () => {
-        c.slot.remove();
-        delete c.source.dataset["dragged"];
-        clearMarks(c);
-        if (change !== undefined) {
-          flushSync(() => {
-            readOptions().moveCard(change.move, change.words);
-          });
-        }
-      },
-      spring,
-    );
-    landCard(c, look, spring, change);
-    rollChangedCounts(countsBefore);
-  };
-
-  /**
-   * Brings the card in the page down from the ghost's look, and removes the
-   * ghost in the same frame so nothing shows twice. The card may be a new
-   * element, because a card that changed cell is a new one to React, so it is
-   * found by its id. When it is not on the page (it went into a folded lane, or
-   * left the board) the ghost flies to where it went, or fades.
-   */
-  const landCard = (
-    c: Carry,
-    look: Look,
-    spring: SpringName,
-    change: DropChange | undefined,
-  ): void => {
-    const card = findByData(scroller, "data-card-id", c.card.id);
-    if (card === null) {
-      flyAway(c, look);
-      return;
-    }
-    const place = measureLayoutRect(card);
-    const body = trackBody(card);
-    body.set({ s: look.scale, r: look.tilt, l: look.lift });
-    body.relocate(
-      look.centerX - (place.left + place.width / 2),
-      look.centerY - (place.top + place.height / 2),
-      look.velocity,
-    );
-    card.dataset["landing"] = "";
-    body.to({ x: 0, y: 0, s: 1, r: 0, l: 0 }, spring, {
-      done: () => {
-        delete card.dataset["landing"];
-        // Gives the card back to its stylesheet: no inline style stays on it.
-        body.clear();
-      },
+    flipBoard(scroller, spring, () => {
+      c.slot.remove();
+      delete c.source.dataset["dragged"];
+      clearMarks(c);
+      flushSync(() => {
+        const options = readOptions();
+        options.onCarryingChange(false);
+        if (change !== undefined) options.moveCard(change.move, change.words);
+      });
     });
-    c.body.clear();
-    c.layer.remove();
-    // Hiding the card dropped its focus; the keyboard goes on from where the card now is.
-    if (document.activeElement === null || document.activeElement === document.body) {
-      card.focus({ preventScroll: true });
-    }
-    if (change?.move.stage === "landed" && c.card.stage !== "landed") {
-      card.dataset["justLanded"] = "";
-      window.setTimeout(() => {
-        delete card.dataset["justLanded"];
-      }, LANDED_RING_MS);
-    }
-  };
-
-  /**
-   * Sends the ghost to the line that now stands for the card, and fades it
-   * there: the count of the folded lane it was dropped on, or the "3 landed"
-   * line of a cell that hides it. A card with no such place fades where it is.
-   */
-  const flyAway = (c: Carry, look: Look): void => {
-    const target = findHidingPlace(c);
-    const remove = (): void => {
-      c.body.clear();
-      c.layer.remove();
-    };
-    if (target === null) {
-      c.body.to({ s: 0.96, o: 0 }, "travel", { done: remove });
-      return;
-    }
-    const goal = target.getBoundingClientRect();
-    c.body.to(
-      {
-        x: goal.left + goal.width / 2 - (look.centerX - c.body.values.x),
-        y: goal.top + goal.height / 2 - (look.centerY - c.body.values.y),
-        s: 0.1,
-        o: 0,
-      },
-      "travel",
-      { done: remove },
-    );
-  };
-
-  /** Returns the element that stands for a card dropped at the carry's place, now that the card itself is not drawn, or `null`. */
-  const findHidingPlace = (c: Carry): Element | null => {
-    const { place } = c;
-    if (place === null) return null;
-    if (place.kind === "cell") {
-      return findByData(scroller, "data-more-cell-id", buildCellId(place.laneId, place.stage));
-    }
-    const foldRow = findByData(scroller, "data-fold-row", place.laneId);
-    const stage = place.stage ?? c.card.stage;
-    return (
-      [...(foldRow?.children ?? [])].find(
-        (cell) => cell instanceof HTMLElement && cell.dataset["stage"] === stage,
-      ) ?? findByData(scroller, "data-lane-head", place.laneId)
-    );
-  };
-
-  /** Rolls the number of each stage whose count changed, so the new count rises into place. */
-  const rollChangedCounts = (before: ReadonlyMap<BoardStage, string>): void => {
-    for (const stage of BOARD_STAGES) {
-      const count = scroller.querySelector<HTMLElement>(
-        `.board-rule [data-stage="${stage}"] .desk-heading-count`,
-      );
-      if (count === null || count.textContent === before.get(stage)) continue;
-      count.dataset["rolling"] = "";
-      window.setTimeout(() => {
-        delete count.dataset["rolling"];
-      }, COUNT_ROLL_MS);
-    }
+    landCard(scroller, c, pose, spring, change?.move);
+    rollChangedCounts(scroller, countsBefore);
   };
 
   /** Lets go of the card where the slot is, and sends the move. */
@@ -624,7 +390,7 @@ const createBoardDrag = (
         : buildDropMove({
             cards: options.cards,
             projects: options.projects,
-            arranged: options.arranged,
+            arrangedLanes: options.arrangedLanes,
             movingCardId: c.card.id,
             place,
             nextShownCardId: place.kind === "cell" ? findNextShownCardId(c.slot) : null,
@@ -639,7 +405,7 @@ const createBoardDrag = (
 
   /**
    * Sends the card home: Esc, a cancelled pointer, a lost pointer, a hidden
-   * window, or a page change that took its place away. `isPointerUp` says
+   * window, or a page change that took its place away. `isPointerUp` is
    * whether the pointer's button is already up.
    */
   const cancelCarry = (isPointerUp: boolean): void => {
@@ -656,7 +422,7 @@ const createBoardDrag = (
     const root = scroller.closest<HTMLElement>(".work-desk");
     const source = held.element.isConnected
       ? held.element
-      : findByData(scroller, "data-card-id", held.cardId);
+      : scroller.querySelector<HTMLElement>(`[data-card-id="${held.cardId}"]`);
     const cell = source?.closest<HTMLElement>(".board-cell") ?? null;
     const options = readOptions();
     const card = options.cards.find((each) => each.id === held.cardId);
@@ -671,6 +437,9 @@ const createBoardDrag = (
       stopListening();
       return;
     }
+    flushSync(() => {
+      options.onCarryingChange(true);
+    });
 
     // The press dents the card. The copy must be the card's full size.
     source.style.setProperty("scale", "1");
@@ -694,29 +463,23 @@ const createBoardDrag = (
     slot.style.height = `${String(home.height)}px`;
     cell.insertBefore(slot, source);
     source.dataset["dragged"] = "";
-    root.dataset["carrying"] = "";
 
     const body = trackBody(ghost);
     const reduced = isMotionReduced();
     body.to({ s: CARRY_SCALE, l: 1 }, "hand", { reduced });
 
-    const projectIds = new Set(options.projects.map((project) => project.id));
     const watcher = new MutationObserver(onPageChanged);
     watcher.observe(scroller, { childList: true, subtree: true });
     scroller.addEventListener("lostpointercapture", onLostCapture);
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
+    const measured = measureBoardGeometry(scroller);
     const c: Carry = {
       pointerId: held.pointerId,
       card,
-      originLaneId:
-        card.projectId !== undefined && projectIds.has(card.projectId)
-          ? card.projectId
-          : "no-project",
       source,
       root,
       layer,
-      ghost,
       body,
       slot,
       home,
@@ -724,18 +487,18 @@ const createBoardDrag = (
       reduced,
       watcher,
       hand: { x: event.clientX, y: event.clientY, vx: 0, vy: 0, movedAt: performance.now() },
-      geometry: measureBoard(),
+      geometry: measured.geometry,
+      view: measured.view,
       place: null,
       uprightTimer: undefined,
       scrollFrame: 0,
       markedLane: null,
     };
     carry = c;
-    announceCarrying(true);
     followHand(c, event.clientX, event.clientY);
   };
 
-  // ---------- What the page and the pointer tell us ----------
+  // ---------- Handlers for the page, the pointer and the keys ----------
 
   /**
    * Runs when the page's elements changed during a carry, which is a live
@@ -750,17 +513,19 @@ const createBoardDrag = (
       cancelCarry(false);
       return;
     }
-    c.geometry = measureBoard();
+    remeasure(c);
   }
 
   /**
    * Runs when the board scrolls under a carried card, by the wheel or at an
-   * edge. The card stays in the hand, and what lies under it is read again.
+   * edge. The card stays in the hand. The measurements are in board
+   * coordinates, so only the pointer's place on the board changes, and the
+   * page is not read.
    */
   function onScroll(): void {
     const c = carry;
     if (c === null) return;
-    c.geometry = measureBoard();
+    c.view = { ...c.view, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop };
     choosePlace(c);
   }
 
@@ -803,7 +568,7 @@ const createBoardDrag = (
     }
   }
 
-  /** Only Esc means anything while a card is in the hand, and it does not reach anything else. */
+  /** Sends the card home on Esc while a card is in the hand, and keeps the key from reaching anything else. No other key is handled. */
   function onKeyDown(event: KeyboardEvent): void {
     if (carry === null || event.key !== "Escape") return;
     event.preventDefault();
@@ -811,11 +576,12 @@ const createBoardDrag = (
     cancelCarry(false);
   }
 
-  /** Sends the card home when the window is hidden or loses the focus: the pointer's release may never arrive. */
+  /** Sends the card home when the window loses the focus: the pointer's release may never arrive. */
   function onWindowAway(): void {
     if (carry !== null) cancelCarry(true);
   }
 
+  /** Sends the card home when the window is hidden. */
   function onVisibilityChange(): void {
     if (document.hidden) onWindowAway();
   }
@@ -884,30 +650,22 @@ const createBoardDrag = (
  * - A folded lane is a target as a whole, since it has no cells to put a slot
  *   in. A slot after the last card of a cell that hides some lands before the
  *   first hidden card.
- * - The page is scrolled at the top and bottom edges, and measured again when
- *   it scrolls.
+ * - The page is scrolled at the top and bottom edges. The board is measured
+ *   when a carry starts and when the page or the slot changes, never when the
+ *   pointer moves or the board scrolls.
  *
- * Returns `isCarrying`, for keys to stand still while a card is in the hand.
+ * Whether a card is in the hand is told to the screen through
+ * `onCarryingChange`, which keeps the value.
  */
-export function useBoardDrag(options: BoardDragOptions): BoardDrag {
+export function useBoardDrag(options: BoardDragOptions): void {
   const latest = useRef(options);
   useEffect(() => {
     latest.current = options;
   });
-  const carrying = useRef(false);
   const { scrollRef } = options;
   useEffect(() => {
     const scroller = scrollRef.current;
     if (scroller === null) return;
-    const drag = createBoardDrag(
-      scroller,
-      () => latest.current,
-      (isCarrying) => {
-        carrying.current = isCarrying;
-      },
-    );
-    return drag.destroy;
+    return createBoardDrag(scroller, () => latest.current).destroy;
   }, [scrollRef]);
-  const isCarrying = useCallback(() => carrying.current, []);
-  return { isCarrying };
 }

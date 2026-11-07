@@ -1,8 +1,8 @@
 /**
  * The facets of the Work board's Filter menu, built on the shared filter of
  * `@hercule/client-core/desk`: State (Has a question, Failed, With an agent)
- * and Project. Later slices add rows to `STATE_ROWS` or push facets of their
- * own onto the list.
+ * and Project. Another state is one more row of `STATE_ROWS`; another facet is
+ * one more entry of the list `buildWorkFacets` returns.
  */
 import type { WorkCard } from "@hercule/contract";
 import type { FilterFacet, FilterValue } from "../desk/filter";

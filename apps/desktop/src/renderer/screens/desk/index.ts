@@ -10,6 +10,10 @@
  * - `Toolbar`, `ToolButton`, `IconPill`, `FilterChip`, `ClearChipsButton`,
  *   `FindBox`, `ToolMenu` and the menu rows: the toolbar's row, its controls
  *   and its menus.
+ * - `FilterControl`, `FilterChips`: the Filter button with its menu, and the
+ *   chips of what is chosen, for any list of items.
+ * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
+ *   It is the one part here that reads something (the clock).
  * - `ViewPill`: the pill that names a place and switches between its views.
  * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
  *   headings.
@@ -18,6 +22,7 @@
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
+export { FilterChips, FilterControl } from "./filter-control";
 export { SectionHeading } from "./section-heading";
 export { SideSheet } from "./side-sheet";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
@@ -44,4 +49,5 @@ export {
   type MenuPickKind,
 } from "./tool-menu";
 export { UndoLine } from "./undo-line";
+export { useDeskAgeLabel } from "./use-desk-age-label";
 export { ViewPill } from "./view-pill";

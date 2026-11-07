@@ -42,6 +42,7 @@ import {
   type SessionStatus,
   type SortDirection,
   type ThreadDone,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import {
   announceTaskCardChange,
@@ -1552,7 +1553,12 @@ const make = Effect.gen(function* () {
      *   kind. Other sessions, such as a long history of finished Threads, are
      *   not returned.
      *
-     * It reads the Tasks' sessions on `sessions_task_id`, and no transcript.
+     * `totals` is answered from `sessions_task_turn_ended` alone. It counts
+     * Threads as the sessions with no agent, which is how `kind` is defined,
+     * because an index cannot cover the generated column `kind`. `notable`
+     * reads the Tasks' sessions on `sessions_task_id`. Neither reads a
+     * transcript.
+     *
      * The ids reach SQLite as one JSON text, so the statements do not grow
      * with the number of Tasks.
      */
@@ -1572,7 +1578,7 @@ const make = Effect.gen(function* () {
           readonly thread_count: number;
           readonly last_turn_ended_at: string | null;
         }>`
-          SELECT task_id, SUM(kind = 'thread') AS thread_count,
+          SELECT task_id, SUM(agent_id IS NULL) AS thread_count,
                  MAX(last_turn_ended_at) AS last_turn_ended_at
           FROM sessions
           WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
@@ -1595,7 +1601,7 @@ const make = Effect.gen(function* () {
             WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds})))
           WHERE recency = 1
              OR (kind = 'thread' AND recency_of_kind = 1)
-             OR status IN ('queued', 'starting', 'busy')
+             OR status IN ${sql.in(WORKING_SESSION_STATUSES)}
              OR open_requests <> '[]'
           ORDER BY task_id, created_at, id`;
         return {

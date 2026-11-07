@@ -1,46 +1,27 @@
-import type { JSX } from "react";
+import { memo, type JSX } from "react";
 import {
-  describeCardFailure,
+  chooseCardColleaguePose,
+  chooseCardSecondLine,
   describeCardForReader,
-  describeCardQuestion,
   isLoudCard,
 } from "@hercule/client-core/work";
 import { findNextDeskAgeChange } from "@hercule/client-core/desk";
 import type { WorkCard } from "@hercule/contract";
-import { useClockValue, useDeskAgeLabel } from "../../app/age-clock";
+import { useClockValue } from "../../app/age-clock";
 import { buildLook } from "../../faces";
-import { Card, type CardColleague, type CardNowTone } from "../desk";
+import { Card, useDeskAgeLabel, type CardColleague } from "../desk";
 
-/**
- * Returns the colleague standing behind the top edge of `card`, or `null` when
- * nobody does. The three facts of a card are independent, and the pose follows
- * the one that matters most: a failure (a plaster, no paws), then a question
- * (a raised palm), then a live session (typing). The face is the session's:
- * the one the pose belongs to, else the card's newest.
- */
-const chooseColleague = (card: WorkCard, isStill: boolean): CardColleague | null => {
-  const [pose, sessionId] =
-    card.failure !== undefined
-      ? ([
-          "failed",
-          card.workingSessionId ?? card.openQuestion?.sessionId ?? card.openSessionId,
-        ] as const)
-      : card.openQuestion !== undefined
-        ? (["waiting", card.openQuestion.sessionId] as const)
-        : (["working", card.workingSessionId] as const);
-  if (sessionId === undefined) return null;
-  return { look: buildLook(sessionId), pose, seed: sessionId, still: isStill };
-};
-
-/** Returns the second line of `card` and how it reads, or nothing when the card has none. */
-const chooseSecondLine = (
-  card: WorkCard,
-): { readonly now: string; readonly tone: CardNowTone } | null => {
-  if (card.failure !== undefined)
-    return { now: describeCardFailure(card.failure).text, tone: "failed" };
-  if (card.openQuestion !== undefined)
-    return { now: describeCardQuestion(card.openQuestion), tone: "question" };
-  return null;
+/** Returns the colleague standing behind the top edge of `card`, or `null` when nobody does. */
+const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null => {
+  const colleague = chooseCardColleaguePose(card);
+  return colleague === null
+    ? null
+    : {
+        look: buildLook(colleague.sessionId),
+        pose: colleague.pose,
+        seed: colleague.sessionId,
+        still: isStill,
+      };
 };
 
 /**
@@ -59,8 +40,12 @@ const chooseSecondLine = (
  *
  * The element carries `data-card-id` and `data-stage`, which drag and keyboard
  * code find it by.
+ *
+ * The card is memoized, so a read that changes other cards, or a move of the
+ * focus, draws only the cards whose own values changed. That holds only while
+ * `onOpen` and `onFocus` keep their identity between renders.
  */
-export function WorkCardView({
+export const WorkCardView = memo(function WorkCardView({
   card,
   isTabStop,
   isStill,
@@ -77,7 +62,7 @@ export function WorkCardView({
   const reading = useClockValue(card.lastActivityAt, true, findNextDeskAgeChange, (now) =>
     describeCardForReader(card, now),
   );
-  const secondLine = chooseSecondLine(card);
+  const secondLine = chooseCardSecondLine(card);
   return (
     <Card
       role="button"
@@ -86,9 +71,9 @@ export function WorkCardView({
       data-card-id={card.id}
       data-stage={card.stage}
       title={card.title}
-      now={secondLine?.now}
+      now={secondLine?.text}
       nowTone={secondLine?.tone ?? "plain"}
-      colleague={chooseColleague(card, isStill)}
+      colleague={buildColleague(card, isStill)}
       landed={card.stage === "landed" && !isLoudCard(card)}
       meta={<time dateTime={card.lastActivityAt}>{age}</time>}
       onClick={() => {
@@ -99,4 +84,4 @@ export function WorkCardView({
       }}
     />
   );
-}
+});

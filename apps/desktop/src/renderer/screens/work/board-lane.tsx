@@ -42,7 +42,7 @@ const describeFoldedCounts = (cells: readonly ArrangedLaneCell[]): string => {
  * of counts `data-fold-row`, which motion and keyboard code find them by.
  */
 export function BoardLane({
-  arranged,
+  arrangedLane,
   tabStopCardId,
   isStill,
   onToggleLane,
@@ -51,7 +51,7 @@ export function BoardLane({
   onOpenCard,
   onFocusCard,
 }: {
-  readonly arranged: ArrangedLane;
+  readonly arrangedLane: ArrangedLane;
   readonly tabStopCardId: string | null;
   readonly isStill: boolean;
   readonly onToggleLane: (laneId: string) => void;
@@ -60,7 +60,7 @@ export function BoardLane({
   readonly onOpenCard: (card: WorkCard) => void;
   readonly onFocusCard: (cardId: string) => void;
 }): JSX.Element {
-  const { lane, isFolded, summary, cells } = arranged;
+  const { lane, isFolded, summary, cells } = arrangedLane;
   const total = cells.reduce((sum, cell) => sum + cell.cardCount, 0);
   return (
     <section className={isFolded ? "board-lane is-folded" : "board-lane"} data-lane-id={lane.id}>

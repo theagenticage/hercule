@@ -48,7 +48,7 @@ export type Filter = Readonly<Record<string, readonly string[]>>;
 export const EMPTY_FILTER: Filter = {};
 
 /** What a chip shows, and which value clicking it removes. */
-export interface FilterChip {
+export interface FilterChipWords {
   readonly facetId: string;
   readonly valueId: string;
   /** The facet's `caption`: empty or the word before the value. */
@@ -81,7 +81,7 @@ export const toggleFilterValue = (filter: Filter, facetId: string, valueId: stri
 export const buildFilterChips = <Item>(
   filter: Filter,
   facets: readonly FilterFacet<Item>[],
-): readonly FilterChip[] =>
+): readonly FilterChipWords[] =>
   facets.flatMap((facet) =>
     (filter[facet.id] ?? []).map((valueId) => ({
       facetId: facet.id,

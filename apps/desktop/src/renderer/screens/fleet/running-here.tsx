@@ -10,7 +10,7 @@ import { useAgeLabel } from "../../app/age-clock";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { WorkflowsIcon } from "../../icons/workflows";
 import { VirtualList } from "../virtual-list";
-import { ViewSwitch } from "../workflows/view-switch";
+import { ViewSwitch } from "../view-switch";
 import { MachinePageSection } from "./machine-page-section";
 import { MachineFacesStack, MachineWorkFace } from "./work-faces";
 import "./running-here.css";

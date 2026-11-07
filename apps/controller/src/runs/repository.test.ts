@@ -1041,6 +1041,18 @@ describe("the runs the Tracking pane reads", () => {
   });
 });
 
+describe("the query plan of the board's last run endings", () => {
+  it("reads when each Task's runs ended from runs_task_finished alone, so no run is opened", async () => {
+    const plan = await explainStatement("MAX(finished_at)", (runs) =>
+      runs.listLastEndings(["0190c000-0000-7000-8000-0000000000b1"]),
+    );
+
+    expect(plan.some((step) => step.includes("COVERING INDEX runs_task_finished"))).toBe(true);
+    expect(plan.some((step) => step.includes("runs_task_id"))).toBe(false);
+    expect(plan.some((step) => step.startsWith("SCAN runs"))).toBe(false);
+  });
+});
+
 describe("the query plans of the Tracking pane's run reads", () => {
   const TASK = "0190c000-0000-7000-8000-0000000000b1";
   const RUN = "0190c000-0000-7000-8000-0000000000c1";

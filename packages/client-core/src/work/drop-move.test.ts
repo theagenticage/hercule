@@ -3,10 +3,11 @@
  * card the dropped card follows in stored order.
  */
 import { describe, expect, it } from "vitest";
-import { applyCardMove, buildLanes } from "@hercule/client-core/work";
-import { buildBoard, buildCard, FAILURE, listIds } from "@hercule/client-core/work/testing";
-import { arrangeLanes } from "./arrange-lanes";
-import { buildDropMove, type DropRequest } from "./board-drop";
+import { arrangeCell } from "./arrange-cell";
+import { applyCardMove } from "./card-move";
+import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
+import { buildDropMove, type DropRequest } from "./drop-move";
+import { buildLanes } from "./lanes";
 
 const PROJECTS = [
   { id: "storefront", name: "Storefront" },
@@ -31,11 +32,13 @@ const requestFor = (
 ): DropRequest => ({
   cards,
   projects: PROJECTS,
-  arranged: arrangeLanes(buildLanes({ cards }, PROJECTS), {
-    foldedLaneIds: new Set(),
-    openedCellIds: new Set(),
-    isFiltering: false,
-  }),
+  arrangedLanes: buildLanes({ cards }, PROJECTS).map((lane) => ({
+    lane,
+    cells: lane.cells.map(({ stage, cards: cellCards }) => ({
+      stage,
+      arrangement: arrangeCell(cellCards, { stage, opened: false, filtered: false }),
+    })),
+  })),
   movingCardId,
   place,
   nextShownCardId,

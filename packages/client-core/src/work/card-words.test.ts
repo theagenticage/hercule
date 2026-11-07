@@ -1,7 +1,12 @@
 /** Tests the line a failed card shows and the name a screen reader reads for a card. */
 import { describe, expect, it } from "vitest";
 import { buildCard, FAILURE, QUESTION } from "./cards.testing";
-import { describeCardForReader, describeCardFailure, describeCardQuestion } from "./card-words";
+import {
+  chooseCardSecondLine,
+  describeCardFailure,
+  describeCardForReader,
+  describeCardQuestion,
+} from "./card-words";
 
 describe("describeCardFailure", () => {
   it.each([
@@ -15,14 +20,7 @@ describe("describeCardFailure", () => {
     ],
     ["with a cause of several lines", "first\n  second", "Review PR failed: first second."],
   ])("writes the line %s", (_, cause, expected) => {
-    expect(describeCardFailure({ ...FAILURE, cause }).text).toBe(expected);
-  });
-
-  it("returns the workflow name apart, for a screen to style", () => {
-    expect(describeCardFailure(FAILURE)).toMatchObject({
-      workflowName: "Review PR",
-      outcome: " failed: the branch changed mid-run.",
-    });
+    expect(describeCardFailure({ ...FAILURE, cause })).toBe(expected);
   });
 });
 
@@ -33,6 +31,28 @@ describe("describeCardQuestion", () => {
     ["a question of only whitespace", " \n ", "Has a question"],
   ])("returns %s", (_, text, expected) => {
     expect(describeCardQuestion({ ...QUESTION, text })).toBe(expected);
+  });
+});
+
+describe("chooseCardSecondLine", () => {
+  it("is what broke for a failed card, even when it also has a question", () => {
+    expect(
+      chooseCardSecondLine(buildCard("a", { failure: FAILURE, openQuestion: QUESTION })),
+    ).toEqual({
+      text: "Review PR failed: the branch changed mid-run.",
+      tone: "failed",
+    });
+  });
+
+  it("is the question for a card that asks one", () => {
+    expect(chooseCardSecondLine(buildCard("a", { openQuestion: QUESTION }))).toEqual({
+      text: "Should refunds go back to the original card?",
+      tone: "question",
+    });
+  });
+
+  it("is nothing for a card with neither", () => {
+    expect(chooseCardSecondLine(buildCard("a"))).toBeNull();
   });
 });
 

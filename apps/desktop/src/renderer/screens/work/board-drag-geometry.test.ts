@@ -4,13 +4,14 @@
  * folded one.
  */
 import { describe, expect, it } from "vitest";
+import type { DropPlace } from "@hercule/client-core/work";
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
   isSameDropPlace,
+  toBoardPoint,
   type BoardGeometry,
   type CellBox,
-  type DropPlace,
   type LaneBox,
 } from "./board-drag-geometry";
 
@@ -58,8 +59,6 @@ const GEOMETRY: BoardGeometry = {
     { ...openLane("checkout", 400, 444, {}), isFolded: true, cells: new Map() },
     openLane("no-project", 444, 700, {}),
   ],
-  viewTop: 0,
-  viewBottom: 800,
 };
 
 describe("chooseDropPlace", () => {
@@ -169,6 +168,18 @@ describe("isSameDropPlace", () => {
     ).toBe(false);
     expect(isSameDropPlace(null, null)).toBe(true);
     expect(isSameDropPlace(place, null)).toBe(false);
+  });
+});
+
+describe("toBoardPoint", () => {
+  it("turns a window position into a place on the board, so a scroll moves the pointer over the board", () => {
+    const view = { left: 100, top: 50, bottom: 850, scrollLeft: 0, scrollTop: 0 };
+
+    expect(toBoardPoint(view, 300, 250)).toEqual({ x: 200, y: 200 });
+    expect(toBoardPoint({ ...view, scrollLeft: 30, scrollTop: 400 }, 300, 250)).toEqual({
+      x: 230,
+      y: 600,
+    });
   });
 });
 

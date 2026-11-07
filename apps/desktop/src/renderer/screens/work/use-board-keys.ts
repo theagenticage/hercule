@@ -6,9 +6,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
-import { flushSync } from "react-dom";
 import { EMPTY_FILTER, isFilterOn } from "@hercule/client-core/desk";
 import {
+  chooseTargetStage,
+  describeCardMove,
   listShownCardIds,
   walkBoard,
   type CardMove,
@@ -19,9 +20,8 @@ import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { listShownCards, type ArrangedLane } from "./arrange-lanes";
-import { describeCardMove } from "./describe-card-move";
 import { keepCardInView } from "./keep-in-view";
-import { chooseTargetStage, readBoardKey } from "./read-board-key";
+import { readBoardKey } from "./read-board-key";
 import { buildCellId, type WorkView } from "./use-work-view";
 
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
@@ -42,7 +42,7 @@ export interface BoardKeysInput {
   /** Every card of the board. */
   readonly cards: readonly WorkCard[];
   /** The lanes as the board draws them, which decide what the arrows can reach. */
-  readonly arranged: readonly ArrangedLane[];
+  readonly arrangedLanes: readonly ArrangedLane[];
   /** The cards the Find list offers, in the order it lists them. */
   readonly findMatches: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
@@ -54,11 +54,8 @@ export interface BoardKeysInput {
     /** Puts back the newest gesture of the user. */
     readonly undoLastMove: () => void;
   };
-  /**
-   * Returns whether a card is in the hand in a drag, as of the key press. The
-   * drag owns Esc then, and no other key means anything.
-   */
-  readonly isCarrying: () => boolean;
+  /** Whether a card is in the hand of a drag. The drag owns Esc then, and no other key means anything. */
+  readonly isCarrying: boolean;
   /** The element that scrolls the board. */
   readonly scrollRef: RefObject<HTMLElement | null>;
   /** The Find box's input. */
@@ -81,14 +78,14 @@ export interface BoardKeys {
   readonly handleFindKeys: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
 }
 
-/** Returns the arranged lane that holds the card `cardId`, shown or hidden, or `undefined`. */
+/** Returns the lane that holds the card `cardId`, shown or hidden, or `undefined`. */
 const findLaneOfCard = (
-  arranged: readonly ArrangedLane[],
+  arrangedLanes: readonly ArrangedLane[],
   cardId: string | null,
 ): ArrangedLane | undefined =>
-  arranged.find(({ cells }) =>
+  arrangedLanes.find(({ cells }) =>
     cells.some(
-      ({ arranged: cell }) =>
+      ({ arrangement: cell }) =>
         cell.cards.some((card) => card.id === cardId) ||
         cell.hiddenCards.some((card) => card.id === cardId),
     ),
@@ -109,7 +106,7 @@ const findLaneOfCard = (
  * - While a card is in the hand of a drag, no key does anything here.
  */
 export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
-  const { view, cards, arranged, findMatches, projects, moves, scrollRef, findRef } = input;
+  const { view, cards, arrangedLanes, findMatches, projects, moves, scrollRef, findRef } = input;
   const [isKeysSheetOpen, setKeysSheetOpen] = useState(false);
   const [chosenMatch, setChosenMatch] = useState<{ text: string; id: string } | null>(null);
   const hoveredCardId = useRef<string | null>(null);
@@ -169,7 +166,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   const changeFoldsKeepingFocus = (change: () => void, laneId: string | undefined): void => {
     const scroller = scrollRef.current;
     const hadFocusInBoard = scroller?.contains(document.activeElement) === true;
-    flushSync(change);
+    change();
     if (!hadFocusInBoard || laneId === undefined || document.activeElement !== document.body) {
       return;
     }
@@ -181,12 +178,11 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   /** Moves the card to the end of the cell of `stage` in its own lane, and keeps focus on it when it had focus. */
   const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
     const hadFocus = document.activeElement === findCardElement(card.id);
-    const laneId = findLaneOfCard(arranged, card.id)?.lane.id;
+    const laneId = findLaneOfCard(arrangedLanes, card.id)?.lane.id;
     const move: CardMove = { taskId: card.id, stage };
-    // Committed at once: the card is a new element in its new cell, and focus can only go to it once it is there.
-    flushSync(() => {
-      moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
-    });
+    // The move is committed before it returns: the card is a new element in
+    // its new cell, and focus can only go to it once it is there.
+    moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
     if (!hadFocus || focusCard(card.id) || laneId === undefined) return;
     // The cell shows only some of its cards, and the moved one is behind its
     // line ("3 landed", "13 more"). Focus goes to that line.
@@ -212,7 +208,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   };
 
   const handleKey = (event: KeyboardEvent): void => {
-    if (event.defaultPrevented || input.isCarrying() || isTextField(event.target)) return;
+    if (event.defaultPrevented || input.isCarrying || isTextField(event.target)) return;
     const command = readBoardKey(event, view.display.hasSingleKeys, input.platform);
     if (command === null || (event.repeat && command.kind !== "walk")) return;
     if (command.kind === "step-back") {
@@ -229,7 +225,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     }
     if (!isOnBoard) return;
 
-    const shown = listShownCards(arranged);
+    const shown = listShownCards(arrangedLanes);
     const shownIds = new Set(listShownCardIds(shown));
     const hoveredId = hoveredCardId.current;
     // The card under a resting pointer, else the one with focus.
@@ -280,7 +276,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       case "fold-lane": {
         const laneId =
           target?.closest<HTMLElement>("[data-lane-id]")?.dataset.laneId ??
-          findLaneOfCard(arranged, view.currentCardId)?.lane.id;
+          findLaneOfCard(arrangedLanes, view.currentCardId)?.lane.id;
         if (laneId === undefined) return;
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
@@ -291,8 +287,8 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       case "fold-all-lanes":
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
-          view.foldEverything(arranged.map((each) => each.lane.id));
-        }, findLaneOfCard(arranged, view.currentCardId)?.lane.id);
+          view.foldEverything(arrangedLanes.map((each) => each.lane.id));
+        }, findLaneOfCard(arrangedLanes, view.currentCardId)?.lane.id);
         return;
       case "find":
         event.preventDefault();

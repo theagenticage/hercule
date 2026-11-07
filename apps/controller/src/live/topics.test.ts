@@ -151,7 +151,9 @@ describe("the pace of a change to a Task's card", () => {
     // second is over.
     const sendSteps = received.flatMap((messages, step) => (messages.length > 0 ? [step] : []));
     expect(sendSteps).toEqual([18]);
-    expect(received.flat()).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+    expect(received.flat()).toEqual([
+      { _tag: "invalidate", ids: [TASK], kind: "updated", derived: true },
+    ]);
   });
 
   it("sends a person's change at once and the agent's change a second later, so one Task can get both", async () => {
@@ -171,7 +173,9 @@ describe("the pace of a change to a Task's card", () => {
     );
 
     expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
-    expect(afterLongWindow).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+    expect(afterLongWindow).toEqual([
+      { _tag: "invalidate", ids: [TASK], kind: "updated", derived: true },
+    ]);
   });
 
   it("names no ids in the first push of a new subscription, however many card changes are waiting", async () => {
@@ -188,7 +192,7 @@ describe("the pace of a change to a Task's card", () => {
 
     expect(firstAfterReconnect).toEqual([{ _tag: "invalidate", ids: [], kind: "updated" }]);
     // The change made while the client was away is still pushed, after the first push.
-    expect(later).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+    expect(later).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated", derived: true }]);
   });
 });
 

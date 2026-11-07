@@ -4,7 +4,8 @@ import "./undo-line.css";
 /**
  * Renders the undo line at the foot of the page: `text` says what just
  * happened or why a move failed, and when `onUndo` is given, an Undo button
- * puts it back, with the key that does the same beside it.
+ * puts it back, with `undoKey` beside it, the words for the key that does the
+ * same, such as "⌘Z".
  *
  * `isShown` fades the line in and out. While it is out, the line holds the
  * text it last showed, so the caller keeps passing that text until the line
@@ -14,10 +15,12 @@ import "./undo-line.css";
 export function UndoLine({
   text,
   onUndo,
+  undoKey,
   isShown,
 }: {
   readonly text: string;
   readonly onUndo: (() => void) | null;
+  readonly undoKey: string;
   readonly isShown: boolean;
 }): JSX.Element {
   return (
@@ -25,7 +28,7 @@ export function UndoLine({
       <span>{text}</span>
       {onUndo !== null && (
         <button type="button" className="undo-line-button" onClick={onUndo}>
-          Undo <kbd>⌘Z</kbd>
+          Undo <kbd>{undoKey}</kbd>
         </button>
       )}
     </div>

@@ -25,6 +25,10 @@
  *   turn. `last_activity_at` moves on every tool event, so it cannot say that.
  *   Sessions that are not live (`idle` or `exited`) take their
  *   `last_activity_at`; the others stay empty until their turn ends.
+ * - `runs_task_finished` and `sessions_task_turn_ended` hold, for each Task,
+ *   only the columns the board totals read (when a run ended, and the
+ *   `agent_id` and last turn end of a session), so the totals of a Task never
+ *   read its runs or sessions themselves.
  *
  * The backfill groups rows by the hex of `project_id` and reads `id` as it
  * comes, so it makes no assumption about the shape of an id.
@@ -124,5 +128,19 @@ export default Effect.gen(function* () {
   yield* sql`
     UPDATE sessions SET last_turn_ended_at = last_activity_at
     WHERE status IN ('idle', 'exited')
+  `;
+
+  // Serve the board's per-Task totals from the index alone. `finished_at` and
+  // `last_turn_ended_at` sit after large columns in their rows, so without
+  // these a read of up to a thousand Tasks would read every run and session
+  // of each. The session index holds `agent_id` and not `kind`: `kind` is a
+  // generated column, and SQLite never answers from an index alone for one.
+  // A session with no `agent_id` is a Thread (see `kind`, migration 0092).
+  yield* sql`
+    CREATE INDEX runs_task_finished ON runs (task_id, finished_at) WHERE task_id IS NOT NULL
+  `;
+  yield* sql`
+    CREATE INDEX sessions_task_turn_ended ON sessions (task_id, agent_id, last_turn_ended_at)
+      WHERE task_id IS NOT NULL
   `;
 });

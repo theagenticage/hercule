@@ -85,6 +85,7 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
@@ -599,9 +600,6 @@ const ONLY_A_THREAD_CAN_BE_ARCHIVED =
 
 /** The reason stored on the Queued Input an archive cancels. */
 const ARCHIVED_INPUT_REASON = "The session was archived, so it takes no more input.";
-
-/** The statuses of a session that is working, which an archive refuses to cut short. */
-const WORKING_STATUSES: ReadonlyArray<SessionStatus> = ["queued", "starting", "busy"];
 
 /**
  * Returns the end reason of a subscription whose holding session was
@@ -2126,7 +2124,7 @@ const make = Effect.gen(function* () {
             )).filter((session) => session.kind === "agent" && session.archived === null);
             const sessionsToArchive = [...moving, ...following];
             const working = sessionsToArchive.filter((session) =>
-              WORKING_STATUSES.includes(session.status),
+              WORKING_SESSION_STATUSES.includes(session.status),
             );
             if (working.length > 0) {
               return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));

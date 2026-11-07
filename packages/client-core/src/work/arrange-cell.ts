@@ -16,8 +16,8 @@
  */
 import type { BoardStage, WorkCard } from "@hercule/contract";
 
-/** The most cards a cell shows before it hides any. */
-const ROWS_BEFORE_HIDING = 4;
+/** The most cards a cell shows before it hides any (the Landed cell shows none). */
+export const ROWS_BEFORE_HIDING = 4;
 
 /** A cell with this many cards or fewer shows all of them: the fifth is shown rather than hidden. */
 const MOST_CARDS_SHOWN_WHOLE = ROWS_BEFORE_HIDING + 1;

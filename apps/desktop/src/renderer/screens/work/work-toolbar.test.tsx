@@ -1,6 +1,8 @@
 /**
- * Tests the Work toolbar as the user meets it: the numbers and rows of its
- * menus, what a choice reports to the board, and the chips of what is on.
+ * Tests the Work toolbar as the user meets it: Group by, the Filter menu with
+ * the Work board's facets, the Display menu and what a choice reports to the
+ * board, and the Find matches. The Filter menu's own rules are tested with
+ * the desk's `FilterControl`.
  * jsdom has no popover API, so a menu's rows are always in the page and the
  * tests find them with `hidden: true`.
  */
@@ -11,7 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { EMPTY_FILTER, type Filter } from "@hercule/client-core/desk";
 import { buildLanes, buildWorkFacets } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
-import { WorkToolbar, type WorkDisplay } from "./work-toolbar";
+import type { WorkDisplay } from "./use-work-view";
+import { WorkToolbar } from "./work-toolbar";
 
 /** Returns a card in the invented Northwind Market world, at Exploring, with no facts. */
 const buildCard = (id: string, title: string, overrides: Partial<WorkCard> = {}): WorkCard => ({
@@ -146,79 +149,14 @@ describe("WorkToolbar", () => {
     expect(getRow(withCount("With an agent", 1))).toBeTruthy();
   });
 
-  it("shows what is on as chips beside Filter, and counts the values of other facets within it", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-
-    await user.click(getRow(withCount("Failed", 1)));
-
-    expect(screen.getByRole("button", { name: "Remove filter Failed" })).toBeTruthy();
-    expect(getRow(withCount("Failed", 1)).getAttribute("aria-checked")).toBe("true");
-    await user.click(getRow("Project"));
-    // Only the failed card is left: it is in Storefront, so Depot ops adds nothing.
-    expect(getRow(withCount("Storefront", 1))).toBeTruthy();
-    expect(getRow(withCount("Depot ops", 0))).toBeTruthy();
-  });
-
-  it("opens the Project values in the same menu, and Back returns to the row that opened them", async () => {
+  it("filters by a Project from the Filter menu, and shows it as a chip with its caption", async () => {
     const user = userEvent.setup();
     render(<Harness />);
 
     await user.click(getRow("Project"));
     await user.click(getRow(withCount("Storefront", 3)));
 
-    // A chosen Project counts on the Project row and shows as a chip with its caption.
     expect(screen.getByRole("button", { name: "Remove filter Project Storefront" })).toBeTruthy();
-    expect(
-      screen.queryByRole("menuitemcheckbox", { name: /Has a question/, hidden: true }),
-    ).toBeNull();
-    await user.click(getRow("Project"));
-    expect(getRow(/Has a question/)).toBeTruthy();
-    expect(document.activeElement).toBe(getRow(withCount("Project", 1)));
-  });
-
-  it("puts a Find box over a facet that has more than seven values, and narrows the values by it", async () => {
-    const user = userEvent.setup();
-    const projects = Array.from({ length: 8 }, (_, index) => ({
-      id: `project-${index}`,
-      name: `Depot ${index + 1}`,
-    }));
-    const cards = projects.map((project) =>
-      buildCard(`card-${project.id}`, `Check ${project.name}`, { projectId: project.id }),
-    );
-    render(<Harness cards={cards} projects={projects} />);
-
-    await user.click(getRow("Project"));
-    await user.type(
-      screen.getByRole("textbox", { name: "Find in Project", hidden: true }),
-      "depot 3",
-    );
-
-    expect(getRow(withCount("Depot 3", 1))).toBeTruthy();
-    expect(screen.queryByRole("menuitemcheckbox", { name: /Depot 4/, hidden: true })).toBeNull();
-  });
-
-  it("has no Find box over two Projects", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-
-    await user.click(getRow("Project"));
-
-    expect(screen.queryByRole("textbox", { name: "Find in Project", hidden: true })).toBeNull();
-  });
-
-  it("offers Clear from two chips, and Clear turns every filter off", async () => {
-    const user = userEvent.setup();
-    render(<Harness initialFilter={{ state: ["failed", "question"] }} />);
-
-    expect(screen.getByRole("button", { name: "Clear" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Remove filter Failed" }));
-    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Remove filter Has a question" })).toBeTruthy();
-
-    await user.click(getRow(withCount("Failed", 1)));
-    await user.click(screen.getByRole("button", { name: "Clear" }));
-    expect(screen.queryByRole("button", { name: /Remove filter/ })).toBeNull();
   });
 
   it("reports the whole display when one choice changes", async () => {

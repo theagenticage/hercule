@@ -3,8 +3,8 @@ import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { rememberOverviewView, type OverviewView } from "../../app/overview-view";
 import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { isTextField } from "../../app/text-field";
-import { ViewPill } from "../desk";
-import type { ViewChoice } from "../workflows/view-switch";
+import { ViewPill } from "../desk/view-pill";
+import type { ViewChoice } from "../view-switch";
 
 /** The Overview's views, left to right. */
 const CHOICES: ReadonlyArray<ViewChoice<OverviewView>> = [
@@ -13,7 +13,7 @@ const CHOICES: ReadonlyArray<ViewChoice<OverviewView>> = [
 ];
 
 /** The view each number key picks, with ⌘ held: ⌘1 is the Office and ⌘2 is Work. */
-const VIEW_OF_KEY: Readonly<Record<string, OverviewView>> = { "1": "office", "2": "work" };
+const VIEW_BY_NUMBER_KEY: Readonly<Record<string, OverviewView>> = { "1": "office", "2": "work" };
 
 /**
  * The view the user last switched away from with the pill or a shortcut, until
@@ -69,7 +69,7 @@ export function OverviewPill(): JSX.Element {
   const platform = bridge.platform;
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      const next = VIEW_OF_KEY[event.key];
+      const next = VIEW_BY_NUMBER_KEY[event.key];
       if (next === undefined || event.defaultPrevented || event.shiftKey || event.altKey) return;
       if (!isPrimaryModifierHeld(event, platform) || isOtherModifierHeld(event, platform)) return;
       if (isTextField(event.target)) return;

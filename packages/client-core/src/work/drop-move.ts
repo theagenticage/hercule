@@ -1,13 +1,34 @@
-import {
-  buildLanes,
-  chooseAfterTaskId,
-  chooseLaneId,
-  type CardMove,
-  type WorkProject,
-} from "@hercule/client-core/work";
-import type { WorkCard } from "@hercule/contract";
-import type { ArrangedLane } from "./arrange-lanes";
-import type { DropPlace } from "./board-drag-geometry";
+import type { BoardStage, WorkCard } from "@hercule/contract";
+import { chooseAfterTaskId, type CardMove } from "./card-move";
+import type { ArrangedCell } from "./arrange-cell";
+import { buildLanes, chooseLaneId, type WorkProject } from "./lanes";
+
+/**
+ * Where a carried card is let go:
+ *
+ * - `cell`: in an open lane at `stage`, as the card number `index` of the
+ *   cards the cell shows (0 is the top), not counting the carried card.
+ * - `folded-lane`: on a folded lane, which has no cells to put a slot in. The
+ *   stage is the one the pointer is over, or `null` when the pointer is left
+ *   of the stages, on the lane's head, which keeps the card's stage.
+ */
+export type DropPlace =
+  | {
+      readonly kind: "cell";
+      readonly laneId: string;
+      readonly stage: BoardStage;
+      readonly index: number;
+    }
+  | { readonly kind: "folded-lane"; readonly laneId: string; readonly stage: BoardStage | null };
+
+/** The part of an arranged lane (a lane with its cells arranged) a drop reads: which cards each of its cells hides behind "13 more". */
+export interface DropLane {
+  readonly lane: { readonly id: string };
+  readonly cells: readonly {
+    readonly stage: BoardStage;
+    readonly arrangement: Pick<ArrangedCell, "hiddenCards">;
+  }[];
+}
 
 /** What a drop knows besides the place. */
 export interface DropRequest {
@@ -15,7 +36,7 @@ export interface DropRequest {
   readonly cards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
   /** What each lane shows, which says which cards wait behind "13 more". */
-  readonly arranged: readonly ArrangedLane[];
+  readonly arrangedLanes: readonly DropLane[];
   readonly movingCardId: string;
   readonly place: DropPlace;
   /**
@@ -27,12 +48,12 @@ export interface DropRequest {
 
 /** Returns the first card a cell hides behind its "13 more" line, or `null` when it hides none. */
 const findFirstHiddenCardId = (
-  arranged: readonly ArrangedLane[],
+  arrangedLanes: readonly DropLane[],
   place: Extract<DropPlace, { kind: "cell" }>,
 ): string | null =>
-  arranged
+  arrangedLanes
     .find((each) => each.lane.id === place.laneId)
-    ?.cells.find((cell) => cell.stage === place.stage)?.arranged.hiddenCards[0]?.id ?? null;
+    ?.cells.find((cell) => cell.stage === place.stage)?.arrangement.hiddenCards[0]?.id ?? null;
 
 /**
  * Returns the `task.move` that a drop asks for, or `undefined` when the card
@@ -51,7 +72,7 @@ const findFirstHiddenCardId = (
  *   card goes last in its cell.
  */
 export const buildDropMove = (request: DropRequest): CardMove | undefined => {
-  const { cards, projects, arranged, movingCardId, place, nextShownCardId } = request;
+  const { cards, projects, arrangedLanes, movingCardId, place, nextShownCardId } = request;
   const moving = cards.find((card) => card.id === movingCardId);
   const lane = buildLanes({ cards }, projects).find((each) => each.id === place.laneId);
   if (moving === undefined || lane === undefined) return undefined;
@@ -72,7 +93,7 @@ export const buildDropMove = (request: DropRequest): CardMove | undefined => {
     ...move,
     afterTaskId: chooseAfterTaskId({
       storedCell,
-      nextVisibleCardId: nextShownCardId ?? findFirstHiddenCardId(arranged, place),
+      nextVisibleCardId: nextShownCardId ?? findFirstHiddenCardId(arrangedLanes, place),
       movingCardFailed: moving.failure !== undefined,
     }),
   };

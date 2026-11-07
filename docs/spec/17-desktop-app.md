@@ -1253,7 +1253,7 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
   - Each view draws its own pill, and the new view's pill starts its puck on the tab the user left, so the puck is seen to slide from one view to the other.
 - **The Office's own pill** keeps the Rooms directory, and its camera button reads **Whole office**. The button used to read "Overview", which is now the name of the place. The Office is otherwise unchanged. The toolbar of Work is not drawn in the Office.
 - **Going to the Office unmounts everything and builds the scene again,** 191 to 309 ms ([Measured](#measured)). Nothing tries to keep it alive. The Office turns the window's glass off ([Rules](#rules), rule 5), so chrome the two views share looks different on each. Check it in all six themes.
-- **The way in.** The sidebar's Work section on the Hercule face gains an **Overview** row, first. It opens the view the user used last, and Work the first time. The view is remembered in `localStorage`, one entry per controller URL, as the last screen is. The row is selected on Work only; the Office keeps its own row, **The office**, and the Office button in the sidebar's top row, both unchanged. *The drawing shows Overview replacing The office, and that swap waits for [#1048](https://github.com/theagenticage/hercule/issues/1048), on Rogier's word.* Go gains an Overview item, with no native accelerator of its own: main's startup file has almost no budget left ([Measured](#measured)).
+- **The way in.** The sidebar's Work section on the Hercule face gains an **Overview** row, first. It opens the view the user used last, and Work the first time. The view is remembered in `localStorage`, one entry per controller URL, as the last screen is. The row is selected on Work only; the Office keeps its own row, **The office**, and the Office button in the sidebar's top row, both unchanged. *The drawing shows Overview replacing The office, and that swap waits for [#1048](https://github.com/theagenticage/hercule/issues/1048), on Rogier's word.* The Go menu gains no Overview item yet. It lists threads and assistants (`listGoMenuItems`), and the places in it are native items in `main/menu.ts`, which waits: main's startup file has almost no budget left ([Measured](#measured)). The way in is the sidebar's row and ⌘1 and ⌘2 of the pill.
   - **Waiting on you keeps its rows and where they lead.** The drawing's "click opens the card" is not built: the section also holds approvals, which no card shows.
   - `/work` shows the Hercule face ([The Hercule face](#the-hercule-face)).
   - **Open on** keeps its choices. "Where I left off" covers `/work`, and there is no Overview choice.
@@ -1284,8 +1284,8 @@ The rules for this layer:
 *(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* Work shows every unfinished Task as a card, placed by stage in a lane for each Project. Its goal is that the user does not have to go and look: what needs them shows on the card, and the rest stays where they left it. The words are [GLOSSARY.md](../../GLOSSARY.md)'s: Work is the view, a Task is the record, and the board is only what a screen draws, never a name for a record.
 
 - **The route** is `/work`, in `routes/_connected/_shell/work.tsx`, a chunk of its own (rule 6), exporting `Route` with `staticData: { title: "Work" }`. The screen's components are in `screens/work/`, and what it works out is in `@hercule/client-core/work`. The route's loader starts the board's read without waiting for it, so the screen draws its loading state, with the stages and lanes in place, at once.
-- **The stages** are the five columns Exploring, Planned, Building, In review and Landed. Done and Dropped are ends, and the board has no column for them: an unfinished Task is one at the first five stages ([./09-tasks.md](./09-tasks.md#the-board)). **A lane** is one Project, and Tasks with no Project are in the lane "No project", last. Lanes sort by project name. The sidebar's activity order does not leak in. A **cell** is one lane at one stage.
-- **A card** shows its title, the foot, and a colleague behind its top edge while a Thread of the Task works. A Thread's question takes the card's second line, in `--you-ink`. Cards have no summary yet, and no details pane. A click, Return or Space opens the card's newest Thread (`openSessionId`), and a Task with no Thread opens nothing.
+- **The stages** are the five Stages Exploring, Planned, Building, In review and Landed, drawn side by side. Done and Dropped are ends, and Work has no place for them: an unfinished Task is one at the first five stages ([./09-tasks.md](./09-tasks.md#the-board)). **A lane** is one Project, and Tasks with no Project are in the lane "No project", last. Lanes sort by project name. The sidebar's activity order does not leak in. A **cell** is one lane at one stage.
+- **A card** shows its title, the foot, and a colleague behind its top edge while a Thread of the Task works. A Thread's question takes the card's second line, in `--you-ink`. Cards have no summary yet, and no details pane. A click, Return or Space opens the card's newest Thread (`openSessionId`). A Task with no Thread opens nothing yet, and the undo line says "This Task has no Thread yet." Every Task added with Add starts that way, until the details pane (slice 3) opens it.
 - **Lanes open on a first visit,** so the first screen is proper cards. The Threads open at the upgrade are there, at Exploring.
 
 ### What Work reads and writes
@@ -1294,7 +1294,7 @@ The rules for this layer:
 |---|---|
 | Reads the cards | `task.queryBoard`, once, in the query `WORK_BOARD_KEY` beside the route (`-work-board.ts`), not in `app/queries.ts`, which loads with the shell. The board is not shell data |
 | Names the lanes | The Projects the shell already holds |
-| Tells a clear desk from a first run | `task.query` with `limit: 1`, only while the board is empty |
+| Tells a clear desk from a first run | `task.query` with `limit: 1`, only while the board is empty. A controller with no Task shows "Nothing here yet." and a **Start a thread** button, which opens the new thread's draft with the focus in its message. The button shows ⌘N, as the sidebar's New thread row does on every platform |
 | Moves a card | `task.move` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)) |
 | Adds a Task | `task.create`, with the lane's Project and the stage `exploring` |
 
@@ -1303,6 +1303,7 @@ The rules for this layer:
 - **A hidden window reads no board.** The query is enabled only while the window is visible ([Rules](#rules), rule 3). A push that arrives meanwhile marks it out of date, and the board is read once when the window shows.
 - **Project names have no live topic** ([#279](https://github.com/theagenticage/hercule/issues/279)). A lane renamed from the CLI shows at the next read. That is accepted.
 - **A board past `MAX_BOARD_CARDS` (1,000)** says so on the screen, in a line under the lanes. It never hides it.
+- **A read that fails says so, with a way to try again.** The board that cannot be read shows "The board could not be read" and the reason, and so does the check for any Task, on an empty board. Each has a Try again button.
 
 ### Rows, lanes and folds
 
@@ -1337,7 +1338,7 @@ One row of 36px glass controls, from the shared parts, 10px from the top. It sta
 
 - **There is no drag library.** Dragging uses pointer events with pointer capture (`screens/work/use-board-drag.ts`), moving one element by `transform`, with FLIP for the neighbours. Cards are matched by Task id, never by element, because a card moved to another cell is a new element.
 - **The move shows at once** and is sent in order. The screen draws the last board the controller gave, with every move not yet read back applied over it (`applyCardMove` in client-core, a pure function). A move that fails leaves the list: the card goes back and the undo line says why. A `task` push that arrives during a move is never dropped.
-- **Each move the user makes is one gesture** on the undo stack, holding the place the card came from. ⌘Z undoes one gesture at a time, only the user's, never a fact that arrived.
+- **Each move the user makes is one gesture** on the undo stack, holding the place the card came from. ⌘Z undoes one gesture at a time, only the user's, never a fact that arrived. A gesture made before the user left Work still works when they come back. A move that did not save leaves the stack, wherever it was in it. When the card the moved card followed has gone, Undo puts it last in its stage and the undo line says so.
 - **A failed move rolls back and says why.** The drawing's moves while offline, marked with a clock until they sync, are left out: an offline queue is its own piece of work.
 - **A Task that arrives by itself,** or changes stage by anything but a drag, goes last in its cell, so nothing the user is looking at moves.
 
@@ -1347,7 +1348,7 @@ The screen owns its keys; there is no registry. Single keys work only with focus
 
 | Key | What it does |
 |---|---|
-| Arrows, H J K L | Walk the board. Up and down stay in the column; left and right go to the nearest height in the next column |
+| Arrows, H J K L | Walk the board. Up and down stay in the stage's column, and cross to the next lane at its end; left and right go to the nearest stage of the lane that has a card, at the same row or the last one there |
 | `[` `]` | The previous and next lane |
 | Return, Space | Opens the card |
 | ⇧← ⇧→ | Moves the card back or on one stage |
@@ -1355,9 +1356,9 @@ The screen owns its keys; there is no registry. Single keys work only with focus
 | A | Add to Work |
 | F, ⇧F | Folds this lane, or folds every lane |
 | / | Find |
-| ⌘Z | Undoes the user's last gesture |
-| ? | Shows the keys |
-| Esc | Steps back one thing at a time: a drag, then the chips |
+| ⌘Z (Ctrl Z on Linux) | Undoes the user's last gesture. It works from anywhere but a text field, not only with focus on the board |
+| ? | Shows the keys, and hides them again |
+| Esc | Steps back one thing at a time: a drag, then the keys sheet, the Add sheet, the Find text, and last the chips |
 
 ### Work's motion
 

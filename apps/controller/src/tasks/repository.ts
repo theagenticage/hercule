@@ -142,7 +142,7 @@ export interface TrackedTask {
 }
 
 /**
- * A Task as the Work board reads it: its place and the columns a card shows,
+ * A Task as the Work board reads it: its place and the fields a card shows,
  * and none of the Task's description or provenance.
  */
 export interface BoardTask {
@@ -348,13 +348,13 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
  */
 const ON_BOARD = "stage NOT IN ('done', 'dropped')";
 
-/** Returns true if the stage is a column of the board. */
+/** Returns true if the stage is one of the board's five stages. */
 const isBoardStage = (stage: TaskStage): stage is BoardStage =>
   (BOARD_STAGES as ReadonlyArray<string>).includes(stage);
 
 /**
  * Orders cards by project (none first), then by stage in the order of the
- * board's columns, then by rank, then by id. Ids and ranks sort as text.
+ * board's stages, then by rank, then by id. Ids and ranks sort as text.
  */
 const compareBoardOrder = (left: BoardTask, right: BoardTask): number => {
   const leftProject = left.projectId ?? "";
@@ -725,11 +725,10 @@ const make = Effect.gen(function* () {
     /**
      * Records that the run `runId` started on the Task: raises the Task's
      * failure revision, and when the Task shows a failure, clears it and
-     * writes the row an Undo restores it from. Does nothing, and returns
-     * `undefined`, when the Task has no row yet. Otherwise returns true when a
-     * failure was cleared.
+     * writes the row an Undo restores it from. Does nothing when the Task
+     * has no row yet. Returns true when a failure was cleared, else false.
      */
-    recordRunStart: (taskId: string, runId: string): Effect.Effect<boolean | undefined, SqlError> =>
+    recordRunStart: (taskId: string, runId: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(taskId);
         const rows = yield* sql<{
@@ -737,7 +736,7 @@ const make = Effect.gen(function* () {
           readonly failure_revision: number;
         }>`SELECT failed_run_id, failure_revision FROM tasks WHERE id = ${key}`;
         const row = rows[0];
-        if (row === undefined) return undefined;
+        if (row === undefined) return false;
         const revision = row.failure_revision + 1;
         yield* sql`UPDATE tasks SET failure_revision = ${revision}, failed_run_id = NULL
                    WHERE id = ${key}`;
@@ -900,7 +899,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the cards of the Work board: the live Tasks at a board stage,
-     * ordered by project (none first), then stage in the order of the columns,
+     * ordered by project (none first), then stage in the order of the board,
      * then rank. It returns one Task more than `limit` at most, so the caller
      * can tell that there were more.
      *
@@ -909,9 +908,9 @@ const make = Effect.gen(function* () {
      *
      * One statement. It walks `tasks_board_rank` in its own order, which is
      * project, stage, rank, so it sorts nothing and stops after `limit + 1`
-     * Tasks. It looks at the index entries of finished Tasks too, but never at
-     * their rows. The index order puts stages in alphabetical order, so the
-     * rows are put in column order afterwards, in memory. It reads no
+     * Tasks. The index leaves out finished and deleted Tasks, so the walk never
+     * meets them. The index order puts stages in alphabetical order, so the
+     * rows are put in board order afterwards, in memory. It reads no
      * description and no provenance. The statement names the index, because
      * left to itself the planner reads `tasks_stage` and sorts.
      */
@@ -932,7 +931,7 @@ const make = Effect.gen(function* () {
                  t.created_at, t.stage_changed_at, t.failed_run_id
           FROM tasks t INDEXED BY tasks_board_rank
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
-          WHERE t.stage NOT IN ('done', 'dropped') AND t.deleted_at IS NULL
+          WHERE t.${sql.literal(ON_BOARD)} AND t.deleted_at IS NULL
           ORDER BY t.project_id, t.stage, t.board_rank
           LIMIT ${limit + 1}`,
         (rows) =>

@@ -1,5 +1,5 @@
 import type { BoardWalk } from "@hercule/client-core/work";
-import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
+import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 
@@ -94,22 +94,4 @@ export const readBoardKey = (
   if (letter === "a") return { kind: "add" };
   const letterWalk = LETTER_WALKS[letter];
   return letterWalk === undefined ? null : { kind: "walk", walk: letterWalk };
-};
-
-/**
- * Returns the stage that `command` moves `card` to, or `undefined` when it
- * moves nowhere: the command is not a stage move, the card already stands
- * there, or it is at the first or last stage and the command goes past it.
- */
-export const chooseTargetStage = (
-  card: Pick<WorkCard, "stage">,
-  command: BoardKeyCommand,
-): BoardStage | undefined => {
-  const target =
-    command.kind === "pick-stage"
-      ? command.stage
-      : command.kind === "shift-stage"
-        ? BOARD_STAGES[BOARD_STAGES.indexOf(card.stage) + command.direction]
-        : undefined;
-  return target === card.stage ? undefined : target;
 };

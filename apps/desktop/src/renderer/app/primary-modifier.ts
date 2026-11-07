@@ -21,3 +21,7 @@ export const isPrimaryModifierHeld = (event: ModifierFlags, platform: DesktopPla
  */
 export const isOtherModifierHeld = (event: ModifierFlags, platform: DesktopPlatform): boolean =>
   platform === "mac" ? event.ctrlKey : event.metaKey;
+
+/** Returns how the Undo key reads on `platform`: ⌘Z on a Mac, Ctrl Z elsewhere. */
+export const describeUndoKey = (platform: DesktopPlatform): string =>
+  platform === "mac" ? "⌘Z" : "Ctrl Z";

@@ -575,7 +575,7 @@ describe("the cost of the board read", () => {
 
 describe("the size of the board", () => {
   /** Reads the board when `count` Tasks are on it. */
-  const readBoardOf = (count: number) =>
+  const readBoardWithTasks = (count: number) =>
     Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -596,14 +596,14 @@ describe("the size of the board", () => {
     );
 
   it("returns every card and says nothing was left out when the board holds exactly the most it returns", async () => {
-    const board = await readBoardOf(MAX_BOARD_CARDS);
+    const board = await readBoardWithTasks(MAX_BOARD_CARDS);
 
     expect(board.cards).toHaveLength(MAX_BOARD_CARDS);
     expect(board.truncated).toBe(false);
   });
 
   it("returns the most it can and says Tasks were left out when the board holds more", async () => {
-    const board = await readBoardOf(MAX_BOARD_CARDS + 1);
+    const board = await readBoardWithTasks(MAX_BOARD_CARDS + 1);
 
     expect(board.cards).toHaveLength(MAX_BOARD_CARDS);
     expect(board.truncated).toBe(true);

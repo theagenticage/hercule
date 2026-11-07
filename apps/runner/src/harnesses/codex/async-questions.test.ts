@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { AnswerNotDelivered, MAX_MESSAGE_LENGTH, HarnessEvent } from "@hercule/protocol";
+import { readAsyncQuestionItem } from "./async-questions";
 import { RPC_DEADLINE } from "./rpc";
 import {
   buildRefusal,
@@ -277,6 +278,34 @@ describe("a Codex async question", () => {
       text: `> ${TITLE}\n\nYes, No\n\n> ${"é".repeat(256)}\n\nfree "text"\nwith a line`,
       steered: true,
     });
+  });
+
+  it("drops a question with no title, as for a blocking question, and numbers the others", async () => {
+    const run = await startBusySession();
+    await askAsyncQuestion(run, {
+      ...ASYNC_ITEM,
+      id: "call_blank",
+      questions: [
+        { title: "", options: ["Yes"] },
+        { title: TITLE, options: null },
+        { title: "Second?", options: null },
+      ],
+    });
+
+    const opened = filterByTag(run.seen, "request.opened")[0]!.request;
+    expect(opened.kind === "question" && opened.detail.questions).toEqual([
+      { question: TITLE, header: "Question 1", options: [], multiSelect: false },
+      { question: "Second?", header: "Question 2", options: [], multiSelect: false },
+    ]);
+  });
+
+  it("reads an item whose questions all have no title as asking nothing", () => {
+    const frame = buildItemNote("item/completed", {
+      ...ASYNC_ITEM,
+      questions: [{ title: "", options: ["Yes"] }],
+    });
+
+    expect(readAsyncQuestionItem(frame as never)).toBeUndefined();
   });
 
   it("keeps a title with a blank line and a closing tag inside the quote and the envelope", async () => {

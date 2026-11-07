@@ -1,21 +1,13 @@
+/** Tests the words the undo line uses for a move: which place it names, and how a long title is cut. */
 import { describe, expect, it } from "vitest";
 import type { WorkCard } from "@hercule/contract";
+import { buildCard } from "./cards.testing";
 import { describeCardMove } from "./describe-card-move";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
 
-const card = (overrides: Partial<WorkCard> = {}): WorkCard => ({
-  id: "task-1",
-  title: "Review PR",
-  stage: "building",
-  priority: "normal",
-  boardRank: "a",
-  threadCount: 1,
-  createdAt: "2026-11-01T09:00:00.000Z",
-  stageChangedAt: "2026-11-01T09:00:00.000Z",
-  lastActivityAt: "2026-11-01T09:00:00.000Z",
-  ...overrides,
-});
+const card = (overrides: Partial<WorkCard> = {}): WorkCard =>
+  buildCard("task-1", { title: "Review PR", stage: "building", ...overrides });
 
 describe("describeCardMove", () => {
   it.each([

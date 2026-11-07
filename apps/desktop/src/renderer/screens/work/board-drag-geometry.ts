@@ -1,10 +1,13 @@
 /**
  * Where a carried card would land, worked out from measurements of the board
- * taken once (at the lift, after each change of the slot, and after a scroll).
+ * taken once (at the lift, and after each change of the page or the slot).
  * Nothing here reads the page, so the pointer's frame loop does no layout.
  *
- * All coordinates are in window pixels, as `getBoundingClientRect` gives them.
+ * The measurements are in board coordinates: pixels from the top left of the
+ * board's scrolled content, so they stay true while the board scrolls. A
+ * pointer position in the window becomes one with `toBoardPoint`.
  */
+import type { DropPlace } from "@hercule/client-core/work";
 import type { BoardStage } from "@hercule/contract";
 
 /** Half the space between two columns: a pointer this close left of a column still counts as inside it. */
@@ -56,32 +59,30 @@ export interface LaneBox {
   readonly cells: ReadonlyMap<BoardStage, CellBox>;
 }
 
-/** Everything `chooseDropPlace` and `computeEdgeScrollSpeed` need. */
+/** Everything `chooseDropPlace` needs, in board coordinates. */
 export interface BoardGeometry {
   readonly columns: readonly StageColumn[];
   readonly lanes: readonly LaneBox[];
-  /** The top and bottom of the part of the board that is in view. */
-  readonly viewTop: number;
-  readonly viewBottom: number;
 }
 
-/**
- * Where a carried card would land:
- *
- * - `cell`: in an open lane at `stage`, as the card number `index` of the
- *   cards the cell shows (0 is the top), not counting the carried card.
- * - `folded-lane`: on a folded lane, which has no cells to put a slot in. The
- *   stage is the column the pointer is over, or `null` when the pointer is
- *   left of the columns, on the lane's head, which keeps the card's stage.
- */
-export type DropPlace =
-  | {
-      readonly kind: "cell";
-      readonly laneId: string;
-      readonly stage: BoardStage;
-      readonly index: number;
-    }
-  | { readonly kind: "folded-lane"; readonly laneId: string; readonly stage: BoardStage | null };
+/** The scroller as the window sees it: where its top left is, how far it is scrolled, and where its bottom is. */
+export interface BoardView {
+  readonly left: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly scrollLeft: number;
+  readonly scrollTop: number;
+}
+
+/** Returns the point of the board that lies under the window position (`x`, `y`). */
+export const toBoardPoint = (
+  view: BoardView,
+  x: number,
+  y: number,
+): { readonly x: number; readonly y: number } => ({
+  x: x - view.left + view.scrollLeft,
+  y: y - view.top + view.scrollTop,
+});
 
 /** Returns whether two places are the same one. */
 export const isSameDropPlace = (a: DropPlace | null, b: DropPlace | null): boolean => {
@@ -164,7 +165,8 @@ export const chooseDropPlace = (
 
 /**
  * Returns how many pixels the board should scroll this frame for a carried
- * card at height `y`: negative to scroll up, positive to scroll down, and 0
+ * card at window height `y`, when the board's top and bottom edges are at the
+ * window heights `viewTop` and `viewBottom`: negative to scroll up, positive to scroll down, and 0
  * when the card is clear of both edges. The deeper it is in a zone, the
  * faster it goes. The top zone is taller than the bottom one because the
  * toolbar and the stage names cover the top of the board.

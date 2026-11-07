@@ -1,35 +1,34 @@
 /**
- * What the head of a lane says about the lane: for a folded lane, one small
- * count under each stage, and for any lane, how many cards failed.
+ * What the head of a lane says about the lane (how many cards failed), and the
+ * dot a folded lane shows under each stage.
  */
-import type { BoardStage } from "@hercule/contract";
-import { isLoudCard } from "./arrange-cell";
+import type { WorkCard } from "@hercule/contract";
 import type { WorkLane } from "./lanes";
-
-/** The small count under one stage of a folded lane. */
-export interface StageCount {
-  readonly stage: BoardStage;
-  readonly count: number;
-  /** Whether a card of the stage has a question or a failure, which shows as a dot. */
-  readonly showsDot: boolean;
-}
 
 /** What a lane's head says. */
 export interface LaneSummary {
-  readonly stageCounts: readonly StageCount[];
   /** The number of failed cards in the lane. The head says "1 failed" when it is above 0, folded or not. */
   readonly failedCount: number;
 }
 
-/** Returns the counts a folded lane shows, and the failed count the head of any lane shows. */
+/** The dot a folded lane shows under a stage: a card in it failed, or has a question. */
+export type CellDot = "failed" | "question";
+
+/** Returns the failed count the head of a lane shows. */
 export const summarizeLane = (lane: WorkLane): LaneSummary => ({
-  stageCounts: lane.cells.map((cell) => ({
-    stage: cell.stage,
-    count: cell.cards.length,
-    showsDot: cell.cards.some(isLoudCard),
-  })),
   failedCount: lane.cells.reduce(
     (total, cell) => total + cell.cards.filter((card) => card.failure !== undefined).length,
     0,
   ),
 });
+
+/**
+ * Returns the dot for the cards of one cell of a folded lane: `failed` when
+ * any card failed, else `question` when any has an open question, else `null`.
+ * A failure outranks a question because it is the one thing the page marks in
+ * a loud colour.
+ */
+export const chooseCellDot = (cards: readonly WorkCard[]): CellDot | null => {
+  if (cards.some((card) => card.failure !== undefined)) return "failed";
+  return cards.some((card) => card.openQuestion !== undefined) ? "question" : null;
+};

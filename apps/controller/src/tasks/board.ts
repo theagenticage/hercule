@@ -34,6 +34,7 @@ import {
   type Unauthenticated,
   type WorkBoard,
   type WorkCard,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository, type BoardTask } from "./repository";
@@ -105,9 +106,6 @@ export class TaskBoardFacts extends Context.Service<
   }
 >()("hercule/controller/tasks/TaskBoardFacts") {}
 
-/** The statuses of a session that is live for the board: it is doing, or about to do, work. */
-const WORKING_STATUSES: ReadonlyArray<SessionStatus> = ["queued", "starting", "busy"];
-
 /** Orders sessions by when they were opened, then by id. Timestamps and ids sort as text. */
 const compareOpenedFirst = (left: BoardSessionFact, right: BoardSessionFact): number => {
   if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? -1 : 1;
@@ -160,7 +158,7 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     })
     .at(0);
   const working = facts.sessions
-    .filter((session) => WORKING_STATUSES.includes(session.status))
+    .filter((session) => WORKING_SESSION_STATUSES.includes(session.status))
     .toSorted(compareOpenedFirst)
     .at(-1);
   const openSessionId =

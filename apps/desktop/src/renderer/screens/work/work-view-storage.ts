@@ -4,7 +4,7 @@
  * One entry per controller and user, because a lane's id means nothing to
  * another controller, and two people on one machine fold their own lanes.
  */
-import type { WorkDisplay } from "./work-toolbar";
+import type { WorkDisplay } from "./use-work-view";
 
 /** The choices of the Display menu before the user makes any. */
 export const DEFAULT_WORK_DISPLAY: WorkDisplay = {

@@ -15,6 +15,7 @@ import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testin
 import { buildWorkBoardKey } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import { flipByKey } from "../../../app/motion";
+import type { CardMover } from "../../../app/card-mover";
 import { createUndoStack } from "../../../app/undo-stack";
 import { useCardMoves } from "./-card-moves";
 import { workBoardQuery } from "./-work-board";
@@ -79,7 +80,7 @@ const setUp = (readBoard: () => WorkBoard = () => BOARD) => {
   const { client, held } = buildClient(readBoard);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(buildWorkBoardKey(), BOARD);
-  const undoStack = createUndoStack();
+  const undoStack = createUndoStack<CardMover>();
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
@@ -140,7 +141,7 @@ describe("useCardMoves", () => {
   });
 
   it("puts the card back and says why when the controller refuses the move", async () => {
-    const { result, stageOf, held, undoStack } = setUp();
+    const { result, stageOf, held } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -159,8 +160,11 @@ describe("useCardMoves", () => {
     );
     expect(result.current.line.canUndo).toBe(false);
     // The failed move left nothing for Undo to reverse.
+    act(() => {
+      result.current.undoLastMove();
+    });
     await waitFor(() => {
-      expect(undoStack.peek()).toBeNull();
+      expect(result.current.line.text).toBe("Nothing to undo.");
     });
   });
 
@@ -303,7 +307,7 @@ describe("useCardMoves", () => {
   });
 
   it("says nothing was put back when the move being undone did not save", async () => {
-    const { result, held, undoStack } = setUp();
+    const { result, held } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
       result.current.moveCard({ taskId: "b", stage: "planned" }, "Moved b");
@@ -322,9 +326,50 @@ describe("useCardMoves", () => {
       expect(result.current.line.canUndo).toBe(false);
     });
 
-    // The refused move left the stack; Undo reaches the move before it.
-    expect(undoStack.peek()?.words).toBe("Moved a");
+    // The refused move left the stack, so Undo reaches the move before it.
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitForRequests(held, 3);
+    expect(held[2]).toMatchObject({ taskId: "a", payload: { stage: "building" } });
     expect(listIds(result.current.board!.cards)).toContain("b");
+  });
+
+  it("leaves a refused move off the stack even when a saved move was made after it", async () => {
+    const { result, held } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+      result.current.moveCard({ taskId: "b", stage: "planned" }, "Moved b");
+    });
+    await waitForRequests(held, 1);
+    await act(() => {
+      held[0]!.refuse("no");
+      return Promise.resolve();
+    });
+    await waitForRequests(held, 2);
+    await act(() => {
+      held[1]!.accept();
+      return Promise.resolve();
+    });
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitForRequests(held, 3);
+    await act(() => {
+      held[2]!.accept();
+      return Promise.resolve();
+    });
+    // The newest gesture is b, which saved. a is not left on the stack to say it did not save.
+    await waitFor(() => {
+      expect(result.current.line.text).toBe("Put back: Moved b.");
+    });
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(result.current.line.text).toBe("Nothing to undo.");
+    });
   });
 
   it("reads the board again after the last move finishes, and stops applying the move once it has", async () => {

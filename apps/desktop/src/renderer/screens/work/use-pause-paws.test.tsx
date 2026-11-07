@@ -3,7 +3,7 @@
  * scrolled out of view, and does no observer work when no card is working.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { useRef, type JSX } from "react";
 import { usePausePawsOffScreen } from "./use-pause-paws";
 
@@ -57,6 +57,13 @@ function Board({ poses }: { readonly poses: readonly string[] }): JSX.Element {
   );
 }
 
+/** Lets the mutation observer's callback run, which the browser queues after the page changed. */
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    await Promise.resolve();
+  });
+};
+
 describe("usePausePawsOffScreen", () => {
   it("makes no observer while no card has a colleague at work", () => {
     render(<Board poses={["waiting", "failed"]} />);
@@ -77,15 +84,36 @@ describe("usePausePawsOffScreen", () => {
     expect(working.hasAttribute("data-offscreen")).toBe(false);
   });
 
-  it("stops watching a card whose colleague stops working", () => {
+  it("stops watching a card whose colleague stops working", async () => {
     const { rerender, getByTestId } = render(<Board poses={["working"]} />);
     const [observer] = observers;
     const card = getByTestId("card-0");
     observer?.report(card, false);
 
     rerender(<Board poses={["failed"]} />);
+    await settle();
 
     expect(observer?.watching.size).toBe(0);
     expect(card.hasAttribute("data-offscreen")).toBe(false);
+  });
+
+  it("starts watching a card that arrives with a colleague at work", async () => {
+    const { rerender, getByTestId } = render(<Board poses={["waiting"]} />);
+    expect(observers).toEqual([]);
+
+    rerender(<Board poses={["waiting", "working"]} />);
+    await settle();
+
+    expect(observers[0]?.watching).toEqual(new Set([getByTestId("card-1")]));
+  });
+
+  it("does not look at the board when a render changes nothing on it", async () => {
+    const { rerender } = render(<Board poses={["working"]} />);
+    const query = vi.spyOn(Element.prototype, "querySelectorAll");
+
+    rerender(<Board poses={["working"]} />);
+    await settle();
+
+    expect(query).not.toHaveBeenCalled();
   });
 });

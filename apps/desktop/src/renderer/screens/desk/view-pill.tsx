@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
 import { animateValue, type MotionValue } from "../../app/motion";
-import { ViewSwitch, type ViewChoice } from "../workflows/view-switch";
+import { ViewSwitch, type ViewChoice } from "../view-switch";
 import "./view-pill.css";
 
 /** The puck's left edge and width, as two numbers on springs. */

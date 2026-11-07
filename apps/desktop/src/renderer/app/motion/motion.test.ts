@@ -14,8 +14,8 @@ import {
   ghostElement,
   staggerDelay,
   trackBody,
-  type PartialChannelValues,
 } from "./index";
+import type { PartialChannelValues } from "./springs";
 
 /** One frame of a 60 Hz display, in milliseconds. */
 const FRAME = 16;
@@ -319,7 +319,7 @@ describe("flipping by key", () => {
   };
 
   /** Flips the keyed elements of the page around `mutate`. */
-  const flip = (mutate: () => void, options: { spring?: "self" } = {}): void => {
+  const flip = (mutate: () => void, options: { spring?: "self" } = {}) =>
     flipByKey({
       root: document.body,
       selector: "[data-key]",
@@ -327,7 +327,6 @@ describe("flipping by key", () => {
       mutate,
       ...options,
     });
-  };
 
   /** Replaces the element of its key by a new one at layout `top`, as React does for a card in another column. */
   const replace = (old: HTMLElement, top: number): HTMLElement => {
@@ -382,7 +381,7 @@ describe("flipping by key", () => {
     unkeyed.dataset.key = "";
     let arrived!: HTMLElement;
 
-    flip(() => {
+    const { born, places } = flip(() => {
       gone.remove();
       arrived = makeKeyed("new", 200);
     });
@@ -390,6 +389,10 @@ describe("flipping by key", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(arrived.style.transform).toBe("");
     expect(unkeyed.style.transform).toBe("");
+    // The new element is returned, and every keyed element on the page after the change has its place.
+    expect(born).toEqual([arrived]);
+    expect(places.get("new")?.top).toBe(200);
+    expect(places.has("gone")).toBe(false);
   });
 
   it("flips an element that stays the same element, as flipElements does", () => {

@@ -2,7 +2,18 @@ import { useState } from "react";
 import { EMPTY_FILTER, isFilterOn, type Filter } from "@hercule/client-core/desk";
 import type { BoardStage } from "@hercule/contract";
 import { readSavedWorkView, writeSavedWorkView, type SavedWorkView } from "./work-view-storage";
-import type { WorkDisplay } from "./work-toolbar";
+
+/** How the lanes label themselves: in a strip at the side, or in a band across the top. */
+export type LaneLabels = "side-labels" | "bands";
+
+/** The choices of the Display menu. */
+export interface WorkDisplay {
+  readonly laneLabels: LaneLabels;
+  /** Whether the colleagues on the cards hold still: no typing paws, no blinking. */
+  readonly isStill: boolean;
+  /** Whether single keys, such as A and F, work on the board. */
+  readonly hasSingleKeys: boolean;
+}
 
 /** Returns the id of one cell of the board, the key `openedCellIds` holds. */
 export const buildCellId = (laneId: string, stage: BoardStage): string => `${laneId}/${stage}`;

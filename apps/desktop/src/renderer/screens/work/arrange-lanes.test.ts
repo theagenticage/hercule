@@ -24,8 +24,8 @@ describe("arrangeLanes", () => {
     const [lane] = arrangeLanes(lanes, CLOSED);
     const building = lane!.cells.find((cell) => cell.stage === "building")!;
 
-    expect(building.arranged.cards).toHaveLength(4);
-    expect(building.arranged.foot).toBe("more");
+    expect(building.arrangement.cards).toHaveLength(4);
+    expect(building.arrangement.foot).toBe("more");
     expect(building.cardCount).toBe(8);
   });
 
@@ -35,8 +35,8 @@ describe("arrangeLanes", () => {
       (cell) => cell.stage === "building",
     )!;
 
-    expect(building.arranged.cards).toHaveLength(8);
-    expect(building.arranged.foot).toBe("fewer");
+    expect(building.arrangement.cards).toHaveLength(8);
+    expect(building.arrangement.foot).toBe("fewer");
   });
 });
 

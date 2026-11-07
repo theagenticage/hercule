@@ -80,10 +80,11 @@ describe("the task tracking migration", () => {
       ),
     ).toBe(true);
     // One lookup per task id, then a sort, because the rows of several tasks
-    // are not in order across the ids.
-    expect(runsByTaskPlan.map((step) => step.detail)).toEqual([
-      "SEARCH runs USING INDEX runs_task_id (task_id=?)",
-      "USE TEMP B-TREE FOR ORDER BY",
-    ]);
+    // are not in order across the ids. `runs_task_finished`, added later, also
+    // starts with `task_id`, and for a read of whole rows SQLite may choose
+    // either index: both cost the same here.
+    const [lookup, ...rest] = runsByTaskPlan.map((step) => step.detail);
+    expect(lookup).toMatch(/^SEARCH runs USING INDEX runs_task_(id|finished) \(task_id=\?\)$/);
+    expect(rest).toEqual(["USE TEMP B-TREE FOR ORDER BY"]);
   });
 });

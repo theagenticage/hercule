@@ -1,7 +1,7 @@
 /**
  * Tests moving a card before the controller answers: the projection over the
- * board, pending moves applied again, where a card stood, and which card a
- * drop follows in stored order.
+ * board, pending moves applied again, where a card stood, which card a drop
+ * follows in stored order, and which stage a key moves a card to.
  */
 import { describe, expect, it } from "vitest";
 import type { WorkBoard } from "@hercule/contract";
@@ -9,6 +9,7 @@ import {
   applyCardMove,
   buildRestoreMove,
   chooseAfterTaskId,
+  chooseTargetStage,
   readPlacement,
   reapplyCardMoves,
 } from "./card-move";
@@ -257,5 +258,18 @@ describe("chooseAfterTaskId", () => {
     expect(
       chooseAfterTaskId({ storedCell: STORED, nextVisibleCardId: "gone", movingCardFailed: false }),
     ).toBe("c");
+  });
+});
+
+describe("chooseTargetStage", () => {
+  it.each([
+    ["exploring", { kind: "shift-stage", direction: 1 }, "planned"],
+    ["building", { kind: "shift-stage", direction: -1 }, "planned"],
+    ["exploring", { kind: "shift-stage", direction: -1 }, undefined],
+    ["landed", { kind: "shift-stage", direction: 1 }, undefined],
+    ["building", { kind: "pick-stage", stage: "landed" }, "landed"],
+    ["building", { kind: "pick-stage", stage: "building" }, undefined],
+  ] as const)("moves a card at %s on %j to %s", (stage, change, expected) => {
+    expect(chooseTargetStage({ stage }, change)).toBe(expected);
   });
 });

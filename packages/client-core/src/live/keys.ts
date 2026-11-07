@@ -51,6 +51,12 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   /**
+   * The Work board's one read. It sits under the Tasks' key, so every ordinary
+   * `task` push reads it again. A `derived` `task` push reads only this key
+   * (see `buildQueryKeys`).
+   */
+  workBoard: (): LiveQueryKey => [...queryKeys.tasks(), "board"],
+  /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
    * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
@@ -432,15 +438,26 @@ const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), 
  * and record prefixes rather than one key per record. `conversationIds` is
  * the push's map from each session to its conversation, which only a
  * `session` push carries.
+ *
+ * `derived` is the push's flag of the same name, which only a `task` push can
+ * carry. It means a Task's card changed because of its sessions or runs, and
+ * no field of the Task record changed. Only the Work board draws that, so the
+ * push reads the board alone. Tracking already follows `run` pushes, and the
+ * list, the Task's record and Your work read fields of the Task itself, so
+ * reading them again would fetch the same data. A busy agent causes this push
+ * every second, and the shell keeps Tracking and Your work active on every
+ * screen.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
   conversationIds?: Invalidate["conversationIds"],
+  derived?: Invalidate["derived"],
 ): ReadonlyArray<LiveQueryKey> => {
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
   if (topic === "task") {
+    if (derived === true) return [queryKeys.workBoard()];
     return ids.length === 0
       ? [
           queryKeys.tasks(),

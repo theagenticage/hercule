@@ -1,7 +1,9 @@
 import {
   arrangeCell,
+  chooseCellDot,
   summarizeLane,
   type ArrangedCell,
+  type CellDot,
   type LaneSummary,
   type ShownBoard,
   type WorkLane,
@@ -13,11 +15,11 @@ import { buildCellId } from "./use-work-view";
 export interface ArrangedLaneCell {
   readonly stage: BoardStage;
   readonly cellId: string;
-  readonly arranged: ArrangedCell;
+  readonly arrangement: ArrangedCell;
   /** How many cards the cell holds, shown or not. */
   readonly cardCount: number;
-  /** The dot a folded lane shows under this stage: a failure first, then a question, else none. */
-  readonly dot: "failed" | "question" | null;
+  /** The dot a folded lane shows under this stage, or `null` for none. */
+  readonly dot: CellDot | null;
 }
 
 /** One lane as the board draws it. */
@@ -48,29 +50,27 @@ export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readon
       return {
         stage: cell.stage,
         cellId,
-        arranged: arrangeCell(cell.cards, {
+        arrangement: arrangeCell(cell.cards, {
           stage: cell.stage,
           opened: view.openedCellIds.has(cellId),
           filtered: view.isFiltering,
         }),
         cardCount: cell.cards.length,
-        dot: cell.cards.some((card) => card.failure !== undefined)
-          ? "failed"
-          : cell.cards.some((card) => card.openQuestion !== undefined)
-            ? "question"
-            : null,
+        dot: chooseCellDot(cell.cards),
       };
     }),
   }));
 
 /**
- * Returns what is on screen, by lane and column, for the keyboard walk. A
+ * Returns what is on screen, by lane and stage, for the keyboard walk. A
  * folded lane shows no card. A card hidden behind "13 more" is not on screen
  * either.
  */
-export const listShownCards = (arranged: readonly ArrangedLane[]): ShownBoard =>
-  arranged.map(({ lane, isFolded, cells }) => ({
+export const listShownCards = (arrangedLanes: readonly ArrangedLane[]): ShownBoard =>
+  arrangedLanes.map(({ lane, isFolded, cells }) => ({
     id: lane.id,
     isFolded,
-    columns: cells.map(({ arranged: cell }) => (isFolded ? [] : cell.cards.map((card) => card.id))),
+    columns: cells.map(({ arrangement: cell }) =>
+      isFolded ? [] : cell.cards.map((card) => card.id),
+    ),
   }));
