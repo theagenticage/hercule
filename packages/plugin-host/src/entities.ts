@@ -302,11 +302,17 @@ export const EntityProgress = Schema.Struct({
  * `http` and `https` are accepted: a `javascript:` or `file:` link written by
  * a plugin would otherwise travel to every client as it is.
  */
-const HttpUrl = buildBoundedString(1, MAX_EVENT_URL_LENGTH).check(
+export const HttpUrl = buildBoundedString(1, MAX_EVENT_URL_LENGTH).check(
   Schema.isPattern(/^https?:\/\/\S+$/i, {
     message: "A url must start with http:// or https:// and hold no spaces.",
   }),
 );
+
+/** Returns true when `value` is a link a person opens (see `HttpUrl`). */
+export const isHttpUrl = Schema.is(HttpUrl);
+
+/** The web addresses an observation reports as its own (`relations.linkedUrls`). */
+export const LinkedUrls = atMost(HttpUrl, MAX_ENTITY_RELATIONS);
 
 /**
  * The relations one observation reports. `complete` is true when every
@@ -324,7 +330,7 @@ export const EntityObservationRelations = Schema.Struct({
    * other plugins' link forms, so the core recognizes each URL and turns it
    * into a `source` claim. Leave it out when the source reports none.
    */
-  linkedUrls: Schema.optionalKey(atMost(HttpUrl, MAX_ENTITY_RELATIONS)),
+  linkedUrls: Schema.optionalKey(LinkedUrls),
 });
 
 /** The fields a full and a partial observation share. */
@@ -345,6 +351,9 @@ const ObservationText = Schema.Struct({
   text: buildBoundedString(0, MAX_ENTITY_TEXT_LENGTH),
   revision: Schema.optionalKey(buildBoundedString(1, 256)),
 });
+
+/** The texts of one observation, at most `MAX_ENTITY_TEXTS`. */
+export const ObservationTexts = atMost(ObservationText, MAX_ENTITY_TEXTS);
 
 /** The fields of an observation that are all optional, whatever its kind of completeness. */
 const optionalObservationFields = {
@@ -369,7 +378,7 @@ const optionalObservationFields = {
    * An observation that carries an `evidenceKey` replaces this Connection's
    * `text` claims for that key; one that leaves the key out touches none.
    */
-  texts: Schema.optionalKey(atMost(ObservationText, MAX_ENTITY_TEXTS)),
+  texts: Schema.optionalKey(ObservationTexts),
 };
 
 /** Raw facts by name: the kind's templates and facts read from these. */

@@ -21,6 +21,7 @@
  * inaccessible after the link was written is no longer named.
  */
 import { MAX_ENTITY_TIMELINE, type EntityChange } from "@hercule/contract";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -36,7 +37,7 @@ import {
 import { fillSentence, parseReasonTemplates, renderSentence } from "./sentences";
 
 /** The three kinds of news a timeline holds. */
-export type EntityChangeReason = EntityChange["reason"];
+type EntityChangeReason = EntityChange["reason"];
 
 /**
  * One thing to write on a timeline. `person` is the new owner of a
@@ -148,7 +149,7 @@ export const renderEntityChange = (row: TimelineRow, linkedWords?: string): Enti
   };
   return {
     reason: row.reason,
-    say: cleared
+    sentence: cleared
       ? renderSentence(templates?.[UNASSIGNED_KEY], {}, UNASSIGNED_SENTENCE)
       : renderSentence(
           templates?.[row.reason],
@@ -237,21 +238,12 @@ const make = Effect.gen(function* () {
         SELECT ref, access FROM external_entity_observations
         WHERE ref IN (SELECT value FROM json_each(${refsJson(targets)}))`;
       const recordsByRef = new Map(records.map((record) => [record.ref, record] as const));
-      const accessByRef = new Map<
-        string,
-        Array<{ readonly access: "ok" | "inaccessible" | "deleted" }>
-      >();
-      for (const observation of observations) {
-        const group = accessByRef.get(observation.ref);
-        if (group === undefined) accessByRef.set(observation.ref, [observation]);
-        else group.push(observation);
-      }
+      const accessByRef = Arr.groupBy(observations, (observation) => observation.ref);
       return new Map(
         targets.map((target) => {
           const record = recordsByRef.get(target);
           const noun = record?.noun ?? findActiveKind(kinds, target)?.noun ?? UNKNOWN_NOUN;
-          const readable =
-            record !== undefined && deriveAccess(accessByRef.get(target) ?? []) === "ok";
+          const readable = record !== undefined && deriveAccess(accessByRef[target] ?? []) === "ok";
           return [
             target,
             readable

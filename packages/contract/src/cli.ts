@@ -1240,7 +1240,13 @@ export const CLI = {
     help: "Adds a thing from another system to Work as a Task, one at a time. A thing Hercule never saw is read from its source and followed. Returns the entity's id (left out when the Task exists and Hercule holds no record of the thing), the Task's id, whether this call created the Task, its stage, and whether Hercule now follows the thing. A thing that already has a live Task returns that Task and creates none.",
     examples: [
       { args: ["github:pr:acme/webshop#87"] },
-      { args: ["linear:issue:SHOP-123", "--project", "1f3a9c2e"] },
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--project",
+          "1f3a9c2e",
+        ],
+      },
     ],
     fields: {
       ref: {
@@ -1259,7 +1265,15 @@ export const CLI = {
   "externalEntity.link": {
     command: "entity link",
     help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing. Remove it with `hercule entity unlink`.",
-    examples: [{ args: ["linear:issue:SHOP-123", "--to", "github:pr:acme/webshop#87"] }],
+    examples: [
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+        ],
+      },
+    ],
     fields: {
       fromRef: {
         positional: true,
@@ -1276,7 +1290,15 @@ export const CLI = {
   "externalEntity.unlink": {
     command: "entity unlink",
     help: "Removes your own link between two things, in either direction. Returns whether one was removed, and the firmest claim that still joins them, if a source or a mention is left: only your own link can be removed here. Nothing is written on either source.",
-    examples: [{ args: ["linear:issue:SHOP-123", "--to", "github:pr:acme/webshop#87"] }],
+    examples: [
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+        ],
+      },
+    ],
     fields: {
       fromRef: {
         positional: true,

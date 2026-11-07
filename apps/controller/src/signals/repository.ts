@@ -427,7 +427,9 @@ const make = Effect.gen(function* () {
      * signal is left out. It reads two narrow columns, never a signal's
      * blocks or actions, and it scans one of the partial indexes that hold
      * the open signals only, so the resolved signals, which are most of the
-     * table, are never read.
+     * table, are never read. The index is named because `signals_thread_ref`
+     * also covers these two columns, and the planner would scan it instead,
+     * resolved signals included.
      */
     listOpenThreads: (): Effect.Effect<
       ReadonlyArray<{ readonly signalId: string; readonly threadRef: string }>,
@@ -435,7 +437,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.map(
         sql<{ readonly id: Uint8Array; readonly thread_ref: string }>`
-          SELECT id, thread_ref FROM signals
+          SELECT id, thread_ref FROM signals INDEXED BY signals_open_thread
           WHERE status = 'open' AND thread_ref IS NOT NULL
         `,
         (rows) =>

@@ -10,9 +10,9 @@
  *
  * Every read is one statement however many refs it is given.
  */
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
-import type * as Statement from "effect/sql/Statement";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   MAX_BOARD_STACK_CANDIDATES,
@@ -32,72 +32,110 @@ import {
   type EntityRow,
   type ObservationRow,
 } from "./entity-records";
-import { PENDING_TARGET_PREFIX } from "./pending-target";
-import type { RidingCard, RidingLink } from "./riding";
+import {
+  CLAIM_TYPES_FIRMEST_FIRST,
+  CURRENT_LINKED_SQL,
+  EFFECTIVE_LINK_SQL,
+  type ClaimType,
+} from "./claim-sql";
 
-/**
- * The SQL condition that the target `to_ref` of the claim `c` is a ref. A
- * pending target is not, so a pending claim is neither a link nor a peer.
- */
-export const IS_REF_TARGET_SQL = `substr(c.to_ref, 1, ${PENDING_TARGET_PREFIX.length}) <> '${PENDING_TARGET_PREFIX}'`;
-
-/** The claims that make a pair a link, and the claims that make one join: a hint (`text`) joins nothing. */
-const CONFIRMED_CLAIMS_SQL = `c.claim_type IN ('source', 'person')`;
-
-/** The longest `evidenceKey` a link carries (see `EntityLink`). */
-const MAX_LINK_EVIDENCE_KEY_LENGTH = 128;
-
-/** Orders the claim types from firmest to weakest. */
-const CLAIM_FIRMNESS = { source: 0, person: 1, text: 2 } as const;
-
-/** One current `linked` claim, with the plugin of its Connection when it has one. */
-export interface LinkClaimRow {
+/** One row of the links statement: the firmest current `linked` claim of a pair, with the plugin of its Connection when it has one. */
+interface LinkRow {
   readonly id: number;
   readonly from_ref: string;
   readonly to_ref: string;
-  readonly claim_type: keyof typeof CLAIM_FIRMNESS;
+  readonly claim_type: ClaimType;
   readonly actor: string | null;
   readonly plugin_id: string | null;
   /** The URL or text key the claim came from. Empty for a claim with no evidence. */
   readonly evidence_key: string;
+  /** 1 when some person also claims the pair, whatever the firmest claim is. */
+  readonly has_person_claim: number;
 }
 
 /**
- * Builds the links from claims: a pair of peers appears once, in either
- * direction, under its firmest claim. Among claims of one type the oldest
- * wins. A claim names only its plugin or its actor, never the Connection. A
- * thing linked to itself is no link. The links come in the order of their
- * claims' ids.
+ * The SQL that ranks the claim types, 0 for the firmest. It is built from the
+ * one list of claim types, so the order cannot differ from the rest of the code.
  */
-export const pickFirmestLinks = (claims: ReadonlyArray<LinkClaimRow>): Array<EntityLink> => {
-  const firmest = new Map<string, LinkClaimRow>();
-  for (const claim of claims) {
-    if (claim.from_ref === claim.to_ref) continue;
-    const pair = [claim.from_ref, claim.to_ref].sort().join("\u0000");
-    const best = firmest.get(pair);
-    if (
-      best === undefined ||
-      CLAIM_FIRMNESS[claim.claim_type] < CLAIM_FIRMNESS[best.claim_type] ||
-      (claim.claim_type === best.claim_type && claim.id < best.id)
-    ) {
-      firmest.set(pair, claim);
-    }
-  }
-  return [...firmest.values()]
-    .sort((a, b) => a.id - b.id)
-    .map((claim) => ({
-      fromRef: claim.from_ref,
-      toRef: claim.to_ref,
-      claim: {
-        type: claim.claim_type,
-        ...(claim.plugin_id === null ? {} : { plugin: claim.plugin_id }),
-        ...(claim.actor === null ? {} : { actor: claim.actor }),
-        // Only a hint names its text. A source's evidence is a URL and stays on the server.
-        ...(claim.claim_type === "text" && claim.evidence_key !== ""
-          ? { evidenceKey: claim.evidence_key.slice(0, MAX_LINK_EVIDENCE_KEY_LENGTH) }
-          : {}),
-      },
-    }));
+const CLAIM_TYPE_RANK_SQL = `CASE t.claim_type ${CLAIM_TYPES_FIRMEST_FIRST.map(
+  (type, rank) => `WHEN '${type}' THEN ${rank}`,
+).join(" ")} END`;
+
+/** Converts a row of the links statement to a link. */
+const buildLink = (row: LinkRow): EntityLink => ({
+  fromRef: row.from_ref,
+  toRef: row.to_ref,
+  claim: {
+    type: row.claim_type,
+    ...(row.plugin_id === null ? {} : { plugin: row.plugin_id }),
+    ...(row.actor === null ? {} : { actor: row.actor }),
+    // Only a hint names its text. A source's evidence is a URL and stays on the server.
+    ...(row.claim_type === "text" && row.evidence_key !== ""
+      ? { evidenceKey: row.evidence_key }
+      : {}),
+  },
+  hasPersonClaim: row.has_person_claim === 1,
+});
+
+/**
+ * Reads the direct links of `refs`: every pair that has a current `linked`
+ * claim with one end in `refs`, once, under its firmest claim, in the order of
+ * that claim's id. Among claims of one type the oldest wins. A claim names only
+ * its plugin or its actor, never the Connection. A thing linked to itself is no
+ * link, and a pending target is no end. `hasPersonClaim` is true when a person
+ * also claims the pair, so the person's own claim can be removed even when a
+ * source's claim hides it.
+ *
+ * - With `limit`, the statement cuts the list, so rows past the limit are
+ *   never loaded. It returns at most `limit + 1` links, so the caller can
+ *   tell that more exist. Without it, every link is returned.
+ * - With `confirmedOnly`, a `text` claim is not read, so a pair that only a
+ *   hint reports has no link.
+ *
+ * One statement however many refs there are.
+ */
+export const readFirmestLinks = (
+  sql: SqlClient.SqlClient,
+  refs: ReadonlyArray<string>,
+  options: { readonly limit?: number; readonly confirmedOnly?: boolean } = {},
+): Effect.Effect<Array<EntityLink>, SqlError> => {
+  if (refs.length === 0) return Effect.succeed([]);
+  const refsJson = JSON.stringify(refs);
+  const claimTest = sql.literal(options.confirmedOnly ? EFFECTIVE_LINK_SQL : CURRENT_LINKED_SQL);
+  // SQLite reads a negative LIMIT as no limit at all.
+  const rowLimit = options.limit === undefined ? -1 : options.limit + 1;
+  // CROSS JOIN pins the order, so each ref seeks its claims by index. UNION
+  // drops the claim that both of its ends find when both are in `refs`.
+  return Effect.map(
+    sql<LinkRow>`
+      WITH touching AS (
+        SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
+        FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
+          ON c.from_ref = r.value AND ${claimTest}
+        WHERE c.from_ref <> c.to_ref
+        UNION
+        SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
+        FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
+          ON c.to_ref = r.value AND ${claimTest}
+        WHERE c.from_ref <> c.to_ref
+      ),
+      ranked AS (
+        SELECT t.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)
+            ORDER BY ${sql.literal(CLAIM_TYPE_RANK_SQL)}, t.id) AS pair_rank,
+          MAX(t.claim_type = 'person') OVER (
+            PARTITION BY min(t.from_ref, t.to_ref), max(t.from_ref, t.to_ref)) AS has_person_claim
+        FROM touching t
+      )
+      SELECT t.id, t.from_ref, t.to_ref, t.claim_type, t.actor, k.plugin_id, t.evidence_key,
+        t.has_person_claim
+      FROM ranked t LEFT JOIN connections k ON k.id = t.connection_id
+      WHERE t.pair_rank = 1
+      ORDER BY t.id
+      LIMIT ${rowLimit}`,
+    (rows) => rows.map(buildLink),
+  );
 };
 
 /** Returns the end of `link` that is not `ref`. */
@@ -109,7 +147,7 @@ export const readFarEnd = (link: EntityLink, ref: string): string =>
  * restricted: it keeps its kind and noun and shows no title, identifier,
  * status or change, and it is never the user's.
  */
-export const buildPeer = (
+const buildPeer = (
   row: EntityRow,
   observations: ReadonlyArray<Pick<ObservationRow, "access" | "owned_by_you">>,
   latestChange: EntityChange | undefined,
@@ -135,19 +173,13 @@ export const buildPeer = (
  * read it, so it is restricted like a record nobody can read now, with the
  * kind and noun of the active kind that owns its ref.
  */
-export const buildUnreadPeer = (ref: string, owner: ActiveEntityKind): EntityPeer => ({
+const buildUnreadPeer = (ref: string, owner: ActiveEntityKind): EntityPeer => ({
   ref,
   kind: owner.kind,
   noun: owner.noun,
   yours: false,
   restricted: true,
 });
-
-/** The cards and links that decide riding, read from the Inbox's population. */
-export interface RidingInputs {
-  readonly cards: ReadonlyArray<RidingCard>;
-  readonly links: ReadonlyArray<RidingLink>;
-}
 
 /**
  * Builds the reads of links. `readLatestChanges` is the timeline's read, so a
@@ -163,113 +195,15 @@ export const makeEntityLinkReads = (
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
   return {
-    /**
-     * Returns the direct links of `refs`: every pair that has a current
-     * `linked` claim with one end in `refs`, once, under its firmest claim,
-     * pending targets left out. One statement however many refs there are.
-     * With `confirmedOnly`, a `text` claim is not read, so a pair that only
-     * a hint reports has no link.
-     */
+    /** Returns the direct links of `refs` (see `readFirmestLinks` for the options). */
     readLinksOf: (
       refs: ReadonlyArray<string>,
-      options: { readonly confirmedOnly: boolean } = { confirmedOnly: false },
-    ): Effect.Effect<Array<EntityLink>, SqlError> => {
-      if (refs.length === 0) return Effect.succeed([]);
-      const claimTypes = sql.literal(options.confirmedOnly ? `AND ${CONFIRMED_CLAIMS_SQL}` : "");
-      // CROSS JOIN pins the order, so each ref seeks its claims by index.
-      return Effect.map(
-        sql<LinkClaimRow>`
-          SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id, c.evidence_key
-          FROM json_each(${refsJson(refs)}) r CROSS JOIN external_entity_relation_claims c
-            ON c.from_ref = r.value AND c.relation = 'linked' AND c.state = 'current'
-          LEFT JOIN connections k ON k.id = c.connection_id
-          WHERE ${sql.literal(IS_REF_TARGET_SQL)} ${claimTypes}
-          UNION ALL
-          SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id, c.evidence_key
-          FROM json_each(${refsJson(refs)}) r CROSS JOIN external_entity_relation_claims c
-            ON c.to_ref = r.value AND c.relation = 'linked' AND c.state = 'current'
-          LEFT JOIN connections k ON k.id = c.connection_id
-          WHERE c.from_ref <> c.to_ref ${claimTypes}`,
-        pickFirmestLinks,
-      );
-    },
-
-    /**
-     * Reads what decides riding over the whole Inbox: the cards that have a
-     * confirmed link (`source` or `person`) to a card of the other kind, and
-     * those links. A card with no such link can neither ride nor lead, so it
-     * is not read. `eligible` is the Inbox's membership, as the common table
-     * expressions that define `eligible`. One statement, whatever the number
-     * of cards.
-     */
-    readRidingInputs: (eligible: Statement.Fragment): Effect.Effect<RidingInputs, SqlError> =>
-      Effect.map(
-        sql<{
-          readonly from_ref: string;
-          readonly to_ref: string;
-          readonly claim_type: LinkClaimRow["claim_type"];
-          readonly from_card: "rich" | "compact";
-          readonly from_pace: "fast" | "slow";
-          readonly from_patience: number;
-          readonly from_waiting_since: string;
-          readonly from_has_task: number;
-          readonly to_card: "rich" | "compact";
-          readonly to_pace: "fast" | "slow";
-          readonly to_patience: number;
-          readonly to_waiting_since: string;
-          readonly to_has_task: number;
-        }>`
-          WITH ${eligible}
-          SELECT c.from_ref, c.to_ref, c.claim_type,
-            a.card AS from_card, a.pace AS from_pace,
-            a.patience AS from_patience,
-            COALESCE(a.waiting_since, a.concerned_since, a.first_observed_at) AS from_waiting_since,
-            a.task_id IS NOT NULL AS from_has_task,
-            b.card AS to_card, b.pace AS to_pace,
-            b.patience AS to_patience,
-            COALESCE(b.waiting_since, b.concerned_since, b.first_observed_at) AS to_waiting_since,
-            b.task_id IS NOT NULL AS to_has_task
-          FROM eligible a
-          JOIN external_entity_relation_claims c
-            ON c.from_ref = a.ref AND c.relation = 'linked' AND c.state = 'current'
-              AND ${sql.literal(CONFIRMED_CLAIMS_SQL)}
-          JOIN eligible b ON b.ref = c.to_ref
-          WHERE a.card <> b.card`,
-        (rows) => {
-          const cards = new Map<string, RidingCard>();
-          for (const row of rows) {
-            cards.set(row.from_ref, {
-              ref: row.from_ref,
-              card: row.from_card,
-              pace: row.from_pace,
-              patience: row.from_patience,
-              waitingSince: row.from_waiting_since,
-              hasTask: row.from_has_task === 1,
-            });
-            cards.set(row.to_ref, {
-              ref: row.to_ref,
-              card: row.to_card,
-              pace: row.to_pace,
-              patience: row.to_patience,
-              waitingSince: row.to_waiting_since,
-              hasTask: row.to_has_task === 1,
-            });
-          }
-          return {
-            cards: [...cards.values()],
-            links: rows.map((row) => ({
-              fromRef: row.from_ref,
-              toRef: row.to_ref,
-              claim: { type: row.claim_type },
-            })),
-          };
-        },
-      ),
+      options?: { readonly limit?: number; readonly confirmedOnly?: boolean },
+    ): Effect.Effect<Array<EntityLink>, SqlError> => readFirmestLinks(sql, refs, options),
 
     /**
      * Returns the things at the far end of links as peers, sorted by ref.
-     * `refs` are the far ends. A ref that is on the Inbox (`eligible` is its
-     * membership, as in `readRidingInputs`) is left out, it has a card.
+     * `refs` are the far ends. A ref in `onInbox` has a card and is left out.
      *
      * - A ref with a record is a peer built from it (`buildPeer`).
      * - A ref with no record was never read by any Connection. It is a
@@ -280,19 +214,17 @@ export const makeEntityLinkReads = (
      * changes.
      */
     listPeers: (
-      eligible: Statement.Fragment,
+      onInbox: ReadonlySet<string>,
       refs: ReadonlyArray<string>,
       kinds: ReadonlyArray<ActiveEntityKind> | undefined,
     ): Effect.Effect<Array<EntityPeer>, SqlError> =>
       Effect.gen(function* () {
         if (refs.length === 0) return [];
-        const rows = yield* sql<EntityRow & { readonly has_card: number }>`
-          WITH ${eligible}
-          SELECT e.*, EXISTS (SELECT 1 FROM eligible x WHERE x.ref = e.ref) AS has_card
-          FROM external_entities e
-          WHERE e.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`;
+        const rows = yield* sql<EntityRow>`
+          SELECT * FROM external_entities
+          WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`;
         const recordRefs = new Set(rows.map((row) => row.ref));
-        const records = rows.filter((row) => row.has_card === 0);
+        const records = rows.filter((row) => !onInbox.has(row.ref));
         const unread = refs.flatMap((ref) => {
           const owner = recordRefs.has(ref) ? undefined : findActiveKind(kinds, ref);
           return owner === undefined ? [] : [buildUnreadPeer(ref, owner)];
@@ -305,17 +237,9 @@ export const makeEntityLinkReads = (
                 SELECT ref, access, owned_by_you FROM external_entity_observations
                 WHERE ref IN (SELECT value FROM json_each(${refsJson(peerRefs)}))`;
         const latestChanges = yield* readLatestChanges(peerRefs, kinds);
-        const observationsByRef = new Map<
-          string,
-          Array<Pick<ObservationRow, "ref" | "access" | "owned_by_you">>
-        >();
-        for (const observation of observations) {
-          const group = observationsByRef.get(observation.ref);
-          if (group === undefined) observationsByRef.set(observation.ref, [observation]);
-          else group.push(observation);
-        }
+        const observationsByRef = Arr.groupBy(observations, (observation) => observation.ref);
         const peers = records.map((row) =>
-          buildPeer(row, observationsByRef.get(row.ref) ?? [], latestChanges.get(row.ref)),
+          buildPeer(row, observationsByRef[row.ref] ?? [], latestChanges.get(row.ref)),
         );
         return [...peers, ...unread].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
       }),
@@ -353,13 +277,11 @@ export const makeEntityLinkReads = (
           pairs(rich_ref, compact_ref) AS (
             SELECT c.from_ref, c.to_ref
             FROM board_links b CROSS JOIN external_entity_relation_claims c
-              ON c.from_ref = b.ref AND c.relation = 'linked' AND c.state = 'current'
-            WHERE ${sql.literal(CONFIRMED_CLAIMS_SQL)}
+              ON c.from_ref = b.ref AND ${sql.literal(EFFECTIVE_LINK_SQL)}
             UNION
             SELECT c.to_ref, c.from_ref
             FROM board_links b CROSS JOIN external_entity_relation_claims c
-              ON c.to_ref = b.ref AND c.relation = 'linked' AND c.state = 'current'
-            WHERE ${sql.literal(CONFIRMED_CLAIMS_SQL)}
+              ON c.to_ref = b.ref AND ${sql.literal(EFFECTIVE_LINK_SQL)}
           )
           SELECT lead.task_id AS lead_task_id, member.task_id AS member_task_id,
             MIN(compact.noun) AS noun

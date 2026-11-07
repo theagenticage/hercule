@@ -25,6 +25,10 @@ const PLACEHOLDER = /\{([A-Za-z0-9_-]+)\}/g;
 export const parseReasonTemplates = (text: string | null): ReasonTemplates | undefined =>
   text === null ? undefined : (JSON.parse(text) as ReasonTemplates);
 
+/** Returns the names of the `{name}` placeholders in `template`, in order, a repeated name once per use. */
+export const listPlaceholders = (template: string): ReadonlyArray<string> =>
+  Array.from(template.matchAll(PLACEHOLDER), (match) => match[1]!);
+
 /**
  * Fills each `{name}` of `template` from `facts`. Returns undefined when the
  * template names something `facts` does not hold, so the caller can fall back

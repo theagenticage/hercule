@@ -28,7 +28,7 @@ import {
 } from "@hercule/plugin-host";
 import { assertConnectionIngesting, canConnectionPoll, connectionRepository } from "../connections";
 import { announce, nowIso, withTransaction } from "../db";
-import type { EntityReporter, RecognizedClaimsByRef } from "../plugins";
+import type { EntityReporter, RecognizedClaimsByRef, StoredTextRevisions } from "../plugins";
 import { announceEntityChanges } from "./announce";
 import {
   buildConflictWarning,
@@ -36,6 +36,7 @@ import {
   decideConnectionWarning,
 } from "./connection-warning";
 import { isPendingTarget } from "./pending-target";
+import { relationClaimRepository } from "./relation-claims";
 import {
   externalEntityRepository,
   type EntityEnvironment,
@@ -247,6 +248,7 @@ export const prepareObservations = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* externalEntityRepository;
+  const claims = yield* relationClaimRepository;
   const connections = yield* connectionRepository;
 
   /**
@@ -415,6 +417,17 @@ const make = Effect.gen(function* () {
         });
         return true;
       }),
+
+    /**
+     * Returns the revisions that the stored `text` claims of the reporter's
+     * Connection were made from, for `refs` (see `readStoredTextRevisions` of
+     * the claims). The host reads them before it searches a text.
+     */
+    readStoredTextRevisions: (
+      reporter: EntityReporter,
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<StoredTextRevisions, SqlError> =>
+      claims.readStoredTextRevisions(reporter.connectionId, refs),
 
     /**
      * Returns up to `limit` refs of the unqualified kind that the Connection

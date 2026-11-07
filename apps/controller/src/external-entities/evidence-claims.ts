@@ -16,14 +16,15 @@
  * them in memory, and writes each kind of change in one statement. A poll that
  * repeats what is stored sends the same few statements for 3 refs as for 300.
  */
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
-import type { RecognizedClaims, RecognizedTarget } from "../plugins";
+import type { RecognizedClaims, RecognizedTarget, StoredTextRevisions } from "../plugins";
 import { encodePendingTarget, isPendingTarget } from "./pending-target";
-import type { NewLink } from "./claim-sql";
+import { buildPairKey, type NewLink } from "./claim-sql";
 
 /** What one observation reports as evidence, with what the plugins recognized in it. */
 export interface EvidenceEntry {
@@ -36,6 +37,12 @@ export interface EvidenceEntry {
   readonly texts: EntityObservation["texts"];
   /** Absent when nothing was recognized, as when the call came from a test or from the core itself. */
   readonly recognized: RecognizedClaims | undefined;
+  /**
+   * True when the thing was not yet a full record before this write. What it
+   * reports now is part of what it arrived with, so no pair it joins is news
+   * (see `NewLink`), however late a pending claim of it resolves.
+   */
+  readonly inBaseline: boolean;
 }
 
 /** What `applyEvidenceClaims` changed. */
@@ -46,7 +53,7 @@ export interface EvidenceWrite {
    * ref and a claim that holds one draws nothing, so it is not listed.
    */
   readonly changedRefs: ReadonlyArray<string>;
-  /** The pairs that an added `source` claim joined for the first time. */
+  /** The pairs that an added `source` claim joined for the first time, leaving out those of a thing's baseline. */
   readonly newLinks: ReadonlyArray<NewLink>;
 }
 
@@ -74,6 +81,8 @@ interface NewClaim {
   readonly evidenceKey: string;
   readonly revision: string | null;
   readonly recognizedAs: string | null;
+  /** Whether the claim belongs to its thing's first full baseline (see `EvidenceEntry.inBaseline`). */
+  readonly inBaseline: boolean;
 }
 
 /** The difference between what one write reports and what is stored, before anything is written. */
@@ -96,26 +105,7 @@ interface EvidencePlan {
  */
 const buildStoredTarget = (fromRef: string, target: RecognizedTarget): string | undefined => {
   if (target.recognized === "ref") return target.ref === fromRef ? undefined : target.ref;
-  return encodePendingTarget({
-    form: "scoped",
-    pluginId: target.pluginId,
-    ...(target.kind === undefined ? {} : { kind: target.kind }),
-    ...(target.scopeHint === undefined ? {} : { scopeHint: target.scopeHint }),
-    identifier: target.identifier,
-  });
-};
-
-/** Groups rows by their `from_ref`. */
-const groupByFromRef = <Row extends { readonly from_ref: string }>(
-  rows: ReadonlyArray<Row>,
-): Map<string, Array<Row>> => {
-  const groups = new Map<string, Array<Row>>();
-  for (const row of rows) {
-    const group = groups.get(row.from_ref) ?? [];
-    group.push(row);
-    groups.set(row.from_ref, group);
-  }
-  return groups;
+  return encodePendingTarget({ ...target, form: "scoped" });
 };
 
 /**
@@ -168,6 +158,7 @@ const planUrls = (
       evidenceKey: url,
       revision: observedRevision ?? null,
       recognizedAs: null,
+      inBaseline: entry.inBaseline,
     });
   }
 
@@ -188,7 +179,8 @@ const planUrls = (
  *
  * - A text whose `revision` equals the revision its stored claims were made
  *   from is skipped: nothing changed, and the plugins that recognized it
- *   may be disabled now.
+ *   may be disabled now. So is a text the host did not search for the same
+ *   reason (its recognized entry has no `targets`).
  * - A stored claim is matched by what the text said (`recognized_as`), not by
  *   its target, so a claim the resolver already rewrote to a ref keeps its id
  *   and time while its text still says the same.
@@ -202,17 +194,17 @@ const planTexts = (
   plan: EvidencePlan,
 ): void => {
   const { fromRef } = entry;
-  const storedByKey = new Map<string, Array<StoredTextClaim>>();
-  for (const row of stored) {
-    const group = storedByKey.get(row.evidence_key) ?? [];
-    group.push(row);
-    storedByKey.set(row.evidence_key, group);
-  }
+  const storedByKey = Arr.groupBy(stored, (row) => row.evidence_key);
   const seen = new Set<string>();
   for (const text of entry.texts ?? []) {
     if (seen.has(text.evidenceKey)) continue;
     seen.add(text.evidenceKey);
-    const storedForKey = storedByKey.get(text.evidenceKey) ?? [];
+    const recognized = entry.recognized?.texts.find(
+      (candidate) => candidate.evidenceKey === text.evidenceKey,
+    );
+    // The host did not search this text because its claims were made from the same revision.
+    if (recognized !== undefined && recognized.targets === undefined) continue;
+    const storedForKey = storedByKey[text.evidenceKey] ?? [];
     const revision = text.revision;
     if (
       revision !== undefined &&
@@ -223,9 +215,6 @@ const planTexts = (
     }
 
     const desired = new Set<string>();
-    const recognized = entry.recognized?.texts.find(
-      (candidate) => candidate.evidenceKey === text.evidenceKey,
-    );
     for (const target of recognized?.targets ?? []) {
       const toRef = buildStoredTarget(fromRef, target);
       if (toRef !== undefined) desired.add(toRef);
@@ -244,6 +233,7 @@ const planTexts = (
         evidenceKey: text.evidenceKey,
         revision: revision ?? null,
         recognizedAs: toRef,
+        inBaseline: entry.inBaseline,
       });
     }
     for (const row of storedForKey) {
@@ -253,12 +243,12 @@ const planTexts = (
   }
 };
 
-/** Builds the writer of evidence claims. Needs the database and the question "does a pair already join". */
+/** Builds the writer of evidence claims. Needs the database and the question "which of these pairs already join". */
 export const makeEvidenceClaims = (input: {
   readonly sql: SqlClient.SqlClient;
-  readonly hasEffectiveLink: (a: string, b: string) => Effect.Effect<boolean, SqlError>;
+  readonly listJoinedPairs: (pairs: ReadonlyArray<NewLink>) => Effect.Effect<Set<string>, SqlError>;
 }) => {
-  const { sql, hasEffectiveLink } = input;
+  const { sql, listJoinedPairs } = input;
 
   /** Reads the stored `source` address claims of `refs` from one Connection, in one statement. */
   const readStoredUrlClaims = (connectionId: Uint8Array, refs: ReadonlyArray<string>) =>
@@ -283,6 +273,41 @@ export const makeEvidenceClaims = (input: {
             AND claim_type = 'text'`;
 
   return {
+    /**
+     * Returns the revision that the stored `text` claims of one Connection were
+     * made from, for each of `refs` and each evidence key, in one statement.
+     * A key is left out when it has no claim, when one of its claims has no
+     * revision, or when its claims were made from different revisions.
+     */
+    readStoredTextRevisions: (
+      connectionId: string,
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<StoredTextRevisions, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly from_ref: string;
+          readonly evidence_key: string;
+          readonly revision: string;
+        }>`
+          SELECT from_ref, evidence_key, MIN(observed_revision) AS revision
+          FROM external_entity_relation_claims
+          WHERE from_ref IN (SELECT value FROM json_each(${JSON.stringify(refs)}))
+            AND relation = 'linked' AND connection_id = ${uuidFromString(connectionId)}
+            AND claim_type = 'text'
+          GROUP BY from_ref, evidence_key
+          HAVING COUNT(*) = COUNT(observed_revision)
+            AND MIN(observed_revision) = MAX(observed_revision)`,
+        (rows) => {
+          const byRef = new Map<string, Map<string, string>>();
+          for (const row of rows) {
+            const keys = byRef.get(row.from_ref) ?? new Map<string, string>();
+            keys.set(row.evidence_key, row.revision);
+            byRef.set(row.from_ref, keys);
+          }
+          return byRef;
+        },
+      ),
+
     /**
      * Writes the evidence claims of several observations from one Connection,
      * in the caller's transaction, and returns the refs they changed and the
@@ -311,17 +336,19 @@ export const makeEvidenceClaims = (input: {
         const { now } = args;
         const urlEntries = args.entries.filter((entry) => entry.relations !== undefined);
         const textEntries = args.entries.filter((entry) => (entry.texts?.length ?? 0) > 0);
-        const storedUrls = groupByFromRef(
+        const storedUrls = Arr.groupBy(
           yield* readStoredUrlClaims(
             connectionId,
             urlEntries.map((entry) => entry.fromRef),
           ),
+          (row) => row.from_ref,
         );
-        const storedTexts = groupByFromRef(
+        const storedTexts = Arr.groupBy(
           yield* readStoredTextClaims(
             connectionId,
             textEntries.map((entry) => entry.fromRef),
           ),
+          (row) => row.from_ref,
         );
 
         const plan: EvidencePlan = {
@@ -331,10 +358,10 @@ export const makeEvidenceClaims = (input: {
           revisionUpdates: [],
         };
         for (const entry of urlEntries) {
-          planUrls(entry, storedUrls.get(entry.fromRef) ?? [], plan);
+          planUrls(entry, storedUrls[entry.fromRef] ?? [], plan);
         }
         for (const entry of textEntries) {
-          planTexts(entry, storedTexts.get(entry.fromRef) ?? [], plan);
+          planTexts(entry, storedTexts[entry.fromRef] ?? [], plan);
         }
 
         const changed = new Set<string>();
@@ -350,18 +377,20 @@ export const makeEvidenceClaims = (input: {
           changed.add(claim.toRef);
         }
 
-        // The pairs this write adds, so that two entries that report each
-        // other join the pair once, as when they were written one by one.
-        const addedPairs = new Set<string>();
-        for (const claim of plan.urlClaims) {
-          if (isPendingTarget(claim.toRef)) continue;
-          const pairKey = JSON.stringify([claim.fromRef, claim.toRef].sort());
-          const wasLinked =
-            addedPairs.has(pairKey) || (yield* hasEffectiveLink(claim.fromRef, claim.toRef));
-          addedPairs.add(pairKey);
+        // Which of the added pairs already join, read once for the whole write
+        // and before any claim is added. Two entries that report each other
+        // join the pair once: the first one adds it to `joined`.
+        const newPairs = plan.urlClaims.filter((claim) => !isPendingTarget(claim.toRef));
+        const joined = yield* listJoinedPairs(newPairs);
+        for (const claim of newPairs) {
+          const pairKey = buildPairKey(claim.fromRef, claim.toRef);
+          const wasJoined = joined.has(pairKey);
+          joined.add(pairKey);
           changed.add(claim.fromRef);
           changed.add(claim.toRef);
-          if (!wasLinked) newLinks.push({ fromRef: claim.fromRef, toRef: claim.toRef });
+          if (!wasJoined && !claim.inBaseline) {
+            newLinks.push({ fromRef: claim.fromRef, toRef: claim.toRef });
+          }
         }
         for (const claim of plan.textClaims) {
           if (isPendingTarget(claim.toRef)) continue;
@@ -373,10 +402,11 @@ export const makeEvidenceClaims = (input: {
           yield* sql`
             INSERT INTO external_entity_relation_claims
               (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-               observed_revision, recognized_as, state, conflict_reason, observed_at)
+               observed_revision, recognized_as, state, conflict_reason, observed_at, in_baseline)
             SELECT json_extract(value, '$.fromRef'), 'linked', json_extract(value, '$.toRef'),
                    'source', ${connectionId}, NULL, json_extract(value, '$.evidenceKey'),
-                   json_extract(value, '$.revision'), NULL, 'current', NULL, ${now}
+                   json_extract(value, '$.revision'), NULL, 'current', NULL, ${now},
+                   json_extract(value, '$.inBaseline')
             FROM json_each(${JSON.stringify(plan.urlClaims)})`;
         }
         if (plan.textClaims.length > 0) {
@@ -386,11 +416,11 @@ export const makeEvidenceClaims = (input: {
           yield* sql`
             INSERT OR IGNORE INTO external_entity_relation_claims
               (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-               observed_revision, recognized_as, state, conflict_reason, observed_at)
+               observed_revision, recognized_as, state, conflict_reason, observed_at, in_baseline)
             SELECT json_extract(value, '$.fromRef'), 'linked', json_extract(value, '$.toRef'),
                    'text', ${connectionId}, NULL, json_extract(value, '$.evidenceKey'),
                    json_extract(value, '$.revision'), json_extract(value, '$.recognizedAs'),
-                   'current', NULL, ${now}
+                   'current', NULL, ${now}, json_extract(value, '$.inBaseline')
             FROM json_each(${JSON.stringify(plan.textClaims)})`;
         }
         if (plan.revisionUpdates.length > 0) {

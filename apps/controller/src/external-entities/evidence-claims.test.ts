@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { uuidFromString } from "../db";
+import { mintUuid, uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import type { RecognizedClaims, RecognizedTarget } from "../plugins";
 import { encodePendingTarget } from "./pending-target";
@@ -27,6 +27,9 @@ const LATER = "2026-01-02T00:00:00.000Z";
 const TICKET = "acme-tracker:ticket:T-1";
 const CHANGE = "acme-forge:change:7";
 const OTHER_CHANGE = "acme-forge:change:8";
+
+/** More links than any test here writes, so a read is never cut. */
+const NO_CUT = 100;
 
 const TRACKER_ACCOUNT = "0190c000-0000-7000-8000-0000000000d1";
 const OTHER_TRACKER_ACCOUNT = "0190c000-0000-7000-8000-0000000000d2";
@@ -86,6 +89,8 @@ interface Report {
   readonly urls?: ReadonlyArray<string>;
   readonly texts?: ReadonlyArray<{ evidenceKey: string; text: string; revision?: string }>;
   readonly recognized?: RecognizedClaims;
+  /** Whether the thing was not yet a full record before this report. */
+  readonly inBaseline?: boolean;
   readonly now?: string;
 }
 
@@ -103,6 +108,7 @@ const report = (claims: Claims, input: Report) =>
         texts: input.texts,
         recognized: input.recognized,
         observedRevision: undefined,
+        inBaseline: input.inBaseline ?? false,
       },
     ],
     now: input.now ?? AT,
@@ -133,6 +139,13 @@ const readStored = (sql: SqlClient.SqlClient, fromRef = TICKET) =>
   sql<StoredClaim>`
     SELECT id, from_ref, to_ref, claim_type, evidence_key, observed_revision, observed_at, is_pending
     FROM external_entity_relation_claims WHERE from_ref = ${fromRef} ORDER BY id`;
+
+/** Inserts the least a record needs, so that a person can link from its ref. */
+const insertEntity = (sql: SqlClient.SqlClient, ref: string) =>
+  sql`INSERT INTO external_entities
+    (id, ref, kind, noun, completeness, title, first_observed_at, updated_at)
+    VALUES (${mintUuid()}, ${ref},
+            'acme-tracker/ticket', 'Ticket', 'full', 'A ticket', ${AT}, ${AT})`;
 
 describe("a web address a source reports", () => {
   it("becomes a source claim at once: a ref for a thing a plugin names, a pending target for the rest", async () => {
@@ -237,12 +250,12 @@ describe("a web address a source reports", () => {
           recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
         });
         const pending = {
-          detail: yield* claims.readClaimsFor(TICKET),
+          detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
           joined: yield* claims.hasEffectiveLink(TICKET, PENDING_OPS_47),
         };
         yield* sql`UPDATE external_entity_relation_claims SET to_ref = ${OTHER_CHANGE}`;
         const resolved = {
-          detail: yield* claims.readClaimsFor(TICKET),
+          detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
           joined: yield* claims.hasEffectiveLink(TICKET, OTHER_CHANGE),
         };
         return { pending, resolved };
@@ -413,6 +426,7 @@ describe("a poll that repeats what is stored", () => {
               texts: [{ evidenceKey: "description", targets: namesAThing ? [asOtherChange] : [] }],
             },
             observedRevision: "v1",
+            inBaseline: false,
           };
         });
         yield* claims.applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT });
@@ -452,6 +466,8 @@ describe("a person's link", () => {
   it("is one claim for a pair in either direction, and unlink removes only the person's claim", async () => {
     const result = await run((claims, sql) =>
       Effect.gen(function* () {
+        yield* insertEntity(sql, TICKET);
+        yield* insertEntity(sql, CHANGE);
         yield* report(claims, {
           urls: [CHANGE_URL],
           recognized: recognizedUrls([CHANGE_URL, asChange]),
@@ -492,13 +508,9 @@ describe("a person's link", () => {
       }),
     );
 
-    // The source already joined the pair, so the person's claim is no new link.
-    expect(result.added).toEqual({ added: true, newLink: undefined });
-    expect(result.repeated.added).toBe(false);
-    expect(result.unread.newLink).toEqual({
-      fromRef: TICKET,
-      toRef: "acme-forge:change:never-read",
-    });
+    expect(result.added).toBe("added");
+    expect(result.repeated).toBe("already-linked");
+    expect(result.unread).toBe("added");
     expect(result.removed).toEqual({ removed: true, remaining: "source" });
     expect(result.again).toEqual({ removed: false, remaining: "source" });
     expect(result.unreadRemoved).toEqual({ removed: true });
@@ -506,8 +518,9 @@ describe("a person's link", () => {
   });
 
   it("reports the hint that is left", async () => {
-    const result = await run((claims) =>
+    const result = await run((claims, sql) =>
       Effect.gen(function* () {
+        yield* insertEntity(sql, TICKET);
         yield* report(claims, {
           texts: [{ evidenceKey: "description", text: "x" }],
           recognized: { urls: [], texts: [{ evidenceKey: "description", targets: [asChange] }] },
@@ -518,5 +531,129 @@ describe("a person's link", () => {
     );
 
     expect(result).toEqual({ removed: true, remaining: "text" });
+  });
+});
+
+describe("what a write reads and records about the thing's baseline", () => {
+  it("asks which of the added pairs already join in one statement, however many are added", async () => {
+    const countJoinQuestions = (count: number) =>
+      run((claims) =>
+        Effect.gen(function* () {
+          const entries = Array.from({ length: count }, (_, index) => ({
+            fromRef: `acme-tracker:ticket:N-${index}`,
+            relations: { complete: true, linkedUrls: [CHANGE_URL] },
+            texts: undefined,
+            recognized: recognizedUrls([CHANGE_URL, asChange]),
+            observedRevision: undefined,
+            inBaseline: false,
+          }));
+          const statements: Array<string> = [];
+          const write = yield* claims
+            .applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT })
+            .pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile()[0]);
+                  return statement;
+                }),
+              ),
+            );
+          return {
+            questions: statements.filter((statement) => statement.includes("EXISTS")).length,
+            newLinks: write.newLinks.length,
+          };
+        }),
+      );
+
+    expect(await countJoinQuestions(2)).toEqual({ questions: 1, newLinks: 2 });
+    expect(await countJoinQuestions(40)).toEqual({ questions: 1, newLinks: 40 });
+  });
+
+  it("records a claim of a thing that was not yet a full record as its baseline, and reports no new link", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const write = yield* report(claims, {
+          urls: [SCOPED_URL, CHANGE_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47], [CHANGE_URL, asChange]),
+          inBaseline: true,
+        });
+        const later = yield* report(claims, {
+          connectionId: OTHER_TRACKER_ACCOUNT,
+          urls: [SCOPED_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
+        });
+        const flags = yield* sql<{
+          readonly connection_id: Uint8Array;
+          readonly in_baseline: number;
+        }>`
+          SELECT connection_id, in_baseline FROM external_entity_relation_claims ORDER BY id`;
+        return { write, later, flags: flags.map((row) => row.in_baseline) };
+      }),
+    );
+
+    expect(result.write.newLinks).toEqual([]);
+    expect(result.write.changedRefs).toEqual([TICKET, CHANGE].sort());
+    expect(result.flags).toEqual([1, 1, 0]);
+  });
+});
+
+describe("the revisions the stored texts were made from", () => {
+  const text = (revision: string) => ({ evidenceKey: "description", text: "x", revision });
+  const named = (key: string, revision: string, target: RecognizedTarget) => ({
+    texts: [{ evidenceKey: key, text: "x", revision }],
+    recognized: { urls: [], texts: [{ evidenceKey: key, revision, targets: [target] }] },
+  });
+
+  it("lists a key only when all of its claims share one revision", async () => {
+    const result = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, named("description", "r1", asChange));
+        yield* report(claims, {
+          texts: [{ evidenceKey: "notes", text: "y", revision: "n1" }],
+          recognized: {
+            urls: [],
+            texts: [{ evidenceKey: "notes", revision: "n1", targets: [asChange, asOtherChange] }],
+          },
+        });
+        yield* report(claims, {
+          texts: [{ evidenceKey: "bare", text: "z" }],
+          recognized: {
+            urls: [],
+            texts: [{ evidenceKey: "bare", targets: [asChange] }],
+          },
+        });
+        const stored = yield* claims.readStoredTextRevisions(TRACKER_ACCOUNT, [
+          TICKET,
+          "other:x:1",
+        ]);
+        const otherConnection = yield* claims.readStoredTextRevisions(OTHER_TRACKER_ACCOUNT, [
+          TICKET,
+        ]);
+        return { stored: [...(stored.get(TICKET) ?? [])], otherConnection: otherConnection.size };
+      }),
+    );
+
+    expect(result.stored.sort()).toEqual([
+      ["description", "r1"],
+      ["notes", "n1"],
+    ]);
+    expect(result.otherConnection).toBe(0);
+  });
+
+  it("leaves the claims of a text alone when the host did not search it", async () => {
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, named("description", "r1", asChange));
+        // Same revision, nothing recognized: the host skipped the search.
+        yield* report(claims, {
+          texts: [text("r1")],
+          recognized: { urls: [], texts: [{ evidenceKey: "description", revision: "r1" }] },
+          now: LATER,
+        });
+        return yield* readStored(sql);
+      }),
+    );
+
+    expect(rows.map((row) => [row.to_ref, row.observed_revision])).toEqual([[CHANGE, "r1"]]);
   });
 });

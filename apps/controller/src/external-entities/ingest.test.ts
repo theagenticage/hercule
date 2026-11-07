@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Layer } from "effect";
+import type { Signal } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   MAX_ENTITY_OBSERVATIONS,
@@ -20,6 +21,7 @@ import { ConnectionNotIngesting } from "../connections";
 import { uuidFromString, uuidToString } from "../db";
 import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import type { EntityReporter } from "../plugins";
+import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
 import type { FullEntityObservation } from "./slots";
@@ -525,5 +527,85 @@ describe("the Connection's warning", () => {
       }),
     );
     expect(warning).toContain("part of itself");
+  });
+});
+
+describe("the signals a new work record puts in front of Intake", () => {
+  const AT = "2026-03-01T00:01:00.000Z";
+
+  /** Raises a signal from an event on the thread `threadRef` and returns its id. */
+  const raiseSignal = (id: string, threadRef: string, status: "open" | "resolved" = "open") =>
+    Effect.gen(function* () {
+      const signals = yield* signalRepository;
+      const signal: Signal = {
+        id,
+        kind: "acme-tracker/mentioned",
+        origin: { type: "event", eventId: 1, connectionId: CONNECTION, threadRef },
+        title: "Marta mentioned you",
+        priority: "normal",
+        blocks: [],
+        actions: [],
+        match: {},
+        status,
+        ...(status === "resolved"
+          ? {
+              resolution: {
+                kind: "decided" as const,
+                actionId: "done",
+                outcome: "Marked done",
+                actor: "user" as const,
+                origin: "web",
+                at: AT,
+              },
+            }
+          : {}),
+        createdAt: AT,
+      };
+      yield* inTransaction(signals.insert(signal, []));
+    });
+
+  const SIGNAL_A = "0199e0e7-0005-7000-8000-000000000001";
+  const SIGNAL_B = "0199e0e7-0005-7000-8000-000000000002";
+  const SIGNAL_DONE = "0199e0e7-0005-7000-8000-000000000003";
+  const SIGNAL_ELSEWHERE = "0199e0e7-0005-7000-8000-000000000004";
+
+  const signalPushes = (announced: ReadonlyArray<unknown>) =>
+    announced
+      .filter((change) => (change as { topic?: string }).topic === "signal")
+      .map((change) => (change as { id: string }).id)
+      .sort();
+
+  it("announces the open signals of a ref when a poll creates its full record, and nothing when the poll repeats", async () => {
+    const result = await run(({ ingest, announced }) =>
+      Effect.gen(function* () {
+        yield* raiseSignal(SIGNAL_A, ticketRef("a"));
+        yield* raiseSignal(SIGNAL_B, ticketRef("a"));
+        yield* raiseSignal(SIGNAL_DONE, ticketRef("a"), "resolved");
+        yield* raiseSignal(SIGNAL_ELSEWHERE, ticketRef("other"));
+        yield* ingest.reconcile(reporter, complete([ticket("a")]));
+        const first = signalPushes(announced);
+        yield* ingest.reconcile(reporter, complete([ticket("a")]));
+        yield* ingest.reconcile(reporter, complete([ticket("a", { title: "Renamed" })]));
+        return { first, afterRepeat: signalPushes(announced) };
+      }),
+    );
+    expect(result.first).toEqual([SIGNAL_A, SIGNAL_B]);
+    expect(result.afterRepeat).toEqual([SIGNAL_A, SIGNAL_B]);
+  });
+
+  it("announces them when a partial record becomes full", async () => {
+    const result = await run(({ ingest, announced }) =>
+      Effect.gen(function* () {
+        yield* raiseSignal(SIGNAL_A, ticketRef("a"));
+        yield* ingest.refresh(reporter, [
+          { kind: "ticket", ref: ticketRef("a"), title: "Ticket a", partial: true },
+        ]);
+        const whilePartial = signalPushes(announced);
+        yield* ingest.refresh(reporter, [ticket("a")]);
+        return { whilePartial, whenFull: signalPushes(announced) };
+      }),
+    );
+    expect(result.whilePartial).toEqual([]);
+    expect(result.whenFull).toEqual([SIGNAL_A]);
   });
 });

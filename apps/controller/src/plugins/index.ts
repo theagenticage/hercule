@@ -29,8 +29,11 @@ export {
   type RecognizedClaims,
   type RecognizedClaimsByRef,
   type RecognizedTarget,
+  type ScopedTarget,
+  type StoredTextRevisions,
 } from "./entity-observations";
-export { type PluginRecognition } from "./entity-recognition";
+export { buildRecognizedTarget } from "./claim-recognition";
+export { buildScopedRecognition, type PluginRecognition } from "./entity-recognition";
 export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";

@@ -131,6 +131,17 @@ export interface ActiveEntityKind {
   readonly refPrefix: string;
 }
 
+/** Builds the active kind of a plugin's declaration of an entity kind. */
+export const buildActiveEntityKind = (declaration: {
+  readonly word: string;
+  readonly noun: string;
+  readonly refPrefix: string;
+}): ActiveEntityKind => ({
+  kind: declaration.word,
+  noun: declaration.noun,
+  refPrefix: declaration.refPrefix,
+});
+
 /** Returns the active kind that owns `ref`, or undefined when no active kind's `refPrefix` starts it. */
 export const findActiveKind = (
   kinds: ReadonlyArray<ActiveEntityKind> | undefined,

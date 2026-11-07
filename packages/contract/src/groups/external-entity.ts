@@ -15,6 +15,7 @@
 import {
   ENTITY_CONCERNS,
   EntityRepository,
+  MAX_ENTITY_EVIDENCE_KEY_LENGTH,
   MAX_ENTITY_FACTS,
   PluginId,
 } from "@hercule/plugin-host";
@@ -43,6 +44,7 @@ import {
 } from "./entity-context";
 import {
   MAX_SIGNAL_ASKER_LENGTH,
+  MAX_SIGNAL_OUTCOME_LENGTH,
   MAX_SIGNAL_TITLE_LENGTH,
   SignalKind,
   SignalStatus,
@@ -200,8 +202,14 @@ export const EntityLink = Schema.Struct({
      * `text` claim only, so a client can say "The description of #6263". A
      * `source` claim never carries one: the URL it came from stays on the server.
      */
-    evidenceKey: Schema.optionalKey(bounded(1, 128)),
+    evidenceKey: Schema.optionalKey(bounded(1, MAX_ENTITY_EVIDENCE_KEY_LENGTH)),
   }),
+  /**
+   * True when a person also claims this pair (`externalEntity.link`), whatever
+   * the firmest claim is. A source's claim hides the person's one in `claim`,
+   * but the person can still remove theirs, and a client offers it from this.
+   */
+  hasPersonClaim: Schema.Boolean,
 });
 
 export type EntityLink = Schema.Schema.Type<typeof EntityLink>;
@@ -225,7 +233,7 @@ export const EntitySignalLine = Schema.Struct({
    */
   say: EntityReason,
   /** `resolution.outcome`, when the signal has ended. */
-  outcome: Schema.optionalKey(Schema.String),
+  outcome: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH))),
   /** True while the signal is snoozed. */
   snoozed: Schema.Boolean,
 });

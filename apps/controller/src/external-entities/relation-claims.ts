@@ -11,6 +11,7 @@
  * read entities, does not decide who may write, and does not announce
  * anything. Write methods join the caller's transaction.
  */
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -24,10 +25,10 @@ import {
 } from "@hercule/contract";
 import type { EntityObservationRelations } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
-import { CURRENT_LINKED_SQL, EFFECTIVE_LINK_SQL, type NewLink } from "./claim-sql";
+import { buildPairKey, EFFECTIVE_LINK_SQL, type NewLink } from "./claim-sql";
 import { makeEvidenceClaims } from "./evidence-claims";
 import { makePersonLinks } from "./person-links";
-import { IS_REF_TARGET_SQL, pickFirmestLinks, type LinkClaimRow } from "./entity-links";
+import { readFirmestLinks } from "./entity-links";
 
 /** The relations one observation reports (see `EntityObservationRelations`). */
 type ObservedRelations = Schema.Schema.Type<typeof EntityObservationRelations>;
@@ -138,16 +139,34 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns true when a current claim of a source or a person links the two
-   * refs, in either direction. A text claim and a pending target do not count.
+   * Returns the keys (see `buildPairKey`) of those `pairs` that a current claim
+   * of a source or a person already links, in either direction, in one
+   * statement however many pairs there are. A text claim and a pending target
+   * do not count.
    */
+  const listJoinedPairs = (pairs: ReadonlyArray<NewLink>): Effect.Effect<Set<string>, SqlError> =>
+    pairs.length === 0
+      ? Effect.succeed(new Set())
+      : Effect.map(
+          sql<{ readonly a: string; readonly b: string }>`
+            WITH pairs(a, b) AS (
+              SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+              FROM json_each(${JSON.stringify(pairs.map(({ fromRef, toRef }) => [fromRef, toRef]))})
+            )
+            SELECT p.a, p.b FROM pairs p
+            WHERE EXISTS (
+              SELECT 1 FROM external_entity_relation_claims c
+              WHERE ${sql.literal(EFFECTIVE_LINK_SQL)}
+                AND ((c.from_ref = p.a AND c.to_ref = p.b) OR (c.from_ref = p.b AND c.to_ref = p.a))
+            )`,
+          (rows) => new Set(rows.map((row) => buildPairKey(row.a, row.b))),
+        );
+
+  /** Returns true when a current claim of a source or a person links the two refs, in either direction. */
   const hasEffectiveLink = (a: string, b: string): Effect.Effect<boolean, SqlError> =>
-    sql<{ readonly found: number }>`
-      SELECT EXISTS (
-        SELECT 1 FROM external_entity_relation_claims c
-        WHERE ${sql.literal(EFFECTIVE_LINK_SQL)}
-          AND ((c.from_ref = ${a} AND c.to_ref = ${b}) OR (c.from_ref = ${b} AND c.to_ref = ${a}))
-      ) AS found`.pipe(Effect.map((rows) => rows[0]?.found === 1));
+    Effect.map(listJoinedPairs([{ fromRef: a, toRef: b }]), (joined) =>
+      joined.has(buildPairKey(a, b)),
+    );
 
   /** Returns `refs` and every ref below them, sorted. Never cut. */
   const listRefsBelow = (
@@ -165,8 +184,8 @@ const make = Effect.gen(function* () {
 
   return {
     hasEffectiveLink,
-    ...makeEvidenceClaims({ sql, hasEffectiveLink }),
-    ...makePersonLinks({ sql, hasEffectiveLink }),
+    ...makeEvidenceClaims({ sql, listJoinedPairs }),
+    ...makePersonLinks({ sql }),
 
     /**
      * Writes the relations one Connection reports for several refs at once, as
@@ -198,6 +217,8 @@ const make = Effect.gen(function* () {
         readonly fromRef: string;
         readonly relations: ObservedRelations;
         readonly observedRevision: string | undefined;
+        /** True when the thing was not yet a full record before this write (see `EvidenceEntry.inBaseline`). */
+        readonly inBaseline: boolean;
       }>;
       readonly now: string;
     }): Effect.Effect<
@@ -210,7 +231,7 @@ const make = Effect.gen(function* () {
         readonly refsBelowBefore: ReadonlyArray<string>;
         /** The far ends of the `linked` claims added or removed, sorted: their cards changed too. */
         readonly linkedPeers: ReadonlyArray<string>;
-        /** The pairs that this write joined for the first time (see `NewLink`). */
+        /** The pairs that this write joined for the first time, leaving out those of a thing's baseline (see `NewLink`). */
         readonly newLinks: ReadonlyArray<NewLink>;
       },
       SqlError
@@ -230,17 +251,12 @@ const make = Effect.gen(function* () {
             AND connection_id = ${connectionId}
             AND claim_type = 'source' AND evidence_key = ''`;
 
-        const storedByRef = new Map<string, Array<StoredClaimRow>>();
-        for (const row of storedRows) {
-          const group = storedByRef.get(row.from_ref) ?? [];
-          group.push(row);
-          storedByRef.set(row.from_ref, group);
-        }
+        const storedByRef = Arr.groupBy(storedRows, (row) => row.from_ref);
 
         // First work out the whole difference, so that no write depends on
         // which ref was handled first.
         const plans = entries.map((entry) => {
-          const stored = storedByRef.get(entry.fromRef) ?? [];
+          const stored = storedByRef[entry.fromRef] ?? [];
           const storedKeys = new Set(stored.map((row) => buildClaimKey(row.relation, row.to_ref)));
           const desired = new Map<string, { relation: Relation; toRef: string }>();
           for (const toRef of entry.relations.partOf) {
@@ -280,8 +296,13 @@ const make = Effect.gen(function* () {
               a.relation.localeCompare(b.relation) ||
               a.toRef.localeCompare(b.toRef),
           );
-        const revisionByRef = new Map(
-          entries.map((entry) => [entry.fromRef, entry.observedRevision]),
+        const entryByRef = new Map(entries.map((entry) => [entry.fromRef, entry]));
+        // Which of the added pairs already join, read once and before any claim
+        // is added. A pair added twice in one batch is a new link once.
+        const joined = yield* listJoinedPairs(
+          additions.filter(
+            ({ relation, fromRef, toRef }) => relation === "linked" && fromRef !== toRef,
+          ),
         );
         const refusedByRef = new Map<string, Array<EntityConflict>>();
         const newLinks: Array<NewLink> = [];
@@ -292,8 +313,9 @@ const make = Effect.gen(function* () {
         );
         for (const { fromRef, relation, toRef } of additions) {
           if (relation === "linked") linkedPeers.add(toRef);
-          const wasLinked =
-            relation === "linked" && fromRef !== toRef && (yield* hasEffectiveLink(fromRef, toRef));
+          const pairKey = buildPairKey(fromRef, toRef);
+          const isNewLink = relation === "linked" && fromRef !== toRef && !joined.has(pairKey);
+          if (isNewLink) joined.add(pairKey);
           const conflictReason =
             relation !== "part-of"
               ? null
@@ -302,17 +324,16 @@ const make = Effect.gen(function* () {
                 : (yield* closesLoop(fromRef, toRef))
                   ? LOOP_REASON
                   : null;
-          const observedRevision = revisionByRef.get(fromRef);
+          const { observedRevision, inBaseline } = entryByRef.get(fromRef)!;
           yield* sql`
             INSERT INTO external_entity_relation_claims
               (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-               observed_revision, state, conflict_reason, observed_at)
+               observed_revision, state, conflict_reason, observed_at, in_baseline)
             VALUES (${fromRef}, ${relation}, ${toRef}, 'source', ${connectionId}, NULL, '',
                     ${observedRevision ?? null},
-                    ${conflictReason === null ? "current" : "conflicted"}, ${conflictReason}, ${now})`;
-          if (relation === "linked" && fromRef !== toRef && !wasLinked) {
-            newLinks.push({ fromRef, toRef });
-          }
+                    ${conflictReason === null ? "current" : "conflicted"}, ${conflictReason}, ${now},
+                    ${inBaseline ? 1 : 0})`;
+          if (isNewLink && !inBaseline) newLinks.push({ fromRef, toRef });
           if (conflictReason !== null) {
             const refused = refusedByRef.get(fromRef) ?? [];
             refused.push({ fromRef, relation, toRef, reason: conflictReason });
@@ -458,12 +479,15 @@ const make = Effect.gen(function* () {
      * for the detail read of one entity.
      *
      * A pair of peers appears once, in either direction, under its firmest
-     * claim: `source`, then `person`, then `text`. A claim names only its
-     * plugin or its actor, never the Connection. The conflicts are the
-     * claims stored as `conflicted` that start or end at `ref`.
+     * claim: `source`, then `person`, then `text` (see `readFirmestLinks`).
+     * It returns at most `limit + 1` links, so the caller can tell that some
+     * were cut. A claim names only its plugin or its actor, never the
+     * Connection. The conflicts are the claims stored as `conflicted` that
+     * start or end at `ref`.
      */
     readClaimsFor: (
       ref: string,
+      limit: number,
     ): Effect.Effect<
       {
         readonly links: ReadonlyArray<EntityLink>;
@@ -472,19 +496,7 @@ const make = Effect.gen(function* () {
       SqlError
     > =>
       Effect.gen(function* () {
-        const linkClaims = yield* sql<LinkClaimRow>`
-          SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id, c.evidence_key
-          FROM external_entity_relation_claims c
-          LEFT JOIN connections k ON k.id = c.connection_id
-          WHERE ${sql.literal(CURRENT_LINKED_SQL)} AND c.from_ref = ${ref}
-            AND ${sql.literal(IS_REF_TARGET_SQL)}
-          UNION ALL
-          SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id, c.evidence_key
-          FROM external_entity_relation_claims c
-          LEFT JOIN connections k ON k.id = c.connection_id
-          WHERE ${sql.literal(CURRENT_LINKED_SQL)} AND c.to_ref = ${ref}
-            AND c.from_ref <> ${ref}`;
-        const links = pickFirmestLinks(linkClaims);
+        const links = yield* readFirmestLinks(sql, [ref], { limit });
 
         const refused = yield* sql<{
           readonly from_ref: string;
@@ -510,8 +522,6 @@ const make = Effect.gen(function* () {
       }),
   };
 });
-
-export { CURRENT_LINKED_SQL, EFFECTIVE_LINK_SQL, type NewLink };
 
 /** The relation claim repository. Requires the database only. */
 export const relationClaimRepository = make;

@@ -158,17 +158,17 @@ describe("renderEntityChange", () => {
       ),
     ).toEqual({
       reason: input.reason,
-      say: { say: input.say, tone: "plain" },
+      sentence: { say: input.say, tone: "plain" },
       at: "2026-03-01T00:05:00.000Z",
     });
   });
 
   it("says the core's own words for a cleared owner, and the kind's when it declares them", () => {
     const cleared = row("reassigned", {});
-    expect(renderEntityChange(cleared).say).toEqual({ say: "Unassigned", tone: "plain" });
+    expect(renderEntityChange(cleared).sentence).toEqual({ say: "Unassigned", tone: "plain" });
     const templates = { unassigned: { say: "Nobody has it now", tone: "attention" } };
     expect(
-      renderEntityChange({ ...cleared, reason_templates: JSON.stringify(templates) }).say,
+      renderEntityChange({ ...cleared, reason_templates: JSON.stringify(templates) }).sentence,
     ).toEqual({
       say: "Nobody has it now",
       tone: "attention",
@@ -178,7 +178,7 @@ describe("renderEntityChange", () => {
   it("fills the words of a link into the kind's own sentence", () => {
     const templates = { linked: { say: "Joined to {value}", tone: "good" } };
     expect(
-      renderEntityChange(row("linked", {}, templates), "a pull request you cannot open").say,
+      renderEntityChange(row("linked", {}, templates), "a pull request you cannot open").sentence,
     ).toEqual({ say: "Joined to a pull request you cannot open", tone: "good" });
   });
 
@@ -187,7 +187,7 @@ describe("renderEntityChange", () => {
       reassigned: { say: "{person} has taken it over", tone: "attention" },
       assigned: { say: "Assigned to you", tone: "plain" },
     };
-    expect(renderEntityChange(row("reassigned", { person: "Kofi" }, templates)).say).toEqual({
+    expect(renderEntityChange(row("reassigned", { person: "Kofi" }, templates)).sentence).toEqual({
       say: "Kofi has taken it over",
       tone: "attention",
     });
@@ -195,7 +195,7 @@ describe("renderEntityChange", () => {
 
   it("falls back to the default for a reason the kind does not declare", () => {
     const templates = { reassigned: { say: "{person} took it", tone: "attention" } };
-    expect(renderEntityChange(row("moved", { value: "Done" }, templates)).say).toEqual({
+    expect(renderEntityChange(row("moved", { value: "Done" }, templates)).sentence).toEqual({
       say: "Moved to Done",
       tone: "plain",
     });
@@ -203,7 +203,7 @@ describe("renderEntityChange", () => {
 
   it("falls back to the default when the kind's sentence needs a fact a change does not have", () => {
     const templates = { moved: { say: "Now #{number} is {value}", tone: "attention" } };
-    expect(renderEntityChange(row("moved", { value: "Done" }, templates)).say).toEqual({
+    expect(renderEntityChange(row("moved", { value: "Done" }, templates)).sentence).toEqual({
       say: "Moved to Done",
       tone: "plain",
     });
@@ -211,7 +211,7 @@ describe("renderEntityChange", () => {
 
   it("cuts a long sentence at a word to the bound of a sentence", () => {
     const person = `${"Kofi ".repeat(60)}Mensah`;
-    const { say } = renderEntityChange(row("reassigned", { person })).say;
+    const { say } = renderEntityChange(row("reassigned", { person })).sentence;
     expect(say.length).toBeLessThanOrEqual(MAX_ENTITY_REASON_LENGTH);
     expect(say.endsWith("…")).toBe(true);
   });
@@ -246,7 +246,7 @@ describe("the stored timeline", () => {
         return yield* timeline.readTimeline("a");
       }),
     );
-    expect(read.map((change) => change.say.say)).toEqual([
+    expect(read.map((change) => change.sentence.say)).toEqual([
       "Moved to One",
       "Moved to Two",
       "Moved to Three",
@@ -279,8 +279,8 @@ describe("the stored timeline", () => {
     expect(MAX_ENTITY_TIMELINE).toBe(50);
     expect(outcome.full).toHaveLength(50);
     // The six oldest went: S0 to S5.
-    expect(outcome.full[0]!.say.say).toBe("Moved to S6");
-    expect(outcome.full.at(-1)!.say.say).toBe("Moved to T6");
+    expect(outcome.full[0]!.sentence.say).toBe("Moved to S6");
+    expect(outcome.full.at(-1)!.sentence.say).toBe("Moved to T6");
     expect(outcome.other).toHaveLength(1);
   });
 
@@ -323,7 +323,7 @@ describe("the stored timeline", () => {
       }),
     );
     expect(statements).toHaveLength(1);
-    expect(new Map([...latest].map(([ref, change]) => [ref, change.say.say]))).toEqual(
+    expect(new Map([...latest].map(([ref, change]) => [ref, change.sentence.say]))).toEqual(
       new Map([
         ["a", "Moved to Two"],
         ["b", "Moved to Other"],
@@ -388,12 +388,12 @@ describe("the stored timeline", () => {
         return { withKinds, withoutKinds: yield* timeline.readTimeline("a") };
       }),
     );
-    expect(outcome.withKinds.map((change) => change.say.say)).toEqual([
+    expect(outcome.withKinds.map((change) => change.sentence.say)).toEqual([
       "Linked a pull request you cannot open",
       "Linked an issue you cannot open",
       "Linked a thing you cannot open",
     ]);
-    expect(outcome.withoutKinds.map((change) => change.say.say)).toEqual([
+    expect(outcome.withoutKinds.map((change) => change.sentence.say)).toEqual([
       "Linked a thing you cannot open",
       "Linked a thing you cannot open",
       "Linked a thing you cannot open",

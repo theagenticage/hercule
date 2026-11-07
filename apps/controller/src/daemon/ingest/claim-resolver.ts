@@ -9,6 +9,12 @@
  * Found rewrites the claim's target to the canonical ref and keeps its type
  * and Connection.
  *
+ * Reading costs requests to the plugin's source, so the loop spends a budget
+ * per plugin whose things are read (the target plugin), not per Connection
+ * that reported the claim: `MAX_CLAIMS_PER_PLUGIN_PER_WINDOW` claims per
+ * window, and a window is as long as the interval of the plugin's declared
+ * `entities` feed. Recognizing a web address reads nothing and spends no budget.
+ *
  * It runs here and not inside the plugin host because the host builds the
  * ingest loops and the lookups need the host. Lookups take seconds, so they
  * run outside any transaction, and each result is written in its own short one
@@ -18,26 +24,39 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { EntityRecognition } from "@hercule/plugin-host";
 import {
+  buildScopedTargetPrefix,
   ClaimResolution,
   decodePendingTarget,
   encodePendingTarget,
+  PENDING_URL_PREFIX,
   type ClaimResolutionOutcome,
   type PendingClaim,
-  type PendingTarget,
 } from "../../external-entities";
-import { EntityLookups, type DecidedResolution } from "../../plugins";
+import {
+  buildRecognizedTarget,
+  buildScopedRecognition,
+  EntityLookups,
+  PluginHost,
+  type DecidedResolution,
+  type RegisteredEventSource,
+} from "../../plugins";
 import { PromotionState } from "../../promotion";
 import { nowIso } from "../../db";
 import { absorbFailures } from "../../absorbing";
 
-/** The most pending claims one Connection has resolved in one pass. */
-export const MAX_CLAIMS_PER_CONNECTION_PER_PASS = 20;
+/** The most pending claims of one plugin's things that are read in one window. */
+export const MAX_CLAIMS_PER_PLUGIN_PER_WINDOW = 20;
 
 /**
- * How long the loop waits between passes. A pass with nothing due is one
- * indexed statement, and the shortest backoff of a claim is 120 seconds, so
+ * The most pending web addresses one pass recognizes. Recognizing reads
+ * nothing, but each answer is a write, so a pass stays short.
+ */
+const MAX_ADDRESSES_PER_PASS = 100;
+
+/**
+ * How long the loop waits between passes. A pass with nothing due is a few
+ * indexed statements, and the shortest backoff of a claim is 120 seconds, so
  * a short wait costs almost nothing and keeps a new claim from waiting long
  * for its first try.
  */
@@ -49,95 +68,159 @@ export const ClaimResolverInterval = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => CLAIM_RESOLVER_INTERVAL },
 );
 
-/** Converts a scoped pending target to the recognition the lookup reads. */
-const buildRecognition = (
-  target: Extract<PendingTarget, { form: "scoped" }>,
-): EntityRecognition => ({
-  recognized: "scoped",
-  form: "identifier",
-  ...(target.kind === undefined ? {} : { kind: target.kind }),
-  identifier: target.identifier,
-  ...(target.scopeHint === undefined ? {} : { scopeHint: target.scopeHint }),
-});
-
-const UNPLACED: ClaimResolutionOutcome = { kind: "unplaced" };
+/**
+ * When each plugin's current window ends, as milliseconds since the epoch.
+ * The loop keeps it in memory, so a restart opens every window afresh.
+ */
+export type ReadWindows = Map<string, number>;
 
 /**
- * Runs one pass: settles up to `MAX_CLAIMS_PER_CONNECTION_PER_PASS` due claims
- * of each Connection. Two claims with the same pending target are read once.
- * Never fails on a lookup: an answer that does not place the thing postpones
- * the claim.
+ * Returns the length of the window of a source, in milliseconds: the default
+ * interval of its `entities` feed, else of its shortest feed, because a lookup
+ * is only declared by a source that reads entities.
  */
-export const resolvePendingClaims: Effect.Effect<void, never, ClaimResolution | EntityLookups> =
+const computeWindowMs = (source: RegisteredEventSource): number => {
+  const feeds = Object.values(source.feeds);
+  const seconds =
+    source.feeds["entities"]?.defaultIntervalSeconds ??
+    Math.min(...feeds.map((feed) => feed.defaultIntervalSeconds));
+  return seconds * 1000;
+};
+
+/**
+ * Gives the pending web addresses that are due a target, without reading
+ * anything. An address that a plugin recognizes as a ref becomes that ref,
+ * one it recognizes as a scoped thing becomes a pending claim of that plugin,
+ * and one nobody recognizes waits. Claims that hold the same address share one
+ * answer.
+ */
+const recognizeAddresses = (now: string) =>
   Effect.gen(function* () {
     const resolution = yield* ClaimResolution;
     const lookups = yield* EntityLookups;
-    const now = yield* nowIso;
     const due = yield* Effect.orDie(
-      resolution.listDue({ now, perConnection: MAX_CLAIMS_PER_CONNECTION_PER_PASS }),
+      resolution.listDue({
+        now,
+        targetPrefix: PENDING_URL_PREFIX,
+        limit: MAX_ADDRESSES_PER_PASS,
+      }),
     );
-    if (due.length === 0) return;
 
-    // One read per pending target in a pass, however many claims hold it.
-    const readTargets = new Map<string, DecidedResolution>();
-    const read = (pluginId: string, recognition: EntityRecognition, key: string) =>
+    const outcomes = new Map<string, ClaimResolutionOutcome | undefined>();
+    const recognize = (url: string) =>
       Effect.gen(function* () {
-        const known = readTargets.get(key);
-        if (known !== undefined) return known;
-        const decided = yield* lookups.resolve(pluginId, recognition);
-        readTargets.set(key, decided);
-        return decided;
+        const recognitions = yield* lookups.recognize(url);
+        const found = recognitions.find(({ recognition }) => recognition.form === "url");
+        const target = found === undefined ? undefined : buildRecognizedTarget(found);
+        if (target === undefined) return undefined;
+        if (target.recognized === "ref") {
+          return { kind: "found", ref: target.ref } satisfies ClaimResolutionOutcome;
+        }
+        const encoded = encodePendingTarget({ ...target, form: "scoped" });
+        return encoded === undefined
+          ? undefined
+          : ({ kind: "recognized", target: encoded } satisfies ClaimResolutionOutcome);
       });
 
-    const settle = (claim: PendingClaim, expectedTarget: string, outcome: ClaimResolutionOutcome) =>
-      Effect.orDie(resolution.settle({ claimId: claim.id, expectedTarget, outcome }));
-
+    const postponed = new Set<string>();
     for (const claim of due) {
       const decoded = decodePendingTarget(claim.target);
-      if (decoded === undefined) {
-        yield* settle(claim, claim.target, UNPLACED);
+      const url = decoded?.form === "url" ? decoded.url : undefined;
+      if (url !== undefined && !outcomes.has(url)) outcomes.set(url, yield* recognize(url));
+      const outcome = url === undefined ? undefined : outcomes.get(url);
+      if (outcome !== undefined) {
+        yield* Effect.orDie(
+          resolution.settle({ claimId: claim.id, expectedTarget: claim.target, outcome }),
+        );
+      } else if (!postponed.has(claim.target)) {
+        postponed.add(claim.target);
+        yield* Effect.orDie(resolution.postponeTarget({ target: claim.target, now }));
+      }
+    }
+  });
+
+/**
+ * Reads the due claims of one plugin's things, in the order given, and
+ * settles them. The claims that hold one pending target are read once.
+ *
+ * - A thing the lookup found settles every claim that holds it.
+ * - An answer that does not place the thing (not found, ambiguous, incomplete
+ *   or unavailable) postpones every claim that holds the target, in one
+ *   statement.
+ * - An incomplete or unavailable answer also ends the pass of this plugin: a
+ *   Connection failed or ran out of requests, so the next reads would fail
+ *   the same way. Claims not yet read stay due and wait for the next window.
+ */
+const readPluginClaims = (pluginId: string, due: ReadonlyArray<PendingClaim>, now: string) =>
+  Effect.gen(function* () {
+    const resolution = yield* ClaimResolution;
+    const lookups = yield* EntityLookups;
+    const answers = new Map<string, DecidedResolution>();
+    for (const claim of due) {
+      const decoded = decodePendingTarget(claim.target);
+      if (decoded?.form !== "scoped") {
+        yield* Effect.orDie(resolution.postponeTarget({ target: claim.target, now }));
         continue;
       }
-      let target = claim.target;
-      let scoped: Extract<PendingTarget, { form: "scoped" }>;
-      if (decoded.form === "url") {
-        // A plugin may have become active since the address was reported.
-        const recognitions = yield* lookups.recognize(decoded.url);
-        const found = recognitions.find(({ recognition }) => recognition.form === "url");
-        if (found === undefined) {
-          yield* settle(claim, target, UNPLACED);
-          continue;
+      let decided = answers.get(claim.target);
+      if (decided === undefined) {
+        decided = yield* lookups.resolve(pluginId, buildScopedRecognition(decoded));
+        answers.set(claim.target, decided);
+        if (!("found" in decided)) {
+          yield* Effect.orDie(resolution.postponeTarget({ target: claim.target, now }));
         }
-        if (found.recognition.recognized === "ref") {
-          yield* settle(claim, target, { kind: "found", ref: found.recognition.ref });
-          continue;
-        }
-        scoped = {
-          form: "scoped",
-          pluginId: found.pluginId,
-          ...(found.recognition.kind === undefined ? {} : { kind: found.recognition.kind }),
-          ...(found.recognition.scopeHint === undefined
-            ? {}
-            : { scopeHint: found.recognition.scopeHint }),
-          identifier: found.recognition.identifier,
-        };
-        const encoded = encodePendingTarget(scoped);
-        if (encoded === undefined) {
-          yield* settle(claim, target, UNPLACED);
-          continue;
-        }
-        yield* settle(claim, target, { kind: "recognized", target: encoded });
-        target = encoded;
-      } else {
-        scoped = decoded;
       }
+      if ("found" in decided) {
+        yield* Effect.orDie(
+          resolution.settle({
+            claimId: claim.id,
+            expectedTarget: claim.target,
+            outcome: { kind: "found", ref: decided.found.observation.ref },
+          }),
+        );
+      } else if ("incomplete" in decided || "unavailable" in decided) {
+        return;
+      }
+    }
+  });
 
-      const decided = yield* read(scoped.pluginId, buildRecognition(scoped), target);
-      yield* settle(
-        claim,
-        target,
-        "found" in decided ? { kind: "found", ref: decided.found.observation.ref } : UNPLACED,
+/**
+ * Runs one pass: recognizes the pending web addresses that are due, then, for
+ * each plugin whose window is open, reads up to
+ * `MAX_CLAIMS_PER_PLUGIN_PER_WINDOW` due claims of its things. A plugin with
+ * claims to read opens a window that lasts the interval of its `entities` feed
+ * (`windows` remembers when it ends); a plugin with none keeps its window
+ * closed, so a claim that arrives later is read at once.
+ * Never fails on a lookup: an answer that does not place the thing postpones
+ * the claim.
+ */
+export const resolvePendingClaims = (
+  windows: ReadWindows = new Map(),
+): Effect.Effect<void, never, ClaimResolution | EntityLookups | PluginHost> =>
+  Effect.gen(function* () {
+    const resolution = yield* ClaimResolution;
+    const host = yield* PluginHost;
+    const now = yield* nowIso;
+    const nowMs = Date.parse(now);
+
+    yield* recognizeAddresses(now);
+
+    const sources = (yield* host.listActiveEventSources()).filter(
+      (source) => source.entityLookup !== undefined,
+    );
+    for (const source of sources) {
+      const { pluginId } = source;
+      if ((windows.get(pluginId) ?? 0) > nowMs) continue;
+      const due = yield* Effect.orDie(
+        resolution.listDue({
+          now,
+          targetPrefix: buildScopedTargetPrefix(pluginId),
+          limit: MAX_CLAIMS_PER_PLUGIN_PER_WINDOW,
+        }),
       );
+      if (due.length === 0) continue;
+      windows.set(pluginId, nowMs + computeWindowMs(source));
+      yield* readPluginClaims(pluginId, due, now);
     }
   });
 
@@ -153,12 +236,13 @@ export const resolvePendingClaims: Effect.Effect<void, never, ClaimResolution | 
 export const runClaimResolverLoop: Effect.Effect<
   never,
   never,
-  ClaimResolution | EntityLookups | PromotionState
+  ClaimResolution | EntityLookups | PluginHost | PromotionState
 > = Effect.gen(function* () {
   const resolution = yield* ClaimResolution;
   const lookups = yield* EntityLookups;
   const interval = yield* ClaimResolverInterval;
   const promotion = yield* PromotionState;
+  const windows: ReadWindows = new Map();
   let knownLinkSources: string | undefined;
   while (true) {
     yield* absorbFailures(
@@ -170,7 +254,7 @@ export const runClaimResolverLoop: Effect.Effect<
             knownLinkSources = linkSources;
             yield* Effect.orDie(resolution.makeUrlClaimsDue());
           }
-          yield* resolvePendingClaims;
+          yield* resolvePendingClaims(windows);
         }),
       ),
     );

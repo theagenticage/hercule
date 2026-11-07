@@ -138,7 +138,9 @@ const buildIngestEntities = (
 ): IngestEntities => {
   const recognizeObserved = (observations: ReadonlyArray<EntityObservation>) =>
     Effect.flatMap(recognizer.readRecognizer(), (recognize) =>
-      recognizeClaims(observations, recognize),
+      recognizeClaims(observations, recognize, (refs) =>
+        port.readStoredTextRevisions(reporter, refs),
+      ),
     );
   return {
     reconcile: (inventory) =>

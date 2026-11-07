@@ -4,6 +4,11 @@
  * can use them without importing each other.
  */
 
+/** The claim types, from firmest to weakest. A pair is drawn under its firmest claim. */
+export const CLAIM_TYPES_FIRMEST_FIRST = ["source", "person", "text"] as const;
+
+export type ClaimType = (typeof CLAIM_TYPES_FIRMEST_FIRST)[number];
+
 /**
  * The test for a link between peers that reads may show: a claim, aliased
  * `c`, that two things are linked, that is current, and whose target is a
@@ -25,3 +30,7 @@ export interface NewLink {
   readonly fromRef: string;
   readonly toRef: string;
 }
+
+/** Returns one key for a pair of refs, whichever end is first. */
+export const buildPairKey = (a: string, b: string): string =>
+  a < b ? JSON.stringify([a, b]) : JSON.stringify([b, a]);

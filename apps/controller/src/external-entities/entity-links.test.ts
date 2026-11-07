@@ -289,6 +289,36 @@ describe("riding on the Inbox", () => {
     expect(large.inbox.cards.filter((card) => card.ridesOn !== undefined)).toHaveLength(40);
     expect(large.inbox.links).toHaveLength(40);
     expect(large.statements).toHaveLength(small.statements.length);
+    // The membership of the Inbox is worked out once per read, however many reads follow from it.
+    expect(large.statements.filter((text) => text.includes("eligible AS ("))).toHaveLength(1);
+  });
+
+  it("fills the page with a lead and its riders when more riders than a page are older than the lead", async () => {
+    const riders = MAX_INBOX_CARDS + 5;
+    const inbox = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(
+          TICKET_KIND,
+          Array.from({ length: riders }, (_, index) => ticket(`t${index}`)),
+          1,
+        );
+        // The epic is newer than every ticket, so the page limit cuts through its riders.
+        yield* reconcile(EPIC_KIND, [epic("e1")], 2);
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
+          SELECT ref, 'linked', ${epicRef("e1")}, 'person', 'user', '', 'current', ${at(3)}
+          FROM external_entities WHERE kind = ${TICKET_KIND}`;
+        return yield* repository.queryInbox(environment(4));
+      }),
+    );
+    expect(inbox.truncated).toBe(true);
+    expect(inbox.cards).toHaveLength(MAX_INBOX_CARDS);
+    expect(inbox.cards.filter((card) => card.ref === epicRef("e1"))).toHaveLength(1);
+    expect(inbox.cards.filter((card) => card.ridesOn === epicRef("e1"))).toHaveLength(
+      MAX_INBOX_CARDS - 1,
+    );
+    // Every rider counts as riding, so Requests holds none of them.
+    expect(inbox.counts.requests).toBe(0);
   });
 });
 
@@ -360,6 +390,7 @@ describe("links and peers", () => {
         fromRef: epicRef("e1"),
         toRef: ticketRef("t1"),
         claim: { type: "source", plugin: PLUGIN },
+        hasPersonClaim: false,
       },
     ]);
   });
@@ -451,12 +482,12 @@ describe("links and peers", () => {
         return { open, locked: yield* readDetail(6) };
       }),
     );
-    expect(outcome.open.timeline.map((change) => change.say.say)).toEqual(["Linked T"]);
-    expect(outcome.open.latestChange?.say.say).toBe("Linked T");
+    expect(outcome.open.timeline.map((change) => change.sentence.say)).toEqual(["Linked T"]);
+    expect(outcome.open.latestChange?.sentence.say).toBe("Linked T");
     const locked = ["Linked a ticket you cannot open"];
-    expect(outcome.locked.timeline.map((change) => change.say.say)).toEqual(locked);
+    expect(outcome.locked.timeline.map((change) => change.sentence.say)).toEqual(locked);
     expect(outcome.locked.timeline[0]!.ref).toBe(ticketRef("t2"));
-    expect(outcome.locked.latestChange?.say.say).toBe(locked[0]);
+    expect(outcome.locked.latestChange?.sentence.say).toBe(locked[0]);
   });
 
   it("gives the detail the same peers", async () => {

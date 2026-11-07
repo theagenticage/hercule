@@ -16,6 +16,7 @@ import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
   MAX_ENTITY_RELATIONS,
+  MAX_ENTITY_TEXT_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
   type EntityObservation,
@@ -171,7 +172,10 @@ export const buildIssueContextFields = (
     texts: [
       {
         evidenceKey: "description",
-        text: description === null || description.trim() === "" ? "" : description,
+        text:
+          description === null || description.trim() === ""
+            ? ""
+            : cutText(description, MAX_ENTITY_TEXT_LENGTH),
         revision: issue.updatedAt,
       },
     ],

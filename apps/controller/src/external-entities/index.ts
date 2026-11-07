@@ -9,7 +9,14 @@ export {
   type ClaimResolutionOutcome,
   type PendingClaim,
 } from "./claim-resolution";
+export { buildActiveEntityKind } from "./entity-records";
 export { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
-export { decodePendingTarget, encodePendingTarget, type PendingTarget } from "./pending-target";
+export {
+  buildScopedTargetPrefix,
+  decodePendingTarget,
+  encodePendingTarget,
+  PENDING_URL_PREFIX,
+  type PendingTarget,
+} from "./pending-target";
 export { externalEntityRepository, type ContextRead, type ObservedEntity } from "./repository";
 export { ExternalEntityService, ExternalEntityServiceLayer } from "./service";

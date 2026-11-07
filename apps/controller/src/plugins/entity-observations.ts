@@ -29,19 +29,22 @@ export interface EntityReporter {
 }
 
 /**
- * What recognition found a reference to. A `ref` names exactly one thing. A
- * `scoped` target needs a read to place: `kind` is the qualified kind word
- * and `scopeHint` the scope the text named, either of which may be absent.
+ * A thing that a plugin recognized but cannot place without reading it. `kind`
+ * is the qualified kind word and `scopeHint` the scope the text named, either
+ * of which may be absent. A pending claim keeps the same four fields in its
+ * target (see `PendingTarget`).
  */
+export interface ScopedTarget {
+  readonly pluginId: string;
+  readonly kind?: string;
+  readonly scopeHint?: string;
+  readonly identifier: string;
+}
+
+/** What recognition found a reference to. A `ref` names exactly one thing. A `scoped` target needs a read to place. */
 export type RecognizedTarget =
   | { readonly recognized: "ref"; readonly ref: string }
-  | {
-      readonly recognized: "scoped";
-      readonly pluginId: string;
-      readonly kind?: string;
-      readonly scopeHint?: string;
-      readonly identifier: string;
-    };
+  | ({ readonly recognized: "scoped" } & ScopedTarget);
 
 /**
  * What the active plugins made of the web addresses and the texts of one
@@ -54,16 +57,28 @@ export interface RecognizedClaims {
    * lists. `target` is absent when no active plugin recognizes the address.
    */
   readonly urls: ReadonlyArray<{ readonly url: string; readonly target?: RecognizedTarget }>;
-  /** One entry for each text of the observation, with every thing the text names, each once. */
+  /**
+   * One entry for each text of the observation. `targets` lists every thing
+   * the text names, each once. It is absent when the text was not searched
+   * because its stored claims were made from the same `revision`: the claims
+   * stay as they are.
+   */
   readonly texts: ReadonlyArray<{
     readonly evidenceKey: string;
     readonly revision?: string;
-    readonly targets: ReadonlyArray<RecognizedTarget>;
+    readonly targets?: ReadonlyArray<RecognizedTarget>;
   }>;
 }
 
 /** The recognized claims of a call, by the ref of the observation they belong to. */
 export type RecognizedClaimsByRef = ReadonlyMap<string, RecognizedClaims>;
+
+/**
+ * The revision that the stored `text` claims of the reporter's Connection were
+ * made from, by ref and then by evidence key. A key is listed only when all
+ * of its claims were made from one revision.
+ */
+export type StoredTextRevisions = ReadonlyMap<string, ReadonlyMap<string, string>>;
 
 /**
  * The Entity Observations port, which the controller daemon implements. It has
@@ -91,6 +106,16 @@ export class EntityObservations extends Context.Service<
       observations: ReadonlyArray<EntityObservation>,
       claims?: RecognizedClaimsByRef,
     ) => Effect.Effect<void, PluginError>;
+    /**
+     * Returns the revisions that the stored `text` claims of the reporter's
+     * Connection were made from, for the given refs. The host reads them
+     * before it searches a text, so a text whose revision did not change is
+     * not searched again.
+     */
+    readonly readStoredTextRevisions: (
+      reporter: EntityReporter,
+      refs: ReadonlyArray<string>,
+    ) => Effect.Effect<StoredTextRevisions>;
     /**
      * Returns up to `limit` refs of the unqualified kind that the Connection
      * should read now. Dies with a `PluginError` when the plugin did not

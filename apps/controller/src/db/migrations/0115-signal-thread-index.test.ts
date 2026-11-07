@@ -41,6 +41,33 @@ describe("the signal thread index migration", () => {
     expect(plans.any).toMatch(/SEARCH signals USING (COVERING )?INDEX signals_thread_ref/);
   });
 
+  it("serves the newest lines of one status and the counts by status with no sort", async () => {
+    const plans = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* migrated;
+        const explain = (statement: string) =>
+          Effect.map(
+            sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${statement}`),
+            (rows) => rows.map((row) => row.detail).join("\n"),
+          );
+        return {
+          newestOpen: yield* explain(
+            `SELECT s.id, z.until FROM signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id
+             WHERE s.thread_ref = 'a' AND s.status = 'open'
+             ORDER BY s.created_at DESC, s.id DESC LIMIT 50`,
+          ),
+          counts: yield* explain(
+            "SELECT status, COUNT(*) FROM signals WHERE thread_ref = 'a' GROUP BY status",
+          ),
+        };
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
+    );
+    expect(plans.newestOpen).toMatch(/SEARCH s USING COVERING INDEX signals_thread_ref/);
+    expect(plans.newestOpen).not.toContain("TEMP B-TREE");
+    expect(plans.counts).toMatch(/SEARCH signals USING COVERING INDEX signals_thread_ref/);
+    expect(plans.counts).not.toContain("TEMP B-TREE");
+  });
+
   it("refuses a timeline reason other than reassigned, moved and linked", async () => {
     const results = await Effect.runPromise(
       Effect.gen(function* () {

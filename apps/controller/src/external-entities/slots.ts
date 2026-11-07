@@ -27,6 +27,7 @@ import {
   type EntityObservation,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
+import { fillSentence, listPlaceholders } from "./sentences";
 
 /**
  * A status as it is stored: what a card draws, plus the Task stage the kind's
@@ -98,8 +99,6 @@ export type FullEntityObservation = Exclude<EntityObservation, { readonly partia
 
 const decodeSlots = Schema.decodeUnknownEffect(EntitySlots, { errors: "all" });
 
-const PLACEHOLDER = /\{([A-Za-z0-9_-]+)\}/g;
-
 /** Matches the text of a `delta` fact: `+120 -30`. */
 const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
 
@@ -150,18 +149,17 @@ export const renderEntitySlots = (
       extra: Readonly<Record<string, string | undefined>> = {},
     ) =>
       Effect.gen(function* () {
-        const names = Array.from(template.matchAll(PLACEHOLDER), (match) => match[1]!);
-        const values = new Map<string, string>();
-        for (const name of names) {
+        const values: Record<string, string | undefined> = {};
+        for (const name of listPlaceholders(template)) {
           const value = name in extra ? extra[name] : readText(name);
           if (value === undefined) {
             return yield* refuse(
               `the ${purpose} "${template}" needs the field "${name}", which the observation did not report.`,
             );
           }
-          values.set(name, value);
+          values[name] = value;
         }
-        return template.replace(PLACEHOLDER, (_, name: string) => values.get(name)!);
+        return fillSentence(template, values)!;
       });
 
     const renderStatus = Effect.gen(function* () {

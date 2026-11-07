@@ -92,12 +92,12 @@ export type EntityReason = Schema.Schema.Type<typeof EntityReason>;
 /**
  * Something that changed at the source, as the thing's timeline tells it:
  * someone else was assigned, the status moved, a new link arrived. Hercule
- * shows it and acts on nothing. `say` is finished text, with the person or
+ * shows it and acts on nothing. `sentence` is finished text, with the person or
  * the value already put in.
  */
 export const EntityChange = Schema.Struct({
   reason: Schema.Literals(["reassigned", "moved", "linked"]),
-  say: EntityReason,
+  sentence: EntityReason,
   at: Timestamp,
   /** For a `linked` change, the ref of the linked thing, so a client can draw its mark and open it. */
   ref: Schema.optionalKey(ExternalRef),

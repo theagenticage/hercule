@@ -171,7 +171,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
           replyBytes: JSON.stringify(rows).length,
           queryYourWork: yield* measureMedian(yourWork.query()),
           openThreads: yield* measureMedian(signals.listOpenThreads()),
-          openTasks: yield* measureMedian(tasks.listOpenOnRefs(refs)),
+          openTasks: yield* measureMedian(tasks.listActiveTasksForRefs(refs)),
         };
       }).pipe(
         Effect.provideService(CurrentActor, USER),

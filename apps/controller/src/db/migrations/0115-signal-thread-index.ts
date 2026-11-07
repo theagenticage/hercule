@@ -8,7 +8,10 @@
  *   that lookup, and every other signal index is partial on open signals. The
  *   card reads open signals by ref, and the detail also counts and lists the
  *   resolved ones. `status` is the second column so a card's read seeks only
- *   its open signals, however many resolved ones the ref has.
+ *   its open signals, however many resolved ones the ref has. `created_at`
+ *   and `id` follow, so the detail reads the newest lines of one status
+ *   straight off the index, with no sort, and counts them without reading the
+ *   signals.
  * - `external_entity_timeline` has one row per thing that changed at the
  *   source: someone else was assigned (`reassigned`), the status changed
  *   (`moved`), or a new link arrived (`linked`). `person` (the new owner of a
@@ -39,7 +42,9 @@
  *   named it, so a text claim that was resolved to a ref is still matched by
  *   what its text says. `resolve_attempts` and `next_resolve_at` are the
  *   backoff of the resolver loop, like the ones on observations ('' is due
- *   now, and sorts before every time).
+ *   now, and sorts before every time). `in_baseline` is true for a claim
+ *   written while its thing was not yet a full record: what a thing arrived
+ *   with is not news, however late a pending claim of it resolves.
  *
  * The migration only adds indexes, tables and columns, so the upgrade test
  * needs no fixture for it.
@@ -51,7 +56,7 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
-    CREATE INDEX signals_thread_ref ON signals (thread_ref, status)
+    CREATE INDEX signals_thread_ref ON signals (thread_ref, status, created_at, id)
   `;
 
   yield* sql`
@@ -83,12 +88,14 @@ export default Effect.gen(function* () {
       ADD COLUMN next_resolve_at TEXT NOT NULL DEFAULT ''`;
   yield* sql`
     ALTER TABLE external_entity_relation_claims
+      ADD COLUMN in_baseline INTEGER NOT NULL DEFAULT 0 CHECK (in_baseline IN (0, 1))`;
+  yield* sql`
+    ALTER TABLE external_entity_relation_claims
       ADD COLUMN is_pending INTEGER GENERATED ALWAYS AS (substr(to_ref, 1, 11) = 'unresolved:') VIRTUAL`;
-  // Serves the resolver loop: which Connections have a pending claim that is
-  // due, and the oldest due claims of one Connection. With nothing pending,
-  // the index is empty.
+  // Serves the resolver loop: the oldest due pending claims, in the order
+  // they are tried, without a sort. With nothing pending, the index is empty.
   yield* sql`
     CREATE INDEX external_entity_claims_pending
-      ON external_entity_relation_claims (connection_id, next_resolve_at) WHERE is_pending = 1
+      ON external_entity_relation_claims (next_resolve_at, id) WHERE is_pending = 1
   `;
 });

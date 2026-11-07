@@ -71,12 +71,12 @@ import {
   type SharedColumn,
   type SharedValues,
 } from "./entity-records";
+import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
-import { decideRiding } from "./riding";
+import { decideRiding, selectInboxPage, type RidingCard } from "./riding";
 import {
   CURRENT_PART_OF_SQL,
   relationClaimRepository,
-  type NewLink,
   WALK_DOWN_SQL,
   WALK_STATE_ROOM,
   WALK_UP_SQL,
@@ -142,8 +142,12 @@ export interface EntityWriteChanges {
 export interface ReconcileChanges extends EntityWriteChanges {
   /** Every claim of the reported refs that the graph refused, such as a loop. */
   readonly conflicts: ReadonlyArray<EntityConflict>;
-  /** The pairs this write joined by a link for the first time, not those a second claim repeats. */
-  readonly newLinks: ReadonlyArray<NewLink>;
+  /**
+   * The ids of the open signals on a ref that this write turned into a full
+   * record of a work kind, by creating it or by making a partial one full.
+   * Intake shows the record on such a signal, so it must read it again.
+   */
+  readonly signalIds: ReadonlyArray<string>;
 }
 
 /** What the daily sweep deleted. */
@@ -597,17 +601,25 @@ const WANTED_REFS_SQL = `
 const countsOnTheClock = (entity: EntityRow, hasTask: boolean): boolean =>
   isWorkRecord(entity) && entity.pace === "fast" && entity.dismissed_at === null && !hasTask;
 
-/** One row of the cards statement: an entity, its active Task, its side, and whether a live Task follows it. */
-interface EligibleRow extends EntityRow {
-  readonly task_id: Uint8Array | null;
+/**
+ * One eligible card as the Inbox reads it, with only what riding, the counts
+ * and the page order need. The page's full entity rows are read afterwards,
+ * for the cards that made the page.
+ */
+interface EligibleCard extends RidingCard {
+  /** The active Task of the thing, else null. */
+  readonly taskId: Uint8Array | null;
   readonly side: InboxSide;
-  readonly following: number;
+  /** True when a live Task follows the thing. */
+  readonly following: boolean;
+  readonly arrivalSequence: number;
 }
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* relationClaimRepository;
   const tasks = yield* taskRepository;
+  const signalLines = makeSignalLineReads(sql);
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
 
@@ -702,6 +714,23 @@ const make = Effect.gen(function* () {
       ),
       (chunks) => sortUnique(chunks.flat().map((row) => uuidToString(row.task_id))),
     );
+
+  /**
+   * Announces a change to the claims between `refs`: the entities at those
+   * refs, and every live Task that links any of them, are read again. Records
+   * the announcement for the transaction it runs in, so call it inside the
+   * transaction that wrote the claims.
+   */
+  const announceRefs = (refs: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* sql<{ readonly id: Uint8Array }>`
+        SELECT id FROM external_entities
+        WHERE ref IN (SELECT value FROM json_each(${JSON.stringify(refs)}))`;
+      yield* announceEntityChanges({
+        entityIds: found.map((row) => uuidToString(row.id)),
+        affectedTaskIds: yield* listTaskIdsLinkedTo(refs),
+      });
+    });
 
   /**
    * Marks the summary of every live Task that links one of `refs` out of date,
@@ -861,6 +890,10 @@ const make = Effect.gen(function* () {
 
       yield* timeline.recordEntityChanges(sourceChanges, now);
 
+      // What a thing reports while it is not yet a full record is part of what
+      // it arrived with, so the links it joins then are not news.
+      const isBaseline = (ref: string): boolean =>
+        before.entities.get(ref)?.completeness !== "full";
       const relationChanged = new Set<string>();
       const conflicts: Array<EntityConflict> = [];
       const { writes, refsBelowBefore, linkedPeers, newLinks } = yield* claims.applySourceRelations(
@@ -874,6 +907,7 @@ const make = Effect.gen(function* () {
                     fromRef: observation.ref,
                     relations: observation.relations,
                     observedRevision: observation.sourceRevision,
+                    inBaseline: isBaseline(observation.ref),
                   },
                 ],
           ),
@@ -893,19 +927,25 @@ const make = Effect.gen(function* () {
           texts: observation.texts,
           recognized,
           observedRevision: observation.sourceRevision,
+          inBaseline: isBaseline(observation.ref),
         })),
         now,
       });
       for (const ref of evidence.changedRefs) relationChanged.add(ref);
-      // A pair a source joined is news on both ends, unless the thing was
-      // first seen in this write: what it already carried then is a baseline.
-      const joined = [...newLinks, ...evidence.newLinks];
-      yield* timeline.recordLinks(
-        joined.filter((link) => before.entities.get(link.fromRef)?.completeness === "full"),
-        now,
-      );
+      // A pair a source joined is news on both ends.
+      yield* timeline.recordLinks([...newLinks, ...evidence.newLinks], now);
 
       const afterWrite = yield* readRefStates(touched, environment);
+      const becameWorkRecord = touched.filter((ref) => {
+        const after = afterWrite.entities.get(ref);
+        const beforeRow = before.entities.get(ref);
+        return (
+          after !== undefined &&
+          isWorkRecord(after) &&
+          (beforeRow === undefined || !isWorkRecord(beforeRow))
+        );
+      });
+      const signalIds = yield* signalLines.listOpenSignalIds(becameWorkRecord);
       for (const ref of touched) {
         const entity = afterWrite.entities.get(ref);
         const reported = unionConcerns(before.observations.get(ref) ?? []);
@@ -979,7 +1019,7 @@ const make = Effect.gen(function* () {
             a.relation.localeCompare(b.relation) ||
             a.toRef.localeCompare(b.toRef),
         ),
-        newLinks: joined,
+        signalIds,
       };
     });
 
@@ -1038,7 +1078,6 @@ const make = Effect.gen(function* () {
   // The Inbox
   // -------------------------------------------------------------------------
 
-  const signalLines = makeSignalLineReads(sql);
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
 
   /**
@@ -1048,29 +1087,43 @@ const make = Effect.gen(function* () {
   const buildEligibleEntities = (now: string) =>
     sql`read_clock(now) AS (SELECT ${now}), ${sql.literal(ELIGIBLE_ENTITIES_SQL)}`;
 
-  /** Counts the eligible entities at `now`, riders included. Reads every one, so the counts include cards past `MAX_INBOX_CARDS`. */
-  const readEligibleCounts = (now: string): Effect.Effect<InboxCounts, SqlError> =>
+  /**
+   * Reads every eligible card at `now`, oldest first by `(firstObservedAt,
+   * id)`, with the lean fields (`EligibleCard`). This is the one place an
+   * Inbox read evaluates the membership (`ELIGIBLE_ENTITIES_SQL`): the page,
+   * its peers, the riding and the counts all work from the cards it returns.
+   */
+  const readEligibleCards = (now: string): Effect.Effect<ReadonlyArray<EligibleCard>, SqlError> =>
     Effect.map(
       sql<{
-        readonly on_the_clock: number;
-        readonly requests: number;
-        readonly with_someone_else: number;
-        readonly newest_arrival: number;
+        readonly ref: string;
+        readonly card: "rich" | "compact";
+        readonly pace: "fast" | "slow";
+        readonly patience: number;
+        readonly waiting_since: string;
+        readonly task_id: Uint8Array | null;
+        readonly side: InboxSide;
+        readonly following: number;
+        readonly arrival_sequence: number | null;
       }>`
-      WITH ${buildEligibleEntities(now)}
-      SELECT
-        COUNT(*) FILTER (WHERE task_id IS NULL AND pace = 'fast') AS on_the_clock,
-        COUNT(*) FILTER (WHERE side = 'requests') AS requests,
-        COUNT(*) FILTER (WHERE side = 'with-someone-else') AS with_someone_else,
-        COALESCE(MAX(arrival_sequence) FILTER (WHERE task_id IS NULL AND pace = 'fast'), 0)
-          AS newest_arrival
-      FROM eligible`,
-      (rows) => ({
-        onTheClock: rows[0]!.on_the_clock,
-        requests: rows[0]!.requests,
-        withSomeoneElse: rows[0]!.with_someone_else,
-        newestArrival: rows[0]!.newest_arrival,
-      }),
+        WITH ${buildEligibleEntities(now)}
+        SELECT ref, card, pace, patience,
+          COALESCE(waiting_since, concerned_since, first_observed_at) AS waiting_since,
+          task_id, side, following, arrival_sequence
+        FROM eligible ORDER BY first_observed_at, id`,
+      (rows) =>
+        rows.map((row) => ({
+          ref: row.ref,
+          card: row.card,
+          pace: row.pace,
+          patience: row.patience,
+          waitingSince: row.waiting_since,
+          hasTask: row.task_id !== null,
+          taskId: row.task_id,
+          side: row.side,
+          following: row.following === 1,
+          arrivalSequence: row.arrival_sequence ?? 0,
+        })),
     );
 
   /**
@@ -1092,31 +1145,50 @@ const make = Effect.gen(function* () {
         );
 
   /**
-   * Decides who rides on whom over every eligible card, at `now`, before any
-   * page limit. Returns the rider to lead map (see `decideRiding`).
+   * Counts the eligible cards. Every rider has no live Task, so each one is a
+   * Requests card that the count leaves out, because the client draws it under
+   * its lead.
    */
-  const readRiding = (now: string): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
-    Effect.map(linkReads.readRidingInputs(buildEligibleEntities(now)), (inputs) =>
-      decideRiding(inputs.cards, inputs.links, Date.parse(now)),
-    );
+  const countCards = (
+    cards: ReadonlyArray<EligibleCard>,
+    riding: ReadonlyMap<string, string>,
+  ): InboxCounts => {
+    const onTheClock = cards.filter((card) => card.taskId === null && card.pace === "fast");
+    return {
+      onTheClock: onTheClock.length,
+      requests: cards.filter((card) => card.side === "requests").length - riding.size,
+      withSomeoneElse: cards.filter((card) => card.side === "with-someone-else").length,
+      newestArrival: Math.max(0, ...onTheClock.map((card) => card.arrivalSequence)),
+    };
+  };
 
   /**
-   * Leaves out of the Requests count what rides. Every rider has no live Task,
-   * so each one is a Requests card.
+   * Reads what the Inbox is at `now`: every eligible card, who rides on whom
+   * (`decideRiding`, over every card, before any page limit) and the counts.
+   * Two statements, the cards and the links among them.
    */
-  const countWithRiding = (
-    counts: InboxCounts,
-    riding: ReadonlyMap<string, string>,
-  ): InboxCounts => ({ ...counts, requests: counts.requests - riding.size });
+  const readInboxStanding = (
+    now: string,
+  ): Effect.Effect<
+    {
+      readonly cards: ReadonlyArray<EligibleCard>;
+      readonly riding: ReadonlyMap<string, string>;
+      readonly counts: InboxCounts;
+    },
+    SqlError
+  > =>
+    Effect.gen(function* () {
+      const cards = yield* readEligibleCards(now);
+      const links = yield* linkReads.readLinksOf(
+        cards.map((card) => card.ref),
+        { confirmedOnly: true },
+      );
+      const riding = decideRiding(cards, links, Date.parse(now));
+      return { cards, riding, counts: countCards(cards, riding) };
+    });
 
   /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
   const buildRidesOn = (lead: string | undefined) => (lead === undefined ? {} : { ridesOn: lead });
-
-  /** Counts the Inbox at `now`: the eligible entities, with what rides left out of Requests. */
-  const readInboxCounts = (now: string): Effect.Effect<InboxCounts, SqlError> =>
-    Effect.gen(function* () {
-      return countWithRiding(yield* readEligibleCounts(now), yield* readRiding(now));
-    });
 
   /**
    * Reads what lies above each of `starts`: their ancestors, the places those
@@ -1248,8 +1320,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Returns the ids of the live Tasks that link any of `refs`, sorted. */
-    listTaskIdsLinkedTo,
+    announceRefs,
 
     /**
      * Replaces what one Connection says about one kind, and returns what
@@ -1323,18 +1394,15 @@ const make = Effect.gen(function* () {
       readonly connectionId: string;
       readonly observed: ReadonlyArray<ObservedEntity>;
       readonly environment: EntityEnvironment;
-    }): Effect.Effect<
-      EntityWriteChanges & { readonly newLinks: ReadonlyArray<NewLink> },
-      SqlError
-    > =>
+    }): Effect.Effect<EntityWriteChanges, SqlError> =>
       Effect.gen(function* () {
-        const { entityIds, affectedTaskIds, newLinks } = yield* writeObservedEntities({
+        const { entityIds, affectedTaskIds, signalIds } = yield* writeObservedEntities({
           ...input,
           isInventory: false,
           stampsRead: true,
           leaving: [],
         });
-        return { entityIds, affectedTaskIds, newLinks };
+        return { entityIds, affectedTaskIds, signalIds };
       }),
 
     /**
@@ -1448,69 +1516,69 @@ const make = Effect.gen(function* () {
      * places, and the counts over all eligible cards.
      *
      * Riding is decided once over every eligible card, before the page limit
-     * (`decideRiding`), and the Requests count follows the same decision. A
-     * rider rides whether or not its lead made the page. When the page limit
-     * cuts the lead, the rider leaves the page with it, so the page never
-     * draws a Requests card that the count left out. `links` are the direct
-     * links of the cards on the page and `peers` the records at their far end
-     * that have no card. If either hits its bound, `truncated` is set.
+     * (`decideRiding`), and the Requests count follows the same decision. The
+     * page is chosen in bundles (`selectInboxPage`): a lead comes with its
+     * riders and a rider never comes alone, so the page never draws a
+     * Requests card that the count left out, and it is never empty while
+     * cards exist. `links` are the direct links of the cards on the page and
+     * `peers` the records at their far end that have no card. If the page, the
+     * links or the peers hit their bound, `truncated` is set.
      *
      * A constant number of statements however many cards there are: the
-     * counts, the riding read, the cards, one walk up for every card, the
-     * records above them, the observations of cards and places together,
-     * the links, and the three reads of the peers.
+     * eligible cards and their links (evaluating the membership once), the
+     * entity rows of the page, one walk up for every card, the records above
+     * them, the observations of cards and places together, the links of the
+     * page, and the three reads of the peers.
      */
     queryInbox: (environment: EntityEnvironment): Effect.Effect<Inbox, SqlError> =>
       Effect.gen(function* () {
-        const riding = yield* readRiding(environment.now);
-        const counts = countWithRiding(yield* readEligibleCounts(environment.now), riding);
-        const found = yield* sql<EligibleRow>`
-          WITH ${buildEligibleEntities(environment.now)}
-          SELECT * FROM eligible ORDER BY first_observed_at, id LIMIT ${MAX_INBOX_CARDS + 1}`;
-        const cardsTruncated = found.length > MAX_INBOX_CARDS;
-        const sliced = cardsTruncated ? found.slice(0, MAX_INBOX_CARDS) : found;
-        const slicedRefs = new Set(sliced.map((row) => row.ref));
-        const rows = sliced.filter((row) => {
-          const lead = riding.get(row.ref);
-          return lead === undefined || slicedRefs.has(lead);
-        });
-        const pageRefs = new Set(rows.map((row) => row.ref));
+        const { cards: eligibleCards, riding, counts } = yield* readInboxStanding(environment.now);
+        const page = selectInboxPage(
+          eligibleCards.map((card) => card.ref),
+          riding,
+          MAX_INBOX_CARDS,
+        );
+        const pageCards = eligibleCards.filter((card) => page.refs.has(card.ref));
+        const entityRows = yield* readEntities(pageCards.map((card) => card.ref));
+        const rows = pageCards.map((card) => ({ card, row: entityRows.get(card.ref)! }));
+        const cardsTruncated = page.truncated;
+        const pageRefs = page.refs;
 
         // Cards come oldest first, so the older cards keep their context and
         // a later one loses its farthest ancestors when the places run out.
         const context = yield* readContext({
-          starts: rows.map((row) => row.ref),
+          starts: rows.map(({ row }) => row.ref),
           maxAncestors: MAX_ENTITY_ANCESTORS,
           maxPlaces: MAX_INBOX_PLACES,
           environment,
         });
         const activePluginIds = new Set(environment.activePluginIds);
         const cardSignals = yield* signalLines.readCardSignals(
-          rows.map((row) => ({
+          rows.map(({ row }) => ({
             ref: row.ref,
             reasonTemplates: row.reason_templates as string | null,
           })),
           environment.now,
         );
 
-        const cards = rows.map((row): InboxCard => ({
+        const cards = rows.map(({ card, row }): InboxCard => ({
           ...buildEntityFields({
             row,
             observations: context.observations.get(row.ref) ?? [],
             activePluginIds,
-            taskId: row.task_id === null ? undefined : uuidToString(row.task_id),
-            following: row.following === 1,
+            taskId: card.taskId === null ? undefined : uuidToString(card.taskId),
+            following: card.following,
             ancestors: context.ancestors.get(row.ref)!,
             contextComplete: context.contextComplete.get(row.ref)!,
             latestChange: context.latestChanges.get(row.ref),
           }),
-          side: row.side,
+          side: card.side,
           ...buildCardSignalFields(cardSignals.get(row.ref)),
           ...buildRidesOn(riding.get(row.ref)),
         }));
         const { places, edges } = context;
 
-        const pageLinks = yield* linkReads.readLinksOf([...pageRefs]);
+        const pageLinks = yield* linkReads.readLinksOf([...pageRefs], { limit: MAX_INBOX_LINKS });
         const links = pageLinks.slice(0, MAX_INBOX_LINKS);
         const farRefs = [
           ...new Set(
@@ -1518,7 +1586,7 @@ const make = Effect.gen(function* () {
           ),
         ];
         const foundPeers = yield* linkReads.listPeers(
-          buildEligibleEntities(environment.now),
+          new Set(eligibleCards.map((card) => card.ref)),
           farRefs,
           environment.activeEntityKinds,
         );
@@ -1544,7 +1612,8 @@ const make = Effect.gen(function* () {
     listStackCandidates: linkReads.listStackCandidates,
 
     /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
-    countInbox: (now: string): Effect.Effect<InboxCounts, SqlError> => readInboxCounts(now),
+    countInbox: (now: string): Effect.Effect<InboxCounts, SqlError> =>
+      Effect.map(readInboxStanding(now), (standing) => standing.counts),
 
     /**
      * Returns one entity with the records above it and what it is linked to,
@@ -1569,7 +1638,7 @@ const make = Effect.gen(function* () {
           SELECT task_id, following, position FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
           WHERE ref = ${row.ref}`;
         const active = links.find((link) => link.position === 1);
-        const related = yield* claims.readClaimsFor(row.ref);
+        const related = yield* claims.readClaimsFor(row.ref, MAX_ENTITY_LINKS);
         const linkedRefs = related.links
           .slice(0, MAX_ENTITY_LINKS)
           .map((link) => readFarEnd(link, row.ref));
@@ -1603,7 +1672,7 @@ const make = Effect.gen(function* () {
           )),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            buildEligibleEntities(environment.now),
+            yield* listEligibleRefs(linkedRefs, environment.now),
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS),
@@ -1768,9 +1837,11 @@ const make = Effect.gen(function* () {
      * a number of the arrival counter, once.
      *
      * It decides from the rows, in the caller's transaction, after the signal
-     * is written. The entity is an arrival only when it is a full record of a
-     * fast kind, not dismissed, has no live Task, concerns the user through
-     * no Connection, and the signal is its only live signal (open and not
+     * is written. The entity must be on the Inbox now (`listEligibleRefs`, the
+     * one definition: a full record of a work kind, not dismissed, held by
+     * something). The signal is what put it there only when nothing else
+     * holds it: it is a fast kind, concerns the user through no Connection,
+     * has no live Task, and the signal is its only live signal (open and not
      * snoozed). A second signal, or one from a second Connection, finds the
      * card on the clock already and raises nothing. Does nothing for a ref
      * with no entity. Announces nothing: the signal's own announcement
@@ -1778,6 +1849,7 @@ const make = Effect.gen(function* () {
      */
     recordArrival: (ref: string, now: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        if (!(yield* listEligibleRefs([ref], now)).has(ref)) return;
         const entity = (yield* readEntities([ref])).get(ref);
         if (entity === undefined) return;
         const observations = (yield* readObservations([ref])).get(ref) ?? [];

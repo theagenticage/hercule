@@ -59,7 +59,7 @@ const make = Effect.gen(function* () {
         for (const { signalId, threadRef } of openThreads) {
           signalIdsByRef.set(threadRef, [...(signalIdsByRef.get(threadRef) ?? []), signalId]);
         }
-        const found = yield* tasks.listOpenOnRefs([...signalIdsByRef.keys()]);
+        const found = yield* tasks.listActiveTasksForRefs([...signalIdsByRef.keys()]);
         const signalIdsByTask = new Map<string, Set<string>>();
         for (const task of found) {
           const signalIds = signalIdsByTask.get(task.id) ?? new Set<string>();

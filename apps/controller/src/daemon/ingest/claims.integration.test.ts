@@ -29,6 +29,7 @@ import {
 import { connectionRepository, type StoredConnection } from "../../connections";
 import { withTransaction } from "../../db";
 import {
+  buildScopedTargetPrefix,
   ClaimResolutionLayer,
   ClaimResolution,
   decodePendingTarget,
@@ -37,7 +38,7 @@ import { relationClaimRepository } from "../../external-entities/relation-claims
 import { EntityLookups, EntityLookupsLayer, PluginHost, Plugins } from "../../plugins";
 import { ingestContexts } from "../../plugins/ingest-context";
 import { asUser, buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../plugins/testing";
-import { resolvePendingClaims } from "./claim-resolver";
+import { MAX_CLAIMS_PER_PLUGIN_PER_WINDOW, resolvePendingClaims } from "./claim-resolver";
 
 const FORGE_URL = /^https:\/\/forge\.example\/items\/(\d+)$/;
 const TRACKER_URL = /^https:\/\/tracker\.example\/([a-z]+)\/issue\/([A-Z]+-\d+)$/;
@@ -84,7 +85,7 @@ const buildPlugin = (id: string, lookup: EntityLookup): Plugin => ({
       registerEventSource(host, {
         id,
         connectionType: `${id}/${id}`,
-        feeds: IDLE_FEEDS,
+        feeds: { ...IDLE_FEEDS, entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 } },
         entityKinds: [kindOf(id)],
         kinds: {
           [`${id}.item.done`]: {
@@ -111,8 +112,12 @@ const forgeLookup: EntityLookup = {
   resolve: () => Effect.succeed({ missing: "unknown" }),
 };
 
+/** Every text the tracker's lookup was asked to recognize since the world started. */
+const recognizedTexts: Array<string> = [];
+
 const buildTrackerLookup = (answers: { current: TrackerAnswers }): EntityLookup => ({
   recognize: (text) => {
+    recognizedTexts.push(text);
     const url = TRACKER_URL.exec(text);
     const recognitions: Array<EntityRecognition> =
       url === null
@@ -201,6 +206,7 @@ const runInWorld = <A>(
   Effect.runPromise(
     Effect.gen(function* () {
       const answers: { current: TrackerAnswers } = { current: {} };
+      recognizedTexts.length = 0;
       const host = yield* PluginHost;
       yield* host.boot([
         buildPlugin("forge", forgeLookup),
@@ -314,13 +320,18 @@ describe("an address a source reports", () => {
         const resolution = yield* ClaimResolution;
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const pending = yield* readClaims(sql);
-        const due = yield* resolution.listDue({ now: new Date().toISOString(), perConnection: 20 });
+        const due = yield* resolution.listDue({
+          now: new Date().toISOString(),
+          targetPrefix: buildScopedTargetPrefix("tracker"),
+          limit: 20,
+        });
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const resolved = yield* readClaims(sql);
         const dueAfter = yield* resolution.listDue({
           now: new Date(Date.now() + 1000).toISOString(),
-          perConnection: 20,
+          targetPrefix: buildScopedTargetPrefix("tracker"),
+          limit: 20,
         });
         return { pending, due, resolved, dueAfter };
       }),
@@ -358,11 +369,11 @@ describe("an address a source reports", () => {
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const pending = yield* readLinked;
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const resolved = yield* readLinked;
         // The same address again is not a new link.
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         return { pending, resolved, again: yield* readLinked };
       }),
     );
@@ -381,7 +392,7 @@ describe("an address a source reports", () => {
         // The address is part of the thing's first sight, and no read can place it yet.
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         return {
           claims: yield* readClaims(sql),
           linked: yield* sql`SELECT id FROM external_entity_timeline WHERE reason = 'linked'`,
@@ -399,7 +410,7 @@ describe("an address a source reports", () => {
         const plugins = yield* Plugins;
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const resolved = yield* readClaims(sql);
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const repeated = yield* readClaims(sql);
@@ -423,15 +434,15 @@ describe("an address a source reports", () => {
         yield* plugins.disable("tracker");
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const first = yield* readClaims(sql);
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const failed = yield* readClaims(sql);
         yield* plugins.enable("tracker");
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
         // The claim waits for its backoff until the set of recognizers changes.
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const waiting = yield* readClaims(sql);
         yield* resolution.makeUrlClaimsDue();
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         return { first, failed, waiting, resolved: yield* readClaims(sql) };
       }),
     );
@@ -467,7 +478,7 @@ describe("an address a source reports", () => {
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const whilePending = yield* forge.entities!.listWanted("item", 50);
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         const afterwards = yield* tracker.entities!.listWanted("item", 50);
         return { whilePending, afterwards };
       }),
@@ -520,7 +531,7 @@ describe("a reference in a text", () => {
             "tracker-b": () => ({ outOfScope: true }),
           };
           yield* reportItem(tracker, { plugin: "tracker", n: 1, texts: description("SHOP-123") });
-          yield* resolvePendingClaims;
+          yield* resolvePendingClaims();
           return yield* readClaims(sql);
         }),
       { trackerAccounts: ["tracker-a", "tracker-b"] },
@@ -539,7 +550,7 @@ describe("a reference in a text", () => {
             "tracker-b": () => buildFound("tracker:item:2"),
           };
           yield* reportItem(tracker, { plugin: "tracker", n: 9, texts: description("SHOP-123") });
-          yield* resolvePendingClaims;
+          yield* resolvePendingClaims();
           return yield* readClaims(sql);
         }),
       { trackerAccounts: ["tracker-a", "tracker-b"] },
@@ -559,7 +570,7 @@ describe("a reference in a text", () => {
             "tracker-b": () => "fail",
           };
           yield* reportItem(tracker, { plugin: "tracker", n: 9, texts: description("SHOP-123") });
-          yield* resolvePendingClaims;
+          yield* resolvePendingClaims();
           return yield* readClaims(sql);
         }),
       { trackerAccounts: ["tracker-a", "tracker-b"] },
@@ -576,7 +587,7 @@ describe("a reference in a text", () => {
         const claims = yield* relationClaimRepository;
         answers.current = { "tracker-a": () => buildFound("tracker:item:123") };
         yield* reportItem(tracker, { plugin: "tracker", n: 1, texts: description("SHOP-123") });
-        yield* resolvePendingClaims;
+        yield* resolvePendingClaims();
         return yield* claims.hasEffectiveLink("tracker:item:1", "tracker:item:123");
       }),
     );
@@ -602,5 +613,167 @@ describe("what a plugin may report", () => {
 
     expect(outcome.message).toContain("texts");
     expect(outcome.claims).toEqual([]);
+  });
+});
+
+describe("the budget of reading pending claims", () => {
+  /** Reports `count` forge items, each with a description naming one tracker identifier. */
+  const reportPendingClaims = (forge: IngestContext, count: number, sameIdentifier = false) =>
+    Effect.forEach(
+      Array.from({ length: count }, (_, index) => index + 1),
+      (n) =>
+        reportItem(forge, {
+          plugin: "forge",
+          n,
+          texts: [
+            {
+              evidenceKey: "description",
+              text: `see SHOP-${sameIdentifier ? 1 : n}`,
+              revision: "r1",
+            },
+          ],
+        }),
+    );
+
+  /** Collects the identifiers the tracker is asked about. */
+  const answerAndCount = (asked: Array<string>, answer: "unplaced" | "fail"): TrackerAnswers => ({
+    "tracker-a": (identifier) => {
+      asked.push(identifier);
+      return answer === "fail" ? "fail" : { missing: "not-found" };
+    },
+  });
+
+  it("is 20 claims of one target plugin per window, the window being the interval of its entities feed", async () => {
+    const result = await runInWorld(({ forge, answers }) =>
+      Effect.gen(function* () {
+        const asked: Array<string> = [];
+        answers.current = answerAndCount(asked, "unplaced");
+        yield* reportPendingClaims(forge, 25);
+        const windows = new Map<string, number>();
+        yield* resolvePendingClaims(windows);
+        const first = asked.length;
+        // The window is still open, so the five claims left wait.
+        yield* resolvePendingClaims(windows);
+        const second = asked.length;
+        return { first, second, window: windows.get("tracker")! - Date.now() };
+      }),
+    );
+
+    expect(result.first).toBe(MAX_CLAIMS_PER_PLUGIN_PER_WINDOW);
+    expect(result.second).toBe(MAX_CLAIMS_PER_PLUGIN_PER_WINDOW);
+    // 120 seconds, the default interval of the entities feed it declares.
+    expect(result.window).toBeGreaterThan(110_000);
+    expect(result.window).toBeLessThanOrEqual(120_000);
+  });
+
+  it("is spent on the target plugin however many Connections reported claims", async () => {
+    const asked = await runInWorld(({ forge, tracker, answers }) =>
+      Effect.gen(function* () {
+        const asked: Array<string> = [];
+        answers.current = answerAndCount(asked, "unplaced");
+        yield* reportPendingClaims(forge, 15);
+        // The tracker's own Connection reports 15 more claims about its own things.
+        yield* Effect.forEach(
+          Array.from({ length: 15 }, (_, index) => index + 16),
+          (n) =>
+            reportItem(tracker, {
+              plugin: "tracker",
+              n,
+              texts: [{ evidenceKey: "description", text: `see SHOP-${n}`, revision: "r1" }],
+            }),
+        );
+        yield* resolvePendingClaims(new Map());
+        return asked.length;
+      }),
+    );
+
+    expect(asked).toBe(MAX_CLAIMS_PER_PLUGIN_PER_WINDOW);
+  });
+
+  it("ends the pass of a plugin at its first answer that could not be sure, and keeps the rest due", async () => {
+    const result = await runInWorld(({ forge, sql, answers }) =>
+      Effect.gen(function* () {
+        const asked: Array<string> = [];
+        answers.current = answerAndCount(asked, "fail");
+        yield* reportPendingClaims(forge, 5);
+        yield* resolvePendingClaims(new Map());
+        return {
+          asked: asked.length,
+          attempts: (yield* readClaims(sql)).map((claim) => claim.resolve_attempts),
+        };
+      }),
+    );
+
+    expect(result.asked).toBe(1);
+    expect(result.attempts.sort()).toEqual([0, 0, 0, 0, 1]);
+  });
+
+  it("postpones every claim that holds a target in one statement, even beyond the claims of the pass", async () => {
+    const result = await runInWorld(({ forge, sql, answers }) =>
+      Effect.gen(function* () {
+        const asked: Array<string> = [];
+        answers.current = answerAndCount(asked, "unplaced");
+        yield* reportPendingClaims(forge, 25, true);
+        yield* resolvePendingClaims(new Map());
+        return {
+          asked: asked.length,
+          attempts: (yield* readClaims(sql)).map((claim) => claim.resolve_attempts),
+        };
+      }),
+    );
+
+    expect(result.asked).toBe(1);
+    expect(result.attempts).toEqual(Array.from({ length: 25 }, () => 1));
+  });
+});
+
+describe("a text whose revision did not change", () => {
+  it("is not recognized again, and its claims stay", async () => {
+    const result = await runInWorld(({ forge, sql }) =>
+      Effect.gen(function* () {
+        const texts = (revision: string, text: string) => [
+          { evidenceKey: "description", text, revision },
+        ];
+        yield* reportItem(forge, { plugin: "forge", n: 1, texts: texts("r1", "see SHOP-9") });
+        const afterFirst = recognizedTexts.filter((text) => text === "see SHOP-9").length;
+        const first = yield* readClaims(sql);
+        yield* reportItem(forge, { plugin: "forge", n: 1, texts: texts("r1", "see SHOP-9") });
+        const afterRepeat = recognizedTexts.filter((text) => text === "see SHOP-9").length;
+        yield* reportItem(forge, { plugin: "forge", n: 1, texts: texts("r2", "see SHOP-9") });
+        return {
+          afterFirst,
+          afterRepeat,
+          afterNewRevision: recognizedTexts.filter((text) => text === "see SHOP-9").length,
+          first,
+          last: yield* readClaims(sql),
+        };
+      }),
+    );
+
+    expect(result.afterFirst).toBe(1);
+    expect(result.afterRepeat).toBe(1);
+    expect(result.afterNewRevision).toBe(2);
+    expect(result.last.map((claim) => claim.id)).toEqual(result.first.map((claim) => claim.id));
+  });
+});
+
+describe("a claim of a thing that first arrived as a partial record", () => {
+  it("writes no linked row when it resolves, as the claims of a full first sight write none", async () => {
+    const linked = await runInWorld(({ forge, sql, answers }) =>
+      Effect.gen(function* () {
+        // The thing is known by its title only, then a full read completes it
+        // and reports an address that no read can place yet.
+        yield* forge.entities!.refresh([
+          { kind: "item", ref: "forge:item:1", title: "Item 1", partial: true },
+        ]);
+        yield* Effect.sleep("5 millis");
+        yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
+        answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
+        yield* resolvePendingClaims();
+        return yield* sql`SELECT id FROM external_entity_timeline WHERE reason = 'linked'`;
+      }),
+    );
+
+    expect(linked).toEqual([]);
   });
 });

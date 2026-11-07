@@ -129,22 +129,14 @@ export interface LegHandoff {
   readonly next?: TrackedHandoff;
 }
 
-/** The active Task of one External Ref, with the columns Your work shows. */
-export interface OpenTaskOnRef {
-  readonly ref: ExternalRef;
-  readonly id: string;
-  readonly title: string;
-  readonly status: TaskStatus;
-  readonly updatedAt: string;
-}
-
-/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card shows. */
+/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card and Your work show. */
 export interface ActiveTaskOnRef {
   readonly ref: ExternalRef;
   readonly id: string;
   readonly title: string;
   readonly status: TaskStatus;
   readonly stage: TaskStage;
+  readonly updatedAt: string;
 }
 
 /**
@@ -1432,7 +1424,9 @@ const make = Effect.gen(function* () {
     /**
      * Returns the active Task of each of `refs` that has one, by the rule of
      * `findActiveTaskForRef`, in one statement however many refs there are.
-     * A ref with no active Task has no row.
+     * A ref with no active Task has no row, and a Task linking several of the
+     * refs has one row per ref. It reads only the columns of the row, never
+     * the description.
      */
     listActiveTasksForRefs: (
       refs: ReadonlyArray<ExternalRef>,
@@ -1446,8 +1440,9 @@ const make = Effect.gen(function* () {
               readonly title: string;
               readonly status: string;
               readonly stage: string;
+              readonly updated_at: string;
             }>`
-              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage
+              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage, tasks.updated_at
               FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
               JOIN tasks ON tasks.id = live.task_id
               WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
@@ -1458,6 +1453,7 @@ const make = Effect.gen(function* () {
                 title: row.title,
                 status: row.status as TaskStatus,
                 stage: row.stage as TaskStage,
+                updatedAt: row.updated_at,
               })),
           ),
 
@@ -1505,45 +1501,6 @@ const make = Effect.gen(function* () {
               });
         },
       ),
-
-    /**
-     * Returns, for each of `refs` that has an active Task (see
-     * `findActiveTaskForRef`), one row: the ref and that Task's id, title,
-     * status and update time. A ref with no active Task has no row, and a Task
-     * linking several of the refs has one row per ref. It reads only the
-     * columns of the row, never the description.
-     *
-     * It follows the links in `task_entity_links`, the same as every other
-     * read of a Task's refs, so a ref has one meaning. Only the active Task
-     * counts, so a ref never shows on two Tasks. One statement, and its work
-     * follows the links of the refs given, not the Tasks there are.
-     */
-    listOpenOnRefs: (
-      refs: ReadonlyArray<ExternalRef>,
-    ): Effect.Effect<ReadonlyArray<OpenTaskOnRef>, SqlError> =>
-      refs.length === 0
-        ? Effect.succeed([])
-        : Effect.map(
-            sql<{
-              readonly ref: string;
-              readonly id: Uint8Array;
-              readonly title: string;
-              readonly status: string;
-              readonly updated_at: string;
-            }>`
-              SELECT live.ref, t.id, t.title, t.status, t.updated_at
-              FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
-              JOIN tasks t ON t.id = live.task_id
-              WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
-            (rows) =>
-              rows.map((row) => ({
-                ref: row.ref,
-                id: uuidToString(row.id),
-                title: row.title,
-                status: row.status as TaskStatus,
-                updatedAt: row.updated_at,
-              })),
-          ),
 
     /**
      * Returns the id of the Task that the workspace's row in `task_workspaces`

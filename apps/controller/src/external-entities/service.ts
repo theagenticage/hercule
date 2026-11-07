@@ -69,7 +69,7 @@ import {
   type TaskUndoRefusal,
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
-import { makeRefsAnnouncer } from "./claim-announce";
+import { buildActiveEntityKind } from "./entity-records";
 import { isPendingTarget } from "./pending-target";
 import { relationClaimRepository } from "./relation-claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
@@ -186,10 +186,6 @@ const make = Effect.gen(function* () {
   const ingest = yield* ExternalEntityIngest;
   const host = yield* PluginHost;
   const claims = yield* relationClaimRepository;
-  const announceRefs = makeRefsAnnouncer({
-    sql,
-    listTaskIdsLinkedTo: entities.listTaskIdsLinkedTo,
-  });
 
   /** Reads the entity kinds and plugins that are active now. */
   const readCatalog: Effect.Effect<Catalog> = Effect.map(
@@ -212,11 +208,9 @@ const make = Effect.gen(function* () {
       now: yield* nowIso,
       activePluginIds: catalog.activePluginIds,
       activeKinds: new Set(catalog.kinds.keys()),
-      activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) => ({
-        kind: declaration.word,
-        noun: declaration.noun,
-        refPrefix: declaration.refPrefix,
-      })),
+      activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
+        buildActiveEntityKind(declaration),
+      ),
     };
   });
 
@@ -949,17 +943,15 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const known = yield* sql<{ readonly id: Uint8Array }>`
-              SELECT id FROM external_entities WHERE ref = ${fromRef}`;
-            if (known.length === 0) {
+            const outcome = yield* claims.addPersonLink({ fromRef, toRef, actor, now });
+            if (outcome === "no-record") {
               return yield* Effect.fail(
                 createNotFoundError(
                   `Hercule holds no record of ${fromRef}, so it cannot be linked from.`,
                 ),
               );
             }
-            const { added } = yield* claims.addPersonLink({ fromRef, toRef, actor, now });
-            if (added) yield* announceRefs([fromRef, toRef]);
+            if (outcome === "added") yield* entities.announceRefs([fromRef, toRef]);
           }),
         );
         return {};
@@ -973,14 +965,14 @@ const make = Effect.gen(function* () {
      */
     unlink: (
       input: EntityLinkInput,
-    ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
+    ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const result = yield* claims.removePersonLinks({ a: input.fromRef, b: input.toRef });
-            if (result.removed) yield* announceRefs([input.fromRef, input.toRef]);
+            if (result.removed) yield* entities.announceRefs([input.fromRef, input.toRef]);
             return result;
           }),
         );

@@ -117,4 +117,68 @@ describe("recognizeClaims", () => {
 
     expect(claims.get("tracker:item:1")?.texts[0]?.targets).toHaveLength(MAX_TARGETS_PER_TEXT);
   });
+  it("does not search a text whose revision equals the stored one, and reads the stored revisions once", async () => {
+    const { asked, recognize } = buildRecognizer(() => [AS_REF]);
+    const reads: Array<ReadonlyArray<string>> = [];
+    const claims = await Effect.runPromise(
+      recognizeClaims(
+        [
+          observation({
+            ref: "tracker:item:1",
+            texts: [
+              { evidenceKey: "description", text: "unchanged", revision: "r1" },
+              { evidenceKey: "notes", text: "edited", revision: "n2" },
+            ],
+          }),
+          observation({
+            ref: "tracker:item:2",
+            texts: [{ evidenceKey: "description", text: "no revision" }],
+          }),
+        ],
+        recognize,
+        (refs) => {
+          reads.push(refs);
+          return Effect.succeed(
+            new Map([
+              [
+                "tracker:item:1",
+                new Map([
+                  ["description", "r1"],
+                  ["notes", "n1"],
+                ]),
+              ],
+            ]),
+          );
+        },
+      ),
+    );
+
+    expect(reads).toEqual([["tracker:item:1"]]);
+    expect(asked).toEqual(["edited", "no revision"]);
+    expect(claims.get("tracker:item:1")?.texts).toEqual([
+      { evidenceKey: "description", revision: "r1" },
+      {
+        evidenceKey: "notes",
+        revision: "n2",
+        targets: [{ recognized: "ref", ref: "forge:item:7" }],
+      },
+    ]);
+  });
+
+  it("does not search an observation whose revision is longer than the schema allows", async () => {
+    const { asked, recognize } = buildRecognizer(() => [AS_REF]);
+    const claims = await Effect.runPromise(
+      recognizeClaims(
+        [
+          observation({
+            texts: [{ evidenceKey: "d", text: "x", revision: "r".repeat(257) }],
+          }),
+        ],
+        recognize,
+      ),
+    );
+
+    expect(asked).toEqual([]);
+    expect(claims.size).toBe(0);
+  });
 });

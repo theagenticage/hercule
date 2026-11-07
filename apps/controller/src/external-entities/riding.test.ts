@@ -3,7 +3,7 @@
  * links alone.
  */
 import { describe, expect, it } from "vitest";
-import { decideRiding, type RidingCard, type RidingLink } from "./riding";
+import { decideRiding, selectInboxPage, type RidingCard, type RidingLink } from "./riding";
 
 const NOW = Date.parse("2026-03-10T00:00:00.000Z");
 const HOUR = 3_600_000;
@@ -136,5 +136,40 @@ describe("decideRiding", () => {
     const cards = [lead("T", 5), lead("U", 60), small("A")];
     const links = [link("A", "T"), link("A", "U")];
     expect(ride([...cards].reverse(), [...links].reverse())).toEqual(ride(cards, links));
+  });
+});
+
+describe("selectInboxPage", () => {
+  const pick = (refs: ReadonlyArray<string>, riding: Record<string, string>, limit: number) => {
+    const page = selectInboxPage(refs, new Map(Object.entries(riding)), limit);
+    return { refs: refs.filter((ref) => page.refs.has(ref)), truncated: page.truncated };
+  };
+
+  it("takes every card, in no particular bundle, when they all fit", () => {
+    expect(pick(["a", "b", "c"], {}, 3)).toEqual({ refs: ["a", "b", "c"], truncated: false });
+  });
+
+  it("brings the riders of a lead that comes later than they do, and never picks a rider alone", () => {
+    // p1 and p2 are older than their lead t. With room for 3, t brings both and x is left off.
+    expect(pick(["p1", "p2", "t", "x"], { p1: "t", p2: "t" }, 3)).toEqual({
+      refs: ["p1", "p2", "t"],
+      truncated: true,
+    });
+  });
+
+  it("stops at the first bundle that does not fit, rather than skipping to a smaller one", () => {
+    expect(pick(["a", "p1", "p2", "t", "z"], { p1: "t", p2: "t" }, 3)).toEqual({
+      refs: ["a"],
+      truncated: true,
+    });
+  });
+
+  it("never leaves the page empty: a first bundle larger than the page is cut to the lead and its oldest riders", () => {
+    const riders = Array.from({ length: 10 }, (_, index) => `p${String(index)}`);
+    const riding = Object.fromEntries(riders.map((rider) => [rider, "t"]));
+    expect(pick([...riders, "t"], riding, 4)).toEqual({
+      refs: ["p0", "p1", "p2", "t"],
+      truncated: true,
+    });
   });
 });

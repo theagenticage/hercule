@@ -1851,8 +1851,8 @@ describe("what changed outside", () => {
     );
     expect(outcome.first).toBe(0);
     expect(outcome.detail.timeline).toEqual([
-      { reason: "reassigned", say: { say: "Now with Kofi", tone: "plain" }, at: at(3) },
-      { reason: "moved", say: { say: "Moved to In review", tone: "plain" }, at: at(5) },
+      { reason: "reassigned", sentence: { say: "Now with Kofi", tone: "plain" }, at: at(3) },
+      { reason: "moved", sentence: { say: "Moved to In review", tone: "plain" }, at: at(5) },
     ]);
     expect(outcome.detail.latestChange).toEqual(outcome.detail.timeline[1]);
   });
@@ -1879,7 +1879,7 @@ describe("what changed outside", () => {
       }),
     );
     expect(outcome.renamed).toEqual([]);
-    expect(outcome.moved.map((change) => change.say.say)).toEqual(["Moved to Raised"]);
+    expect(outcome.moved.map((change) => change.sentence.say)).toEqual(["Moved to Raised"]);
   });
 
   it("writes a reassigned change with no person when the owner is cleared, and says Unassigned", async () => {
@@ -1895,7 +1895,7 @@ describe("what changed outside", () => {
     );
     expect(outcome.stored).toEqual([{ reason: "reassigned", person: null }]);
     expect(outcome.detail.timeline).toEqual([
-      { reason: "reassigned", say: { say: "Unassigned", tone: "plain" }, at: at(3) },
+      { reason: "reassigned", sentence: { say: "Unassigned", tone: "plain" }, at: at(3) },
     ]);
   });
 
@@ -1921,7 +1921,7 @@ describe("what changed outside", () => {
     );
     expect(outcome.cards[0]!.latestChange).toEqual({
       reason: "moved",
-      say: { say: "Now In review at the tracker", tone: "good" },
+      sentence: { say: "Now In review at the tracker", tone: "good" },
       at: at(3),
     });
   });
@@ -2013,7 +2013,7 @@ describe("what changed outside", () => {
     );
     expect(places.readable[0]!.latestChange).toEqual({
       reason: "moved",
-      say: { say: "Moved to Underway", tone: "plain" },
+      sentence: { say: "Moved to Underway", tone: "plain" },
       at: at(2),
     });
     expect(places.restricted[0]).toMatchObject({ restricted: true });

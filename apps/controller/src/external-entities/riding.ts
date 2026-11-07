@@ -100,3 +100,47 @@ export const decideRiding = (
   }
   return riding;
 };
+
+/** What `selectInboxPage` picks: the refs on the page, and whether any card was left off it. */
+export interface InboxPageSelection {
+  readonly refs: ReadonlySet<string>;
+  readonly truncated: boolean;
+}
+
+/**
+ * Picks the cards of one Inbox page, at most `limit`, from `refs`, the refs
+ * of every eligible card in page order (oldest first).
+ *
+ * Cards are chosen in bundles. A lead brings its riders, and a rider is never
+ * chosen alone, because a rider that comes without its lead would be drawn as
+ * a Requests card the counts left out. The walk goes through `refs` in order
+ * and takes the next lead (or lone card) with all its riders, and stops at
+ * the first bundle that does not fit in the room left. When the very first
+ * bundle is larger than `limit` it is cut to `limit`, the lead and its oldest
+ * riders, because stopping before it would leave the page empty for good.
+ *
+ * `riding` is the rider to lead map from `decideRiding`. Every lead in it is
+ * among `refs`.
+ */
+export const selectInboxPage = (
+  refs: ReadonlyArray<string>,
+  riding: ReadonlyMap<string, string>,
+  limit: number,
+): InboxPageSelection => {
+  const ridersByLead = new Map<string, Array<string>>();
+  for (const ref of refs) {
+    const lead = riding.get(ref);
+    if (lead !== undefined) ridersByLead.set(lead, [...(ridersByLead.get(lead) ?? []), ref]);
+  }
+  const selected = new Set<string>();
+  for (const ref of refs) {
+    if (riding.has(ref)) continue;
+    const bundle = [ref, ...(ridersByLead.get(ref) ?? [])];
+    if (selected.size + bundle.length > limit) {
+      if (selected.size === 0) for (const member of bundle.slice(0, limit)) selected.add(member);
+      break;
+    }
+    for (const member of bundle) selected.add(member);
+  }
+  return { refs: selected, truncated: selected.size < refs.length };
+};

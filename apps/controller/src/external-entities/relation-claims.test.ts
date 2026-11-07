@@ -25,6 +25,9 @@ const ROUND_ONE = "acme-erp:delivery-round:R1";
 const ROUND_TWO = "acme-erp:delivery-round:R2";
 const SITE = "acme-erp:site:north";
 
+/** More links than any test here writes, so a read is never cut. */
+const NO_CUT = 100;
+
 const ERP_ACCOUNT = "0190c000-0000-7000-8000-0000000000c1";
 const OTHER_ERP_ACCOUNT = "0190c000-0000-7000-8000-0000000000c2";
 
@@ -62,7 +65,12 @@ const report = (
   connectionId: string,
   fromRef: string,
   partOf: ReadonlyArray<string>,
-  options: { complete?: boolean; linked?: ReadonlyArray<string>; now?: string } = {},
+  options: {
+    complete?: boolean;
+    linked?: ReadonlyArray<string>;
+    inBaseline?: boolean;
+    now?: string;
+  } = {},
 ) =>
   Effect.map(
     claims.applySourceRelations({
@@ -72,6 +80,7 @@ const report = (
           fromRef,
           relations: { complete: options.complete ?? true, partOf, linked: options.linked ?? [] },
           observedRevision: undefined,
+          inBaseline: options.inBaseline ?? false,
         },
       ],
       now: options.now ?? AT,
@@ -157,6 +166,7 @@ describe("writing source claims", () => {
                 fromRef: ROUND_ONE,
                 relations: { complete: true, partOf, linked: [] },
                 observedRevision: undefined,
+                inBaseline: false,
               },
             ],
             now: LATER,
@@ -183,6 +193,7 @@ describe("writing source claims", () => {
               fromRef: ORDER,
               relations: { complete: false, partOf: [], linked: [] },
               observedRevision: "7",
+              inBaseline: false,
             },
           ],
           now: LATER,
@@ -202,14 +213,19 @@ describe("writing source claims", () => {
         yield* report(claims, OTHER_ERP_ACCOUNT, ORDER, [], { linked: [SITE] });
         return {
           rows: yield* readStored(sql, ORDER),
-          detail: yield* claims.readClaimsFor(ORDER),
+          detail: yield* claims.readClaimsFor(ORDER, NO_CUT),
         };
       }),
     );
 
     expect(rows).toHaveLength(2);
     expect(detail.links).toEqual([
-      { fromRef: ORDER, toRef: SITE, claim: { type: "source", plugin: "acme-erp" } },
+      {
+        fromRef: ORDER,
+        toRef: SITE,
+        claim: { type: "source", plugin: "acme-erp" },
+        hasPersonClaim: false,
+      },
     ]);
   });
 
@@ -223,18 +239,132 @@ describe("writing source claims", () => {
         yield* sql`INSERT INTO external_entity_relation_claims
           (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
           VALUES (${ORDER}, 'linked', ${SITE}, 'person', 'user', '', 'current', ${AT})`;
-        const withPerson = yield* claims.readClaimsFor(ORDER);
+        const withPerson = yield* claims.readClaimsFor(ORDER, NO_CUT);
         yield* report(claims, OTHER_ERP_ACCOUNT, SITE, [], { linked: [ORDER] });
-        return { withPerson, withSource: yield* claims.readClaimsFor(ORDER) };
+        return { withPerson, withSource: yield* claims.readClaimsFor(ORDER, NO_CUT) };
       }),
     );
 
     expect(detail.withPerson.links).toEqual([
-      { fromRef: ORDER, toRef: SITE, claim: { type: "person", actor: "user" } },
+      {
+        fromRef: ORDER,
+        toRef: SITE,
+        claim: { type: "person", actor: "user" },
+        hasPersonClaim: true,
+      },
     ]);
+    // The source's claim is the firmest now, and the person's claim is still there to remove.
     expect(detail.withSource.links).toEqual([
-      { fromRef: SITE, toRef: ORDER, claim: { type: "source", plugin: "acme-erp" } },
+      {
+        fromRef: SITE,
+        toRef: ORDER,
+        claim: { type: "source", plugin: "acme-erp" },
+        hasPersonClaim: true,
+      },
     ]);
+  });
+
+  it("cuts the links in the statement: one more than the limit, each pair under its firmest claim", async () => {
+    const links = await run((claims, sql) =>
+      Effect.gen(function* () {
+        // Three peers of the order. The first is claimed by a hint and then by a source.
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+          VALUES (${ORDER}, 'linked', 'acme-erp:site:a', 'text', ${uuidFromString(ERP_ACCOUNT)}, 'note',
+                  'current', ${AT})`;
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], {
+          linked: ["acme-erp:site:a", "acme-erp:site:b", "acme-erp:site:c"],
+        });
+        const all = yield* claims.readClaimsFor(ORDER, NO_CUT);
+        const cut = yield* claims.readClaimsFor(ORDER, 2);
+        return { all: all.links, cut: cut.links };
+      }),
+    );
+
+    expect(links.all.map((link) => [link.toRef, link.claim.type])).toEqual([
+      ["acme-erp:site:a", "source"],
+      ["acme-erp:site:b", "source"],
+      ["acme-erp:site:c", "source"],
+    ]);
+    // The caller sees the limit plus one: there is more than it asked for.
+    expect(links.cut).toHaveLength(3);
+    const noMoreThanLimit = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], { linked: ["acme-erp:site:a"] });
+        return (yield* claims.readClaimsFor(ORDER, 1)).links;
+      }),
+    );
+    expect(noMoreThanLimit).toHaveLength(1);
+  });
+
+  it("reads a batch of new links with one question about joined pairs, however many there are", async () => {
+    const counts = await run((claims) =>
+      Effect.gen(function* () {
+        const count = (peers: number) =>
+          Effect.gen(function* () {
+            const statements: Array<string> = [];
+            yield* claims
+              .applySourceRelations({
+                connectionId: ERP_ACCOUNT,
+                entries: [
+                  {
+                    fromRef: `acme-erp:purchase-order:batch-${peers}`,
+                    relations: {
+                      complete: true,
+                      partOf: [],
+                      linked: Array.from(
+                        { length: peers },
+                        (_, n) => `acme-erp:site:${peers}-${n}`,
+                      ),
+                    },
+                    observedRevision: undefined,
+                    inBaseline: false,
+                  },
+                ],
+                now: AT,
+              })
+              .pipe(
+                Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                  Effect.sync(() => {
+                    statements.push(statement.compile()[0]);
+                    return statement;
+                  }),
+                ),
+              );
+            return statements.filter((statement) => statement.includes("EXISTS")).length;
+          });
+        return { few: yield* count(2), many: yield* count(20) };
+      }),
+    );
+
+    expect(counts.few).toBe(1);
+    expect(counts.many).toBe(1);
+  });
+
+  it("leaves the pairs of a thing's baseline out of the new links", async () => {
+    const result = await run((claims) =>
+      Effect.gen(function* () {
+        const arriving = yield* claims.applySourceRelations({
+          connectionId: ERP_ACCOUNT,
+          entries: [
+            {
+              fromRef: ORDER,
+              relations: { complete: true, partOf: [], linked: [SITE] },
+              observedRevision: undefined,
+              inBaseline: true,
+            },
+          ],
+          now: AT,
+        });
+        const later = yield* report(claims, OTHER_ERP_ACCOUNT, ROUND_ONE, [], {
+          linked: [ORDER],
+        });
+        return { arriving: arriving.newLinks, later };
+      }),
+    );
+
+    expect(result.arriving).toEqual([]);
+    expect(result.later.changed).toBe(true);
   });
 });
 
@@ -250,11 +380,13 @@ describe("loops in part-of", () => {
               fromRef: ROUND_ONE,
               relations: { complete: true, partOf: [ROUND_TWO], linked: [] },
               observedRevision: undefined,
+              inBaseline: false,
             },
             {
               fromRef: ROUND_TWO,
               relations: { complete: true, partOf: [], linked: [] },
               observedRevision: undefined,
+              inBaseline: false,
             },
           ],
           now: LATER,
@@ -281,7 +413,7 @@ describe("loops in part-of", () => {
           write,
           again,
           rows: yield* readStored(sql, SITE),
-          detail: yield* claims.readClaimsFor(ROUND_ONE),
+          detail: yield* claims.readClaimsFor(ROUND_ONE, NO_CUT),
         };
       }),
     );

@@ -10,50 +10,51 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { EntityUnlinkResult } from "@hercule/contract";
-import { CURRENT_LINKED_SQL, type NewLink } from "./claim-sql";
+import { CLAIM_TYPES_FIRMEST_FIRST, CURRENT_LINKED_SQL } from "./claim-sql";
 
-/** Orders the claim types from firmest to weakest. */
-const CLAIM_FIRMNESS = ["source", "person", "text"] as const;
+/** What `addPersonLink` did. */
+export type PersonLinkOutcome =
+  /** Hercule holds no record of `fromRef`, so nothing was written. */
+  | "no-record"
+  /** The actor already linked the pair, in either direction, so nothing was written. */
+  | "already-linked"
+  | "added";
 
-/** Builds the person-link writes. Needs the database and the question "does a pair already join". */
-export const makePersonLinks = (input: {
-  readonly sql: SqlClient.SqlClient;
-  readonly hasEffectiveLink: (a: string, b: string) => Effect.Effect<boolean, SqlError>;
-}) => {
-  const { sql, hasEffectiveLink } = input;
+/** Builds the person-link writes. Needs the database only. */
+export const makePersonLinks = (input: { readonly sql: SqlClient.SqlClient }) => {
+  const { sql } = input;
   return {
     /**
-     * Writes `actor`'s claim that `fromRef` is linked to `toRef`. Writes
-     * nothing when the actor already linked the pair in either direction.
-     * Returns whether a claim was added, and `newLink` when that claim joined
-     * a pair that no source or person joined before.
+     * Writes `actor`'s claim that `fromRef` is linked to `toRef`. The target
+     * may be a ref nobody has read, but `fromRef` must have a record. Writes
+     * nothing when it has none, or when the actor already linked the pair in
+     * either direction.
      */
     addPersonLink: (args: {
       readonly fromRef: string;
       readonly toRef: string;
       readonly actor: string;
       readonly now: string;
-    }): Effect.Effect<
-      { readonly added: boolean; readonly newLink: NewLink | undefined },
-      SqlError
-    > =>
+    }): Effect.Effect<PersonLinkOutcome, SqlError> =>
       Effect.gen(function* () {
         const { fromRef, toRef, actor, now } = args;
+        const known = yield* sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM external_entities WHERE ref = ${fromRef}`;
+        if (known.length === 0) return "no-record";
         const existing = yield* sql<{ readonly id: number }>`
           SELECT id FROM external_entity_relation_claims
           WHERE claim_type = 'person' AND relation = 'linked' AND actor = ${actor}
             AND ((from_ref = ${fromRef} AND to_ref = ${toRef})
               OR (from_ref = ${toRef} AND to_ref = ${fromRef}))
           LIMIT 1`;
-        if (existing.length > 0) return { added: false, newLink: undefined };
-        const wasLinked = yield* hasEffectiveLink(fromRef, toRef);
+        if (existing.length > 0) return "already-linked";
         yield* sql`
           INSERT INTO external_entity_relation_claims
             (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
              observed_revision, state, conflict_reason, observed_at)
           VALUES (${fromRef}, 'linked', ${toRef}, 'person', NULL, ${actor}, '',
                   NULL, 'current', NULL, ${now})`;
-        return { added: true, newLink: wasLinked ? undefined : { fromRef, toRef } };
+        return "added";
       }),
 
     /**
@@ -72,11 +73,13 @@ export const makePersonLinks = (input: {
           WHERE claim_type = 'person' AND relation = 'linked'
             AND ((from_ref = ${a} AND to_ref = ${b}) OR (from_ref = ${b} AND to_ref = ${a}))
           RETURNING id`;
-        const left = yield* sql<{ readonly claim_type: (typeof CLAIM_FIRMNESS)[number] }>`
+        const left = yield* sql<{
+          readonly claim_type: (typeof CLAIM_TYPES_FIRMEST_FIRST)[number];
+        }>`
           SELECT DISTINCT c.claim_type FROM external_entity_relation_claims c
           WHERE ${sql.literal(CURRENT_LINKED_SQL)}
             AND ((c.from_ref = ${a} AND c.to_ref = ${b}) OR (c.from_ref = ${b} AND c.to_ref = ${a}))`;
-        const remaining = CLAIM_FIRMNESS.find((type) =>
+        const remaining = CLAIM_TYPES_FIRMEST_FIRST.find((type) =>
           left.some((row) => row.claim_type === type),
         );
         return {

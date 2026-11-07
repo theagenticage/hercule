@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import type { EntityRecognition } from "@hercule/plugin-host";
+import type { ScopedTarget } from "./entity-observations";
 import type { RegisteredEventSource } from "./event-sources";
 
 /** The most recognitions one plugin returns for a text. */
@@ -24,6 +25,18 @@ export interface PluginRecognition {
   readonly pluginId: string;
   readonly recognition: EntityRecognition;
 }
+
+/**
+ * Builds the recognition a lookup reads for a scoped target. The `kind` stays
+ * qualified, as `EntityLookups.resolve` expects.
+ */
+export const buildScopedRecognition = (target: ScopedTarget): EntityRecognition => ({
+  recognized: "scoped",
+  form: "identifier",
+  ...(target.kind === undefined ? {} : { kind: target.kind }),
+  identifier: target.identifier,
+  ...(target.scopeHint === undefined ? {} : { scopeHint: target.scopeHint }),
+});
 
 /** Returns the recognition with its `kind`, when it has one, qualified by the plugin id. */
 const qualifyKind = (pluginId: string, recognition: EntityRecognition): EntityRecognition =>

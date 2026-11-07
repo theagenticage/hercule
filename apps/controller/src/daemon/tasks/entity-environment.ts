@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import { nowIso } from "../../db";
+import { buildActiveEntityKind } from "../../external-entities";
 import type { PluginHost } from "../../plugins";
 
 /**
@@ -14,8 +15,6 @@ export const readEntityEnvironment = (host: PluginHost["Service"]) =>
     return {
       now: yield* nowIso,
       activePluginIds: [...new Set(sources.map((source) => source.pluginId))],
-      activeEntityKinds: sources.flatMap((source) =>
-        source.entityKinds.map(({ word, noun, refPrefix }) => ({ kind: word, noun, refPrefix })),
-      ),
+      activeEntityKinds: sources.flatMap((source) => source.entityKinds.map(buildActiveEntityKind)),
     };
   });
