@@ -130,8 +130,9 @@ type Relations = NonNullable<EntityObservation["relations"]>;
  *   read), the project, the milestone and the team.
  * - `linkedUrls` holds the attachments' links, each once. It is left out when
  *   the context was not read, because then nothing is known about them.
- * - `complete` is true only when the context was read and every page of the
- *   attachments was. Otherwise the host takes no claim away.
+ * - `complete` is true only when the context was read, every page of the
+ *   attachments was, and no link was cut to fit `MAX_ENTITY_RELATIONS`.
+ *   Otherwise the host takes no claim away.
  * - `texts` holds the description. An issue with no description reports an
  *   empty text, which clears the hints its old description left.
  */
@@ -156,7 +157,10 @@ export const buildIssueContextFields = (
     ),
   ];
   const relations: Relations = {
-    complete: context !== undefined && !context.attachments.pageInfo.hasNextPage,
+    complete:
+      context !== undefined &&
+      !context.attachments.pageInfo.hasNextPage &&
+      urls.length <= MAX_ENTITY_RELATIONS,
     partOf,
     linked: [],
     ...(context === undefined ? {} : { linkedUrls: urls.slice(0, MAX_ENTITY_RELATIONS) }),
@@ -319,14 +323,21 @@ const definePlaceRead = <S extends Schema.Decoder<{ readonly id: string }>>(defi
   };
 };
 
-/** Collects every relation the places reports, and whether Linear had more of them than were read. */
+/**
+ * Collects the parents a place reports, each once. The relations are complete
+ * only when Linear had no more parents than were read and none was cut to fit
+ * `MAX_ENTITY_RELATIONS`.
+ */
 const buildPlaceRelations = (
   parents: ReadonlyArray<{ readonly refs: ReadonlyArray<string>; readonly hasMore: boolean }>,
-): Relations => ({
-  complete: parents.every((relation) => !relation.hasMore),
-  partOf: parents.flatMap((relation) => relation.refs).slice(0, MAX_ENTITY_RELATIONS),
-  linked: [],
-});
+): Relations => {
+  const refs = [...new Set(parents.flatMap((relation) => relation.refs))];
+  return {
+    complete: parents.every((relation) => !relation.hasMore) && refs.length <= MAX_ENTITY_RELATIONS,
+    partOf: refs.slice(0, MAX_ENTITY_RELATIONS),
+    linked: [],
+  };
+};
 
 const PROJECT_READ = definePlaceRead({
   kind: PROJECT_KIND,

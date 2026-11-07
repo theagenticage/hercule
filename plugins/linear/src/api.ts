@@ -268,6 +268,49 @@ interface PagedItems<A> {
 }
 
 /**
+ * Reads the pages of a list query one after another and returns what `keep`
+ * leaves of the items. `keep` runs after every page, so memory stays bounded
+ * by what it keeps plus one page. Stops after `maxPages` pages. `hasMore` is
+ * true when that cap stopped the read or `keep` dropped an item. Fails as
+ * `callLinear` does, and then returns nothing.
+ */
+const readPagesKeeping = <S extends Schema.Decoder<unknown>>(
+  authorization: string,
+  query: LinearQuery,
+  field: string,
+  item: S,
+  maxPages: number,
+  keep: (items: Array<S["Type"]>) => Array<S["Type"]>,
+): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const page = Schema.Struct({
+      [field]: Schema.Struct({ nodes: Schema.Array(item), pageInfo: PageInfo }),
+    });
+    let items: Array<S["Type"]> = [];
+    let dropped = false;
+    let after: string | null = null;
+    for (let read = 0; read < maxPages; read += 1) {
+      const data = yield* callLinear(
+        authorization,
+        { ...query, variables: { ...query.variables, first: MAX_PAGE_SIZE, after } },
+        page,
+      );
+      const list = data[field] as {
+        readonly nodes: ReadonlyArray<S["Type"]>;
+        readonly pageInfo: Schema.Schema.Type<typeof PageInfo>;
+      };
+      const combined = [...items, ...list.nodes];
+      items = keep(combined);
+      dropped ||= items.length < combined.length;
+      if (!list.pageInfo.hasNextPage || list.pageInfo.endCursor === null) {
+        return { items, hasMore: dropped };
+      }
+      after = list.pageInfo.endCursor;
+    }
+    return { items, hasMore: true };
+  });
+
+/**
  * Reads a list query page by page and returns its items. The query's list is
  * the root field `field`, and the query takes `$first` and `$after`. Each
  * page asks for `MAX_PAGE_SIZE` items. Stops after `maxPages` pages and says
@@ -281,27 +324,25 @@ export const readPages = <S extends Schema.Decoder<unknown>>(
   item: S,
   maxPages: number,
 ): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const page = Schema.Struct({
-      [field]: Schema.Struct({ nodes: Schema.Array(item), pageInfo: PageInfo }),
-    });
-    const items: Array<S["Type"]> = [];
-    let after: string | null = null;
-    for (let read = 0; read < maxPages; read += 1) {
-      const data = yield* callLinear(
-        authorization,
-        { ...query, variables: { ...query.variables, first: MAX_PAGE_SIZE, after } },
-        page,
-      );
-      const list = data[field] as {
-        readonly nodes: ReadonlyArray<S["Type"]>;
-        readonly pageInfo: Schema.Schema.Type<typeof PageInfo>;
-      };
-      items.push(...list.nodes);
-      if (!list.pageInfo.hasNextPage || list.pageInfo.endCursor === null) {
-        return { items, hasMore: false };
-      }
-      after = list.pageInfo.endCursor;
-    }
-    return { items, hasMore: true };
-  });
+  readPagesKeeping(authorization, query, field, item, maxPages, (items) => items);
+
+/**
+ * Reads a list query to its last page and returns the `limit` items with the
+ * latest `updatedAt`, newest first. `hasMore` is true when the list was longer
+ * than `limit`. Whatever order Linear lists in, the result is the same, and
+ * memory holds at most `limit` plus one page of items. Fails as `callLinear`
+ * does, on any page, and then returns nothing.
+ */
+export const readNewestPages = <S extends Schema.Decoder<{ readonly updatedAt: string }>>(
+  authorization: string,
+  query: LinearQuery,
+  field: string,
+  item: S,
+  limit: number,
+): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
+  readPagesKeeping(authorization, query, field, item, Number.POSITIVE_INFINITY, (items) =>
+    // Linear's timestamps are all UTC ISO strings of one shape, so they order as text.
+    items
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+      .slice(0, limit),
+  );

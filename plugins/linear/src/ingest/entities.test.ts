@@ -9,6 +9,7 @@ import { EntityFact } from "@hercule/contract";
 import {
   EntityObservation,
   MAX_ENTITY_OBSERVATIONS,
+  MAX_ENTITY_RELATIONS,
   type EntityInventory,
 } from "@hercule/plugin-host";
 import type { LinearConnectionConfig } from "../connection-type";
@@ -28,6 +29,8 @@ import {
   type FakeWorld,
   type ReportedEntities,
 } from "../testing";
+import { ApiIssue } from "../linear-objects";
+import { buildIssueContextFields } from "./entity-context";
 import { pollWithConnection } from "./index";
 
 /** The ref the host stores for the fake issue `id`. */
@@ -221,7 +224,48 @@ describe("the entities feed's inventory", () => {
     const refs = new Set(inventory.observations.map((observation) => observation.ref));
     expect(refs.has(refOf("issue-1"))).toBe(true);
     expect(refs.has(refOf(`issue-${String(MAX_ENTITY_OBSERVATIONS + 1)}`))).toBe(false);
-    expect(requestNames.filter((name) => name === "LinearAssignedIssues")).toHaveLength(8);
+    expect(requestNames.filter((name) => name === "LinearAssignedIssues")).toHaveLength(9);
+  });
+
+  it("reads the whole inventory whatever the page size, and keeps the newest issues of it", async () => {
+    const base = Date.now();
+    const count = MAX_ENTITY_OBSERVATIONS + 30;
+    // Oldest first, so the newest issues are on the last pages.
+    const issues = Array.from({ length: count }, (_, index) =>
+      buildFakeIssue(index + 1, { updatedAt: new Date(base + index * 1000).toISOString() }),
+    );
+
+    const { reported, requestNames } = await pollEntitiesFeed(issues, { pageSize: 100 });
+
+    const inventory = reconciledIssues(reported);
+    expect(inventory.complete).toBe(false);
+    expect(inventory.observations).toHaveLength(MAX_ENTITY_OBSERVATIONS);
+    const refs = new Set(inventory.observations.map((observation) => observation.ref));
+    expect(refs.has(refOf(`issue-${String(count)}`))).toBe(true);
+    expect(refs.has(refOf("issue-31"))).toBe(true);
+    expect(refs.has(refOf("issue-30"))).toBe(false);
+    expect(requestNames.filter((name) => name === "LinearAssignedIssues")).toHaveLength(
+      Math.ceil(count / 100),
+    );
+  });
+
+  it("reports nothing when a page after the host's limit fails", async () => {
+    const issues = Array.from({ length: MAX_ENTITY_OBSERVATIONS + 30 }, (_, index) =>
+      buildFakeIssue(index + 1),
+    );
+    let pages = 0;
+
+    const { reported, result } = await pollEntitiesFeed(issues, {
+      prepare: (world) => {
+        world.override = (request) =>
+          request.operationName === "LinearAssignedIssues" && (pages += 1) === 9
+            ? { status: 500, body: {} }
+            : undefined;
+      },
+    });
+
+    expect(Result.isFailure(result)).toBe(true);
+    expect(reported.reconciled).toEqual([]);
   });
 
   it("reports an inventory of exactly the host's limit as complete", async () => {
@@ -296,6 +340,34 @@ describe("the entities feed's refresh", () => {
       refOf("issue-1"),
     ]);
   });
+
+  it("splits a refresh of more places and issues than the host takes into calls it accepts", async () => {
+    const children = Array.from({ length: MAX_ENTITY_OBSERVATIONS }, (_, index) =>
+      buildFakeIssue(index + 1),
+    );
+    const parents = children.map((_, index) =>
+      buildFakeIssue(10_000 + index, { assignee: { ...OTHER_USER } }),
+    );
+    const wanted = buildFakeIssue(99_999, {
+      assignee: { ...OTHER_USER },
+      state: { ...FAKE_STATES.completed },
+    });
+
+    const { reported, result } = await pollEntitiesFeed([...children, ...parents, wanted], {
+      wanted: [refOf(wanted.id)],
+      prepare: (world) => {
+        children.forEach((child, index) => {
+          world.parents[child.id] = parents[index]!.id;
+        });
+      },
+    });
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(reported.refreshed.map((call) => call.length)).toEqual([MAX_ENTITY_OBSERVATIONS, 1]);
+    const refs = reported.refreshed.flat().map((observation) => observation.ref);
+    expect(new Set(refs).size).toBe(MAX_ENTITY_OBSERVATIONS + 1);
+    expect(refs).toContain(refOf(wanted.id));
+  }, 30_000);
 
   it("reports an issue of another workspace as inaccessible without asking Linear", async () => {
     const { reported, requestNames } = await pollEntitiesFeed([], {
@@ -550,6 +622,30 @@ describe("the context of an issue", () => {
     expect(relations?.linkedUrls).toHaveLength(50);
   });
 
+  it("says the relations are not complete when more links are listed than one observation holds", () => {
+    const issue = buildFakeIssue(1);
+    const attachments = Array.from(
+      { length: MAX_ENTITY_RELATIONS + 6 },
+      (_, index) => `https://example.com/doc/${String(index)}`,
+    );
+
+    const { relations } = buildIssueContextFields(
+      Schema.decodeUnknownSync(ApiIssue)(issue),
+      { id: TEST_ORGANIZATION.id, urlKey: TEST_ORGANIZATION.urlKey },
+      {
+        id: issue.id,
+        parent: null,
+        attachments: {
+          nodes: attachments.map((url) => ({ url })),
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    );
+
+    expect(relations?.complete).toBe(false);
+    expect(relations?.linkedUrls).toHaveLength(MAX_ENTITY_RELATIONS);
+  });
+
   it("reports an issue whose context read failed with what the issue itself knows, and not complete", async () => {
     const { reported, result } = await pollWithContext({
       prepare: (world) => {
@@ -715,6 +811,37 @@ describe("the context of a place", () => {
     const { relations } = refreshedPlace(reported, placeRef("project", "project-checkout"));
     expect(relations?.complete).toBe(false);
     expect(relations?.partOf).toHaveLength(50 + 1);
+  });
+
+  it("says a project's relations are not complete when each parent was listed but too many for one observation", async () => {
+    const initiativeIds = Array.from({ length: 50 }, (_, index) => `init-${String(index)}`);
+    const teamIds = Array.from({ length: 30 }, (_, index) => `team-${String(index)}`);
+
+    const { reported } = await pollPlaces(
+      { project: [placeRef("project", "project-checkout")] },
+      (world) => {
+        Object.assign(world.projects[0]!, { initiativeIds, teamIds });
+      },
+    );
+
+    const { relations } = refreshedPlace(reported, placeRef("project", "project-checkout"));
+    expect(relations?.complete).toBe(false);
+    expect(relations?.partOf).toHaveLength(MAX_ENTITY_RELATIONS);
+  });
+
+  it("counts a parent Linear lists twice once, and keeps the relations complete", async () => {
+    const initiativeIds = Array.from({ length: 50 }, (_, index) => `init-${String(index % 40)}`);
+
+    const { reported } = await pollPlaces(
+      { project: [placeRef("project", "project-checkout")] },
+      (world) => {
+        Object.assign(world.projects[0]!, { initiativeIds });
+      },
+    );
+
+    const { relations } = refreshedPlace(reported, placeRef("project", "project-checkout"));
+    expect(relations?.complete).toBe(true);
+    expect(relations?.partOf).toHaveLength(40 + 1);
   });
 
   it("reports an initiative with its parent initiative, and a milestone under its project, and a team with no progress they were not given", async () => {

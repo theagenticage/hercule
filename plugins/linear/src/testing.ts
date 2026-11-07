@@ -840,7 +840,7 @@ export interface ReportedEntities {
 /**
  * Builds the `entities` member of an ingest context, which records every call.
  * `wanted` holds the refs `listWanted` returns, by kind. Like the host, it
- * refuses a `reconcile` call with more observations than the host takes.
+ * refuses a `reconcile` or `refresh` call with more observations than the host takes.
  */
 export const buildFakeEntities = (
   wanted: Readonly<Record<string, ReadonlyArray<string>>> = {},
@@ -853,7 +853,10 @@ export const buildFakeEntities = (
         inventory.observations.length > MAX_ENTITY_OBSERVATIONS
           ? Effect.fail(new PluginError({ message: "too many observations in one call" }))
           : Effect.sync(() => void reported.reconciled.push(inventory)),
-      refresh: (observations) => Effect.sync(() => void reported.refreshed.push(observations)),
+      refresh: (observations) =>
+        observations.length > MAX_ENTITY_OBSERVATIONS
+          ? Effect.fail(new PluginError({ message: "too many observations in one call" }))
+          : Effect.sync(() => void reported.refreshed.push(observations)),
       listWanted: (kind, limit) =>
         Effect.sync(() => {
           reported.listed.push({ kind, limit });

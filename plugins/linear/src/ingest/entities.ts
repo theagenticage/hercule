@@ -29,7 +29,7 @@ import {
   type IngestEntities,
   type PollResult,
 } from "@hercule/plugin-host";
-import { MAX_PAGE_SIZE, readPages, type LinearFailure } from "../api";
+import { readNewestPages, type LinearFailure } from "../api";
 import { OPEN_STATE_TYPES } from "../connection-type";
 import { ISSUE_KIND } from "../entity-kinds";
 import { buildIssueObservation, parseRef } from "../entity-reads";
@@ -46,12 +46,6 @@ import { readIssuesById } from "./issues";
 
 /** How many refs of one kind the poll asks the host for, and reads, each time. */
 const WANTED_REFS_PER_KIND = 50;
-
-/**
- * The most pages of the inventory a poll reads. They hold exactly the most
- * observations the host takes in one call.
- */
-const MAX_INVENTORY_PAGES = MAX_ENTITY_OBSERVATIONS / MAX_PAGE_SIZE;
 
 /**
  * The query that lists the open issues assigned to the user, the most
@@ -107,11 +101,11 @@ const buildIssueObservations = (
   });
 
 /**
- * Reads the whole inventory of issues and reports it in one `reconcile` call.
- * An inventory longer than the host takes is cut to the most recently updated
- * issues and reported with `complete: false`, so nothing is taken away for
- * the issues left out. Fails as `readPages` fails, before anything is
- * reported. Returns the parent issues the context read found, as partial
+ * Reads the whole inventory of issues, to its last page, and reports it in
+ * one `reconcile` call. An inventory longer than the host takes is cut to the
+ * most recently updated issues and reported with `complete: false`, so nothing
+ * is taken away for the issues left out. Fails as `readNewestPages` fails, on
+ * any page, before anything is reported. Returns the parent issues the context read found, as partial
  * observations for the refresh to report.
  */
 const reconcileInventory = (
@@ -121,7 +115,7 @@ const reconcileInventory = (
   userId: string,
 ): Effect.Effect<ReadonlyArray<EntityObservation>, LinearFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const assigned = yield* readPages(
+    const assigned = yield* readNewestPages(
       authorization,
       {
         name: "LinearAssignedIssues",
@@ -130,7 +124,7 @@ const reconcileInventory = (
       },
       "issues",
       ApiIssue,
-      MAX_INVENTORY_PAGES,
+      MAX_ENTITY_OBSERVATIONS,
     );
     const { issues, parents } = yield* buildIssueObservations(
       authorization,
@@ -208,8 +202,11 @@ const refreshWantedIssues = (
         .filter((parent) => !full.has(parent.ref))
         .map((parent) => [parent.ref, parent]),
     );
+    // Each ref once, and no more per call than the host takes.
     const observations = [...refreshed.issues, ...places.values()];
-    if (observations.length > 0) yield* entities.refresh(observations);
+    for (let start = 0; start < observations.length; start += MAX_ENTITY_OBSERVATIONS) {
+      yield* entities.refresh(observations.slice(start, start + MAX_ENTITY_OBSERVATIONS));
+    }
     for (const [id, ref] of readable) {
       if (!found.has(id)) yield* entities.reportMissing(ref, "inaccessible");
     }
