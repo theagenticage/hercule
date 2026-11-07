@@ -8,25 +8,16 @@ import { Effect, Schema } from "effect";
 import type { EmittedEvent, EventKindDeclaration } from "./contributions";
 import { MAX_EMITTED_FIELD_BYTES } from "./contributions";
 import {
-  EXTERNAL_REF_PATTERN,
+  buildBoundedString,
+  ExternalRef,
   ISO_TIMESTAMP_PATTERN,
   MAX_DEDUP_KEY_LENGTH,
   MAX_EVENT_AUTHOR_LENGTH,
   MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
-  MAX_EXTERNAL_REF_LENGTH,
 } from "./limits";
 import { PluginError } from "./plugin";
-
-/** Builds the schema of a string of at least `minimum` and at most `maximum` characters. */
-const buildBoundedString = (minimum: number, maximum: number) =>
-  Schema.String.check(Schema.isBetweenLength(minimum, maximum));
-
-const ExternalRef = Schema.String.check(
-  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  Schema.isPattern(EXTERNAL_REF_PATTERN),
-);
 
 /** The fields every event has, whatever its kind, with the limits the host enforces. */
 const EventEnvelope = Schema.Struct({

@@ -11,7 +11,7 @@ export type SidebarFace = "threads" | "orchestration";
  *
  * - A thread, the new-thread screen and an assistant's Conversation show the
  *   threads face.
- * - Work (the Overview's view of the board), Intake, Workflows, a run's page,
+ * - Work (the Overview's view of the board), the Inbox, Intake, Workflows, a run's page,
  *   Discussions, the Wiki and Fleet (the Fleet page and a machine's pages)
  *   show the orchestration face, where their rows are. A run's page belongs
  *   to the Workflows row.
@@ -24,6 +24,7 @@ export const decideScreenFace = (pathname: string): SidebarFace | null => {
     return "threads";
   }
   return pathname === "/work" ||
+    pathname === "/inbox" ||
     pathname === "/intake" ||
     pathname === "/workflows" ||
     pathname.startsWith("/workflows/") ||

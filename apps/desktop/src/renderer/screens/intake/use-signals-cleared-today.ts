@@ -1,6 +1,6 @@
 /**
  * The Done signals that count what was cleared today, which the foot under
- * To do and inbox zero both show (spec 17 §Intake).
+ * To do and To do clear both show (spec 17 §Intake).
  */
 import { useEffect } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";

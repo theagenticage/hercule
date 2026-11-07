@@ -15,7 +15,6 @@ import { buildLogicalBoard } from "@hercule/client-core/work";
 import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
 import { flipByKey } from "../../../app/motion";
-import type { CardMover } from "../../../app/card-mover";
 import type { PendingMove } from "../../../app/pending-card-moves";
 import { openTestAccountScope } from "../../../app/testing-account-scope";
 import { useCardMoves } from "./-card-moves";
@@ -152,6 +151,7 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
           onCardReturning: (taskId, stage) => {
             returning.push([taskId, stage]);
           },
+          isCarrying: false,
         });
         return { ...moves, board: buildShownBoard(data, shownMoves) };
       },
@@ -1054,7 +1054,7 @@ describe("useCardMoves across a sign-out", () => {
       scopes.close();
     });
     expect(pendingCardMoves.getSnapshot()).toEqual([]);
-    expect(await undoStack.undo({} as CardMover)).toEqual({ kind: "empty" });
+    expect(await undoStack.undo()).toEqual({ kind: "empty" });
     await act(() => {
       held[0]!.accept();
       return Promise.resolve();

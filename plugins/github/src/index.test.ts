@@ -127,8 +127,32 @@ describe("what the github plugin registers", () => {
   it("requests the capabilities its connection type, ingest and actions use", () => {
     expect(github.manifest).toMatchObject({
       id: "github",
-      capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
+      capabilities: [
+        "connections",
+        "event-sources",
+        "events",
+        "resources",
+        "entities",
+        "workflow-actions",
+      ],
     });
+  });
+
+  it("declares the entity kinds it reports and an entities feed to poll them", async () => {
+    const source = (await collectContributions(github)).sources[0]!;
+
+    expect(
+      (source.entityKinds ?? []).map((kind) => [kind.word, kind.refPrefix, kind.pace]),
+    ).toEqual([
+      ["pull-request", "github:pr:", "fast"],
+      ["issue", "github:issue:", "slow"],
+      ["repository", "github:repo:", "context"],
+    ]);
+    expect(source.feeds?.["entities"]).toEqual({
+      defaultIntervalSeconds: 120,
+      minIntervalSeconds: 60,
+    });
+    expect(source.entityLookup).toBeDefined();
   });
 
   it("contributes one type that offers a device flow and a pasted token", async () => {

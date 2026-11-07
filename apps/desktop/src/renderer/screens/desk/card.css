@@ -131,7 +131,8 @@
 .desk-card[data-state="landed"] .card-words {
   min-height: 0;
 }
-.desk-card[data-state="landed"] .card-meta {
+.desk-card[data-state="landed"] .card-meta,
+.desk-card[data-state="landed"] .card-also {
   display: none;
 }
 
@@ -156,6 +157,29 @@
   font: var(--type-meta);
   color: var(--faint);
   font-variant-numeric: tabular-nums;
+}
+/* The mark of the source a card comes from, beside the age. */
+.card-src {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+  line-height: 0;
+}
+/* What a card in two lanes says at the bottom left, so no lane looks like its
+   only home. It stops short of the marks and the age on the right. */
+.card-also {
+  position: absolute;
+  left: var(--card-pad-x);
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  max-width: calc(100% - 2 * var(--card-pad-x) - 76px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-meta);
+  color: var(--faint);
 }
 .card-title {
   display: -webkit-box;

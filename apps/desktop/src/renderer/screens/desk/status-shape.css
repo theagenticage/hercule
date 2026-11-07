@@ -1,12 +1,19 @@
 /* The status shape, drawn on the app's 16-unit icon grid with the stroke the
    icons use, and the failed mark, which is the `cross` shape in its `bad`
-   tone. The colour of a shape comes from its tone alone. */
+   tone. The colour of a shape comes from its tone alone. The shapes and tones are
+   the Inbox drawing's (`css/card.css` and `css/tokens.css`). */
 .shape {
   display: inline-grid;
   place-items: center;
 }
 .shape.tone-quiet {
   color: var(--faint);
+}
+.shape.tone-active {
+  color: var(--accent-ink);
+}
+.shape.tone-attention {
+  color: var(--attention-ink);
 }
 .shape.tone-good {
   color: var(--ok);

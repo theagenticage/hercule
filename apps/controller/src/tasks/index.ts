@@ -1,14 +1,17 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
+  ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
   TaskServiceLayer,
+  type CreatedTaskUndo,
   type FailureRestoration,
   type FailureRestoreRefusal,
   type QueryInput,
   type TaskPage,
+  type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
-export { taskRepository, type BoardTask, type NewTask } from "./repository";
+export { LIVE_TASK_LINKS_SQL, taskRepository, type BoardTask, type NewTask } from "./repository";
 export {
   SUMMARY_CONCURRENCY,
   SUMMARY_MIN_INTERVAL_SECONDS,
@@ -26,6 +29,8 @@ export {
   TaskBoardFacts,
   TaskBoardLayer,
   type BoardCardFacts,
+  type BoardEntityContext,
+  type BoardFacts,
   type BoardFactsRequest,
   type BoardFailureFact,
   type BoardSessionFact,

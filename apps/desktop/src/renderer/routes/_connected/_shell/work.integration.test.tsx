@@ -3,14 +3,23 @@
  * opening, again on a `task` push, none while the window is hidden), the cards
  * and their three facts, the filter and its chip, folding a lane, the states
  * of an empty board, Add to Work from a lane's `+`, and the offline line. Its
- * second part drives the board with the keyboard alone.
+ * second part drives the board with the keyboard alone, and its third part
+ * groups the board by an outside place, such as a repository.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { buildInbox } from "@hercule/client-core/inbox/testing";
 import { buildSession, buildWorkspace } from "@hercule/client-core/threads/testing";
-import { buildBoard, buildCard, buildSummary } from "@hercule/client-core/work/testing";
-import type { BoardStage, Task, TaskDetail, WorkBoard, WorkCard } from "@hercule/contract";
+import { buildBoard, buildCard, buildPlace, buildSummary } from "@hercule/client-core/work/testing";
+import type {
+  BoardStage,
+  PluginDetail,
+  Task,
+  TaskDetail,
+  WorkBoard,
+  WorkCard,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -25,6 +34,7 @@ import {
   type Handler,
 } from "../../../app/testing";
 import { buildPendingIntentsKey, UNDO_WINDOW_MS } from "../../../app/pending-intents";
+import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 
 // The ids of the cards that drew, in order. A card's reading for a screen
@@ -50,6 +60,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setVisibility("visible");
+  localStorage.clear();
 });
 
 const WEBSHOP = SIDEBAR_FIXTURE.projects[0]!;
@@ -586,6 +597,28 @@ describe("the Work screen's keys", () => {
     // Nothing further to the left: the focus stays.
     await user.keyboard("{ArrowLeft}");
     expect(document.activeElement).toBe(getCard("Refund emails show the wrong currency"));
+  });
+
+  it("takes the keyboard focus when Work opens from the sidebar, so the keys act at once", async () => {
+    const user = userEvent.setup();
+    await openWork({
+      handlers: {
+        "GET /api/v1/external-entities/inbox": { body: buildInbox([]) },
+        "GET /api/v1/external-entities/inbox/count": { body: buildInbox([]).counts },
+      },
+    });
+    await user.click(await screen.findByRole("link", { name: /^Inbox/ }));
+    await waitFor(() => {
+      expect(document.querySelector(".inbox-desk")).not.toBeNull();
+    });
+
+    // The click leaves focus on the sidebar row, which is not the page.
+    await user.click(screen.getByRole("link", { name: "Overview" }));
+    await screen.findByRole("button", { name: /^Tidy the depot labels/ });
+    expect(document.activeElement).toBe(document.querySelector(".board-scroll"));
+    await user.keyboard("{ArrowDown}");
+
+    expect(document.activeElement?.closest(".desk-card")).not.toBeNull();
   });
 
   it("jumps between lanes with [ and ], and opens the card's details with Return", async () => {
@@ -2812,5 +2845,328 @@ describe("the runs of a Task in the details pane", () => {
     expect(
       await screen.findByText('Could not stop "Review PR": The run has already ended.'),
     ).toBeTruthy();
+  });
+});
+
+// ---------- Grouping by an outside place ----------
+
+/** The invented source of the repositories: its one-square mark is how a test tells it is drawn. */
+const FORGE: PluginDetail = {
+  id: "forge",
+  displayName: "Forge",
+  mark: { paths: ["M2 2h12v12H2z"] },
+  hostApi: 2,
+  capabilities: [],
+  enabled: true,
+  status: { _tag: "active" },
+  config: {},
+  contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
+};
+
+const REPOSITORY_KIND = "forge/repository";
+const REPOSITORY_CAPTION = "Forge repository";
+const DEPOT_REPOSITORY = buildPlace("forge:repo:depot", "depot-service", {
+  kind: REPOSITORY_KIND,
+  noun: "Repository",
+  caption: REPOSITORY_CAPTION,
+  status: { shape: "ring", tone: "active", label: "Active" },
+  progress: { fraction: 3 / 7, done: 3, total: 7 },
+});
+const STORE_REPOSITORY = buildPlace("forge:repo:store", "store-web", {
+  kind: REPOSITORY_KIND,
+  noun: "Repository",
+  caption: REPOSITORY_CAPTION,
+});
+const DEPOT_LANE = `place:${DEPOT_REPOSITORY.ref}`;
+const STORE_LANE = `place:${STORE_REPOSITORY.ref}`;
+
+const SHARED_ID = buildTaskId(30);
+const SHARED_TITLE = "Share the pallet scan library";
+
+/** Four Tasks: one in the depot repository, one in the store repository, one in both, and one in none. */
+const REPOSITORY_CARDS: readonly WorkCard[] = [
+  buildCard(SHARED_ID, {
+    title: SHARED_TITLE,
+    entityMarks: [{ plugin: "forge", kind: "forge/pull-request" }],
+    contextRefs: [DEPOT_REPOSITORY.ref, STORE_REPOSITORY.ref],
+  }),
+  buildCard(buildTaskId(31), {
+    title: "Print depot pick lists",
+    entityMarks: [{ plugin: "forge", kind: "forge/issue" }],
+    contextRefs: [DEPOT_REPOSITORY.ref],
+  }),
+  buildCard(buildTaskId(32), {
+    title: "Show the basket total",
+    projectId: WEBSHOP.id,
+    entityMarks: [{ plugin: "forge", kind: "forge/issue" }],
+    contextRefs: [STORE_REPOSITORY.ref],
+  }),
+  buildCard(buildTaskId(33), { title: "Tidy the depot labels", stage: "planned" }),
+];
+
+const buildRepositoryBoard = (cards: readonly WorkCard[] = REPOSITORY_CARDS): WorkBoard => ({
+  ...buildBoard(...cards),
+  places: [DEPOT_REPOSITORY, STORE_REPOSITORY],
+  groupings: [{ kind: REPOSITORY_KIND, caption: REPOSITORY_CAPTION }],
+});
+
+/** Opens Work on a board of repositories, with the repositories' plugin installed. */
+const openRepositoryWork = (
+  options: {
+    readonly board?: () => WorkBoard;
+    readonly handlers?: Readonly<Record<string, Handler>>;
+  } = {},
+) =>
+  openWork({
+    board: options.board ?? (() => buildRepositoryBoard()),
+    handlers: { "GET /api/v1/plugins": { body: [FORGE] }, ...options.handlers },
+  });
+
+/** Chooses a grouping in the Group by menu, which jsdom keeps open in the page. */
+const groupBy = async (name: string): Promise<void> => {
+  await userEvent.click(screen.getByRole("menuitemradio", { name, hidden: true }));
+};
+
+/** Returns the section of the lane whose head names `name`. */
+const getLane = (name: RegExp | string): HTMLElement =>
+  screen.getByRole("heading", { level: 3, name }).closest("section")!;
+
+/** Returns every card named `title` that the board draws, one for each lane it is in. */
+const getCardsNamed = (title: string): HTMLElement[] =>
+  screen.getAllByRole("button", { name: new RegExp(`^${title}`) });
+
+describe("the Work screen grouped by an outside place", () => {
+  it("draws a lane per repository, with its mark and what it says about itself, and the lane of what has none last", async () => {
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+
+    await groupBy(REPOSITORY_CAPTION);
+
+    const names = screen
+      .getAllByRole("heading", { level: 3 })
+      .flatMap((heading) => heading.querySelector(".board-lane-name")?.textContent ?? []);
+    expect(names).toEqual(["depot-service", "store-web", `No ${REPOSITORY_CAPTION}`]);
+    const depot = getLane(/^depot-service/);
+    expect(depot.querySelector(".board-lane-folder svg path")).not.toBeNull();
+    expect(within(depot).getByText(/Forge repository · Active/)).toBeTruthy();
+    // Progress shows only where the source reports it.
+    expect(within(depot).getByText("3 of 7")).toBeTruthy();
+    expect(within(getLane(/^store-web/)).queryByText(/ of /)).toBeNull();
+    expect(screen.getByRole("button", { name: /^Group by\s*Forge repository$/ })).toBeTruthy();
+  });
+
+  it("puts a Task in two repositories in both, counts it once, and says so on each card", async () => {
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+
+    await groupBy(REPOSITORY_CAPTION);
+
+    const copies = getCardsNamed(SHARED_TITLE);
+    expect(copies).toHaveLength(2);
+    expect(copies.map((copy) => copy.closest("section")?.dataset["laneId"])).toEqual([
+      DEPOT_LANE,
+      STORE_LANE,
+    ]);
+    for (const copy of copies) {
+      const also = copy.querySelector<HTMLElement>(".card-also")!;
+      expect(also.textContent).toBe("In 2 repositories");
+      expect(also.title).toBe("depot-service, store-web");
+    }
+    // Only one of the two cards is the stop that Tab leads onto.
+    expect(
+      screen.getAllByRole("button").filter((button) => button.getAttribute("tabindex") === "0"),
+    ).toHaveLength(1);
+  });
+
+  it("draws the mark of the source on the foot of each card that links it, and none on one that links nothing", async () => {
+    await openRepositoryWork();
+
+    const linked = await screen.findByRole("button", { name: /^Print depot pick lists/ });
+    expect(linked.querySelector(".card-meta .card-src svg path")).not.toBeNull();
+    expect(linked.querySelector(".card-src")?.getAttribute("title")).toBe("Forge");
+    expect(getCard("Tidy the depot labels").querySelector(".card-src")).toBeNull();
+  });
+
+  it("keeps the grouping after the screen is opened again, and draws Project when its kind has gone", async () => {
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+    await groupBy(REPOSITORY_CAPTION);
+    expect(screen.getByRole("heading", { level: 3, name: /^depot-service/ })).toBeTruthy();
+
+    cleanup();
+    await openRepositoryWork();
+    expect(await screen.findByRole("heading", { level: 3, name: /^depot-service/ })).toBeTruthy();
+
+    cleanup();
+    await openRepositoryWork({ board: () => buildBoard(...CARDS) });
+    expect(await screen.findByRole("heading", { level: 3, name: /^webshop/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Group by\s*Project$/ })).toBeTruthy();
+    // The choice is kept, in case the kind comes back.
+    const saved = localStorage.getItem(buildWorkViewKey(CONTROLLER_URL, SIDEBAR_FIXTURE.username));
+    expect(JSON.parse(saved ?? "{}")).toMatchObject({ groupBy: REPOSITORY_KIND });
+  });
+
+  it("filters by a repository with a captioned chip, and leaves the Project of every Task alone", async () => {
+    const user = userEvent.setup();
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+
+    await user.click(screen.getByRole("menuitem", { name: /^Forge repository/, hidden: true }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^store-web/, hidden: true }));
+
+    expect(
+      screen.getByRole("button", { name: "Remove filter Forge repository store-web" }),
+    ).toBeTruthy();
+    expect(getCard("Show the basket total")).toBeTruthy();
+    expect(getCard(SHARED_TITLE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Print depot pick lists/ })).toBeNull();
+    // The Task is still in its own Project's lane.
+    expect(
+      within(getLane(/^webshop/)).getByRole("button", { name: /^Show the basket total/ }),
+    ).toBeTruthy();
+  });
+
+  it("filters by the source of the cards", async () => {
+    const user = userEvent.setup();
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+
+    await user.click(screen.getByRole("menuitem", { name: /^Source/, hidden: true }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^No source/, hidden: true }));
+
+    expect(getCard("Tidy the depot labels")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Print depot pick lists/ })).toBeNull();
+  });
+
+  it("walks the keys inside the lane of the copy that has the focus, not the lane of its twin", async () => {
+    const user = userEvent.setup();
+    await openRepositoryWork();
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+    await groupBy(REPOSITORY_CAPTION);
+    const inStore = getCardsNamed(SHARED_TITLE)[1]!;
+
+    // The depot lane has two cards in Exploring and the store lane has two as well.
+    await user.click(inStore);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(getCard("Show the basket total"));
+    expect(getCard("Show the basket total").closest("section")?.dataset["laneId"]).toBe(STORE_LANE);
+
+    // Up from the first card of the store lane goes into the depot lane's last card, not to a twin.
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(document.activeElement).toBe(getCard("Print depot pick lists"));
+  });
+
+  it("moves a Task a stage from its copy in the second lane, with no Project and no place to follow, and keeps the focus there", async () => {
+    const user = userEvent.setup();
+    let cards = REPOSITORY_CARDS;
+    const { calls } = await openRepositoryWork({
+      board: () => buildRepositoryBoard(cards),
+      handlers: {
+        [`POST /api/v1/tasks/${SHARED_ID}/move`]: (call) => {
+          const { stage } = call.body as { stage: BoardStage };
+          cards = cards.map((card) => (card.id === SHARED_ID ? { ...card, stage } : card));
+          return { body: { ...buildCreatedTask(SHARED_TITLE, undefined), id: SHARED_ID, stage } };
+        },
+      },
+    });
+    await screen.findByRole("button", { name: /^Print depot pick lists/ });
+    await groupBy(REPOSITORY_CAPTION);
+    await user.click(getCardsNamed(SHARED_TITLE)[1]!);
+
+    await user.keyboard(withShift("{ArrowRight}"));
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path.endsWith("/move"))).toHaveLength(1);
+    });
+    expect(calls.find((call) => call.path.endsWith("/move"))?.body).toEqual({ stage: "planned" });
+    const copies = getCardsNamed(SHARED_TITLE);
+    expect(copies).toHaveLength(2);
+    for (const copy of copies) {
+      expect(copy.closest(".board-cell")?.getAttribute("data-stage")).toBe("planned");
+    }
+    expect(document.activeElement).toBe(copies[1]);
+  });
+});
+
+describe("the Work screen's lanes for outside places, in their edge cases", () => {
+  const ODD_REPOSITORY = buildPlace('forge:repo:"odd"\\name', "odd-service", {
+    kind: REPOSITORY_KIND,
+    noun: "Repository",
+    caption: REPOSITORY_CAPTION,
+  });
+  const oddBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
+    ...buildBoard(...cards),
+    places: [ODD_REPOSITORY],
+    groupings: [{ kind: REPOSITORY_KIND, caption: REPOSITORY_CAPTION }],
+  });
+  const inOdd = (n: number, projectId: string | undefined): WorkCard =>
+    buildCard(buildTaskId(60 + n), {
+      title: `Odd task ${String(n)}`,
+      ...(projectId === undefined ? {} : { projectId }),
+      contextRefs: [ODD_REPOSITORY.ref],
+    });
+
+  it("folds and opens a lane whose place ref holds quotes and a backslash", async () => {
+    const user = userEvent.setup();
+    await openRepositoryWork({ board: () => oddBoard(inOdd(1, undefined), inOdd(2, undefined)) });
+    await screen.findByRole("button", { name: /^Odd task 1/ });
+    await groupBy(REPOSITORY_CAPTION);
+    await user.click(getCard("Odd task 1"));
+
+    await user.keyboard("f");
+
+    expect(screen.queryByRole("button", { name: /^Odd task 1/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^odd-service/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    await user.keyboard("f");
+    expect(getCard("Odd task 1")).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "the Project that most of its cards are in",
+      [inOdd(1, WEBSHOP.id), inOdd(2, WEBSHOP.id), inOdd(3, OPS.id), inOdd(4, undefined)],
+      WEBSHOP.id,
+    ],
+    ["no Project when two Projects tie", [inOdd(1, WEBSHOP.id), inOdd(2, OPS.id)], undefined],
+    [
+      "no Project when as many cards have none as the best Project has",
+      [inOdd(1, WEBSHOP.id), inOdd(2, undefined)],
+      undefined,
+    ],
+  ])("adds a Task from the lane's plus into %s", async (_, cards, projectId) => {
+    const user = userEvent.setup();
+    const { calls } = await openRepositoryWork({
+      board: () => oddBoard(...cards),
+      handlers: {
+        "POST /api/v1/tasks": (call) => ({
+          body: buildCreatedTask(
+            (call.body as { title: string }).title,
+            (call.body as { projectId?: string }).projectId,
+          ),
+        }),
+      },
+    });
+    await screen.findByRole("button", { name: /^Odd task 1/ });
+    await groupBy(REPOSITORY_CAPTION);
+
+    await user.click(screen.getByRole("button", { name: "Add to odd-service" }));
+    await user.type(screen.getByRole("textbox", { name: "New Task" }), "Label the crates{Enter}");
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === "POST" && call.path === "/api/v1/tasks")).toBe(
+        true,
+      );
+    });
+    const created = calls.find((call) => call.method === "POST" && call.path === "/api/v1/tasks");
+    expect(created?.body).toEqual({
+      title: "Label the crates",
+      description: "",
+      stage: "exploring",
+      ...(projectId === undefined ? {} : { projectId }),
+    });
   });
 });

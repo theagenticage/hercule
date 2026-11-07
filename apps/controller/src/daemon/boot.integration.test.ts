@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
-import { del, type ServerHarness } from "../http/testing";
+import { completeSetup, del, get, withServer, type ServerHarness } from "../http/testing";
 import {
   at,
   waitUntil,
@@ -254,6 +254,28 @@ describe("an input that was being delivered when the controller restarted", () =
       expect(row?.ended_at).not.toBeNull();
       expect(row?.lost_wake_up_event_id).toBeNull();
       expect(row?.health_error_message).toBeNull();
+    });
+  });
+});
+
+describe("the composed controller", () => {
+  // The External Entity service needs the Task service, and the Task board
+  // reads entities through a port, so a wrong join would be a cycle of layers.
+  // The controller is built with the real layers here: it boots, and the
+  // operations that sit on each side of the join answer.
+  it("builds the External Entity service beside the plugin host's ingest port and the Work board", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const counts = await get(base, "/api/v1/external-entities/inbox/count", token);
+      expect(counts.status, await counts.clone().text()).toBe(200);
+      expect(await counts.json()).toEqual({
+        onTheClock: 0,
+        requests: 0,
+        withSomeoneElse: 0,
+        newestArrival: 0,
+      });
+      const board = await get(base, "/api/v1/tasks/board", token);
+      expect(board.status, await board.clone().text()).toBe(200);
     });
   });
 });

@@ -15,7 +15,7 @@
  *   drew while the transition ran, with the 250 rows the steps above leave
  *   in the list;
  * - what the list's motion costs on screen: one signal arriving, a burst of
- *   30 arriving, and inbox zero after the user's own Done of the last
+ *   30 arriving, and To do clear after the user's own Done of the last
  *   signal. For each: the frames drawn and the longest gap between them, the
  *   renderer main thread's time and longest task, and what still runs once
  *   the motion is over (see `measureRowMotion`).
@@ -245,7 +245,7 @@ export interface MotionCost {
   readonly longestTaskMs: number;
   /**
    * How long the spec gives the motion, in milliseconds: `--dur-2` for rows,
-   * 800 ms plus the pane's 320 ms wait for inbox zero's arrival.
+   * 800 ms plus the pane's 320 ms wait for To do clear's arrival.
    */
   readonly lengthMs: number;
   /**
@@ -286,8 +286,8 @@ export interface IntakeWork {
   readonly arrival: MotionCost;
   /** `BURST_SIZE` signals raised elsewhere at once, landing on screen. */
   readonly arrivalBurst: MotionCost;
-  /** The user's own Done of the last signal on To do, which brings inbox zero. */
-  readonly inboxZero: MotionCost;
+  /** The user's own Done of the last signal on To do, which brings To do clear. */
+  readonly toDoClear: MotionCost;
 }
 
 /**
@@ -306,8 +306,8 @@ export interface IntakeWork {
  * - the split opened and then closed with the header's button: for each, a
  *   trace and the page's animation frames from the click until one frame
  *   after the transition's `--dur-3` is over (see `measureSplitToggle`);
- * - the list's motion: one arrival and a burst landing on screen, and inbox
- *   zero arriving (see `measureRowMotion`).
+ * - the list's motion: one arrival and a burst landing on screen, and To do
+ *   clear arriving (see `measureRowMotion`).
  *
  * The reads of To do are counted from the page's resource timing entries.
  * One connection to the page serves the whole scenario. The window stays
@@ -539,7 +539,7 @@ export const POINTER_OFF_LIST = { x: 100, y: 400 };
 /**
  * The longest a measured change may take to end its motion, in milliseconds
  * after the change. It covers the change's request, the read it causes and the
- * longest motion (inbox zero's 1,120 ms). A motion still running then fails
+ * longest motion (To do clear's 1,120 ms). A motion still running then fails
  * the measurement.
  */
 const MOTION_RECORD_MS = 3_500;
@@ -548,11 +548,11 @@ const MOTION_RECORD_MS = 3_500;
 const SECOND_AFTER_MOTION_MS = 1_050;
 
 /**
- * How long inbox zero's arrival runs here, as spec 17 §Motion sets it, in
+ * How long To do clear's arrival runs here, as spec 17 §Motion sets it, in
  * milliseconds: 800 ms, after a wait of `--dur-3` (320 ms) for the pane to
  * close, because the measured Done is made with the pane open.
  */
-const INBOX_ZERO_ARRIVAL_MS = 800 + 320;
+const TO_DO_CLEAR_ARRIVAL_MS = 800 + 320;
 
 /** The renderer's main thread draws a frame in each `BeginMainThreadFrame` event. */
 const MAIN_THREAD_FRAME = "BeginMainThreadFrame";
@@ -564,11 +564,11 @@ const MAIN_THREAD_FRAME = "BeginMainThreadFrame";
  * - one signal raised elsewhere, landing on screen;
  * - `BURST_SIZE` signals raised elsewhere at once, landing on screen;
  * - the user's own Done, with the E key, of the last signal on To do,
- *   which brings inbox zero.
+ *   which brings To do clear.
  *
  * To do is sorted oldest first, so a raised signal lands below the rows on
  * screen. To land it on screen, `signal.markDone` first clears To do down to
- * `ROWS_BEFORE_ARRIVAL` signals, and before inbox zero down to one. The
+ * `ROWS_BEFORE_ARRIVAL` signals, and before To do clear down to one. The
  * pointer rests off the list while signals arrive. Fails when `--dur-2` is
  * 0, as under Reduce motion, because then nothing moves, when the list does
  * not show what a step asks for within 10 s, and when a change moves nothing.
@@ -576,7 +576,7 @@ const MAIN_THREAD_FRAME = "BeginMainThreadFrame";
 async function measureRowMotion(
   page: Inspector,
   fixture: ThreadFixture,
-): Promise<Pick<IntakeWork, "arrival" | "arrivalBurst" | "inboxZero">> {
+): Promise<Pick<IntakeWork, "arrival" | "arrivalBurst" | "toDoClear">> {
   const evaluate = (expression: string) =>
     page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
   const waitInPage = (expression: string, timeoutMessage: string) =>
@@ -666,7 +666,7 @@ async function measureRowMotion(
     "a click on the last signal did not select it",
   );
   await sleep(PUSH_SETTLE_MS);
-  const inboxZero = await measureListChange(page, {
+  const toDoClear = await measureListChange(page, {
     change: async () => {
       for (const type of ["keyDown", "keyUp"]) {
         await page.send("Input.dispatchKeyEvent", {
@@ -678,11 +678,11 @@ async function measureRowMotion(
         });
       }
     },
-    lengthMs: INBOX_ZERO_ARRIVAL_MS,
+    lengthMs: TO_DO_CLEAR_ARRIVAL_MS,
     endsWhen: `document.querySelector(".asks-zero") !== null`,
     mustSee: `document.querySelector(".asks-zero.is-arriving") !== null`,
   });
-  return { arrival, arrivalBurst, inboxZero };
+  return { arrival, arrivalBurst, toDoClear };
 }
 
 /** What `measureListChange` makes and checks. */
@@ -964,7 +964,7 @@ export const formatMotion = (cost: MotionCost) =>
 
 /** Prints what the Intake scenario measured, against the limits spec 17 sets. */
 export function reportIntakeWork(measured: IntakeWork): void {
-  const { pushes, burst, splitOpen, splitClose, arrival, arrivalBurst, inboxZero } = measured;
+  const { pushes, burst, splitOpen, splitClose, arrival, arrivalBurst, toDoClear } = measured;
   // Budget, limit, measured, and whether the measurement is within the
   // limit, or null for a measure that is recorded but has no budget.
   const budgets: [string, string, string, Within][] = [
@@ -1028,10 +1028,10 @@ export function reportIntakeWork(measured: IntakeWork): void {
       ),
     ],
     [
-      "Inbox zero, after the user's Done of the last signal, with the pane open",
+      "To do clear, after the user's Done of the last signal, with the pane open",
       "no dropped frame; nothing draws after 800 ms plus the pane's --dur-3",
-      formatMotion(inboxZero),
-      macLimit(droppedNoMotionFrame(inboxZero) && isStillAfter(inboxZero)),
+      formatMotion(toDoClear),
+      macLimit(droppedNoMotionFrame(toDoClear) && isStillAfter(toDoClear)),
     ],
   ];
 

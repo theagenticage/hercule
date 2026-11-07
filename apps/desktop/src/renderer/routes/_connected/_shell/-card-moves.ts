@@ -55,7 +55,11 @@ import {
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
 import type { AccountScope } from "../../../app/account-scope";
-import type { CardMover, PutBackRequest } from "../../../app/card-mover";
+import {
+  buildCachedInboxWriter,
+  type CardMover,
+  type PutBackRequest,
+} from "../../../app/card-mover";
 import type { PendingMove } from "../../../app/pending-card-moves";
 import type { Gesture } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
@@ -123,6 +127,17 @@ export interface CardMoves {
    * off the stack again, for a gesture that cannot be undone any more.
    */
   readonly sayWithUndo: (text: string, gesture: Gesture<CardMover>) => () => void;
+  /**
+   * Adds `gesture`, something the user did that this screen did not make
+   * itself (such as adding a thing from a source), as the newest on the undo
+   * stack at once. See `UndoStack.reserve` for `willHold`.
+   */
+  readonly reserveGesture: (gesture: Gesture<CardMover>, willHold: Promise<boolean>) => void;
+  /**
+   * Shows `text` on the undo line with Undo, for a `gesture` that was reserved
+   * with `reserveGesture` and has now been saved.
+   */
+  readonly sayWithReservedUndo: (text: string, gesture: Gesture<CardMover>) => void;
 }
 
 const NOT_SAVED_MESSAGE = "That move did not save, so there is nothing to put back.";
@@ -208,7 +223,7 @@ const findNeighbourCardId = (card: HTMLElement): string | null => {
  * is the element that scrolls the board, which the motion of a move measures.
  *
  * - `moveCard` shows the move at once, sends `task.move` after the moves
- *   before it, and pushes a gesture on `undoStack`. A move that fails leaves
+ *   before it, and reserves a gesture on `undoStack` at once. A move that fails leaves
  *   the pending list, so the card goes back, and the line says why. The
  *   gesture of a failed move is taken off the stack.
  * - When the controller accepts a move, the board in the query cache is
@@ -238,6 +253,7 @@ export const useCardMoves = ({
   readBoard,
   scrollRef,
   onCardReturning,
+  isCarrying,
 }: {
   readonly client: HerculeClient;
   /**
@@ -255,10 +271,11 @@ export const useCardMoves = ({
    * holding it back as a Task that arrived by itself.
    */
   readonly onCardReturning: (taskId: string, stage: EndStage) => void;
+  /** Whether a card is in the hand of a drag. Undo waits for it to be put down. */
+  readonly isCarrying: boolean;
 }): CardMoves => {
   const queryClient = useQueryClient();
   const { undoStack, pendingCardMoves: pendingMoves, isCurrent } = scope;
-  const { line, say, withdraw, undo } = useUndoLine(undoStack);
 
   /**
    * Makes `change` and glides every part of the board that moves because of
@@ -417,6 +434,16 @@ export const useCardMoves = ({
     };
   };
 
+  const { line, say, withdraw, undo } = useUndoLine(
+    undoStack,
+    () => ({
+      putCardBack,
+      putEndedCardBack,
+      writeInboxEdit: buildCachedInboxWriter(queryClient),
+    }),
+    isCarrying,
+  );
+
   /**
    * Puts the gesture that Undo reverses on the stack and shows its words on
    * the undo line. Each of `parts` is one card: `putBack` asks the open
@@ -453,10 +480,14 @@ export const useCardMoves = ({
         return notes.length === 0 ? undefined : notes.join(" ");
       },
     };
-    undoStack.push(gesture);
+    const willHold = Promise.all(parts.map((part) => part.wasSaved)).then((saved) =>
+      saved.some(Boolean),
+    );
+    undoStack.reserve(gesture, willHold);
     say(note === undefined ? `${words}.` : `${words}. ${note}`, gesture);
-    void Promise.all(parts.map((part) => part.wasSaved)).then((saved) => {
-      if (!saved.some(Boolean)) withdraw(gesture);
+    // The stack gives the gesture up by itself; the line must stop offering its Undo too.
+    void willHold.then((isHeld) => {
+      if (!isHeld) withdraw(gesture);
     });
   };
 
@@ -600,27 +631,29 @@ export const useCardMoves = ({
     makeMove(move, words, note, true);
   };
 
-  const undoLastMove = (): void => {
-    undo({ putCardBack, putEndedCardBack });
-  };
-
   return {
     moveCard,
     moveCardWithMotion,
     moveCards,
     endCard,
     endCardsTogether,
-    undoLastMove,
+    undoLastMove: undo,
     line,
     sayWithoutUndo: (text) => {
       say(text);
     },
     sayWithUndo: (text, gesture) => {
-      undoStack.push(gesture);
+      undoStack.reserve(gesture, Promise.resolve(true));
       say(text, gesture);
       return () => {
         withdraw(gesture);
       };
+    },
+    reserveGesture: (gesture, willHold) => {
+      undoStack.reserve(gesture, willHold);
+    },
+    sayWithReservedUndo: (text, gesture) => {
+      say(text, gesture);
     },
   };
 };

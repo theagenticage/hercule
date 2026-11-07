@@ -276,6 +276,25 @@ const make = Effect.gen(function* () {
             },
           ),
 
+    /**
+     * Returns the ids of the Projects that are not deleted and that the
+     * Resource with this canonical remote is filed under, in id order. A
+     * deleted Project keeps its filing, so it is left out here.
+     */
+    listLiveProjectsOfRemote: (
+      canonicalRemote: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly project_id: Uint8Array }>`
+          SELECT project_resources.project_id FROM resources
+          JOIN project_resources ON project_resources.resource_id = resources.id
+          JOIN projects ON projects.id = project_resources.project_id
+          WHERE resources.canonical_remote = ${canonicalRemote} AND projects.deleted_at IS NULL
+          ORDER BY project_resources.project_id
+        `,
+        (rows) => rows.map((row) => uuidToString(row.project_id)),
+      ),
+
     /** Replaces the projects this resource is filed under with the given ones. */
     setProjects: (id: string, projectIds: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {

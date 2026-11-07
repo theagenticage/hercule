@@ -9,7 +9,10 @@
  * - `openSignals`, the signals still open on the Connection, read through
  *   the Open Signals port;
  * - `resources`, the Resources linked to the Connection, only when the
- *   plugin's manifest requested the `resources` capability.
+ *   plugin's manifest requested the `resources` capability;
+ * - `entities`, which reports what the poll read of External Entities through
+ *   the Entity Observations port, only when the manifest requested the
+ *   `entities` capability.
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -30,6 +33,7 @@ import {
   type IngestConnection,
   type EmittedEvent,
   type IngestContext,
+  type IngestEntities,
   type LinkedResource,
 } from "@hercule/plugin-host";
 import { nowIso, withTransaction } from "../db";
@@ -41,6 +45,7 @@ import {
 import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
 import { describeFieldIssues } from "./errors";
+import { EntityObservations, type EntityReporter } from "./entity-observations";
 import type { RegisteredEventSource } from "./event-sources";
 import { OpenSignals } from "./open-signals";
 
@@ -115,12 +120,24 @@ const toLinkedResource = (resource: StoredResource): LinkedResource => ({
   remote: resource.canonicalRemote,
 });
 
+/** Binds the Entity Observations port to one reporter, which gives a plugin its `entities` handle. */
+const buildIngestEntities = (
+  port: typeof EntityObservations.Service,
+  reporter: EntityReporter,
+): IngestEntities => ({
+  reconcile: (inventory) => port.reconcile(reporter, inventory),
+  refresh: (observations) => port.refresh(reporter, observations),
+  listWanted: (kind, limit) => port.listWanted(reporter, kind, limit),
+  reportMissing: (ref, reason) => port.reportMissing(reporter, ref, reason),
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connectionTypes = yield* ConnectionTypes;
   const connectionState = yield* connectionStateRepository;
   const resources = yield* resourceRepository;
   const openSignals = yield* OpenSignals;
+  const entityObservations = yield* EntityObservations;
 
   /**
    * Checks one emitted event and appends it to the log in its own short
@@ -215,6 +232,15 @@ const make = Effect.gen(function* () {
       state: connectionState.buildStore(connection.id),
       credentials: () => connectionTypes.runtimeFor(source.pluginId).credentials(connection.id),
       openSignals: () => openSignals.listForConnection(connection.id),
+      ...(source.entities
+        ? {
+            entities: buildIngestEntities(entityObservations, {
+              connectionId: connection.id,
+              pluginId: source.pluginId,
+              kinds: source.entityKinds,
+            }),
+          }
+        : {}),
       ...(source.resources
         ? {
             resources: {

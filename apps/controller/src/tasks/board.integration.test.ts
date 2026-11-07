@@ -308,6 +308,8 @@ describe("task.queryBoard", () => {
 
       expect(board.truncated).toBe(false);
       expect(board.cards).toHaveLength(8);
+      expect(board).toMatchObject({ places: [], edges: [], groupings: [], contextComplete: true });
+      expect(cards.get("Plain")).toMatchObject({ entityMarks: [], contextRefs: [] });
       expect(cards.get("Thread only")).toMatchObject({
         stage: "exploring",
         projectId: storefront,

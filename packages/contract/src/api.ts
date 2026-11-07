@@ -18,6 +18,7 @@ import { controller } from "./groups/controller";
 import { conversation } from "./groups/conversation";
 import { event } from "./groups/event";
 import { eventKind } from "./groups/event-kind";
+import { externalEntity } from "./groups/external-entity";
 import { input } from "./groups/input";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
@@ -64,6 +65,7 @@ export const api = HttpApi.make("hercule")
     task,
     notification,
     signal,
+    externalEntity,
     ignoreRule,
     discussion,
     project,

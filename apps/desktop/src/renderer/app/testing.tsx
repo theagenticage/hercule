@@ -782,6 +782,10 @@ export const buildSidebarHandlers = (
   "GET /api/v1/signals": (call) => answerSignalQuery(records.signals ?? [], call),
   // The shell reads the Tasks the signals on To do are about (Your work).
   "GET /api/v1/signals/your-work": { body: { tasks: [] } },
+  // The shell reads the Inbox's counts, for the Inbox row.
+  "GET /api/v1/external-entities/inbox/count": {
+    body: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
+  },
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
   // Settings > Intake reads the Ignore Rules each time it opens.
   "GET /api/v1/ignore-rules": { body: [] },

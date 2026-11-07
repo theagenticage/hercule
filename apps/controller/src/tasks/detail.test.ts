@@ -23,6 +23,7 @@ import {
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskBoardFactsLayer, TaskDetailFactsLayer } from "../daemon/tasks";
+import { buildPluginStack } from "../plugins/testing";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
@@ -89,7 +90,7 @@ const PLAN = {
 /** Reads details as the user, over the real ports and a fresh database. */
 const DetailsOverRealPorts = TaskDetailsLayer.pipe(
   Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
-  Layer.provideMerge(TestDatabase),
+  Layer.provideMerge(buildPluginStack()),
 );
 
 const insertTask = (fields: Partial<NewTask> = {}) =>
@@ -523,13 +524,18 @@ describe("who may read the details", () => {
                   readFacts: (tasks) =>
                     Effect.sync(() => {
                       asked.push("card facts");
-                      return tasks.map(() => ({
-                        sessions: [],
-                        threadCount: 0,
-                        lastTurnEndedAt: undefined,
-                        lastRunEndedAt: undefined,
-                        failure: undefined,
-                      }));
+                      return {
+                        cards: tasks.map(() => ({
+                          sessions: [],
+                          threadCount: 0,
+                          lastTurnEndedAt: undefined,
+                          lastRunEndedAt: undefined,
+                          failure: undefined,
+                          entityMarks: [],
+                          contextRefs: [],
+                        })),
+                        context: { places: [], edges: [], groupings: [], contextComplete: true },
+                      };
                     }),
                 }),
                 Layer.succeed(TaskTrackingRuns)({

@@ -313,7 +313,7 @@ describe("Intake", () => {
     await raiseSignal(arranged, "fyi", "Release 4.2 shipped");
     const { app, page } = await openSignedIn(arranged.url);
     expect(await readSidebarFace(page)).toEqual(THREADS_FACE);
-    expect((await readMenuItems(app, "Go"))[1]).toEqual({
+    expect((await readMenuItems(app, "Go"))[2]).toEqual({
       label: "Intake",
       accelerator: "CmdOrCtrl+Shift+I",
       enabled: true,

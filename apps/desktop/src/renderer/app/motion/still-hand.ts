@@ -26,10 +26,12 @@ const CHECK_EVERY = 240;
 /** What a change waits for. */
 export interface StillHandOptions {
   /**
-   * Returns the element the change would happen at, or `null` when it has no
-   * place on the page. A change with no place waits only for a drag to end.
+   * Returns every element the change would happen at: a change can show in
+   * more than one place, such as a card drawn in two lanes. The hand is busy
+   * when it is near any of them. A change with no place on the page returns
+   * none, and waits only for a drag to end.
    */
-  readonly target: () => Element | null;
+  readonly targets: () => readonly Element[];
   /** Returns whether the user is dragging something right now. */
   readonly isDragging: () => boolean;
   /** Stops the wait: the returned promise then resolves with `false`. */
@@ -65,16 +67,17 @@ const distanceFrom = (rect: DOMRect, x: number, y: number): number =>
  * is known only from its first move after the wait began, so a pointer that
  * has rested over the target since before counts through `:hover`.
  */
-const isHandNear = (options: StillHandOptions, now: number): boolean => {
-  if (options.isDragging()) return true;
-  const target = options.target();
-  if (target === null) return false;
+const isHandNearElement = (target: Element, now: number): boolean => {
   if (target.matches(":hover")) return true;
   if (pointer === null) return false;
   const distance = distanceFrom(target.getBoundingClientRect(), pointer.x, pointer.y);
   if (distance < READING_DISTANCE) return true;
   return now - pointer.movedAt < MOVING_FOR && distance < REACHING_DISTANCE;
 };
+
+/** Returns whether the user is dragging, or the hand is busy near any target of the change. */
+const isHandNear = (options: StillHandOptions, now: number): boolean =>
+  options.isDragging() || options.targets().some((target) => isHandNearElement(target, now));
 
 const stopWatching = (): void => {
   if (timer !== null) clearTimeout(timer);
@@ -105,12 +108,12 @@ const check = (): void => {
  * not still while:
  *
  * - the user is dragging;
- * - the pointer rests within 120px of the target, however long it has rested,
+ * - the pointer rests within 120px of a target, however long it has rested,
  *   because a parked pointer means someone is reading;
- * - the pointer moved in the last 900ms within 280px of the target.
+ * - the pointer moved in the last 900ms within 280px of a target.
  *
  * It resolves at once when the hand is already still. A pointer that stays
- * near the target holds it for 8 seconds at most. A drag holds it for as long
+ * near a target holds it for 8 seconds at most. A drag holds it for as long
  * as it lasts, and the 8 seconds count from the drop: they cover a hand that
  * rests, not a card in the hand. When `signal` aborts first, it resolves with
  * `false` and the change should not happen.

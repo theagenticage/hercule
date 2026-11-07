@@ -320,6 +320,79 @@ export const decodeGithubValue = <S extends Schema.ConstraintDecoder<unknown>>(
     ),
   );
 
+/** The part of a GraphQL answer the plugin reads. `data` is decoded by the caller. */
+const GraphqlAnswer = Schema.Struct({
+  data: Schema.optionalKey(Schema.Unknown),
+  errors: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        type: Schema.optionalKey(Schema.String),
+        message: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+});
+
+/**
+ * The error types GitHub gives for one thing it could not read, with `null`
+ * in its place in `data`: it does not exist, or the token may not see it.
+ */
+const MISSING_ERROR_TYPES: ReadonlySet<string | undefined> = new Set(["NOT_FOUND", "FORBIDDEN"]);
+
+/** How `fetchGraphql` treats the errors in an answer. */
+interface GraphqlOptions {
+  /**
+   * When true, an answer whose only errors say a thing was not found, or
+   * not allowed, still succeeds: the thing is `null` in `data`. A request
+   * that names many things by alias needs this, so that one lost repository
+   * does not fail the others.
+   */
+  readonly tolerateMissing?: boolean;
+}
+
+/**
+ * Sends one query to GitHub's GraphQL API and returns the `data` of the
+ * answer, for the caller to decode. Fails as `fetchFeedResponse` fails, so a
+ * 401 is an `AuthError` and a rate limit is `GithubRateLimited`. GraphQL
+ * also reports a rate limit as a 200 with a `RATE_LIMITED` error, which is
+ * `GithubRateLimited` too. Any other answer with `errors`, or with no
+ * `data`, fails with a `PluginError` that holds GitHub's messages, because
+ * the data of such an answer may be missing parts.
+ */
+export const fetchGraphql = (
+  token: string,
+  query: string,
+  variables: Readonly<Record<string, string | number | null>>,
+  options: GraphqlOptions = {},
+): Effect.Effect<unknown, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* fetchFeedResponse({
+      method: "POST",
+      path: "/graphql",
+      token,
+      body: { query, variables },
+    });
+    const answer = yield* decodeGithubValue(GraphqlAnswer, response.body, "a GraphQL answer");
+    const errors = answer.errors ?? [];
+    if (errors.some((error) => error.type === "RATE_LIMITED")) {
+      return yield* new GithubRateLimited({
+        retryAfterSeconds: computeRateLimitWaitSeconds(response, yield* Clock.currentTimeMillis),
+      });
+    }
+    const tolerated =
+      options.tolerateMissing === true &&
+      errors.every((error) => MISSING_ERROR_TYPES.has(error.type));
+    if ((errors.length > 0 && !tolerated) || answer.data === undefined || answer.data === null) {
+      const messages = errors.map((error) => error.message ?? error.type ?? "an unknown error");
+      return yield* new PluginError({
+        message: `GitHub's GraphQL API returned ${errors.length === 0 ? "no data" : "errors"}${
+          messages.length === 0 ? "." : `: ${messages.join("; ")}`
+        }`,
+      });
+    }
+    return answer.data;
+  });
+
 /** The longest string kept in an event's `raw`, in UTF-16 code units. */
 const MAX_RAW_STRING_LENGTH = 2000;
 

@@ -267,6 +267,29 @@ const buildWorkspace = (tail: string) => ({
   disposedAt: null,
 });
 
+describe("a positional that is a query parameter", () => {
+  it("sends the words of entity search as query parameters", async () => {
+    const { fetch, client } = stubClient(() => ({
+      source: "github",
+      outcome: "no-match",
+      results: [],
+      incomplete: false,
+      linkSources: [],
+    }));
+    const command = lookUpCommand("entity", "search");
+    const args = await parseArguments(command, ["github", "fix the flaky test"], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "GET",
+      path: "/api/v1/external-entities/search",
+    });
+    expect(fetch.calls[0]!.query.toString()).toBe("source=github&text=fix+the+flaky+test");
+  });
+});
+
 describe("workspace dispose-many", () => {
   it("resolves each tail and sends one item per workspace, with no expectedLastUsedAt", async () => {
     const workspaces = [buildWorkspace("ccccccc3"), buildWorkspace("ddddddd4")];

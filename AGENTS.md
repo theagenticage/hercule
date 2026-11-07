@@ -174,7 +174,7 @@ pnpm test:desktop:container  # the same on a headless Linux machine: Docker, a v
 
 The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
 
-- **The goldens** are 96 PNGs in `apps/desktop/ui-goldens/`: the 16 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
+- **The goldens** are 102 PNGs in `apps/desktop/ui-goldens/`: the 17 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
 - **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, in CI on macOS. The book is not edited.
 
 ```

@@ -79,16 +79,21 @@ export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readon
     }),
   }));
 
-/** Returns how many cards stand at each stage across `lanes`, shown or not, with 0 for a stage no card is at. */
+/**
+ * Returns how many Tasks stand at each stage across `lanes`, shown or not,
+ * with 0 for a stage no Task is at. A Task with a card in two lanes (under two
+ * outside places) is counted once.
+ */
 export const countCardsByStage = (
   lanes: readonly ArrangedLane[],
 ): Readonly<Record<BoardStage, number>> => {
-  const counts = Object.fromEntries(BOARD_STAGES.map((stage) => [stage, 0])) as Record<
-    BoardStage,
-    number
-  >;
-  for (const { cells } of lanes) {
-    for (const { stage, cardCount } of cells) counts[stage] += cardCount;
+  const taskIds = new Map<BoardStage, Set<string>>(BOARD_STAGES.map((stage) => [stage, new Set()]));
+  for (const { lane } of lanes) {
+    for (const { stage, cards } of lane.cells) {
+      for (const card of cards) taskIds.get(stage)?.add(card.id);
+    }
   }
-  return counts;
+  return Object.fromEntries(
+    BOARD_STAGES.map((stage) => [stage, taskIds.get(stage)?.size ?? 0]),
+  ) as Record<BoardStage, number>;
 };

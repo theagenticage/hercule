@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { useRef, type JSX } from "react";
+import { PROJECT_FACET_ID } from "@hercule/client-core/work";
 import { buildBoard, buildCard, FAILURE } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
 import { useBoardReads } from "./use-board-reads";
@@ -55,6 +56,7 @@ function Harness({
     hiddenIds,
     serverBoard,
     projects: [],
+    groupBy: PROJECT_FACET_ID,
     isCarrying,
     scrollRef,
   });

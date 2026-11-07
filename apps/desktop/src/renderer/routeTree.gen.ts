@@ -16,6 +16,7 @@ import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
 import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
 import { Route as ConnectedShellDiscussionsRouteRouteImport } from './routes/_connected/_shell/discussions/route'
+import { Route as ConnectedShellInboxRouteImport } from './routes/_connected/_shell/inbox'
 import { Route as ConnectedShellIntakeRouteImport } from './routes/_connected/_shell/intake'
 import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
@@ -82,6 +83,11 @@ const ConnectedShellDiscussionsRouteRoute =
     path: '/discussions',
     getParentRoute: () => ConnectedShellRoute,
   } as any)
+const ConnectedShellInboxRoute = ConnectedShellInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => ConnectedShellRoute,
+} as any)
 const ConnectedShellIntakeRoute = ConnectedShellIntakeRouteImport.update({
   id: '/intake',
   path: '/intake',
@@ -273,6 +279,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
   '/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
+  '/inbox': typeof ConnectedShellInboxRoute
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
   '/work': typeof ConnectedShellWorkRoute
@@ -310,6 +317,7 @@ export interface FileRoutesByTo {
   '/discussions': typeof ConnectedShellDiscussionsRouteRouteWithChildren
   '/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
+  '/inbox': typeof ConnectedShellInboxRoute
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
   '/work': typeof ConnectedShellWorkRoute
@@ -348,6 +356,7 @@ export interface FileRoutesById {
   '/_connected/_shell/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
   '/_connected/_shell/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/_connected/_shell/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
+  '/_connected/_shell/inbox': typeof ConnectedShellInboxRoute
   '/_connected/_shell/intake': typeof ConnectedShellIntakeRoute
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/work': typeof ConnectedShellWorkRoute
@@ -389,6 +398,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/wiki'
     | '/workflows'
+    | '/inbox'
     | '/intake'
     | '/office'
     | '/work'
@@ -426,6 +436,7 @@ export interface FileRouteTypes {
     | '/discussions'
     | '/wiki'
     | '/workflows'
+    | '/inbox'
     | '/intake'
     | '/office'
     | '/work'
@@ -463,6 +474,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/settings'
     | '/_connected/_shell/wiki'
     | '/_connected/_shell/workflows'
+    | '/_connected/_shell/inbox'
     | '/_connected/_shell/intake'
     | '/_connected/_shell/office'
     | '/_connected/_shell/work'
@@ -549,6 +561,13 @@ declare module '@tanstack/react-router' {
       path: '/discussions'
       fullPath: '/discussions'
       preLoaderRoute: typeof ConnectedShellDiscussionsRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
+    '/_connected/_shell/inbox': {
+      id: '/_connected/_shell/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof ConnectedShellInboxRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
     '/_connected/_shell/intake': {
@@ -899,6 +918,7 @@ interface ConnectedShellRouteChildren {
   ConnectedShellSettingsRouteRoute: typeof ConnectedShellSettingsRouteRouteWithChildren
   ConnectedShellWikiRouteRoute: typeof ConnectedShellWikiRouteRouteWithChildren
   ConnectedShellWorkflowsRouteRoute: typeof ConnectedShellWorkflowsRouteRouteWithChildren
+  ConnectedShellInboxRoute: typeof ConnectedShellInboxRoute
   ConnectedShellIntakeRoute: typeof ConnectedShellIntakeRoute
   ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
   ConnectedShellWorkRoute: typeof ConnectedShellWorkRoute
@@ -919,6 +939,7 @@ const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
   ConnectedShellWikiRouteRoute: ConnectedShellWikiRouteRouteWithChildren,
   ConnectedShellWorkflowsRouteRoute:
     ConnectedShellWorkflowsRouteRouteWithChildren,
+  ConnectedShellInboxRoute: ConnectedShellInboxRoute,
   ConnectedShellIntakeRoute: ConnectedShellIntakeRoute,
   ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
   ConnectedShellWorkRoute: ConnectedShellWorkRoute,

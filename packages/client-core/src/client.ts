@@ -42,6 +42,16 @@ type DecodedOnly<Success> = Exclude<
   HttpClientResponse.HttpClientResponse | readonly [unknown, HttpClientResponse.HttpClientResponse]
 >;
 
+/** What a caller can set on one call, after its request. */
+export interface CallOptions {
+  /**
+   * Cancels the call when it aborts: the request stops and the promise rejects
+   * with the signal's reason. A caller that no longer wants the answer (an
+   * older search) aborts instead of letting the request finish.
+   */
+  readonly signal?: AbortSignal;
+}
+
 /** The derived client, with every Effect method turned into a promise method. */
 type Promisified<T> = {
   readonly [K in keyof T]: T[K] extends (
@@ -49,7 +59,10 @@ type Promisified<T> = {
   ) => Effect.Effect<infer Success, unknown, unknown>
     ? void extends Request
       ? () => Promise<DecodedOnly<Success>>
-      : (request: Omit<Request, "responseMode" | "sseOptions">) => Promise<DecodedOnly<Success>>
+      : (
+          request: Omit<Request, "responseMode" | "sseOptions">,
+          options?: CallOptions,
+        ) => Promise<DecodedOnly<Success>>
     : Promisified<T[K]>;
 };
 
@@ -238,6 +251,9 @@ export const createClient = (options: ClientOptions): HerculeClient => {
    * be decoded, because both fail with the same kind of error. The flag is
    * per call, so concurrent calls do not see each other's.
    *
+   * When `signal` aborts, Effect interrupts the call, which aborts the fetch,
+   * and the promise rejects with the signal's reason.
+   *
    * Trace propagation is turned off on each call too. By default, Effect's
    * HTTP client adds the tracing headers `b3` and `traceparent` to every
    * request. The controller's CORS preflight allows only `authorization` and
@@ -248,6 +264,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   const run = (
     effect: Effect.Effect<unknown, unknown>,
     tokenFrom: ((result: unknown) => string | null) | undefined,
+    signal?: AbortSignal,
   ): Promise<unknown> => {
     const sentToken = token;
     let sent = false;
@@ -268,21 +285,28 @@ export const createClient = (options: ClientOptions): HerculeClient => {
           Effect.provideService(SentToken, sentToken),
         ),
       ),
-    ).then((result) => {
-      if (Result.isFailure(result)) {
-        const error = toClientError(result.failure, options.baseUrl, sent);
-        if (error instanceof ApiError && error.code === "unauthenticated") {
-          clearTokenIfCurrent(sentToken);
+      signal === undefined ? undefined : { signal },
+    ).then(
+      (result) => {
+        if (Result.isFailure(result)) {
+          const error = toClientError(result.failure, options.baseUrl, sent);
+          if (error instanceof ApiError && error.code === "unauthenticated") {
+            clearTokenIfCurrent(sentToken);
+          }
+          throw error;
         }
-        throw error;
-      }
-      if (tokenFrom !== undefined) {
-        const next = tokenFrom(result.success);
-        if (next === null) clearTokenIfCurrent(sentToken);
-        else setToken(next);
-      }
-      return result.success;
-    });
+        if (tokenFrom !== undefined) {
+          const next = tokenFrom(result.success);
+          if (next === null) clearTokenIfCurrent(sentToken);
+          else setToken(next);
+        }
+        return result.success;
+      },
+      (interruption: unknown) => {
+        // An interrupted fiber rejects with an Effect cause, not with the reason the caller expects.
+        throw signal?.aborted === true ? signal.reason : interruption;
+      },
+    );
   };
 
   let readContentCall: Call | undefined;
@@ -319,9 +343,9 @@ export const createClient = (options: ClientOptions): HerculeClient => {
         let call: Call | undefined;
         return [
           name,
-          (request?: unknown) => {
+          (request?: unknown, callOptions?: CallOptions) => {
             call ??= buildCall(group.identifier, name);
-            return run(call(request), tokenFrom);
+            return run(call(request), tokenFrom, callOptions?.signal);
           },
         ];
       }),

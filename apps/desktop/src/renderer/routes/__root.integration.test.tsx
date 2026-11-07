@@ -62,13 +62,14 @@ describe("Sign Out from the app menu", () => {
     const { accountScopes } = context.controller!;
     const scope = accountScopes.read();
     expect(scope.isCurrent()).toBe(true);
-    scope.undoStack.push({ words: "Moved a", undo: () => Promise.resolve(undefined) });
+    const moved = { words: "Moved a", undo: () => Promise.resolve(undefined) };
+    scope.undoStack.reserve(moved, Promise.resolve(true));
 
     fake.sendMenuCommand("signOut");
     expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
 
     expect(scope.isCurrent()).toBe(false);
-    expect(await scope.undoStack.undo({} as never)).toEqual({ kind: "empty" });
+    expect(scope.undoStack.holds(moved)).toBe(false);
     expect(() => accountScopes.read()).toThrow();
   });
 

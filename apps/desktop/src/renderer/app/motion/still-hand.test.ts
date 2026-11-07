@@ -29,11 +29,13 @@ const startWait = (
   const controller = new AbortController();
   running.push(controller);
   const result: { value: boolean | null } = { value: null };
-  void waitForStillHand({ target: () => target, isDragging, signal: controller.signal }).then(
-    (isStill) => {
-      result.value = isStill;
-    },
-  );
+  void waitForStillHand({
+    targets: () => (target === null ? [] : [target]),
+    isDragging,
+    signal: controller.signal,
+  }).then((isStill) => {
+    result.value = isStill;
+  });
   return { result, controller };
 };
 

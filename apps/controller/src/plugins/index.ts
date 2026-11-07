@@ -16,6 +16,15 @@ export { decideProviderAccountHarness, listCredentialVariables } from "./harness
 export { findAccountKind, findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
+export {
+  EntityLookups,
+  EntityLookupsLayer,
+  type DecidedResolution,
+  type LookupObservation,
+  type PluginRecognition,
+  type SearchOutcome,
+} from "./entity-lookups";
+export { EntityObservations, type EntityReporter } from "./entity-observations";
 export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";

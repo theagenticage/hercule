@@ -11,11 +11,11 @@ import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { summarizeCause, type Event } from "@hercule/contract";
-import { decodeAgainst, PluginError, SignalDraft } from "@hercule/plugin-host";
+import { PluginError, SignalDraft } from "@hercule/plugin-host";
 import { ConnectionTypes, type StoredConnection } from "../connections";
+import { decodeConnectionConfig } from "./connection-config";
 import { describeFieldIssues } from "./errors";
 import type { RegisteredSignalKind } from "./signal-kinds";
 
@@ -47,18 +47,7 @@ export const signalBuilds = Effect.gen(function* () {
       connection: StoredConnection,
     ): Effect.Effect<SignalDraft, PluginError> =>
       Effect.gen(function* () {
-        const type = yield* connectionTypes.named(connection.type);
-        const configSchema = Option.getOrUndefined(type)?.contribution.configSchema;
-        const config =
-          configSchema === undefined
-            ? connection.config
-            : yield* Effect.mapError(
-                decodeAgainst(configSchema, connection.config),
-                (error) =>
-                  new PluginError({
-                    message: `the Connection's config does not fit its type: ${describeFieldIssues(error)}`,
-                  }),
-              );
+        const config = yield* decodeConnectionConfig(connectionTypes, connection);
         const build = Effect.suspend(() =>
           kind.build(
             {

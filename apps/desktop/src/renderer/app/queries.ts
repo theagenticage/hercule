@@ -10,6 +10,7 @@ import {
   keepPreviousData,
   noop,
   queryOptions,
+  skipToken,
   type EnsureInfiniteQueryDataOptions,
   type InfiniteData,
   type EnsureQueryDataOptions,
@@ -45,6 +46,7 @@ import {
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
+  type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
   type Input,
@@ -1054,6 +1056,90 @@ export const pluginsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.plugins(),
     queryFn: () => client.plugin.query(),
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads the Inbox whole: its cards, the places above them, and its counts.
+ * Not shell data: only the Inbox screen reads it, and it is read again for
+ * the pushes of the live topics while that screen is open. The sidebar reads the
+ * counts alone, see `inboxCountQuery`.
+ */
+export const inboxQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.inbox(),
+    queryFn: () => client.externalEntity.queryInbox(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one External Entity whole, as the open card of the Inbox draws it: the
+ * card's own record with the places above it, its links, and whether its
+ * plugin is still active. A push on the `externalEntity` topic reads it again.
+ * It fails `NotFound` for a record that is not a full card.
+ */
+export const entityQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.externalEntity(id),
+    queryFn: () => client.externalEntity.read({ params: { id } }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
+ * every screen. A push on `task` reads it again, so the read is a small one.
+ */
+export const inboxCountQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.inboxCount(),
+    queryFn: () => client.externalEntity.countInbox(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads what the Add to Work sheet lists before the user types: the things
+ * that concern them and have no Task yet, under `contextRef` when the sheet
+ * has a context chosen. A push on the `externalEntity` topic reads it again,
+ * so a poll can add to the list while the sheet is open.
+ */
+export const entitySuggestionsQuery = (client: HerculeClient, contextRef: string | undefined) =>
+  queryOptions({
+    queryKey: [...queryKeys.entitySuggestions(), contextRef ?? null],
+    queryFn: () =>
+      client.externalEntity.listSuggestions({
+        query: contextRef === undefined ? {} : { contextRef },
+      }),
+    retry: false,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Searches a source live, for the Add to Work sheet: `search` is the source,
+ * the words (or one pasted link) and the context to search in. With no
+ * `search`, nothing is read.
+ *
+ * Each search has its own key, so an answer belongs to the words it was asked
+ * for. A newer search never shows an older answer, because the sheet reads
+ * only the key of the newest, and no earlier answer stands in for it while
+ * it waits (no placeholder). The answer is kept no longer than the sheet
+ * shows it: a source's answer is never stored, and a thing that was added
+ * since must read as added the next time.
+ */
+export const entitySearchQuery = (client: HerculeClient, search: EntitySearchQuery | undefined) =>
+  queryOptions({
+    queryKey: [
+      "entity-search",
+      search?.source ?? null,
+      search?.text ?? null,
+      search?.scopeRef ?? null,
+    ],
+    // The signal aborts the request once a newer search replaces this one.
+    queryFn:
+      search === undefined
+        ? skipToken
+        : ({ signal }) => client.externalEntity.search({ query: search }, { signal }),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
   });
 
 /**
@@ -2103,8 +2189,8 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, the Tasks Tracking lists and their runs (the count
  * takes in Tracking's waiting rows), the Tasks that To do's signals are
- * about (Your work, which makes a row Needs you), and the plugins that name
- * each signal's source.
+ * about (Your work, which makes a row Needs you), the Inbox's counts, and the
+ * plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -2143,6 +2229,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
     queryClient.ensureQueryData(trackingQuery(client)),
     queryClient.ensureQueryData(yourWorkQuery(client)),
+    queryClient.ensureQueryData(inboxCountQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

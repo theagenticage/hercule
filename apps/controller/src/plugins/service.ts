@@ -96,6 +96,7 @@ const make = Effect.gen(function* () {
             ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
           ),
           intake: yield* host.readPluginIntakeSettings(plugin.id, intake),
+          entityKinds: yield* host.listEntityKinds(plugin.id),
         } satisfies PluginDetail;
       }),
     );

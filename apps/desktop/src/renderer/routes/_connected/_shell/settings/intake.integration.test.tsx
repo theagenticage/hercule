@@ -98,6 +98,7 @@ const LINEAR: PluginDetail = {
       },
     ],
   },
+  entityKinds: [],
 };
 
 /** A plugin with no signal kind and no event kind, which gets a section only when it has Ignore Rules. */
@@ -168,6 +169,7 @@ const buildGithub = (records: IntakeRecords): PluginDetail => ({
     },
   ],
   intake: resolveSettings(records.plugin),
+  entityKinds: [],
 });
 
 /**

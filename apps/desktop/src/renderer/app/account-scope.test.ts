@@ -93,7 +93,8 @@ describe("the account scope", () => {
   it("empties the undo stack and the pending moves, and sends no held intent, when it closes", async () => {
     const { scopes, respondToQuestion } = setUp();
     const scope = scopes.open("ada");
-    scope.undoStack.push({ words: "Moved a", undo: () => Promise.resolve(undefined) });
+    const moved = { words: "Moved a", undo: () => Promise.resolve(undefined) };
+    scope.undoStack.reserve(moved, Promise.resolve(true));
     scope.pendingCardMoves.add({
       change: { kind: "move", move: { taskId: "a", stage: "in-review" } },
       isUndoWanted: undefined,
@@ -103,7 +104,7 @@ describe("the account scope", () => {
     scopes.close();
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
 
-    expect(await scope.undoStack.undo({} as never)).toEqual({ kind: "empty" });
+    expect(scope.undoStack.holds(moved)).toBe(false);
     expect(scope.pendingCardMoves.getSnapshot()).toEqual([]);
     expect(respondToQuestion).not.toHaveBeenCalled();
   });
@@ -111,14 +112,15 @@ describe("the account scope", () => {
   it("starts a new user with nothing in memory, and finds the first user's unsent answer only under the first user", async () => {
     const { scopes, respondToQuestion } = setUp();
     const ada = scopes.open("ada");
-    ada.undoStack.push({ words: "Moved a", undo: () => Promise.resolve(undefined) });
+    const moved = { words: "Moved a", undo: () => Promise.resolve(undefined) };
+    ada.undoStack.reserve(moved, Promise.resolve(true));
     ada.pendingIntents.hold(ANSWER);
 
     const bob = scopes.open("bob");
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
 
     expect(bob.pendingIntents.getSnapshot()).toEqual([]);
-    expect(await bob.undoStack.undo({} as never)).toEqual({ kind: "empty" });
+    expect(bob.undoStack.holds(moved)).toBe(false);
     expect(respondToQuestion).not.toHaveBeenCalled();
 
     // Back to the first user: the answer comes back unsent, and is never sent by itself.

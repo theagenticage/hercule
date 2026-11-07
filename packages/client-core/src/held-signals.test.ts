@@ -1,6 +1,6 @@
 /**
  * Tests the record behind the signals Intake's list shows: which changes
- * wait while the pointer is over the list, and when inbox zero arrives.
+ * wait while the pointer is over the list, and when To do clear arrives.
  */
 import { describe, expect, it } from "vitest";
 import type { Signal } from "@hercule/contract";
@@ -40,7 +40,7 @@ describe("followListedSignals", () => {
     expect(held.arriving).toBe(false);
   });
 
-  it("arrives at inbox zero when the user's own action takes the last signals off", () => {
+  it("arrives at To do clear when the user's own action takes the last signals off", () => {
     let held = startHeldSignals([A, B], "to-do:all");
     held = recordOwnChanges(held, ["a", "b"]);
     held = followListedSignals(held, []);
@@ -121,7 +121,7 @@ describe("holding", () => {
     expect(held.shown).toEqual([A]);
   });
 
-  it("holds back the first row of an empty list, which would take the place of inbox zero", () => {
+  it("holds back the first row of an empty list, which would take the place of To do clear", () => {
     let held = updateHolding(startHeldSignals([], "to-do:all"), true);
     held = followListedSignals(held, [A]);
     expect(held.shown).toEqual([]);
@@ -158,7 +158,7 @@ describe("holding", () => {
     expect(readIds(held.shown)).toEqual(["a", "b", "c"]);
   });
 
-  it("shows inbox zero still when the release empties the list", () => {
+  it("shows To do clear still when the release empties the list", () => {
     let held = updateHolding(startHeldSignals([A], "to-do:all"), true);
     held = followListedSignals(held, []);
     expect(readIds(held.shown)).toEqual(["a"]);

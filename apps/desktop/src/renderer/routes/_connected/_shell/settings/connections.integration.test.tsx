@@ -54,6 +54,7 @@ const buildPlugin = (
   config: {},
   contributions,
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /** The GitHub plugin, declaring its Connection type with a device flow and a pasted token. */

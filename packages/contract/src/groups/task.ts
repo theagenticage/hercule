@@ -27,6 +27,17 @@ import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { DEFAULT_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
+import {
+  EntityEdge,
+  EntityGrouping,
+  EntityMark,
+  EntityPlace,
+  MAX_BOARD_GROUPINGS,
+  MAX_BOARD_PLACES,
+  MAX_CARD_CONTEXTS,
+  MAX_ENTITY_MARKS,
+  MAX_GRAPH_EDGES,
+} from "./entity-context";
 import { EventId } from "./event-record";
 import { RunStatus } from "./run-status";
 import { Session, SessionRequest } from "./session";
@@ -809,6 +820,17 @@ export const WorkCard = Schema.Struct({
   lastActivityAt: Timestamp,
   /** Absent until a summary has been written for the Task. */
   summary: Schema.optionalKey(TaskSummary),
+  /**
+   * One mark per kind of outside thing the Task links, at most
+   * `MAX_ENTITY_MARKS`.
+   */
+  entityMarks: atMost(EntityMark, MAX_ENTITY_MARKS),
+  /**
+   * The refs the Task links and everything above them by `part of`, for
+   * Group by and Filter. A peer's ancestors are never included: a `linked`
+   * claim adds nothing here. The records are in the board's `places`.
+   */
+  contextRefs: atMost(ExternalRef, MAX_CARD_CONTEXTS),
 });
 
 export type WorkCard = Schema.Schema.Type<typeof WorkCard>;
@@ -822,6 +844,18 @@ export const WorkBoard = Schema.Struct({
   cards: atMost(WorkCard, MAX_BOARD_CARDS),
   /** True when more Tasks exist than `MAX_BOARD_CARDS`. The screen says so; it never hides it. */
   truncated: Schema.Boolean,
+  /** Each record above a card's links, once. */
+  places: atMost(EntityPlace, MAX_BOARD_PLACES),
+  /** The current `part of` steps between the places and the linked refs, so a client rebuilds every path. */
+  edges: atMost(EntityEdge, MAX_GRAPH_EDGES),
+  /** The groupable kinds that have at least one place on this board. */
+  groupings: atMost(EntityGrouping, MAX_BOARD_GROUPINGS),
+  /**
+   * False when a depth, edge or fanout limit cut the walk up `part of`, or an
+   * ancestor has no record. Work then says that what is above the cards may
+   * be incomplete.
+   */
+  contextComplete: Schema.Boolean,
 });
 
 export type WorkBoard = Schema.Schema.Type<typeof WorkBoard>;

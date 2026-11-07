@@ -55,7 +55,6 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { findTaskToContinue } from "../signals";
 import { runRepository } from "../runs/repository";
 import { taskRepository } from "./repository";
 import { TaskTracking, TaskTrackingLayer } from "./tracking";
@@ -221,7 +220,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("Tracking's reads", () => {
           trackedTasks: yield* measureMedian(tasks.listTracked()),
           newestRuns: yield* measureMedian(runs.listLatestOfTasks(ids)),
           taskLookup: yield* measureMedian(
-            findTaskToContinue(tasks, `github:issue:acme/api#${String(count)}`),
+            tasks.findActiveTaskForRef(`github:issue:acme/api#${String(count)}`),
           ),
         };
       }).pipe(

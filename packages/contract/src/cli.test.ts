@@ -64,6 +64,8 @@ const HIDDEN = [
   "attachment.readContent",
   "attachment.delete",
   "task.undoTryAgain",
+  "externalEntity.countInbox",
+  "externalEntity.undoTakeOn",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -122,6 +124,14 @@ const COMMANDS: Record<string, string> = {
   "signal.snooze": "signal snooze",
   "signal.unsnooze": "signal unsnooze",
   "signal.lowerPriority": "signal lower-priority",
+  "externalEntity.queryInbox": "entity list",
+  "externalEntity.read": "entity read",
+  "externalEntity.takeOn": "entity take-on",
+  "externalEntity.dismiss": "entity dismiss",
+  "externalEntity.restore": "entity restore",
+  "externalEntity.search": "entity search",
+  "externalEntity.listSuggestions": "entity suggestions",
+  "externalEntity.addToWork": "entity add-to-work",
   "ignoreRule.query": "ignore-rule list",
   "ignoreRule.create": "ignore-rule create",
   "ignoreRule.delete": "ignore-rule delete",
@@ -373,6 +383,7 @@ const RESOLVES: Record<string, string> = {
   "signal.snooze signalIds": "signal.query",
   "signal.unsnooze signalIds": "signal.query",
   "signal.lowerPriority signalIds": "signal.query",
+  "externalEntity.addToWork projectId": "project.query",
   "ignoreRule.delete id": "ignoreRule.query",
   "discussion.read id": "discussion.query",
   "discussion.post id": "discussion.query",
@@ -528,7 +539,7 @@ describe("the CLI table", () => {
     expect(Object.keys(table).sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 
-  it("hides exactly the five operations with no command", () => {
+  it("hides exactly the operations with no command", () => {
     const hidden = rows.filter(([, row]) => row.hidden === true).map(([id]) => id);
     expect(hidden.sort()).toEqual([...HIDDEN].sort());
   });

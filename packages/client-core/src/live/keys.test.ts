@@ -131,6 +131,150 @@ describe("the Work board's key", () => {
   });
 });
 
+describe("the Inbox's and the entities' keys", () => {
+  const inboxKeys = [queryKeys.inbox(), queryKeys.inboxCount()];
+
+  // Each row is one topic and the exact keys its push reads again. A pane's
+  // read is always the whole prefix: a pane embeds its parents' records, so a
+  // push naming one entity can change another entity's pane.
+  const rows: ReadonlyArray<{
+    readonly name: string;
+    readonly topic: "task" | "externalEntity" | "connection" | "plugin";
+    readonly derived?: true;
+    readonly ids: ReadonlyArray<string>;
+    readonly keys: ReadonlyArray<LiveQueryKey>;
+  }> = [
+    {
+      name: "an externalEntity push naming ids reads every entity pane, not only the named ones",
+      topic: "externalEntity",
+      ids: ["e1", "e2"],
+      keys: [
+        ...inboxKeys,
+        queryKeys.workBoard(),
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "an externalEntity push naming no ids",
+      topic: "externalEntity",
+      ids: [],
+      keys: [
+        ...inboxKeys,
+        queryKeys.workBoard(),
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a plain task push reads the entity panes and the suggestions",
+      topic: "task",
+      ids: ["t1"],
+      keys: [
+        queryKeys.tasks(),
+        queryKeys.task("t1"),
+        queryKeys.tracking(),
+        queryKeys.trackingDetail("t1"),
+        queryKeys.yourWork(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a plain task push naming no ids",
+      topic: "task",
+      ids: [],
+      keys: [
+        queryKeys.tasks(),
+        queryKeys.task(),
+        queryKeys.tracking(),
+        queryKeys.trackingDetail(),
+        queryKeys.yourWork(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a derived task push reads the board and the named Task's details only, which a busy agent causes every second",
+      topic: "task",
+      derived: true,
+      ids: ["t1"],
+      keys: [queryKeys.workBoard(), queryKeys.taskDetail("t1")],
+    },
+    {
+      name: "a connection push naming ids reads the entity panes, the board and the suggestions",
+      topic: "connection",
+      ids: ["c1"],
+      keys: [
+        queryKeys.connections(),
+        queryKeys.connection("c1"),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a connection push naming no ids",
+      topic: "connection",
+      ids: [],
+      keys: [
+        queryKeys.connections(),
+        queryKeys.connection(),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a plugin push reads the entity panes, the board and the suggestions",
+      topic: "plugin",
+      ids: ["github"],
+      keys: [
+        queryKeys.plugins(),
+        queryKeys.connection(),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+  ];
+
+  for (const row of rows) {
+    it(`reads exactly these keys again after ${row.name}`, () => {
+      assert.deepStrictEqual(buildQueryKeys(row.topic, row.ids, undefined, row.derived), row.keys);
+    });
+  }
+
+  it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
+    for (const topic of ["run", "session", "signal", "workflow", "wikiPage"] as const) {
+      for (const ids of [[], ["x"]]) {
+        const keys = buildQueryKeys(topic, ids);
+        for (const key of [
+          ...inboxKeys,
+          queryKeys.externalEntity(),
+          queryKeys.entitySuggestions(),
+        ]) {
+          assert.isFalse(
+            keys.some((read) => isPrefixOf(read, key)),
+            `a ${topic} push naming ${ids.join() || "no ids"}`,
+          );
+        }
+      }
+    }
+  });
+});
+
 describe("signal pushes", () => {
   it("invalidates every list, the changed signals and Your work", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [

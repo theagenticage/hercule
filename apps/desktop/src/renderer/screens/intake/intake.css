@@ -566,7 +566,7 @@
   max-width: 412px;
   margin-top: 16px;
 }
-/* Inbox zero already fills the list's height, so a dock under it would make
+/* To do clear already fills the list's height, so a dock under it would make
    the list scroll while the toast shows. There the dock takes no height, and
    the toast rises from the dock's bottom edge over the picture's empty
    bottom padding. */

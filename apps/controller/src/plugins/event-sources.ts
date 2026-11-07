@@ -15,8 +15,10 @@ import {
   EventSourceNames,
   FeedDeclaration,
   PluginError,
+  type EntityLookup,
   type EventSourceContribution,
   type PluginManifest,
+  type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
 import {
   MAX_EVENT_KIND_LENGTH,
@@ -27,6 +29,7 @@ import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../ev
 import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
+import { decodeEntityKinds } from "./entity-kinds";
 import { decodeSignalKinds, type RegisteredSignalKind } from "./signal-kinds";
 
 /**
@@ -54,7 +57,14 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
  * - `kinds` are the kinds it may emit, keyed by name.
  * - `resources` is whether the manifest requested the `resources` capability,
  *   which decides whether `open` receives the Connection's Resources.
+ * - `entities` is whether the manifest requested the `entities` capability,
+ *   which decides whether `open` receives `IngestContext.entities`.
  * - `signalKinds` are the checked, qualified signal kinds its events raise.
+ * - `entityKinds` are the checked, qualified kinds of External Entity it
+ *   reports. They are kept whatever the status of the plugin, so a disabled
+ *   plugin's declaration is still returned.
+ * - `entityLookup` is how it recognizes, searches and reads its things, when it
+ *   offers one.
  */
 export interface RegisteredEventSource {
   readonly id: string;
@@ -63,7 +73,10 @@ export interface RegisteredEventSource {
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
   readonly kinds: ReadonlyMap<string, RegisteredEventKind>;
   readonly resources: boolean;
+  readonly entities: boolean;
   readonly signalKinds: ReadonlyArray<RegisteredSignalKind>;
+  readonly entityKinds: ReadonlyArray<QualifiedEntityKindDeclaration>;
+  readonly entityLookup?: EntityLookup;
   readonly open: EventSourceContribution["open"];
 }
 
@@ -172,12 +185,16 @@ const decodeFeeds = (
  * to look up the kind of a trigger, and adds the live source to `sources`.
  * Fails with a `PluginError` if:
  *
- * - the manifest did not request the `events` capability;
+ * - the manifest did not request the `events` capability, or declared
+ *   `entityKinds` or an `entityLookup` without the `entities` capability;
  * - a name is invalid, or a kind is declared twice;
  * - the Connection type belongs to another plugin, or already has a source;
+ * - the source declares an `entityLookup` and another source of the same
+ *   plugin already does;
  * - a kind has the name of a core kind;
  * - a feed is invalid, as `decodeFeeds` explains;
- * - a signal kind is invalid, as `decodeSignalKinds` explains.
+ * - a signal kind is invalid, as `decodeSignalKinds` explains;
+ * - an entity kind is invalid, as `decodeEntityKinds` explains.
  *
  * The collections belong to the registration pass, which passes them in for
  * this function to append to. A pass registers every plugin before anything
@@ -191,6 +208,7 @@ export const registerEventSourceContribution = (
   declared: Array<NewContribution>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
+  otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
 ): Effect.Effect<void, PluginError> =>
   Effect.gen(function* () {
     const pluginId = manifest.id;
@@ -205,6 +223,19 @@ export const registerEventSourceContribution = (
       return yield* Effect.fail(
         new PluginError({
           message: `the event source ${names.id} emits events, but the manifest did not request the events capability. Add "events" to the manifest's capabilities.`,
+        }),
+      );
+    }
+    // Entity kinds are reported through the `entities` capability, and
+    // declaring them without it would leave the declaration with nothing that
+    // can report.
+    if (
+      (contribution.entityKinds !== undefined || contribution.entityLookup !== undefined) &&
+      !manifest.capabilities.includes("entities")
+    ) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event source ${names.id} declares entityKinds or an entityLookup, but the manifest did not request the entities capability. Add "entities" to the manifest's capabilities.`,
         }),
       );
     }
@@ -228,6 +259,21 @@ export const registerEventSourceContribution = (
       return yield* Effect.fail(
         new PluginError({
           message: `the event sources ${claimed.id} and ${id} are both for the Connection type ${names.connectionType}. A Connection type can have one event source; declare every feed and kind on one source.`,
+        }),
+      );
+    }
+    // The host reaches a plugin's lookup by plugin id alone (see `EntityLookups`),
+    // so a second lookup in the same plugin would never be asked.
+    const claimedLookup =
+      contribution.entityLookup === undefined
+        ? undefined
+        : sources.find(
+            (source) => source.pluginId === pluginId && source.entityLookup !== undefined,
+          );
+    if (claimedLookup !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event sources ${claimedLookup.id} and ${id} both declare an entityLookup. A plugin can have one entityLookup; declare it on one source and make it recognize, search and read the things of every source.`,
         }),
       );
     }
@@ -307,6 +353,16 @@ export const registerEventSourceContribution = (
           .flatMap((source) => source.signalKinds.map((registered) => registered.kind)),
       ),
     );
+    const ownSources = sources.filter((source) => source.pluginId === pluginId);
+    const entityKinds = yield* decodeEntityKinds(manifest, id, contribution.entityKinds ?? [], {
+      words: new Set(
+        ownSources.flatMap((source) => source.entityKinds.map((registered) => registered.word)),
+      ),
+      // A ref is known by its prefix alone, across every plugin.
+      refPrefixes: [...otherPluginsSources, ...sources].flatMap((source) =>
+        source.entityKinds.map(({ word, refPrefix }) => ({ kind: word, refPrefix })),
+      ),
+    });
     declared.push({
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,
@@ -320,7 +376,12 @@ export const registerEventSourceContribution = (
       feeds,
       kinds: sourceKinds,
       resources: manifest.capabilities.includes("resources"),
+      entities: manifest.capabilities.includes("entities"),
       signalKinds,
+      entityKinds,
+      ...(contribution.entityLookup === undefined
+        ? {}
+        : { entityLookup: contribution.entityLookup }),
       open: contribution.open,
     });
   });

@@ -68,12 +68,7 @@ import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { Settings } from "../../settings";
-import {
-  findTaskToContinue,
-  readThreadRef,
-  signalRepository,
-  type SignalSummary,
-} from "../../signals";
+import { readThreadRef, signalRepository, type SignalSummary } from "../../signals";
 import { taskRepository } from "../../tasks";
 import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
 
@@ -416,7 +411,7 @@ export const buildDescribe: Effect.Effect<
      * continue, or nothing. Several handoffs in one describe call usually name
      * signals of the same thread, so each thread is looked up once.
      */
-    const readTaskToContinue = readOncePerId((ref) => findTaskToContinue(tasks, ref));
+    const readTaskToContinue = readOncePerId((ref) => tasks.findActiveTaskForRef(ref));
 
     /**
      * Returns a session's name as a `marked` part, and every Request the

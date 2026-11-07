@@ -113,7 +113,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(NO_BOARD_CARD));
         }
         const id = task.id;
-        const [facts] = yield* cardFacts.readFacts([boardTask]);
+        const {
+          cards: [facts],
+        } = yield* cardFacts.readFacts([boardTask]);
         const card = buildWorkCard(boardTask, facts!);
         // The card's open question is asked by one Thread, and the pane answers it from that
         // Thread's Requests, so that Thread is listed even when newer sessions would crowd it out.

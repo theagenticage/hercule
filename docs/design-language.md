@@ -259,11 +259,11 @@ screen is [spec 17 §Intake](./spec/17-desktop-app.md#intake). These are the rul
 Intake follows:
 
 - **A list you work through, not a brief you read.** Intake holds Signals: what people, systems
-  and Hercule's agents ask of the user. The goal is inbox zero. A signal sits on To do only while
+  and Hercule's agents ask of the user. The goal is To do clear. A signal sits on To do only while
   a move is asked of the user, and leaves the moment they make it, here or on its source.
 - **Four views over the same records:** To do (what waits on you), Later (what you snoozed), Done
   (what left the list, and how), and Everything (the events behind it all, with what came of
-  each). Only To do is counted, and its count takes in every row on it, so inbox zero is never a
+  each). Only To do is counted, and its count takes in every row on it, so To do clear is never a
   lie.
 - **One urgent tier.** `urgent` signals are pinned under **Now**, the longest-burning first. `high`
   is a small marigold mark at the row's end and does not reorder the list. The user may lower a

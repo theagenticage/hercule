@@ -15,12 +15,23 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import {
   MAX_BOARD_CARDS,
+  MAX_BOARD_GROUPINGS,
+  MAX_BOARD_PLACES,
+  MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
+  MAX_ENTITY_MARKS,
   MAX_TRACKING_FAILURE_CAUSE,
+  WorkBoard,
   WorkCard,
   type Grant,
   type SessionRequest,
 } from "@hercule/contract";
+import {
+  HOST_API,
+  registerConnectionType,
+  registerEventSource,
+  type Plugin,
+} from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskBoardFactsLayer } from "../daemon/tasks";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
@@ -35,6 +46,9 @@ import {
   type BoardCardFacts,
   type BoardSessionFact,
 } from "./board";
+import { externalEntityRepository, type ObservedEntity } from "../external-entities";
+import { PluginHost, Plugins } from "../plugins";
+import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../plugins/testing";
 import { taskRepository, type BoardTask, type NewTask } from "./repository";
 
 const AT = "2026-10-20T10:00:00.000Z";
@@ -60,6 +74,8 @@ const NO_FACTS: BoardCardFacts = {
   lastTurnEndedAt: undefined,
   lastRunEndedAt: undefined,
   failure: undefined,
+  entityMarks: [],
+  contextRefs: [],
 };
 
 const askQuestion = (
@@ -121,6 +137,8 @@ describe("buildWorkCard", () => {
       createdAt: AT,
       stageChangedAt: AT,
       lastActivityAt: AT,
+      entityMarks: [],
+      contextRefs: [],
     });
   });
 
@@ -361,6 +379,22 @@ describe("buildWorkCard", () => {
     });
   });
 
+  describe("the outside things", () => {
+    it("copies the marks and the context refs, and cuts them to what a card holds", () => {
+      const marks = ["a", "b", "c", "d"].map((kind) => ({ plugin: "acme", kind: `acme/${kind}` }));
+      const refs = Array.from(
+        { length: MAX_CARD_CONTEXTS + 1 },
+        (_, n) => `acme:thing:${String(n)}`,
+      );
+
+      const card = buildWorkCard(TASK, { ...NO_FACTS, entityMarks: marks, contextRefs: refs });
+
+      expect(card.entityMarks).toEqual(marks.slice(0, MAX_ENTITY_MARKS));
+      expect(card.contextRefs).toEqual(refs.slice(0, MAX_CARD_CONTEXTS));
+      expect(Schema.is(WorkCard)(card)).toBe(true);
+    });
+  });
+
   describe("the last activity", () => {
     it.each([
       ["the creation of a Task with no turn and no run", undefined, undefined, AT],
@@ -423,7 +457,10 @@ describe("who may read the board", () => {
                 readFacts: (tasks) =>
                   Effect.sync(() => {
                     asked.push(tasks.map((task) => task.id));
-                    return tasks.map(() => NO_FACTS);
+                    return {
+                      cards: tasks.map(() => NO_FACTS),
+                      context: { places: [], edges: [], groupings: [], contextComplete: true },
+                    };
                   }),
               }),
             ),
@@ -535,6 +572,14 @@ const writeBoard = (count: number) =>
     );
   });
 
+/**
+ * The Work board's read on a migrated database with a real plugin host. The
+ * board asks the host which plugins are running, so a place whose plugin
+ * stopped counts as stale.
+ */
+const boardLayer = () =>
+  TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(buildPluginStack()));
+
 /** Counts the statements the board read sends to the database, with `count` Tasks on the board. */
 const countStatements = (count: number) =>
   Effect.runPromise(
@@ -551,12 +596,7 @@ const countStatements = (count: number) =>
           }),
       );
       return { statements, board };
-    }).pipe(
-      Effect.provideService(CurrentActor, USER),
-      Effect.provide(
-        TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(TestDatabase)),
-      ),
-    ),
+    }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(boardLayer())),
   );
 
 describe("the cost of the board read", () => {
@@ -574,6 +614,383 @@ describe("the cost of the board read", () => {
   });
 });
 
+const PLUGIN = "acme-tracker";
+
+/** An invented tracker plugin: one Connection type and one event source, so the host runs it. */
+const trackerPlugin: Plugin = {
+  manifest: {
+    id: PLUGIN,
+    displayName: "Acme tracker",
+    hostApi: HOST_API,
+    capabilities: ["connections", "event-sources", "events", "entities"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    Effect.andThen(
+      registerConnectionType(host, {
+        type: "account",
+        displayName: "Account",
+        setup: [],
+        validate: () => Effect.succeed({ displayName: "a", accountId: "a" }),
+      }),
+      registerEventSource(host, {
+        id: "tracker",
+        connectionType: `${PLUGIN}/account`,
+        feeds: IDLE_FEEDS,
+        kinds: {
+          [`${PLUGIN}.thing.done`]: {
+            description: "Something was done.",
+            schema: Schema.Struct({ title: Schema.String }),
+            availableToTriage: true,
+          },
+        },
+        open: IDLE_INGEST_OPEN,
+      }),
+    ),
+  activate: () => Effect.succeed(Effect.void),
+};
+
+const CONNECTION = "0199e0e7-0010-7000-8000-000000000001";
+const PROJECT_A = "acme-tracker:project:harbour";
+const PROJECT_B = "acme-tracker:project:lighthouse";
+const ticketRef = (name: string) => `acme-tracker:ticket:${name}`;
+
+type ObservedRelations = NonNullable<ObservedEntity["observation"]["relations"]>;
+
+const OBSERVED_AT = "2026-10-20T09:00:00.000Z";
+
+/** Builds the observation of a ticket: a compact, fast kind with no caption, so it cannot group. */
+const ticket = (name: string, relations?: ObservedRelations): ObservedEntity => ({
+  kind: `${PLUGIN}/ticket`,
+  slots: {
+    noun: "Ticket",
+    card: "compact",
+    pace: "fast",
+    patience: 24,
+    identifier: name.toUpperCase(),
+    facts: [],
+  },
+  observation: {
+    kind: "ticket",
+    ref: ticketRef(name),
+    title: `Ticket ${name}`,
+    url: `https://tracker.example/${name}`,
+    lifecycle: "open",
+    fields: {},
+    concerns: ["assigned"],
+    sourceUpdatedAt: OBSERVED_AT,
+    ...(relations === undefined ? {} : { relations }),
+  },
+});
+
+/** Builds the observation of a project: a place with a caption, so it can group. */
+const projectPlace = (ref: string, title: string): ObservedEntity => ({
+  kind: `${PLUGIN}/project`,
+  slots: { noun: "Project", pace: "context", caption: "Tracker project" },
+  observation: {
+    kind: "project",
+    ref,
+    title,
+    fields: {},
+    concerns: [],
+    sourceUpdatedAt: OBSERVED_AT,
+  },
+});
+
+const partOf = (...parents: ReadonlyArray<string>): ObservedRelations => ({
+  complete: true,
+  partOf: parents,
+  linked: [],
+});
+
+/**
+ * Stores the observations of one tracker plugin, as one Connection read them,
+ * and a Task on the board that links each of `linked`.
+ */
+const writeLinkedBoard = (input: {
+  readonly kinds: ReadonlyArray<{
+    readonly kind: string;
+    readonly observed: ReadonlyArray<ObservedEntity>;
+  }>;
+  readonly tasks: ReadonlyArray<ReadonlyArray<string>>;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tasks = yield* taskRepository;
+    const entities = yield* externalEntityRepository;
+    yield* Effect.flatMap(PluginHost, (host) => host.boot([trackerPlugin]));
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
+            status, labels, config, created_at, updated_at)
+          VALUES (${uuidFromString(CONNECTION)}, ${PLUGIN}, ${`${PLUGIN}/account`}, 'a', 'a', 'a',
+            'connected', '[]', '{}', ${AT}, ${AT})`;
+        for (const { kind, observed } of input.kinds) {
+          yield* entities.reconcile({
+            connectionId: CONNECTION,
+            kind,
+            complete: true,
+            observed,
+            actor: `plugin:${PLUGIN}`,
+            environment: { now: AT, activePluginIds: [PLUGIN] },
+          });
+        }
+        for (const [index, refs] of input.tasks.entries()) {
+          yield* tasks.insert({
+            ...NEW_TASK,
+            title: `Task ${String(index)}`,
+            provenance: refs.map((ref) => ({ ref })),
+          });
+        }
+      }),
+    );
+  });
+
+/**
+ * Stores the board with `writeLinkedBoard`, runs `change` (a change to the
+ * database or to the plugins, after the board was written), and reads the board.
+ */
+const readLinkedBoard = (
+  input: Parameters<typeof writeLinkedBoard>[0],
+  change: Effect.Effect<unknown, unknown, SqlClient.SqlClient | Plugins> = Effect.void,
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      yield* writeLinkedBoard(input);
+      yield* change;
+      return yield* Effect.flatMap(TaskBoard, (board) => board.query());
+    }).pipe(
+      Effect.provideService(CurrentActor, USER),
+      Effect.provide(boardLayer()),
+    ) as Effect.Effect<WorkBoard>,
+  );
+
+const TICKET_KIND = `${PLUGIN}/ticket`;
+const PROJECT_KIND = `${PLUGIN}/project`;
+
+describe("the context of the board", () => {
+  it("puts a Task under two places in both, and carries each place once for the whole board", async () => {
+    const board = await readLinkedBoard({
+      kinds: [
+        {
+          kind: PROJECT_KIND,
+          observed: [projectPlace(PROJECT_A, "Harbour"), projectPlace(PROJECT_B, "Lighthouse")],
+        },
+        {
+          kind: TICKET_KIND,
+          observed: [ticket("one", partOf(PROJECT_A, PROJECT_B)), ticket("two", partOf(PROJECT_A))],
+        },
+      ],
+      tasks: [[ticketRef("one")], [ticketRef("two")]],
+    });
+
+    const [first, second] = board.cards.toSorted((a, b) => a.title.localeCompare(b.title));
+    expect(first!.contextRefs).toEqual([ticketRef("one"), PROJECT_A, PROJECT_B]);
+    expect(second!.contextRefs).toEqual([ticketRef("two"), PROJECT_A]);
+    expect(first!.entityMarks).toEqual([{ plugin: PLUGIN, kind: TICKET_KIND }]);
+    expect(board.places.map((place) => place.ref)).toEqual(
+      [PROJECT_A, PROJECT_B, ticketRef("one"), ticketRef("two")].toSorted(),
+    );
+    expect(board.places.find((place) => place.ref === PROJECT_A)).toMatchObject({
+      title: "Harbour",
+      caption: "Tracker project",
+      restricted: false,
+    });
+    expect(board.edges).toEqual(
+      expect.arrayContaining([
+        { fromRef: ticketRef("one"), toRef: PROJECT_A },
+        { fromRef: ticketRef("one"), toRef: PROJECT_B },
+        { fromRef: ticketRef("two"), toRef: PROJECT_A },
+      ]),
+    );
+    expect(board.edges).toHaveLength(3);
+    expect(board.contextComplete).toBe(true);
+  });
+
+  it("never gives a Task the ancestors of a peer its link is only linked to", async () => {
+    const board = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        {
+          kind: TICKET_KIND,
+          observed: [
+            ticket("peer", partOf(PROJECT_A)),
+            ticket("mine", { complete: true, partOf: [], linked: [ticketRef("peer")] }),
+          ],
+        },
+      ],
+      tasks: [[ticketRef("mine")]],
+    });
+
+    expect(board.cards[0]!.contextRefs).toEqual([ticketRef("mine")]);
+    expect(board.places.map((place) => place.ref)).toEqual([ticketRef("mine")]);
+    expect(board.edges).toEqual([]);
+  });
+
+  it("lists a groupable kind with its caption only when a place of it is on the board", async () => {
+    const withProject = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        { kind: TICKET_KIND, observed: [ticket("one", partOf(PROJECT_A))] },
+      ],
+      tasks: [[ticketRef("one")]],
+    });
+    const withoutProject = await readLinkedBoard({
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        { kind: TICKET_KIND, observed: [ticket("one")] },
+      ],
+      tasks: [[ticketRef("one")]],
+    });
+
+    expect(withProject.groupings).toEqual([{ kind: PROJECT_KIND, caption: "Tracker project" }]);
+    expect(withoutProject.groupings).toEqual([]);
+  });
+
+  it("says the context may be incomplete when a ref above a link has no record", async () => {
+    const board = await readLinkedBoard({
+      kinds: [{ kind: TICKET_KIND, observed: [ticket("one", partOf(PROJECT_A))] }],
+      tasks: [[ticketRef("one")]],
+    });
+
+    expect(board.cards[0]!.contextRefs).toEqual([ticketRef("one"), PROJECT_A]);
+    expect(board.contextComplete).toBe(false);
+  });
+
+  describe("when a place above a link cannot be read now", () => {
+    const board = {
+      kinds: [
+        { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+        { kind: TICKET_KIND, observed: [ticket("one", partOf(PROJECT_A))] },
+      ],
+      tasks: [[ticketRef("one")]],
+    };
+
+    it("is complete while a Connection reads the place", async () => {
+      expect((await readLinkedBoard(board)).contextComplete).toBe(true);
+    });
+
+    /** Runs a change to the rows, in a transaction as a writer does. */
+    const writeRows = (
+      change: (sql: SqlClient.SqlClient) => Effect.Effect<unknown, unknown>,
+    ): Effect.Effect<unknown, unknown, SqlClient.SqlClient> =>
+      Effect.flatMap(SqlClient.SqlClient, (sql) => withTransaction(sql, change(sql)));
+
+    it.each([
+      [
+        "its only Connection is disabled",
+        writeRows((sql) => sql`UPDATE connections SET status = 'disabled'`),
+      ],
+      ["its plugin stopped", Effect.flatMap(Plugins, (plugins) => plugins.disable(PLUGIN))],
+      [
+        "every Connection that reads it is backing off",
+        writeRows(
+          (sql) =>
+            sql`UPDATE external_entity_observations SET next_attempt_at = '2999-01-01T00:00:00.000Z'
+                WHERE ref = ${PROJECT_A}`,
+        ),
+      ],
+      [
+        "no Connection can read it any more",
+        writeRows(
+          (sql) =>
+            sql`UPDATE external_entity_observations SET access = 'inaccessible'
+                WHERE ref = ${PROJECT_A}`,
+        ),
+      ],
+    ] as const)("is incomplete when %s", async (_name, change) => {
+      const read = await readLinkedBoard(board, change);
+
+      expect(read.contextComplete).toBe(false);
+      // The last-known place stays on the board.
+      expect(read.places.map((place) => place.ref)).toContain(PROJECT_A);
+    });
+  });
+
+  it("keeps the places to the most a reply carries, and says the context is incomplete", async () => {
+    const perTask = 100;
+    const taskCount = Math.ceil((MAX_BOARD_PLACES + 100) / perTask);
+    const names = Array.from({ length: taskCount * perTask }, (_, n) => `t${String(n)}`);
+    const read = await readLinkedBoard({
+      kinds: [{ kind: TICKET_KIND, observed: names.map((name) => ticket(name)) }],
+      tasks: Array.from({ length: taskCount }, (_, task) =>
+        names.slice(task * perTask, (task + 1) * perTask).map(ticketRef),
+      ),
+    });
+
+    expect(read.places).toHaveLength(MAX_BOARD_PLACES);
+    expect(read.contextComplete).toBe(false);
+    expect(() => Schema.encodeSync(WorkBoard)(read)).not.toThrow();
+  });
+
+  it("keeps the groupings to the most a reply carries, the first kinds by name, and says the context is incomplete", async () => {
+    const kindNames = Array.from(
+      { length: MAX_BOARD_GROUPINGS + 1 },
+      (_, n) => `group${String(n).padStart(2, "0")}`,
+    );
+    const placeRef = (word: string) => `acme-tracker:${word}:one`;
+    const read = await readLinkedBoard({
+      kinds: kindNames.map((word) => ({
+        kind: `${PLUGIN}/${word}`,
+        observed: [
+          {
+            ...projectPlace(placeRef(word), word),
+            kind: `${PLUGIN}/${word}`,
+            slots: { noun: "Group", pace: "context" as const, caption: `Caption ${word}` },
+          },
+        ],
+      })),
+      tasks: [kindNames.map(placeRef)],
+    });
+
+    expect(read.groupings.map((grouping) => grouping.kind)).toEqual(
+      kindNames.slice(0, MAX_BOARD_GROUPINGS).map((word) => `${PLUGIN}/${word}`),
+    );
+    expect(read.contextComplete).toBe(false);
+    expect(() => Schema.encodeSync(WorkBoard)(read)).not.toThrow();
+  });
+
+  it("sends the same number of statements for 10 Tasks and for 300 that link things under places", async () => {
+    /** Reads a board of `count` Tasks, each linking its own ticket under one project, and returns the statements sent. */
+    const countContextStatements = (count: number) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const names = Array.from({ length: count }, (_, n) => `t${String(n)}`);
+          yield* writeLinkedBoard({
+            kinds: [
+              { kind: PROJECT_KIND, observed: [projectPlace(PROJECT_A, "Harbour")] },
+              {
+                kind: TICKET_KIND,
+                observed: names.map((name) => ticket(name, partOf(PROJECT_A))),
+              },
+            ],
+            tasks: names.map((name) => [ticketRef(name)]),
+          });
+          const statements: Array<string> = [];
+          const board = yield* Effect.provideService(
+            Effect.flatMap(TaskBoard, (reader) => reader.query()),
+            Statement.CurrentTransformer,
+            (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+          );
+          return { statements, board };
+        }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(boardLayer())),
+      );
+
+    const small = await countContextStatements(10);
+    const large = await countContextStatements(300);
+
+    expect(large.board.cards).toHaveLength(300);
+    expect(large.board.cards.every((card) => card.contextRefs.includes(PROJECT_A))).toBe(true);
+    expect(large.board.places).toHaveLength(301);
+    expect(large.statements).toHaveLength(small.statements.length);
+  });
+});
+
 describe("the size of the board", () => {
   /** Reads the board when `count` Tasks are on it. */
   const readBoardWithTasks = (count: number) =>
@@ -588,12 +1005,7 @@ describe("the size of the board", () => {
           }),
         );
         return yield* Effect.flatMap(TaskBoard, (board) => board.query());
-      }).pipe(
-        Effect.provideService(CurrentActor, USER),
-        Effect.provide(
-          TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(TestDatabase)),
-        ),
-      ),
+      }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(boardLayer())),
     );
 
   it("returns every card and says nothing was left out when the board holds exactly the most it returns", async () => {
@@ -663,7 +1075,10 @@ describe("the summary on a card", () => {
       }).pipe(
         Effect.provideService(CurrentActor, USER),
         Effect.provide(
-          TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer), Layer.provideMerge(TestDatabase)),
+          TaskBoardLayer.pipe(
+            Layer.provide(TaskBoardFactsLayer),
+            Layer.provideMerge(buildPluginStack()),
+          ),
         ),
         Effect.orDie,
       ),

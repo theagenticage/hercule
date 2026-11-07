@@ -6,6 +6,10 @@ declare module "react" {
     "--paw-delay"?: string;
     /** How long after the sunrise starts one of its rays starts to grow. */
     "--ray-delay"?: string;
+    /** The width of a sunrise that stands in the flow of a page, and its face and the box that clips the face. */
+    "--sunrise-width"?: string;
+    "--face-size"?: string;
+    "--face-box-height"?: string;
     /** The distance a pane's width is shifted for the undo line, so it stays centred on the board. */
     "--undo-line-x"?: string;
   }

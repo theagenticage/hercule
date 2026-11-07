@@ -43,6 +43,8 @@ export const PLUGIN_CAPABILITIES = [
   "events",
   "notifications",
   "resources",
+  // Reporting External Entities from a poll, and declaring their kinds.
+  "entities",
   "secrets",
   "kv",
   "public-api",
@@ -84,9 +86,16 @@ export const PluginId = Schema.String.check(
  * the theme's colour. It holds path data only, so a mark can carry no script,
  * style or colour. The host checks the strings when it loads the plugin: at
  * most 16 paths, and at most 4 KB of them together. It drops a mark that
- * fails the check rather than the plugin.
+ * fails the check rather than the plugin. `hue` and `solid` are plain numbers
+ * and flags, so they need no check.
  */
-export const PluginMark = Schema.Struct({ paths: Schema.Array(Schema.String) });
+export const PluginMark = Schema.Struct({
+  paths: Schema.Array(Schema.String),
+  /** The hue, in degrees, that tints the mark where the app draws one. Absent means the neutral ink. */
+  hue: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 360 }))),
+  /** True for a heavy mark, which the app draws a little smaller. */
+  solid: Schema.optionalKey(Schema.Boolean),
+});
 
 export type PluginMark = Schema.Schema.Type<typeof PluginMark>;
 
