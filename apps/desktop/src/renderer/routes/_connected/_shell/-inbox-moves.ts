@@ -2,7 +2,10 @@
  * Taking on and dismissing the Inbox's cards, and the undo line at the foot of
  * the screen. It follows the Work board's moves (`-card-moves.ts`):
  *
- * - Moves are sent one at a time, in the order the user made them.
+ * - Moves are sent one at a time, in the order the user made them. The
+ *   reversal of a move takes its place in the same line when the user presses
+ *   Undo, and waits there for the move's own answer. A move the user makes
+ *   after Undo therefore reaches the controller after the reversal.
  * - A dismissal shows at once: the card leaves the page and the cards after it
  *   close up, before the controller answers. The screen shows the Inbox in the
  *   query cache with every edit not yet answered applied over it
@@ -171,6 +174,13 @@ export const useInboxMoves = ({
     mutationFn: (card: InboxCard) => client.externalEntity.dismiss({ params: { id: card.id } }),
   });
 
+  // The reversals wait in the same line as the moves, so none overtakes another.
+  const reverseMove = useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: (reverse: () => Promise<void>) => reverse(),
+  });
+
   const take = (card: InboxCard): void => {
     const name = nameCard(card);
     const request = takeOn.mutateAsync(card);
@@ -183,11 +193,13 @@ export const useInboxMoves = ({
       {
         words: `Took on ${name}`,
         undo: async (page) => {
-          if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
-          const { taskId } = await request;
-          // The Task was touched since, so it stays and the line says why.
-          await undoAddedTask(client, card.id, taskId);
-          await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
+          await reverseMove.mutateAsync(async () => {
+            if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
+            const { taskId } = await request;
+            // The Task was touched since, so it stays and the line says why.
+            await undoAddedTask(client, card.id, taskId);
+            await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
+          });
           return undefined;
         },
       },
@@ -239,9 +251,11 @@ export const useInboxMoves = ({
       {
         words: `Dismissed ${name}`,
         undo: async (page) => {
-          if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
-          await client.externalEntity.restore({ params: { id: card.id } });
-          await page.writeInboxEdit({ kind: "put-back", card });
+          await reverseMove.mutateAsync(async () => {
+            if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
+            await client.externalEntity.restore({ params: { id: card.id } });
+            await page.writeInboxEdit({ kind: "put-back", card });
+          });
           return undefined;
         },
       },

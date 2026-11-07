@@ -89,7 +89,7 @@ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
  * Returns the seconds a ref waits before it may be read again, after
  * `attemptCount` failed reads: 120 seconds, doubling, at most 6 hours.
  */
-export const computeRetryDelaySeconds = (attemptCount: number): number =>
+const computeRetryDelaySeconds = (attemptCount: number): number =>
   Math.min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * 2 ** Math.min(attemptCount, 16));
 
 // The Connection warnings that entity ingest writes, one sentence per kind
@@ -99,11 +99,11 @@ export const computeRetryDelaySeconds = (attemptCount: number): number =>
 // of them. Anything else is account setup's and is left as it is.
 
 /** Builds the warning for a complete read that could only be done in part. */
-export const buildIncompleteWarning = (kind: string): string =>
+const buildIncompleteWarning = (kind: string): string =>
   `The Inbox may be missing items: the ${kind} list could only be read in part.`;
 
 /** Builds the warning for a relationship that was ignored because it would close a loop. */
-export const buildConflictWarning = (kind: string): string =>
+const buildConflictWarning = (kind: string): string =>
   `The Inbox ignored a relationship of ${kind} that would make a thing part of itself.`;
 
 /**

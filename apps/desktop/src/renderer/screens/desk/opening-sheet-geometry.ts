@@ -50,7 +50,7 @@ export interface SheetFrame {
 }
 
 /** Returns where `t` lies between `start` and `end`, from 0 to 1 and held there outside them. */
-export const readPhase = (t: number, start: number, end: number): number =>
+export const computePhaseProgress = (t: number, start: number, end: number): number =>
   Math.min(1, Math.max(0, (t - start) / (end - start)));
 
 /** Returns the rectangle `t` of the way from `from` to `to`. */
@@ -66,7 +66,7 @@ export const blendRects = (from: SheetRect, to: SheetRect, t: number): SheetRect
  * card) to `destination`. With no `from`, the card is not on the page, so the
  * sheet stays at the destination and only fades.
  */
-export const readSheetFrame = (
+export const computeSheetFrame = (
   from: SheetRect | null,
   destination: SheetRect,
   travel: number,
@@ -75,10 +75,11 @@ export const readSheetFrame = (
   return {
     rect,
     radius: SHEET_CORNER_FROM + (SHEET_CORNER_TO - SHEET_CORNER_FROM) * travel,
-    paperOpacity: from === null ? 1 : readPhase(travel, 0, WORDS_GONE_AT),
-    wordsOpacity: 1 - readPhase(travel, 0, WORDS_GONE_AT),
-    contentOpacity: readPhase(travel, CONTENT_FADES_FROM, CONTENT_FADES_TO),
-    contentRise: CONTENT_RISE * (1 - readPhase(travel, CONTENT_FADES_FROM, CONTENT_FADES_TO)),
+    paperOpacity: from === null ? 1 : computePhaseProgress(travel, 0, WORDS_GONE_AT),
+    wordsOpacity: 1 - computePhaseProgress(travel, 0, WORDS_GONE_AT),
+    contentOpacity: computePhaseProgress(travel, CONTENT_FADES_FROM, CONTENT_FADES_TO),
+    contentRise:
+      CONTENT_RISE * (1 - computePhaseProgress(travel, CONTENT_FADES_FROM, CONTENT_FADES_TO)),
     contentOffset: { x: destination.left - rect.left, y: destination.top - rect.top },
   };
 };

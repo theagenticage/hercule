@@ -5,7 +5,6 @@ import {
   applyInboxEdit,
   describeMoveRefusal,
   nameCard,
-  readMonogram,
   reapplyInboxEdits,
   type InboxEdit,
 } from "./card-moves";
@@ -36,19 +35,6 @@ describe("describeMoveRefusal", () => {
 describe("nameCard", () => {
   it("names a card by its noun and identifier", () => {
     expect(nameCard(buildRequestCard("7"))).toBe("Review #7");
-  });
-});
-
-describe("readMonogram", () => {
-  it("takes the first letter of the first two words", () => {
-    expect(readMonogram("rogier")).toBe("R");
-    expect(readMonogram("Tessa Brandt")).toBe("TB");
-    expect(readMonogram("noa.van-dijk_jr")).toBe("NV");
-  });
-
-  it("gives a question mark for a name with no letter", () => {
-    expect(readMonogram("")).toBe("?");
-    expect(readMonogram(" . ")).toBe("?");
   });
 });
 

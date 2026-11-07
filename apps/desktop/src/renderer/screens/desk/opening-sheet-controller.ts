@@ -9,7 +9,12 @@
  * the sheet stands at its destination and fades.
  */
 import { animateValue, isMotionReduced, trackBody, type MotionValue } from "../../app/motion";
-import { blendRects, isSameRect, readSheetFrame, type SheetRect } from "./opening-sheet-geometry";
+import {
+  blendRects,
+  isSameRect,
+  computeSheetFrame,
+  type SheetRect,
+} from "./opening-sheet-geometry";
 
 /** Where a sheet opens from: the visible part of its card, and the card's own words. */
 export interface SheetOrigin {
@@ -234,7 +239,7 @@ export class SheetController {
     if (this.isDisposed) return;
     const travel = this.travel.current;
     const destination = blendRects(this.previous, this.target, this.follow.current);
-    const frame = readSheetFrame(this.fromRect(), destination, travel);
+    const frame = computeSheetFrame(this.fromRect(), destination, travel);
     const { layer, paper, inner, content } = this.parts;
     const { rect } = frame;
     layer.style.left = toPixels(rect.left);

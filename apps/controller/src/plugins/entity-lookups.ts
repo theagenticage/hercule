@@ -136,10 +136,11 @@ const decideUnfoundRef = (
   answers: ReadonlyArray<ConnectionAnswer>,
   skipped: boolean,
 ): DecidedResolution => {
+  // A Connection that was left out may have found it, so this is never `unavailable`:
+  // that would tell the user to add a Connection when a usable one was not tried.
+  if (skipped) return { incomplete: true };
   if (answers.every(({ asked }) => asked.status === "timed-out")) return { unavailable: true };
-  if (skipped || answers.some(({ asked }) => asked.status !== "answered")) {
-    return { incomplete: true };
-  }
+  if (answers.some(({ asked }) => asked.status !== "answered")) return { incomplete: true };
   return { missing: pickFirmestMissing(answers) ?? "unknown" };
 };
 
@@ -166,10 +167,10 @@ const decideScoped = (
     if (!foundByRef.has(ref)) foundByRef.set(ref, { connectionId, observation: asked.value.found });
   }
   if (foundByRef.size >= 2) return { ambiguous: [...foundByRef.keys()] };
+  // Same rule as `decideUnfoundRef`: a Connection left out makes the answer `incomplete`.
+  if (skipped) return { incomplete: true };
   if (answers.every(({ asked }) => asked.status === "timed-out")) return { unavailable: true };
-  if (skipped || answers.some(({ asked }) => asked.status !== "answered")) {
-    return { incomplete: true };
-  }
+  if (answers.some(({ asked }) => asked.status !== "answered")) return { incomplete: true };
   const [only] = foundByRef.values();
   if (only !== undefined) return { found: only };
   return { missing: pickFirmestMissing(answers) ?? "unknown" };
@@ -361,7 +362,7 @@ const make = Effect.gen(function* () {
      * oldest Connection that returned a ref names it. `incomplete` is true when
      * a Connection failed or eligible ones were left out. The outcome is
      * `source-unavailable` when the plugin has no lookup, no Connection is
-     * eligible, or every Connection timed out.
+     * eligible, or every eligible Connection was asked and timed out.
      */
     search: (
       pluginId: string,
@@ -390,7 +391,12 @@ const make = Effect.gen(function* () {
             ),
           { concurrency: "unbounded" },
         );
-        if (answers.every((answer) => answer.asked.status === "timed-out")) return unavailable;
+        // Connections left out by the limit may be usable, so only a full round of timeouts is unavailable.
+        if (
+          eligible.length === asked.length &&
+          answers.every((answer) => answer.asked.status === "timed-out")
+        )
+          return unavailable;
         const byRef = new Map<string, LookupObservation>();
         for (const { connectionId, asked: result } of answers) {
           if (result.status !== "answered") continue;
@@ -421,9 +427,11 @@ const make = Effect.gen(function* () {
      * - A `scoped` recognition asks every Connection at once.
      *
      * The answer is `unavailable` when the plugin has no lookup, no
-     * Connection is eligible, or every Connection timed out. A failed
-     * Connection, a rejected credential included, and eligible Connections left
-     * out by the limit make a missing or single answer `incomplete`.
+     * Connection is eligible, or every eligible Connection was asked and
+     * timed out. A failed Connection (a rejected credential included) and
+     * eligible Connections left out by the limit or the deadline make a
+     * missing or single answer `incomplete`, even when every Connection that
+     * was asked timed out.
      */
     resolve: (pluginId: string, target: EntityRecognition): Effect.Effect<DecidedResolution> =>
       Effect.gen(function* () {

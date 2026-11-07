@@ -21,6 +21,7 @@ import {
 } from "@hercule/client-core/work";
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
+import { useFocusPageOnArrival } from "../desk";
 import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { findCardElement, isSameCardInLane, readCardInLane } from "./card-in-lane";
@@ -95,6 +96,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   const [isKeysSheetOpen, setKeysSheetOpen] = useState(false);
   const [chosenMatch, setChosenMatch] = useState<{ text: string; id: string } | null>(null);
   const hoveredCard = useRef<CardInLane | null>(null);
+  useFocusPageOnArrival(scrollRef);
 
   // Find: the first match is active until an arrow key chooses another. A
   // choice belongs to the text it was made for, so typing starts at the top.

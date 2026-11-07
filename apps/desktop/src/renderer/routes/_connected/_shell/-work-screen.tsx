@@ -111,6 +111,7 @@ export function WorkScreen({
     board: moves.board,
     serverBoard: board.data,
     projects,
+    groupBy: savedView.groupBy,
     isCarrying,
     scrollRef,
   });

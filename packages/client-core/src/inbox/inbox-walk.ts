@@ -16,6 +16,13 @@ export interface InboxStop {
   readonly middle: number;
   /** True when the card still waits for the user: it has no live Task. */
   readonly waits: boolean;
+  /**
+   * The id of the card that stands right below this one in the same list, with
+   * no heading and no pointer row between them, or `undefined` when something
+   * else, or nothing, follows. It is the card that rises into this one's place
+   * when this one leaves.
+   */
+  readonly followedBy: string | undefined;
 }
 
 /**
@@ -112,16 +119,24 @@ const splitColumnAround = (
 };
 
 /**
- * Returns the id of the first card after `id` in its column that still waits,
- * or `undefined` when there is none. After a card leaves the page, this is the
- * card that moves up into its place, so it is the one a pointer that stays
- * where it was can reach again. Read the stops before the move, because a move
- * can take the card off the page.
+ * Returns the id of the card that rises into the place of the card `id` when
+ * it leaves the page, or `undefined` when that card cannot be dismissed (it
+ * has a Task, so it does not wait) or when no card follows `id` directly (a
+ * heading or a pointer row comes next, or `id` is the last of its list).
+ *
+ * Only this card is ever under a pointer that stays where it was, so it is
+ * the only one a repeated click may act on. Reading further down would act on
+ * a card the user has not seen move. Read the stops before the move, because
+ * a move can take the card off the page.
  */
-export const decideFollowingWaitingCard = (
+export const decideCardRisingIntoPlace = (
   stops: readonly InboxStop[],
   id: string,
-): string | undefined => splitColumnAround(stops, id)?.after.find((stop) => stop.waits)?.id;
+): string | undefined => {
+  const followedBy = stops.find((stop) => stop.id === id)?.followedBy;
+  const rising = stops.find((stop) => stop.id === followedBy);
+  return rising?.waits === true ? rising.id : undefined;
+};
 
 /**
  * Returns the id of the card to move on to after a move on the card `id`, or
@@ -131,8 +146,8 @@ export const decideFollowingWaitingCard = (
  * nearest first. The answer comes from the order of the page, never from what
  * lies under the pointer: while the page closes up after a move, that is a
  * moving target. The keys use this one, so they always have a card to go on
- * with; the pointer uses `decideFollowingWaitingCard`, because a card before
- * `id` never takes its place under the pointer. Read the stops before the
+ * with; the pointer uses `decideCardRisingIntoPlace`, because only the card
+ * that rises into `id`'s place is under the pointer. Read the stops before the
  * move, because a move can take the card off the page.
  */
 export const decideNextWaitingCard = (

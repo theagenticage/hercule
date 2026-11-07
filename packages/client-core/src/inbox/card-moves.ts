@@ -29,21 +29,6 @@ export const describeMoveRefusal = (card: InboxCard, move: InboxMove): string | 
 /** Returns what to call `card` in a sentence about a move: its noun and identifier, such as "Pull request #87". */
 export const nameCard = (card: InboxCard): string => `${card.noun} ${card.identifier}`;
 
-/**
- * Returns the letters of the user's monogram: the first letter of each of the
- * first two words of `name`, in capitals, where a space, a dot, a dash or an
- * underscore ends a word. A name with no letter gives "?".
- */
-export const readMonogram = (name: string): string => {
-  const letters = name
-    .split(/[\s._-]+/)
-    .flatMap((word) => Array.from(word).slice(0, 1))
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  return letters === "" ? "?" : letters;
-};
-
 /** One change to the cards of the Inbox the screen draws. */
 export type InboxEdit =
   /** The card leaves the page: the user dismissed it. */

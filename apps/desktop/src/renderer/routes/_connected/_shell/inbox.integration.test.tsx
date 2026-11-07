@@ -194,10 +194,10 @@ describe("the Inbox screen", () => {
 
   it("reads nothing while the window is hidden, and reads once when it shows", async () => {
     setVisibility("hidden");
-    const { calls } = await openInbox();
+    const { calls, live } = await openInbox();
+    // The first pushes mark the Inbox out of date. A hidden window must still start no read.
     await screen.findByText("Loading the Inbox");
-    // Give a read that should not happen the time to start.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await live.waitForFirstPushes();
     expect(countInboxReads(calls)).toBe(0);
 
     setVisibility("visible");
@@ -1126,7 +1126,7 @@ describe("the Inbox keeps the page in place during a visit", () => {
   it("counts the new mark as seen only once the card that brought it is on the page", async () => {
     const user = userEvent.setup();
     let inbox = buildPageInbox([ROUNDING, SLOTS]);
-    const { live } = await openInbox({ inbox: () => inbox });
+    const { calls, live } = await openInbox({ inbox: () => inbox });
     await user.hover(await screen.findByRole("listitem", { name: /Cache delivery slot lookups/ }));
     await live.waitForFirstPushes();
     await waitFor(() => {
@@ -1137,8 +1137,12 @@ describe("the Inbox keeps the page in place during a visit", () => {
     inbox = buildPageInbox([ROUNDING, SLOTS, LOYALTY], {
       counts: { ...COUNTS, newestArrival: 6 },
     });
+    const readsBefore = countInboxReads(calls);
     live.pushInvalidation("externalEntity");
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitFor(() => {
+      expect(countInboxReads(calls)).toBe(readsBefore + 1);
+    });
+    await live.waitForFirstPushes();
     expect(screen.queryByRole("listitem", { name: /Round loyalty points down/ })).toBeNull();
     expect(readAcknowledgedArrival()).toBe(5);
 

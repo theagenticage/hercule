@@ -4,7 +4,7 @@
  * it. The sheet itself (`InboxOpenCard`) draws from this; the page's keys and
  * clicks drive it.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { findCardOrPlaceElement } from "./inbox-page-dom";
 
 /**
@@ -45,7 +45,9 @@ export interface OpenCard {
   /**
    * Folds the sheet back like `close`, then calls `then` once it has landed
    * (with Reduce motion, once it has faded). `then` is dropped when the sheet
-   * is opened again meanwhile, and when nothing is open.
+   * is opened again meanwhile, and when nothing is open. When the page goes
+   * away during the fold, `then` is called at that moment instead: a move the
+   * user chose is never lost.
    */
   readonly closeThen: (then: () => void) => void;
   /**
@@ -102,6 +104,14 @@ const NOTHING_OPEN: OpenState = {
 export const useOpenCard = (): OpenCard => {
   const [state, setState] = useState(NOTHING_OPEN);
   const afterClose = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      const then = afterClose.current;
+      afterClose.current = null;
+      then?.();
+    },
+    [],
+  );
   const close = (): void => {
     setState((was) => (was.isOpen ? { ...was, isOpen: false } : was));
   };

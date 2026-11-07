@@ -8,7 +8,8 @@
  * with the same code. Their `outside` field is what tells them apart.
  */
 import type { EntityGrouping, EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
-import { describeLockedRow, lowerFirst } from "../desk/relation-rows";
+import { describeLockedRow } from "../desk/relation-rows";
+import { lowerFirst } from "../intake";
 import { parsePluginId } from "../plugin-id";
 import { buildLane, type CardPlaces, type WorkLane } from "./lanes";
 
@@ -35,6 +36,9 @@ const PLACE_LANE_PREFIX = "place:";
 
 /** Returns the id of the lane for the place `ref`. */
 const buildPlaceLaneId = (ref: string): string => `${PLACE_LANE_PREFIX}${ref}`;
+
+/** Returns the id of the lane "No <caption>" for the cards under no place of `kind`. */
+const buildNoPlaceLaneId = (kind: string): string => `none:${kind}`;
 
 /**
  * Returns the ref of the place a lane is for, or `undefined` for a Project
@@ -129,10 +133,29 @@ export const groupBoardByContext = (
     ? lanes
     : [
         ...lanes,
-        buildLane(`none:${kind}`, `No ${caption}`, null, loose, {
+        buildLane(buildNoPlaceLaneId(kind), `No ${caption}`, null, loose, {
           pluginId: null,
           caption,
           cardPlaces: {},
         }),
       ];
+};
+
+/**
+ * Returns the ids of the lanes `card` stands in when the board is grouped by
+ * the places of `kind`: one per place of that kind in its `contextRefs`, or
+ * the "No <caption>" lane when it has none. It names the same lanes as
+ * `groupBoardByContext`, for code that must find a card's cells before the
+ * lanes are built.
+ */
+export const listContextLaneIds = (
+  card: Pick<WorkCard, "contextRefs">,
+  places: readonly EntityPlace[],
+  kind: string,
+): readonly string[] => {
+  const placeRefs = new Set(
+    places.filter((place) => place.kind === kind).map((place) => place.ref),
+  );
+  const refs = [...new Set(card.contextRefs)].filter((ref) => placeRefs.has(ref));
+  return refs.length === 0 ? [buildNoPlaceLaneId(kind)] : refs.map(buildPlaceLaneId);
 };

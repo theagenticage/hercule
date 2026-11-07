@@ -16,6 +16,8 @@
  *   chips of what is chosen, for any list of items.
  * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
  *   It is the one part here that reads something (the clock).
+ * - `useFocusPageOnArrival`: gives the page that scrolls the keyboard focus as
+ *   it opens, so its keys act after a click on the sidebar.
  * - `ViewPill`: the pill that names a place and switches between its views.
  * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
  *   headings.
@@ -69,4 +71,5 @@ export {
 } from "./tool-menu";
 export { UndoLine } from "./undo-line";
 export { useDeskAgeLabel } from "./use-desk-age-label";
+export { useFocusPageOnArrival } from "./use-focus-page-on-arrival";
 export { ViewPill } from "./view-pill";

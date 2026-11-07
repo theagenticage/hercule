@@ -3,7 +3,7 @@
  * holds lasting work as rows on the surface of each place. The narrow column
  * holds Requests, with "With someone else" at its foot. Nothing folds, and
  * nothing the user did not ask for changes place: the order never reads
- * activity, only when a card was first observed.
+ * activity, only when a card was first observed and when it joined the visit.
  */
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { filterItems, type Filter } from "../desk/filter";
@@ -19,7 +19,6 @@ import {
   type SurfaceHead,
 } from "./inbox-place";
 import {
-  compareOldestFirst,
   placeInboxCards,
   type PlacementChoice,
   type RequestsOrder,
@@ -43,7 +42,7 @@ export interface OngoingRow {
   readonly near: readonly OpenPlaceRow[];
 }
 
-/** One raised surface and the work on it: oldest first, then the pointers. */
+/** One raised surface and the work on it in the order it joined the visit, then the pointers. */
 export interface InboxSurface {
   readonly head: SurfaceHead;
   readonly rows: readonly OngoingRow[];
@@ -95,7 +94,7 @@ const buildColumnRow = (card: InboxCard, context: PlaceContext): ColumnRow => ({
   homeName: findHomeName(card, context),
 });
 
-/** Returns the Requests groups. Cards come oldest first; a group lies where `placement` ranks its key. */
+/** Returns the Requests groups. Cards come in the order given; a group lies where `placement` ranks its key. */
 const groupRequests = (
   cards: readonly InboxCard[],
   order: RequestsOrder,
@@ -171,22 +170,29 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
  * - A card lies in the column of its held side.
  * - Ongoing: a surface for each place, grouped as the held grouping says.
  *   The surfaces keep the order they joined the visit in, and so does each
- *   card's surface. On a surface the cards come oldest first, then the
- *   pointers to cards drawn in full elsewhere.
- * - Requests: oldest first, or yours first (still oldest first within each
+ *   card's surface. On a surface the cards come in the order they joined the
+ *   visit, then the pointers to cards drawn in full elsewhere.
+ * - Requests: in that order, or yours first (still in that order within each
  *   half), or by place with a label for each place. Each request keeps its group.
- * - With someone else: oldest first, at the foot of the column.
+ * - With someone else: in that order, at the foot of the column.
+ *
+ * The order the cards join the visit in is oldest first for the first read,
+ * and a card that arrives later comes after them, so nothing a reader is
+ * looking at moves.
  * - The filter narrows all three. It changes no number the sidebar shows.
  */
 export const layOutInbox = (inbox: Inbox, view: InboxView, held: VisitPlacement): InboxLayout => {
   const context = buildPlaceContext(inbox);
   const placement = placeInboxCards(inbox, view, held, context);
-  const oldestFirst = [...inbox.cards].sort(compareOldestFirst);
+  // Every list keeps the order its cards joined the visit in: oldest first at the start, then arrivals.
+  const inVisitOrder = inbox.cards.toSorted(
+    (a, b) => (placement.rankOfCard.get(a.id) ?? 0) - (placement.rankOfCard.get(b.id) ?? 0),
+  );
   const shown = new Set(
-    filterItems(oldestFirst, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
+    filterItems(inVisitOrder, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
   );
   const cardsOn = (side: InboxSide, onlyShown: boolean): InboxCard[] =>
-    oldestFirst.filter(
+    inVisitOrder.filter(
       (card) =>
         (placement.sides.get(card.id) ?? card.side) === side && (!onlyShown || shown.has(card.id)),
     );

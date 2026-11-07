@@ -45,14 +45,28 @@ function holdCalls<Answer>() {
 const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) => {
   const takes = holdCalls<{ taskId: string; created: boolean }>();
   const dismissals = holdCalls<unknown>();
-  const restore = vi.fn(() => Promise.resolve({}));
-  const undoTakeOn = vi.fn(() => Promise.resolve({ undone: true }));
+  // The requests in the order they reach the controller.
+  const sent: string[] = [];
+  const restore = vi.fn(() => {
+    sent.push("restore");
+    return Promise.resolve({});
+  });
+  const undoTakeOn = vi.fn(() => {
+    sent.push("undoTakeOn");
+    return Promise.resolve({ undone: true });
+  });
   const queryInbox = vi.fn(readInbox);
   const client = {
     externalEntity: {
       queryInbox,
-      takeOn: takes.call,
-      dismiss: dismissals.call,
+      takeOn: () => {
+        sent.push("takeOn");
+        return takes.call();
+      },
+      dismiss: () => {
+        sent.push("dismiss");
+        return dismissals.call();
+      },
       restore,
       undoTakeOn,
     },
@@ -75,7 +89,17 @@ const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) =
     },
     { wrapper },
   );
-  return { ...view, takes, dismissals, restore, undoTakeOn, queryInbox, queryClient, undoStack };
+  return {
+    ...view,
+    takes,
+    dismissals,
+    restore,
+    undoTakeOn,
+    sent,
+    queryInbox,
+    queryClient,
+    undoStack,
+  };
 };
 
 /** Lets the promises of the queued requests run. */
@@ -176,6 +200,55 @@ describe("the order of Undo", () => {
     await waitFor(() => {
       expect(result.current.line.text).toBe("Nothing to undo.");
     });
+  });
+});
+
+describe("the order of requests around Undo", () => {
+  it("sends the reversal of a slow Take before a Take made after Undo", async () => {
+    const { result, takes, sent } = setUp();
+    act(() => {
+      result.current.take(A);
+    });
+    await waitFor(() => {
+      expect(takes.calls).toHaveLength(1);
+    });
+    // Undo is pressed before the first Take has answered, and the card still offers Take.
+    act(() => {
+      result.current.undoLastMove();
+      result.current.take(A);
+    });
+    await act(async () => {
+      takes.calls[0]!.answer({ taskId: "task-a", created: true });
+      await settle();
+    });
+    await waitFor(() => {
+      expect(takes.calls).toHaveLength(2);
+    });
+
+    expect(sent).toEqual(["takeOn", "undoTakeOn", "takeOn"]);
+  });
+
+  it("sends the reversal of a slow dismissal before a dismissal made after Undo", async () => {
+    const { result, dismissals, sent } = setUp();
+    act(() => {
+      result.current.dismiss(A);
+    });
+    await waitFor(() => {
+      expect(dismissals.calls).toHaveLength(1);
+    });
+    act(() => {
+      result.current.undoLastMove();
+      result.current.dismiss(A);
+    });
+    await act(async () => {
+      dismissals.calls[0]!.answer({});
+      await settle();
+    });
+    await waitFor(() => {
+      expect(dismissals.calls).toHaveLength(2);
+    });
+
+    expect(sent).toEqual(["dismiss", "restore", "dismiss"]);
   });
 });
 

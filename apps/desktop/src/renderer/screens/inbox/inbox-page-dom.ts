@@ -42,15 +42,22 @@ export const readCardId = (element: Element | null): string | null =>
 /**
  * Returns every card on the page as a stop, in the order the page draws them:
  * the wide side first, then the narrow column. A card with a live Task carries
- * `data-has-task` and no longer waits for the user.
+ * `data-has-task` and no longer waits for the user. A card is followed by the
+ * card that is its next sibling in the list, if the next sibling is a card:
+ * headings stand outside the lists, and pointer rows are not cards.
  */
 export const readInboxStops = (root: ParentNode): readonly InboxStop[] =>
   Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR), (element) => {
     const rect = element.getBoundingClientRect();
+    const below = element.nextElementSibling;
     return {
       id: element.dataset["cardId"] ?? "",
       column: element.closest(".inbox-narrow") === null ? "wide" : "narrow",
       middle: rect.top + rect.height / 2,
       waits: !element.hasAttribute("data-has-task"),
+      followedBy:
+        below instanceof HTMLElement && below.matches(CARD_SELECTOR)
+          ? below.dataset["cardId"]
+          : undefined,
     };
   });

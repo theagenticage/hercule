@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
+import { buildInitials, readErrorMessage } from "@hercule/client-core";
 import {
   buildInboxFacets,
   decideEmptyInbox,
@@ -9,7 +9,6 @@ import {
   describeTruncatedInbox,
   HOME_GROUPING,
   listInboxGroupings,
-  readMonogram,
   type InboxGrouping,
   type InboxLayout,
 } from "@hercule/client-core/inbox";
@@ -100,7 +99,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const isVisible = useWindowVisible();
   const offlineSince = useOfflineSince(live);
   const view = useInboxView(buildInboxViewKey(url, username));
-  const monogram = readMonogram(username);
+  const monogram = buildInitials(username);
 
   // The words of the last visit's cards wait while this visit's read is on its way.
   const [isHolding, setIsHolding] = useState(read.isFetching);

@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { buildInbox } from "@hercule/client-core/inbox/testing";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
 import type { BoardStage, PluginDetail, Task, WorkBoard, WorkCard } from "@hercule/contract";
 import {
@@ -452,6 +453,28 @@ describe("the Work screen's keys", () => {
     // Nothing further to the left: the focus stays.
     await user.keyboard("{ArrowLeft}");
     expect(document.activeElement).toBe(getCard("Refund emails show the wrong currency"));
+  });
+
+  it("takes the keyboard focus when Work opens from the sidebar, so the keys act at once", async () => {
+    const user = userEvent.setup();
+    await openWork({
+      handlers: {
+        "GET /api/v1/external-entities/inbox": { body: buildInbox([]) },
+        "GET /api/v1/external-entities/inbox/count": { body: buildInbox([]).counts },
+      },
+    });
+    await user.click(await screen.findByRole("link", { name: /^Inbox/ }));
+    await waitFor(() => {
+      expect(document.querySelector(".inbox-desk")).not.toBeNull();
+    });
+
+    // The click leaves focus on the sidebar row, which is not the page.
+    await user.click(screen.getByRole("link", { name: "Overview" }));
+    await screen.findByRole("button", { name: /^Tidy the depot labels/ });
+    expect(document.activeElement).toBe(document.querySelector(".board-scroll"));
+    await user.keyboard("{ArrowDown}");
+
+    expect(document.activeElement?.closest(".desk-card")).not.toBeNull();
   });
 
   it("jumps between lanes with [ and ], and opens the card's Thread with Return", async () => {

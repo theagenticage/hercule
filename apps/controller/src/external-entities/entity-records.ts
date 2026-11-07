@@ -162,9 +162,10 @@ export const deriveStale = (
 
 /**
  * Returns when the facts were last known true: the newest successful read of
- * any Connection, and the newest complete scan of each Connection that still
- * lists the thing. A scan of unrelated items does not make an item that left
- * the inventory look fresh. Falls back to `fallback` when nothing was read.
+ * any Connection, and the newest complete scan of each Connection whose
+ * inventory still lists the thing, whether or not the thing concerns the
+ * user. A scan of unrelated items does not make an item that left the
+ * inventory look fresh. Falls back to `fallback` when nothing was read.
  */
 export const deriveObservedAt = (
   observations: ReadonlyArray<ObservationRow>,
@@ -172,7 +173,7 @@ export const deriveObservedAt = (
 ): string => {
   const times = observations.flatMap((observation) => [
     ...(observation.last_refreshed_at === null ? [] : [observation.last_refreshed_at]),
-    ...(observation.last_complete_at !== null && parseConcerns(observation).length > 0
+    ...(observation.last_complete_at !== null && observation.listed === 1
       ? [observation.last_complete_at]
       : []),
   ]);

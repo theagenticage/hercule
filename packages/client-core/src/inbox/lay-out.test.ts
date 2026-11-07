@@ -381,6 +381,55 @@ describe("layOutInbox: what the visit holds in place", () => {
     ]);
   });
 
+  it("puts a card that appears after the first read behind the rows already on its surface", () => {
+    const first = buildInbox([ticket("2", [PRICING]), ticket("3", [PRICING])], { places });
+    const arrived = buildInbox(
+      [
+        ticket("2", [PRICING]),
+        ticket("3", [PRICING]),
+        ticket("1", [PRICING], { firstObservedAt: "2026-10-01T09:00:00.000Z" }),
+      ],
+      { places },
+    );
+    const [surface] = layOutVisit([first, arrived]).ongoing.surfaces;
+    expect(listCardIds(surface?.rows ?? [])).toEqual(["2", "3", "1"]);
+  });
+
+  it("puts a request that appears after the first read at the end of Requests", () => {
+    const first = buildInbox([review("2", []), review("3", [])]);
+    const arrived = buildInbox([
+      review("2", []),
+      review("3", []),
+      review("1", [], { firstObservedAt: "2026-10-01T09:00:00.000Z" }),
+    ]);
+    expect(requestIds(layOutVisit([first, arrived]))).toEqual(["2", "3", "1"]);
+  });
+
+  it("brings a dismissed card back to the row it had, not to the end", () => {
+    const all = buildInbox(
+      [ticket("1", [PRICING]), ticket("2", [PRICING]), ticket("3", [PRICING])],
+      {
+        places,
+      },
+    );
+    const dismissed = buildInbox([ticket("1", [PRICING]), ticket("3", [PRICING])], { places });
+    const arrived = buildInbox(
+      [ticket("1", [PRICING]), ticket("3", [PRICING]), ticket("4", [PRICING])],
+      { places },
+    );
+    const restored = buildInbox(
+      [
+        ticket("1", [PRICING]),
+        ticket("2", [PRICING]),
+        ticket("3", [PRICING]),
+        ticket("4", [PRICING]),
+      ],
+      { places },
+    );
+    const [surface] = layOutVisit([all, dismissed, arrived, restored]).ongoing.surfaces;
+    expect(listCardIds(surface?.rows ?? [])).toEqual(["1", "2", "3", "4"]);
+  });
+
   it("orders several surfaces that join together as the page does", () => {
     const before = buildInbox([ticket("1", [BETA])], { places });
     const after = buildInbox(
@@ -413,6 +462,34 @@ describe("layOutInbox: what the visit holds in place", () => {
     const layout = layOut(before, view(), held);
     expect(surfaceIds(layout)).toEqual([PRICING]);
     expect(held.sides.get("1")).toBe("ongoing");
+  });
+
+  it("keeps the surfaces of a Group by choice when the replies stop offering that kind of place", () => {
+    const grouped = view({ grouping: "acme/project" });
+    const before = buildInbox([ticket("1", [PRICING]), ticket("2", [BETA])], { places });
+    // A reparenting removed the last project from the replies.
+    const after = buildInbox([ticket("1", []), ticket("2", [])], { places });
+    const layout = layOutVisit([before, after], grouped);
+    expect(layout.grouping).toBe("acme/project");
+    expect(layout.ongoing.surfaces.map((s) => [s.head.id, listCardIds(s.rows)])).toEqual([
+      [PRICING, ["1"]],
+      [BETA, ["2"]],
+    ]);
+  });
+
+  it("looks for the Group by choice again at the next visit", () => {
+    const grouped = view({ grouping: "acme/project" });
+    const after = buildInbox([ticket("1", []), ticket("2", [])], { places });
+    expect(layOutVisit([after], grouped).grouping).toBe(HOME_GROUPING);
+  });
+
+  it("looks for the Group by choice again when the user picks it", () => {
+    const before = buildInbox([ticket("1", [PRICING])], { places });
+    const after = buildInbox([ticket("1", [])], { places });
+    let held = layOut(before, view()).placement;
+    held = layOut(after, view({ grouping: STATUS_GROUPING }), held).placement;
+    // The choice was Status, then Project, which the replies no longer offer.
+    expect(layOut(after, view({ grouping: "acme/project" }), held).grouping).toBe(HOME_GROUPING);
   });
 
   describe("in Requests", () => {

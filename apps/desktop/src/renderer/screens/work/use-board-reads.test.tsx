@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { useRef, type JSX } from "react";
+import { PROJECT_FACET_ID } from "@hercule/client-core/work";
 import { buildBoard, buildCard, FAILURE } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
 import { useBoardReads } from "./use-board-reads";
@@ -45,7 +46,14 @@ function Harness({
   readonly unrelated?: number;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const reads = useBoardReads({ board, serverBoard, projects: [], isCarrying, scrollRef });
+  const reads = useBoardReads({
+    board,
+    serverBoard,
+    projects: [],
+    groupBy: PROJECT_FACET_ID,
+    isCarrying,
+    scrollRef,
+  });
   return (
     <div className="work-desk">
       <div ref={scrollRef} className="board-scroll">

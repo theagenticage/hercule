@@ -153,7 +153,7 @@ describe("findNextCardTimeChange", () => {
 
   it("changes when the age of the facts does, if that comes first", () => {
     const card = buildInboxCard("1", { stale: true, observedAt: hoursAgo(47.5) });
-    expect(hoursUntil(card as ReturnType<typeof waiting>)).toBeCloseTo(0.5, 5);
+    expect(hoursUntil(card)).toBeCloseTo(0.5, 5);
   });
 
   it("is never for a card that does not depend on the time", () => {

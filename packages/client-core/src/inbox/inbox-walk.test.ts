@@ -1,7 +1,7 @@
 /** Tests how the keys walk the Inbox page and which card the page moves on to after a move. */
 import { describe, expect, it } from "vitest";
 import {
-  decideFollowingWaitingCard,
+  decideCardRisingIntoPlace,
   decideNextWaitingCard,
   walkInbox,
   type InboxStop,
@@ -14,18 +14,19 @@ const stop = (
   column: InboxStop["column"],
   middle: number,
   waits = true,
-): InboxStop => ({ id, column, middle, waits });
+  followedBy: string | undefined = undefined,
+): InboxStop => ({ id, column, middle, waits, followedBy });
 
 // The page: three rows on the wide side, three requests in the column.
 //   a(40)            r(60)
 //   b(140)           s(120)
 //   c(300)           t(380, has a Task)
 const PAGE: readonly InboxStop[] = [
-  stop("a", "wide", 40),
-  stop("b", "wide", 140),
+  stop("a", "wide", 40, true, "b"),
+  stop("b", "wide", 140, true, "c"),
   stop("c", "wide", 300),
-  stop("r", "narrow", 60),
-  stop("s", "narrow", 120),
+  stop("r", "narrow", 60, true, "s"),
+  stop("s", "narrow", 120, true, "t"),
   stop("t", "narrow", 380, false),
 ];
 
@@ -103,21 +104,35 @@ describe("decideNextWaitingCard", () => {
   });
 });
 
-describe("decideFollowingWaitingCard", () => {
-  it("moves on to the first card after it in its column that waits", () => {
-    const page = [stop("a", "wide", 0), stop("b", "wide", 1, false), stop("c", "wide", 2)];
-    expect(decideFollowingWaitingCard(page, "a")).toBe("c");
-    expect(decideFollowingWaitingCard(PAGE, "r")).toBe("s");
+describe("decideCardRisingIntoPlace", () => {
+  // Each case is a column, top to bottom, as (id, waits, followed directly by the next card).
+  const column = (
+    ...cards: ReadonlyArray<readonly [id: string, waits: boolean, isFollowed: boolean]>
+  ): readonly InboxStop[] =>
+    cards.map(([id, waits, isFollowed], index) =>
+      stop(id, "narrow", index * 100, waits, isFollowed ? cards[index + 1]?.[0] : undefined),
+    );
+
+  it("is the card right below, when it waits", () => {
+    expect(decideCardRisingIntoPlace(PAGE, "a")).toBe("b");
+    expect(decideCardRisingIntoPlace(PAGE, "r")).toBe("s");
   });
 
-  it("has no card to move on to at the foot of its column, where the keys would go back", () => {
-    expect(decideFollowingWaitingCard(PAGE, "c")).toBeUndefined();
-    expect(decideFollowingWaitingCard(PAGE, "s")).toBeUndefined();
+  it("is none when the card right below was taken, even if a later card waits", () => {
+    const page = column(["a", true, true], ["b", false, true], ["c", true, false]);
+    expect(decideCardRisingIntoPlace(page, "a")).toBeUndefined();
+    expect(decideNextWaitingCard(page, "a")).toBe("c");
+  });
+
+  it("is none when a heading or a pointer row stands between the cards", () => {
+    const page = column(["a", true, false], ["b", true, false]);
+    expect(decideCardRisingIntoPlace(page, "a")).toBeUndefined();
+  });
+
+  it("is none at the foot of its list, or for a card that is not on the page", () => {
+    expect(decideCardRisingIntoPlace(PAGE, "c")).toBeUndefined();
+    expect(decideCardRisingIntoPlace(PAGE, "s")).toBeUndefined();
+    expect(decideCardRisingIntoPlace(PAGE, "gone")).toBeUndefined();
     expect(decideNextWaitingCard(PAGE, "c")).toBe("b");
-  });
-
-  it("has none when the cards after it do not wait, or when it is not on the page", () => {
-    expect(decideFollowingWaitingCard(PAGE, "s")).toBeUndefined();
-    expect(decideFollowingWaitingCard(PAGE, "gone")).toBeUndefined();
   });
 });

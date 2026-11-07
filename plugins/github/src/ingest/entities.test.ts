@@ -468,8 +468,14 @@ describe("the entities feed's inventory", () => {
     const { result, reported } = await pollEntitiesFeed(stub);
 
     expect(Result.isSuccess(result)).toBe(true);
+    // The repositories go in one complete call, because a second complete call
+    // would unlist what the first one listed. The first 2,000 by name are
+    // listed; the other 1,000 are left to the host's refresh of wanted refs.
     const repositories = reported.reconciled.filter(({ kind }) => kind === "repository");
-    expect(repositories.map(({ observations }) => observations.length)).toEqual([2000, 1000]);
+    expect(repositories.map(({ complete }) => complete)).toEqual([true]);
+    const listed = repositories[0]!.observations.map(({ ref }) => ref);
+    expect(listed).toHaveLength(2000);
+    expect(listed).toEqual([...listed].sort());
     expect(reconciledKind(reported, "pull-request").observations).toHaveLength(2000);
     expect(reconciledKind(reported, "issue").observations).toHaveLength(1000);
   });

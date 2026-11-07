@@ -37,6 +37,10 @@
   overscroll-behavior: contain;
   overflow-anchor: none;
 }
+/* The board takes the keyboard focus when Work opens, so its keys act at once. It is not a control, so it draws no ring. */
+.board-scroll:focus {
+  outline: none;
+}
 /* A classic scroll bar takes room at the right edge, and the toolbar keeps 14px from it. */
 .work-desk.has-scrollbar .desk-toolbar {
   right: calc(14px + var(--scrollbar-width));

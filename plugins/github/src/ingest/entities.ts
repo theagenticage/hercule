@@ -517,29 +517,27 @@ const reconcileInventory = (
       );
     }
 
+    // A complete call empties what the Connection listed before and leaves
+    // out now. That holds for the concerns and for the listing itself (a
+    // listed record is not asked for again by the refresh). So each kind is
+    // reported whole in one call, and a second complete call would unlist
+    // what the first one listed.
+    //
     // Each search reads at most 1,000 items, so the repositories of three
-    // searches can pass the host's limit of one call. They go in batches.
-    // Batches can be `complete` because a repository has no concerns: a
-    // complete call empties the concerns of what it leaves out, and there are
-    // none to empty, so a batch never clears what another batch lists.
-    const repositoryObservations = [...repositories.values()].map(buildRepositoryObservation);
-    const batchCount = Math.max(
-      1,
-      Math.ceil(repositoryObservations.length / MAX_ENTITY_OBSERVATIONS),
-    );
-    for (let batch = 0; batch < batchCount; batch++) {
-      yield* entities.reconcile({
-        kind: REPOSITORY_KIND,
-        complete: true,
-        observations: repositoryObservations.slice(
-          batch * MAX_ENTITY_OBSERVATIONS,
-          (batch + 1) * MAX_ENTITY_OBSERVATIONS,
-        ),
-      });
-    }
-    // Pull requests and issues are never batched. A complete call empties the
-    // concerns of every earlier item it leaves out, so each kind must be
-    // reported whole in one call. They fit: a search reads at most 1,000
+    // searches can pass the host's limit of one call. The call lists the
+    // first ones by name: the same ones every poll, so a repository does not
+    // move in and out of the listing. The rest are not listed, so the host
+    // wants them read, and the refresh below reads them 50 per poll.
+    const repositoryObservations = [...repositories.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .slice(0, MAX_ENTITY_OBSERVATIONS)
+      .map(([, node]) => buildRepositoryObservation(node));
+    yield* entities.reconcile({
+      kind: REPOSITORY_KIND,
+      complete: true,
+      observations: repositoryObservations,
+    });
+    // Pull requests and issues fit in one call each: a search reads at most 1,000
     // items, so the two pull request searches give at most 2,000 (exactly the
     // host's limit) and the issue search at most 1,000.
     yield* entities.reconcile({

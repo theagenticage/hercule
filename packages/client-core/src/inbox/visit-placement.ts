@@ -5,13 +5,17 @@
  * lies. A visit holds, for each card:
  *
  * - its side (a card that gets a Task keeps its column);
+ * - its row: the order of the cards inside each list, which is the order they
+ *   joined the visit in;
  * - on the wide side, the surfaces it lies on and which of them draws it in
  *   full, and the order of the surfaces;
  * - in Requests, the group it lies in, and the order of the groups.
  *
- * A card new to the visit is placed as the read says and its surface or group,
- * if it is new too, joins at the end. The user's own Group by or Requests order
- * starts that part over, and so does the next visit.
+ * A card new to the visit is placed as the read says. It joins the end of its
+ * list, and its surface or group, if it is new too, joins at the end. The
+ * user's own Group by or Requests order starts the surfaces or groups over, and
+ * so does the next visit. The order of the rows inside a list is held until the
+ * next visit even then: the user asked for other lists, not for other rows.
  */
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { resolveGrouping } from "./groupings";
@@ -44,8 +48,21 @@ export interface PlacementChoice {
 export interface VisitPlacement {
   /** The side each card was first seen on, by card id. */
   readonly sides: ReadonlyMap<string, InboxSide>;
-  /** The grouping the surfaces below were held for. */
+  /**
+   * The Group by choice the surfaces below were held for, as the user made it,
+   * or `undefined` before the visit has placed anything. A new read does not
+   * place the surfaces again for the same choice, even when the replies no
+   * longer offer that grouping.
+   */
+  readonly requestedGrouping: string | undefined;
+  /** The grouping the surfaces below were placed with: `requestedGrouping`, or Place when the first reply did not offer it. */
   readonly grouping: string;
+  /**
+   * The position of each card in the order the cards joined the visit, by card
+   * id, for every list a card can lie in. A card that is gone from the reads
+   * keeps its position, so one the user dismissed and undid lies where it did.
+   */
+  readonly rankOfCard: ReadonlyMap<string, number>;
   /**
    * The heads of the surfaces each ongoing card lies on, by card id, as they
    * were first seen. The first is where the card is drawn in full. A head that
@@ -65,7 +82,9 @@ export interface VisitPlacement {
 /** A visit that holds nothing yet. */
 export const NO_PLACEMENT: VisitPlacement = {
   sides: new Map(),
+  requestedGrouping: undefined,
   grouping: "",
+  rankOfCard: new Map(),
   headsOfCard: new Map(),
   surfaceRank: new Map(),
   requestsOrder: "oldest",
@@ -78,7 +97,7 @@ const compareGroupKeys = (a: string, b: string): number =>
   a === b ? 0 : a === ELSEWHERE ? 1 : b === ELSEWHERE ? -1 : a.localeCompare(b, "en");
 
 /** Sorts oldest first by when the card was first observed, then by id, so the order never depends on activity. */
-export const compareOldestFirst = (a: InboxCard, b: InboxCard): number =>
+const compareOldestFirst = (a: InboxCard, b: InboxCard): number =>
   Date.parse(a.firstObservedAt) - Date.parse(b.firstObservedAt) || a.id.localeCompare(b.id, "en");
 
 /** Returns the key of the group a request lies in for `order`. */
@@ -108,15 +127,19 @@ const appendRanks = <Key extends string>(
  * reads before it. Returns `held` itself when `inbox` adds nothing to it, so
  * a caller can tell by identity whether anything changed.
  *
- * - A card not seen before is placed as `inbox` says. A card seen before keeps
- *   its side, its surfaces and its group, whatever `inbox` now says. A card
- *   that is gone from `inbox` keeps its entry, so one the user dismissed and
- *   undid lies where it did.
+ * - A card not seen before is placed as `inbox` says, and takes the last
+ *   position in the order of the visit; cards that join together take it
+ *   oldest first. A card seen before keeps its side, its surfaces, its group
+ *   and its position, whatever `inbox` now says. A card that is gone from
+ *   `inbox` keeps its entry, so one the user dismissed and undid lies where it
+ *   did.
  * - A surface or a group not seen before joins at the end, behind the others.
  *   Several that join together are put in the page's usual order.
- * - A different Group by (`choice.grouping`, once it is resolved against what
- *   `inbox` offers) or Requests order drops what was held for the old one, and
- *   places every card again. Sides are never dropped.
+ * - A different Group by (`choice.grouping`) or Requests order drops the
+ *   surfaces or groups held for the old one, and places every card again. The
+ *   Group by is resolved against what `inbox` offers only then, once, and the
+ *   result is held with the choice, so a kind of place that leaves the replies
+ *   later does not move cards. Sides and positions are never dropped.
  */
 export const placeInboxCards = (
   inbox: Inbox,
@@ -124,12 +147,13 @@ export const placeInboxCards = (
   held: VisitPlacement,
   context: PlaceContext,
 ): VisitPlacement => {
-  const grouping = resolveGrouping(inbox, choice.grouping);
-  const keepsSurfaces = held.grouping === grouping;
+  const keepsSurfaces = held.requestedGrouping === choice.grouping;
+  const grouping = keepsSurfaces ? held.grouping : resolveGrouping(inbox, choice.grouping);
   const keepsGroups = held.requestsOrder === choice.requestsOrder;
   const oldestFirst = [...inbox.cards].sort(compareOldestFirst);
 
   const sides = new Map(held.sides);
+  const rankOfCard = new Map(held.rankOfCard);
   const headsOfCard = new Map(keepsSurfaces ? held.headsOfCard : []);
   const groupOfCard = new Map(keepsGroups ? held.groupOfCard : []);
   const newHeads = new Map<string, SurfaceHead>();
@@ -137,6 +161,10 @@ export const placeInboxCards = (
   let isChanged = !keepsSurfaces || !keepsGroups;
 
   for (const card of oldestFirst) {
+    if (!rankOfCard.has(card.id)) {
+      rankOfCard.set(card.id, rankOfCard.size);
+      isChanged = true;
+    }
     if (!sides.has(card.id)) {
       sides.set(card.id, card.side);
       isChanged = true;
@@ -161,7 +189,9 @@ export const placeInboxCards = (
 
   return {
     sides,
+    requestedGrouping: choice.grouping,
     grouping,
+    rankOfCard,
     headsOfCard,
     surfaceRank: appendRanks(
       keepsSurfaces ? held.surfaceRank : new Map(),

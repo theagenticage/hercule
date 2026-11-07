@@ -10,6 +10,7 @@
  * list never shows one parent as if it were the only one.
  */
 import type { EntityEdge, EntityPlace, EntityStatus } from "@hercule/contract";
+import { lowerFirst } from "../intake";
 import { readEntityPluginId } from "./entity-words";
 
 /** The records and the `part of` steps a reply carries, which are all the rows are built from. */
@@ -141,10 +142,6 @@ export const readAncestorRows = (
   }
   return rows;
 };
-
-/** Returns `word` with its first letter in lower case, unless the word starts with an acronym ("PR"). */
-export const lowerFirst = (word: string): string =>
-  /^[A-Z]{2}/.test(word) ? word : word.charAt(0).toLowerCase() + word.slice(1);
 
 /**
  * Returns the words for a place no Connection can read, such as "A Sentry

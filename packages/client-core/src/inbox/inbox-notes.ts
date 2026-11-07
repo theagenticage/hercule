@@ -5,6 +5,7 @@
 import type { Connection, Inbox, PluginDetail } from "@hercule/contract";
 import { MAX_INBOX_CARDS } from "@hercule/contract";
 import { namePlugin } from "../intake";
+import { formatNameList } from "../name-list";
 import { parsePluginId } from "../plugin-id";
 
 /**
@@ -16,11 +17,6 @@ export const describeTruncatedInbox = (inbox: Inbox): string | undefined =>
   inbox.truncated
     ? `The Inbox shows the first ${MAX_INBOX_CARDS.toLocaleString("en")} cards, and more exist. Dismiss or take on some to bring the rest in.`
     : undefined;
-
-const joinNames = (names: readonly string[]): string =>
-  names.length <= 2
-    ? names.join(" and ")
-    : `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`;
 
 /**
  * Returns the one line that names a source the Inbox cannot read now and says
@@ -59,7 +55,7 @@ export const describeFailingSources = (
     if (names.length === 1 && only !== undefined) {
       return `${names[0] ?? ""} ${only.status === "needs-reauth" ? "needs you to sign in again" : "stopped answering"}. Its cards may be out of date.`;
     }
-    return `${joinNames(names)} are not answering. Their cards may be out of date.`;
+    return `${formatNameList(names, "and")} are not answering. Their cards may be out of date.`;
   }
   return ofSources.find(
     (connection) =>

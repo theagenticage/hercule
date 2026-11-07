@@ -385,6 +385,36 @@ describe("resolve", () => {
     expect(answer).toEqual({ incomplete: true });
   });
 
+  it("is incomplete, not unavailable, when the first Connection times out and the deadline leaves the others out", async () => {
+    const { answer, calls } = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        // a hangs until its own 8 second timeout; b could read the ref but is never asked.
+        fake.resolve = (account) =>
+          account === "a"
+            ? Effect.never
+            : Effect.succeed({ found: buildObservation("tracker:ticket:1") });
+        const fiber = yield* Effect.forkChild(lookups.resolve("tracker", byRef));
+        yield* TestClock.adjust("20 seconds");
+        return { answer: yield* Fiber.join(fiber), calls: [...fake.calls] };
+      }),
+    );
+    expect(calls).toEqual(["a"]);
+    expect(answer).toEqual({ incomplete: true });
+  });
+
+  it("is incomplete, not unavailable, when every asked Connection times out but the limit of 8 left others out", async () => {
+    const accounts = Array.from({ length: 9 }, (_, index) => `c${String(index)}`);
+    const answer = await runWith(accounts, (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.resolve = () => Effect.never;
+        const fiber = yield* Effect.forkChild(lookups.resolve("tracker", scoped));
+        yield* TestClock.adjust("8 seconds");
+        return yield* Fiber.join(fiber);
+      }),
+    );
+    expect(answer).toEqual({ incomplete: true });
+  });
+
   it("asks only eligible Connections of the target plugin", async () => {
     const answer = await Effect.runPromise(
       Effect.gen(function* () {
@@ -588,6 +618,18 @@ describe("search", () => {
     });
     expect(outcome.incomplete).toBe(true);
     expect(outcome.observations).toHaveLength(1);
+  });
+
+  it("returns no results, incomplete, when the four asked Connections time out and a fifth was left out", async () => {
+    const outcome = await runWith(["a", "b", "c", "d", "e"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.search = () => Effect.never;
+        const fiber = yield* Effect.forkChild(lookups.search("tracker", { text: "x", limit: 20 }));
+        yield* TestClock.adjust("8 seconds");
+        return yield* Fiber.join(fiber);
+      }),
+    );
+    expect(outcome).toEqual({ observations: [], incomplete: true, outcome: "results" });
   });
 
   it("is source-unavailable when every Connection times out, and with no Connection", async () => {

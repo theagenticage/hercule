@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
-  decideFollowingWaitingCard,
+  decideCardRisingIntoPlace,
   decideNextWaitingCard,
   describeMoveRefusal,
   walkInbox,
@@ -9,6 +9,7 @@ import {
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
+import { useFocusPageOnArrival } from "../desk";
 import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CARD_SELECTOR, findCardElement, readCardElement, readInboxStops } from "./inbox-page-dom";
@@ -111,8 +112,8 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
       return true;
     }
     // The next card is chosen before the move, because a dismissal takes the card off the page.
-    // The pointer only goes to a card that moves up into the card's place; the keys go back when nothing follows.
-    const decideNext = by === "pointer" ? decideFollowingWaitingCard : decideNextWaitingCard;
+    // The pointer only goes to the card that rises into the card's place; the keys go back when nothing follows.
+    const decideNext = by === "pointer" ? decideCardRisingIntoPlace : decideNextWaitingCard;
     const next = scroller === null ? undefined : decideNext(readInboxStops(scroller), card.id);
     if (move === "take") input.moves.take(card);
     else input.moves.dismiss(card);
@@ -294,12 +295,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     current.set(id, "keys", false);
   };
 
-  // The page takes the keyboard focus as the screen opens: a click on the
-  // sidebar leaves focus on its row, which is not the page, and the keys would
-  // never reach it. A text field that has focus keeps it.
-  useEffect(() => {
-    if (!isTextField(document.activeElement)) scrollRef.current?.focus({ preventScroll: true });
-  }, [scrollRef]);
+  useFocusPageOnArrival(scrollRef);
 
   // The listeners are added once and call the newest handlers, which read the newest state and props.
   const handlers = useRef({ handleKey, handleClick, handleFocusIn });

@@ -764,6 +764,15 @@ describe("buildInitials", () => {
   it("takes one letter of a one-word name", () => {
     expect(buildInitials(" sanne ")).toBe("S");
   });
+
+  it("ends a word at a dot, a dash or an underscore, so a username reads like a name", () => {
+    expect(buildInitials("marta.de-vries")).toBe("MV");
+    expect(buildInitials("rogier")).toBe("R");
+  });
+
+  it("gives nothing for a name with no letter", () => {
+    expect(buildInitials(" . ")).toBe("");
+  });
 });
 
 describe("the split's widths", () => {

@@ -1653,10 +1653,14 @@ function persistLinkedTaskRows(home: string): boolean {
   try {
     const rankColumn = version >= TASK_BOARD_RANK_MIGRATION ? ", board_rank" : "";
     const rankValue = version >= TASK_BOARD_RANK_MIGRATION ? ", 'V'" : "";
+    // Migration 110 added `stage_changed_at` with an empty default, which the
+    // API cannot read as a time, so the row sets it.
+    const stageColumn = version >= TASK_STAGES_MIGRATION ? ", stage_changed_at" : "";
+    const stageValue = version >= TASK_STAGES_MIGRATION ? ", ?" : "";
     const insertTask = database.query(
       `INSERT INTO tasks (id, title, description, status, priority, labels,
-                          created_at, updated_at, status_changed_at${rankColumn})
-       VALUES (?, ?, '', 'open', 'normal', '[]', ?, ?, ?${rankValue})`,
+                          created_at, updated_at, status_changed_at${stageColumn}${rankColumn})
+       VALUES (?, ?, '', 'open', 'normal', '[]', ?, ?, ?${stageValue}${rankValue})`,
     );
     const insertEntry = database.query(
       `INSERT INTO task_provenance (id, task_id, ref, signal_id, at, actor)
@@ -1669,6 +1673,7 @@ function persistLinkedTaskRows(home: string): boolean {
         SEEDED_TASK_CREATED,
         SEEDED_TASK_CREATED,
         SEEDED_TASK_CREATED,
+        ...(version >= TASK_STAGES_MIGRATION ? [SEEDED_TASK_CREATED] : []),
       );
       insertEntry.run(
         uuidBlob(Bun.randomUUIDv7()),

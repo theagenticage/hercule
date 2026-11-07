@@ -77,7 +77,7 @@ export const useInboxArrivals = ({
     const wait = new AbortController();
     void waitForStillHand({
       // The card the pointer rests on is the one that must not move.
-      target: () => scrollRef.current?.querySelector('[data-current="pointer"]') ?? null,
+      targets: () => [...(scrollRef.current?.querySelectorAll('[data-current="pointer"]') ?? [])],
       isDragging: () => false,
       signal: wait.signal,
     }).then((isStill) => {

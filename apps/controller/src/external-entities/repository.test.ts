@@ -806,6 +806,61 @@ describe("access and Connections that go away", () => {
   });
 });
 
+describe("observedAt of a listed record with no concerns", () => {
+  it("is dated by the complete scan that lists it, with or without concerns, and by none once the inventory leaves it out", async () => {
+    const times = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const observedAt = (minutes: number) =>
+          Effect.map(readInbox(repository, minutes), (inbox) => inbox.cards[0]!.observedAt);
+        yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: [] })], { minutes: 1 });
+        yield* linkTaskToRef(ticketRef("t1"), 2);
+        // The title changes in a later complete scan: the card shows facts read at minute 10.
+        yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: [], title: "Renamed" })], {
+          minutes: 10,
+        });
+        const listed = yield* observedAt(11);
+        // A scan that leaves it out stops dating it: the record falls back to its first sight.
+        yield* reconcile(ACCOUNT_A, [ticket("t2")], { minutes: 20 });
+        return { listed, departed: yield* observedAt(21) };
+      }),
+    );
+    expect(times).toEqual({ listed: at(10), departed: at(1) });
+  });
+});
+
+describe("a complete inventory is the whole kind", () => {
+  it("unlists what an earlier complete call listed, so the refresh wants it again", async () => {
+    const wantedAfter = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [project()], { minutes: 1, kind: PROJECT_KIND });
+        yield* reconcile(
+          ACCOUNT_A,
+          [ticket("t1", { relations: { complete: true, partOf: [PROJECT], linked: [] } })],
+          {
+            minutes: 1,
+          },
+        );
+        const ask = (minutes: number) =>
+          repository.listWanted({
+            connectionId: ACCOUNT_A,
+            refPrefix: "acme-tracker:project:",
+            limit: 50,
+            now: at(minutes),
+          });
+        const whileListed = yield* ask(2);
+        // A second complete call for the same kind, with other members only.
+        const other = {
+          ...project(),
+          observation: { ...project().observation, ref: "acme-tracker:project:other" },
+        };
+        yield* reconcile(ACCOUNT_A, [other], { minutes: 3, kind: PROJECT_KIND });
+        return { whileListed, afterSecondCall: yield* ask(4) };
+      }),
+    );
+    expect(wantedAfter).toEqual({ whileListed: [], afterSecondCall: [PROJECT] });
+  });
+});
+
 describe("partial records", () => {
   it("makes a record with no card, then fills it in when the full record arrives", async () => {
     const steps = await run(({ repository, reconcile }) =>

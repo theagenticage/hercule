@@ -1,6 +1,11 @@
 import { useRef, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient, type PluginIdentity } from "@hercule/client-core";
+import {
+  buildInitials,
+  readErrorMessage,
+  type HerculeClient,
+  type PluginIdentity,
+} from "@hercule/client-core";
 import {
   decideOpenCard,
   isCardTimeDependent,
@@ -160,7 +165,7 @@ export function InboxOpenCard({
   const walkToCard = (id: string): void => {
     sheet.walkInside({ kind: "card", id });
   };
-  const userInitial = username.charAt(0).toUpperCase();
+  const userInitial = buildInitials(username);
   return (
     <OpeningSheet
       isOpen={sheet.isOpen}

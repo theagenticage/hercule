@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkBoard } from "@hercule/contract";
 import { buildBoard, buildCard, buildPlace, listIds } from "./cards.testing";
-import { groupBoardByContext, listBoardGroupings } from "./context-lanes";
+import { groupBoardByContext, listBoardGroupings, listContextLaneIds } from "./context-lanes";
 import { countCardsByStage, arrangeLanes } from "./arrange-lanes";
 
 const GROUPING = { kind: "acme/project", caption: "Acme project" };
@@ -178,5 +178,26 @@ describe("groupBoardByContext", () => {
     );
     const [lane] = groupBoardByContext(board, "relay/repository");
     expect(lane?.outside?.cardPlaces["x"]?.summary).toBe("In 2 repositories");
+  });
+});
+
+describe("listContextLaneIds", () => {
+  it("names the lanes that groupBoardByContext draws for each card", () => {
+    const cards = [
+      buildCard("both", { contextRefs: ["acme:project:returns", "acme:project:pricing"] }),
+      buildCard("one", { contextRefs: ["acme:project:pricing"] }),
+      buildCard("none"),
+      buildCard("elsewhere", { contextRefs: ["acme:project:unknown"] }),
+    ];
+    const board = buildContextBoard(cards, PLACES);
+    const lanes = groupBoardByContext(board, "acme/project");
+    for (const card of cards) {
+      const drawnIn = lanes
+        .filter((lane) => lane.cells.some((cell) => cell.cards.includes(card)))
+        .map((lane) => lane.id);
+      expect(listContextLaneIds(card, board.places, "acme/project").toSorted()).toEqual(
+        drawnIn.toSorted(),
+      );
+    }
   });
 });

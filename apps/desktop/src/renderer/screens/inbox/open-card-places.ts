@@ -9,7 +9,8 @@ const EDGE_MARGIN = 16;
 /** How far the sheet keeps below the top of the page, which is the top of the desk. */
 const TOP_MARGIN = 12;
 
-const readRectOf = (element: HTMLElement): SheetRect => {
+/** Returns where `element` is drawn in the window, as a rectangle. */
+const measureElementRect = (element: HTMLElement): SheetRect => {
   const { left, top, width, height } = element.getBoundingClientRect();
   return { left, top, width, height };
 };
@@ -40,7 +41,7 @@ export const readOpenCardPlaces = (
   held: SheetRect | null,
 ): SheetPlaces => {
   const drawnOrigin = isOnPage(origin) ? origin : null;
-  const from = drawnOrigin === null ? null : readRectOf(drawnOrigin);
+  const from = drawnOrigin === null ? null : measureElementRect(drawnOrigin);
   const surface =
     drawnOrigin?.dataset["placeRef"] === undefined
       ? null
@@ -59,7 +60,8 @@ export const readOpenCardPlaces = (
   const height = Math.min(content.offsetHeight, window.innerHeight - 2 * EDGE_MARGIN);
 
   const wantedLeft =
-    held?.left ?? (surface === null ? (from?.left ?? page.left) - 1 : readRectOf(surface).left);
+    held?.left ??
+    (surface === null ? (from?.left ?? page.left) - 1 : measureElementRect(surface).left);
   const wantedTop = held?.top ?? from?.top ?? page.top;
   return {
     origin: { rect: from, words: drawnOrigin },
