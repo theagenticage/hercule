@@ -14,7 +14,6 @@ import {
 } from "./cards.testing";
 import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
-import { NO_RIDING_CHOICES } from "./riding-choices";
 import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
 
 const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
@@ -26,7 +25,7 @@ const layOut = (
   inbox: Inbox,
   inboxView: InboxView,
   held: VisitPlacement = NO_PLACEMENT,
-): InboxLayout => layOutInbox(inbox, inboxView, held, NO_RIDING_CHOICES);
+): InboxLayout => layOutInbox(inbox, inboxView, held);
 
 /** Lays out each read in turn within one visit, and returns the layout of the last. */
 const layOutVisit = (reads: readonly Inbox[], inboxView: InboxView = view()): InboxLayout => {

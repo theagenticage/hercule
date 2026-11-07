@@ -26,7 +26,6 @@ import {
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
-import type { RidingChoices } from "./riding-choices";
 import {
   placeInboxCards,
   type PlacementChoice,
@@ -100,6 +99,8 @@ export interface InboxLayout {
     readonly awaitingCount: number;
   };
   readonly withSomeoneElse: { readonly rows: readonly ColumnRow[] };
+  /** The bundle of each card that carries something, by card id. Pass it as `previousBundles` to the layout of the next read. */
+  readonly bundles: Readonly<Record<string, CardBundle>>;
 }
 
 /** Builds the row of `card` in a column. Only a card of Requests carries lines: a card a Task holds is plain. */
@@ -180,6 +181,25 @@ const buildSurfaces = (
     .map(({ head, full, pointers }) => ({ head, rows: [...full, ...pointers] }));
 };
 
+/** No bundle drawn before: the first layout of a visit. */
+const NO_BUNDLES: Readonly<Record<string, CardBundle>> = {};
+
+/** Returns the bundle of every card drawn in full that carries something, by card id. */
+const indexBundles = (
+  surfaces: readonly InboxSurface[],
+  groups: readonly RequestGroup[],
+): Readonly<Record<string, CardBundle>> => {
+  const bundles: Record<string, CardBundle> = {};
+  const rows = [
+    ...surfaces.flatMap((surface) => surface.rows.filter((row) => row.alsoIn === undefined)),
+    ...groups.flatMap((group) => group.rows),
+  ];
+  for (const { card, bundle } of rows) {
+    if (bundle !== EMPTY_BUNDLE) bundles[card.id] = bundle;
+  }
+  return bundles;
+};
+
 const decideColumnState = (shown: number, beforeFilter: number): ColumnState => ({
   isEmpty: shown === 0,
   isEmptiedByFilter: shown === 0 && beforeFilter > 0,
@@ -192,8 +212,10 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
  * order the surfaces and groups come. The read decides what is written in
  * them, and where a card that is new to the visit lies (`placeInboxCards`).
  * The layout returns what the visit holds now, as `placement`, to pass as `held`
- * with the next read. `riding` is what the user's own Link and Unlink chose
- * since the visit began (`RidingChoices`).
+ * with the next read, and the `bundles` it drew, to pass as `previousBundles`.
+ * A bundle that has not changed keeps its identity, so what compares it by
+ * identity does not draw it again. The user's own Link and Unlink that wait for
+ * an answer are in `held.pendingMoves`.
  *
  * - A card lies in the column of its held side.
  * - Ongoing: a surface for each place, grouped as the held grouping says.
@@ -217,15 +239,15 @@ export const layOutInbox = (
   inbox: Inbox,
   view: InboxView,
   held: VisitPlacement,
-  riding: RidingChoices,
+  previousBundles: Readonly<Record<string, CardBundle>> = NO_BUNDLES,
 ): InboxLayout => {
   const context = buildPlaceContext(inbox);
-  const placement = placeInboxCards(inbox, view, held, context, riding);
+  const placement = placeInboxCards(inbox, view, held, context);
   const readRank = (id: string): number => placement.cards.get(id)?.rank ?? 0;
   // Every list keeps the order its cards joined the visit in: oldest first at the start, then arrivals.
   const inVisitOrder = inbox.cards.toSorted((a, b) => readRank(a.id) - readRank(b.id));
   const drawnRiding = decideDrawnRiding(inbox.cards, placement);
-  const sources = indexBundleSources(inbox, drawnRiding, readRank, context);
+  const sources = indexBundleSources(inbox, drawnRiding, readRank, context, previousBundles);
   const shown = new Set(
     filterItems(inVisitOrder, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
   );
@@ -243,15 +265,17 @@ export const layOutInbox = (
 
   const ongoing = cardsOn("ongoing", true);
   const requests = cardsOn("requests", true);
+  const surfaces = buildSurfaces(ongoing, context, placement, sources);
+  const groups = groupRequests(requests, view.requestsOrder, context, placement, sources);
   return {
     placement,
     grouping: placement.grouping.id,
     ongoing: {
-      surfaces: buildSurfaces(ongoing, context, placement, sources),
+      surfaces,
       ...decideColumnState(ongoing.length, cardsOn("ongoing", false).length),
     },
     requests: {
-      groups: groupRequests(requests, view.requestsOrder, context, placement, sources),
+      groups,
       awaitingCount: inbox.counts.requests,
       ...decideColumnState(requests.length, cardsOn("requests", false).length),
     },
@@ -260,6 +284,7 @@ export const layOutInbox = (
         buildColumnRow(card, context, sources, "with-someone-else"),
       ),
     },
+    bundles: indexBundles(surfaces, groups),
   };
 };
 

@@ -31,7 +31,7 @@ import { RequestsSide } from "../../../screens/inbox/requests-side";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
 import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
-import { useInboxVisit } from "../../../screens/inbox/use-inbox-visit";
+import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
 import { useOpenCard } from "../../../screens/inbox/use-open-card";
 import { useInboxMoves } from "./-inbox-moves";
 import { useInbox } from "./-inbox-read";
@@ -81,7 +81,14 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const { data: connections } = useSuspenseQuery(connectionsQuery(client));
   const scrollRef = useRef<HTMLDivElement>(null);
   const read = useInbox(client);
-  const moves = useInboxMoves({ client, undoStack, serverInbox: read.data, scrollRef });
+  const visitHistory = useVisitHistory();
+  const moves = useInboxMoves({
+    client,
+    undoStack,
+    serverInbox: read.data,
+    visit: visitHistory,
+    scrollRef,
+  });
   const isVisible = useWindowVisible();
   const offlineSince = useOfflineSince(live);
   const view = useInboxView(buildInboxViewKey(url, username));
@@ -111,8 +118,8 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       view: { grouping: view.grouping, filter: view.filter, requestsOrder: view.requestsOrder },
       isFresh: hasOwnReply,
       hasUserMove: moves.hasPendingEdits,
-      riding: moves.riding,
     },
+    visit: visitHistory,
     scrollRef,
   });
   const hasWords = inbox !== undefined && !isHolding;

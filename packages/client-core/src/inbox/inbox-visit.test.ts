@@ -8,13 +8,23 @@ import { describe, expect, it } from "vitest";
 import {
   buildInbox,
   buildInboxCard,
+  buildInboxLink,
   buildInboxPlace,
   buildRequestCard,
   listCardIds,
 } from "./cards.testing";
-import { advanceInboxVisit, START_OF_VISIT, type InboxVisit, type VisitStep } from "./inbox-visit";
+import { planLink, planUnlink } from "./card-links";
+import {
+  advanceInboxVisit,
+  advanceLinkGesture,
+  START_OF_VISIT,
+  type InboxVisit,
+  type LinkGestureStep,
+  type VisitStep,
+} from "./inbox-visit";
 import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
 import type { InboxView } from "./lay-out";
+import { hasPlacedCards } from "./visit-placement";
 
 const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
 
@@ -52,6 +62,12 @@ const startVisit = () => {
       history = next.history;
       return next.visit;
     },
+    /** Follows a Link or Unlink of the user, as the page does when the user makes one and the controller answers. */
+    gesture: (step: LinkGestureStep) => {
+      history = advanceLinkGesture(history, step);
+    },
+    /** Returns the placement the visit holds now. */
+    readPlacement: () => history.placement,
     /** Lets the arrivals `ids` in, as the caller does once the hand is still. */
     release: (...ids: string[]) => {
       released = new Set([...released, ...ids]);
@@ -172,7 +188,7 @@ describe("advanceInboxVisit: the history", () => {
       isFresh: false,
       hasUserMove: false,
     });
-    expect(placeholder.history.placement).toBeUndefined();
+    expect(hasPlacedCards(placeholder.history.placement)).toBe(false);
     expect(placeholder.visit.layout?.ongoing.surfaces).toHaveLength(1);
   });
 });
@@ -268,5 +284,127 @@ describe("advanceInboxVisit: what the user's own move emptied", () => {
       everything: false,
       requests: false,
     });
+  });
+});
+
+describe("advanceLinkGesture: where a card rides", () => {
+  const A = buildInboxCard("a", { firstObservedAt: "2026-11-01T09:00:00.000Z" });
+  const B = buildInboxCard("b", { firstObservedAt: "2026-11-02T09:00:00.000Z" });
+  const X = request("3");
+  const alone = inboxOf([A, B, X]);
+  const ridingOn = (lead: InboxCard) => inboxOf([A, B, { ...X, ridesOn: lead.ref }]);
+  const link = (
+    visit: ReturnType<typeof startVisit>,
+    inbox: Inbox,
+    lead: InboxCard,
+    gesture: number,
+  ) => {
+    const plan = planLink(inbox, X.ref, lead.ref);
+    visit.gesture({ _tag: "start", gesture, move: plan.ridingMove! });
+  };
+  /** The ids of the cards drawn riding on each lead. */
+  const riders = (visit: InboxVisit) =>
+    Object.fromEntries(
+      [A, B].map((lead) => [
+        lead.id,
+        visit
+          .layout!.ongoing.surfaces.flatMap((surface) => surface.rows)
+          .find((row) => row.card.id === lead.id && row.alsoIn === undefined)!
+          .bundle.riders.map((card) => card.id),
+      ]),
+    );
+
+  it("puts a request on the lead the user links it to, though a later read says it rides on another", () => {
+    const visit = startVisit();
+    visit.read(alone);
+    // The read says X rides on B, but the visit keeps drawing it alone.
+    const later = ridingOn(B);
+    expect(riders(visit.read(later))).toEqual({ a: [], b: [] });
+    link(visit, later, A, 1);
+    expect(riders(visit.read(later, { hasUserMove: true }))).toEqual({ a: ["3"], b: [] });
+    visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
+    expect(riders(visit.read(later))).toEqual({ a: ["3"], b: [] });
+  });
+
+  it("plays a later Link again when an earlier one is refused, so the card ends on the later lead", () => {
+    const visit = startVisit();
+    visit.read(alone);
+    link(visit, alone, A, 1);
+    link(visit, alone, B, 2);
+    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
+    visit.gesture({ _tag: "refuse", gesture: 1 });
+    expect(riders(visit.read(alone))).toEqual({ a: [], b: ["3"] });
+    visit.gesture({ _tag: "settle", gesture: 2, remaining: undefined });
+    expect(riders(visit.read(alone))).toEqual({ a: [], b: ["3"] });
+  });
+
+  it("keeps the first lead when both Links are accepted", () => {
+    const visit = startVisit();
+    visit.read(alone);
+    link(visit, alone, A, 1);
+    link(visit, alone, B, 2);
+    visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
+    visit.gesture({ _tag: "settle", gesture: 2, remaining: undefined });
+    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
+  });
+
+  describe("an Unlink", () => {
+    const person = buildInboxLink(X.ref, A.ref, "person");
+    const linked = buildInbox([A, B, { ...X, ridesOn: A.ref }], { links: [person], places });
+    const unlink = (visit: ReturnType<typeof startVisit>) => {
+      const plan = planUnlink(linked, X.ref, A.ref, visit.readPlacement());
+      visit.gesture({ _tag: "start", gesture: 1, move: plan!.ridingMove! });
+    };
+
+    it("takes the card off its lead while it waits, and lets it stand alone once nothing joins the pair", () => {
+      const visit = startVisit();
+      visit.read(linked);
+      unlink(visit);
+      expect(riders(visit.read(linked))).toEqual({ a: [], b: [] });
+      visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
+      expect(riders(visit.read(linked))).toEqual({ a: [], b: [] });
+    });
+
+    it("keeps the card on its lead when the answer says a source still reports the link", () => {
+      const visit = startVisit();
+      visit.read(linked);
+      unlink(visit);
+      visit.gesture({ _tag: "settle", gesture: 1, remaining: "source" });
+      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
+    });
+
+    it("puts the card back on its lead when the Unlink is refused", () => {
+      const visit = startVisit();
+      visit.read(linked);
+      unlink(visit);
+      visit.gesture({ _tag: "refuse", gesture: 1 });
+      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
+    });
+
+    it("is undone by a Link, a gesture of its own, planned over the place the visit holds", () => {
+      const visit = startVisit();
+      visit.read(linked);
+      unlink(visit);
+      visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
+      link(visit, linked, A, 2);
+      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
+    });
+  });
+
+  it("returns the history it was given for a gesture that has no move waiting", () => {
+    const visit = startVisit();
+    visit.read(alone);
+    const before = visit.readPlacement();
+    visit.gesture({ _tag: "settle", gesture: 9, remaining: undefined });
+    visit.gesture({ _tag: "refuse", gesture: 9 });
+    expect(visit.readPlacement()).toBe(before);
+  });
+
+  it("still shows a move made while a copy from an earlier visit stands in, and keeps it for the visit's own reply", () => {
+    const visit = startVisit();
+    visit.read(alone, { isFresh: false });
+    link(visit, alone, A, 1);
+    expect(riders(visit.read(alone, { isFresh: false }))).toEqual({ a: ["3"], b: [] });
+    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
   });
 });

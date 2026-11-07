@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import {
   advanceInboxVisit,
+  advanceLinkGesture,
   START_OF_VISIT,
   type InboxVisit,
+  type LinkGestureStep,
+  type VisitHistory,
   type VisitStep,
 } from "@hercule/client-core/inbox";
 import { waitForStillHand } from "../../app/motion";
@@ -13,6 +16,39 @@ import { useSignalLanding } from "./use-signal-landing";
 
 /** How long the sunrise waits after the user's own move empties the Inbox, which is the time the last card takes to step aside. */
 const SUNRISE_DELAY_MS = 320;
+
+/** What the visit remembers, shared by the hook that draws the page and the one that makes the user's moves. */
+export interface VisitHistoryHandle {
+  readonly history: VisitHistory;
+  /** Replaces the history, as `advanceInboxVisit` returns it for the draw. */
+  readonly setHistory: (history: VisitHistory) => void;
+  /** Returns the newest history, also when it was changed after the last draw. A move planned later reads it. */
+  readonly readLatest: () => VisitHistory;
+  /** Follows a Link or Unlink of the user from its start to the controller's answer (`advanceLinkGesture`). */
+  readonly advanceLinkGesture: (step: LinkGestureStep) => void;
+}
+
+/**
+ * Returns the history of the visit of this screen (`START_OF_VISIT` at first).
+ * `useInboxVisit` draws from it and `useInboxMoves` makes the user's Links and
+ * Unlinks in it, so the visit is the one place that knows where a card rides.
+ */
+export const useVisitHistory = (): VisitHistoryHandle => {
+  const [history, setHistoryState] = useState(START_OF_VISIT);
+  const latest = useRef(history);
+  useLayoutEffect(() => {
+    latest.current = history;
+  });
+  return {
+    history,
+    setHistory: setHistoryState,
+    readLatest: () => latest.current,
+    advanceLinkGesture: (step) => {
+      latest.current = advanceLinkGesture(latest.current, step);
+      setHistoryState((before) => advanceLinkGesture(before, step));
+    },
+  };
+};
 
 /**
  * Returns what the Inbox page draws for the read it holds (`InboxVisit`), and
@@ -36,13 +72,16 @@ const SUNRISE_DELAY_MS = 320;
  *   says for the signals that landed.
  *
  * `step` is the read as `VisitStep` describes it, without the ids released so
- * far, which this hook keeps. `scrollRef` is the element that scrolls the page.
+ * far, which this hook keeps. `visit` is the history this hook advances. `scrollRef`
+ * is the element that scrolls the page.
  */
 export const useInboxVisit = ({
   step,
+  visit: { history, setHistory },
   scrollRef,
 }: {
   readonly step: Omit<VisitStep, "released">;
+  readonly visit: VisitHistoryHandle;
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): InboxVisit & {
   readonly isWaitingForSunrise: boolean;
@@ -50,7 +89,6 @@ export const useInboxVisit = ({
   readonly clearFresh: (id: string) => void;
   readonly announcement: string;
 } => {
-  const [history, setHistory] = useState(START_OF_VISIT);
   const [released, setReleased] = useState(NO_IDS);
   // A signal that lands holds its card's old words back for a moment, so the read drawn is not always the latest.
   const landing = useSignalLanding({
@@ -60,7 +98,7 @@ export const useInboxVisit = ({
   });
 
   // Laying out the page is the costly part of a draw, so it runs again only for a different read or choice.
-  const { view, isFresh, hasUserMove, riding } = step;
+  const { view, isFresh, hasUserMove } = step;
   const { grouping, filter, requestsOrder } = view;
   const next = useMemo(
     () =>
@@ -70,19 +108,8 @@ export const useInboxVisit = ({
         released,
         isFresh,
         hasUserMove,
-        ...(riding === undefined ? {} : { riding }),
       }),
-    [
-      history,
-      landing.inbox,
-      grouping,
-      filter,
-      requestsOrder,
-      released,
-      isFresh,
-      hasUserMove,
-      riding,
-    ],
+    [history, landing.inbox, grouping, filter, requestsOrder, released, isFresh, hasUserMove],
   );
   // Set while drawing, so the draw that shows a new read already holds its cards.
   if (next.history !== history) setHistory(next.history);

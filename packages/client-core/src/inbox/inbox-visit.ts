@@ -12,8 +12,14 @@
  *   it before, and it lies where it did.
  * - Where cards lie is held by `placeInboxCards`: a read changes the words on
  *   the page, never the place of a card the user has seen.
+ * - What rides on what is held there too. The user's own Link and Unlink are
+ *   the one thing that moves it. Each is a gesture the visit follows from
+ *   its start to the controller's answer (`advanceLinkGesture`), so the visit
+ *   is the only place that knows where a card rides.
  */
-import type { Inbox } from "@hercule/contract";
+import type { EntityUnlinkResult, Inbox } from "@hercule/contract";
+import { replaceEqualDeep } from "@tanstack/query-core";
+import type { CardBundle } from "./card-bundles";
 import {
   keepHeldGrouping,
   listInboxGroupings,
@@ -21,8 +27,15 @@ import {
   type InboxGrouping,
 } from "./groupings";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
-import { NO_RIDING_CHOICES, type RidingChoices } from "./riding-choices";
-import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
+import {
+  hasPlacedCards,
+  NO_PLACEMENT,
+  refuseRidingMove,
+  settleRidingMove,
+  startRidingMove,
+  type RidingMove,
+  type VisitPlacement,
+} from "./visit-placement";
 
 /** Whether a column shows cards, and when it shows none, whether the user's own move took the last one. */
 type Emptiness = "filled" | "empty" | "emptied by move";
@@ -32,8 +45,14 @@ type Emptiness = "filled" | "empty" | "emptied by move";
  * pass back the `history` that `advanceInboxVisit` returns.
  */
 export interface VisitHistory {
-  /** Where the cards lie, or `undefined` until the visit's own first reply has been placed. */
-  readonly placement: VisitPlacement | undefined;
+  /**
+   * Where the cards lie, and the Links and Unlinks that wait for an answer.
+   * It holds no card (`hasPlacedCards` is false) until the visit's own first
+   * reply has been placed.
+   */
+  readonly placement: VisitPlacement;
+  /** The bundle each card of the last fresh reply carried, so a bundle that did not change keeps its identity. */
+  readonly bundles: Readonly<Record<string, CardBundle>>;
   /** The whole page: no card at all. */
   readonly everything: Emptiness;
   /** The Requests column. */
@@ -42,7 +61,8 @@ export interface VisitHistory {
 
 /** A visit that has read nothing yet. */
 export const START_OF_VISIT: VisitHistory = {
-  placement: undefined,
+  placement: NO_PLACEMENT,
+  bundles: {},
   everything: "empty",
   requests: "empty",
 };
@@ -68,11 +88,6 @@ export interface VisitStep {
    * not an accident: a column they leave empty is `emptiedByMove`.
    */
   readonly hasUserMove: boolean;
-  /**
-   * What the user's own Link and Unlink put cards on or took them off in this
-   * visit. Leave it out when none was made.
-   */
-  readonly riding?: RidingChoices;
 }
 
 /** What the screen draws for one read. */
@@ -157,15 +172,22 @@ export const advanceInboxVisit = (
       history,
     };
   }
-  const known = isFresh ? history.placement : undefined;
+  const known = isFresh && hasPlacedCards(history.placement) ? history.placement : undefined;
   const { inbox, held } = holdBackArrivals(known, received, released);
-  const layout = layOutInbox(inbox, view, known ?? NO_PLACEMENT, step.riding ?? NO_RIDING_CHOICES);
+  // A copy kept from an earlier visit holds nothing in place, but the user's moves that wait still show.
+  const placementToLayOut = isFresh
+    ? history.placement
+    : { ...NO_PLACEMENT, pendingMoves: history.placement.pendingMoves };
+  const layout = layOutInbox(inbox, view, placementToLayOut, history.bundles);
 
   const everything = advanceEmptiness(history.everything, inbox.cards.length === 0, hasUserMove);
   const requests = advanceEmptiness(history.requests, layout.requests.isEmpty, hasUserMove);
   const placement = isFresh ? layout.placement : history.placement;
+  // The bundles keep their identity already, so this is cheap, and the history is the same object when none changed.
+  const bundles = isFresh ? replaceEqualDeep(history.bundles, layout.bundles) : history.bundles;
   const isUnchanged =
     placement === history.placement &&
+    bundles === history.bundles &&
     everything === history.everything &&
     requests === history.requests;
   return {
@@ -179,6 +201,44 @@ export const advanceInboxVisit = (
         requests: requests === "emptied by move",
       },
     },
-    history: isUnchanged ? history : { placement, everything, requests },
+    history: isUnchanged ? history : { placement, bundles, everything, requests },
   };
+};
+
+/**
+ * One step in the life of a Link or Unlink the user made. The visit keeps the
+ * gesture from its start until the controller answers it. Undo is no step of
+ * its own: it is a new gesture in the other direction, started when Undo is
+ * pressed, which the visit follows like any other.
+ *
+ * - `start`: the user made the gesture. Its `move` shows at once.
+ * - `settle`: the controller accepted it. `remaining` is the answer of an
+ *   Unlink: the firmest claim that still joins the pair.
+ * - `refuse`: the controller refused it, or it changed nothing. The move is
+ *   dropped, and the gestures made after it are played again on what is settled.
+ */
+export type LinkGestureStep =
+  | { readonly _tag: "start"; readonly gesture: number; readonly move: RidingMove }
+  | {
+      readonly _tag: "settle";
+      readonly gesture: number;
+      readonly remaining: EntityUnlinkResult["remaining"];
+    }
+  | { readonly _tag: "refuse"; readonly gesture: number };
+
+/**
+ * Returns the history after `step`, or `history` itself when the step changes
+ * nothing, as for a gesture that has no move waiting (one that planned none).
+ * Call it when the user makes a Link or Unlink and when the controller answers
+ * it. The next `advanceInboxVisit` draws the result.
+ */
+export const advanceLinkGesture = (history: VisitHistory, step: LinkGestureStep): VisitHistory => {
+  const { placement } = history;
+  const next =
+    step._tag === "start"
+      ? startRidingMove(placement, step.gesture, step.move)
+      : step._tag === "settle"
+        ? settleRidingMove(placement, step.gesture, step.remaining)
+        : refuseRidingMove(placement, step.gesture);
+  return next === placement ? history : { ...history, placement: next };
 };

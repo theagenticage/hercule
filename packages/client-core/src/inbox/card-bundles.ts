@@ -6,15 +6,19 @@
  * nothing until the user links the two.
  *
  * Which card rides on which is decided by the controller (`InboxCard.ridesOn`).
- * The visit holds that for its length (`HeldCard.ridesOn`), so a read never
- * moves a card the user has seen; `decideDrawnRiding` turns what is held into
- * what the page draws. Nothing here knows a kind by name.
+ * The visit holds that for its length (`HeldCard.ridesOn`, and the user's own
+ * Links and Unlinks that wait for an answer), so a read never moves a card the
+ * user has seen; `decideDrawnRiding` turns what is held into what the page
+ * draws. A bundle built again keeps the identity of the one it equals, so a
+ * row that draws the same is not drawn again. Nothing here knows a kind by
+ * name.
  */
 import type { EntityLink, EntityPeer, InboxCard } from "@hercule/contract";
+import { replaceEqualDeep } from "@tanstack/query-core";
 import { readEntityPluginId } from "../desk/entity-words";
 import { isLinkBetween, nameLinkedThing, readOtherRef } from "../desk/link-ends";
 import { findHomeName, type PlaceContext } from "./inbox-place";
-import type { VisitPlacement } from "./visit-placement";
+import { readRidesOn, type VisitPlacement } from "./visit-placement";
 
 /** Who says two things are linked: the firmest claim of the pair. */
 export type LinkClaim = EntityLink["claim"];
@@ -110,7 +114,8 @@ export const EMPTY_BUNDLE: CardBundle = { parts: [], lines: [], riders: [] };
 
 /**
  * Returns the lead each riding card is drawn under, as its ref, by card id.
- * A card rides when the visit holds it on the Requests side with a lead, and
+ * A card rides when the visit holds it on the Requests side with a lead (the
+ * place `readRidesOn` gives, with the user's unanswered moves played), and
  * that lead is a card the visit holds on the wide side. A lead that is gone
  * (dismissed, or a card that has since got a Task) lets what rode on it stand
  * alone, and rides again when it comes back.
@@ -128,7 +133,8 @@ export const decideDrawnRiding = (
   for (const card of cards) {
     const held = placement.cards.get(card.id);
     if (held === undefined || held.side !== "requests") continue;
-    if (held.ridesOn !== undefined && leads.has(held.ridesOn)) riding.set(card.id, held.ridesOn);
+    const ridesOn = readRidesOn(placement, card);
+    if (ridesOn !== undefined && leads.has(ridesOn)) riding.set(card.id, ridesOn);
   }
   return riding;
 };
@@ -141,13 +147,16 @@ export interface BundleSources {
   readonly linksByRef: ReadonlyMap<string, readonly EntityLink[]>;
   /** The riding cards of each lead, by the lead's ref, in the order of the visit. */
   readonly ridersByLead: ReadonlyMap<string, readonly InboxCard[]>;
+  /** The bundles of the layout before this one, by card id. A bundle that comes out equal keeps its identity. */
+  readonly previousBundles: Readonly<Record<string, CardBundle>>;
   readonly context: PlaceContext;
 }
 
 /**
  * Returns the lookups `buildCardBundle` reads. `riding` is `decideDrawnRiding`'s
  * answer and `readRank` gives each card's place in the order of the visit, which
- * orders the cards that ride on one lead.
+ * orders the cards that ride on one lead. `previousBundles` are the bundles
+ * the layout before this read drew, by card id.
  */
 export const indexBundleSources = (
   inbox: {
@@ -158,6 +167,7 @@ export const indexBundleSources = (
   riding: ReadonlyMap<string, string>,
   readRank: (cardId: string) => number,
   context: PlaceContext,
+  previousBundles: Readonly<Record<string, CardBundle>>,
 ): BundleSources => {
   const linksByRef = new Map<string, EntityLink[]>();
   for (const link of inbox.links) {
@@ -182,6 +192,7 @@ export const indexBundleSources = (
     peerByRef: new Map(inbox.peers.map((peer) => [peer.ref, peer])),
     linksByRef,
     ridersByLead,
+    previousBundles,
     context,
   };
 };
@@ -260,7 +271,9 @@ const describeLine = (line: TuckedLine): string =>
  *   hint never makes a part and never changes what rides.
  * - A link whose other end the read does not hold draws nothing.
  *
- * Returns `EMPTY_BUNDLE` itself for a card that carries nothing.
+ * Returns `EMPTY_BUNDLE` itself for a card that carries nothing. Returns the
+ * bundle `sources.previousBundles` holds for `lead` itself when the new one
+ * equals it, and shares every part and line that did not change with it.
  */
 export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBundle => {
   const riders = sources.ridersByLead.get(lead.ref) ?? [];
@@ -329,7 +342,9 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
   locked.sort((a, b) => compareNames(a.noun, b.noun) || compareNames(a.ref, b.ref));
   lines.sort((a, b) => compareNames(describeLine(a), describeLine(b)));
   if (asking.length + quiet.length + locked.length + lines.length === 0) return EMPTY_BUNDLE;
-  return { parts: [...asking, ...quiet, ...locked], lines, riders };
+  const built: CardBundle = { parts: [...asking, ...quiet, ...locked], lines, riders };
+  const previous = sources.previousBundles[lead.id];
+  return previous === undefined ? built : replaceEqualDeep(previous, built);
 };
 
 /**
@@ -344,71 +359,3 @@ export const listBundleCardIds = (card: InboxCard, bundle: CardBundle): readonly
     return part._tag === "quiet" && part.cardId !== undefined ? [part.cardId] : [];
   }),
 ];
-
-const isSameClaim = (a: LinkClaim | undefined, b: LinkClaim | undefined): boolean =>
-  a === b ||
-  (a !== undefined &&
-    b !== undefined &&
-    a.type === b.type &&
-    a.plugin === b.plugin &&
-    a.actor === b.actor &&
-    a.evidenceKey === b.evidenceKey);
-
-const isSamePart = (a: TuckedPart, b: TuckedPart): boolean => {
-  if (a._tag === "asking") {
-    return (
-      b._tag === "asking" &&
-      a.card === b.card &&
-      a.homeName === b.homeName &&
-      isSameClaim(a.claim, b.claim)
-    );
-  }
-  if (a._tag === "quiet") {
-    return (
-      b._tag === "quiet" &&
-      a.ref === b.ref &&
-      a.cardId === b.cardId &&
-      a.openId === b.openId &&
-      a.title === b.title &&
-      a.statusWords === b.statusWords &&
-      isSameClaim(a.claim, b.claim)
-    );
-  }
-  return (
-    b._tag === "locked" && a.ref === b.ref && a.noun === b.noun && isSameClaim(a.claim, b.claim)
-  );
-};
-
-const isSameLine = (a: TuckedLine, b: TuckedLine): boolean => {
-  if (a._tag === "mention") {
-    return (
-      b._tag === "mention" &&
-      a.word === b.word &&
-      a.reference === b.reference &&
-      a.fromRef === b.fromRef &&
-      a.toRef === b.toRef &&
-      isSameClaim(a.claim, b.claim)
-    );
-  }
-  return (
-    b._tag === "peer" &&
-    a.otherRef === b.otherRef &&
-    a.reference === b.reference &&
-    a.openId === b.openId &&
-    isSameClaim(a.claim, b.claim)
-  );
-};
-
-/**
- * Checks whether two bundles draw the same thing, so a card whose bundle was
- * built again by a new read is not drawn again. Cards compare by identity: a
- * card that did not change keeps its object from one read to the next.
- */
-export const isSameBundle = (a: CardBundle, b: CardBundle): boolean =>
-  a === b ||
-  (a.parts.length === b.parts.length &&
-    a.lines.length === b.lines.length &&
-    a.riders.length === b.riders.length &&
-    a.riders.every((rider, index) => rider === b.riders[index]) &&
-    a.parts.every((part, index) => isSamePart(part, b.parts[index]!)) &&
-    a.lines.every((line, index) => isSameLine(line, b.lines[index]!)));

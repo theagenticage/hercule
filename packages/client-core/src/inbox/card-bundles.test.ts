@@ -7,7 +7,7 @@
 import type { Inbox } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { toggleFilterValue } from "../desk/filter";
-import { isSameBundle, listBundleCardIds, type CardBundle } from "./card-bundles";
+import { EMPTY_BUNDLE, listBundleCardIds, type CardBundle } from "./card-bundles";
 import {
   buildInbox,
   buildInboxCard,
@@ -17,26 +17,37 @@ import {
 } from "./cards.testing";
 import { HOME_GROUPING } from "./inbox-place";
 import { layOutInbox, listRiders, type InboxLayout, type InboxView } from "./lay-out";
-import { chooseLead, NO_RIDING_CHOICES, type RidingChoices } from "./riding-choices";
-import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
+import {
+  NO_PLACEMENT,
+  startRidingMove,
+  type RidingMove,
+  type VisitPlacement,
+} from "./visit-placement";
 
 const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
 
 const layOut = (
   inbox: Inbox,
   held: VisitPlacement = NO_PLACEMENT,
-  riding: RidingChoices = NO_RIDING_CHOICES,
-): InboxLayout => layOutInbox(inbox, VIEW, held, riding);
+  previousBundles: InboxLayout["bundles"] = {},
+): InboxLayout => layOutInbox(inbox, VIEW, held, previousBundles);
 
-/** Lays out each read of one visit, and returns the layout of the last. */
-const layOutVisit = (
-  reads: readonly Inbox[],
-  riding: RidingChoices = NO_RIDING_CHOICES,
-): InboxLayout => {
+/**
+ * Lays out each read of one visit, and returns the layout of the last. The
+ * moves in `waiting` are the user's Links and Unlinks that the controller has
+ * not answered, made before the last read.
+ */
+const layOutVisit = (reads: readonly Inbox[], waiting: readonly RidingMove[] = []): InboxLayout => {
   let held = NO_PLACEMENT;
   let layout: InboxLayout | undefined;
-  for (const inbox of reads) {
-    layout = layOut(inbox, held, riding);
+  for (const [index, inbox] of reads.entries()) {
+    if (index === reads.length - 1) {
+      held = waiting.reduce(
+        (placement, move, gesture) => startRidingMove(placement, gesture, move),
+        held,
+      );
+    }
+    layout = layOut(inbox, held, layout?.bundles);
     held = layout.placement;
   }
   return layout!;
@@ -325,13 +336,13 @@ describe("what the visit holds of riding", () => {
   });
 
   it("lets the user's own Link put a request on its lead, and Unlink take it off", () => {
-    const put = new Map([[REVIEW.id, chooseLead(TICKET.ref)]]);
-    const linkedLayout = layOutVisit([unlinked, linked], put);
+    const put: RidingMove = { direction: "link", cardId: REVIEW.id, leadRef: TICKET.ref };
+    const linkedLayout = layOutVisit([unlinked, linked], [put]);
     expect(describeParts(bundleOf(linkedLayout, TICKET.id))).toEqual(["asking #3"]);
     expect(requestIds(linkedLayout)).toEqual([]);
 
-    const taken = new Map([[REVIEW.id, chooseLead(undefined)]]);
-    const unlinkedLayout = layOutVisit([linked, unlinked], taken);
+    const taken: RidingMove = { direction: "unlink", cardId: REVIEW.id, leadRef: TICKET.ref };
+    const unlinkedLayout = layOutVisit([linked, unlinked], [taken]);
     expect(requestIds(unlinkedLayout)).toEqual([REVIEW.id]);
   });
 
@@ -365,7 +376,6 @@ describe("the filter and what rides", () => {
       inbox,
       { ...VIEW, filter: toggleFilterValue({}, "whose", "mine") },
       NO_PLACEMENT,
-      NO_RIDING_CHOICES,
     );
     expect(ongoingIds(layout)).toEqual([TICKET.id, OTHER_TICKET.id]);
     const lead = layout.ongoing.surfaces.flatMap((surface) => surface.rows)[0]!;
@@ -378,31 +388,36 @@ describe("the filter and what rides", () => {
       buildInbox([TICKET, { ...OTHER_TICKET, yours: true }, notMine]),
       { ...VIEW, filter: toggleFilterValue({}, "whose", "mine") },
       NO_PLACEMENT,
-      NO_RIDING_CHOICES,
     );
     expect(ongoingIds(layout)).toEqual([OTHER_TICKET.id]);
     expect(requestIds(layout)).toEqual([]);
   });
 });
 
-describe("isSameBundle", () => {
-  const inbox = buildInbox([TICKET, REVIEW], { links: [buildInboxLink(TICKET.ref, REVIEW.ref)] });
+describe("the identity of a bundle", () => {
+  const link = buildInboxLink(TICKET.ref, REVIEW.ref);
+  const inbox = buildInbox([TICKET, REVIEW], { links: [link] });
+  const first = layOut(inbox);
+  const next = (read: Inbox): InboxLayout => layOut(read, first.placement, first.bundles);
 
-  it("is true for a bundle built again from the same cards", () => {
-    expect(
-      isSameBundle(bundleOf(layOut(inbox), TICKET.id), bundleOf(layOut(inbox), TICKET.id)),
-    ).toBe(true);
+  it("is kept for a bundle built again from the same cards, and for an equal copy of them", () => {
+    const base = bundleOf(first, TICKET.id);
+    expect(bundleOf(next(inbox), TICKET.id)).toBe(base);
+    const copy = buildInbox([{ ...TICKET }, { ...REVIEW }], { links: [{ ...link }] });
+    expect(bundleOf(next(copy), TICKET.id)).toBe(base);
   });
 
-  it("is false when a part's card changed or the claim changed", () => {
-    const changed = buildInbox([TICKET, { ...REVIEW, title: "New title" }], {
-      links: [buildInboxLink(TICKET.ref, REVIEW.ref)],
-    });
+  it("changes when a part's card or the claim changed, and keeps the parts that did not", () => {
+    const base = bundleOf(first, TICKET.id);
+    const changed = buildInbox([TICKET, { ...REVIEW, title: "New title" }], { links: [link] });
+    expect(bundleOf(next(changed), TICKET.id)).not.toBe(base);
     const person = buildInbox([TICKET, REVIEW], {
       links: [buildInboxLink(TICKET.ref, REVIEW.ref, "person")],
     });
-    const base = bundleOf(layOut(inbox), TICKET.id);
-    expect(isSameBundle(base, bundleOf(layOut(changed), TICKET.id))).toBe(false);
-    expect(isSameBundle(base, bundleOf(layOut(person), TICKET.id))).toBe(false);
+    expect(bundleOf(next(person), TICKET.id)).not.toBe(base);
+  });
+
+  it("is the empty bundle itself for a card that carries nothing", () => {
+    expect(bundleOf(next(buildInbox([TICKET])), TICKET.id)).toBe(EMPTY_BUNDLE);
   });
 });

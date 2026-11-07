@@ -1,29 +1,24 @@
 /**
  * Linking two things from the Inbox, and taking a link back. The user's own
- * Link and Unlink show on the page before the controller answers, so each is an
- * edit to the Inbox the screen holds (`SetLinkEdit`): it changes the pair's
- * link and, when the link makes a request ride on a ticket, what rides on what.
- * `planLink` and `planUnlink` work out the edit. Undo is a Link or Unlink in
- * the other direction, planned when Undo is pressed, so it never replays an
- * edit planned earlier.
+ * Link and Unlink show on the page before the controller answers. Each is two
+ * things: an edit to the Inbox the screen holds (`SetLinkEdit`), which changes
+ * the pair's link and nothing else, and, when a card can ride on one end, a
+ * `RidingMove`, which the visit holds until the controller answers
+ * (`startRidingMove`). `planLink` and `planUnlink` work out both; an Unlink
+ * reads where the card is drawn from the placement the visit holds. Undo is a Link or
+ * Unlink in the other direction, planned when Undo is pressed, so it never
+ * replays a plan made earlier.
  */
 import type { EntityLink, EntityUnlinkResult, Inbox, InboxCard } from "@hercule/contract";
 import { isLinkBetween, nameLinkedThing } from "../desk/link-ends";
 import type { LinkClaim } from "./card-bundles";
-import {
-  chooseLead,
-  NO_RIDING_CHOICES,
-  readChosenLead,
-  type RidingChoices,
-  type RidingMove,
-} from "./riding-choices";
+import { readRidesOn, type RidingMove, type VisitPlacement } from "./visit-placement";
 
 /**
  * The pair `fromRef` and `toRef` is joined by `claim` after this edit, or by
  * nothing when `claim` is `undefined`. `hasPersonClaim` says whether the user
  * has a claim on the pair too, which `claim` (the firmest) does not show when
- * a source reports the pair as well. `riding` puts the card `id` on the lead
- * `ridesOn`, or takes it off every lead when `ridesOn` is `undefined`.
+ * a source reports the pair as well.
  */
 export interface SetLinkEdit {
   readonly kind: "set-link";
@@ -31,14 +26,13 @@ export interface SetLinkEdit {
   readonly toRef: string;
   readonly claim: LinkClaim | undefined;
   readonly hasPersonClaim: boolean;
-  readonly riding?: { readonly id: string; readonly ridesOn: string | undefined };
 }
 
-/** What a Link or Unlink does to the page: the edit, and what it does to riding. */
+/** What a Link or Unlink does to the page: the edit, and what it does to the card that rides. */
 export interface LinkPlan {
   readonly edit: SetLinkEdit;
   /** What the move does to the card that can ride on the other end, when one end is such a card. */
-  readonly riding?: RidingMove;
+  readonly ridingMove?: RidingMove;
 }
 
 /** A link a person made: the user's own claim. */
@@ -49,22 +43,10 @@ const findLink = (inbox: Inbox, fromRef: string, toRef: string): EntityLink | un
   inbox.links.find((link) => isLinkBetween(link, fromRef, toRef));
 
 /**
- * Returns the ref of the lead `card` rides on as the visit holds it: the
- * user's choice when there is one, else what the card says (`ridesOn`), or
- * `undefined` when it stands alone. The held place is the one a Link or Unlink
- * starts from, because a read may say otherwise while a choice waits for the
- * controller's answer.
- */
-const readHeldLead = (card: InboxCard, choices: RidingChoices): string | undefined => {
-  const choice = choices.get(card.id);
-  return choice === undefined ? card.ridesOn : readChosenLead(choice);
-};
-
-/**
  * Returns the card that can ride on a lead if these two things are linked,
  * and that lead, or `undefined`. A request joins a card of lasting work that
  * waits on the Inbox. Two cards of lasting work never ride. The card may
- * ride on another lead already, which `readHeldLead` tells.
+ * ride on another lead already, which `readRidesOn` tells.
  */
 const findRiderAndLead = (
   inbox: Inbox,
@@ -78,42 +60,28 @@ const findRiderAndLead = (
 };
 
 /**
- * Returns the edit that links `fromRef` and `toRef`. A pair a source already
+ * Returns the edit that links `fromRef` and `toRef`, and the move that puts a
+ * request on the card of lasting work it is linked to. A pair a source already
  * reports keeps that claim, which is firmer than a person's: linking it again
  * changes nothing on the page but the user's own claim. A pair held by a
- * reference found in text becomes the user's. A request with no lead joins the
- * card of lasting work it is linked to; one that rides on a lead already keeps
- * it. `choices` is where the visit holds each card (see `readHeldLead`).
+ * reference found in text becomes the user's. The move is planned also for a
+ * request that rides on a lead already, because that move may be refused: the
+ * visit plays it on the place it holds, and a request that rides on a lead
+ * keeps it (`readRidesOn`).
  */
-export const planLink = (
-  inbox: Inbox,
-  fromRef: string,
-  toRef: string,
-  choices: RidingChoices = NO_RIDING_CHOICES,
-): LinkPlan => {
+export const planLink = (inbox: Inbox, fromRef: string, toRef: string): LinkPlan => {
   const existing = findLink(inbox, fromRef, toRef);
   const claim = existing?.claim.type === "source" ? existing.claim : PERSON_CLAIM;
   const rides = findRiderAndLead(inbox, fromRef, toRef);
-  const heldLead = rides === undefined ? undefined : readHeldLead(rides.card, choices);
   return {
-    edit: {
-      kind: "set-link",
-      fromRef,
-      toRef,
-      claim,
-      hasPersonClaim: true,
-      ...(rides === undefined || heldLead !== undefined
-        ? {}
-        : { riding: { id: rides.card.id, ridesOn: rides.lead.ref } }),
-    },
+    edit: { kind: "set-link", fromRef, toRef, claim, hasPersonClaim: true },
     ...(rides === undefined
       ? {}
       : {
-          riding: {
-            kind: "link",
+          ridingMove: {
+            direction: "link",
             cardId: rides.card.id,
-            lead: rides.lead.ref,
-            before: chooseLead(heldLead),
+            leadRef: rides.lead.ref,
           },
         }),
   };
@@ -122,12 +90,13 @@ export const planLink = (
 /**
  * Returns the edit that takes back the user's own claim on the link between
  * `fromRef` and `toRef`, or `undefined` when the user made no claim on it.
- * `choices` is where the visit holds each card (see `readHeldLead`). What
- * stays depends on the firmest claim:
+ * `placement` is the place the visit holds. What stays depends on the firmest
+ * claim:
  *
  * - If it is the user's, the pair is left with no link on the page. The edit
  *   assumes that nothing else joins the pair; the next read shows a hint that
- *   is left. A card that rode on the other end is set free.
+ *   is left. A card that is drawn riding on the other end is set free (the
+ *   move).
  * - If it is a source's, the pair stays joined by that claim, and nothing
  *   rides differently.
  */
@@ -135,40 +104,29 @@ export const planUnlink = (
   inbox: Inbox,
   fromRef: string,
   toRef: string,
-  choices: RidingChoices = NO_RIDING_CHOICES,
+  placement: VisitPlacement,
 ): LinkPlan | undefined => {
   const link = findLink(inbox, fromRef, toRef);
   if (link === undefined || !link.hasPersonClaim) return undefined;
   const staysLinked = link.claim.type === "source";
-  let ridden: { readonly card: InboxCard; readonly lead: string } | undefined;
+  const edit: SetLinkEdit = {
+    kind: "set-link",
+    fromRef: link.fromRef,
+    toRef: link.toRef,
+    claim: staysLinked ? link.claim : undefined,
+    hasPersonClaim: false,
+  };
+  if (staysLinked) return { edit };
   for (const card of inbox.cards) {
-    const lead = readHeldLead(card, choices);
-    if (lead !== undefined && isLinkBetween({ fromRef: card.ref, toRef: lead }, fromRef, toRef)) {
-      ridden = { card, lead };
-      break;
+    const leadRef = readRidesOn(placement, card);
+    if (
+      leadRef !== undefined &&
+      isLinkBetween({ fromRef: card.ref, toRef: leadRef }, fromRef, toRef)
+    ) {
+      return { edit, ridingMove: { direction: "unlink", cardId: card.id, leadRef } };
     }
   }
-  const freed = staysLinked ? undefined : ridden;
-  return {
-    edit: {
-      kind: "set-link",
-      fromRef: link.fromRef,
-      toRef: link.toRef,
-      claim: staysLinked ? link.claim : undefined,
-      hasPersonClaim: false,
-      ...(freed === undefined ? {} : { riding: { id: freed.card.id, ridesOn: undefined } }),
-    },
-    ...(freed === undefined
-      ? {}
-      : {
-          riding: {
-            kind: "unlink",
-            cardId: freed.card.id,
-            lead: freed.lead,
-            before: chooseLead(freed.lead),
-          },
-        }),
-  };
+  return { edit };
 };
 
 /**
@@ -199,9 +157,8 @@ export const describeLinkRemoved = (remaining: EntityUnlinkResult["remaining"]):
 };
 
 /**
- * Returns `inbox` with `edit` made: the pair's link replaced (or removed), and
- * the card on its lead (or off it) when the edit says so. Returns `inbox` itself
- * when nothing changes.
+ * Returns `inbox` with `edit` made: the pair's link replaced, added or removed.
+ * What rides on what is not part of an edit: the visit holds it.
  */
 export const applySetLink = (inbox: Inbox, edit: SetLinkEdit): Inbox => {
   const isPair = (link: EntityLink): boolean => isLinkBetween(link, edit.fromRef, edit.toRef);
@@ -213,17 +170,7 @@ export const applySetLink = (inbox: Inbox, edit: SetLinkEdit): Inbox => {
       : known === undefined
         ? [...inbox.links, { fromRef: edit.fromRef, toRef: edit.toRef, claim, hasPersonClaim }]
         : inbox.links.map((link) => (link === known ? { ...link, claim, hasPersonClaim } : link));
-  const { riding } = edit;
-  const cards =
-    riding === undefined
-      ? inbox.cards
-      : inbox.cards.map((card) => {
-          if (card.id !== riding.id) return card;
-          const { ridesOn: before, ...rest } = card;
-          void before;
-          return riding.ridesOn === undefined ? rest : { ...rest, ridesOn: riding.ridesOn };
-        });
-  return { ...inbox, links, cards };
+  return { ...inbox, links };
 };
 
 /** Returns how a move names the thing at `ref`: its identifier, else its title, else its noun. */

@@ -1,4 +1,4 @@
-import { isSameBundle, listBundleCardIds, type CardBundle } from "@hercule/client-core/inbox";
+import { listBundleCardIds, type CardBundle } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 
 /** The props a row and a request are both drawn from, and that need more than identity to compare. */
@@ -17,11 +17,11 @@ const isSameFreshness = (before: BundledCardProps, after: BundledCardProps): boo
 
 /**
  * Returns the comparison `memo` uses to decide whether a row or a request
- * draws the same as before. The layout builds a new bundle on each read, so
- * `bundle` is compared by what it draws, and `freshIds` by the cards of this
- * card alone, so a signal landing on another card does not draw this one
- * again. A prop named in `compare` is compared by that function, and every
- * other prop by identity.
+ * draws the same as before. The layout keeps the identity of a bundle that
+ * did not change, so `bundle` is compared by identity like every other prop.
+ * `freshIds` is compared by the cards of this card alone, so a signal landing
+ * on another card does not draw this one again. A prop named in `compare` is
+ * compared by that function.
  */
 export const buildCardPropsComparer =
   <Props extends BundledCardProps>(
@@ -29,7 +29,6 @@ export const buildCardPropsComparer =
   ) =>
   (before: Props, after: Props): boolean =>
     (Object.keys(after) as (keyof Props)[]).every((key) => {
-      if (key === "bundle") return isSameBundle(before.bundle, after.bundle);
       if (key === "freshIds") return isSameFreshness(before, after);
       return compare[key]?.(before, after) ?? Object.is(before[key], after[key]);
     });

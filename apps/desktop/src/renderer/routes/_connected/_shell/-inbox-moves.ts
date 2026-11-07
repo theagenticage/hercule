@@ -18,9 +18,11 @@
  *   gesture takes its place when the user acts, before the controller answers,
  *   and its undo waits for the answer itself. The undo of a Link or Unlink is
  *   a Link or Unlink in the other direction, made when Undo is pressed: it
- *   shows at once, goes into the riding ledger and is reconciled with the
- *   controller's answer like any other, so it never replays what rode on what
- *   when the first move was planned. A move that fails, or a Take that
+ *   shows at once and is reconciled with the controller's answer like any
+ *   other, so it never replays what rode on what when the first move was
+ *   planned. What rides on what is held by the visit, not here: this file
+ *   starts, settles and refuses the gestures in it (`advanceLinkGesture`) and
+ *   plans an Unlink over the place the visit holds. A move that fails, or a Take that
  *   makes no Task, takes its gesture off again. A gesture outlives the screen
  *   that made it, so it is undone through the screen that is open when Undo is
  *   pressed (`CardMover`).
@@ -35,20 +37,15 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import {
-  decideRidingChoices,
   describeDismissal,
   describeLinkRemaining,
   describeLinkRemoved,
-  EMPTY_RIDING_LEDGER,
   nameCard,
   planLink,
   planUnlink,
   reapplyInboxEdits,
-  settleRidingMove,
-  startRidingMove,
   type EntityLinkMove,
   type InboxEdit,
-  type RidingChoices,
   type RidingMove,
 } from "@hercule/client-core/inbox";
 import type { EntityUnlinkResult, Inbox, InboxCard } from "@hercule/contract";
@@ -63,6 +60,7 @@ import type { Gesture, UndoStack } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
+import type { VisitHistoryHandle } from "../../../screens/inbox/use-inbox-visit";
 import {
   comeBackFromAside,
   copyCardToStepAside,
@@ -125,8 +123,6 @@ export interface InboxMoves {
   readonly inbox: Inbox | undefined;
   /** Whether a move the user made is applied over the read and not yet answered by the controller. */
   readonly hasPendingEdits: boolean;
-  /** What the user's own Link and Unlink put cards on or took them off, for the visit to hold in place. */
-  readonly riding: RidingChoices;
   /**
    * Takes the card on as a Task. When the controller answers, the card shows
    * the user's monogram where its wait was, and the undo line offers Undo. A
@@ -177,17 +173,21 @@ const sendLinkChange = async (
 /**
  * Moves cards of the Inbox for `client` and returns the Inbox to draw.
  * `serverInbox` is the Inbox as the last read gave it, and `scrollRef` is the
- * element that scrolls the page, which the motion of a move measures.
+ * element that scrolls the page, which the motion of a move measures. `visit`
+ * is the history of the visit, where the Links and Unlinks the user makes are
+ * followed.
  */
 export const useInboxMoves = ({
   client,
   undoStack,
   serverInbox,
+  visit,
   scrollRef,
 }: {
   readonly client: HerculeClient;
   readonly undoStack: UndoStack<CardMover>;
   readonly serverInbox: Inbox | undefined;
+  readonly visit: VisitHistoryHandle;
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): InboxMoves => {
   const queryClient = useQueryClient();
@@ -199,10 +199,6 @@ export const useInboxMoves = ({
   };
   const nextId = useRef(1);
   const writeCachedInbox = buildCachedInboxWriter(queryClient);
-  // The visit holds what rides on what, so a read cannot move a card. The user's own Link and Unlink can,
-  // and they are kept here, by card, for the length of the screen.
-  const [ridingLedger, setRidingLedger] = useState(EMPTY_RIDING_LEDGER);
-  const riding = useMemo(() => decideRidingChoices(ridingLedger), [ridingLedger]);
 
   // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
   const inbox = useMemo(
@@ -217,7 +213,7 @@ export const useInboxMoves = ({
   );
   // What a Link or Unlink is planned over. It is read when the move is made, which for an Undo is long after
   // the render that made the gesture.
-  const newest = useRef({ inbox, riding });
+  const newestInbox = useRef(inbox);
 
   /**
    * Makes `change` and glides every part of the page that moves because of it
@@ -238,16 +234,16 @@ export const useInboxMoves = ({
 
   /**
    * Shows `edit` on the page at once, gliding on `spring`, and lists it as
-   * pending. `ridingMove` is what a Link or Unlink does to what rides on what,
-   * which waits for the controller's answer with the edit. Returns the edit
-   * and the parts that are new.
+   * pending. `ridingMove` is what a Link or Unlink does to what rides on what:
+   * the visit starts a gesture for it, which waits for the controller's answer
+   * with the edit. Returns the edit and the parts that are new.
    */
   const showEdit = (edit: InboxEdit, spring: SpringName, ridingMove?: RidingMove) => {
     const shown: PendingEdit = { id: nextId.current++, edit };
     const born = playPageChange(spring, () => {
       changePending((edits) => [...edits, shown]);
       if (ridingMove !== undefined) {
-        setRidingLedger((ledger) => startRidingMove(ledger, shown.id, ridingMove));
+        visit.advanceLinkGesture({ _tag: "start", gesture: shown.id, move: ridingMove });
       }
     });
     return { shown, born };
@@ -261,15 +257,21 @@ export const useInboxMoves = ({
   const takeEditBack = (shown: PendingEdit): void => {
     playPageChange("hand", () => {
       changePending((edits) => edits.filter((each) => each.id !== shown.id));
-      setRidingLedger((ledger) => settleRidingMove(ledger, shown.id, false));
+      visit.advanceLinkGesture({ _tag: "refuse", gesture: shown.id });
     });
   };
 
-  /** Writes an edit the controller answered into the cached Inbox, and drops it from the pending list in the same draw. */
-  const settleEdit = async (shown: PendingEdit, didChangeRiding = true): Promise<void> => {
+  /**
+   * Writes an edit the controller answered into the cached Inbox, and drops it
+   * from the pending list in the same draw. `remaining` is an Unlink's answer.
+   */
+  const settleEdit = async (
+    shown: PendingEdit,
+    remaining?: EntityUnlinkResult["remaining"],
+  ): Promise<void> => {
     await writeCachedInbox(shown.edit);
     changePending((edits) => edits.filter((each) => each.id !== shown.id));
-    setRidingLedger((ledger) => settleRidingMove(ledger, shown.id, didChangeRiding));
+    visit.advanceLinkGesture({ _tag: "settle", gesture: shown.id, remaining });
   };
 
   /**
@@ -422,8 +424,8 @@ export const useInboxMoves = ({
    * movement on `hand`; a card that rode on the other end stands alone. The
    * controller's answer decides what rides on what: a link a source still
    * reports keeps its card riding. A failure takes it back and rejects.
-   * It is planned over the newest Inbox and riding choices, wherever it is
-   * called from, because Undo calls it long after the gesture it reverses.
+   * It is planned over the newest Inbox and the place the visit holds, wherever
+   * it is called from, because Undo calls it long after the gesture it reverses.
    * `isWanted` is for Undo: the move is sent only if it resolves to true.
    * Returns the controller's answer, once it is settled on the page.
    */
@@ -432,18 +434,19 @@ export const useInboxMoves = ({
     direction: LinkDirection,
     isWanted?: MoveIsWanted,
   ): Promise<LinkAnswer> => {
-    const { inbox: shownInbox, riding: heldChoices } = newest.current;
+    const shownInbox = newestInbox.current;
     const plan =
       shownInbox === undefined
         ? undefined
         : direction === "link"
-          ? planLink(shownInbox, move.fromRef, move.toRef, heldChoices)
-          : planUnlink(shownInbox, move.fromRef, move.toRef, heldChoices);
-    const shown = plan === undefined ? undefined : showEdit(plan.edit, "hand", plan.riding).shown;
+          ? planLink(shownInbox, move.fromRef, move.toRef)
+          : planUnlink(shownInbox, move.fromRef, move.toRef, visit.readLatest().placement);
+    const shown =
+      plan === undefined ? undefined : showEdit(plan.edit, "hand", plan.ridingMove).shown;
     return changeLinkRequest.mutateAsync({ move, direction, isWanted }).then(
       async (answer) => {
         if (shown !== undefined) {
-          if (answer.didChange) await settleEdit(shown, answer.remaining !== "source");
+          if (answer.didChange) await settleEdit(shown, answer.remaining);
           else takeEditBack(shown);
         }
         readLinksAgain();
@@ -459,7 +462,7 @@ export const useInboxMoves = ({
   const changeLinkRef = useRef(changeLink);
   useLayoutEffect(() => {
     changeLinkRef.current = changeLink;
-    newest.current = { inbox, riding };
+    newestInbox.current = inbox;
   });
 
   /**
@@ -506,7 +509,6 @@ export const useInboxMoves = ({
   return {
     inbox,
     hasPendingEdits: pendingEdits.length > 0,
-    riding,
     take,
     dismiss,
     link: (move) => {
