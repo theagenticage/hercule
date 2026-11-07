@@ -770,6 +770,8 @@ export const CLI = {
         help: "The card this one now follows among the cards of the task's new project and stage, by its id or a tail of eight or more characters; `null` puts it first. Leave it off to put the task last.",
         resolves: "task.query",
       },
+      // Only the desktop app's Undo sets it; a person at a terminal has no use for it.
+      refuseIfMerged: { hidden: true },
     },
   },
   "task.merge": {
@@ -1134,6 +1136,121 @@ export const CLI = {
         placeholder: "signal-id",
         help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to lower them in one call.",
         resolves: "signal.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+
+  "externalEntity.queryInbox": {
+    command: "entity list",
+    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Also gives the places above the cards and the counts. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  // Exists only for the sidebar and the undo line: the sidebar reads the
+  // counts on every screen. A terminal gets the same counts from `entity list`.
+  "externalEntity.countInbox": { hidden: true },
+  "externalEntity.read": {
+    command: "entity read",
+    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, and any claim the graph refused. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
+    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+    },
+  },
+  "externalEntity.takeOn": {
+    command: "entity take-on",
+    help: "Takes a thing from another system on as a Task, linked to it. Returns the Task's id and whether this call created it. Calling it again, or from another account, returns the same Task and makes no second one. The Task starts at the stage the thing's status maps to, else Planned, in the Project whose repository the thing lands in when exactly one matches. Nothing is written on the source.",
+    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  // Exists only for the sidebar and the undo line: the undo line calls it to
+  // remove the Task that a take-on or an add-to-work created. A terminal
+  // removes a Task with `task delete`.
+  "externalEntity.undoTakeOn": { hidden: true },
+  "externalEntity.dismiss": {
+    command: "entity dismiss",
+    help: "Takes a card off your Inbox. The thing keeps its history and nothing is told to its source. A new concern or signal does not bring it back; only `hercule entity restore` does.",
+    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.restore": {
+    command: "entity restore",
+    help: "Brings a dismissed card back onto your Inbox.",
+    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id. A dismissed card is not in `hercule entity list`, so keep the id from before; a tail is not accepted.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.search": {
+    command: "entity search",
+    help: "Searches a source live, through your Connections, by words or an identifier. A pasted link from another source switches to that source, and the reply says so. Each result says if it is new to Hercule, known, or already on Work. Nothing is stored by a search. At most 20 results come back. Use `hercule entity add-to-work` with a result's ref to add one.",
+    examples: [
+      { args: ["github", "flaky login test"] },
+      { args: ["linear", "SHOP-123", "--scope", "linear:team:web"] },
+    ],
+    fields: {
+      source: {
+        positional: true,
+        help: "The plugin to search, such as github or linear.",
+      },
+      text: {
+        positional: true,
+        help: "Words, an identifier such as SHOP-123, or one link. Quote text with spaces.",
+      },
+      scopeRef: {
+        flag: "scope",
+        help: "Only search inside this context of the source, as a ref. A source that cannot search by it fails the call.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.listSuggestions": {
+    command: "entity suggestions",
+    help: "Lists what could be added to Work now: things that concern you and have no live Task, each once. With --context, only those under that place, reached through what they are part of; a thing in several contexts names the others. Places are never listed. Use `hercule entity add-to-work` with a ref to add one.",
+    examples: [{ args: [] }, { args: ["--context", "linear:project:pricing-rules"] }],
+    fields: {
+      contextRef: {
+        flag: "context",
+        help: "Only things under this place, as a ref.",
+      },
+    },
+  },
+  "externalEntity.addToWork": {
+    command: "entity add-to-work",
+    help: "Adds a thing from another system to Work as a Task, one at a time. A thing Hercule never saw is read from its source and followed. Returns the entity's id (left out when the Task exists and Hercule holds no record of the thing), the Task's id, whether this call created the Task, its stage, and whether Hercule now follows the thing. A thing that already has a live Task returns that Task and creates none.",
+    examples: [
+      { args: ["github:pr:acme/webshop#87"] },
+      { args: ["linear:issue:SHOP-123", "--project", "1f3a9c2e"] },
+    ],
+    fields: {
+      ref: {
+        positional: true,
+        help: "The thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it.",
+      },
+      projectId: {
+        flag: "project",
+        help: "The Hercule Project for the Task, by id or a tail of eight or more characters. Left out, the Project is picked from the thing's repository when exactly one matches.",
+        resolves: "project.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -4705,6 +4822,11 @@ export const NOUNS = {
     summary:
       "Ignore Rules: the user's rules that keep signals of one kind, with given values, from being raised.",
     flow: "hercule ignore-rule list to see the rules and what they caught, hercule ignore-rule create to add one, hercule ignore-rule delete to remove one.",
+  },
+  entity: {
+    summary:
+      "External Entities: the pull requests, tickets and errors in other systems that concern you, and the Inbox that lists them.",
+    flow: "hercule entity list to see the Inbox, hercule entity read for one thing, hercule entity take-on to make it a Task, hercule entity dismiss to put a card away, hercule entity search and hercule entity add-to-work to reach a thing not on the Inbox.",
   },
   discussion: {
     summary:

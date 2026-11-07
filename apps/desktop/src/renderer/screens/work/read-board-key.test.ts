@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { readBoardKey, type BoardKeyPress } from "./read-board-key";
+import type { DeskKeyPress } from "../desk/desk-keys";
+import { readBoardKey } from "./read-board-key";
 
 const NO_MODIFIERS = { shiftKey: false, altKey: false, metaKey: false, ctrlKey: false };
 
 /** Returns a key press of `key`, with the modifiers in `held` pressed. */
-const press = (key: string, held: Partial<BoardKeyPress> = {}): BoardKeyPress => ({
+const press = (key: string, held: Partial<DeskKeyPress> = {}): DeskKeyPress => ({
   key,
   ...NO_MODIFIERS,
   ...held,
@@ -39,22 +40,21 @@ describe("readBoardKey", () => {
     [press("/"), { kind: "find" }],
     [press("?", { shiftKey: true }), { kind: "toggle-keys-sheet" }],
     [press("Escape"), { kind: "step-back" }],
-    [press("z", { metaKey: true }), { kind: "undo" }],
-  ])("reads %j as %j on a Mac", (pressed, command) => {
-    expect(readBoardKey(pressed, true, "mac")).toEqual(command);
+  ])("reads %j as %j", (pressed, command) => {
+    expect(readBoardKey(pressed, true)).toEqual(command);
   });
 
   it.each(["6", "0", "w", "Tab"])(
     "does not use %s, which later slices own or nobody does",
     (key) => {
-      expect(readBoardKey(press(key), true, "mac")).toBeNull();
+      expect(readBoardKey(press(key), true)).toBeNull();
     },
   );
 
   it("does not use Shift with the up and down arrows, or with a letter that is not F", () => {
-    expect(readBoardKey(press("ArrowUp", { shiftKey: true }), true, "mac")).toBeNull();
-    expect(readBoardKey(press("H", { shiftKey: true }), true, "mac")).toBeNull();
-    expect(readBoardKey(press("A", { shiftKey: true }), true, "mac")).toBeNull();
+    expect(readBoardKey(press("ArrowUp", { shiftKey: true }), true)).toBeNull();
+    expect(readBoardKey(press("H", { shiftKey: true }), true)).toBeNull();
+    expect(readBoardKey(press("A", { shiftKey: true }), true)).toBeNull();
   });
 
   it("turns off the keys that type a character with the single-keys switch, and no other", () => {
@@ -78,36 +78,28 @@ describe("readBoardKey", () => {
       "/",
       "?",
     ].map((key) => press(key, { shiftKey: key === "?" }));
-    expect(typed.map((pressed) => readBoardKey(pressed, false, "mac"))).toEqual(
-      typed.map(() => null),
-    );
-    expect(readBoardKey(press("F", { shiftKey: true }), false, "mac")).toBeNull();
+    expect(typed.map((pressed) => readBoardKey(pressed, false))).toEqual(typed.map(() => null));
+    expect(readBoardKey(press("F", { shiftKey: true }), false)).toBeNull();
 
-    expect(readBoardKey(press("ArrowDown"), false, "mac")).toEqual({ kind: "walk", walk: "down" });
-    expect(readBoardKey(press("ArrowRight", { shiftKey: true }), false, "mac")).toEqual({
+    expect(readBoardKey(press("ArrowDown"), false)).toEqual({ kind: "walk", walk: "down" });
+    expect(readBoardKey(press("ArrowRight", { shiftKey: true }), false)).toEqual({
       kind: "shift-stage",
       direction: 1,
     });
-    expect(readBoardKey(press("Enter"), false, "mac")).toEqual({ kind: "open-card" });
-    expect(readBoardKey(press(" "), false, "mac")).toEqual({ kind: "open-card" });
-    expect(readBoardKey(press("Escape"), false, "mac")).toEqual({ kind: "step-back" });
-    expect(readBoardKey(press("z", { metaKey: true }), false, "mac")).toEqual({ kind: "undo" });
+    expect(readBoardKey(press("Enter"), false)).toEqual({ kind: "open-card" });
+    expect(readBoardKey(press(" "), false)).toEqual({ kind: "open-card" });
+    expect(readBoardKey(press("Escape"), false)).toEqual({ kind: "step-back" });
   });
 
   it("does not drop a card for Shift and Backspace", () => {
-    expect(readBoardKey(press("Backspace", { shiftKey: true }), true, "mac")).toBeNull();
+    expect(readBoardKey(press("Backspace", { shiftKey: true }), true)).toBeNull();
   });
 
-  it("keeps a single key with ⌘, Ctrl or Alt held for the app, and undoes only with the primary modifier", () => {
+  it("keeps a key with ⌘, Ctrl or Alt held for the app, Undo's included", () => {
     for (const held of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
-      expect(readBoardKey(press("a", held), true, "mac")).toBeNull();
-      expect(readBoardKey(press("ArrowRight", held), true, "mac")).toBeNull();
+      expect(readBoardKey(press("a", held), true)).toBeNull();
+      expect(readBoardKey(press("ArrowRight", held), true)).toBeNull();
+      expect(readBoardKey(press("z", held), true)).toBeNull();
     }
-    // On a Mac Ctrl+Z is not undo, and on Linux ⌘Z is not.
-    expect(readBoardKey(press("z", { ctrlKey: true }), true, "mac")).toBeNull();
-    expect(readBoardKey(press("z", { metaKey: true }), true, "linux")).toBeNull();
-    expect(readBoardKey(press("z", { ctrlKey: true }), true, "linux")).toEqual({ kind: "undo" });
-    // Shift with Z is redo, which the board does not have.
-    expect(readBoardKey(press("Z", { metaKey: true, shiftKey: true }), true, "mac")).toBeNull();
   });
 });

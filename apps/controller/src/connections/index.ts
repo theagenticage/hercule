@@ -27,6 +27,7 @@ export {
 } from "./service";
 export {
   assertConnectionIngesting,
+  canConnectionPoll,
   ConnectionNotIngesting,
   connectionStateRepository,
   INGESTING_STATUSES,

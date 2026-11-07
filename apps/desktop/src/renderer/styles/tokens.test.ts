@@ -60,6 +60,13 @@ const SHARED_TOKENS = [
   "--m-ease-in",
   "--m-ease-both",
   "--m-settle",
+  "--mark-l",
+  "--mark-c",
+  "--attention-ink",
+  "--wait-fresh",
+  "--wait-recent",
+  "--wait-due",
+  "--wait-over",
 ];
 
 type Block = { selectors: string[]; declared: Set<string> };

@@ -58,6 +58,7 @@ const buildPlugin = (
     },
   ],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 const PLUGINS: readonly PluginDetail[] = [

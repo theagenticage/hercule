@@ -62,6 +62,7 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { readEvent } from "../events/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
 import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
@@ -621,6 +622,64 @@ const readWebConversation = async (
   );
   return expectPresent(found);
 };
+
+describe("what an external entity subscription receives", () => {
+  it("names the entity when the user dismisses it and when the user restores it", async () => {
+    await withServer(async ({ base, live: reader, sql }) => {
+      const token = await completeSetup(base);
+      const id = mintUuid();
+      const now = new Date().toISOString();
+      await Effect.runPromise(
+        withTransaction(
+          sql,
+          sql`
+          INSERT INTO external_entities
+            (id, ref, kind, noun, card, pace, patience, completeness, identifier, title, url,
+             lifecycle, facts, first_observed_at, updated_at)
+          VALUES (${id}, 'acme:ticket:1', 'acme/ticket', 'Ticket', 'compact', 'fast', 24, 'full',
+                  'ACME-1', 'A ticket', 'https://tracker.example/1', 'open', '[]', ${now}, ${now})`,
+        ),
+      );
+      const entityId = uuidToString(id);
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const entities = yield* collectPushes(client, "externalEntity");
+          yield* Effect.promise(() => expectHeld(reader, 1, "externalEntity"));
+
+          const dismissed = yield* Effect.promise(() =>
+            post(base, `/api/v1/external-entities/${entityId}/dismiss`, {}, token),
+          );
+          expect(dismissed.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(200, () => entities.received.length >= 1)),
+          ).toBe(true);
+          expect(entities.received[0]).toEqual({
+            _tag: "invalidate",
+            ids: [entityId],
+            kind: "updated",
+          });
+
+          const restored = yield* Effect.promise(() =>
+            post(base, `/api/v1/external-entities/${entityId}/restore`, {}, token),
+          );
+          expect(restored.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(200, () => entities.received.length >= 2)),
+          ).toBe(true);
+          expect(entities.received[1]).toEqual({
+            _tag: "invalidate",
+            ids: [entityId],
+            kind: "updated",
+          });
+          yield* Fiber.interrupt(entities.fiber);
+        }),
+      );
+    });
+  });
+});
 
 describe("what an assistant subscription receives", () => {
   it("names the assistant once on a create, an update and a delete", async () => {

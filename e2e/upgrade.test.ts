@@ -310,6 +310,31 @@ const TASK_STAGES_MIGRATION = 110;
  */
 const TASK_BOARD_RANK_MIGRATION = 112;
 
+/**
+ * The migration that adds `task_entity_links` and backfills it from the refs
+ * in Task provenance.
+ */
+const ENTITY_LINKS_MIGRATION = 114;
+
+/**
+ * The Tasks whose provenance names a ref, which migration 114 turns into links:
+ * one through a handoff entry (it names a signal as well) and one through a plain
+ * `ref` entry. Both stay `open`, so Tracking leaves them out.
+ */
+const LINKED_TASKS = [
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a31",
+    title: "Review the refund rules in Northwind Market's checkout",
+    ref: "github:issue:northwind/market#512",
+    signalId: "0199e0e7-0000-7000-8000-000000000a33",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a32",
+    title: "Update the invoice template for Northwind Market",
+    ref: "github:issue:northwind/market#513",
+  },
+] as const;
+
 /** The project of the board fixture's Tasks. */
 const BOARD_PROJECT_ID = "0199e0e7-0000-7000-8000-000000000b00";
 
@@ -1611,6 +1636,69 @@ function persistTaskStageRows(
   }
 }
 
+/**
+ * Writes the Tasks of `LINKED_TASKS` into the database the edge binary
+ * created, when that database has not run migration 114. Returns true when it
+ * wrote them.
+ *
+ * The rows go straight into the database because the edge binary has no way to
+ * write a handoff entry without a signed-in harness. A database that ran
+ * migration 110 has `stage` with a default of `planned`, which is what `open`
+ * maps to, and one that ran 112 needs a rank, so it gets one.
+ */
+function persistLinkedTaskRows(home: string): boolean {
+  const version = readMigrationVersion(home);
+  if (version >= ENTITY_LINKS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const rankColumn = version >= TASK_BOARD_RANK_MIGRATION ? ", board_rank" : "";
+    const rankValue = version >= TASK_BOARD_RANK_MIGRATION ? ", 'V'" : "";
+    // Migration 110 added `stage_changed_at` with an empty default, which the
+    // API cannot read as a time, so the row sets it.
+    const stageColumn = version >= TASK_STAGES_MIGRATION ? ", stage_changed_at" : "";
+    const stageValue = version >= TASK_STAGES_MIGRATION ? ", ?" : "";
+    const insertTask = database.query(
+      `INSERT INTO tasks (id, title, description, status, priority, labels,
+                          created_at, updated_at, status_changed_at${stageColumn}${rankColumn})
+       VALUES (?, ?, '', 'open', 'normal', '[]', ?, ?, ?${stageValue}${rankValue})`,
+    );
+    const insertEntry = database.query(
+      `INSERT INTO task_provenance (id, task_id, ref, signal_id, at, actor)
+       VALUES (?, ?, ?, ?, ?, 'user')`,
+    );
+    for (const task of LINKED_TASKS) {
+      insertTask.run(
+        uuidBlob(task.id),
+        task.title,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        ...(version >= TASK_STAGES_MIGRATION ? [SEEDED_TASK_CREATED] : []),
+      );
+      insertEntry.run(
+        uuidBlob(Bun.randomUUIDv7()),
+        uuidBlob(task.id),
+        task.ref,
+        "signalId" in task ? uuidBlob(task.signalId) : null,
+        SEEDED_TASK_CREATED,
+      );
+    }
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/** Lists the ids of the Tasks that `hercule task list --ref` finds, in the order it prints them. */
+async function readTaskIdsOnRef(
+  ref: string,
+  options: { readonly home: string; readonly binary: string },
+): Promise<ReadonlyArray<string>> {
+  const ran = await runCli(["task", "list", "--ref", ref, "--json"], options);
+  expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
+  return expectJson<{ items: ReadonlyArray<{ id: string }> }>(ran).items.map((task) => task.id);
+}
+
 /** An audit entry of the edge binary's log, and the runner the upgraded binary must read it back with. */
 interface ExpectedRunnerEntry {
   readonly id: number;
@@ -2587,6 +2675,7 @@ describe("upgrading from the previous edge release", () => {
         permissionProfileId: unrestricted.id,
       });
       const taskBoardRowsSeeded = persistTaskBoardRows(home);
+      const linkedTaskRowsSeeded = persistLinkedTaskRows(home);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -2610,6 +2699,18 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the sorted match fixture: the edge database already ran migration ${String(SORTED_MATCH_MIGRATION)}.`,
+        );
+      }
+
+      if (linkedTaskRowsSeeded) {
+        for (const task of LINKED_TASKS) {
+          expect(await readTaskIdsOnRef(task.ref, edge), `edge Tasks on ${task.ref}`).toEqual([
+            task.id,
+          ]);
+        }
+      } else {
+        console.log(
+          `Skipping the task link fixture: the edge database already ran migration ${String(ENTITY_LINKS_MIGRATION)}.`,
         );
       }
 
@@ -3299,6 +3400,38 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      if (linkedTaskRowsSeeded) {
+        // Migration 113 gave each Task a link for the ref in its provenance, whether
+        // the entry is a handoff or a plain `ref`, stamped with the entry's time and
+        // actor. `task list --ref` still finds the same Tasks as before.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          for (const task of LINKED_TASKS) {
+            expect(
+              reader
+                .query(
+                  `SELECT hex(task_id) AS task_id, linked_at, linked_by, following
+                   FROM task_entity_links WHERE ref = ?`,
+                )
+                .all(task.ref),
+              `links of ${task.ref}`,
+            ).toEqual([
+              {
+                task_id: task.id.replaceAll("-", "").toUpperCase(),
+                linked_at: SEEDED_TASK_CREATED,
+                linked_by: "user",
+                following: 0,
+              },
+            ]);
+            expect(await readTaskIdsOnRef(task.ref, upgraded), `Tasks on ${task.ref}`).toEqual([
+              task.id,
+            ]);
+          }
+        } finally {
+          reader.close();
+        }
+      }
+
       if (taskStageRows !== undefined) {
         const readTask = async (id: string) =>
           expectJson<ReadTask>(await runCli(["task", "read", id, "--json"], upgraded));
@@ -3724,7 +3857,11 @@ describe("upgrading from the previous edge release", () => {
           expect(created).toBeGreaterThanOrEqual(3);
           expect(reader.query("SELECT count(*) AS count FROM tasks").get()).toEqual({
             count:
-              SEEDED_TASKS.length + 1 + (taskBoardRowsSeeded ? BOARD_TASKS.length : 0) + created,
+              SEEDED_TASKS.length +
+              1 +
+              (taskBoardRowsSeeded ? BOARD_TASKS.length : 0) +
+              (linkedTaskRowsSeeded ? LINKED_TASKS.length : 0) +
+              created,
           });
           expect(
             reader

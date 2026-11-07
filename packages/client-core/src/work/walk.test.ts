@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes } from "./arrange-lanes";
-import { buildBoard, buildCard } from "./cards.testing";
+import { buildBoard, buildCard, buildPlace } from "./cards.testing";
+import { groupBoardByContext } from "./context-lanes";
 import { buildLanes } from "./lanes";
 import { walkBoard, type BoardWalk, type WalkStop } from "./walk";
 
@@ -55,7 +56,15 @@ const LANES = arrangeLanes(
   },
 );
 
-const card = (cardId: string): WalkStop => ({ kind: "card", cardId });
+/** Returns the card `cardId` in the lane it stands in on this board. "gone" is on no lane. */
+const card = (cardId: string): WalkStop => ({
+  kind: "card",
+  cardId,
+  laneId:
+    LANES.find((lane) =>
+      lane.cells.some((cell) => cell.arrangement.cards.some((each) => each.id === cardId)),
+    )?.lane.id ?? "cart",
+});
 const head = (laneId: string): WalkStop => ({ kind: "lane", laneId });
 
 describe("walkBoard", () => {
@@ -123,5 +132,38 @@ describe("walkBoard", () => {
 
   it("goes nowhere on a board with no card on screen", () => {
     expect(walkBoard([LANES[3]!], undefined, "down")).toBeUndefined();
+  });
+
+  describe("with a Task under two outside places", () => {
+    const place = (ref: string, title: string) => buildPlace(ref, title);
+    const board = {
+      ...buildBoard(
+        buildCard("t1", { contextRefs: ["acme:a", "acme:b"], stage: "exploring" }),
+        buildCard("t2", { contextRefs: ["acme:b"], stage: "exploring" }),
+      ),
+      places: [place("acme:a", "Alpha"), place("acme:b", "Beta")],
+      groupings: [{ kind: "acme/project", caption: "Acme project" }],
+    };
+    const shown = arrangeLanes(groupBoardByContext(board, "acme/project"), {
+      foldedLaneIds: new Set<string>(),
+      openedCellIds: new Set<string>(),
+      isFiltering: false,
+    });
+    const inLane = (laneId: string, cardId: string): WalkStop => ({ kind: "card", laneId, cardId });
+
+    it("walks down from the copy in the second lane, not from the first", () => {
+      expect(walkBoard(shown, inLane("place:acme:b", "t1"), "down")).toEqual(
+        inLane("place:acme:b", "t2"),
+      );
+      expect(walkBoard(shown, inLane("place:acme:a", "t1"), "down")).toEqual(
+        inLane("place:acme:b", "t1"),
+      );
+    });
+
+    it("walks up from the second lane's copy into the first lane's", () => {
+      expect(walkBoard(shown, inLane("place:acme:b", "t1"), "up")).toEqual(
+        inLane("place:acme:a", "t1"),
+      );
+    });
   });
 });

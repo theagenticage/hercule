@@ -7,6 +7,7 @@ import type { WorkCard } from "@hercule/contract";
 import { ghostElement, measureLayoutRect, trackBody } from "../../app/motion";
 import { copyCardForMotion } from "../desk";
 import type { Carry, Follower } from "./board-drag-carry";
+import { readCardInLane } from "./card-in-lane";
 import { flipBoard } from "./flip-board";
 import type { ReleasePose } from "./land-card";
 
@@ -73,7 +74,15 @@ export const liftFollowers = (
   const elements: HTMLElement[] = [];
   for (const element of scroller.querySelectorAll<HTMLElement>("[data-card-id]")) {
     const card = options.cards.find((each) => each.id === element.dataset["cardId"]);
-    if (card === undefined || card.id === pressed.id || !options.selectedIds.has(card.id)) {
+    const at = readCardInLane(element);
+    // A Task under two outside places has a card in each lane. It is carried once.
+    if (
+      card === undefined ||
+      at === null ||
+      card.id === pressed.id ||
+      !options.selectedIds.has(card.id) ||
+      followers.some((follower) => follower.card.id === card.id)
+    ) {
       continue;
     }
     const depth = followers.length + 1;
@@ -82,7 +91,7 @@ export const liftFollowers = (
     ghost.classList.add("is-follower");
     // Each card sits behind the one before it.
     ghost.style.zIndex = String(-depth);
-    followers.push({ card, ghost, body: trackBody(ghost), home, depth });
+    followers.push({ card, laneId: at.laneId, ghost, body: trackBody(ghost), home, depth });
     elements.push(element);
   }
   // The copies are measured and made first, so hiding the cards moves nothing they were copied from.

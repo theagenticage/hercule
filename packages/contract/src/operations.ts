@@ -252,6 +252,62 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/lower-priority",
   },
+  // An External Entity has no grant family of its own: the Inbox is the
+  // user's view of what concerns them, and a card becomes a Task, so reading
+  // uses `task.read` and every move uses `task.update`, as `modelProfile`
+  // reuses `infra.*`. Take on, undo, dismiss, restore, search and add are the
+  // user's only, which the service checks. Search also needs the Connection
+  // read grant, because it reads through the user's Connections.
+  "externalEntity.queryInbox": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/inbox",
+  },
+  "externalEntity.countInbox": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/inbox/count",
+  },
+  "externalEntity.search": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/search",
+  },
+  "externalEntity.listSuggestions": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/suggestions",
+  },
+  "externalEntity.read": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/:id",
+  },
+  "externalEntity.takeOn": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/take-on",
+  },
+  "externalEntity.undoTakeOn": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/take-on/undo",
+  },
+  "externalEntity.dismiss": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/dismiss",
+  },
+  "externalEntity.restore": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/restore",
+  },
+  "externalEntity.addToWork": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/add-to-work",
+  },
   // An Ignore Rule has no grant family of its own: it is part of how signals
   // are raised. `create` and `delete` are the user's only, which the service
   // checks, because a grant alone does not tell the user from an agent.

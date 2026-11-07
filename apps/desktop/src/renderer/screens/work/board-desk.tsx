@@ -79,7 +79,7 @@ export function BoardDesk({
       data-carrying={isCarrying ? "" : undefined}
     >
       {toolbar}
-      <div ref={scrollRef} className="board-scroll">
+      <div ref={scrollRef} className="board-scroll" tabIndex={-1}>
         <div className="board-canvas">
           <div className="board-rule-wrap">
             <div className="board-rule">

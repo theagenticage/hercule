@@ -1,4 +1,5 @@
 import type { JSX, KeyboardEvent } from "react";
+import type { PluginIdentity } from "@hercule/client-core";
 import {
   chooseCardColleaguePose,
   STAGE_NAMES,
@@ -10,6 +11,7 @@ import {
 import { BOARD_STAGES, type BoardStage, type TaskDetail, type WorkCard } from "@hercule/contract";
 import { buildLook } from "../../faces";
 import { Colleague } from "../desk";
+import { ContextSections } from "./task-pane-context";
 import { FailureSection } from "./task-pane-failure";
 import { Foot } from "./task-pane-foot";
 import { QuestionSection, UnsentAnswerSection } from "./task-pane-question";
@@ -62,6 +64,8 @@ export interface TaskPaneActions extends TaskPaneChanges {
   readonly onOpenTextGeneration: () => void;
   /** Reads the Task again, after a read that failed. */
   readonly onRetryRead: () => void;
+  /** Shows only the Tasks that are part of an outside place, from a row of Part of. */
+  readonly onFilterByPlace: (placeRef: string) => void;
   /** Esc: goes back, or closes. */
   readonly onStepBack: () => void;
 }
@@ -146,14 +150,16 @@ export function TaskPaneColleague({
  *   way, a line and a retry after it failed, a line when the Task is gone.
  *   The pane has its final size at once, so nothing moves when the words
  *   arrive.
+ * - `plugins` is what `plugin.query` returns, for the marks and the names of
+ *   the outside things the Task links.
  * - `threadPromptWords` turns the foot into the line that asks what a new
  *   Thread should do, with those words in it to start with (empty for a new
  *   line). `null` leaves the foot as it is.
  * - `actions` is what its buttons do.
  *
  * From the top: the crumb, the title, the stage path, where it stands with
- * the quiet line under it, a failure, a question, What is left, Threads, Runs,
- * and the foot. Esc steps back. Return does what the first button of the section
+ * the quiet line under it, a failure, a question, What is left, Threads, Part
+ * of, Linked, Runs, and the foot. Esc steps back. Return does what the first button of the section
  * above says, unless the focus is on a button or a field: it tries again
  * after a failure, and sends the suggested answer of a question.
  *
@@ -164,12 +170,14 @@ export function TaskPane({
   pane,
   projectName,
   read,
+  plugins,
   threadPromptWords,
   actions,
 }: {
   readonly pane: TaskPaneContent;
   readonly projectName: string | null;
   readonly read: TaskPaneRead;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   /** The words the line that asks what a new Thread should do starts with, or `null` when the foot is not that line. */
   readonly threadPromptWords: string | null;
   readonly actions: TaskPaneActions;
@@ -310,6 +318,11 @@ export function TaskPane({
               taskTitle={read.detail.card.title}
               onOpenThread={actions.onOpenThread}
               onMoveThreadToNewTask={actions.onMoveThreadToNewTask}
+            />
+            <ContextSections
+              detail={read.detail}
+              plugins={plugins}
+              onFilterByPlace={actions.onFilterByPlace}
             />
             <RunsSection
               detail={read.detail}

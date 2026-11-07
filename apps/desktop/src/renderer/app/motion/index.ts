@@ -9,6 +9,7 @@
 export { findBody, MOVING_CLASS, trackBody, type MotionBody, type Velocity } from "./body";
 export {
   computeCenter,
+  ensureOverlayLayer,
   flipByKey,
   ghostElement,
   measureLayoutRect,

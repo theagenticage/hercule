@@ -139,7 +139,7 @@ describe("a launch", () => {
   );
 
   it.each([
-    ["a screen this build does not have", "/inbox"],
+    ["a screen this build does not have", "/calendar"],
     ["Settings", "/settings/appearance"],
     ["sign-in", "/login"],
     ["a path past a screen's own", "/office/old"],

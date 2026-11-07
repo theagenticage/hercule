@@ -346,8 +346,8 @@ const HttpUrl = Schema.String.check(
 );
 
 /**
- * A menu item the page carries out: Sign Out, New Thread, Office, Intake,
- * Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
+ * A menu item the page carries out: Sign Out, New Thread, Office, Inbox,
+ * Intake, Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
  * faces of the sidebar, or View > Toggle Sidebar, which hides or shows the
  * sidebar.
  * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
@@ -357,6 +357,7 @@ export const MenuCommand = Schema.Literals([
   "signOut",
   "newThread",
   "openOffice",
+  "openInbox",
   "openIntake",
   "openWorkflows",
   "openSettings",

@@ -410,6 +410,7 @@ export {
   MIN_INTAKE_PANE_WIDTH,
   moveEventSelection,
   moveSignalSelection,
+  namePlugin,
   nameSignalSource,
   parseIntakeListWidth,
   trimAnswerEllipsis,
@@ -537,7 +538,7 @@ export {
   updateTrackingRowsHolding,
   type HeldTrackingRows,
 } from "./held-tracking-rows";
-export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
+export { describeToDoClearLine, type ToDoClearLine } from "./to-do-clear";
 export { matchYourWork, type YourWork } from "./your-work";
 export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";

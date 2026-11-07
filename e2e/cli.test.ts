@@ -194,7 +194,9 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
     // The three harness plugins and the six provider plugins have no capabilities asserted here. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
-    // linked repo Resources it watches, and the GitHub workflow actions.
+    // linked repo Resources it watches, the reader of the issues and pull
+    // requests that concern the user (entities), and the GitHub workflow
+    // actions.
     // sentry is the same without Resources, and linear is sentry without
     // workflow actions.
     const findCapabilities = (id: string) =>
@@ -204,6 +206,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "event-sources",
       "events",
       "resources",
+      "entities",
       "workflow-actions",
     ]);
     expect(findCapabilities("sentry")).toEqual([

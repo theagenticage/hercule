@@ -261,11 +261,12 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 - **Grants.** The operation's row names `task.read`, and the service also checks `session.read` (as `session.query`) and `run.read` (as `run.query`) before it reads anything, because a card shows a Thread's question and a run's state. A caller with `task.read` alone is refused with `forbidden` naming the missing grant, not given a thinner board. The user holds all three.
 - **How it reads.** A fixed number of statements whatever the number of cards, with no transaction, so it runs on the read-only connection.
 - Its CLI row is `hercule task board`. Its help names the three grants.
+- *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **Entities on the board.** The reply gains `places` (`EntityPlace[]`, at most `MAX_BOARD_PLACES`), `edges` (at most `MAX_GRAPH_EDGES`), `groupings` (the kinds that can group things and have a place on this board, each with its caption) and `contextComplete`. A `WorkCard` gains `entityMarks` (at most 3, each a plugin id and kind) and `contextRefs` (the refs its Task links and everything above them, at most `MAX_CARD_CONTEXTS`). All are read in a fixed number of statements, with one walk up `part of` for every card. No new grant is needed ([./20-external-entities.md](./20-external-entities.md#11-works-context)).
 
 *(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* **`task.move`** puts a Task in a place on the board, in one transaction and one `task.updated`, stamped with the actor.
 
-- **Input.** `stage?` is one of the five board stages; `done` and `dropped` fail `validation`, because the board has no such column (Done and Drop go through `task.update`). `projectId?` moves the Task to a project, and `null` to the "No project" lane. `afterTaskId?` is the card the Task now follows in its cell; `null` puts it first; absent keeps it last in the new cell.
-- **Errors.** `not_found` for a Task, a project or an `afterTaskId` that does not exist. `validation` when `afterTaskId` is not in the target cell, or is the moving Task.
+- **Input.** `stage?` is one of the five board stages; `done` and `dropped` fail `validation`, because the board has no such column (Done and Drop go through `task.update`). `projectId?` moves the Task to a project, and `null` to the "No project" lane. `afterTaskId?` is the card the Task now follows in its cell; `null` puts it first; absent keeps it last in the new cell. `refuseIfMerged?` (only `true`) is set by an Undo: it fails the move with `not_found` when the Task in the path was merged into another, where the move would otherwise go to the survivor the merged id stands for. Its CLI field is hidden.
+- **Errors.** `not_found` for a Task, a project or an `afterTaskId` that does not exist, and for a merged Task when `refuseIfMerged` is set. `validation` when `afterTaskId` is not in the target cell, or is the moving Task.
 - **A move that changes nothing writes nothing**, as `task.update`, and emits no event.
 - **Events.** `task.updated` reports `changes.boardRank` beside any `stage` or `projectId` change ([./09-tasks.md](./09-tasks.md#the-board)).
 - Its CLI row is `hercule task move <id> --stage <stage> [--project <id>] [--after <id>]`, with the id, project and card resolved from tails through `task.query` and `project.query`. Not a bound operation: `task.move` lists no `usableIn`.
@@ -280,6 +281,9 @@ interface TaskDetail {
   sessionCount: number             // how many sessions the Task has
   runs: TrackingDetailRun[]        // at most MAX_TRACKING_DETAIL_RUNS (20), oldest first, as Tracking lists them
   runCount: number                 // how many runs the Task has
+  entities: EntityPlace[]          // the outside things the Task links, in link order, at most MAX_CARD_CONTEXTS (64)
+  places: EntityPlace[]            // the linked things and every place above them, each once, at most MAX_CARD_CONTEXTS
+  edges: EntityEdge[]              // the current `part of` steps between them, at most MAX_GRAPH_EDGES
 }
 
 interface TaskDetailSession {
@@ -289,6 +293,7 @@ interface TaskDetailSession {
 }
 ```
 
+- **`entities`, `places` and `edges` come from one `readContext` over the Task's linked refs** ([./20-external-entities.md](./20-external-entities.md#11-works-context)), so the number of statements does not follow the number of links. A linked thing with no record is left out of `entities`; one no Connection can read is `restricted`. A Task with more links than the bound shows the first ones.
 - **The summary is `card.summary`.** `TaskDetail` has no summary field of its own, so the board and the pane cannot disagree.
 - **The Thread that asks the card's `openQuestion` is always in `sessions`,** even when newer sessions would crowd it out, because the pane answers the question from that Thread's Requests. `sessionCount` and `runCount` let the pane say "and 12 more" and link to `session.query` by `taskId` and `run.query` by `taskIds`.
 - **Grants.** The operation's row names `task.read`, and the service also checks `session.query` and `run.query` before it reads anything, as `task.queryBoard` does. A caller that lacks one is refused with `forbidden` naming it, and is not given a thinner reply.
@@ -309,6 +314,32 @@ interface TaskDetailSession {
 - Its CLI row is `hidden: true`: the operation exists only for the undo line of Try again, and a terminal user stops a run with `hercule run cancel`.
 
 `task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* `priority` ascends `low, normal, high, urgent`, and `status` ascends `open, in-progress, done, cancelled`. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
+
+### externalEntity
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)* Semantics: [./20-external-entities.md](./20-external-entities.md). The group reuses the `task` grant family, as `modelProfile` reuses `infra`, so there is no new family and no grants migration. The CLI spells the noun `entity` (`hercule entity list`).
+
+| Operation | Input | Grant | Route |
+|---|---|---|---|
+| `externalEntity.queryInbox` | none -> `Inbox` | `task.read` | `GET /external-entities/inbox` |
+| `externalEntity.countInbox` | none -> `InboxCounts` | `task.read` | `GET /external-entities/inbox/count` |
+| `externalEntity.read` | `{ id }` -> `ExternalEntityDetail` | `task.read` | `GET /external-entities/{id}` |
+| `externalEntity.takeOn` | `{ id }` -> `{ taskId, created }` | `task.update`, user only | `POST /external-entities/{id}/take-on` |
+| `externalEntity.undoTakeOn` | `{ id, taskId }` -> `{ undone, reason? }` | `task.update`, user only | `POST /external-entities/{id}/take-on/undo` |
+| `externalEntity.dismiss` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/dismiss` |
+| `externalEntity.restore` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/restore` |
+| `externalEntity.search` | `{ source, text, scopeRef? }` -> `EntitySearchReply` | `task.read` and `connection.query`, user only | `GET /external-entities/search` |
+| `externalEntity.listSuggestions` | `{ contextRef? }` -> `EntitySuggestions` | `task.read` | `GET /external-entities/suggestions` |
+| `externalEntity.addToWork` | `{ ref, projectId? }` -> `{ id?, taskId, created, stage, followed }` | `task.update`, user only | `POST /external-entities/add-to-work` |
+
+- **`queryInbox`** returns `{ cards: InboxCard[], places: EntityPlace[], edges: EntityEdge[], counts: InboxCounts, truncated }`: the whole Inbox in one reply, at most `MAX_INBOX_CARDS` (1,000) cards, oldest first inside each side, in a fixed number of statements. A dismissed card is not listed.
+- **`countInbox`** returns the same `counts`, from the same function, for the sidebar. It needs the same grants as `queryInbox`.
+- **`read`** returns one full record of a work kind with its places, edges, links and conflicts. A partial record, a context record and an unknown id answer `not_found`.
+- **`takeOn` and `addToWork`** fail `invalid_state` for a kind that cannot be taken on (a place) or a thing that could not be read, `conflict` when the entity changed while the Task was being made and the call should be repeated, and `not_found` for an unknown id (and, for `addToWork`, an unknown Project). A repeat returns the same Task.
+- **`undoTakeOn`** deletes the Task only when it is live, not merged and untouched since it was created. Otherwise it changes nothing and answers `{ undone: false, reason }`.
+- **`search`** answers an outcome in the reply, not an error, for everything the source can say: `results`, `no-match`, `inaccessible`, `not-found`, `unknown`, `ambiguous`, `incomplete`, `unknown-link` and `source-unavailable`. A scope the source cannot search by fails `validation`.
+- **A session** may call `queryInbox`, `countInbox`, `read` and `listSuggestions` with `task.read`. The user-only operations refuse a session with `forbidden`.
+- **The CLI rows.** `hercule entity list`, `read <id>`, `take-on <id>`, `dismiss <id>`, `restore <id>`, `search <source> <text> [--scope <ref>]`, `suggestions [--context <ref>]` and `add-to-work <ref> [--project <id>]`. `countInbox` and `undoTakeOn` are `hidden: true`: they exist only for the sidebar and the undo line. An entity's id is given whole; a tail is not accepted.
 
 ### workflow, trigger, run
 

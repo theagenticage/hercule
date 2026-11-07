@@ -132,6 +132,45 @@ button.task-pane-note:hover {
   font-weight: var(--w-regular);
   letter-spacing: 0;
 }
+/* Part of and Linked: the shared relation rows, drawn the size of the pane's other rows (the drawing's `.pn-row`): 32px tall, 8px of padding that hangs outside the text column, the mark and the lock in a 20px place, and the state small and faint at the end. */
+.task-pane-context .relation-row {
+  min-height: 32px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border-radius: var(--r-sm);
+  transition: background var(--m-quick);
+}
+.task-pane-context .relation-row:hover {
+  background: var(--hover);
+}
+/* A Part of row is a button: the keyboard sees the same ring the Inbox's move rows draw. */
+.task-pane-context button.relation-go:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.task-pane-context .relation-go {
+  gap: 9px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.task-pane-context .relation-mark,
+.task-pane-context .relation-go > svg {
+  margin: 0 3px;
+}
+.task-pane-context .relation-go > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+.task-pane-context .relation-end {
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.task-pane-context .relation-row.is-locked,
+.task-pane-context .relation-row.is-locked .relation-title {
+  color: var(--muted);
+}
 .task-pane-left {
   margin: 0;
   line-height: 19px;

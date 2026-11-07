@@ -80,14 +80,18 @@ describe("the spelling of a command", () => {
     expect(spelled).toEqual(written);
   });
 
-  it("never makes a query parameter positional", () => {
-    // Building the tree throws for such a row, so this always holds. The test
-    // checks that the rule is applied at all.
+  it("lists a positional query parameter among the positionals and not among the flags", () => {
     for (const command of COMMANDS) {
       for (const field of command.query) {
         expect(field.positional, `${readSpelling(command)}: --${field.spelling}`).toBe(false);
       }
     }
+    const search = COMMANDS.find((command) => command.id === "externalEntity.search")!;
+    expect(search.positionals.map((field) => [field.name, field.carriedIn])).toEqual([
+      ["source", "query"],
+      ["text", "query"],
+    ]);
+    expect(search.query.map((field) => field.name)).toEqual(["scopeRef"]);
   });
 
   it("spells every word in kebab-case", () => {
@@ -127,14 +131,13 @@ describe("the spelling of a command", () => {
         readSpelling(command),
       ).toEqual(listPathParams(command.path));
       // A payload positional comes after them. The only other positional is
-      // a skill folder, sent as the query field that names each skill.
+      // a skill folder, sent as the query field that names each skill, or the
+      // words of a search, which a GET carries in its query string.
       const rest = command.positionals.slice(inPath.length);
       expect(
         rest.every(
           (field) =>
-            field.carriedIn === "payload" ||
-            field.readsSkillFolder ||
-            (field.carriedIn === "query" && field.optional),
+            field.carriedIn === "payload" || field.readsSkillFolder || field.carriedIn === "query",
         ),
         `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
@@ -326,6 +329,8 @@ describe("the placeholders a usage line shows", () => {
 
   /** Every command whose positionals are not a single plain `<id>`, with `...` after a repeated one. */
   const NAMED: Record<string, string> = {
+    "entity search": "<source> <text>",
+    "entity add-to-work": "<ref>",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",

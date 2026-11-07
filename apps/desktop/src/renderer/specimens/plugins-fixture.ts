@@ -17,6 +17,7 @@ export const buildPlugin = (id: string, displayName: string, mark?: PluginMark):
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /**
@@ -31,6 +32,12 @@ const GITHUB_MARK: PluginMark = {
 };
 /** The GitHub plugin, installed and active, with its mark. */
 export const GITHUB_PLUGIN: PluginDetail = buildPlugin("github", "GitHub", GITHUB_MARK);
+
+/** The Quayside plugin, invented: purchase orders and the places they lie in. Its mark is a small crate, in a declared hue. */
+export const QUAYSIDE_PLUGIN: PluginDetail = buildPlugin("quayside", "Quayside", {
+  paths: ["M2.5 5.5h11v7.5h-11z", "M2.5 8.5h11", "M5.5 5.5V3h5v2.5"],
+  hue: 190,
+});
 
 /**
  * Sentry's mark, as a plugin that draws Sentry's own logo would declare it:

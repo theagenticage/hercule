@@ -5,7 +5,7 @@
  * at Approve on #1294, a Now row arrives above it, and they approve the
  * wrong signal. A change the user's own action made applies at once.
  *
- * The same record tells whether inbox zero arrives: only when the user's own
+ * The same record tells whether To do clear arrives: only when the user's own
  * action takes the last signal off the list.
  */
 import type { Signal } from "@hercule/contract";
@@ -26,7 +26,7 @@ export interface HeldSignals {
   readonly holding: boolean;
   /** What the list shows, such as the view, the tab and the pages read. */
   readonly scope: string;
-  /** Whether inbox zero plays its arrival: the user's own action emptied the list just now. */
+  /** Whether To do clear plays its arrival: the user's own action emptied the list just now. */
   readonly arriving: boolean;
 }
 
@@ -41,7 +41,7 @@ export const startHeldSignals = (listed: ReadonlyArray<Signal>, scope: string): 
 });
 
 /**
- * Decides whether inbox zero arrives when the shown list goes from `before`
+ * Decides whether To do clear arrives when the shown list goes from `before`
  * to `after`. It arrives only when the list empties and every signal that
  * left is in `ownIds`. While the list stays empty, `wasArriving` holds, so a
  * read that finds the list still empty does not stop an arrival under way.
@@ -134,7 +134,7 @@ export const dropOwnChanges = (
 /**
  * Starts or stops holding back the changes the user did not make. Stopping
  * shows the last read in one step, so its changes move as one block. A list
- * this empties shows inbox zero still, because the user did not empty it.
+ * this empties shows To do clear still, because the user did not empty it.
  */
 export const updateHolding = (held: HeldSignals, holding: boolean): HeldSignals => {
   if (held.holding === holding) return held;
@@ -150,7 +150,7 @@ export const updateHolding = (held: HeldSignals, holding: boolean): HeldSignals 
 /**
  * Switches to `scope`, another view, tab or page count, whose last read is
  * `listed`. The list shows `listed`, and an arrival under way stops, so
- * coming back to To do shows inbox zero still. An own change stays
+ * coming back to To do shows To do clear still. An own change stays
  * recorded only while `listed` still has its row as it was: a page of
  * Later that loads while the user's snooze waits for its answer must not
  * make that snooze wait under the pointer.

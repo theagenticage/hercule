@@ -1,5 +1,5 @@
 /**
- * Inbox zero: the picture To do shows when nothing is left on it (spec 17
+ * To do clear: the picture To do shows when nothing is left on it (spec 17
  * §Motion).
  */
 import { useEffect, useState, type JSX } from "react";
@@ -8,7 +8,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   countClearedToday,
   countClearedTodayByPlugin,
-  describeInboxZeroLine,
+  describeToDoClearLine,
 } from "@hercule/client-core";
 import { useClockValue } from "../../app/age-clock";
 import { pluginsQuery } from "../../app/queries";
@@ -16,7 +16,7 @@ import { Face, HERCULE_LOOK } from "../../faces";
 import { PluginMark } from "../../marks";
 import { readMotionDuration } from "./motion-tokens";
 import { useSignalsClearedToday } from "./use-signals-cleared-today";
-import "./inbox-zero.css";
+import "./to-do-clear.css";
 
 declare module "react" {
   interface CSSProperties {
@@ -31,15 +31,15 @@ declare module "react" {
 const RAY_COUNT = 24;
 /** The sparks that fly out from behind Hercule as it arrives. */
 const SPARK_COUNT = 6;
-/** How long the arrival lasts, in milliseconds, as inbox-zero.css times it, without the wait for a closing pane. */
+/** How long the arrival lasts, in milliseconds, as to-do-clear.css times it, without the wait for a closing pane. */
 const ARRIVAL_MS = 800;
 
-/** Returns when inbox zero's line may next read differently in `timezone`. */
+/** Returns when To do clear's line may next read differently in `timezone`. */
 const findNextLineChange = (timezone: string, now: Date): Date =>
-  describeInboxZeroLine(now, timezone).changesAt;
+  describeToDoClearLine(now, timezone).changesAt;
 
 /**
- * Renders inbox zero: Hercule in a brass sunburst, "Inbox zero", a line that
+ * Renders To do clear: Hercule in a brass sunburst, "Inbox zero", a line that
  * follows the time of day in `timezone`, the user's timezone setting, and how many
  * signals were cleared today, with a pill per plugin that opens Done on that
  * plugin's tab. With nothing cleared today, the count and the pills are left
@@ -53,7 +53,7 @@ const findNextLineChange = (timezone: string, now: Date): Date =>
  * plays in the settled column instead of sliding sideways as the list widens.
  * `onShowDone` is called with a plugin's id when its pill is pressed.
  */
-export function InboxZero({
+export function ToDoClear({
   timezone,
   arriving,
   paneShown,
@@ -71,7 +71,7 @@ export function InboxZero({
     timezone,
     true,
     findNextLineChange,
-    (clockNow) => describeInboxZeroLine(clockNow, timezone).text,
+    (clockNow) => describeToDoClearLine(clockNow, timezone).text,
   );
   const { cleared } = countClearedToday(signals, now, timezone);
   const byPlugin = countClearedTodayByPlugin(signals, now, timezone, plugins);

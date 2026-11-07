@@ -1,7 +1,7 @@
 import { copyElementWithoutIds } from "../../app/motion";
 
-/** The `data-*` attributes the stylesheet draws a card by. A copy keeps them, or it would not look like the card. */
-const LOOK_ATTRIBUTES = ["data-state", "data-now", "data-pose", "data-still"];
+/** The `data-*` attributes the stylesheet draws a card by (a card of the Work board or of the Inbox). A copy keeps them, or it would not look like the card. */
+const LOOK_ATTRIBUTES = ["data-state", "data-now", "data-pose", "data-still", "data-access"];
 
 /** The classes a card wears for a moment, such as while it moves or has focus. A copy does not share them. */
 const MOMENT_CLASSES = ["is-focus", "is-moving", "is-rising", "is-carried"];

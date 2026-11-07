@@ -3,7 +3,7 @@
  * goes, and what Undo says it did. Work and the Inbox share it, because they
  * share the undo stack (`undo-stack.ts`).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Gesture, UndoStack } from "./undo-stack";
 
 /** How long the undo line stays after a move, and after a failure, which takes longer to read. */
@@ -16,8 +16,8 @@ export interface UndoLineState {
   /**
    * Whether the line offers Undo: true only while the gesture the line was
    * shown for is still on the undo stack. A gesture can leave the stack before
-   * the line hides (an intent that was sent), and Undo would then reverse an
-   * older gesture that has nothing to do with the line.
+   * the line hides (a request that changed nothing), and Undo would then
+   * reverse an older gesture that has nothing to do with the line.
    */
   readonly canUndo: boolean;
   readonly isShown: boolean;
@@ -50,19 +50,32 @@ export interface UndoLineControls<Page> {
    */
   readonly withdraw: (gesture: Gesture<Page>) => void;
   /**
-   * Reverses the newest gesture of the stack, passing `page` to the gesture
-   * (see `Gesture.undo`), and says what happened. An undo that is already
-   * running makes this do nothing.
+   * Reverses the newest gesture of the stack and says what happened on this
+   * line. The key and the line's button both come here, through the stack. An
+   * undo that is already running makes this do nothing.
    */
-  readonly undo: (page: Page) => void;
+  readonly undo: () => void;
 }
 
 /**
- * Holds the undo line for `undoStack`. The line hides itself 5.2 seconds
- * after a gesture and 8 seconds after a failure, and starts again on every new
- * line.
+ * Holds the undo line for `undoStack`, for as long as the page that calls it
+ * is mounted. The line hides itself 5.2 seconds after a gesture and 8 seconds
+ * after a failure, and starts again on every new line.
+ *
+ * While the page is mounted it is the stack's page (`UndoStack.registerPage`):
+ * every Undo, from the Undo key or from the line's button, is drawn by this
+ * page and said on this line.
+ *
+ * `buildPage` returns what this page lends to a gesture when it is undone (see
+ * `Gesture.undo`). It is called when Undo is pressed, so it may use the
+ * newest state of the page. `isPaused` tells whether Undo must wait, such as
+ * while a card is in the hand of a drag (see `UndoAdapter.isPaused`).
  */
-export function useUndoLine<Page>(undoStack: UndoStack<Page>): UndoLineControls<Page> {
+export function useUndoLine<Page>(
+  undoStack: UndoStack<Page>,
+  buildPage: () => Page,
+  isPaused = false,
+): UndoLineControls<Page> {
   const [held, setHeld] = useState<HeldLine<Page>>({
     text: "",
     offered: null,
@@ -108,21 +121,25 @@ export function useUndoLine<Page>(undoStack: UndoStack<Page>): UndoLineControls<
     };
   }, [held.serial, held.isShown, held.staysMs]);
 
-  const undo = (page: Page): void => {
-    void undoStack.undo(page).then((outcome) => {
-      switch (outcome.kind) {
-        case "empty":
-          say("Nothing to undo.");
-          return;
-        case "busy":
-          return;
-        case "reversed":
-          say(`Put back: ${outcome.words}.${outcome.note === undefined ? "" : ` ${outcome.note}`}`);
-          return;
-        case "failed":
-          say(`Could not put back: ${outcome.words}. ${outcome.reason}`);
-      }
-    });
+  // The newest state of the page, so a later render is what Undo uses.
+  const latest = useRef({ buildPage, isPaused, say });
+  useLayoutEffect(() => {
+    latest.current = { buildPage, isPaused, say };
+  });
+  useEffect(
+    () =>
+      undoStack.registerPage({
+        buildPage: () => latest.current.buildPage(),
+        isPaused: () => latest.current.isPaused,
+        report: (report) => {
+          latest.current.say(report.text);
+        },
+      }),
+    [undoStack],
+  );
+
+  const undo = (): void => {
+    void undoStack.undo();
   };
 
   return { line, say, withdraw, undo };

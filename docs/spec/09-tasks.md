@@ -181,6 +181,27 @@ For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving th
 - **Runs and sessions:** a task holds no run or session ids. The links live on the run and session side (all links optional for runs and for Agents' sessions, per the work triangle in [./02](./02-domain-model.md); a Thread always has one, see [Threads and their Tasks](#threads-and-their-tasks)); a task's run list is derived by querying runs that reference it, and its session list by querying sessions with `taskId`. A [merge](#merging-tasks) rewrites those links, so the runs and sessions of the merged Task are the survivor's afterwards. Provenance may additionally record a `runId` for a run that created or touched the task, but that is a history entry, not the link.
   - *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* A run links to its Task by `taskId` ([./07-workflows.md](./07-workflows.md)). Only a handoff sets it, so the Tasks that have runs are the handed-off ones. A task's runs are `run.query` with `taskIds`; Tracking reads them that way and works out each Task's state from them.
 
+## Entity links
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)* A Task relates to outside things through links. The things themselves are External Entities ([./20-external-entities.md](./20-external-entities.md)). Provenance stays the append-only history, and the link is the relation.
+
+```sql
+task_entity_links (task_id, ref, linked_at, linked_by, following INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (task_id, ref))  -- index on (ref, linked_at, task_id)
+```
+
+- **It keys on the ref,** not on an entity id. So the tasks domain imports nothing of External Entities, and a link outlives the pruning of its entity.
+- **One Task may link many refs, and one ref may be linked by many Tasks** over time. A ref stays non-unique across Tasks.
+- **Who writes a link.** `insertTask` and `updateTask` write a link for each provenance entry with a `ref`, in the same transaction, so a hand-off and an agent's `--ref` both link. `externalEntity.takeOn` and `externalEntity.addToWork` write one too, through two user-only `TaskService` methods: one creates a Task linked to a ref inside the caller's transaction, and one deletes a Task only when it is untouched since it was created ([./20-external-entities.md](./20-external-entities.md#9-operations)). A link has `linked_at` and `linked_by` (an actor). `following` is set by `addToWork` only.
+- **The backfill.** The migration creates a link for each provenance entry with a `ref` of every Task that is not deleted. The oldest entry of each (Task, ref) pair gives `linked_at` and `linked_by`.
+- **The active Task of a ref** is the live Task with the lowest `(linked_at, task_id)`: not `done`, not `dropped`, not deleted and not merged. It is the oldest, so a summary or any other update can never change the answer. One tasks-domain query holds the rule, and everything that needs "the Task of this ref" uses it:
+  - Intake's hand-off. The signal's Describe Line and `signal.handOff` both name the active Task of the signal's thread ref and continue it. This replaces the rule "the open Task updated most recently" ([ADR 0046](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md)).
+  - An entity's `taskId`, its side on the Inbox, the Inbox count and the Add sheet's "on Work" mark.
+- **Merging, summaries and the details pane** meet links in three rules ([Merging Tasks](#merging-tasks), [Task Summaries](#task-summaries)):
+  - `task.merge` moves the links of the merged Task to the survivor without duplicates, in the merge's own transaction. When both Tasks link a ref, one link stays, with the older `linked_at` (and the `linked_by` that came with it), and `following` if either had it. The merged Task is left with no links, so the active Task of each of its refs, an entity's `taskId` and its side on the Inbox all follow the survivor. A merge has no server-side Undo: the desktop app holds the merge back while its undo line shows and sends nothing when the user undoes it ([./17](./17-desktop-app.md)).
+  - Every writer of a link resolves a merged Task id to its survivor at its final write. `updateTask` (and so a handoff that continues a Task) reads the Task through `resolveTaskId` in its own transaction. `insertTask` writes a Task it has just made, which no merge can have touched. `externalEntity.takeOn` and `addToWork` return the active Task of the ref, and a merged Task is never active. `undoTakeOn` reads the Task by its own id and refuses a merged one with its own reason, `task-merged`.
+  - The summary's input gains each linked entity's kind, identifier, title, status label and lifecycle. A link added, or a change to a linked entity's kind, identifier, title, status or lifecycle, marks the Task's summary dirty in the same transaction. No operation removes a link yet, and a merge marks the survivor dirty already. `TaskDetail` carries `entities`, `places` and `edges`.
+- **The board.** A `WorkCard` carries `entityMarks` and `contextRefs`, and `task.queryBoard` carries `places`, `edges`, `groupings` and `contextComplete` ([./20-external-entities.md](./20-external-entities.md#11-works-context)). A Task is matched to a place through its own links and upward `part of` only. Filtering or grouping by an outside place never sets a Task's `projectId` or `initiativeId`.
+
 ## Threads and their Tasks
 
 *(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md).)* Every Thread belongs to one Task, so the Work overview can show every Thread on a card. The link is the Session's `taskId` ([./02](./02-domain-model.md)). An Agent's session joins a Task when it can, so a reviewer lands on the card of the implementer it reviews. An Assistant's session never has one.
@@ -313,6 +334,8 @@ interface TaskSummary {
 | A Thread joins the Task, leaves it or is taken off Done onto it | the join rule, `session.moveToTask`, `session.reopen` |
 | A Task is merged into it | `task.merge` |
 | It is taken back from `done` or `dropped` | `task.update`, `task.move` |
+| The Task gains a link to an outside thing it did not link before | where the link is written: a new Task that names a ref, and `task.update` or a handoff that appends one |
+| A thing the Task links changes its kind, identifier, title, status label or lifecycle | the write of the poll or the read that changed the thing ([./20-external-entities.md](./20-external-entities.md)), in that write's own transaction. Only these facts count: a change of concerns, progress or dates, and a poll that changes nothing, mark nothing |
 
 Nothing marks a Task dirty for each token, for each stream event, or when a summary is written. A Task that is deleted, merged or at `done` or `dropped` is left alone, and moving a Task to `done` or `dropped` clears `dirty_at`, so a finished Task costs no call. `dirty_at` is the time of the first change since the last summary. Later changes raise `dirty_revision` and leave `dirty_at` where it is.
 
@@ -379,8 +402,9 @@ A stored summary clears the failure, resets `attempt_count`, writes the audit en
 2. The merge must fit. `validation`, with the number, when the united labels would pass `MAX_TASK_LABELS` or the joined description would pass `MAX_TASK_DESCRIPTION_LENGTH`. The message says to shorten one of the Tasks first, and nothing is written.
 3. `tasks.merged_into_id` is set on the source, and every Task that was merged into the source is repointed to the survivor, so a redirect is always one hop and a chain cannot form.
 4. The source's sessions and runs get the survivor's `taskId`, and its `task_workspaces` rows move. A live run on the source stays live, on the survivor.
-5. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
-6. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
+5. **The source's links to outside things move to the survivor** (`task_entity_links`). A ref both Tasks link keeps one link: the older `linked_at` with the `linked_by` that came with it, and `following` if either link had it ([Links between Tasks and outside things](#entity-links)).
+6. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
+7. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
 
 The merge returns the survivor.
 

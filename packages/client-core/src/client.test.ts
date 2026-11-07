@@ -187,6 +187,29 @@ describe("createClient", () => {
     assert.strictEqual(error.url, BASE);
   });
 
+  it("aborts the request and rejects with the reason when the call's signal aborts", async () => {
+    let requestSignal: AbortSignal | null = null;
+    const fetch: FetchLike = (_url, init) => {
+      requestSignal = init?.signal ?? null;
+      return new Promise<Response>(() => undefined);
+    };
+    const client = createClient({ baseUrl: BASE, fetch });
+    const controller = new AbortController();
+
+    const outcome = client.profile.read(PROFILE, { signal: controller.signal }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await vi.waitFor(() => {
+      assert.isNotNull(requestSignal);
+    });
+    const reason = new Error("a newer search replaced this one");
+    controller.abort(reason);
+
+    assert.strictEqual(await outcome, reason);
+    assert.isTrue((requestSignal as AbortSignal | null)?.aborted);
+  });
+
   it("turns a malformed body into an internal ApiError", async () => {
     const { fetch } = stubFetch(
       () =>
@@ -301,6 +324,7 @@ describe("createClient", () => {
       status: { _tag: "active" },
       config: {},
       contributions: [],
+      entityKinds: [],
       intake: { eventKinds: [], signalKinds: [] },
     };
     const { fetch, sent } = stubFetch((request) =>

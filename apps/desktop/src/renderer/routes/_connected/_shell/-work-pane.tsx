@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isNotFound, readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import { findNextAgeChange } from "@hercule/client-core";
@@ -19,7 +19,7 @@ import {
   listUnsentAnswers,
   type PendingIntent,
 } from "../../../app/pending-intents";
-import { controllerQuery } from "../../../app/queries";
+import { controllerQuery, pluginsQuery } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
 import { OpeningSheet, type SheetPlaces } from "../../../screens/desk";
 import { markCardDent, readSheetOrigin } from "../../../screens/work/pane-anchor";
@@ -66,7 +66,8 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * with `null` when the sheet is gone, so that the keys act on the content
  * that is on screen. `changes` are the pane's buttons that change something. `moveToStage` is how a
  * click on the stage path moves the card, through the board's own moves.
- * `onChangeTask` changes the address: a Task's id to show it, `null` to close.
+ * `onFilterByPlace` is what a click on a row of Part of does: it filters the
+ * board to that place. `onChangeTask` changes the address: a Task's id to show it, `null` to close.
  */
 export function WorkPane({
   client,
@@ -80,6 +81,7 @@ export function WorkPane({
   threadPromptWords,
   changes,
   moveToStage,
+  onFilterByPlace,
   onShown,
   onChangeTask,
 }: {
@@ -94,6 +96,7 @@ export function WorkPane({
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
+  readonly onFilterByPlace: (placeRef: string) => void;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
 }): JSX.Element | null {
@@ -142,6 +145,7 @@ export function WorkPane({
       threadPromptWords={threadPromptWords}
       changes={changes}
       moveToStage={moveToStage}
+      onFilterByPlace={onFilterByPlace}
       onShown={onShown}
       onChangeTask={onChangeTask}
       onClosed={() => {
@@ -165,6 +169,7 @@ function PresentedTask({
   threadPromptWords,
   changes,
   moveToStage,
+  onFilterByPlace,
   onShown,
   onChangeTask,
   onClosed,
@@ -180,6 +185,7 @@ function PresentedTask({
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
+  readonly onFilterByPlace: (placeRef: string) => void;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
   readonly onClosed: () => void;
@@ -188,6 +194,7 @@ function PresentedTask({
   const queryClient = useQueryClient();
   const isVisible = useWindowVisible();
   const detail = useQuery({ ...taskDetailQuery(client, presentedId), enabled: isVisible });
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const controller = useQuery(controllerQuery(client));
   const textGeneration = controller.data?.textGeneration ?? TEXT_GENERATION_UNKNOWN;
   const summary = detail.data?.card.summary;
@@ -276,6 +283,7 @@ function PresentedTask({
     onOpenThread: (sessionId) => {
       void navigate({ to: "/threads/$sessionId", params: { sessionId } });
     },
+    onFilterByPlace,
     onOpenTextGeneration: () => {
       void navigate({ to: "/settings/system" });
     },
@@ -321,6 +329,7 @@ function PresentedTask({
         pane={pane}
         projectName={projectName}
         read={read}
+        plugins={plugins}
         threadPromptWords={threadPromptWords}
         actions={actions}
       />

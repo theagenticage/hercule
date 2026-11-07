@@ -20,6 +20,8 @@ export interface Hand {
 /** A selected card carried behind the card in the hand. */
 export interface Follower {
   readonly card: WorkCard;
+  /** The id of the lane the card was lifted from. */
+  readonly laneId: string;
   /** The copy of the card behind the one in hand, in the carry layer. */
   readonly ghost: HTMLElement;
   readonly body: MotionBody;
@@ -33,6 +35,8 @@ export interface Follower {
 export interface Carry {
   readonly pointerId: number;
   readonly card: WorkCard;
+  /** The id of the lane the card was lifted from. */
+  readonly laneId: string;
   /** The card's element in the page. It stays mounted and hidden for the whole carry. */
   readonly source: HTMLElement;
   readonly root: HTMLElement;

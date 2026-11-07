@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode, type ToggleEvent } from "react";
+import { Fragment, useState, type JSX, type ReactNode, type ToggleEvent } from "react";
 import { flushSync } from "react-dom";
 import {
   countFacetValues,
@@ -12,7 +12,7 @@ import {
 import { FilterIcon } from "../../icons/filter";
 import { FOCUSABLE_MENU_ITEM_SELECTOR } from "../move-menu-focus";
 import { usePopoverMenu } from "../use-popover-menu";
-import { MenuBack, MenuLine, MenuPick, ToolMenu } from "./tool-menu";
+import { MenuBack, MenuHeading, MenuLine, MenuPick, ToolMenu } from "./tool-menu";
 import { ClearChipsButton, FilterChip, ToolButton } from "./toolbar";
 
 /** A facet with more values than this opens with a Find box over them. */
@@ -36,6 +36,9 @@ const focusInMenu = (menu: HTMLElement | null, selector: string): void => {
  * values when there are more than seven. Each value shows how many of `items`
  * the filter would leave if it were chosen, so `items` must be the items the
  * Find text leaves, not the ones the filter leaves.
+ *
+ * A facet with a `heading` has a quiet heading over its row, once for a run
+ * of facets that share it, such as "From your sources".
  *
  * `marks` puts a mark in front of a facet's row and of its values, by facet
  * id. The values of the facet with no caption read well alone and take none.
@@ -147,20 +150,24 @@ export function FilterControl<Item>({
     <>
       {firstFacet !== undefined && renderValueRows(firstFacet, firstFacet.values)}
       {firstFacet !== undefined && otherFacets.length > 0 && <MenuLine />}
-      {otherFacets.map((facet) => (
-        <MenuPick
-          key={facet.id}
-          itemProps={buildItemProps(`open:${facet.id}`)}
-          kind="opens"
-          name={facet.caption}
-          isOn={false}
-          mark={marks[facet.id]}
-          count={(filter[facet.id] ?? []).length}
-          onPick={() => {
-            const hasFind = facet.values.length > MOST_VALUES_WITHOUT_FIND;
-            showFacet(facet.id, hasFind ? ".desk-menu-find" : FOCUSABLE_MENU_ITEM_SELECTOR);
-          }}
-        />
+      {otherFacets.map((facet, index) => (
+        <Fragment key={facet.id}>
+          {facet.heading !== undefined && facet.heading !== otherFacets[index - 1]?.heading && (
+            <MenuHeading>{facet.heading}</MenuHeading>
+          )}
+          <MenuPick
+            itemProps={buildItemProps(`open:${facet.id}`)}
+            kind="opens"
+            name={facet.caption}
+            isOn={false}
+            mark={marks[facet.id]}
+            count={(filter[facet.id] ?? []).length}
+            onPick={() => {
+              const hasFind = facet.values.length > MOST_VALUES_WITHOUT_FIND;
+              showFacet(facet.id, hasFind ? ".desk-menu-find" : FOCUSABLE_MENU_ITEM_SELECTOR);
+            }}
+          />
+        </Fragment>
       ))}
     </>
   );

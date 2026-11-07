@@ -40,8 +40,9 @@ export function ToolButton({
 }
 
 /**
- * Renders a square button on glass that holds one icon, such as Display. It
- * is named by `label`, which is also its tooltip. The button's other
+ * Renders a square button on glass that holds one icon or one character, such
+ * as Display or "?". It is named by `label`, which is also its tooltip unless
+ * `title` gives another, such as one that names the key. The button's other
  * attributes go to the `<button>`.
  */
 export function IconPill({
@@ -53,7 +54,13 @@ export function IconPill({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <button {...button} type="button" className="icon-pill" aria-label={label} title={label}>
+    <button
+      {...button}
+      type="button"
+      className="icon-pill"
+      aria-label={label}
+      title={button.title ?? label}
+    >
       {children}
     </button>
   );

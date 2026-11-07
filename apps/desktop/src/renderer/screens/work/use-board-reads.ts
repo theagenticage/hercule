@@ -112,6 +112,7 @@ export const useBoardReads = ({
   hiddenIds,
   serverBoard,
   projects,
+  groupBy,
   isCarrying,
   scrollRef,
 }: {
@@ -119,6 +120,8 @@ export const useBoardReads = ({
   readonly hiddenIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly projects: readonly WorkProject[];
+  /** How the board is grouped, as the view saved it. */
+  readonly groupBy: string;
   readonly isCarrying: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): BoardReads => {
@@ -220,6 +223,7 @@ export const useBoardReads = ({
     held,
     board: logicalBoard,
     projects,
+    groupBy,
     isCarrying,
     scrollRef,
     release: (key) => {

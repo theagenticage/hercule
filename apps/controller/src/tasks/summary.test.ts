@@ -189,6 +189,25 @@ describe("what marks a Task dirty", () => {
       0,
     ],
     ["an agent session joining it", (id: string) => joinAs("agent", id), 0],
+    [
+      "a new outside thing linked to it",
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) =>
+          tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+        ),
+      1,
+    ],
+    [
+      "the same outside thing linked twice",
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) =>
+          Effect.andThen(
+            tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+            tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+          ),
+        ),
+      1,
+    ],
   ])("is %s: the revision rises by %i", async (_name, change, rise) => {
     const row = await run(
       Effect.gen(function* () {
@@ -199,6 +218,23 @@ describe("what marks a Task dirty", () => {
     );
     expect(row?.dirty_revision ?? 0).toBe(rise);
     expect(row !== undefined && row.dirty_at !== null).toBe(rise > 0);
+  });
+
+  it("is dirty from the start when a new Task names an outside thing", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const linked = yield* tasks.create({
+          title: "Fix the refund",
+          description: "",
+          provenance: [{ ref: "github:issue:acme/api#7" }],
+        });
+        const plain = yield* createTask("Add a refund button");
+        return { linked: yield* readRow(linked.id), plain: yield* readRow(plain.id) };
+      }),
+    );
+    expect(rows.linked?.dirty_revision).toBe(1);
+    expect(rows.plain).toBeUndefined();
   });
 
   it("counts the quiet time from the first change, and keeps the pacing of the model calls", async () => {

@@ -38,6 +38,7 @@ const LINEAR: PluginDetail = {
   status: { _tag: "active" },
   config: {},
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
   contributions: [
     {
       extensionPoint: "connection-type",

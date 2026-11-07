@@ -138,6 +138,36 @@ export interface OpenTaskOnRef {
   readonly updatedAt: string;
 }
 
+/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card shows. */
+export interface ActiveTaskOnRef {
+  readonly ref: ExternalRef;
+  readonly id: string;
+  readonly title: string;
+  readonly status: TaskStatus;
+  readonly stage: TaskStage;
+}
+
+/**
+ * What a Task has gathered since it was created, for the check that decides
+ * whether the Task can still be taken back (`readTraces`).
+ */
+export interface TaskTraces {
+  /** The Task's stage now. */
+  readonly stage: TaskStage;
+  /** True when the Task was merged into another Task. */
+  readonly merged: boolean;
+  /** True when the Task links the ref that `readTraces` was asked about. */
+  readonly linksRef: boolean;
+  /** True when `update` has written the Task since it was created (its `revision` is above 0). */
+  readonly edited: boolean;
+  /** True when a Thread (a session) belongs to the Task. */
+  readonly hasSession: boolean;
+  /** True when a run works on the Task. */
+  readonly hasRun: boolean;
+  /** How many refs the Task links. */
+  readonly linkCount: number;
+}
+
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
 export interface TrackedTask {
   readonly id: string;
@@ -178,6 +208,12 @@ export interface NewTask {
   readonly labels: ReadonlyArray<string>;
   readonly projectId: string | undefined;
   readonly provenance: ReadonlyArray<ProvenanceInput>;
+  /**
+   * True when the Task is linked to its refs only because the user added them
+   * to Work from nothing that concerned them (`task_entity_links.following`).
+   * Absent means false.
+   */
+  readonly following?: boolean;
   readonly at: string;
   readonly actor: string;
 }
@@ -279,6 +315,24 @@ const COLUMNS =
   "tasks.id, tasks.title, tasks.description, tasks.status, tasks.stage, tasks.priority, tasks.labels, " +
   "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
   "tasks.stage_changed_at, tasks.deleted_at";
+
+/**
+ * The SQL of a `SELECT` that lists the live links of Tasks to refs, one row per
+ * link: `task_id`, `ref`, `linked_at`, `following`, and `position`, the link's
+ * place among the live links of its ref, oldest first by `(linked_at,
+ * task_id)`. A link is live when its Task is not deleted, not merged into
+ * another Task and not finished (`done` or `dropped`). The active Task of a
+ * ref is the Task of the link at `position = 1`. This text is the one
+ * definition of these rules: the reads in this module and the Inbox's
+ * membership in `external-entities` build on it.
+ */
+export const LIVE_TASK_LINKS_SQL = `
+  SELECT l.task_id, l.ref, l.linked_at, l.following,
+         ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
+  FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+  WHERE tasks.deleted_at IS NULL
+    AND tasks.merged_into_id IS NULL
+    AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -640,6 +694,30 @@ const make = Effect.gen(function* () {
             });
           },
         );
+
+  /**
+   * Links the Task to each ref its new provenance entries carry. A pair that
+   * is already linked keeps its row, so the oldest `linked_at` stays and the
+   * active Task of a ref does not change when the Task is updated. Returns
+   * true when at least one link is new.
+   */
+  const insertLinks = (
+    taskId: Uint8Array,
+    entries: ReadonlyArray<ProvenanceInput>,
+    link: { readonly at: string; readonly actor: string; readonly following: boolean },
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.map(
+      Effect.forEach(
+        entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
+        (ref) => sql`
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0})
+          ON CONFLICT (task_id, ref) DO NOTHING
+          RETURNING ref
+        `,
+      ),
+      (inserted) => inserted.some((rows) => rows.length > 0),
+    );
 
   const insertProvenance = (
     taskId: Uint8Array,
@@ -1232,6 +1310,33 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the refs each of the Tasks links, in the order they were linked
+     * (then by ref). A Task with no link has no entry. One statement however
+     * many Tasks there are.
+     */
+    listEntityLinks: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+              SELECT task_id, ref FROM task_entity_links
+              WHERE task_id IN ${sql.in(taskIds.map(uuidFromString))}
+              ORDER BY linked_at, ref`,
+            (rows) => {
+              const links = new Map<string, Array<string>>();
+              for (const row of rows) {
+                const taskId = uuidToString(row.task_id);
+                const refs = links.get(taskId);
+                if (refs === undefined) links.set(taskId, [row.ref]);
+                else refs.push(row.ref);
+              }
+              return links;
+            },
+          ),
+
+    /**
      * Returns every Task that is not finished and has a handoff entry, the
      * most recently updated Task first. A Task is finished at `done` or
      * `dropped`; the other five stages are the board stages. Each Task holds
@@ -1310,6 +1415,98 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the active Task of a ref, or none: the Task of the oldest live
+     * link to the ref (see `LIVE_TASK_LINKS_SQL`). Oldest link wins, so a
+     * summary or any other update of a Task never changes the answer.
+     */
+    findActiveTaskForRef: (ref: ExternalRef): Effect.Effect<Option.Option<Task>, SqlError> =>
+      sql<TaskRow>`
+        SELECT ${sql.literal(COLUMNS)} FROM tasks
+        WHERE tasks.id = (
+          SELECT task_id FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
+          WHERE ref = ${ref} AND position = 1)`.pipe(
+        Effect.flatMap(hydrate),
+        Effect.map((found) => Option.fromNullishOr(found[0])),
+      ),
+
+    /**
+     * Returns the active Task of each of `refs` that has one, by the rule of
+     * `findActiveTaskForRef`, in one statement however many refs there are.
+     * A ref with no active Task has no row.
+     */
+    listActiveTasksForRefs: (
+      refs: ReadonlyArray<ExternalRef>,
+    ): Effect.Effect<ReadonlyArray<ActiveTaskOnRef>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly id: Uint8Array;
+              readonly title: string;
+              readonly status: string;
+              readonly stage: string;
+            }>`
+              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage
+              FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
+              JOIN tasks ON tasks.id = live.task_id
+              WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
+            (rows) =>
+              rows.map((row) => ({
+                ref: row.ref,
+                id: uuidToString(row.id),
+                title: row.title,
+                status: row.status as TaskStatus,
+                stage: row.stage as TaskStage,
+              })),
+          ),
+
+    /**
+     * Returns what the Task has gathered since it was created, and whether it
+     * links `ref`, or none when there is no such Task or it is deleted. Reads
+     * the Task by its own id, so a merged Task is returned as itself.
+     * Each answer comes from an index: the Thread and run checks use the
+     * partial indexes on `sessions.task_id` and `runs.task_id`.
+     */
+    readTraces: (
+      id: string,
+      ref: ExternalRef,
+    ): Effect.Effect<Option.Option<TaskTraces>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly stage: string;
+          readonly merged: number;
+          readonly links_ref: number;
+          readonly edited: number;
+          readonly has_session: number;
+          readonly has_run: number;
+          readonly link_count: number;
+        }>`
+          SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged,
+                 EXISTS (SELECT 1 FROM task_entity_links
+                         WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
+                 tasks.revision > 0 AS edited,
+                 EXISTS (SELECT 1 FROM sessions WHERE sessions.task_id = tasks.id) AS has_session,
+                 EXISTS (SELECT 1 FROM runs WHERE runs.task_id = tasks.id) AS has_run,
+                 (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count
+          FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined
+            ? Option.none()
+            : Option.some({
+                stage: row.stage as TaskStage,
+                merged: row.merged === 1,
+                linksRef: row.links_ref === 1,
+                edited: row.edited === 1,
+                hasSession: row.has_session === 1,
+                hasRun: row.has_run === 1,
+                linkCount: row.link_count,
+              });
+        },
+      ),
+
+    /**
      * Returns, for each open task (status `open` or `in-progress`, not
      * deleted or merged) whose provenance carries one of `refs`, one row per ref it
      * carries. It reads only the columns of the row, never the description or
@@ -1319,6 +1516,12 @@ const make = Effect.gen(function* () {
      * its work follows the tasks that carry the refs, not the tasks or the
      * provenance entries there are. The unary `+` on the status keeps SQLite
      * from starting at the status index and scanning every open task.
+     *
+     * This is not the active Task of a ref (`findActiveTaskForRef`), on
+     * purpose. A handoff continues one Task per thread, the oldest linked.
+     * Your work lists every open Task that carries the thread, so a second
+     * Task made from the same thread still shows. Both rules count a Task as
+     * open exactly while its stage is not finished.
      */
     listOpenOnRefs: (
       refs: ReadonlyArray<ExternalRef>,
@@ -1414,6 +1617,11 @@ const make = Effect.gen(function* () {
              ${task.at}, ${task.at}, ${task.at}, ${task.at}, ${boardRank})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
+        yield* insertLinks(id, task.provenance, {
+          at: task.at,
+          actor: task.actor,
+          following: task.following ?? false,
+        });
         return {
           id: uuidToString(id),
           title: task.title,
@@ -1438,7 +1646,8 @@ const make = Effect.gen(function* () {
     /**
      * Applies an edit and appends provenance. Only the columns in the edit are
      * written, which also means that a change to anything other than the title
-     * or the description does not touch the full-text index.
+     * or the description does not touch the full-text index. Returns true when
+     * the provenance linked the Task to a ref it did not link before.
      */
     update: (
       id: string,
@@ -1446,10 +1655,13 @@ const make = Effect.gen(function* () {
       provenance: ReadonlyArray<ProvenanceInput>,
       at: string,
       actor: string,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
-        const sets = [sql`updated_at = ${at}`];
+        // The revision counts every write of `update`. Unlike `updated_at` it moves even
+        // when the clock has not, so it can tell a Task nobody has edited from one that
+        // was edited in the same millisecond it was created.
+        const sets = [sql`updated_at = ${at}`, sql`revision = revision + 1`];
         if (edit.title !== undefined) sets.push(sql`title = ${edit.title}`);
         if (edit.description !== undefined) sets.push(sql`description = ${edit.description}`);
         if (edit.priority !== undefined) sets.push(sql`priority = ${edit.priority}`);
@@ -1471,6 +1683,7 @@ const make = Effect.gen(function* () {
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);
+        return yield* insertLinks(key, provenance, { at, actor, following: false });
       }),
 
     /**
@@ -1696,6 +1909,27 @@ const make = Effect.gen(function* () {
         sql`UPDATE task_provenance SET task_id = ${uuidFromString(targetId)}
             WHERE task_id = ${uuidFromString(sourceId)}`,
       ),
+
+    /**
+     * Moves the entity links of the Task `sourceId` to `targetId`, for a
+     * merge. A ref that both Tasks link keeps one link: the older
+     * `linked_at` (with the `linked_by` that came with it), and `following`
+     * if either link had it. The source is left with no links.
+     */
+    moveEntityLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const source = uuidFromString(sourceId);
+        yield* sql`
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following
+          FROM task_entity_links WHERE task_id = ${source}
+          ON CONFLICT (task_id, ref) DO UPDATE SET
+            linked_by = CASE WHEN excluded.linked_at < linked_at
+                             THEN excluded.linked_by ELSE linked_by END,
+            linked_at = MIN(linked_at, excluded.linked_at),
+            following = MAX(following, excluded.following)`;
+        yield* sql`DELETE FROM task_entity_links WHERE task_id = ${source}`;
+      }),
 
     /**
      * Moves the workspaces recorded for the Task `sourceId` to `targetId`. A

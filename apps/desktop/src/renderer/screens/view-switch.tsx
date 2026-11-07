@@ -1,9 +1,13 @@
-import type { JSX, KeyboardEvent } from "react";
+import type { JSX, KeyboardEvent, ReactNode } from "react";
 
-/** One segment of a `ViewSwitch`: the view it picks and the words on its button. */
+/**
+ * One segment of a `ViewSwitch`: the view it picks and the words on its
+ * button, with a `mark` in front of them when the caller has one.
+ */
 export interface ViewChoice<View extends string> {
   readonly view: View;
   readonly label: string;
+  readonly mark?: ReactNode;
 }
 
 /**
@@ -51,6 +55,7 @@ export function ViewSwitch<View extends string>({
             if (each.view !== view) onPick(each.view);
           }}
         >
+          {each.mark}
           {each.label}
         </button>
       ))}

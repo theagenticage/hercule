@@ -7,36 +7,46 @@ import {
   arrangeLanes,
   buildLanes,
   buildWorkFacets,
-  chooseLaneId,
+  chooseAddOpening,
+  chooseLaneProject,
   countCardsByStage,
   describeCardMove,
   type EndStage,
   findCards,
-  listShownCardIds,
+  groupBoardByContext,
+  listBoardGroupings,
+  listShownCards,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
+  PROJECT_FACET_ID,
   STAGE_NAMES,
+  type AddOpening,
 } from "@hercule/client-core/work";
 import {
   BOARD_STAGES,
   MAX_BOARD_CARDS,
   type BoardStage,
   type ControllerInfo,
+  type EntityPlace,
   type WorkCard,
 } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
-import { controllerQuery, projectsQuery, userQuery } from "../../../app/queries";
+import { controllerQuery, pluginsQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey, isPrimaryModifierHeld } from "../../../app/primary-modifier";
+import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
-import { UndoLine } from "../../../screens/desk";
+import { ReadFailure, UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
+import { AddFromSource } from "../../../screens/work/add-from-source";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
-import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
+import { DeskClear, FirstRun, NoMatch } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
+import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-lane";
+import { keepCardInView } from "../../../screens/work/keep-in-view";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { SelectionBar } from "../../../screens/work/selection-bar";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
@@ -62,13 +72,11 @@ import { hasAnyTaskQuery, useWorkBoard } from "./-work-board";
 /** Below this window width, lanes are bands: side labels would cost the cards 210px. */
 const SIDE_LABELS_FROM_PX = 1320;
 
-/** How long the first board's words take to fade in, which is when the screen stops marking it as arriving. */
-const ARRIVAL_MS = 1_200;
-
 /** How many lanes the loading state draws, before the board says which there are. */
 const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
+const EMPTY_PLACES: readonly EntityPlace[] = [];
 
 /** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
 const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
@@ -86,9 +94,14 @@ const describeOffline = (since: Date): string =>
  *
  * - The board is read while the window is visible, and read again on every
  *   `task` push. A move shows at once and is sent in order (`useCardMoves`).
- * - Filtering and Find run over the board already read, in the client.
+ * - Filtering, Find and grouping by an outside place run over the board
+ *   already read, in the client. A grouping the board no longer offers is
+ *   drawn as Project.
  * - A card opens its details on a sheet over the board. Which Task is open
  *   is in the address (`openTaskId`), so the screen only asks to change it.
+ * - A Task the address names when the screen opens, such as when the Inbox's
+ *   See its Task comes here, has its card brought into view and made the
+ *   current card, once.
  */
 export function WorkScreen({
   controller,
@@ -105,6 +118,7 @@ export function WorkScreen({
   const scope = controller.accountScopes.read();
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
   // Until the controller's record is read, nothing says a summary is coming, so no card promises one.
@@ -119,6 +133,9 @@ export function WorkScreen({
   // back for a still hand, and only what is drawn reads that.
   const logical = useLogicalBoard({ scope, serverBoard: board.data });
   const logicalCards = logical.board?.cards ?? EMPTY_CARDS;
+  // Whether a card is in the hand of a drag. The drag sets it; the reads wait
+  // for it, Undo and the keys stand still for it, and the desk draws it for the stylesheet.
+  const [isCarrying, setIsCarrying] = useState(false);
   const moves = useCardMoves({
     client,
     scope,
@@ -127,15 +144,12 @@ export function WorkScreen({
     onCardReturning: (taskId, how) => {
       noteReturnedTask.current(taskId, how);
     },
+    isCarrying,
   });
   const savedView = useWorkView(buildWorkViewKey(url, username));
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
   const offlineSince = useOfflineSince(live);
   const findRef = useRef<HTMLInputElement>(null);
-
-  // Whether a card is in the hand of a drag. The drag sets it; the reads wait
-  // for it, the keys stand still for it, and the desk draws it for the stylesheet.
-  const [isCarrying, setIsCarrying] = useState(false);
 
   // The board's motion: what the user does to the view plays as motion, a
   // Task that arrives or a run that fails waits for a still hand, and a
@@ -145,6 +159,7 @@ export function WorkScreen({
     hiddenIds: logical.hiddenIds,
     serverBoard: board.data,
     projects,
+    groupBy: savedView.groupBy,
     isCarrying,
     scrollRef,
   });
@@ -155,6 +170,14 @@ export function WorkScreen({
   usePausePawsOffScreen(scrollRef);
   const drawnBoard = reads.drawnBoard;
   const drawnCards = drawnBoard?.cards ?? EMPTY_CARDS;
+  const places = drawnBoard?.places ?? EMPTY_PLACES;
+  const groupings = listBoardGroupings({ groupings: drawnBoard?.groupings ?? [] });
+  // A saved grouping whose kind the board no longer has (its plugin was
+  // removed, or none of its places is on the board) is drawn as Project, and
+  // stays saved in case the kind comes back.
+  const groupBy = groupings.some((grouping) => grouping.kind === view.groupBy)
+    ? view.groupBy
+    : PROJECT_FACET_ID;
   // The answers the user gave from the pane and the app still holds show on
   // their cards as answered; the pane's answer and Try again buttons act here.
   const pane = usePaneChanges({
@@ -186,7 +209,11 @@ export function WorkScreen({
   // The lanes of the whole board, for the Filter menu: a Project the filter
   // hides stays in the menu to be chosen again.
   const allLanes = buildLanes({ cards: drawnCards }, projects);
-  const facets = buildWorkFacets(allLanes);
+  const facets = buildWorkFacets(
+    allLanes,
+    { cards: drawnCards, places, groupings: drawnBoard?.groupings ?? [] },
+    plugins,
+  );
 
   // Failed and Has a question lift themselves once no card has them, so an
   // empty page never says nothing. Only a board that was read can say so.
@@ -201,38 +228,50 @@ export function WorkScreen({
 
   const found = findCards(drawnCards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
-  const lanes = buildLanes({ cards: visibleCards }, projects);
+  const lanes =
+    groupBy === PROJECT_FACET_ID
+      ? buildLanes({ cards: visibleCards }, projects)
+      : groupBoardByContext(
+          { cards: visibleCards, places, groupings: drawnBoard?.groupings ?? [] },
+          groupBy,
+        );
   const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds: view.foldedLaneIds,
     openedCellIds: view.openedCellIds,
     isFiltering: view.isFiltering,
   });
-  const shownIds = listShownCardIds(arrangedLanes);
+  const shownCards = listShownCards(arrangedLanes);
   // Which cards are selected. A card the board stops drawing leaves the selection.
-  const selection = useCardSelection(shownIds);
-  const firstShownId = shownIds[0] ?? null;
-  const tabStopCardId =
-    view.currentCardId !== null && shownIds.includes(view.currentCardId)
-      ? view.currentCardId
-      : firstShownId;
+  const selection = useCardSelection(shownCards.map((card) => card.cardId));
+  const tabStop =
+    shownCards.find((card) => isSameCardInLane(card, view.currentCard)) ?? shownCards[0] ?? null;
 
   const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
   const hasAnyTask = hasAnyTaskRead.data;
 
   // The first board fades its words in from the top left, once.
-  const [startedLoading] = useState(board.data === undefined);
-  const [arrivalOver, setArrivalOver] = useState(false);
   const hasBoard = drawnBoard !== undefined;
+  const isArriving = useFirstArrival(board.data === undefined, hasBoard);
+
+  // The Task the address names when the screen opens is brought into view
+  // once the board is on screen, so closing its details leaves the user there.
+  // Only that one: a Task opened later was chosen on a card the user can see.
+  const [taskNamedOnOpen] = useState(openTaskId);
+  const hasShownNamedTask = useRef(false);
+  const { setCurrentCard } = view;
   useEffect(() => {
-    if (!startedLoading || !hasBoard) return;
-    const timer = setTimeout(() => {
-      setArrivalOver(true);
-    }, ARRIVAL_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [startedLoading, hasBoard]);
+    if (taskNamedOnOpen === null || !hasBoard || hasShownNamedTask.current) return;
+    hasShownNamedTask.current = true;
+    const scroller = scrollRef.current;
+    const element = scroller?.querySelector<HTMLElement>(
+      `[data-card-id="${CSS.escape(taskNamedOnOpen)}"]`,
+    );
+    const at = element === null || element === undefined ? null : readCardInLane(element);
+    if (scroller === null || element === null || element === undefined || at === null) return;
+    keepCardInView(scroller, element);
+    setCurrentCard(at);
+  }, [taskNamedOnOpen, hasBoard, setCurrentCard]);
 
   // Merging by key: `M` or the details' Merge picks a card, and choosing
   // another card (Return, or a click) merges the first into it.
@@ -304,14 +343,46 @@ export function WorkScreen({
     moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
   };
 
+  /**
+   * Shows only the Tasks that are part of the place, from a row of Part of in
+   * the details. The filter and the Find text give way to it, so that all the
+   * place's Tasks show, and the details close to let the board be seen.
+   */
+  const filterByPlace = (placeRef: string): void => {
+    const place = places.find((each) => each.ref === placeRef);
+    if (place === undefined) {
+      moves.sayWithoutUndo("That place is not on this board now.");
+      return;
+    }
+    view.setFilter({ [place.kind]: [placeRef] });
+    view.setFindText("");
+    onChangeOpenTask(null);
+  };
+
   // ---------- Add to Work ----------
   const [addLane, setAddLane] = useState<AddTaskLane | null>(null);
   const [addResult, setAddResult] = useState<string | null>(null);
+  const [addOpening, setAddOpening] = useState<AddOpening>({});
+  // The Project a thing added from a source joins: the lane's, when a Project lane's `+` opened the sheet.
+  const [addProjectId, setAddProjectId] = useState<string | null>(null);
   const addOpener = useRef<HTMLElement | null>(null);
-  const openAddSheet = (lane: AddTaskLane): void => {
+  /**
+   * Opens the sheet. `fromLaneId` is the lane whose `+` or key opened it, when
+   * one did: From a source then opens on that lane's context, and otherwise on
+   * the context the filter is on.
+   */
+  const openAddSheet = (lane: AddTaskLane, fromLaneId?: string): void => {
     addOpener.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddResult(null);
+    setAddOpening(
+      chooseAddOpening({
+        places,
+        filter: view.filter,
+        lane: fromLaneId === undefined ? undefined : lanes.find((each) => each.id === fromLaneId),
+      }),
+    );
+    setAddProjectId(fromLaneId === undefined ? null : lane.projectId);
     setAddLane(lane);
     // Two sheets would cover each other at the right.
     if (openTaskId !== null) onChangeOpenTask(null);
@@ -321,21 +392,20 @@ export function WorkScreen({
     addOpener.current?.focus({ preventScroll: true });
   };
   const toAddLane = (laneId: string): AddTaskLane => {
-    const lane = allLanes.find((each) => each.id === laneId);
-    return lane === undefined
-      ? { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null }
-      : { id: lane.id, name: lane.name, projectId: lane.projectId };
+    const lane =
+      lanes.find((each) => each.id === laneId) ?? allLanes.find((each) => each.id === laneId);
+    if (lane === undefined) {
+      return { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null };
+    }
+    // A lane for an outside place has no Project of its own: a Task added
+    // there joins the Project most of its cards are in, and the sheet names it.
+    const projectId = chooseLaneProject(lane, new Set(projects.map((project) => project.id)));
+    const project = projects.find((each) => each.id === projectId);
+    return { id: lane.id, name: project?.name ?? lane.name, projectId };
   };
   /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
-  const chooseAddLane = (): AddTaskLane => {
-    const projectIds = new Set(projects.map((project) => project.id));
-    const current = logicalCards.find((card) => card.id === tabStopCardId);
-    const laneId =
-      current === undefined
-        ? (lanes[0]?.id ?? NO_PROJECT_LANE_ID)
-        : chooseLaneId(current, projectIds);
-    return toAddLane(laneId);
-  };
+  const chooseAddLane = (): AddTaskLane =>
+    toAddLane(tabStop?.laneId ?? lanes[0]?.id ?? NO_PROJECT_LANE_ID);
   const { mutateAsync: createTask } = useMutation({
     mutationFn: ({ title, lane }: { readonly title: string; readonly lane: AddTaskLane }) =>
       client.task.create({
@@ -411,7 +481,6 @@ export function WorkScreen({
     arrangedLanes,
     findMatches: found.topMatches,
     projects,
-    platform: bridge.platform,
     moves,
     isCarrying,
     scrollRef,
@@ -430,7 +499,7 @@ export function WorkScreen({
     },
     mergePick,
     onAdd: (laneId) => {
-      openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
+      openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId), laneId);
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
     taskPane: {
@@ -488,17 +557,18 @@ export function WorkScreen({
           <BoardLane
             key={each.lane.id}
             arrangedLane={each}
-            tabStopCardId={tabStopCardId}
+            plugins={plugins}
+            tabStop={tabStop}
             isStill={view.display.isStill}
             canWriteSummaries={canWriteSummaries}
             selectedIds={selection.selectedIds}
             onToggleLane={view.toggleLane}
             onToggleCell={view.toggleCell}
             onAddTask={(laneId) => {
-              openAddSheet(toAddLane(laneId));
+              openAddSheet(toAddLane(laneId), laneId);
             }}
             onPressCard={pressCard}
-            onFocusCard={view.setCurrentCardId}
+            onFocusCard={view.setCurrentCard}
           />
         ))}
       </div>
@@ -510,6 +580,12 @@ export function WorkScreen({
       toolbar={
         <WorkToolbar
           pill={<OverviewPill />}
+          groupings={groupings}
+          groupBy={groupBy}
+          onGroupByChange={(next) => {
+            if (next !== groupBy) view.setGroupBy(next);
+          }}
+          plugins={plugins}
           facets={facets}
           filter={view.filter}
           onFilterChange={view.setFilter}
@@ -549,6 +625,36 @@ export function WorkScreen({
               onCreate={async (title) => {
                 await createTask({ title, lane: addLane });
               }}
+              fromSource={
+                <AddFromSource
+                  key={`${addOpening.sourceId ?? ""}|${addOpening.scopeRef ?? ""}`}
+                  client={client}
+                  places={places}
+                  opening={addOpening}
+                  projectId={addProjectId}
+                  isOffline={offlineSince !== null}
+                  reserveGesture={moves.reserveGesture}
+                  onAdded={({ taskId, line, wasCreated, gesture }) => {
+                    if (!wasCreated) {
+                      moves.sayWithoutUndo(line);
+                      return;
+                    }
+                    reads.noteAddedTask(taskId);
+                    moves.sayWithReservedUndo(line, gesture);
+                  }}
+                  onFailed={moves.sayWithoutUndo}
+                  onOpenTask={(taskId) => {
+                    const card = logicalCards.find((each) => each.id === taskId);
+                    if (card === undefined) {
+                      moves.sayWithoutUndo("That Task is not on this board.");
+                      return;
+                    }
+                    // Two sheets would cover each other at the right.
+                    closeAddSheet();
+                    openCard(card);
+                  }}
+                />
+              }
             />
           )}
           <WorkPane
@@ -579,6 +685,7 @@ export function WorkScreen({
               },
             }}
             moveToStage={moveCardToStage}
+            onFilterByPlace={filterByPlace}
             onShown={pane.onPaneShown}
             onChangeTask={onChangeOpenTask}
           />
@@ -606,7 +713,7 @@ export function WorkScreen({
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
       hasSheet={addLane !== null || openTaskId !== null}
-      isArriving={startedLoading && hasBoard && !arrivalOver}
+      isArriving={isArriving}
       state={state}
       scrollRef={scrollRef}
     >

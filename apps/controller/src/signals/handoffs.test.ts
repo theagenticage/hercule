@@ -18,7 +18,7 @@ import { inTransaction, TestDatabase } from "../db/testing";
 import { RunService } from "../runs";
 import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
-import { findTaskToContinue, readThreadRef, SignalHandoffs, SignalHandoffsLayer } from "./handoffs";
+import { readThreadRef, SignalHandoffs, SignalHandoffsLayer } from "./handoffs";
 import { signalRepository } from "./repository";
 
 const REF = "github:issue:acme/api#7";
@@ -40,31 +40,31 @@ describe("readThreadRef", () => {
   });
 });
 
-describe("findTaskToContinue", () => {
+describe("finding the Task a handoff continues", () => {
   // The describe line runs this lookup for every distinct thread on every
-  // read of To do, so it must start from the few provenance rows of the ref.
+  // read of To do, so it must start from the few link rows of the ref.
   // Without statistics SQLite otherwise starts from the status index and scans
   // every open task.
-  it("starts from the provenance of the ref, not from the status index or a scan of the tasks", async () => {
+  it("starts from the links of the ref, not from the status index or a scan of the tasks", async () => {
     const plan = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const tasks = yield* taskRepository;
         // The statements the repository runs, as SQLite receives them.
         const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
-        yield* findTaskToContinue(tasks, REF).pipe(
+        yield* tasks.findActiveTaskForRef(REF).pipe(
           Effect.provideService(Statement.CurrentTransformer, (statement) => {
             statements.push(statement.compile());
             return Effect.succeed(statement);
           }),
         );
-        const [text, params] = statements.find(([text]) => text.includes("FROM tasks"))!;
+        const [text, params] = statements.find(([text]) => text.includes("task_entity_links"))!;
         return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     const details = plan.map((step) => step.detail);
-    expect(details.some((detail) => detail.includes("task_provenance"))).toBe(true);
+    expect(details.some((detail) => detail.includes("task_entity_links"))).toBe(true);
     expect(details.some((detail) => detail.includes("tasks_status_updated_at"))).toBe(false);
     expect(details.some((detail) => detail.startsWith("SCAN tasks"))).toBe(false);
   });

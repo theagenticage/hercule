@@ -1,9 +1,11 @@
 /**
  * What the Work board remembers about how the user looks at it, in
- * `localStorage`: which lanes are folded, and the choices of the Display menu.
+ * `localStorage`: how the lanes are grouped, which lanes are folded, and the
+ * choices of the Display menu.
  * One entry per controller and user, because a lane's id means nothing to
  * another controller, and two people on one machine fold their own lanes.
  */
+import { PROJECT_FACET_ID } from "@hercule/client-core/work";
 import type { WorkDisplay } from "./use-work-view";
 
 /** The choices of the Display menu before the user makes any. */
@@ -13,14 +15,20 @@ export const DEFAULT_WORK_DISPLAY: WorkDisplay = {
   hasSingleKeys: true,
 };
 
-/** What is kept: the ids of the folded lanes, and the Display choices. */
+/** What is kept: how the lanes are grouped, the ids of the folded lanes, and the Display choices. */
 export interface SavedWorkView {
+  /** What the lanes group by: `PROJECT_FACET_ID`, or the kind of an outside place such as `github/repository`. */
+  readonly groupBy: string;
   readonly foldedLaneIds: readonly string[];
   readonly display: WorkDisplay;
 }
 
-/** The view of a user who has saved nothing: every lane open, the default Display. */
-export const EMPTY_WORK_VIEW: SavedWorkView = { foldedLaneIds: [], display: DEFAULT_WORK_DISPLAY };
+/** The view of a user who has saved nothing: grouped by Project, every lane open, the default Display. */
+export const EMPTY_WORK_VIEW: SavedWorkView = {
+  groupBy: PROJECT_FACET_ID,
+  foldedLaneIds: [],
+  display: DEFAULT_WORK_DISPLAY,
+};
 
 /** Returns the `localStorage` key that holds the view of `username` on the controller at `controllerUrl`. */
 export const buildWorkViewKey = (controllerUrl: string, username: string): string =>
@@ -42,9 +50,10 @@ export const readSavedWorkView = (key: string): SavedWorkView => {
     return EMPTY_WORK_VIEW;
   }
   if (!isRecord(parsed)) return EMPTY_WORK_VIEW;
-  const { foldedLaneIds, display } = parsed;
+  const { groupBy, foldedLaneIds, display } = parsed;
   const shown = isRecord(display) ? display : {};
   return {
+    groupBy: typeof groupBy === "string" && groupBy !== "" ? groupBy : EMPTY_WORK_VIEW.groupBy,
     foldedLaneIds: Array.isArray(foldedLaneIds)
       ? foldedLaneIds.filter((id): id is string => typeof id === "string")
       : [],

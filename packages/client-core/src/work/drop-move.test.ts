@@ -5,8 +5,9 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes } from "./arrange-lanes";
-import { applyCardMove } from "./card-move";
-import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
+import { applyCardMove, type CardMove } from "./card-move";
+import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
+import { groupBoardByContext } from "./context-lanes";
 import { buildDropMove, buildFollowerMoves, settleGroupDrop } from "./drop-move";
 import { buildLanes } from "./lanes";
 
@@ -179,6 +180,75 @@ describe("buildDropMove", () => {
       taskId: "x",
       stage: "planned",
       afterTaskId: "p",
+    });
+  });
+
+  describe("in a lane for an outside place", () => {
+    const board = {
+      ...buildBoard(
+        buildCard("a", { projectId: "storefront", contextRefs: ["acme:project:returns"] }),
+        buildCard("b", {
+          projectId: "storefront",
+          stage: "building",
+          contextRefs: ["acme:project:returns"],
+        }),
+        buildCard("c", { projectId: "checkout", stage: "building" }),
+        buildCard("d", { projectId: "storefront", stage: "building" }),
+      ),
+      places: [buildPlace("acme:project:returns", "Returns at the depots")],
+      groupings: [{ kind: "acme/project", caption: "Acme project" }],
+    };
+    const dropOnOutside = (laneId: string, beforeCardId: string | null, folded = false) => {
+      const lane = arrangeLanes(groupBoardByContext(board, "acme/project"), {
+        foldedLaneIds: new Set(folded ? [laneId] : []),
+        openedCellIds: new Set(),
+        isFiltering: false,
+      }).find((each) => each.lane.id === laneId)!;
+      return buildDropMove({ movingCard: board.cards[0]!, lane, stage: "building", beforeCardId });
+    };
+
+    it.each([
+      ["a place", "place:acme:project:returns", "b"],
+      ["a place, with no slot", "place:acme:project:returns", null],
+      ["the lane for Tasks under none", "none:acme/project", null],
+    ])("changes the stage only in %s", (_, laneId, beforeCardId) => {
+      const drop = dropOnOutside(laneId, beforeCardId);
+      expect(drop).toEqual({ move: { taskId: "a", stage: "building" } });
+    });
+
+    it("changes the stage only on a folded lane too", () => {
+      const drop = dropOnOutside("place:acme:project:returns", null, true);
+      expect(drop.move).toEqual({ taskId: "a", stage: "building" });
+    });
+
+    it("changes the stage only for every card of a drop of several, and leaves each in its Project", () => {
+      const drop = dropOnOutside("place:acme:project:returns", null);
+      const followers = [board.cards[1]!, board.cards[2]!];
+
+      const settled = settleGroupDrop(board, PROJECTS, drop, followers);
+
+      expect(settled).toEqual({
+        kind: "send",
+        moves: [
+          { taskId: "a", stage: "building" },
+          { taskId: "b", stage: "building" },
+          { taskId: "c", stage: "building" },
+        ],
+      });
+      const moved = (settled as { moves: readonly CardMove[] }).moves.reduce(applyCardMove, board);
+      expect(Object.fromEntries(moved.cards.map((card) => [card.id, card.projectId]))).toEqual({
+        a: "storefront",
+        b: "storefront",
+        c: "checkout",
+        d: "storefront",
+      });
+    });
+
+    it("leaves the card in its Project, last in its stored cell", () => {
+      const { move } = dropOnOutside("place:acme:project:returns", "b");
+      const moved = applyCardMove(board, move);
+      expect(moved.cards.find((card) => card.id === "a")?.projectId).toBe("storefront");
+      expect(listIds(moved.cards)).toEqual(["b", "c", "d", "a"]);
     });
   });
 });

@@ -52,3 +52,11 @@ Four designs were prototyped. The one chosen, Round Trip, brought each result ba
 - Intake reads Tasks and runs as well as signals. The desktop app's Tracking section is the first Task UI on desktop.
 - The To do count includes the Tracking rows that wait on the user (Needs you, Failed, Finished), so inbox zero stays true.
 - Not decided here, and left for later: comparing attempts, choosing when a handoff may interrupt, closing a Task when its source ends (which would be an editable workflow, under ADR 0019), structured results from runs, and agents with their own identity on GitHub.
+
+## Note: which Task a hand-off continues
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), [ADR 0054](./0054-external-entities-are-durable-records-kept-true-by-polls.md).)* The first bullet of the Decision says a hand-off "continues the open Task that carries the signal's thread ref". The selector was the open Task that was updated most recently (`findTaskToContinue`). That rule changes. A summary, a stage change or any other update could change which Task a ref belongs to, and a card on the Inbox must show one Task for a ref that does not move.
+
+- **The active Task of a ref is the live Task with the oldest link to it,** by `(linked_at, task_id)` in `task_entity_links`. Live means not `done`, not `dropped`, not deleted and not merged. Nothing a Task does later can change the answer.
+- **Both users of the rule move together.** The signal's Describe Line and `signal.handOff` call the same function, so the line still names the Task the hand-off continues.
+- **Nothing else changes.** A hand-off with no live linked Task still creates one, and the core still never moves the Task's status.

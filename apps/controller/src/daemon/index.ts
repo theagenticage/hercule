@@ -89,9 +89,12 @@ export {
   SessionEditObserverLayer,
 } from "./discussions";
 export {
+  EntityObservationsLayer,
   IngestExecutorLayer,
+  EntityPruneInterval,
   IngestReconcileInterval,
   OpenSignalsLayer,
+  runEntityPruneLoop,
   runIngestReconciler,
 } from "./ingest";
 export { BoundOperationsLayer } from "./bound-actions";

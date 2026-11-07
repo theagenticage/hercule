@@ -1,4 +1,4 @@
-/* Inbox zero: Hercule in a brass sunburst, the line under it, and what was
+/* To do clear: Hercule in a brass sunburst, the line under it, and what was
    cleared today, centred in the list's scroller (spec 17 §Motion). The drawing
    is buildZero in docs/design/intake-directions/asks/asks.js. */
 .asks-zero {
@@ -34,7 +34,7 @@
 .asks-zero-ray--short {
   height: 21.5px;
 }
-/* A spark rests unseen; it shows only while inbox zero arrives. */
+/* A spark rests unseen; it shows only while To do clear arrives. */
 .asks-zero-spark {
   position: absolute;
   top: calc(50% - 2px);
@@ -131,21 +131,21 @@
   }
   /* The rays grow outward from their inner end, 12ms apart, clockwise from the top. */
   .asks-zero.is-arriving .asks-zero-ray {
-    animation: inbox-zero-ray var(--dur-3) var(--ease-out) backwards;
+    animation: to-do-clear-ray var(--dur-3) var(--ease-out) backwards;
     animation-delay: calc(var(--arrival-wait) + 120ms + var(--ray-index) * 12ms);
   }
   /* Hercule hops in: its wrapper hops 8px while the face grows on the spring. */
   .asks-zero.is-arriving .asks-zero-face {
-    animation: inbox-zero-hop var(--dur-3) var(--ease-out) backwards;
+    animation: to-do-clear-hop var(--dur-3) var(--ease-out) backwards;
     animation-delay: calc(var(--arrival-wait) + 240ms);
   }
   .asks-zero.is-arriving .asks-zero-face-body {
-    animation: inbox-zero-spring var(--dur-3) var(--ease-spring) backwards;
+    animation: to-do-clear-spring var(--dur-3) var(--ease-spring) backwards;
     animation-delay: calc(var(--arrival-wait) + 240ms);
   }
   /* The sparks fly out from behind Hercule and fade, once. */
   .asks-zero.is-arriving .asks-zero-spark {
-    animation: inbox-zero-spark var(--dur-3) var(--ease-out) backwards;
+    animation: to-do-clear-spark var(--dur-3) var(--ease-out) backwards;
     animation-delay: calc(var(--arrival-wait) + 380ms);
   }
   /* The words rise 6px each, 60ms apart. */
@@ -153,7 +153,7 @@
   .asks-zero.is-arriving .asks-zero-line,
   .asks-zero.is-arriving .asks-zero-n,
   .asks-zero.is-arriving .asks-zero-tally {
-    animation: inbox-zero-rise var(--dur-2) var(--ease-out) backwards;
+    animation: to-do-clear-rise var(--dur-2) var(--ease-out) backwards;
     animation-delay: calc(var(--arrival-wait) + 360ms);
   }
   .asks-zero.is-arriving .asks-zero-line {
@@ -166,12 +166,12 @@
     animation-delay: calc(var(--arrival-wait) + 540ms);
   }
 }
-@keyframes inbox-zero-ray {
+@keyframes to-do-clear-ray {
   from {
     transform: rotate(var(--angle)) translateY(-63.25px) scaleY(0) translateY(-100%);
   }
 }
-@keyframes inbox-zero-hop {
+@keyframes to-do-clear-hop {
   from {
     transform: translateY(0);
   }
@@ -182,13 +182,13 @@
     transform: translateY(0);
   }
 }
-@keyframes inbox-zero-spring {
+@keyframes to-do-clear-spring {
   from {
     opacity: 0;
     transform: scale(0.6);
   }
 }
-@keyframes inbox-zero-spark {
+@keyframes to-do-clear-spark {
   from {
     opacity: 0;
     transform: rotate(var(--angle)) translateY(-18px) scale(0.5);
@@ -201,7 +201,7 @@
     transform: rotate(var(--angle)) translateY(-56px);
   }
 }
-@keyframes inbox-zero-rise {
+@keyframes to-do-clear-rise {
   from {
     opacity: 0;
     transform: translateY(6px);

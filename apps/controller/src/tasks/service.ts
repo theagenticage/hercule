@@ -55,6 +55,7 @@ import {
   refuseStageWithStatus,
   NotFound,
   Validation,
+  type ExternalRef,
   type Forbidden,
   type InvalidState,
   type ProvenanceEntry,
@@ -69,7 +70,6 @@ import {
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
-  afterCommit,
   announce,
   announceTaskCardChange,
   nowIso,
@@ -84,7 +84,7 @@ import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
 import { TaskLinkOwners } from "./link-owners";
-import { TaskSummaryWake } from "./summary-wake";
+import { makeSummaryDirtyMarker } from "./summary-dirty";
 import {
   taskRepository,
   type BoardCell,
@@ -183,6 +183,37 @@ const ONLY_THE_USER_MERGES =
 /** The refusal of `recordHandoff` for a caller who is not the user. */
 const ONLY_THE_USER_RECORDS_HANDOFF =
   "only the user may record a handoff: handing a signal off is the user's act, so a session or a workflow step may not; ask the user instead";
+
+/**
+ * The refusal of `createTaskLinkedToRef`, `undoCreatedTask` and the Inbox
+ * moves of External Entities for a caller who is not the user.
+ */
+export const ONLY_THE_USER_TAKES_ON_WORK =
+  "only the user may take work on from an outside thing, take it back, or set it aside: those are the user's own acts, so a session or a workflow step may not; ask the user instead";
+
+/** Why `undoCreatedTask` left a Task in place. */
+export type TaskUndoRefusal =
+  /** There is no such Task, or it is already deleted. */
+  | "task-gone"
+  /** The Task was merged into another Task, which now holds its work. */
+  | "task-merged"
+  /** The Task does not link the ref it was asked to be taken back for. */
+  | "not-linked"
+  /** A Thread belongs to the Task. */
+  | "has-thread"
+  /** A run works on the Task. */
+  | "has-run"
+  /** The Task links a ref other than the one it was created with. */
+  | "has-other-link"
+  /** The Task was edited after it was created. */
+  | "edited"
+  /** The Task is at Done or Dropped, so it is no longer live work. */
+  | "finished";
+
+/** The result of `undoCreatedTask`. */
+export type CreatedTaskUndo =
+  | { readonly undone: true }
+  | { readonly undone: false; readonly reason: TaskUndoRefusal };
 
 /** One page of tasks, in the contract's shape. */
 export interface TaskPage {
@@ -338,27 +369,7 @@ const make = Effect.gen(function* () {
       return state.value;
     });
 
-  /**
-   * Marks the summary of the Task `taskId` dirty in the caller's transaction,
-   * and wakes the summary writer once that transaction commits. The first mark
-   * of a dirty cycle on a Task with a written summary also announces the Task
-   * as a derived change, so its card shows the summary as stale. A Task that is
-   * deleted, merged or finished is left alone. It writes one row and waits for
-   * nothing, so any change a summary reads can call it.
-   */
-  const markSummaryDirty = (taskId: string): Effect.Effect<void, SqlError> =>
-    withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const wake = yield* TaskSummaryWake;
-        const { marked, becameStale } = yield* tasks.markSummaryDirty(taskId, yield* nowIso);
-        if (marked) yield* afterCommit(wake.wake);
-        // The card shows a written summary as current until told otherwise.
-        // Only the first mark of a dirty cycle says so; the rest change nothing
-        // a client draws.
-        if (becameStale) yield* announceTaskCardChange(taskId);
-      }),
-    );
+  const markSummaryDirty = yield* makeSummaryDirtyMarker;
 
   /**
    * Checks that the project a task points at exists. Fails with `NotFound` if
@@ -493,12 +504,14 @@ const make = Effect.gen(function* () {
         // written and no event recorded.
         if (Object.keys(changes).length === 0) return before;
 
-        yield* tasks.update(id, edit, appended, at, actor);
+        const linkedNewRef = yield* tasks.update(id, edit, appended, at, actor);
         // A finished Task waits for no summary. Taking it back to a live stage,
-        // or changing the words a summary reads, makes the summary out of date.
+        // changing the words a summary reads, or linking a new outside thing
+        // makes the summary out of date.
         if (edit.stage !== undefined && isFinishedStage(edit.stage)) {
           yield* tasks.clearSummaryDirty(id);
         } else if (
+          linkedNewRef ||
           edit.title !== undefined ||
           edit.description !== undefined ||
           (edit.stage !== undefined && isFinishedStage(before.stage))
@@ -594,6 +607,13 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const before = yield* readLiveTaskOrFail(requestedId);
+        if (placement.refuseIfMerged === true && before.id !== requestedId) {
+          return yield* Effect.fail(
+            createNotFoundError(
+              "the task was merged into another task, so it was not moved; move the other task if you meant to",
+            ),
+          );
+        }
         // A merged id, for the Task or for the card it follows, stands for the
         // survivor, and the comparisons and the rank below are about it.
         const id = before.id;
@@ -661,7 +681,15 @@ const make = Effect.gen(function* () {
   const insertTask = (
     fields: Pick<
       NewTask,
-      "id" | "title" | "description" | "stage" | "priority" | "labels" | "projectId" | "provenance"
+      | "id"
+      | "title"
+      | "description"
+      | "stage"
+      | "priority"
+      | "labels"
+      | "projectId"
+      | "provenance"
+      | "following"
     >,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
@@ -679,6 +707,10 @@ const make = Effect.gen(function* () {
         });
         yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
         yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
+        // A new Task has no links yet, so every ref its provenance names is a new link.
+        if (fields.provenance.some((entry) => entry.ref !== undefined)) {
+          yield* markSummaryDirty(task.id);
+        }
         return task;
       }),
     );
@@ -794,6 +826,33 @@ const make = Effect.gen(function* () {
         yield* tasks.recordWorkspaceTask(workspaceId, task.id, yield* nowIso);
       }
       return task;
+    });
+
+  /**
+   * Soft-deletes a task, clears its pending summary and withdraws the open
+   * decisions about it. The row stays, so the log and the runs that reference
+   * the task still point at something. Fails with `NotFound` if the task does
+   * not exist or is already deleted. It checks no grant and opens no
+   * transaction: the caller does both.
+   */
+  const softDeleteTask = (id: string): Effect.Effect<void, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const at = yield* nowIso;
+      const actor = yield* currentStamp;
+      const task = yield* readLiveTaskOrFail(id);
+      yield* tasks.softDelete(id, at);
+      // A deleted Task waits for no summary.
+      yield* tasks.clearSummaryDirty(id);
+      // The event holds a final snapshot, because nothing can read the
+      // row afterwards.
+      yield* audit.append({
+        kind: "task.deleted",
+        actor,
+        record: { topic: "task", id },
+        payload: { taskId: id, snapshot: { ...task, deletedAt: at } },
+        at,
+      });
+      yield* notifier.withdrawDecisionsAbout([{ kind: "task", id }], "task deleted");
     });
 
   return {
@@ -927,6 +986,95 @@ const make = Effect.gen(function* () {
           handoff.taskId,
           { status: "in-progress", provenance: [handoff.entry] },
           yield* currentStamp,
+        );
+      }),
+
+    /**
+     * Creates a Task for a ref the user took on or added to Work, linked to
+     * that ref, and returns it. The Task has the given title and stage,
+     * priority `normal`, and the provenance entry `{ ref }`, which writes the
+     * link. `following` is stored on the link: it says the user added the ref
+     * from nothing that concerned them. The `task.created` event carries the
+     * actor's stamp.
+     *
+     * Permission: the user only, with the grant `task.update`, and not the
+     * grant `task.create` that `create` asks for. Taking work on is the
+     * user's act on an outside thing. It fails with `Forbidden` for any other
+     * caller, whatever grants they hold, and with `NotFound` if the project
+     * does not exist. It runs in the caller's transaction.
+     */
+    createTaskLinkedToRef: (input: {
+      readonly ref: ExternalRef;
+      readonly title: string;
+      readonly stage: TaskStage;
+      readonly projectId?: string;
+      readonly following: boolean;
+    }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        yield* ensureProjectExists(input.projectId);
+        return yield* insertTask(
+          {
+            title: input.title,
+            description: "",
+            stage: input.stage,
+            priority: "normal",
+            labels: [],
+            projectId: input.projectId,
+            provenance: [{ ref: input.ref }],
+            following: input.following,
+          },
+          yield* currentStamp,
+        );
+      }),
+
+    /**
+     * Takes back a Task that `createTaskLinkedToRef` made, by soft-deleting
+     * it, but only when it links `ref` and nothing has been added to it
+     * since: no Thread, no run, no link to another ref, no edit since it was
+     * created, and a stage that is not Done or Dropped. Otherwise it changes
+     * nothing and returns `{ undone: false, reason }`. The Task is read by its
+     * own id and is never replaced by the Task it was merged into: a merged
+     * Task is refused (`task-merged`), because the survivor now holds its
+     * work. The check and the delete are one write, so a Thread cannot join
+     * in between.
+     *
+     * Permission: the user only, with the grant `task.update`, as for
+     * `createTaskLinkedToRef`. It fails with `Forbidden` for any other caller.
+     * It runs in the caller's transaction, or opens one.
+     */
+    undoCreatedTask: (
+      id: Id,
+      ref: ExternalRef,
+    ): Effect.Effect<CreatedTaskUndo, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const found = yield* tasks.readTraces(id, ref);
+            if (Option.isNone(found)) return { undone: false, reason: "task-gone" } as const;
+            const traces = found.value;
+            const reason: TaskUndoRefusal | undefined = traces.merged
+              ? "task-merged"
+              : !traces.linksRef
+                ? "not-linked"
+                : traces.hasSession
+                  ? "has-thread"
+                  : traces.hasRun
+                    ? "has-run"
+                    : traces.linkCount > 1
+                      ? "has-other-link"
+                      : traces.edited
+                        ? "edited"
+                        : isFinishedStage(traces.stage)
+                          ? "finished"
+                          : undefined;
+            if (reason !== undefined) return { undone: false, reason } as const;
+            // The Task was read live a moment ago, in this transaction.
+            yield* Effect.orDie(softDeleteTask(id));
+            return { undone: true } as const;
+          }),
         );
       }),
 
@@ -1066,6 +1214,7 @@ const make = Effect.gen(function* () {
             }
 
             yield* tasks.markMerged(sourceId, targetId);
+            yield* tasks.moveEntityLinks(sourceId, targetId);
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
@@ -1450,7 +1599,8 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Soft-deletes a task, and withdraws the open decisions about it. The row
+     * Soft-deletes a task, clears its pending summary and withdraws the open
+     * decisions about it. The row
      * stays, so the log and the runs that reference the task still point at
      * something. Fails with `NotFound` if the task does not exist or is
      * already deleted. It also fails with
@@ -1465,8 +1615,6 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const at = yield* nowIso;
-            const actor = yield* currentStamp;
             // The id is taken as it is, never followed to a survivor: a stale id
             // (an old link, a CLI call) must not delete the Task that took over.
             const survivorId = yield* tasks.resolveTaskId(id);
@@ -1480,19 +1628,7 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            const task = yield* readLiveTaskOrFail(id);
-            yield* tasks.softDelete(task.id, at);
-            yield* tasks.clearSummaryDirty(task.id);
-            // The event holds a final snapshot, because nothing can read the
-            // row afterwards.
-            yield* audit.append({
-              kind: "task.deleted",
-              actor,
-              record: { topic: "task", id: task.id },
-              payload: { taskId: task.id, snapshot: { ...task, deletedAt: at } },
-              at,
-            });
-            yield* notifier.withdrawDecisionsAbout([{ kind: "task", id: task.id }], "task deleted");
+            yield* softDeleteTask(id);
             return {};
           }),
         );

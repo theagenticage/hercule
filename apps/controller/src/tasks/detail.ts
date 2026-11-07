@@ -9,6 +9,9 @@
  * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
  * - `TaskTrackingRuns` for the runs, the same port Tracking uses;
  * - `TaskDetailFacts` for the sessions and the number of runs.
+ *
+ * The outside things the Task links come from the card's facts, so the card
+ * and the pane are built from one read of the context.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -22,14 +25,16 @@ import {
   type InvalidState,
   type Forbidden,
   type Id,
+  MAX_CARD_CONTEXTS,
   MAX_DETAIL_SESSIONS,
   type NotFound,
   type TaskDetail,
   type TaskDetailSession,
+  type WorkCard,
   type Unauthenticated,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { buildWorkCard, TaskBoardFacts } from "./board";
+import { buildWorkCard, TaskBoardFacts, type BoardEntityContext } from "./board";
 import { taskRepository } from "./repository";
 import { TaskTrackingRuns } from "./tracking";
 
@@ -62,6 +67,29 @@ export class TaskDetailFacts extends Context.Service<
 const NO_BOARD_CARD =
   "this task is finished (done or dropped), so it has no details to show. Move it back to a board stage first";
 
+/**
+ * Returns the outside things a Task links for its pane: `entities`, the
+ * linked refs that have a record, in the order they were linked (at most
+ * `MAX_CARD_CONTEXTS`), and the `places` and `edges` among the refs the card
+ * lists in `contextRefs`. They are cut from the board's context, which the
+ * card was built from, so the pane never disagrees with its card.
+ */
+const buildLinkedEntities = (
+  linkedRefs: ReadonlyArray<string>,
+  card: WorkCard,
+  context: BoardEntityContext,
+) => {
+  const shown = new Set(card.contextRefs);
+  const places = context.places.filter((place) => shown.has(place.ref));
+  const placeByRef = new Map(places.map((place) => [place.ref, place] as const));
+  return {
+    // A linked ref with no record has no row to draw, so it is left out.
+    entities: linkedRefs.slice(0, MAX_CARD_CONTEXTS).flatMap((ref) => placeByRef.get(ref) ?? []),
+    places,
+    edges: context.edges.filter((edge) => shown.has(edge.fromRef) && shown.has(edge.toRef)),
+  };
+};
+
 const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const cardFacts = yield* TaskBoardFacts;
@@ -75,7 +103,8 @@ const make = Effect.gen(function* () {
      * unfinished first, then newest, and always the Thread that asks the
      * card's open question) with how many it has, up to
      * `MAX_TRACKING_DETAIL_RUNS` of its runs (oldest first, as Tracking lists
-     * them) with how many it has.
+     * them) with how many it has, and the outside things it links with the
+     * places above them.
      *
      * The caller needs `task.read`, `session.query` and `run.query`, because
      * the reply shows a session's open Requests and a run's output. A caller
@@ -113,7 +142,10 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(NO_BOARD_CARD));
         }
         const id = task.id;
-        const [facts] = yield* cardFacts.readFacts([boardTask]);
+        const {
+          cards: [facts],
+          context,
+        } = yield* cardFacts.readFacts([boardTask]);
         const card = buildWorkCard(boardTask, facts!);
         // The card's open question is asked by one Thread, and the pane answers it from that
         // Thread's Requests, so that Thread is listed even when newer sessions would crowd it out.
@@ -131,6 +163,7 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
+          ...buildLinkedEntities(facts!.linkedRefs, card, context),
         };
       }),
   };

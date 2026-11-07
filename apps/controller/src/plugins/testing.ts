@@ -19,6 +19,7 @@ import {
   type ActionContext,
   type ActivationContext,
   type AuthError,
+  type EntityKindDeclaration,
   type EventSourceContribution,
   type IngestConnection,
   type FeedDeclaration,
@@ -39,7 +40,7 @@ import { AuditLogLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
-import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
+import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import { nowIso, withTransaction } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
@@ -178,6 +179,7 @@ export const buildPluginStack = () => {
         Layer.provide(IngestExecutorLayer),
         // Merged, so a test can build an ingest context of its own.
         Layer.provideMerge(OpenSignalsLayer),
+        Layer.provideMerge(EntityObservationsLayer),
       ),
     ),
     Layer.provideMerge(ConnectionTypesLayer),
@@ -487,6 +489,8 @@ export const createEventSourceFixture = (
   options: {
     readonly feeds?: Record<string, FeedDeclaration>;
     readonly capabilities?: ReadonlyArray<PluginCapability>;
+    /** The External Entity kinds the source declares. The manifest needs the `entities` capability then. */
+    readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
   } = {},
 ): EventSourceFixture => {
   let running = 0;
@@ -519,6 +523,7 @@ export const createEventSourceFixture = (
             id: "acme",
             connectionType: EVENT_SOURCE_FIXTURE.connectionType,
             feeds: options.feeds ?? { notifications: { defaultIntervalSeconds: 60 } },
+            ...(options.entityKinds === undefined ? {} : { entityKinds: options.entityKinds }),
             kinds: {
               [EVENT_SOURCE_FIXTURE.kind]: {
                 description: "Something was done in Acme.",

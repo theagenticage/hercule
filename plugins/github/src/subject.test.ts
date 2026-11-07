@@ -1,6 +1,12 @@
 /** Tests the subject block, refs and web URLs every GitHub event carries. */
 import { describe, expect, it } from "vitest";
-import { buildItemEvent, buildRepoRef, buildRepoSubject, parseItemRef } from "./subject";
+import {
+  buildItemEvent,
+  buildRepoRef,
+  buildRepoSubject,
+  parseItemRef,
+  parseRepoRef,
+} from "./subject";
 
 describe("the subject, refs and url of an event", () => {
   it("point an issue event at the issue, and its repository", () => {
@@ -82,6 +88,18 @@ describe("parseItemRef", () => {
       "github:repo:acme/webshop",
     ]) {
       expect(parseItemRef(ref), ref).toBeUndefined();
+    }
+  });
+});
+
+describe("parseRepoRef", () => {
+  it("reads the lowercase repository of a repository's ref", () => {
+    expect(parseRepoRef("github:repo:Acme/Web.Shop")).toBe("acme/web.shop");
+  });
+
+  it("refuses an item's ref and a repository GitHub would not allow", () => {
+    for (const ref of ["github:pr:acme/webshop#1", "github:repo:acme/..", "github:repo:acme"]) {
+      expect(parseRepoRef(ref), ref).toBeUndefined();
     }
   });
 });

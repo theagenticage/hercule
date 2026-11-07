@@ -1,11 +1,12 @@
 /**
- * Task Detail Facts: reads, for `task.readDetail`, the sessions of one Task
+ * Task Detail Facts: reads, for `task.readDetail`, the sessions of one Task,
  * and the number of its runs.
  *
  * It lives in the controller daemon because the port belongs to the tasks
  * domain and is answered from the sessions and runs repositories, and both of
  * those domains depend on the tasks domain. Only the layer above them can join
- * them.
+ * them. The outside things the Task links are not read here: they come from
+ * the card's facts (`TaskBoardFacts`), so the pane and the card share one read.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,9 +17,10 @@ import { TaskDetailFacts } from "../../tasks";
 
 /**
  * Answers the tasks domain's `TaskDetailFacts` port from the sessions and
- * runs repositories, in one statement for the sessions and one for the run
- * count. A session's open Requests are built by the code that builds them for
- * the `Session` record, so the pane and the session itself never disagree.
+ * runs repositories: one statement for the sessions and one for the run
+ * count. A session's open Requests are built by
+ * the code that builds them for the `Session` record, so the pane and the
+ * session itself never disagree.
  */
 export const TaskDetailFactsLayer: Layer.Layer<TaskDetailFacts, never, SqlClient.SqlClient> =
   Layer.effect(TaskDetailFacts)(

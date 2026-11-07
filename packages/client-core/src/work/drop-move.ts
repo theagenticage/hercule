@@ -56,12 +56,19 @@ export interface DropRequest {
  *   card floats to the top of its cell. A slot after the last card shown goes
  *   before the first hidden card, so the card does not jump over cards the
  *   user has not seen.
+ * - On a lane for an outside place the drop changes the stage only: no
+ *   `projectId` and no `afterTaskId`, because the lane belongs to the source
+ *   and a cell is still a Project and a stage. The card goes last in its
+ *   stored cell, and the lane shows it by that order.
  * - On a folded lane there is no slot, so `afterTaskId` is absent and the
  *   card goes last in its cell.
  */
 export const buildDropMove = (request: DropRequest): DropMove => {
   const { movingCard, lane, beforeCardId } = request;
   const stage = request.stage ?? movingCard.stage;
+  if (lane.lane.outside !== undefined) {
+    return { move: { taskId: movingCard.id, stage } };
+  }
   const isOwnLane = lane.lane.cells.some((cell) =>
     cell.cards.some((card) => card.id === movingCard.id),
   );
@@ -95,7 +102,8 @@ export const buildDropMove = (request: DropRequest): DropMove => {
  * follower goes last in the cell in turn, which gives the same order.
  *
  * A follower names a Project (`targetProjectId`) only when it stands in
- * another one, as the lead card's move does.
+ * another one, as the lead card's move does. A drop with no `targetProjectId`
+ * (an outside lane) changes the stage only, so no follower names a Project.
  */
 export const buildFollowerMoves = (
   { move: leadMove, targetProjectId }: DropMove,
@@ -106,7 +114,9 @@ export const buildFollowerMoves = (
     const move: CardMove = {
       taskId: card.id,
       ...(leadMove.stage === undefined ? {} : { stage: leadMove.stage }),
-      ...((card.projectId ?? null) === targetProjectId ? {} : { projectId: targetProjectId }),
+      ...(targetProjectId === undefined || (card.projectId ?? null) === targetProjectId
+        ? {}
+        : { projectId: targetProjectId }),
       ...(leadMove.afterTaskId === undefined ? {} : { afterTaskId: previousId }),
     };
     previousId = card.id;
@@ -154,10 +164,7 @@ export const settleGroupDrop = (
   );
   return {
     kind: "send",
-    moves: [
-      settled.move,
-      ...buildFollowerMoves({ move: settled.move, targetProjectId: drop.targetProjectId }, present),
-    ],
+    moves: [settled.move, ...buildFollowerMoves({ ...drop, move: settled.move }, present)],
     ...(notes.length === 0 ? {} : { note: notes.join(" ") }),
   };
 };

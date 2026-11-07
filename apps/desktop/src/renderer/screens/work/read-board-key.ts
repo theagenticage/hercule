@@ -1,7 +1,6 @@
 import type { BoardWalk, EndStage } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
-import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
-import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
+import type { DeskKeyPress } from "../desk/desk-keys";
 
 /** What a key press asks of the Work board. */
 export type BoardKeyCommand =
@@ -22,18 +21,8 @@ export type BoardKeyCommand =
   | { readonly kind: "fold-lane" }
   | { readonly kind: "fold-all-lanes" }
   | { readonly kind: "find" }
-  | { readonly kind: "undo" }
   | { readonly kind: "toggle-keys-sheet" }
   | { readonly kind: "step-back" };
-
-/** The parts of a keyboard event that decide which command a key is. */
-export interface BoardKeyPress {
-  readonly key: string;
-  readonly shiftKey: boolean;
-  readonly altKey: boolean;
-  readonly metaKey: boolean;
-  readonly ctrlKey: boolean;
-}
 
 const ARROW_WALKS: Readonly<Record<string, BoardWalk>> = {
   ArrowUp: "up",
@@ -58,27 +47,17 @@ const LETTER_WALKS: Readonly<Record<string, BoardWalk>> = {
  * `/` or `?`. Backspace and Delete count as single keys too, though they type
  * nothing: they drop a card, and Display's switch is how a user makes sure a
  * stray key never does. Single keys are the only ones `hasSingleKeys` turns off. The
- * arrows, Return, Space, Esc and ⌘Z stay on, because they act on the focused
+ * arrows, Return, Space and Esc stay on, because they act on the focused
  * element or are not typed characters. Shift only counts with the arrows (to
- * move a card) and with F (to fold every lane): Alt, and ⌘ or Ctrl other than
- * for undo, make the key the app's or the system's.
- *
- * `platform` decides which of ⌘ and Ctrl undoes.
+ * move a card) and with F (to fold every lane): Alt, ⌘ and Ctrl make the key
+ * the app's or the system's. Undo is not a board key: the shell listens for it
+ * on every screen.
  */
 export const readBoardKey = (
-  press: BoardKeyPress,
+  press: DeskKeyPress,
   hasSingleKeys: boolean,
-  platform: DesktopPlatform,
 ): BoardKeyCommand | null => {
-  if (press.altKey) return null;
-  if (press.metaKey || press.ctrlKey) {
-    const isUndo =
-      press.key.toLowerCase() === "z" &&
-      !press.shiftKey &&
-      isPrimaryModifierHeld(press, platform) &&
-      !isOtherModifierHeld(press, platform);
-    return isUndo ? { kind: "undo" } : null;
-  }
+  if (press.altKey || press.metaKey || press.ctrlKey) return null;
 
   const { key, shiftKey } = press;
   if (key === "Escape") return { kind: "step-back" };

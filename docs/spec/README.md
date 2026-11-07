@@ -31,6 +31,7 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [17-desktop-app.md](./17-desktop-app.md) | the desktop app: process model, reaching the controller, token storage, Electron security, the IPC contract, native behaviour, the Crew Bureau design system, the Intake screen, performance budgets, slices |
 | [18-android-app.md](./18-android-app.md) | the Android app: scope, the Gradle project and its stack, sign-in and the stored API Key, the live connection and its foreground service, screens, alerts and the Live Update, the Crew Bureau design system on Compose, the performance baseline, testing and distribution |
 | [19-agent-coordination.md](./19-agent-coordination.md) | agent coordination: Edit Overlaps, Discussions and Posts, Discussion Inputs, the per-repo Wiki, the prompt paragraph and the skill section, the desktop Discussions and Wiki screens |
+| [20-external-entities.md](./20-external-entities.md) | External Entities and the Inbox *(added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032))*: the records and their lifecycle, observations and the `reconcile` contract, relation claims and the graph reads, Inbox membership and counts, the `externalEntity` operations, search, recognition and resolution, Work's context, the live causes |
 
 ## Conventions inside the documents
 

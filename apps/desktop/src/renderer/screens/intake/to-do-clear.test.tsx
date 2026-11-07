@@ -12,7 +12,7 @@ import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail, Signal } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import { pluginsQuery, signalsClearedTodayQuery } from "../../app/queries";
-import { InboxZero } from "./inbox-zero";
+import { ToDoClear } from "./to-do-clear";
 
 // 10:00 on Tuesday 13 October in Amsterdam: the morning's line.
 const NOW = new Date("2026-10-13T08:00:00.000Z");
@@ -28,6 +28,7 @@ const buildPlugin = (id: string, displayName: string): PluginDetail => ({
   config: {},
   contributions: [],
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /** Builds a signal of `kind` resolved by the user at `at`. */
@@ -58,12 +59,12 @@ const buildResolved = (id: number, kind: string, at: string): Signal => ({
 });
 
 /**
- * Renders inbox zero in Amsterdam with `done` as the Done list, read whole,
+ * Renders To do clear in Amsterdam with `done` as the Done list, read whole,
  * in a router that holds the `/_connected` route it reads its client from.
  * Every read is answered from the cache; the client never answers, so a read
  * the cache did not answer would leave the picture suspended.
  */
-const renderInboxZero = async (
+const renderToDoClear = async (
   done: ReadonlyArray<Signal>,
   {
     arriving = false,
@@ -97,7 +98,7 @@ const renderInboxZero = async (
     getParentRoute: () => connected,
     path: "intake",
     component: () => (
-      <InboxZero
+      <ToDoClear
         timezone="Europe/Amsterdam"
         arriving={arriving}
         paneShown={paneShown}
@@ -130,16 +131,16 @@ afterEach(() => {
   act(() => ageClock.refresh());
 });
 
-describe("InboxZero", () => {
+describe("ToDoClear", () => {
   it("shows the line for the time of day in the user's timezone", async () => {
-    await renderInboxZero([]);
+    await renderToDoClear([]);
 
     expect(screen.getByText("The rest of the morning is yours.")).toBeDefined();
   });
 
   it("leaves out the count and the pills when nothing was cleared today", async () => {
     // 23:30 on Monday in Amsterdam: yesterday.
-    await renderInboxZero([
+    await renderToDoClear([
       buildResolved(1, "github/review-requested", "2026-10-12T21:30:00.000Z"),
     ]);
 
@@ -149,7 +150,7 @@ describe("InboxZero", () => {
 
   it("counts what was cleared today, with a pill per plugin that opens Done on its tab", async () => {
     const onShowDone = vi.fn<(pluginId: string) => void>();
-    await renderInboxZero(
+    await renderToDoClear(
       [
         buildResolved(1, "linear/mentioned", "2026-10-13T07:50:00.000Z"),
         buildResolved(2, "github/review-requested", "2026-10-13T07:40:00.000Z"),
@@ -182,7 +183,7 @@ describe("InboxZero", () => {
       toFake: ["Date", "setTimeout", "clearTimeout"],
       shouldAdvanceTime: true,
     });
-    await renderInboxZero([], { arriving: true });
+    await renderToDoClear([], { arriving: true });
     const picture = document.querySelector(".asks-zero");
     expect(picture?.classList.contains("is-arriving")).toBe(true);
 
@@ -202,7 +203,7 @@ describe("InboxZero", () => {
     // No stylesheet sets the durations in tests, so the test sets the one the wait reads.
     document.documentElement.style.setProperty("--dur-3", "320ms");
     try {
-      await renderInboxZero([], { arriving: true, paneShown: true });
+      await renderToDoClear([], { arriving: true, paneShown: true });
       const picture = document.querySelector(".asks-zero");
       expect(picture?.classList.contains("waits-for-pane")).toBe(true);
 

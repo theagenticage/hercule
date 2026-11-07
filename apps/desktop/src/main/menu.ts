@@ -123,9 +123,10 @@ const buildEditMenu = (
  *   `development` adds Reload and Toggle Developer Tools, under a separator.
  *   Where `hasMacMenu` is false, Toggle Developer Tools takes
  *   `TOGGLE_DEVELOPER_TOOLS_ACCELERATOR`.
- * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Intake, ⌘⇧I,
- *   which calls `openIntake`, then Workflows, ⌘⇧W, which calls
- *   `openWorkflows`, because all three are places to go, as a thread is.
+ * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Inbox, which
+ *   calls `openInbox` and has no shortcut while Intake keeps ⌘⇧I, then Intake,
+ *   ⌘⇧I, which calls `openIntake`, then Workflows, ⌘⇧W, which calls
+ *   `openWorkflows`, because all four are places to go, as a thread is.
  *   Below a separator it lists `goItems`, the first nine the page sends,
  *   with ⌘1 to ⌘9, each with its title. Choosing one calls
  *   `openDestination` with its destination. With no item, one dimmed
@@ -138,7 +139,7 @@ const buildEditMenu = (
  *   `buildEditMenu` gives, and that it has no Substitutions and Speech where
  *   `hasMacMenu` is false. Window is Electron's own.
  * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
- *   Office, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
+ *   Office, Inbox, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
  *   are dimmed then rather than doing nothing. Main knows only whether a
  *   login token is stored, so from the first run's account step to its end
@@ -160,6 +161,7 @@ const buildMenuTemplate = (options: {
   readonly signOut: () => void;
   readonly newThread: () => void;
   readonly openOffice: () => void;
+  readonly openInbox: () => void;
   readonly openIntake: () => void;
   readonly openWorkflows: () => void;
   readonly showThreadsFace: () => void;
@@ -263,6 +265,11 @@ const buildMenuTemplate = (options: {
           click: options.openOffice,
         },
         {
+          label: "Inbox",
+          enabled: options.signedIn,
+          click: options.openInbox,
+        },
+        {
           label: "Intake",
           accelerator: "CmdOrCtrl+Shift+I",
           enabled: options.signedIn,
@@ -298,7 +305,7 @@ export class MainMenu extends Context.Service<
   {
     /**
      * Enables Settings…, Sign Out, New Thread, View's Threads, Hercule and
-     * Toggle Sidebar, Office, Intake and Workflows when `signedIn` is true. Otherwise
+     * Toggle Sidebar, Office, Inbox, Intake and Workflows when `signedIn` is true. Otherwise
      * disables them and removes the Go menu's items, which the app can no
      * longer open.
      */
@@ -366,6 +373,7 @@ export const makeMainMenuLayer = (
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
+              openInbox: () => sendMenuCommand("openInbox"),
               openIntake: () => sendMenuCommand("openIntake"),
               openWorkflows: () => sendMenuCommand("openWorkflows"),
               showThreadsFace: () => sendMenuCommand("showThreadsFace"),

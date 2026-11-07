@@ -121,6 +121,7 @@ import taskStages from "./0110-task-stages";
 import threadTasks from "./0111-thread-tasks";
 import taskBoardRank from "./0112-task-board-rank";
 import taskSummaries from "./0113-task-summaries";
+import externalEntities from "./0114-external-entities";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -236,6 +237,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [111, "thread-tasks", Effect.succeed(threadTasks)],
   [112, "task-board-rank", Effect.succeed(taskBoardRank)],
   [113, "task-summaries", Effect.succeed(taskSummaries)],
+  [114, "external-entities", Effect.succeed(externalEntities)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
