@@ -130,7 +130,10 @@ export const selectInboxPage = (
   const ridersByLead = new Map<string, Array<string>>();
   for (const ref of refs) {
     const lead = riding.get(ref);
-    if (lead !== undefined) ridersByLead.set(lead, [...(ridersByLead.get(lead) ?? []), ref]);
+    if (lead === undefined) continue;
+    const riders = ridersByLead.get(lead);
+    if (riders === undefined) ridersByLead.set(lead, [ref]);
+    else riders.push(ref);
   }
   const selected = new Set<string>();
   for (const ref of refs) {

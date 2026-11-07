@@ -16,12 +16,16 @@
  *   pending list alone, so the card goes back, and the undo line says why.
  * - Each move the user makes is one gesture on the shared undo stack. The
  *   gesture takes its place when the user acts, before the controller answers,
- *   and its undo waits for the answer itself. A move that fails, or a Take that
+ *   and its undo waits for the answer itself. The undo of a Link or Unlink is
+ *   a Link or Unlink in the other direction, made when Undo is pressed: it
+ *   shows at once, goes into the riding ledger and is reconciled with the
+ *   controller's answer like any other, so it never replays what rode on what
+ *   when the first move was planned. A move that fails, or a Take that
  *   makes no Task, takes its gesture off again. A gesture outlives the screen
  *   that made it, so it is undone through the screen that is open when Undo is
  *   pressed (`CardMover`).
  */
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -33,13 +37,13 @@ import {
 import {
   decideRidingChoices,
   describeDismissal,
+  describeLinkRemaining,
   describeLinkRemoved,
   EMPTY_RIDING_LEDGER,
   nameCard,
   planLink,
   planUnlink,
   reapplyInboxEdits,
-  settleRidingChoice,
   settleRidingMove,
   startRidingMove,
   type EntityLinkMove,
@@ -85,6 +89,9 @@ const readReason = (error: unknown): string => readErrorMessage(error).replace(/
 
 /** Which way a change to a link goes. */
 type LinkDirection = "link" | "unlink";
+
+/** Whether `move` may be sent: it resolves to false when the move it reverses changed nothing. */
+type MoveIsWanted = Promise<boolean>;
 
 /** What the controller answered to a Link or Unlink, in one shape. */
 interface LinkAnswer {
@@ -208,6 +215,9 @@ export const useInboxMoves = ({
           ),
     [serverInbox, pendingEdits],
   );
+  // What a Link or Unlink is planned over. It is read when the move is made, which for an Undo is long after
+  // the render that made the gesture.
+  const newest = useRef({ inbox, riding });
 
   /**
    * Makes `change` and glides every part of the page that moves because of it
@@ -269,10 +279,6 @@ export const useInboxMoves = ({
    */
   const writeInboxEdit = async (edit: InboxEdit): Promise<void> => {
     const { shown, born } = showEdit(edit, "hand");
-    if (edit.kind === "set-link" && edit.riding !== undefined) {
-      const { id, ridesOn } = edit.riding;
-      setRidingLedger((ledger) => settleRidingChoice(ledger, id, ridesOn));
-    }
     if (edit.kind === "put-back") {
       for (const card of born) {
         if (card.dataset["cardId"] === edit.card.id) comeBackFromAside(card);
@@ -301,13 +307,19 @@ export const useInboxMoves = ({
   const changeLinkRequest = useMutation({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
-    mutationFn: ({
+    mutationFn: async ({
       move,
       direction,
+      isWanted,
     }: {
       readonly move: EntityLinkMove;
       readonly direction: LinkDirection;
-    }): Promise<LinkAnswer> => sendLinkChange(client, move, direction),
+      readonly isWanted: MoveIsWanted | undefined;
+    }): Promise<LinkAnswer> => {
+      // Checked when the move reaches the front of the line, so a move that changed nothing is never reversed.
+      if (isWanted !== undefined && !(await isWanted)) throw new Error(NOTHING_TO_PUT_BACK);
+      return sendLinkChange(client, move, direction);
+    },
   });
 
   // The reversals wait in the same line as the moves, so none overtakes another.
@@ -408,45 +420,74 @@ export const useInboxMoves = ({
    * it at once. A request that is linked to a ticket flies from Requests into
    * the ticket's tucked sheet and everything between closes up, in one
    * movement on `hand`; a card that rode on the other end stands alone. The
-   * undo line offers Undo, which does the reverse. A failure takes it back.
-   * The controller's answer decides what rides on what: a link a source
-   * still reports keeps its card riding.
+   * controller's answer decides what rides on what: a link a source still
+   * reports keeps its card riding. A failure takes it back and rejects.
+   * It is planned over the newest Inbox and riding choices, wherever it is
+   * called from, because Undo calls it long after the gesture it reverses.
+   * `isWanted` is for Undo: the move is sent only if it resolves to true.
+   * Returns the controller's answer, once it is settled on the page.
    */
-  const changeLink = (move: EntityLinkMove, direction: LinkDirection): void => {
-    const words = `${move.fromName} and ${move.toName}`;
+  const changeLink = (
+    move: EntityLinkMove,
+    direction: LinkDirection,
+    isWanted?: MoveIsWanted,
+  ): Promise<LinkAnswer> => {
+    const { inbox: shownInbox, riding: heldChoices } = newest.current;
     const plan =
-      inbox === undefined
+      shownInbox === undefined
         ? undefined
         : direction === "link"
-          ? planLink(inbox, move.fromRef, move.toRef)
-          : planUnlink(inbox, move.fromRef, move.toRef);
+          ? planLink(shownInbox, move.fromRef, move.toRef, heldChoices)
+          : planUnlink(shownInbox, move.fromRef, move.toRef, heldChoices);
     const shown = plan === undefined ? undefined : showEdit(plan.edit, "hand", plan.riding).shown;
-    const request = changeLinkRequest.mutateAsync({ move, direction });
-    const wasChanged = request.then(
+    return changeLinkRequest.mutateAsync({ move, direction, isWanted }).then(
+      async (answer) => {
+        if (shown !== undefined) {
+          if (answer.didChange) await settleEdit(shown, answer.remaining !== "source");
+          else takeEditBack(shown);
+        }
+        readLinksAgain();
+        return answer;
+      },
+      (error: unknown) => {
+        if (shown !== undefined) takeEditBack(shown);
+        throw error;
+      },
+    );
+  };
+  // A gesture outlives the render that made it, so its undo calls the newest `changeLink`.
+  const changeLinkRef = useRef(changeLink);
+  useLayoutEffect(() => {
+    changeLinkRef.current = changeLink;
+    newest.current = { inbox, riding };
+  });
+
+  /**
+   * Makes a Link or Unlink the user asked for and puts it on the undo stack.
+   * The undo line says what was done and offers Undo, which makes the move in
+   * the other direction (see `changeLink`).
+   */
+  const makeLinkChange = (move: EntityLinkMove, direction: LinkDirection): void => {
+    const words = `${move.fromName} and ${move.toName}`;
+    const answered = changeLink(move, direction);
+    const wasChanged = answered.then(
       ({ didChange }) => didChange,
       () => false,
     );
     const gesture: Gesture<CardMover> = {
       words: LINK_WORDS[direction].gesture(words),
-      undo: async (page) => {
-        await reverseMove.mutateAsync(async () => {
-          if (!(await wasChanged)) throw new Error(NOTHING_TO_PUT_BACK);
-          await sendLinkChange(client, move, reverseDirection(direction));
-          // The part goes back where it was, the same way it came.
-          if (plan !== undefined) await page.writeInboxEdit(plan.undo);
-          readLinksAgain();
-        });
-        return undefined;
+      undo: async () => {
+        const { remaining } = await changeLinkRef.current(
+          move,
+          reverseDirection(direction),
+          wasChanged,
+        );
+        return describeLinkRemaining(remaining);
       },
     };
     undoStack.reserve(gesture, wasChanged);
-    request.then(
-      async ({ didChange, remaining }) => {
-        if (shown !== undefined) {
-          if (didChange) await settleEdit(shown, remaining !== "source");
-          else takeEditBack(shown);
-        }
-        readLinksAgain();
+    answered.then(
+      ({ didChange, remaining }) => {
         if (!didChange) {
           say(`You had made no link between ${words}, so none was removed.`);
           return;
@@ -457,7 +498,6 @@ export const useInboxMoves = ({
         );
       },
       (error: unknown) => {
-        if (shown !== undefined) takeEditBack(shown);
         say(LINK_WORDS[direction].failed(words, readReason(error)));
       },
     );
@@ -470,10 +510,10 @@ export const useInboxMoves = ({
     take,
     dismiss,
     link: (move) => {
-      changeLink(move, "link");
+      makeLinkChange(move, "link");
     },
     unlink: (move) => {
-      changeLink(move, "unlink");
+      makeLinkChange(move, "unlink");
     },
     undoLastMove: undo,
     line,

@@ -1,7 +1,14 @@
-/** Tests Link and Unlink as edits to the Inbox the screen holds, and the edit that undoes each. */
+/** Tests Link and Unlink as edits to the Inbox the screen holds, planned over the place the visit holds. */
 import { describe, expect, it } from "vitest";
 import { applyInboxEdit } from "./card-moves";
-import { describeLinkRemoved, nameLinkEnd, planLink, planUnlink } from "./card-links";
+import {
+  describeLinkRemaining,
+  describeLinkRemoved,
+  nameLinkEnd,
+  planLink,
+  planUnlink,
+} from "./card-links";
+import { chooseLead, type RidingChoices } from "./riding-choices";
 import {
   buildInbox,
   buildInboxCard,
@@ -16,9 +23,9 @@ const OTHER_REVIEW = buildRequestCard("3", { identifier: "#6264", ridesOn: "acme
 const LEAD_9 = buildInboxCard("9");
 
 describe("planLink", () => {
-  it("puts a request on the card of lasting work it is linked to, and the undo takes it off", () => {
+  it("puts a request on the card of lasting work it is linked to", () => {
     const inbox = buildInbox([TICKET, REVIEW]);
-    const { edit, undo } = planLink(inbox, REVIEW.ref, TICKET.ref);
+    const { edit } = planLink(inbox, REVIEW.ref, TICKET.ref);
     expect(edit).toEqual({
       kind: "set-link",
       fromRef: REVIEW.ref,
@@ -26,14 +33,6 @@ describe("planLink", () => {
       claim: { type: "person", actor: "user" },
       hasPersonClaim: true,
       riding: { id: REVIEW.id, ridesOn: TICKET.ref },
-    });
-    expect(undo).toEqual({
-      kind: "set-link",
-      fromRef: REVIEW.ref,
-      toRef: TICKET.ref,
-      claim: undefined,
-      hasPersonClaim: false,
-      riding: { id: REVIEW.id, ridesOn: undefined },
     });
   });
 
@@ -45,24 +44,22 @@ describe("planLink", () => {
     });
   });
 
-  it("turns a hint into the user's link, and the undo puts the hint back", () => {
+  it("turns a hint into the user's link", () => {
     const hint = buildInboxLink(REVIEW.ref, TICKET.ref, "text");
     const inbox = buildInbox([TICKET, REVIEW], { links: [hint] });
-    const { edit, undo } = planLink(inbox, REVIEW.ref, TICKET.ref);
+    const { edit } = planLink(inbox, REVIEW.ref, TICKET.ref);
     const linked = applyInboxEdit(inbox, edit);
     expect(linked.links).toEqual([
       { ...hint, claim: { type: "person", actor: "user" }, hasPersonClaim: true },
     ]);
     expect(linked.cards.find((card) => card.id === REVIEW.id)?.ridesOn).toBe(TICKET.ref);
-    expect(applyInboxEdit(linked, undo)).toEqual(inbox);
   });
 
   it("keeps a source's claim, which is firmer than a person's, and adds the user's own claim", () => {
     const source = buildInboxLink(REVIEW.ref, TICKET.ref, "source");
     const inbox = buildInbox([TICKET, REVIEW], { links: [source] });
-    const { edit, undo } = planLink(inbox, REVIEW.ref, TICKET.ref);
+    const { edit } = planLink(inbox, REVIEW.ref, TICKET.ref);
     expect(edit).toMatchObject({ claim: source.claim, hasPersonClaim: true });
-    expect(undo).toMatchObject({ claim: source.claim, hasPersonClaim: false });
   });
 
   it("says what the move does to a card that rides already, without moving it on the page", () => {
@@ -99,13 +96,12 @@ describe("planUnlink", () => {
   const person = buildInboxLink(REVIEW.ref, TICKET.ref, "person");
   const riding = { ...REVIEW, ridesOn: TICKET.ref };
 
-  it("takes the user's link back and sets the card that rode on it free, and the undo restores both", () => {
+  it("takes the user's link back and sets the card that rode on it free", () => {
     const inbox = buildInbox([TICKET, riding], { links: [person] });
     const plan = planUnlink(inbox, TICKET.ref, REVIEW.ref)!;
     const unlinked = applyInboxEdit(inbox, plan.edit);
     expect(unlinked.links).toEqual([]);
     expect(unlinked.cards.find((card) => card.id === REVIEW.id)).not.toHaveProperty("ridesOn");
-    expect(applyInboxEdit(unlinked, plan.undo)).toEqual(inbox);
   });
 
   it("takes back the user's claim on a link a source reports as well, and the card keeps riding", () => {
@@ -123,7 +119,6 @@ describe("planUnlink", () => {
     const unlinked = applyInboxEdit(inbox, plan.edit);
     expect(unlinked.links).toEqual([{ ...both, hasPersonClaim: false }]);
     expect(unlinked.cards).toEqual(inbox.cards);
-    expect(applyInboxEdit(unlinked, plan.undo)).toEqual(inbox);
   });
 
   it("says that the card rode on the other end and is taken off it", () => {
@@ -150,10 +145,46 @@ describe("planUnlink", () => {
   });
 });
 
+describe("a Link or Unlink planned over the place the visit holds", () => {
+  const held = (cardId: string, lead: string | undefined): RidingChoices =>
+    new Map([[cardId, chooseLead(lead)]]);
+
+  it("frees a card the visit holds on the lead although the page does not say it rides there", () => {
+    const person = buildInboxLink(REVIEW.ref, TICKET.ref, "person");
+    const inbox = buildInbox([TICKET, REVIEW], { links: [person] });
+    const plan = planUnlink(inbox, REVIEW.ref, TICKET.ref, held(REVIEW.id, TICKET.ref))!;
+    expect(plan.edit.riding).toEqual({ id: REVIEW.id, ridesOn: undefined });
+    expect(plan.riding).toEqual({
+      kind: "unlink",
+      cardId: REVIEW.id,
+      lead: TICKET.ref,
+      before: chooseLead(TICKET.ref),
+    });
+  });
+
+  it("frees nothing when the visit holds the card alone although the page says it rides", () => {
+    const person = buildInboxLink(REVIEW.ref, TICKET.ref, "person");
+    const inbox = buildInbox([TICKET, { ...REVIEW, ridesOn: TICKET.ref }], { links: [person] });
+    const plan = planUnlink(inbox, REVIEW.ref, TICKET.ref, held(REVIEW.id, undefined))!;
+    expect(plan.edit).not.toHaveProperty("riding");
+    expect(plan.riding).toBeUndefined();
+  });
+
+  it("puts a card on a lead it was held off, and keeps one the visit holds on another lead", () => {
+    const inbox = buildInbox([TICKET, REVIEW]);
+    expect(planLink(inbox, REVIEW.ref, TICKET.ref, held(REVIEW.id, undefined)).edit.riding).toEqual(
+      { id: REVIEW.id, ridesOn: TICKET.ref },
+    );
+    const plan = planLink(inbox, REVIEW.ref, TICKET.ref, held(REVIEW.id, LEAD_9.ref));
+    expect(plan.edit).not.toHaveProperty("riding");
+    expect(plan.riding).toMatchObject({ kind: "link", before: chooseLead(LEAD_9.ref) });
+  });
+});
+
 describe("applyInboxEdit with a link", () => {
   it("adds a link where none was, and removes it again", () => {
     const inbox = buildInbox([TICKET, buildInboxCard("5")]);
-    const { edit, undo } = planLink(inbox, TICKET.ref, "acme:ticket:5");
+    const { edit } = planLink(inbox, TICKET.ref, "acme:ticket:5");
     const linked = applyInboxEdit(inbox, edit);
     expect(linked.links).toEqual([
       {
@@ -163,7 +194,8 @@ describe("applyInboxEdit with a link", () => {
         hasPersonClaim: true,
       },
     ]);
-    expect(applyInboxEdit(linked, undo).links).toEqual([]);
+    const unlinked = applyInboxEdit(linked, planUnlink(linked, TICKET.ref, "acme:ticket:5")!.edit);
+    expect(unlinked.links).toEqual([]);
   });
 });
 
@@ -174,6 +206,17 @@ describe("describeLinkRemoved", () => {
     ["text", "Link removed. A reference in text still mentions it."],
   ] as const)("words a removal that leaves %s", (remaining, words) => {
     expect(describeLinkRemoved(remaining)).toBe(words);
+  });
+});
+
+describe("describeLinkRemaining", () => {
+  it.each([
+    [undefined, undefined],
+    ["person", undefined],
+    ["source", "The source still reports the link."],
+    ["text", "A reference in text still mentions it."],
+  ] as const)("words what %s leaves", (remaining, words) => {
+    expect(describeLinkRemaining(remaining)).toBe(words);
   });
 });
 

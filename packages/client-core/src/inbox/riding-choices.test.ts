@@ -5,7 +5,6 @@ import {
   decideRidingChoices,
   EMPTY_RIDING_LEDGER,
   NO_RIDING_CHOICES,
-  settleRidingChoice,
   settleRidingMove,
   startRidingMove,
   type RidingChoice,
@@ -109,13 +108,5 @@ describe("settleRidingMove", () => {
   it("returns the ledger itself for a gesture with no move waiting", () => {
     const ledger = startAll(unlink(A));
     expect(settleRidingMove(ledger, 9, true)).toBe(ledger);
-  });
-});
-
-describe("settleRidingChoice", () => {
-  it("sets a card as settled on a lead, or off every lead, as the undo of a move does", () => {
-    const rides = settleRidingChoice(EMPTY_RIDING_LEDGER, CARD, A);
-    expect(choiceOf(rides)).toEqual(chooseLead(A));
-    expect(choiceOf(settleRidingChoice(rides, CARD, undefined))).toEqual(chooseLead(undefined));
   });
 });

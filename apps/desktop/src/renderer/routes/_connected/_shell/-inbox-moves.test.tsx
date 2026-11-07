@@ -356,6 +356,77 @@ describe("what rides on what after a Link or Unlink", () => {
     expect(result.current.riding.get(RIDER.id)).toEqual({ _tag: "rides", lead: LEAD_B.ref });
   });
 
+  it("takes a card off the lead that was accepted when Undo removes that Link, though the Link was planned while another lead held the card", async () => {
+    // The read after the Link is still on its way when Undo is pressed, so the page shows the Link
+    // the answer wrote into the cache and the card without a lead.
+    const { result, links, unlinks } = setUp(
+      () => new Promise<Inbox>(() => undefined),
+      buildInbox([LEAD_A, LEAD_B, RIDER]),
+    );
+    act(() => {
+      result.current.link(names(LEAD_A));
+    });
+    act(() => {
+      result.current.link(names(LEAD_B));
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      links.calls[0]!.refuse("The ticket is gone");
+      await settle();
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(2);
+    });
+    await act(async () => {
+      links.calls[1]!.answer({});
+      await settle();
+    });
+    expect(result.current.riding.get(RIDER.id)).toEqual({ _tag: "rides", lead: LEAD_B.ref });
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toEqual({ _tag: "alone" });
+  });
+
+  it("keeps a card on its lead when Undo removes a Link and a source still reports the pair", async () => {
+    const { result, links, unlinks } = setUp(undefined, buildInbox([LEAD_A, RIDER]));
+    act(() => {
+      result.current.link(names(LEAD_A));
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      links.calls[0]!.answer({});
+      await settle();
+    });
+    expect(result.current.riding.get(RIDER.id)).toEqual({ _tag: "rides", lead: LEAD_A.ref });
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true, remaining: "source" });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toEqual({ _tag: "rides", lead: LEAD_A.ref });
+  });
+
   it("keeps a card on its lead when an Unlink says a source still reports the link, and says so", async () => {
     const riding = { ...RIDER, ridesOn: LEAD_A.ref };
     const link = buildInboxLink(RIDER.ref, LEAD_A.ref, "person");

@@ -164,6 +164,15 @@ describe("selectInboxPage", () => {
     });
   });
 
+  it("brings every rider of a lead, in their order, when the whole bundle fits", () => {
+    const riders = Array.from({ length: 30 }, (_, index) => `p${String(index)}`);
+    const riding = Object.fromEntries(riders.map((rider) => [rider, "t"]));
+    expect(pick(["x", ...riders, "t", "y"], riding, 32)).toEqual({
+      refs: ["x", ...riders, "t"],
+      truncated: true,
+    });
+  });
+
   it("never leaves the page empty: a first bundle larger than the page is cut to the lead and its oldest riders", () => {
     const riders = Array.from({ length: 10 }, (_, index) => `p${String(index)}`);
     const riding = Object.fromEntries(riders.map((rider) => [rider, "t"]));

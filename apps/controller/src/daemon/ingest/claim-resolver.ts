@@ -188,9 +188,10 @@ const readPluginClaims = (pluginId: string, due: ReadonlyArray<PendingClaim>, no
  * Runs one pass: recognizes the pending web addresses that are due, then, for
  * each plugin whose window is open, reads up to
  * `MAX_CLAIMS_PER_PLUGIN_PER_WINDOW` due claims of its things. A plugin with
- * claims to read opens a window that lasts the interval of its `entities` feed
- * (`windows` remembers when it ends); a plugin with none keeps its window
- * closed, so a claim that arrives later is read at once.
+ * claims to read opens a window, just before its batch, that lasts the
+ * interval of its `entities` feed (`windows` remembers when it ends); a
+ * plugin with none keeps its window closed, so a claim that arrives later is
+ * read at once.
  * Never fails on a lookup: an answer that does not place the thing postpones
  * the claim.
  */
@@ -200,16 +201,17 @@ export const resolvePendingClaims = (
   Effect.gen(function* () {
     const resolution = yield* ClaimResolution;
     const host = yield* PluginHost;
-    const now = yield* nowIso;
-    const nowMs = Date.parse(now);
-
-    yield* recognizeAddresses(now);
+    yield* recognizeAddresses(yield* nowIso);
 
     const sources = (yield* host.listActiveEventSources()).filter(
       (source) => source.entityLookup !== undefined,
     );
     for (const source of sources) {
       const { pluginId } = source;
+      // Read again for each plugin: the batches before this one may have taken minutes, and a window
+      // opened with an earlier time would be over before this batch begins.
+      const now = yield* nowIso;
+      const nowMs = Date.parse(now);
       if ((windows.get(pluginId) ?? 0) > nowMs) continue;
       const due = yield* Effect.orDie(
         resolution.listDue({

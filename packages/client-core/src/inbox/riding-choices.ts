@@ -122,21 +122,6 @@ export const settleRidingMove = (
 };
 
 /**
- * Returns `ledger` with the card put on `lead`, or taken off every lead when
- * `lead` is `undefined`, as already settled. It is for a move that needs no
- * answer, such as the undo of a Link, which the controller has answered by
- * then.
- */
-export const settleRidingChoice = (
-  ledger: RidingLedger,
-  cardId: string,
-  lead: string | undefined,
-): RidingLedger => ({
-  ...ledger,
-  settled: new Map(ledger.settled).set(cardId, chooseLead(lead)),
-});
-
-/**
  * Returns the choices to hold for the visit: for each card with something
  * settled or waiting, where its settled place stands after the waiting moves
  * are played in the order they were made. A move that waits for a card whose

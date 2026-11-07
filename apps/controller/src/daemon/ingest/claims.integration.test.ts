@@ -11,7 +11,7 @@
  * Connections are real.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Clock, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   HOST_API,
@@ -201,7 +201,11 @@ const runInWorld = <A>(
     unknown,
     ClaimResolution | EntityLookups | PluginHost | Plugins | SqlClient.SqlClient
   >,
-  options: { readonly trackerAccounts?: ReadonlyArray<string> } = {},
+  options: {
+    readonly trackerAccounts?: ReadonlyArray<string>;
+    /** A second plugin that, like the tracker, knows things only inside a workspace, and its answers. */
+    readonly secondTracker?: { readonly id: string; readonly answers: { current: TrackerAnswers } };
+  } = {},
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -211,12 +215,23 @@ const runInWorld = <A>(
       yield* host.boot([
         buildPlugin("forge", forgeLookup),
         buildPlugin("tracker", buildTrackerLookup(answers)),
+        ...(options.secondTracker === undefined
+          ? []
+          : [
+              buildPlugin(
+                options.secondTracker.id,
+                buildTrackerLookup(options.secondTracker.answers),
+              ),
+            ]),
       ]);
       const forgeConnection = yield* insertConnection("forge", "forge-a", 0);
       const accounts = options.trackerAccounts ?? ["tracker-a"];
       const trackerConnections: Array<StoredConnection> = [];
       for (const [index, account] of accounts.entries()) {
         trackerConnections.push(yield* insertConnection("tracker", account, index + 1));
+      }
+      if (options.secondTracker !== undefined) {
+        yield* insertConnection(options.secondTracker.id, `${options.secondTracker.id}-a`, 90);
       }
       const contexts = yield* ingestContexts;
       const sources = yield* host.listActiveEventSources();
@@ -688,6 +703,39 @@ describe("the budget of reading pending claims", () => {
     );
 
     expect(asked).toBe(MAX_CLAIMS_PER_PLUGIN_PER_WINDOW);
+  });
+
+  it("opens the window of a plugin when its own batch begins, though the batches before it took minutes", async () => {
+    const boardAnswers: { current: TrackerAnswers } = { current: {} };
+    const result = await runInWorld(
+      ({ forge, answers }) =>
+        Effect.gen(function* () {
+          // Each lookup of the tracker takes seven seconds, so its 20 claims take 140 seconds.
+          let elapsedMs = 0;
+          answers.current = {
+            "tracker-a": () => {
+              elapsedMs += 7_000;
+              return { missing: "not-found" };
+            },
+          };
+          boardAnswers.current = { "board-a": () => ({ missing: "not-found" }) };
+          yield* reportPendingClaims(forge, MAX_CLAIMS_PER_PLUGIN_PER_WINDOW);
+          const startMs = Date.now();
+          const readClock = () => startMs + elapsedMs;
+          // The real clock with only the wall time replaced, so nothing else that reads the clock breaks.
+          const clock: Clock.Clock = Object.create(yield* Clock.Clock, {
+            currentTimeMillisUnsafe: { value: readClock },
+            currentTimeMillis: { value: Effect.sync(readClock) },
+          });
+          const windows = new Map<string, number>();
+          yield* resolvePendingClaims(windows).pipe(Effect.provideService(Clock.Clock, clock));
+          return { board: windows.get("board")! - readClock() };
+        }),
+      { secondTracker: { id: "board", answers: boardAnswers } },
+    );
+
+    // The board's batch began after the tracker's 140 seconds, so its window is a whole 120 seconds from now.
+    expect(result.board).toBe(120_000);
   });
 
   it("ends the pass of a plugin at its first answer that could not be sure, and keeps the rest due", async () => {
