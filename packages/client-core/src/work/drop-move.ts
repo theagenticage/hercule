@@ -1,6 +1,6 @@
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import type { ArrangedLane } from "./arrange-lanes";
-import { chooseAfterTaskId, type CardMove } from "./card-move";
+import { chooseAfterTaskId, type CardMove, type DropMove } from "./card-move";
 
 /**
  * Where a carried card is let go:
@@ -36,8 +36,9 @@ export interface DropRequest {
 }
 
 /**
- * Returns the `task.move` that a drop asks for. The caller shows and sends
- * it; a move that changes nothing is dropped there.
+ * Returns the drop: the `task.move` it asks for, and the Project of the lane
+ * it is let go on. The caller checks the drop with `settleDropMove`, then
+ * shows and sends the move; a move that changes nothing is dropped there.
  *
  * - The stage is the request's, or the card's own for a drop on a lane's head.
  * - `projectId` is named only when the drop is in another lane than the one
@@ -51,7 +52,7 @@ export interface DropRequest {
  * - On a folded lane there is no slot, so `afterTaskId` is absent and the
  *   card goes last in its cell.
  */
-export const buildDropMove = (request: DropRequest): CardMove => {
+export const buildDropMove = (request: DropRequest): DropMove => {
   const { movingCard, lane, beforeCardId } = request;
   const stage = request.stage ?? movingCard.stage;
   const isOwnLane = lane.lane.cells.some((cell) =>
@@ -62,19 +63,18 @@ export const buildDropMove = (request: DropRequest): CardMove => {
     stage,
     ...(isOwnLane ? {} : { projectId: lane.lane.projectId }),
   };
-  if (lane.isFolded) return move;
+  const targetProjectId = lane.lane.projectId;
+  if (lane.isFolded) return { move, targetProjectId };
 
   const storedCell = (lane.lane.cells.find((cell) => cell.stage === stage)?.cards ?? []).filter(
     (card) => card.id !== movingCard.id,
   );
   const firstHiddenCardId =
     lane.cells.find((cell) => cell.stage === stage)?.arrangement.hiddenCards[0]?.id ?? null;
-  return {
-    ...move,
-    afterTaskId: chooseAfterTaskId({
-      storedCell,
-      nextVisibleCardId: beforeCardId ?? firstHiddenCardId,
-      movingCardFailed: movingCard.failure !== undefined,
-    }),
-  };
+  const afterTaskId = chooseAfterTaskId({
+    storedCell,
+    nextVisibleCardId: beforeCardId ?? firstHiddenCardId,
+    movingCardFailed: movingCard.failure !== undefined,
+  });
+  return { move: { ...move, afterTaskId }, targetProjectId };
 };

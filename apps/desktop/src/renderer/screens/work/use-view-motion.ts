@@ -25,9 +25,9 @@ interface BoardChange {
   /** Makes the change in the screen's state. It is committed before the board is measured again. */
   readonly commit: () => void;
   /**
-   * The lane that stays exactly where it is on screen while everything else
-   * moves around it: the one the user clicked, `"top"` for the lane at the top
-   * of the view, or `"none"` so that the page does not scroll.
+   * The element that stays exactly where it is on screen while everything else
+   * moves around it: the lane or the button the user clicked, `"top"` for the
+   * lane at the top of the view, or `"none"` so that the page does not scroll.
    */
   readonly anchor: HTMLElement | "top" | "none";
   /** The milliseconds each part waits before it glides. */
@@ -241,23 +241,26 @@ export const useViewMotion = (
       return;
     }
     const isClosing = view.openedCellIds.has(cellId);
+    // The page keeps the pressed button still, so the pointer stays on it. Anchoring the lane
+    // instead would leave the button far off screen after "Show fewer" in a deep cell.
+    const button = scroller.querySelector<HTMLElement>(`[data-more-cell-id="${cellId}"]`);
     playChange(scroller, {
       commit: () => {
         view.toggleCell(cellId);
       },
-      anchor: cell.closest<HTMLElement>(".board-lane") ?? "none",
+      anchor: button ?? "none",
       prepare: () => {
         const flights = isClosing ? launchFlights(scroller, listCardsPastTheLimit(cell), 0) : [];
         const before = listCardIds(cell);
         return () => {
           if (isClosing) {
             // A copy flies back to the button of its cell only if its card left the page.
-            const button = scroller.querySelector(`[data-more-cell-id="${cellId}"]`);
+            const buttonAfter = scroller.querySelector(`[data-more-cell-id="${cellId}"]`);
             flyFlightsTo(
               flights,
               (flight) =>
                 scroller.querySelector(`[data-card-id="${flight.cardId}"]`) === null
-                  ? button
+                  ? buttonAfter
                   : null,
               TO_BUTTON,
             );

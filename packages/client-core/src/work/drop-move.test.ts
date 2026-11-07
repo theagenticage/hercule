@@ -29,7 +29,7 @@ const CARDS = [
  * in front of the card `beforeCardId` (`null` for last), on the lanes as the
  * board draws them. `foldedLaneId` names a lane the user folded.
  */
-const dropOn = (
+const buildDrop = (
   movingCardId: string,
   laneId: string,
   stage: BoardStage | null,
@@ -48,6 +48,9 @@ const dropOn = (
     beforeCardId,
   });
 };
+
+/** Returns the move that dropping `movingCardId` on a lane asks for, with the arguments of `buildDrop`. */
+const dropOn = (...args: Parameters<typeof buildDrop>) => buildDrop(...args).move;
 
 describe("buildDropMove", () => {
   it("follows the card before the one the slot is in front of, and names no Project in the card's own lane", () => {
@@ -80,6 +83,16 @@ describe("buildDropMove", () => {
 
     const after = applyCardMove(buildBoard(...CARDS), move);
     expect(listIds(after.cards)).toEqual(listIds(CARDS));
+  });
+
+  it("names the Project of the lane the card is let go on, also when the move leaves the Project out", () => {
+    // In its own lane the move writes no Project, but a drop there still has a target to check.
+    expect(buildDrop("a", "storefront", "building", null)).toMatchObject({
+      move: { taskId: "a" },
+      targetProjectId: "storefront",
+    });
+    expect(buildDrop("a", "checkout", "exploring", null).targetProjectId).toBe("checkout");
+    expect(buildDrop("a", "no-project", "exploring", null).targetProjectId).toBeNull();
   });
 
   it("names the lane's Project when the card goes to another lane", () => {

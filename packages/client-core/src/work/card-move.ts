@@ -176,6 +176,17 @@ export const buildRestoreMove = (
 export const CARD_NOT_EXACT_NOTE = "The card it followed has gone, so it went last in that stage.";
 
 /**
+ * A drop: the move it writes, and the Project of the lane it is let go on.
+ * The move leaves `projectId` out for a drop in the card's own lane, so the
+ * target Project is carried beside it, to check that it still exists.
+ */
+export interface DropMove {
+  readonly move: CardMove;
+  /** The Project of the lane the card is let go on, or `null` for the "No project" lane. */
+  readonly targetProjectId: string | null;
+}
+
+/**
  * What to do with a drop's move once the board is as it is now: send it as it
  * is, send it with the card last in its cell and say so in `note`, or send
  * nothing and say why in `reason`.
@@ -185,13 +196,14 @@ export type SettledDrop =
   | { readonly kind: "refuse"; readonly reason: string };
 
 /**
- * Returns what to do with `move`, a drop built from the board the user saw
- * while carrying, over `board` as it is now. A push can change the board
+ * Returns what to do with `drop`, built from the board the user saw while
+ * carrying, over `board` as it is now. A push can change the board
  * during a carry, and a move that names a card that is gone would change
  * nothing and say nothing.
  *
- * - The Task is gone from `board`, or the Project the drop names is no longer
- *   one of `projects`: nothing is sent, and `reason` says why.
+ * - The Task is gone from `board`, or the Project of the lane the card was let
+ *   go on is no longer one of `projects` (even when the move itself names no
+ *   Project): nothing is sent, and `reason` says why.
  * - The card to follow is gone from the target cell: the card goes last in the
  *   cell, with `CARD_NOT_EXACT_NOTE` as the note.
  * - Otherwise the move is sent as it is.
@@ -199,13 +211,13 @@ export type SettledDrop =
 export const settleDropMove = (
   board: Pick<WorkBoard, "cards">,
   projects: readonly WorkProject[],
-  move: CardMove,
+  { move, targetProjectId }: DropMove,
 ): SettledDrop => {
   const moving = board.cards.find((card) => card.id === move.taskId);
   if (moving === undefined) {
     return { kind: "refuse", reason: "The Task has left the board, so it was not moved." };
   }
-  if (typeof move.projectId === "string" && !projects.some((each) => each.id === move.projectId)) {
+  if (targetProjectId !== null && !projects.some((each) => each.id === targetProjectId)) {
     return {
       kind: "refuse",
       reason: "The Project it was dropped on has gone, so the card was not moved.",
