@@ -1072,6 +1072,19 @@ export const inboxQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads one External Entity whole, as the open card of the Inbox draws it: the
+ * card's own record with the places above it, its links, and whether its
+ * plugin is still active. A push on the `externalEntity` topic reads it again.
+ * It fails `NotFound` for a record that is not a full card.
+ */
+export const entityQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.externalEntity(id),
+    queryFn: () => client.externalEntity.read({ params: { id } }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
  * every screen. A push on `task` reads it again, so the read is a small one.
  */

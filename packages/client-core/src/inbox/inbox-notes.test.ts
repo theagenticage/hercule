@@ -66,7 +66,8 @@ describe("describeFailingSources", () => {
   });
 
   it("says the warning of a source's Connection as it is", () => {
-    const warning = "The Inbox may be missing items: the Acme ticket list could only be read in part.";
+    const warning =
+      "The Inbox may be missing items: the Acme ticket list could only be read in part.";
     expect(
       describeFailingSources([buildSourceConnection("c1", "acme/account", { warning })], PLUGINS),
     ).toBe(warning);

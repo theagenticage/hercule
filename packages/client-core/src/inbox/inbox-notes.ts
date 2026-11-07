@@ -63,6 +63,8 @@ export const describeFailingSources = (
   }
   return ofSources.find(
     (connection) =>
-      connection.status !== "disabled" && connection.warning !== undefined && connection.warning !== "",
+      connection.status !== "disabled" &&
+      connection.warning !== undefined &&
+      connection.warning !== "",
   )?.warning;
 };

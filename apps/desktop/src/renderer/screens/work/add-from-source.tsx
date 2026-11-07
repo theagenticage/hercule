@@ -237,6 +237,8 @@ function SourceSearch({
   const addToWork = useMutation({
     mutationFn: (row: AddRow) => client.externalEntity.addToWork({ payload: { ref: row.ref } }),
     onSuccess: (result, row) => {
+      // A Task this call made always has an entity: only an existing Task can come back without one.
+      const entityId = result.id;
       setAdded((before) => {
         const current = before.get(row.ref);
         return current === undefined
@@ -251,26 +253,27 @@ function SourceSearch({
           followed: result.followed,
           created: result.created,
         }),
-        gesture: result.created
-          ? {
-              words: `Added ${row.identifier} to Work`,
-              undo: async () => {
-                const outcome = await client.externalEntity.undoTakeOn({
-                  params: { id: result.id },
-                  payload: { taskId: result.taskId },
-                });
-                if (!outcome.undone) {
-                  throw new Error(outcome.reason ?? "The Task has changed since it was added.");
-                }
-                setAdded((before) => {
-                  const rest = new Map(before);
-                  rest.delete(row.ref);
-                  return rest;
-                });
-                return undefined;
-              },
-            }
-          : undefined,
+        gesture:
+          result.created && entityId !== undefined
+            ? {
+                words: `Added ${row.identifier} to Work`,
+                undo: async () => {
+                  const outcome = await client.externalEntity.undoTakeOn({
+                    params: { id: entityId },
+                    payload: { taskId: result.taskId },
+                  });
+                  if (!outcome.undone) {
+                    throw new Error(outcome.reason ?? "The Task has changed since it was added.");
+                  }
+                  setAdded((before) => {
+                    const rest = new Map(before);
+                    rest.delete(row.ref);
+                    return rest;
+                  });
+                  return undefined;
+                },
+              }
+            : undefined,
       });
     },
     onError: (error, row) => {

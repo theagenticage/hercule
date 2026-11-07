@@ -34,7 +34,8 @@ import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
-import { isSameCardInLane } from "../../../screens/work/card-in-lane";
+import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-lane";
+import { keepCardInView } from "../../../screens/work/keep-in-view";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
@@ -76,8 +77,17 @@ const describeOffline = (since: Date): string =>
  *   drawn as Project.
  * - A card opens its newest Thread. A Task with no Thread opens nothing yet,
  *   and the undo line says so, because there is no details pane to show it in.
+ * - `taskToShow` is a Task the URL names, such as when the Inbox's See its
+ *   Task comes here: its card is brought into view and takes the keyboard,
+ *   once, and the name leaves the URL.
  */
-export function WorkScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
+export function WorkScreen({
+  controller,
+  taskToShow,
+}: {
+  readonly controller: SavedController;
+  readonly taskToShow: string | undefined;
+}): JSX.Element {
   const { client, url, live, undoStack } = controller;
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
@@ -173,6 +183,26 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       clearTimeout(timer);
     };
   }, [startedLoading, hasBoard]);
+
+  // A Task the URL names is shown once the board is on screen, and then forgotten.
+  const showTaskOnce = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (taskToShow === undefined || !hasBoard || showTaskOnce.current === taskToShow) return;
+    showTaskOnce.current = taskToShow;
+    const scroller = scrollRef.current;
+    const element = scroller?.querySelector<HTMLElement>(
+      `[data-card-id="${CSS.escape(taskToShow)}"]`,
+    );
+    const at = element === null || element === undefined ? null : readCardInLane(element);
+    if (scroller === null || element === null || element === undefined || at === null) {
+      moves.sayWithoutUndo("That Task is not shown on the board now. Its lane may be folded.");
+    } else {
+      element.focus({ preventScroll: true });
+      keepCardInView(scroller, element);
+      view.setCurrentCard(at);
+    }
+    void navigate({ to: "/work", search: {}, replace: true });
+  }, [taskToShow, hasBoard, moves, view, navigate]);
 
   const openCard = (card: WorkCard): void => {
     if (card.openSessionId === undefined) {

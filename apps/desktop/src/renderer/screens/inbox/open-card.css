@@ -1,0 +1,351 @@
+/* The open card of the Inbox: the sheet a card or a place opens into, and the
+   veil behind it. It is the drawing's `css/open.css` (`docs/design/inbox/` on
+   the branch `prototype/inbox-hifi`) on the app's tokens, with its `.o-*`
+   names written `.open-card-*`. The sheet itself (its bounds, its corner, its
+   paper) is `screens/desk/opening-sheet.css`. */
+
+/* A flat veil with no blur: paper in the light themes, the scrim in the dark
+   ones (`--veil`). It fades with the sheet and takes no pointer once the
+   sheet is folding. */
+.open-card-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--veil);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-slow) var(--m-ease);
+}
+.open-card-veil[data-on] {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .open-card-veil[data-on] {
+    animation: open-card-veil-in var(--m-slow) var(--m-ease);
+  }
+}
+@keyframes open-card-veil-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The words of the sheet. Its width is set when the sheet is measured, and its
+   height is the sheet's. */
+.open-card {
+  display: flow-root;
+  padding: 12px 0 8px;
+  color: var(--ink);
+}
+.open-card kbd {
+  color: var(--ink);
+}
+
+/* The line at the top that goes back to what the sheet showed before. */
+.open-card-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 58px);
+  margin: -4px 16px 6px 42px;
+  color: var(--muted);
+  font: var(--type-summary);
+  text-align: left;
+}
+.open-card-back svg {
+  flex: none;
+  transform: rotate(180deg);
+}
+.open-card-back span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.open-card-back:hover {
+  color: var(--ink);
+}
+
+.open-card-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  padding: 0 12px;
+}
+.open-card-mark {
+  grid-column: 1;
+  display: inline-grid;
+  place-items: center;
+  align-self: start;
+  margin-top: 3px;
+  color: var(--mark-ink);
+}
+/* Title 20/26: the drawing's size for every open surface. Set by property and
+   not by the `font` shorthand, which would reset the page's font features. */
+.open-card-title {
+  grid-column: 2;
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  line-height: 26px;
+  letter-spacing: -0.008em;
+  text-wrap: pretty;
+}
+.open-card-close {
+  grid-column: 3;
+  align-self: start;
+  margin-top: -1px;
+}
+.open-card-meta {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: calc(18px + var(--text-size-step));
+}
+.open-card-meta > span + span::before {
+  content: "\00b7";
+  margin-right: 5px;
+  color: var(--faint);
+}
+
+/* Status, facts and the wait, with the way to the source at the far end. The
+   status shape hangs 20px into the margin, under the mark. */
+.open-card-facts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  padding: 8px 14px 8px 42px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.open-card-facts > .card-status:first-child {
+  margin-left: -20px;
+}
+.open-card-wait {
+  white-space: nowrap;
+}
+.open-card-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: var(--w-medium);
+}
+.open-card-source:hover {
+  color: var(--ink);
+}
+.open-card-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 10px;
+}
+.open-card-bars i {
+  width: 2.5px;
+  border-radius: 0.5px;
+  background: var(--line);
+}
+.open-card-bars i:nth-child(1) {
+  height: 5px;
+}
+.open-card-bars i:nth-child(2) {
+  height: 7.5px;
+}
+.open-card-bars i:nth-child(3) {
+  height: 10px;
+}
+.open-card-bars i[data-lit] {
+  background: var(--muted);
+}
+
+/* The line that says the facts may be old, and the sentence of why the card is here. */
+.open-card-trust {
+  margin: -4px 14px 4px 42px;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.open-card-said {
+  margin: 0;
+  padding: 4px 14px 4px 42px;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: calc(18px + var(--text-size-step));
+}
+.open-card-said[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.open-card-said[data-tone="good"] {
+  color: var(--ok);
+}
+.open-card-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 0 16px 0 45px;
+  color: var(--faint);
+  font: var(--type-summary);
+}
+
+/* Part of, Yours here: a quiet heading and rows. */
+.open-card-section {
+  margin-top: 8px;
+  padding: 0 12px 8px 41px;
+}
+.open-card-heading {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font: var(--w-medium) var(--t-12) / var(--line-16) var(--font-ui);
+}
+
+/* A place's contents: the places inside it with how they stand, and under each the cards of this page. */
+.open-card-inner-list,
+.open-card-inner > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.open-card-inner {
+  margin-top: 4px;
+}
+.open-card-inner > ul {
+  margin-left: 8px;
+}
+.open-card-inner-go,
+.open-card-card-go {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  font: var(--type-summary);
+  text-align: left;
+}
+.open-card-card-go {
+  min-height: 24px;
+}
+.open-card-inner-go:hover,
+.open-card-card-go:hover {
+  background: var(--hover);
+}
+.open-card-go-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.open-card-inner-go .open-card-go-title {
+  font-weight: var(--w-medium);
+}
+.open-card-go-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.open-card-go-end {
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+/* The moves share one grid, so the first column is as wide as the longest name on this card and no wider. */
+.open-card-ledger {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  margin-top: 2px;
+  padding: 6px 6px 0;
+  border-top: 1px solid var(--divider);
+}
+.open-card-why {
+  grid-column: 1 / -1;
+  margin: 0 8px 4px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.open-card-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 12px;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  text-align: left;
+  outline: none;
+  transition: background var(--m-quick);
+}
+.open-card-row:hover,
+.open-card-row:focus-visible {
+  background: var(--hover);
+}
+.open-card-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.open-card-row:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.open-card-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.open-card-row.is-quiet .open-card-label {
+  padding-left: 28px;
+  color: var(--muted);
+}
+.open-card-says {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.open-card-row kbd {
+  justify-self: end;
+  min-width: 18px;
+  text-align: center;
+}
+/* The user's own monogram: people are letters, and faces are for colleagues. */
+.open-card-you {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--you);
+  color: var(--face-ink);
+  font-size: 9.7px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+@media (forced-colors: active) {
+  .open-card-row:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}

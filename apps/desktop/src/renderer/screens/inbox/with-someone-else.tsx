@@ -16,9 +16,11 @@ import { RequestCard } from "./request-card";
 export function WithSomeoneElse({
   rows,
   plugins,
+  monogram,
 }: {
   readonly rows: readonly ColumnRow[];
   readonly plugins: readonly PluginIdentity[];
+  readonly monogram: string;
 }): JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false);
   const listId = useId();
@@ -46,6 +48,7 @@ export function WithSomeoneElse({
               card={row.card}
               homeName={row.homeName}
               plugins={plugins}
+              monogram={monogram}
               step={index}
             />
           ))}

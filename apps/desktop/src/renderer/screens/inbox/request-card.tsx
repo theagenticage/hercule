@@ -11,6 +11,7 @@ import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import "../desk/card.css";
+import { CardMonogram, CardMoves } from "./card-moves";
 import { CardWaitFigure } from "./card-parts";
 import { useMinuteClock } from "./use-minute-clock";
 
@@ -25,24 +26,30 @@ import { useMinuteClock } from "./use-minute-clock";
  * - A status shape shows only when the card's status is not the usual one of
  *   its kind (`decideCardFace` leaves it out otherwise). `yours` shows beside
  *   the place.
+ * - `monogram` is the user's, which takes the place of the wait once a Task
+ *   holds the card.
  * - `step` is the card's place in its list, which sets when its words arrive
  *   after the first read.
  *
  * It stands as one stable element, `.inbox-request[data-card-id]`, with its
  * sheet (`.card-stock`) and its words (`.card-body`) as children, so what is
- * added to a request later (its moves, its open sheet) does not move it. A
- * card with a Task, which lies under With someone else, is drawn in the same
- * shape.
+ * added to a request (its moves, its open sheet) does not move it. The moves
+ * lie over the end of the second line, whose words end with an ellipsis before
+ * them, and show while the page marks the request as the current card
+ * (`data-current`, set by the page's pointer and keys). A card with a Task,
+ * which lies under With someone else, is drawn in the same shape.
  */
 export const RequestCard = memo(function RequestCard({
   card,
   homeName,
   plugins,
+  monogram,
   step,
 }: {
   readonly card: InboxCard;
   readonly homeName: string | undefined;
   readonly plugins: readonly PluginIdentity[];
+  readonly monogram: string;
   readonly step: number;
 }): JSX.Element {
   const now = useMinuteClock(isCardTimeDependent(card));
@@ -58,6 +65,8 @@ export const RequestCard = memo(function RequestCard({
       role="listitem"
       data-card-id={card.id}
       data-access={card.access === "ok" ? undefined : card.access}
+      data-has-task={card.taskId === undefined ? undefined : ""}
+      tabIndex={-1}
       aria-label={describeCardAloud(face, wait)}
       style={{ "--arrive-step": step }}
     >
@@ -70,6 +79,7 @@ export const RequestCard = memo(function RequestCard({
           {face.title}
         </p>
         {wait !== null && <CardWaitFigure wait={wait} />}
+        {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
         <span className="request-under">
           {face.status !== undefined && (
             <span className="request-shape">
@@ -84,6 +94,7 @@ export const RequestCard = memo(function RequestCard({
           {where !== "" && <span className="request-where">{where}</span>}
         </span>
         {trust !== undefined && <span className="request-trust">{trust}</span>}
+        <CardMoves card={card} />
       </span>
     </div>
   );

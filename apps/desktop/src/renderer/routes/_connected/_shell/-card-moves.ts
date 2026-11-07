@@ -33,7 +33,11 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
-import type { CardMover, PutBackRequest } from "../../../app/card-mover";
+import {
+  buildCachedInboxWriter,
+  type CardMover,
+  type PutBackRequest,
+} from "../../../app/card-mover";
 import type { Gesture, UndoStack } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { flipBoard } from "../../../screens/work/flip-board";
@@ -308,7 +312,7 @@ export const useCardMoves = ({
   };
 
   const undoLastMove = (): void => {
-    undo({ putCardBack });
+    undo({ putCardBack, writeInboxEdit: buildCachedInboxWriter(queryClient) });
   };
 
   return {

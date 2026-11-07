@@ -1,8 +1,9 @@
-import { useSyncExternalStore, type JSX } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readAcknowledgedInboxArrival, subscribeInboxArrival } from "../app/inbox-arrival";
 import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
+import { trackBody } from "../app/motion";
 import { inboxCountQuery, userQuery } from "../app/queries";
 import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
@@ -105,6 +106,32 @@ export function WorkSection(): JSX.Element {
   );
 }
 
+/** How far the Inbox's count sits below its place before it rolls into it, in pixels. */
+const COUNT_ROLL_DEPTH = 4;
+
+/**
+ * Renders the Inbox's count, and rolls it 4px into place on `hand` when the
+ * number changes, so the eye sees that a move or an arrival changed it. The
+ * first number it shows does not roll.
+ */
+function InboxCount({ value }: { readonly value: number }): JSX.Element {
+  const element = useRef<HTMLElement>(null);
+  const shown = useRef(value);
+  useLayoutEffect(() => {
+    if (shown.current === value) return;
+    shown.current = value;
+    if (element.current === null) return;
+    const body = trackBody(element.current);
+    body.set({ y: COUNT_ROLL_DEPTH });
+    body.to({ y: 0 }, "hand");
+  }, [value]);
+  return (
+    <b ref={element} className="count">
+      {value}
+    </b>
+  );
+}
+
 /**
  * Renders the Inbox's row: the count of cards with a clock on them
  * (`onTheClock`), in the plain grey `.count` and hidden at 0, and a 6px
@@ -140,7 +167,7 @@ function InboxRow(): JSX.Element {
       <IntakeIcon />
       <span>Inbox</span>
       {hasNewArrival && <i className="nav-new" />}
-      {onTheClock > 0 && <b className="count">{onTheClock}</b>}
+      {onTheClock > 0 && <InboxCount value={onTheClock} />}
     </Link>
   );
 }

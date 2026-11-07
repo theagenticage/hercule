@@ -1,6 +1,6 @@
 /** Tests what the open card says, with invented tickets of the Acme world. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCard, buildInboxPlace } from "./cards.testing";
+import { buildInboxCard, buildInboxPlace, buildRequestCard } from "./cards.testing";
 import { decideOpenCard, KIND_UNAVAILABLE_REASON } from "./open-card";
 
 const NOW = new Date("2026-11-06T09:00:00.000Z");
@@ -37,6 +37,18 @@ describe("decideOpenCard", () => {
     const refs = decideOpenCard(card, graph, true, NOW).places.map((place) => place.ref);
 
     expect(refs).toEqual(["round-a", "round-b", "site"]);
+  });
+
+  it("gives the whole reason of a request, where its face on the page gives only the person's name", () => {
+    const request = buildRequestCard("9", {
+      person: { name: "Ines" },
+      reason: { say: "Ines asked for your review", tone: "plain" },
+    });
+
+    const words = decideOpenCard(request, NO_GRAPH, true, NOW);
+
+    expect(words.face.sentence?.text).toBe("Ines");
+    expect(words.reason).toEqual({ text: "Ines asked for your review", tone: "plain" });
   });
 
   it("offers Take it and Dismiss on a card with no Task", () => {

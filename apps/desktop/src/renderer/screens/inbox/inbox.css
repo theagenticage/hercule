@@ -209,6 +209,8 @@
 
 /* ---------- A row of lasting work ---------- */
 .inbox-row {
+  /* The room a card keeps from the edges of the page when the keys bring it into view: the undo line covers the foot. */
+  scroll-margin-block: 10px 72px;
   position: relative;
   display: grid;
   grid-template-columns: 124px minmax(0, 1fr) auto;
@@ -220,8 +222,14 @@
   --row-hover: color-mix(in oklab, var(--ink) 5%, var(--stock));
   transition: background-color var(--m-quick) var(--m-ease);
 }
-.inbox-row:hover {
+/* The row under the pointer, or the one the keys are on, is the page's current card (`data-current`).
+   The page marks it itself rather than leaving it to :hover, because while the page closes up after a
+   move, what lies under a resting pointer is a moving target. */
+.inbox-row[data-current] {
   background: var(--row-hover);
+}
+.inbox-row:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--focus);
 }
 /* The last row's corners follow the sheet's, so its fill never shows square corners over them. */
 .inbox-row:last-child {
@@ -416,6 +424,7 @@
    raised. It rises to the full stock under the pointer. */
 .inbox-request {
   --mark-ink: var(--muted);
+  scroll-margin-block: 10px 72px;
   position: relative;
   isolation: isolate;
   display: grid;
@@ -438,9 +447,15 @@
 .inbox-request > .card-stock::before {
   display: none;
 }
-.inbox-request:hover > .card-stock {
+.inbox-request[data-current] > .card-stock {
   background: var(--stock);
   box-shadow: var(--h-hover);
+}
+.inbox-request:focus-visible > .card-stock {
+  background: var(--stock);
+  box-shadow:
+    inset 0 0 0 1.5px var(--focus),
+    var(--h-carry);
 }
 .request-mark {
   grid-column: 1;
@@ -558,4 +573,131 @@
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* ---------- The moves of a card ---------- */
+/* They lie over the end of the card's first line (a row) or second line (a request), invisible and out of
+   reach until the card is the current one. On a row the words under them fade on a soft gradient, so no
+   height changes. On a request the line's words end with an ellipsis before them. */
+.card-moves {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.inbox-row .card-moves {
+  top: 8px;
+  right: 10px;
+  padding-left: 24px;
+  background: linear-gradient(90deg, transparent, var(--row-hover) 18px);
+}
+.inbox-request .card-moves {
+  right: 6px;
+  bottom: 4px;
+}
+.inbox-row[data-current] .card-moves,
+.inbox-request[data-current] .card-moves {
+  opacity: 1;
+  pointer-events: auto;
+}
+.inbox-row[data-current] .row-end {
+  opacity: 0;
+}
+/* The request's second line ends before the moves, with an ellipsis, and gives up its place. */
+.inbox-request[data-current] .request-under {
+  margin-right: 92px;
+}
+.inbox-request[data-current] .request-where {
+  display: none;
+}
+.card-move {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition:
+    background-color var(--m-quick),
+    color var(--m-quick),
+    transform var(--m-press);
+}
+.card-move:hover {
+  background: color-mix(in oklab, var(--ink) 6%, var(--stock));
+  color: var(--ink);
+}
+.card-move:active {
+  transform: scale(0.94);
+}
+.card-move--take {
+  color: var(--ink);
+}
+.card-move--go {
+  padding: 0 8px;
+}
+.card-move:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* ---------- Who has taken a card on ---------- */
+/* The user's monogram stands where the wait was. Its box clips the monogram, which rises into it from below. */
+.card-taken {
+  flex: none;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+}
+.inbox-request .card-taken {
+  grid-column: 3;
+  grid-row: 1;
+  margin: -1px 0;
+}
+.card-taken-in {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+.monogram {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--you);
+  color: var(--face-ink);
+  font-size: 8px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+/* ---------- Copies that step aside ---------- */
+/* A dismissed card is gone from the page at once; its copy steps 14px aside and fades here. It lies over the
+   page, under the toolbar, and takes the page's own edges. */
+.inbox-copies {
+  position: absolute;
+  inset: 46px 0 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+.inbox-copies .is-ghost {
+  pointer-events: none;
+}
+.inbox-copies .inbox-row {
+  background: var(--stock);
 }

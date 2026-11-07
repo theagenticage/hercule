@@ -59,7 +59,8 @@ export type InboxEdit =
 
 /** Returns `card` with its active Task set to `taskId`, or without one when `taskId` is `undefined`. */
 const withTask = (card: InboxCard, taskId: string | undefined): InboxCard => {
-  const { taskId: _before, ...rest } = card;
+  const { taskId: before, ...rest } = card;
+  void before;
   return taskId === undefined ? rest : { ...rest, taskId };
 };
 

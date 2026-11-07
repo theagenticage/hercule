@@ -62,11 +62,17 @@ function RequestsOrderControl({
  * finishing the requests deserves its moment), or a line when the filter
  * hides the ones they have.
  */
-function NoRequests({ isEmptiedByFilter }: { readonly isEmptiedByFilter: boolean }): JSX.Element {
+function NoRequests({
+  isEmptiedByFilter,
+  isSunriseStill,
+}: {
+  readonly isEmptiedByFilter: boolean;
+  readonly isSunriseStill: boolean;
+}): JSX.Element {
   if (isEmptiedByFilter) return <p className="inbox-none">Nothing here matches this filter.</p>;
   return (
     <div className="inbox-requests-clear">
-      <Sunrise width={240} isStill />
+      <Sunrise width={240} isStill={isSunriseStill} />
       <p>No requests left.</p>
     </div>
   );
@@ -80,6 +86,9 @@ function NoRequests({ isEmptiedByFilter }: { readonly isEmptiedByFilter: boolean
  * - `layout` is the page's layout (`layOutInbox`); the column draws its
  *   `requests` and `withSomeoneElse` parts.
  * - `plugins` is what `plugin.query` returns, for the marks.
+ * - `monogram` is the user's, for the cards that a Task holds.
+ * - `isSunriseStill` is false when the user's own move just left no request,
+ *   so the small sunrise plays.
  *
  * The cards stand as `.inbox-request` elements, keyed by the id of their card,
  * in one list for each group inside `.inbox-requests`.
@@ -89,11 +98,15 @@ export function RequestsSide({
   requestsOrder,
   onOrderChange,
   plugins,
+  monogram,
+  isSunriseStill,
 }: {
   readonly layout: InboxLayout;
   readonly requestsOrder: RequestsOrder;
   readonly onOrderChange: (order: RequestsOrder) => void;
   readonly plugins: readonly PluginIdentity[];
+  readonly monogram: string;
+  readonly isSunriseStill: boolean;
 }): JSX.Element {
   const { requests, withSomeoneElse } = layout;
   const stepOfCard = new Map(
@@ -116,6 +129,7 @@ export function RequestsSide({
                   card={row.card}
                   homeName={row.homeName}
                   plugins={plugins}
+                  monogram={monogram}
                   step={stepOfCard.get(row.card.id) ?? 0}
                 />
               ))}
@@ -123,8 +137,13 @@ export function RequestsSide({
           </Fragment>
         ))}
       </div>
-      {requests.isEmpty && <NoRequests isEmptiedByFilter={requests.isEmptiedByFilter} />}
-      <WithSomeoneElse rows={withSomeoneElse.rows} plugins={plugins} />
+      {requests.isEmpty && (
+        <NoRequests
+          isEmptiedByFilter={requests.isEmptiedByFilter}
+          isSunriseStill={isSunriseStill}
+        />
+      )}
+      <WithSomeoneElse rows={withSomeoneElse.rows} plugins={plugins} monogram={monogram} />
     </aside>
   );
 }

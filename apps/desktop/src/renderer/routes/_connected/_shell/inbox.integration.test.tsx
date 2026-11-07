@@ -6,7 +6,7 @@
  * with the sidebar's number, and the lines about a failing source, a cut-short
  * Inbox and a controller that cannot be reached.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
@@ -18,17 +18,26 @@ import {
   buildSourceConnection,
   buildSourcePlugin,
 } from "@hercule/client-core/inbox/testing";
+import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import {
+  buildErrorBody,
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  holdAnswer,
   renderApp,
   setVisibility,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubIntersectionObserver,
   type Call,
   type Handler,
 } from "../../../app/testing";
+
+// The Work board, which some tests open, stops the paws of a colleague out of view.
+beforeEach(() => {
+  stubIntersectionObserver();
+});
 
 afterEach(() => {
   setVisibility("visible");
@@ -356,5 +365,433 @@ describe("the Inbox screen", () => {
     await user.click(await screen.findByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Fix the basket rounding")).toBeTruthy();
+  });
+});
+
+// ---------- The moves ----------
+
+const TASK_ID = buildCardId(900);
+
+const takeOnPath = (card: InboxCard): string => `POST /api/v1/external-entities/${card.id}/take-on`;
+const undoTakeOnPath = (card: InboxCard): string =>
+  `POST /api/v1/external-entities/${card.id}/take-on/undo`;
+const dismissPath = (card: InboxCard): string =>
+  `POST /api/v1/external-entities/${card.id}/dismiss`;
+const restorePath = (card: InboxCard): string =>
+  `POST /api/v1/external-entities/${card.id}/restore`;
+
+/** Lists the calls in `calls` to the operation `path`, written `METHOD /path`. */
+const listCallsTo = (calls: readonly Call[], path: string): readonly Call[] =>
+  calls.filter((call) => `${call.method} ${call.path}` === path);
+
+/** Returns the Undo button of the undo line. */
+const getUndoButton = (): HTMLElement => screen.getByRole("button", { name: /^Undo/ });
+
+/** Returns the button of a card's moves named `name`. */
+const getMove = (card: HTMLElement, name: string): HTMLElement =>
+  within(card).getByRole("button", { name, hidden: true });
+
+/** Rests the pointer on a card, which shows its moves, and presses the move named `name`. */
+const pressMove = async (
+  user: ReturnType<typeof userEvent.setup>,
+  card: HTMLElement,
+  name: string,
+): Promise<void> => {
+  await user.hover(card);
+  await user.click(getMove(card, name));
+};
+
+describe("the Inbox's moves", () => {
+  it("takes a card on: its monogram stands where the wait was, the card keeps its place, and Undo takes the Task back", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: {
+        [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } },
+        [undoTakeOnPath(SLOTS)]: { body: { undone: true } },
+      },
+    });
+    const requests = await screen.findByRole("complementary", { name: "Requests" });
+    expect(getCard(/Cache delivery slot lookups/).textContent).toMatch(/\d+[hd]/);
+
+    await pressMove(user, getCard(/Cache delivery slot lookups/), "Take it");
+
+    expect(await screen.findByText("Took on Review #3. A Task is on Work.")).toBeTruthy();
+    const taken = within(requests).getByRole("listitem", { name: /Cache delivery slot lookups/ });
+    expect(within(taken).getByTitle("You have it")).toBeTruthy();
+    expect(taken.textContent).not.toMatch(/Take it\d*[hd]$/);
+    expect(taken.hasAttribute("data-has-task")).toBe(true);
+    // Its moves now offer the Task, not a second Take.
+    expect(within(taken).queryByRole("button", { name: "Take it", hidden: true })).toBeNull();
+    expect(getMove(taken, "On Work")).toBeTruthy();
+    expect(listCallsTo(calls, takeOnPath(SLOTS))).toHaveLength(1);
+
+    await user.click(getUndoButton());
+
+    expect(await screen.findByText("Put back: Took on Review #3.")).toBeTruthy();
+    expect(listCallsTo(calls, undoTakeOnPath(SLOTS))[0]?.body).toEqual({ taskId: TASK_ID });
+    const freed = getCard(/Cache delivery slot lookups/);
+    expect(within(freed).queryByTitle("You have it")).toBeNull();
+    expect(freed.hasAttribute("data-has-task")).toBe(false);
+  });
+
+  it("says a Task that was touched since stays, with the reason, and keeps the monogram", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      handlers: {
+        [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } },
+        [undoTakeOnPath(SLOTS)]: {
+          body: { undone: false, reason: "A Thread was started on it." },
+        },
+      },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Take it",
+    );
+    await screen.findByText("Took on Review #3. A Task is on Work.");
+
+    await user.click(getUndoButton());
+
+    expect(
+      await screen.findByText("Could not put back: Took on Review #3. A Thread was started on it."),
+    ).toBeTruthy();
+    expect(within(getCard(/Cache delivery slot lookups/)).getByTitle("You have it")).toBeTruthy();
+  });
+
+  it("says a card already had a Task when Take finds one, and offers no Undo", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      handlers: { [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: false } } },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Take it",
+    );
+
+    expect(
+      await screen.findByText("Review #3 already had a Task, so no new one was made."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
+    expect(within(getCard(/Cache delivery slot lookups/)).getByTitle("You have it")).toBeTruthy();
+  });
+
+  it("says why a Take failed and leaves the card as it was", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      handlers: {
+        [takeOnPath(SLOTS)]: {
+          status: 409,
+          body: buildErrorBody("conflict", "It changed while the Task was being made."),
+        },
+      },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Take it",
+    );
+
+    expect(
+      await screen.findByText(
+        "Review #3 was not taken on: It changed while the Task was being made. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(within(getCard(/Cache delivery slot lookups/)).queryByTitle("You have it")).toBeNull();
+  });
+
+  it("dismisses a card before the controller answers, and Undo brings it back", async () => {
+    const user = userEvent.setup();
+    const held = holdAnswer();
+    const { calls } = await openInbox({
+      handlers: {
+        [dismissPath(SLOTS)]: held.handler,
+        [restorePath(SLOTS)]: { body: {} },
+      },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Dismiss",
+    );
+
+    // The controller has not answered, and the card is gone already, with the next one in its place.
+    expect(screen.queryByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeNull();
+    expect(screen.getByRole("listitem", { name: /Round loyalty points down/ })).toBeTruthy();
+    expect(screen.getByText("Dismissed Review #3.")).toBeTruthy();
+    held.answer({ body: {} });
+
+    await user.click(getUndoButton());
+
+    expect(await screen.findByText("Put back: Dismissed Review #3.")).toBeTruthy();
+    expect(listCallsTo(calls, restorePath(SLOTS))).toHaveLength(1);
+    expect(
+      within(screen.getByRole("complementary", { name: "Requests" })).getByRole("listitem", {
+        name: /Cache delivery slot lookups/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("puts a card back and says why when the controller refuses to dismiss it", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: {
+        [dismissPath(SLOTS)]: { status: 500, body: buildErrorBody("internal", "Disk is full.") },
+      },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Dismiss",
+    );
+
+    expect(
+      await screen.findByText(
+        "Review #3 was not dismissed, so it is back: Disk is full. Try again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeTruthy();
+    // A move that did not save has nothing to undo.
+    expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
+    expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(1);
+  });
+
+  it("dismisses with E and makes the next card that waits current, chosen by the order of the page", async () => {
+    const user = userEvent.setup();
+    const third = review(5, "Pin the checkout copy");
+    await openInbox({
+      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY, third]),
+      handlers: { [dismissPath(SLOTS)]: { body: {} } },
+    });
+    await screen.findByText("Fix the basket rounding");
+
+    // The first arrow lands on the first card of the page, the next crosses to the column.
+    await user.keyboard("{ArrowDown}{ArrowRight}");
+    expect(getCard(/Cache delivery slot lookups/).getAttribute("data-current")).toBe("keys");
+    await user.keyboard("e");
+
+    expect(screen.queryByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeNull();
+    const next = getCard(/Round loyalty points down/);
+    expect(next.getAttribute("data-current")).toBe("keys");
+    expect(document.activeElement).toBe(next);
+    // Exactly one card carries the mark.
+    expect(document.querySelectorAll("[data-current]")).toHaveLength(1);
+  });
+
+  it("takes on with T and moves on, and refuses T on a card that has a Task, saying why", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY]),
+      handlers: { [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } } },
+    });
+    await screen.findByText("Fix the basket rounding");
+    await user.keyboard("{ArrowDown}{ArrowRight}t");
+
+    await screen.findByText("Took on Review #3. A Task is on Work.");
+    expect(getCard(/Round loyalty points down/).getAttribute("data-current")).toBe("keys");
+
+    // The card just taken keeps its place and now has a Task: walking back to it and pressing T refuses.
+    await user.keyboard("{ArrowUp}t");
+    expect(await screen.findByText("It already has a Task. Press G to see it.")).toBeTruthy();
+    expect(listCallsTo(calls, takeOnPath(SLOTS))).toHaveLength(1);
+  });
+
+  it("does not act on a card from a key pressed in the toolbar or in a menu", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: {
+        [dismissPath(SLOTS)]: { body: {} },
+        [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } },
+      },
+    });
+    await screen.findByText("Fix the basket rounding");
+    await user.keyboard("{ArrowDown}{ArrowRight}");
+    expect(getCard(/Cache delivery slot lookups/).getAttribute("data-current")).toBe("keys");
+
+    // Focus is on the Group by button in the toolbar.
+    screen.getByRole("button", { name: /Group by/ }).focus();
+    await user.keyboard("et");
+    // Focus is inside an open menu.
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    await user.keyboard("et");
+
+    expect(screen.getByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeTruthy();
+    expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(0);
+    expect(listCallsTo(calls, takeOnPath(SLOTS))).toHaveLength(0);
+  });
+
+  it("walks with the arrows and J and K, and the opposite arrow comes straight back", async () => {
+    const user = userEvent.setup();
+    await openInbox({ inbox: () => buildPageInbox([ROUNDING, RETRIES, SLOTS, LOYALTY]) });
+    await screen.findByText("Fix the basket rounding");
+    const currentTitle = (): string | null =>
+      document.querySelector("[data-current] .row-title, [data-current] .request-title")
+        ?.textContent ?? null;
+
+    // The surfaces lie by name: Checkout, then Pricing rules.
+    await user.keyboard("{ArrowDown}");
+    expect(currentTitle()).toBe("Retry card payments once");
+    await user.keyboard("{ArrowDown}");
+    expect(currentTitle()).toBe("Fix the basket rounding");
+    // Down stays on the wide side: at its foot, nothing moves.
+    await user.keyboard("{ArrowDown}");
+    expect(currentTitle()).toBe("Fix the basket rounding");
+    await user.keyboard("{ArrowRight}");
+    expect(currentTitle()).toBe("Cache delivery slot lookups");
+    await user.keyboard("{ArrowLeft}");
+    expect(currentTitle()).toBe("Fix the basket rounding");
+    // J and K read through the whole page.
+    await user.keyboard("jj");
+    expect(currentTitle()).toBe("Round loyalty points down");
+    await user.keyboard("k");
+    expect(currentTitle()).toBe("Cache delivery slot lookups");
+  });
+
+  it("says G has no Task for a card that waits, and goes to Work with the Task shown for one that has it", async () => {
+    const user = userEvent.setup();
+    const held = ticket(7, "Hold the courier slot", { taskId: TASK_ID });
+    const { router } = await openInbox({
+      inbox: () => buildPageInbox([ROUNDING, held]),
+      handlers: {
+        "GET /api/v1/tasks/board": {
+          body: buildBoard(buildCard(TASK_ID, { title: "Hold the courier slot" })),
+        },
+        "GET /api/v1/tasks": { body: { items: [] } },
+      },
+    });
+    await screen.findByText("Fix the basket rounding");
+    await user.keyboard("{ArrowDown}g");
+
+    expect(
+      await screen.findByText("It has no Task yet. Press T to take it on, and G to see the Task."),
+    ).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/inbox");
+
+    await user.keyboard("{ArrowDown}g");
+
+    // Work brings the Task's card into view and puts the keyboard on it.
+    const workCard = await screen.findByRole("button", { name: /^Hold the courier slot/ });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(workCard);
+    });
+    expect(router.state.location.pathname).toBe("/work");
+  });
+
+  it("undoes a dismissal with the Undo key from another screen, and the card is back when the Inbox opens", async () => {
+    const user = userEvent.setup();
+    const { calls, router } = await openInbox({
+      handlers: {
+        [dismissPath(SLOTS)]: { body: {} },
+        [restorePath(SLOTS)]: { body: {} },
+        "GET /api/v1/tasks/board": {
+          body: buildBoard(buildCard(buildCardId(901), { title: "Order the depot labels" })),
+        },
+        "GET /api/v1/tasks": { body: { items: [] } },
+      },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Dismiss",
+    );
+    await screen.findByText("Dismissed Review #3.");
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(1);
+    });
+
+    await router.navigate({ to: "/work", search: {} });
+    await screen.findByRole("button", { name: /^Order the depot labels/ });
+    await user.keyboard("{Meta>}z{/Meta}");
+
+    await waitFor(() => {
+      expect(listCallsTo(calls, restorePath(SLOTS))).toHaveLength(1);
+    });
+    expect(await screen.findByText("Put back: Dismissed Review #3.")).toBeTruthy();
+
+    await router.navigate({ to: "/inbox" });
+    expect(
+      await screen.findByRole("listitem", { name: /Cache delivery slot lookups/ }),
+    ).toBeTruthy();
+  });
+  it("hands the pointer's card to the next that waits, so the same click at the same spot dismisses it too", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: { [dismissPath(SLOTS)]: { body: {} }, [dismissPath(LOYALTY)]: { body: {} } },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Dismiss",
+    );
+    expect(getCard(/Round loyalty points down/).getAttribute("data-current")).toBe("pointer");
+
+    // The click lands on no card at all: it is the same spot, and the next card is the pointer's.
+    await user.click(document.querySelector(".inbox-scroll")!);
+
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(LOYALTY))).toHaveLength(1);
+    });
+    expect(screen.queryByRole("listitem", { name: /Round loyalty points down/ })).toBeNull();
+  });
+
+  it("opens a card with a click and with Return, and Esc folds it back", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      handlers: {
+        [`GET /api/v1/external-entities/${SLOTS.id}`]: {
+          body: {
+            ...SLOTS,
+            kindAvailable: true,
+            places: [SHOP_WEB],
+            edges: [],
+            links: [],
+            conflicts: [],
+          },
+        },
+      },
+    });
+    await user.click(await screen.findByText("Cache delivery slot lookups"));
+    expect(await screen.findByRole("dialog", { name: "Cache delivery slot lookups" })).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Cache delivery slot lookups" })).toBeNull();
+    });
+    // The card the sheet folded back into holds the keys, so Return opens it again.
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Cache delivery slot lookups" })).toBeTruthy();
+  });
+
+  it("lists its keys on a sheet, from the ? key and from the button at the end of the bar", async () => {
+    const user = userEvent.setup();
+    await openInbox();
+    await screen.findByText("Fix the basket rounding");
+
+    await user.keyboard("?");
+    const sheet = await screen.findByRole("dialog", { name: "Keys" });
+    expect(within(sheet).getByText("Take it")).toBeTruthy();
+    expect(within(sheet).getByText("Dismiss")).toBeTruthy();
+    expect(within(sheet).getByText("Undo")).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Keys" }));
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+  });
+  it("brings in a card that a read adds, and leaves the cards that were there where they are", async () => {
+    let cards: readonly InboxCard[] = [ROUNDING, SLOTS];
+    const { live } = await openInbox({ inbox: () => buildPageInbox(cards) });
+    const slots = await screen.findByRole("listitem", { name: /Cache delivery/ });
+    await live.waitForFirstPushes();
+
+    cards = [ROUNDING, SLOTS, LOYALTY];
+    live.pushInvalidation("externalEntity");
+
+    const arrived = await screen.findByRole("listitem", { name: /Round loyalty points down/ });
+    expect(screen.getByRole("listitem", { name: /Cache delivery/ })).toBe(slots);
+    expect(arrived.compareDocumentPosition(slots) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 });

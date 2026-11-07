@@ -4,6 +4,7 @@
  * it offers. Everything is worked out from the record `externalEntity.read`
  * returns (or the same fields on an Inbox card), so no kind is named here.
  */
+import type { EntityReason } from "@hercule/contract";
 import { readAncestorRows, type AncestorRow, type RelationGraph } from "../desk/relation-rows";
 import { decideCardFace, type CardFace, type CardRecord } from "./card-face";
 import { describeCardTrust, describeCardWait, type CardWait } from "./card-wait";
@@ -26,6 +27,8 @@ export interface OpenCardWords {
   readonly face: CardFace;
   /** The small line under the title: the noun, the identifier, who it is about, and `yours`. */
   readonly meta: readonly string[];
+  /** Why the card is on the Inbox, in full: a request's sentence is not cut down to the person's name here. */
+  readonly reason: { readonly text: string; readonly tone: EntityReason["tone"] } | undefined;
   /** How long the card has waited, or `null` for a kind with no clock or a card a Task holds. */
   readonly wait: CardWait | null;
   /** The line that says the facts may be old, or `undefined` when they are as fresh as can be. */
@@ -65,6 +68,10 @@ export const decideOpenCard = (
       ...(record.person === undefined ? [] : [record.person.name]),
       ...(record.yours ? ["yours"] : []),
     ],
+    reason:
+      record.reason === undefined
+        ? undefined
+        : { text: record.reason.say, tone: record.reason.tone },
     wait: describeCardWait(record, now),
     trust: describeCardTrust(record, now),
     places: readAncestorRows(record.ref, graph),

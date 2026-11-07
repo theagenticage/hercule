@@ -21,12 +21,20 @@
  *   draw the places above a thing and the things linked to it, who claims a
  *   link (shown on hover or focus), and the 4px bar of a source's reported
  *   progress. A place the user cannot open is a locked row with no title.
+ * - `KeysSheet`: the sheet that lists a page's keys, with Undo and Esc after
+ *   them.
  * - `SideSheet`, `UndoLine`, `Sunrise`: the sheet at the right, the line at
  *   the foot, and what shows when all is done.
+ * - `OpeningSheet`: the sheet a card opens into, which grows from where the
+ *   card lies. It knows nothing about what it holds.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { FilterChips, FilterControl } from "./filter-control";
+export { OpeningSheet } from "./opening-sheet";
+export type { SheetOrigin, SheetPlaces } from "./opening-sheet-controller";
+export type { SheetRect } from "./opening-sheet-geometry";
+export { KeysSheet, type KeyRow } from "./keys-sheet";
 export { ProgressBar } from "./progress-bar";
 export { ClaimHint, RelationRow, RelationRows } from "./relation-rows";
 export { SectionHeading } from "./section-heading";

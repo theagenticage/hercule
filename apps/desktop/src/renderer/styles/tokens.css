@@ -805,6 +805,8 @@
   --wait-recent: var(--faint);
   --wait-due: var(--muted);
   --wait-over: var(--ink);
+  /* What dims the page behind an open card: flat, no blur. In the light themes it is paper, so nothing turns grey. */
+  --veil: color-mix(in oklab, var(--desk) 72%, transparent);
 }
 [data-theme="styles"] {
   --mark-l: 0.43;
@@ -816,6 +818,7 @@
 [data-theme="blue-train"] {
   --mark-l: 0.8;
   --mark-c: 0.14;
+  --veil: var(--scrim);
   /* The stock is lighter than --faint was set for, so words on a place take a step more ink. A
      place reads this through --faint, which cannot refer to itself. */
   --faint-on-stock: color-mix(in oklab, var(--muted) 45%, var(--faint));

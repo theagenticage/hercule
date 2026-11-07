@@ -16,16 +16,19 @@ import { PlaceSurface } from "./place-surface";
  *   noticed card draws nothing, so the page holds no gap for it.
  * - `note` is a quiet line under the work, such as the Inbox being cut short.
  * - `plugins` is what `plugin.query` returns, for the marks.
+ * - `monogram` is the user's, for the rows that a Task holds.
  *
  * The surfaces stand as `.inbox-place` elements keyed by their place's ref.
  */
 export function OngoingSide({
   layout,
   plugins,
+  monogram,
   note,
 }: {
   readonly layout: InboxLayout;
   readonly plugins: readonly PluginIdentity[];
+  readonly monogram: string;
   readonly note: ReactNode;
 }): JSX.Element {
   const { ongoing, grouping } = layout;
@@ -40,6 +43,7 @@ export function OngoingSide({
           surface={surface}
           plugins={plugins}
           showStatus={grouping !== STATUS_GROUPING}
+          monogram={monogram}
           block={index + 2}
         />
       ))}
