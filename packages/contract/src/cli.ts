@@ -698,7 +698,7 @@ export const CLI = {
       },
       status: {
         flag: "status",
-        help: "Sets a coarse status: open, in-progress, done or cancelled. The task moves to the earliest stage that status reads, unless its stage already reads it. `--stage` is the exact word; send one of the two, not both.",
+        help: "Sets a coarse status: open, in-progress, done or cancelled. The task moves to a stage: `open` gives planned, `in-progress` gives building, `done` gives done and `cancelled` gives dropped. A task whose stage already reads as that status stays where it is. `--stage` is the exact word; send one of the two, not both.",
       },
       stage: {
         flag: "stage",
@@ -4108,6 +4108,8 @@ export const CLI = {
         "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
       invalid_state:
         "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off",
+      not_found:
+        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off",
     },
   },
   "session.update": {

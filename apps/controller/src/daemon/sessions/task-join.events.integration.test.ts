@@ -1,8 +1,9 @@
 /**
- * Tests the Task of a Done Thread that an event wakes (ticket #1029, "Other
- * paths"). The event pipeline writes the Thread's new input with no request
- * and no actor behind it, so the Task the rule makes for the Thread must be
- * stamped with the system, and the wake-up must still be stored.
+ * Tests the Task of a Done Thread that an event wakes (spec 09, "Threads and
+ * their Tasks", "Taking a Thread off Done"). The event pipeline writes the
+ * Thread's new input with no request and no actor behind it, so the Task the
+ * rule makes for the Thread must be stamped with the system, and the wake-up
+ * must still be stored.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";

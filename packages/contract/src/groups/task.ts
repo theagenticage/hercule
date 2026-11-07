@@ -81,6 +81,16 @@ export const TaskStage = Schema.Literals(TASK_STAGES);
 export type TaskStage = Schema.Schema.Type<typeof TaskStage>;
 
 /**
+ * The stages at which a Task is finished: `done` and `dropped`. A Task at one
+ * of them takes no new Thread, and a workspace whose Task is at one starts a
+ * new Task.
+ */
+export const FINISHED_STAGES: ReadonlyArray<TaskStage> = ["done", "dropped"];
+
+/** Returns true if the stage is `done` or `dropped`, so a Task at it takes no new work. */
+export const isFinishedStage = (stage: TaskStage): boolean => FINISHED_STAGES.includes(stage);
+
+/**
  * Returns the coarse status that reads a stage: `exploring` and `planned` are
  * `open`; `building`, `in-review` and `landed` are `in-progress`; `done` is
  * `done`; `dropped` is `cancelled`.
@@ -285,10 +295,11 @@ const TASK_UPDATE_FIELDS = {
   title: Schema.optionalKey(TaskTitle),
   description: Schema.optionalKey(TaskDescription),
   /**
-   * Sets a coarse status. The Task moves to the earliest stage that status
-   * reads, unless its stage already reads it: `in-progress` leaves an
-   * `in-review` Task where it is. `stage` is the exact word; send it to
-   * choose the stage. A call that sends both is refused.
+   * Sets a coarse status. The Task moves to a stage: `open` gives `planned`,
+   * `in-progress` gives `building`, `done` gives `done` and `cancelled` gives
+   * `dropped`. A Task whose stage already reads as that status stays where it
+   * is: `in-progress` leaves an `in-review` Task there. `stage` is the exact
+   * word; send it to choose the stage. A call that sends both is refused.
    */
   status: Schema.optionalKey(TaskStatus),
   /** Moves the Task to this stage. The status follows from it. */

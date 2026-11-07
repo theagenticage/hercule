@@ -29,7 +29,7 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
+import { FINISHED_STAGES, MAX_TRACKING_HANDOFFS } from "@hercule/contract";
 import type { SqlError } from "effect/sql/SqlError";
 import type {
   ExternalRef,
@@ -133,13 +133,6 @@ export interface TrackedTask {
   readonly title: string;
   readonly handoffs: ReadonlyArray<TrackedHandoff>;
 }
-
-/**
- * The stages at which a Task is finished: `done` and `dropped`. A Task at one
- * of them takes no new Thread, and a workspace whose Task is at one starts a
- * new Task.
- */
-export const FINISHED_STAGES: ReadonlyArray<TaskStage> = ["done", "dropped"];
 
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
@@ -421,6 +414,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the stage of the Task with that id, or none if it does not exist
+     * or has been deleted. It reads one column, so it costs the same however
+     * much provenance the Task has.
+     */
+    readStage: (id: string): Effect.Effect<Option.Option<TaskStage>, SqlError> =>
+      Effect.map(
+        sql<{ readonly stage: TaskStage }>`SELECT stage FROM tasks
+                                           WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+        (rows) => Option.fromNullishOr(rows[0]?.stage),
+      ),
+
+    /**
      * Returns the oldest handoff entry of a Task: the provenance entry that
      * names a signal, earliest `at` first. It is none when the Task does not
      * exist, is deleted, or has no handoff entry. One lookup on
@@ -639,8 +644,8 @@ const make = Effect.gen(function* () {
     /**
      * Returns the id of the Task that the ephemeral workspace's row in
      * `task_workspaces` names, or none when the workspace has no row or the
-     * Task is deleted or finished (`FINISHED_STAGES`). One query that joins
-     * the row to its Task.
+     * Task is deleted or finished (the contract's `FINISHED_STAGES`). One
+     * query that joins the row to its Task.
      */
     readJoinableTaskIdOfWorkspace: (
       workspaceId: string,

@@ -1,7 +1,7 @@
 /**
  * Tests the Task of a workflow run's step sessions, and of a fork of one
- * (ticket #1029, "The join rule"). The run is started by handing a signal off,
- * so it has a Task, in a workflow with two agent steps in one ephemeral
+ * (spec 09, "Which Task a session gets"). The run is started by handing a
+ * signal off, so it has a Task, in a workflow with two agent steps in one ephemeral
  * workspace.
  *
  * - A step session takes its run's Task as it is, even a finished one, and
@@ -173,7 +173,7 @@ describe("the Task of a workflow run's step sessions", () => {
       const run = await readRun(base, arranged.token, runId);
       const taskId = run.taskId!;
       expect(taskId).toBeDefined();
-      await waitUntil("provisioned the run's workspace", async () => {
+      await waitUntil("provisioned the run's workspace", () => {
         const frame = arranged.wire.frames.find((one) => one._tag === "workspaceProvision");
         return frame === undefined
           ? undefined

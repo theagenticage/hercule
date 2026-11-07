@@ -304,8 +304,9 @@ export const Session = Schema.Struct({
   projectId: Schema.NullOr(Id),
   /**
    * The Task the session belongs to. Absent when it belongs to none: an
-   * assistant's session, an Agent's session with no Task to join, and a Thread
-   * that was Done or archived before Tasks existed.
+   * assistant's session, an Agent's session with no Task to join, the session
+   * of a workflow step whose run has no Task, and a Thread that was Done or
+   * archived before Tasks existed.
    */
   taskId: Schema.optionalKey(Id),
   requestedAccessMode: AccessMode,

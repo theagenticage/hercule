@@ -203,7 +203,7 @@ Rules:
 - **Rows 2 and 3 are implicit, so they never refuse.** They give a live Task or nothing. A caller or a fork's parent whose Task is finished, deleted or missing gives nothing, and the next row decides. This one rule serves spawn, fork and reopen.
 - **A run step's session takes its run's `taskId` as it is,** even when that Task is finished, and the run may have none. It does not go through rows 1 to 4 and does not write `task_workspaces`. A Thread that step starts can then inherit the Task by row 2. A fork of a run step's session is an Agent's session, not a run step, so it follows rows 2 and 3.
 - **A new Task** (row 4) takes the session's title, stage `exploring`, priority `normal` and the session's project, when that project still exists. A fork can carry a project that was deleted, and a Task cannot name one, so the project is left out then. A Task's title is never empty, so a session with a blank title gets a Task titled `Untitled thread`.
-- **The actor.** A Task made for a Thread is stamped with the actor who started the Thread, and `task.created` fires for it ([Platform events](#platform-events)). The one exception is a Thread taken off Done by a matched event (below), which has no request behind it and is stamped with the system actor.
+- **The actor.** The Task made for a Thread is stamped with the actor behind the spawn or the reopen, and `task.created` fires for it ([Platform events](#platform-events)). When a matched event wakes the Thread (below), no request is behind it, so that actor is the system.
 - **No grant is checked.** Starting a Thread was already allowed by `session.spawn`, and the Task follows from it.
 - **It is atomic.** The Task is chosen in the same transaction as the session's write and the check that stops a retried call from placing a second session ([./11](./11-public-api-and-agent-surface.md) section 2, "Retrying a call"). A retried spawn makes no second Task. Writes are serial, so two first Threads started at once in one workspace run one after the other, and the second finds the first's row.
 - **A join adds no provenance entry.** The link lives on the session, as links do ([Relations](#relations-project-runs-sessions)).
@@ -213,14 +213,14 @@ Rules:
 A workspace's Task is an explicit row, never "the most recent session in this workspace". The `task_workspaces` table, owned by the tasks domain, holds `workspace_id` (the primary key), `task_id` and `joined_at`. Both ids are plain values, with no foreign key.
 
 - **Reading (row 3).** The row's Task is accepted only when it is live. A row that points at a finished or deleted Task is ignored and then replaced by the next session that joins a Task, so reusing a folder after its Task is Done starts a new Task.
-- **Writing.** A row is written when a session joins a Task in an ephemeral workspace and the workspace has no row with a live Task.
+- **Writing.** A row is written when a session joins a Task in an ephemeral workspace and the workspace has no row with a live Task. Keeping a Task is not joining: a Thread taken off Done that keeps its live Task writes no row.
 - **A main workspace never gets a row.** It is long-lived and shared by whatever runs in it, so sharing one says nothing about being the same work. This limits the inference only: rows 1 and 2 still apply, so a Thread in a main workspace gets row 1, 2 or 4. A workspace-less session has no row to read either.
 
 ### Taking a Thread off Done
 
-When a Done Thread is taken off Done, by `session.reopen` or by a new input, and it has no live Task (none, a finished one or a deleted one), it runs rows 3 and 4. Coming back after the user closed the Task is new work, so it joins a live Task of its workspace or gets a new one. A Thread whose Task is still live keeps it.
+When a Done Thread is taken off Done, by `session.reopen` or by a new input, and it has no live Task (none, a finished one or a deleted one), it runs rows 3 and 4. Coming back after the user closed the Task is new work, so it joins a live Task of its workspace or gets a new one. A Thread whose Task is still live keeps it, and that writes no `task_workspaces` row, because keeping is not joining.
 
-A new input can take a Thread off Done with no request behind it, when a session subscription's matched event wakes it ([./11](./11-public-api-and-agent-surface.md) section 7). A Task made that way is stamped with the system actor.
+A new input can take a Thread off Done with no request behind it, when a session subscription's matched event wakes it ([./11](./11-public-api-and-agent-surface.md) section 7). The Task made then is stamped with the system actor, as the rule above says.
 
 ### A resume is not a join
 
@@ -261,7 +261,7 @@ interface TaskCreatedPayload {
 }
 ```
 
-*(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* `task.created` fires for every Task the core makes for a Thread too, so it fires once per Thread that starts a Task of its own. A trigger on a bare `task.created` therefore starts a run for each new Thread. A workflow that listens to it MUST filter on what it cares about (a label, a project, the actor on the envelope). No shipped workflow listens to `task.created`.
+*(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* `task.created` fires for every Task the core makes for a Thread too, so it fires once per Thread that starts a Task of its own. A trigger on a bare `task.created` therefore starts a run for each new Thread. A workflow that listens to it MUST filter on what it cares about (a label, a project, the actor on the envelope). No shipped workflow listens to `task.created`. The title of a Task made for a Thread comes from the Thread's prompt, so it is untrusted text: a workflow must treat `event.payload.task.title` as data, and never as an instruction to follow.
 
 **`task.updated`** carries per-field diffs, so a CEL filter routes without fetch-and-compare:
 

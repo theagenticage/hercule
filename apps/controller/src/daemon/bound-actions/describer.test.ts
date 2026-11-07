@@ -258,6 +258,24 @@ describe("task.create", () => {
   });
 });
 
+describe("task.create stage", () => {
+  it("names the stage the task is created at", async () => {
+    const line = await run(
+      describeOperation({
+        op: "task.create",
+        input: { title: "Fix login", description: "", stage: "planned" },
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("stage planned"),
+    ]);
+  });
+});
+
 describe("task.update", () => {
   it("names the task and the project, and lists each change in full", async () => {
     const longDescription = "new words ".repeat(50);
@@ -332,6 +350,29 @@ describe("task.update", () => {
       text(": "),
       text("move to project "),
       marked(MISSING_ID),
+    ]);
+  });
+});
+
+describe("task.update stage", () => {
+  it("lists the stage beside the other changes, so an approval hides none of them", async () => {
+    const line = await run(
+      Effect.gen(function* () {
+        const taskId = yield* insertTask("Fix the login page");
+        return yield* describeOperation({
+          op: "task.update",
+          input: { taskId, priority: "low", stage: "dropped" },
+        });
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("stage → dropped"),
+      text(", "),
+      text("priority → low"),
     ]);
   });
 });

@@ -42,6 +42,7 @@ import {
   type SpawnWorkspace,
   type Unauthenticated,
   type Validation,
+  type WorkspaceKind,
 } from "@hercule/contract";
 import { agentRepository, type StoredAgent } from "../../agents";
 import {
@@ -89,7 +90,7 @@ import {
   type DedupOperation,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
-import { TaskService, type JoiningWorkspace } from "../../tasks";
+import { TaskService, type JoinedTask } from "../../tasks";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -341,16 +342,6 @@ type TaskSource =
     };
 
 /**
- * The Task that was made for a new Thread, and the title it was made with. The
- * title is the Thread's own: a Thread that runs title generation has text in
- * its prompt, so its title is never blank and the Task is made with it as is.
- */
-interface MadeTask {
-  readonly taskId: string;
-  readonly title: string;
-}
-
-/**
  * Everything needed to open one session on a runner, for both a spawn and a
  * continue.
  */
@@ -435,10 +426,10 @@ const make = Effect.gen(function* () {
    * title it was given from the message, and the role it was spawned with, if
    * any.
    *
-   * `madeTask` is the Task that was made for this Thread, with the title it
-   * was made with, and is undefined when the Thread joined an existing Task,
-   * whose title is not this Thread's to change. When the title is stored, the
-   * Task takes it too (`TaskService.adoptGeneratedTitle`), unless the Thread
+   * `joinedTask` is the Task the Thread joined. Its `madeTitle` is set only
+   * when the join made the Task for this Thread, because the title of an
+   * existing Task is not this Thread's to change. When the title is stored,
+   * the Task takes it too (`TaskService.adoptGeneratedTitle`), unless the Thread
    * has moved to another Task since: a late answer must not rename a Task the
    * Thread has left. The stored title is used rather than the model's answer,
    * because `setGeneratedTitleAndRole` cleans the answer and may drop it.
@@ -446,7 +437,7 @@ const make = Effect.gen(function* () {
   const startThreadTitle = (
     sessionId: string,
     firstMessage: string,
-    madeTask: MadeTask | undefined,
+    joinedTask: JoinedTask | undefined,
   ): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
@@ -474,15 +465,16 @@ const make = Effect.gen(function* () {
         yield* promotion.whenServing(
           Effect.gen(function* () {
             yield* sessions.setGeneratedTitleAndRole(sessionId, answer.value);
-            if (madeTask === undefined) return;
+            if (joinedTask?.madeTitle === undefined) return;
+            const { taskId, madeTitle } = joinedTask;
             yield* withTransaction(
               sql,
               Effect.gen(function* () {
                 const session = yield* rows.one(sessionId);
-                if (Option.isNone(session) || session.value.taskId !== madeTask.taskId) return;
+                if (Option.isNone(session) || session.value.taskId !== taskId) return;
                 yield* tasks.adoptGeneratedTitle({
-                  taskId: madeTask.taskId,
-                  from: madeTask.title,
+                  taskId,
+                  from: madeTitle,
                   to: session.value.title,
                 });
               }),
@@ -929,33 +921,26 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the title, the Task and the made Task of a session about to be
-   * written, in the transaction that writes it. A `fixed` task source gives
-   * the Task as it is and keeps the title. A `joining` one builds the title
-   * first, because a new Task is named after it, and then joins a Task by the
-   * join rule. Fails with `NotFound` or `InvalidState` when the spawn named a
-   * Task that is missing, deleted or finished.
+   * Returns the Task a session about to be written belongs to, or undefined
+   * when it has none, in the transaction that writes it. A `fixed` task source
+   * gives the Task as it is. A `joining` one builds the session's title first,
+   * because a new Task is named after it, and then joins a Task by the join
+   * rule. Fails with `NotFound` or `InvalidState` when the spawn named a Task
+   * that is missing, deleted or finished.
    */
   const resolveSessionTask = (
     open: Placing,
     opened: {
       readonly workspaceId: string | null;
-      readonly workspaceKind: JoiningWorkspace["kind"] | null;
+      readonly workspaceKind: WorkspaceKind | null;
     },
-  ): Effect.Effect<
-    {
-      readonly title: string | undefined;
-      readonly taskId: string | undefined;
-      readonly madeTask: MadeTask | undefined;
-    },
-    Validation | NotFound | InvalidState | SqlError
-  > =>
+  ): Effect.Effect<JoinedTask | undefined, Validation | NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
       if (open.taskSource._tag === "fixed") {
-        return { title: open.title, taskId: open.taskSource.taskId, madeTask: undefined };
+        const { taskId } = open.taskSource;
+        return taskId === undefined ? undefined : { taskId, madeTitle: undefined };
       }
-      const title = yield* sessions.buildNewSessionTitle(open);
-      const joined = yield* tasks.joinSession({
+      return yield* tasks.joinSession({
         requestedTaskId: open.taskSource.requestedTaskId,
         callerTaskId: open.taskSource.callerTaskId,
         workspace:
@@ -966,21 +951,16 @@ const make = Effect.gen(function* () {
         // column the database derives, because a session placed here
         // answers no conversation and runs no step.
         sessionKind: open.agentId === undefined ? "thread" : "agent",
-        title,
+        title: yield* sessions.buildNewSessionTitle(open),
         projectId: open.projectId,
       });
-      return {
-        title,
-        taskId: joined?.taskId,
-        madeTask: joined?.created === true ? { taskId: joined.taskId, title } : undefined,
-      };
     });
 
   /**
    * Writes the workspace and the session in one transaction, joining the
    * caller's when there is one. Returns the new session's id, the workspace
    * frame the runner must be told about after the commit, if any, and the
-   * Task that was made for the session, if one was.
+   * Task the session joined, if any.
    *
    * The session's Task is resolved after its workspace is opened, because the
    * join rule reads the workspace, and before the session is stored, because
@@ -992,13 +972,13 @@ const make = Effect.gen(function* () {
     {
       readonly sessionId: string;
       readonly frame: WorkspaceProvision | undefined;
-      readonly madeTask: MadeTask | undefined;
+      readonly joinedTask: JoinedTask | undefined;
     },
     Validation | NotFound | InvalidState | SqlError
   > =>
     Effect.gen(function* () {
       const sessionId = uuidToString(mintUuid());
-      const { frame, madeTask } = yield* withTransaction(
+      const { frame, joinedTask } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -1021,7 +1001,7 @@ const make = Effect.gen(function* () {
             branch: buildThreadBranch(sessionId),
             at,
           });
-          const { title, taskId, madeTask } = yield* resolveSessionTask(open, opened);
+          const joinedTask = yield* resolveSessionTask(open, opened);
           yield* sessions.create({
             id: sessionId,
             permissionProfileId: open.permissionProfileId,
@@ -1035,12 +1015,12 @@ const make = Effect.gen(function* () {
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
             attachments: open.attachments,
-            title,
+            title: open.title,
             role: open.role,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
-            taskId,
+            taskId: joinedTask?.taskId,
             checkoutBranch: open.checkoutBranch ?? opened.checkoutBranch,
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the
@@ -1052,10 +1032,10 @@ const make = Effect.gen(function* () {
             githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             at,
           });
-          return { frame: opened.frame, madeTask };
+          return { frame: opened.frame, joinedTask };
         }),
       );
-      return { sessionId, frame, madeTask };
+      return { sessionId, frame, joinedTask };
     });
 
   /**
@@ -1093,8 +1073,8 @@ const make = Effect.gen(function* () {
    * Prepares and writes the session of a `session.spawn` or `session.continue`
    * in one transaction, then starts it. Returns the new session. For a new
    * Thread with a text message, it also starts the call that generates the
-   * Thread's title and role, and tells it which Task was made for the Thread,
-   * if one was, so the Task takes the generated title too.
+   * Thread's title and role, and tells it which Task the Thread joined, so a
+   * Task made for the Thread takes the generated title too.
    *
    * The session also joins its Task in this transaction (`writeSession`), so a
    * retried call with the same `dedupKey` makes no second Task. Fails with
@@ -1140,7 +1120,7 @@ const make = Effect.gen(function* () {
           }),
         );
         if (saved._tag === "existing") return yield* readSessionRecord(saved.sessionId);
-        const { open, sessionId, frame, madeTask } = saved;
+        const { open, sessionId, frame, joinedTask } = saved;
         yield* tellRunnerAndDispatch(open.runnerId, frame);
         // Read back instead of using the inserted row, so the caller sees
         // `starting` when dispatch started the session at once, not `queued`.
@@ -1150,7 +1130,7 @@ const make = Effect.gen(function* () {
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
         if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt, madeTask);
+          yield* startThreadTitle(session.id, open.prompt, joinedTask);
         }
         return session;
       }),

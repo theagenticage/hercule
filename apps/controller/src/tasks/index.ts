@@ -3,7 +3,6 @@ export {
   TaskService,
   TaskServiceLayer,
   type JoinedTask,
-  type JoiningWorkspace,
   type QueryInput,
   type TaskPage,
   type UpdateInput,

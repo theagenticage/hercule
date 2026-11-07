@@ -5,8 +5,7 @@
  * - `sessions.task_id` is the Task a session belongs to. It is not a foreign
  *   key, like `runs.task_id`: the tasks domain owns the table, and a session
  *   is history that keeps the id of a Task deleted since. The partial index
- *   serves the session list filtered by Task, newest first, and stays small
- *   because most sessions have no Task.
+ *   serves the session list filtered by Task, newest first.
  * - `task_workspaces` remembers which Task an ephemeral workspace belongs to,
  *   so the next Thread started in that workspace joins the same Task. It holds
  *   plain ids: neither column is a foreign key.

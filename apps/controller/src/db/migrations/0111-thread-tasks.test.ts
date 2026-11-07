@@ -5,21 +5,23 @@
  * owns the migration of data written by a real binary; these tests check the
  * row shapes.
  *
- * The tests stop at this migration, so a later migration cannot change what
- * they check.
+ * The tests of the data stop at this migration, so a later migration cannot
+ * change what they check. The test of the index runs on the newest database.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
+import { sessionRepository } from "../../sessions";
 import { runMigrations } from "../migrate";
-import { TestDatabaseWriter } from "../testing";
+import { TestDatabase, TestDatabaseWriter } from "../testing";
 import { migrations } from "./index";
 
 const BEFORE = migrations.filter(([id]) => id < 111);
 const UP_TO_THREAD_TASKS = migrations.filter(([id]) => id <= 111);
 
 /** Builds the 16 bytes of a test id, so the id shows in the order of the sorted rows. */
-const idOf = (name: string): Uint8Array => {
+const buildTestId = (name: string): Uint8Array => {
   const bytes = new Uint8Array(16);
   new TextEncoder().encodeInto(name, bytes);
   return bytes;
@@ -64,27 +66,27 @@ const SESSIONS: ReadonlyArray<SessionRow> = [
 const insertRows = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels, credential_hash, created_at, updated_at)
-             VALUES (${idOf("runner")}, 'one', 'online', 'active', 0, '[]', 'hash', ${at(0)}, ${at(0)})`;
+             VALUES (${buildTestId("runner")}, 'one', 'online', 'active', 0, '[]', 'hash', ${at(0)}, ${at(0)})`;
   yield* sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at, ownership, warnings)
-             VALUES (${idOf("ephemeral")}, ${idOf("runner")}, 'ephemeral', 'ready', ${at(0)}, 'managed', '[]'),
-                    (${idOf("primary")}, ${idOf("runner")}, 'primary', 'ready', ${at(0)}, 'managed', '[]')`;
+             VALUES (${buildTestId("ephemeral")}, ${buildTestId("runner")}, 'ephemeral', 'ready', ${at(0)}, 'managed', '[]'),
+                    (${buildTestId("primary")}, ${buildTestId("runner")}, 'primary', 'ready', ${at(0)}, 'managed', '[]')`;
   yield* sql`INSERT INTO projects (id, name, created_at, updated_at, deleted_at)
-             VALUES (${idOf("live")}, 'Live', ${at(0)}, ${at(0)}, NULL),
-                    (${idOf("deleted")}, 'Deleted', ${at(0)}, ${at(0)}, ${at(1)})`;
+             VALUES (${buildTestId("live")}, 'Live', ${at(0)}, ${at(0)}, NULL),
+                    (${buildTestId("deleted")}, 'Deleted', ${at(0)}, ${at(0)}, ${at(1)})`;
   yield* sql`INSERT INTO tasks (id, title, description, status, priority, labels, created_at, updated_at, status_changed_at)
-             VALUES (${idOf("task-of-run")}, 'Existing', '', 'open', 'normal', '[]', ${at(0)}, ${at(0)}, ${at(0)})`;
+             VALUES (${buildTestId("task-of-run")}, 'Existing', '', 'open', 'normal', '[]', ${at(0)}, ${at(0)}, ${at(0)})`;
   yield* sql`INSERT INTO runs (id, plan, inputs, origin, status, created_at, task_id)
-             VALUES (${idOf("run-on-task")}, '{}', '{}', '{}', 'pending', ${at(0)}, ${idOf("task-of-run")}),
-                    (${idOf("run-no-task")}, '{}', '{}', '{}', 'pending', ${at(0)}, NULL)`;
+             VALUES (${buildTestId("run-on-task")}, '{}', '{}', '{}', 'pending', ${at(0)}, ${buildTestId("task-of-run")}),
+                    (${buildTestId("run-no-task")}, '{}', '{}', '{}', 'pending', ${at(0)}, NULL)`;
   for (const session of SESSIONS) {
     yield* sql`INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id, workspace_id,
                                      project_id, agent_id, run_id, requested_access_mode, access_mode, spec,
                                      title, status, created_at, last_activity_at, done_at, done_by, archived_at, archived_by)
-               VALUES (${idOf(session.name)}, ${idOf("profile")}, ${idOf("provider")}, ${idOf("runner")},
-                       ${session.workspace === undefined ? null : idOf(session.workspace)},
-                       ${session.project === undefined ? null : idOf(session.project)},
-                       ${session.agent === true ? idOf("agent") : null},
-                       ${session.run === undefined ? null : idOf(session.run)},
+               VALUES (${buildTestId(session.name)}, ${buildTestId("profile")}, ${buildTestId("provider")}, ${buildTestId("runner")},
+                       ${session.workspace === undefined ? null : buildTestId(session.workspace)},
+                       ${session.project === undefined ? null : buildTestId(session.project)},
+                       ${session.agent === true ? buildTestId("agent") : null},
+                       ${session.run === undefined ? null : buildTestId(session.run)},
                        'default', 'default', '{}', ${session.title ?? session.name}, 'exited',
                        ${at(session.minute)}, ${at(session.minute)},
                        ${session.done === true ? at(30) : null},
@@ -126,7 +128,7 @@ describe("the thread tasks migration", () => {
           readonly status_changed_at: string;
           readonly stage_changed_at: string;
           readonly deleted_at: string | null;
-        }>`SELECT * FROM tasks WHERE id <> ${idOf("task-of-run")} ORDER BY created_at`;
+        }>`SELECT * FROM tasks WHERE id <> ${buildTestId("task-of-run")} ORDER BY created_at`;
         const workspaces = yield* sql<{
           readonly workspace_id: Uint8Array;
           readonly task_id: Uint8Array;
@@ -153,7 +155,9 @@ describe("the thread tasks migration", () => {
     for (const name of ["shared-done", "shared-archived", "agent-archived", "step-no-task"]) {
       expect(taskOf.get(name), name).toBeNull();
     }
-    expect(taskOf.get("step-on-task")).toBe(Buffer.from(idOf("task-of-run")).toString("hex"));
+    expect(taskOf.get("step-on-task")).toBe(
+      Buffer.from(buildTestId("task-of-run")).toString("hex"),
+    );
     const ownTasks = ["main", "alone", "orphan", "blank", "long"].map((name) => taskOf.get(name));
     expect(new Set([sharedTask, ...ownTasks]).size).toBe(6);
     expect(ownTasks).not.toContain(null);
@@ -199,20 +203,56 @@ describe("the thread tasks migration", () => {
     expect(result.found).toEqual([{ title: "Alone" }]);
   });
 
-  it("serves a session list by Task from the partial index", async () => {
-    const plan = await Effect.runPromise(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations(UP_TO_THREAD_TASKS);
-        return yield* sql<{ readonly detail: string }>`
-          EXPLAIN QUERY PLAN
-          SELECT id FROM sessions WHERE task_id = ${idOf("task")}
-          ORDER BY created_at DESC, id DESC LIMIT 51`;
-      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
-    );
+  // Runs on the newest database, because it drives the session repository's own
+  // listing, which reads the columns of every migration.
+  it.each(["asc", "desc"] as const)(
+    "serves a session list by Task, %s, from the partial index with no sort of its own",
+    async (direction) => {
+      const plan = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const sessions = yield* sessionRepository;
+          const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+          yield* sessions
+            .list({
+              limit: 50,
+              cursor: undefined,
+              direction,
+              status: undefined,
+              runnerId: undefined,
+              agentId: undefined,
+              permissionProfileId: undefined,
+              conversationId: undefined,
+              runId: undefined,
+              taskId: "0199e0e7-0004-7000-8000-0000000000ff",
+              kind: undefined,
+              workspaceId: undefined,
+              done: undefined,
+              archived: undefined,
+              activeSince: undefined,
+              doneSince: undefined,
+            })
+            .pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile());
+                  return statement;
+                }),
+              ),
+            );
+          const [text, params] = statements[0]!;
+          const rows = yield* sql.unsafe<{ readonly parent: number; readonly detail: string }>(
+            `EXPLAIN QUERY PLAN ${text}`,
+            params,
+          );
+          // Only the steps of the statement itself. The correlated subqueries
+          // that fill each session's fields run per row and sort on their own.
+          return rows.filter((row) => row.parent === 0).map((row) => row.detail);
+        }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      );
 
-    const details = plan.map((row) => row.detail).join("\n");
-    expect(details).toContain("sessions_task_id");
-    expect(details).not.toContain("TEMP B-TREE");
-  });
+      expect(plan[0]).toBe("SEARCH sessions USING INDEX sessions_task_id (task_id=?)");
+      expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
+    },
+  );
 });

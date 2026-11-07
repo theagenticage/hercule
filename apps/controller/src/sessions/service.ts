@@ -894,16 +894,18 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Takes the Done mark off a session, in the caller's transaction, gives the
-   * Thread a Task that is not finished or deleted, and writes the `session.reopened` audit entry, whose
-   * record announces the change. Writes nothing when the session is not Done.
+   * Takes the Done mark off a session, in the caller's transaction, makes sure
+   * the Thread has a joinable Task, and writes the `session.reopened` audit
+   * entry, whose record announces the change. Writes nothing when the session
+   * is not Done.
    *
-   * The Thread keeps its Task while that is not finished or deleted. Otherwise
-   * (it has none, or its Task is finished or deleted) it joins the joinable
-   * Task of its workspace or gets a new one (`TaskService.rejoinThread`), because coming back after
-   * the user closed a Task is new work. This is the only place a resume is
-   * told apart from a reopen: a harness resume of an exited Thread that was
-   * never Done changes nothing and never reaches this function.
+   * The Thread keeps its Task while that is joinable (neither deleted nor
+   * finished). Otherwise (it has none, or its Task is deleted or finished) it
+   * joins the joinable Task of its workspace or gets a new one, stamped with
+   * `actor` (`TaskService.rejoinThread`), because coming back after the user
+   * closed a Task is new work. This is the only place a resume is told apart
+   * from a reopen: a harness resume of an exited Thread that was never Done
+   * changes nothing and never reaches this function.
    *
    * `inputId` names the input that reopened it, and is left out for an
    * explicit reopen, so a reader of the audit entry can tell the two apart.
@@ -939,6 +941,7 @@ const make = Effect.gen(function* () {
         workspace,
         title: thread.title,
         projectId: thread.projectId ?? undefined,
+        actor,
       });
       if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
       yield* audit.append({
@@ -2299,19 +2302,17 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the title a new session will be stored with: `title` when the
-     * caller chose one, otherwise the first non-blank line of `prompt`,
-     * otherwise the name of the first image in `attachments` (`buildTitle`).
-     * The result may be empty when none of them gives text.
+     * Returns the title a new session with no chosen title is stored with:
+     * the first non-blank line of `prompt`, otherwise the name of the first
+     * image in `attachments` (`buildTitle`). The result may be empty when
+     * neither gives text.
      *
      * The controller daemon calls it before `create` when it needs the title
-     * earlier, to name the Task a new Thread gets. It then passes the result to
-     * `create` as the chosen title. A session with no images reads nothing.
-     * Fails with `Validation` when an image is gone or was uploaded by someone
-     * else, as `create` does.
+     * earlier, to name the Task a new Thread gets. A session with no images
+     * reads nothing. Fails with `Validation` when an image is gone or was
+     * uploaded by someone else, as `create` does.
      */
     buildNewSessionTitle: (input: {
-      readonly title: string | undefined;
       readonly prompt: string;
       readonly attachments: ReadonlyArray<string>;
     }): Effect.Effect<string, Validation | SqlError> =>
@@ -2320,7 +2321,7 @@ const make = Effect.gen(function* () {
           input.attachments.length === 0
             ? []
             : yield* provideSql(readClaimableAttachments(input.attachments));
-        return buildTitle(input.title, input.prompt, references[0]?.name);
+        return buildTitle(undefined, input.prompt, references[0]?.name);
       }),
 
     /**
@@ -2349,8 +2350,6 @@ const make = Effect.gen(function* () {
         );
         yield* sessions.insert({
           id: open.id,
-          // The caller already built the title when it needed it before this
-          // call (`buildNewSessionTitle`); cutting a cut title changes nothing.
           title: buildTitle(open.title, open.prompt, references[0]?.name),
           role: open.role,
           permissionProfileId: open.permissionProfileId,

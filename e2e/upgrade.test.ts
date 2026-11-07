@@ -3010,7 +3010,7 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      // Migration 110 gave every Task the stage its status reads and moved
+      // Migration 110 gave every Task the stage its status maps to and moved
       // nothing else on it. The workflow stored with a status step is still
       // valid: the controller validated it again when it started.
       const upgradedStatusStepWorkflow = expectJson<{ invalidSince?: string }>(

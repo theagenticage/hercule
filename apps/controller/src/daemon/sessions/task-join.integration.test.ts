@@ -1,6 +1,7 @@
 /**
- * Tests the rule that gives a Thread its Task (ticket #1029, "The join rule"),
- * through the operations that write or reopen a session: `session.spawn`,
+ * Tests the rule that gives a Thread its Task (spec 09, "Which Task a session
+ * gets", "A workspace's Task" and "Taking a Thread off Done"), through the
+ * operations that write or reopen a session: `session.spawn`,
  * `session.continue`, `session.reopen` and a new input.
  *
  * The tests use the real API, the real runner socket and real rows. Each row of
@@ -99,8 +100,8 @@ const spawnInNewWorkspace = async (
   return session;
 };
 
-/** The spawn field that puts a session in a workspace that already exists. */
-const inWorkspace = (session: Session) => ({
+/** Builds the spawn field that puts a session in a workspace that already exists. */
+const buildExistingWorkspace = (session: Session) => ({
   kind: "existing" as const,
   workspaceId: String(session.workspaceId),
 });
@@ -249,9 +250,11 @@ const listWorkspaceTasks = async (arranged: Arranged): Promise<ReadonlyArray<str
     .map((row) => `${row.workspace_id}:${row.task_id}`)
     .toSorted();
 
-/** Builds the `workspaceId:taskId` string that `listWorkspaceTasks` returns. */
-const pair = (workspaceId: string | null | undefined, taskId: string | undefined): string =>
-  `${compact(String(workspaceId))}:${compact(String(taskId))}`;
+/** Formats a `task_workspaces` row as the `workspaceId:taskId` string that `listWorkspaceTasks` returns. */
+const formatWorkspaceTask = (
+  workspaceId: string | null | undefined,
+  taskId: string | undefined,
+): string => `${compact(String(workspaceId))}:${compact(String(taskId))}`;
 
 /** Takes the sessions' Task away, as the upgrade left the Threads that were Done. */
 const clearTask = async (arranged: Arranged, sessionId: string): Promise<void> => {
@@ -262,7 +265,7 @@ const clearTask = async (arranged: Arranged, sessionId: string): Promise<void> =
   );
 };
 
-/** Sets the Task of a session through the repository, as a later slice's move will. */
+/** Sets the Task of a session through the repository, as moving a Thread to another Task will. */
 const moveSessionToTask = (arranged: Arranged, sessionId: string, taskId: string): Promise<void> =>
   runWrite(
     arranged,
@@ -284,7 +287,13 @@ const takeSnapshot = async (arranged: Arranged): Promise<Snapshot> => ({
 type Expected =
   | { readonly kind: "joins"; readonly taskId: string }
   | { readonly kind: "none" }
-  | { readonly kind: "new"; readonly title: string; readonly actor: string };
+  | {
+      readonly kind: "new";
+      readonly title: string;
+      readonly actor: string;
+      /** The project the made Task must have; undefined when it must have none. */
+      readonly projectId?: string;
+    };
 
 interface Outcome {
   readonly before: Snapshot;
@@ -321,7 +330,7 @@ const expectOutcome = async (arranged: Arranged, outcome: Outcome): Promise<void
       status: "open",
       priority: "normal",
     });
-    expect(task.projectId).toBeUndefined();
+    expect(task.projectId).toBe(expected.projectId);
     const created = await arranged.harness.platformEvents("task.created");
     expect(created).toHaveLength(before.createdEvents + 1);
     const last = created.at(-1)!;
@@ -352,13 +361,13 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       const before = await takeSnapshot(arranged);
       const session = await spawnOk(arranged, {
         taskId: named.id,
-        workspace: inWorkspace(first),
+        workspace: buildExistingWorkspace(first),
       });
       return {
         before,
         session,
         expected: { kind: "joins", taskId: named.id },
-        workspaceTasks: [pair(first.workspaceId, first.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, first.taskId)],
       };
     },
   },
@@ -395,12 +404,12 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
     run: async (arranged, repo) => {
       const first = await spawnInNewWorkspace(arranged, repo);
       const before = await takeSnapshot(arranged);
-      const session = await spawnOk(arranged, { workspace: inWorkspace(first) });
+      const session = await spawnOk(arranged, { workspace: buildExistingWorkspace(first) });
       return {
         before,
         session,
         expected: { kind: "joins", taskId: first.taskId! },
-        workspaceTasks: [pair(first.workspaceId, first.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, first.taskId)],
       };
     },
   },
@@ -443,14 +452,14 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       const before = await takeSnapshot(arranged);
       const session = await spawnOk(arranged, {
         prompt: "back in the folder",
-        workspace: inWorkspace(first),
+        workspace: buildExistingWorkspace(first),
       });
       const stored = await readSession(arranged, session.id);
       return {
         before,
         session,
         expected: { kind: "new", title: "back in the folder", actor: "user" },
-        workspaceTasks: [pair(first.workspaceId, stored.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, stored.taskId)],
       };
     },
   },
@@ -462,8 +471,8 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       await finishTask(arranged, first.taskId!);
       const before = await takeSnapshot(arranged);
       const [one, other] = await Promise.all([
-        spawnOk(arranged, { prompt: "same folder", workspace: inWorkspace(first) }),
-        spawnOk(arranged, { prompt: "same folder", workspace: inWorkspace(first) }),
+        spawnOk(arranged, { prompt: "same folder", workspace: buildExistingWorkspace(first) }),
+        spawnOk(arranged, { prompt: "same folder", workspace: buildExistingWorkspace(first) }),
       ]);
       const stored = await readSession(arranged, one.id);
       expect((await readSession(arranged, other.id)).taskId).toBe(stored.taskId);
@@ -471,7 +480,7 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
         before,
         session: one,
         expected: { kind: "new", title: "same folder", actor: "user" },
-        workspaceTasks: [pair(first.workspaceId, stored.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, stored.taskId)],
       };
     },
   },
@@ -490,12 +499,15 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       const first = await spawnInNewWorkspace(arranged, repo);
       const agentId = await createAgentId(arranged);
       const before = await takeSnapshot(arranged);
-      const session = await spawnOk(arranged, { agentId, workspace: inWorkspace(first) });
+      const session = await spawnOk(arranged, {
+        agentId,
+        workspace: buildExistingWorkspace(first),
+      });
       return {
         before,
         session,
         expected: { kind: "joins", taskId: first.taskId! },
-        workspaceTasks: [pair(first.workspaceId, first.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, first.taskId)],
       };
     },
   },
@@ -506,8 +518,27 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       await finishTask(arranged, first.taskId!);
       const agentId = await createAgentId(arranged);
       const before = await takeSnapshot(arranged);
-      const session = await spawnOk(arranged, { agentId, workspace: inWorkspace(first) });
+      const session = await spawnOk(arranged, {
+        agentId,
+        workspace: buildExistingWorkspace(first),
+      });
       return { before, session, expected: { kind: "none" } };
+    },
+  },
+  {
+    name: "a Thread started in a project gets a new Task in that project",
+    run: async (arranged) => {
+      const { id: projectId } = await readOk<{ id: string }>(
+        await post(arranged.harness.base, "/api/v1/projects", { name: "Live" }, arranged.token),
+      );
+      const before = await takeSnapshot(arranged);
+      const session = await spawnOk(arranged, { prompt: "in the project", projectId });
+      expect(session.projectId).toBe(projectId);
+      return {
+        before,
+        session,
+        expected: { kind: "new", title: "in the project", actor: "user", projectId },
+      };
     },
   },
   {
@@ -537,7 +568,7 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       const { first, other } = await arrangeThreadOnFinishedTask(arranged, repo);
       const caller = await startCaller(arranged, {
         taskId: other.id,
-        workspace: inWorkspace(first),
+        workspace: buildExistingWorkspace(first),
       });
       await finishTask(arranged, other.id);
       const before = await takeSnapshot(arranged);
@@ -566,7 +597,7 @@ const JOIN_ROWS: ReadonlyArray<Row> = [
       const { first, other } = await arrangeThreadOnFinishedTask(arranged, repo);
       const parent = await spawnAndEnd(arranged, {
         taskId: other.id,
-        workspace: inWorkspace(first),
+        workspace: buildExistingWorkspace(first),
       });
       await finishTask(arranged, other.id);
       const before = await takeSnapshot(arranged);
@@ -702,35 +733,29 @@ describe("the join rule on session.spawn and session.continue", () => {
 /* Reopen against resume                                                     */
 /* ------------------------------------------------------------------------ */
 
-/** The two ways a new Done Thread comes back: the user reopens it, or a new input takes it off Done. */
-const REOPEN_TRIGGERS = [
-  {
-    name: "session.reopen",
-    fire: async (arranged: Arranged, id: string): Promise<void> => {
-      await readOk(
-        await post(
-          arranged.harness.base,
-          "/api/v1/sessions/reopen",
-          { sessionIds: [id] },
-          arranged.token,
-        ),
-      );
-    },
-  },
-  {
-    name: "a new input",
-    fire: async (arranged: Arranged, id: string): Promise<void> => {
-      await readOk(
-        await post(
-          arranged.harness.base,
-          `/api/v1/sessions/${id}/input`,
-          { text: "one more thing" },
-          arranged.token,
-        ),
-      );
-    },
-  },
-] as const;
+/** Takes a Done Thread off Done the explicit way, with `session.reopen`. */
+const reopenThread = async (arranged: Arranged, id: string): Promise<void> => {
+  await readOk(
+    await post(
+      arranged.harness.base,
+      "/api/v1/sessions/reopen",
+      { sessionIds: [id] },
+      arranged.token,
+    ),
+  );
+};
+
+/** Takes a Done Thread off Done by sending it an input. */
+const sendInput = async (arranged: Arranged, id: string): Promise<void> => {
+  await readOk(
+    await post(
+      arranged.harness.base,
+      `/api/v1/sessions/${id}/input`,
+      { text: "one more thing" },
+      arranged.token,
+    ),
+  );
+};
 
 interface ReopenRow {
   readonly name: string;
@@ -771,14 +796,14 @@ const REOPEN_ROWS: ReadonlyArray<ReopenRow> = [
       const other = await createTask(arranged, "The Task that will be finished");
       const thread = await spawnIdle(arranged, {
         taskId: other.id,
-        workspace: inWorkspace(first),
+        workspace: buildExistingWorkspace(first),
       });
       await finishTask(arranged, other.id);
       await markDone(arranged, thread.id);
       return {
         thread,
         expected: { kind: "joins", taskId: first.taskId! },
-        workspaceTasks: [pair(first.workspaceId, first.taskId)],
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, first.taskId)],
       };
     },
   },
@@ -790,27 +815,58 @@ const REOPEN_ROWS: ReadonlyArray<ReopenRow> = [
       return { thread, expected: { kind: "joins", taskId: thread.taskId! } };
     },
   },
+  {
+    name: "a Done Thread that keeps its Task leaves the workspace's row alone, even when that row names a finished Task",
+    run: async (arranged, repo) => {
+      const first = await spawnInNewWorkspace(arranged, repo);
+      const named = await createTask(arranged, "Named work");
+      // Naming a Task leaves the workspace's row on the first Thread's Task.
+      const thread = await spawnIdle(arranged, {
+        taskId: named.id,
+        workspace: buildExistingWorkspace(first),
+      });
+      await finishTask(arranged, first.taskId!);
+      await markDone(arranged, thread.id);
+      return {
+        thread,
+        expected: { kind: "joins", taskId: named.id },
+        workspaceTasks: [formatWorkspaceTask(first.workspaceId, first.taskId)],
+      };
+    },
+  },
 ];
 
-describe.each(REOPEN_TRIGGERS)("a Done Thread taken off Done by $name", (trigger) => {
-  it.each(REOPEN_ROWS)("$name", async (row) => {
-    await withFleet(async (arranged) => {
-      const repo = await createRepo(arranged, "https://github.com/acme/web");
-      const { thread, expected, workspaceTasks } = await row.run(arranged, repo);
-      const before = await takeSnapshot(arranged);
+/** Arranges the row, takes its Thread off Done with `fire`, and checks what the rule decided. */
+const expectReopenOutcome = async (
+  row: ReopenRow,
+  fire: (arranged: Arranged, id: string) => Promise<void>,
+): Promise<void> => {
+  await withFleet(async (arranged) => {
+    const repo = await createRepo(arranged, "https://github.com/acme/web");
+    const { thread, expected, workspaceTasks } = await row.run(arranged, repo);
+    const before = await takeSnapshot(arranged);
 
-      await trigger.fire(arranged, thread.id);
+    await fire(arranged, thread.id);
 
-      const reopened = await readSession(arranged, thread.id);
-      expect("done" in reopened).toBe(false);
-      await expectOutcome(arranged, {
-        before,
-        session: thread,
-        expected,
-        ...(workspaceTasks === undefined ? {} : { workspaceTasks }),
-      });
+    const reopened = await readSession(arranged, thread.id);
+    expect("done" in reopened).toBe(false);
+    await expectOutcome(arranged, {
+      before,
+      session: thread,
+      expected,
+      ...(workspaceTasks === undefined ? {} : { workspaceTasks }),
     });
   });
+};
+
+describe("a Done Thread taken off Done by session.reopen", () => {
+  it.each(REOPEN_ROWS)("$name", (row) => expectReopenOutcome(row, reopenThread));
+});
+
+describe("a Done Thread taken off Done by a new input", () => {
+  // Both ways take the Thread off Done through the same function; one row (the
+  // second one, a finished Task) shows that a new input reaches it.
+  it("on a finished Task gets a new Task", () => expectReopenOutcome(REOPEN_ROWS[1]!, sendInput));
 });
 
 describe("reopening against resuming", () => {
@@ -850,7 +906,7 @@ describe("reopening against resuming", () => {
       );
       await markDone(arranged, thread.id);
 
-      await REOPEN_TRIGGERS[0].fire(arranged, thread.id);
+      await reopenThread(arranged, thread.id);
 
       const taskId = (await readSession(arranged, thread.id)).taskId;
       expect(taskId).toBeDefined();
