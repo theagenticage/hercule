@@ -119,10 +119,17 @@
 
 /* ---------- A place: one raised surface ---------- */
 .inbox-place {
+  /* The row's first column. What rides on a row is set in under its title, so the tucked sheet and the hints
+     read it too, and cannot drift from it. */
+  --row-lead: 124px;
   position: relative;
   isolation: isolate;
   margin: 0 0 16px;
   color: var(--ink);
+}
+/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
+.inbox-place[data-by-status] {
+  --row-lead: 18px;
 }
 /* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink. */
 [data-theme="orient-express"] .inbox-place,
@@ -213,7 +220,7 @@
   scroll-margin-block: 10px 72px;
   position: relative;
   display: grid;
-  grid-template-columns: 124px minmax(0, 1fr) auto;
+  grid-template-columns: var(--row-lead) minmax(0, 1fr) auto;
   column-gap: 12px;
   padding: 11px 16px;
   color: var(--ink);
@@ -231,14 +238,10 @@
 .inbox-row:focus-visible {
   box-shadow: inset 0 0 0 1.5px var(--focus);
 }
-/* The last row's corners follow the sheet's, so its fill never shows square corners over them. */
-.inbox-row:last-child {
+/* The last row's corners follow the sheet's, so its fill never shows square corners over them. A row with
+   parts or hints under it is not the end of its bundle, so it keeps its own corners square. */
+.inbox-place-rows > :last-child > .inbox-row:last-child {
   border-radius: 0 0 var(--card-r) var(--card-r);
-}
-/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
-.inbox-place[data-by-status] .inbox-row,
-.inbox-place[data-by-status] .inbox-pointer {
-  grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 .row-rail {
   display: flex;
@@ -307,6 +310,12 @@
   margin-left: 10px;
   color: var(--faint);
 }
+/* How long ago the signal landed, quiet and in even figures. */
+.row-news small {
+  color: var(--faint);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
 .row-news[data-tone="bad"] {
   color: var(--fail-ink);
 }
@@ -347,6 +356,7 @@
   flex: none;
   font: var(--w-medium) var(--t-12) / var(--line-16) var(--font-ui);
   font-variant-numeric: tabular-nums;
+  transition: opacity var(--m-quick) var(--m-ease);
 }
 .card-wait[data-level="fresh"] {
   color: var(--wait-fresh);
@@ -377,7 +387,7 @@
 /* A pointer to a card that lies under another place too: one card, drawn in full once. */
 .inbox-pointer {
   display: grid;
-  grid-template-columns: 124px minmax(0, 1fr) auto;
+  grid-template-columns: var(--row-lead) minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   width: 100%;
@@ -698,6 +708,7 @@
 .inbox-copies .is-ghost {
   pointer-events: none;
 }
-.inbox-copies .inbox-row {
+.inbox-copies .inbox-row,
+.inbox-copies .inbox-part {
   background: var(--stock);
 }

@@ -25,15 +25,20 @@ const HOLDER_DEPTH = 22;
 const ARRIVAL_DEPTH = 20;
 
 /**
- * What moves when the page changes: cards, the pointers to them, the stock and
- * head of a place, the toggle of With someone else, and the lines that close
- * up under a card. A card's own parts and the rows inside a place's stock are
- * not listed, because they ride with their parent: a part and its parent
- * moving both would count the move twice.
+ * What moves when the page changes: cards (a part that asks is one), the
+ * pointers to them, the quiet and locked parts and the hints that stand under
+ * a card, the stock and head of a place, the toggle of With someone else, and
+ * the lines that close up under a card. A card's own words and the rows inside
+ * a place's stock are not listed, because they ride with their parent: a part
+ * and its parent moving both would count the move twice. The tucked sheet
+ * and the bundle paint nothing, so they are not listed either: the parts and
+ * hints in them are siblings of the card, and move by themselves.
  */
 const MOVABLE_SELECTOR = [
   "[data-card-id]",
   "[data-pointer-to]",
+  ".inbox-part:not([data-card-id])",
+  ".inbox-hint",
   ".inbox-place > .card-stock",
   ".inbox-place-head",
   ".inbox-else-toggle",
@@ -46,8 +51,11 @@ const MOVABLE_SELECTOR = [
 /**
  * Returns the key that tells `element` apart from its neighbours across a
  * change, or `null` for an element to leave alone. A card is one element on
- * the page, and keeps its key when it moves to another place. A pointer is
- * told apart by the card it points to and the place it lies under.
+ * the page, and keeps its key when it moves to another place: a request that is
+ * linked to a ticket becomes a part under it, and flies there. A pointer is
+ * told apart by the card it points to and the place it lies under. A quiet or
+ * locked part, and a hint, are told apart by the card they lie under and the
+ * thing they are about.
  */
 const readMotionKey = (element: HTMLElement): string | null => {
   const place = element.closest<HTMLElement>(".inbox-place")?.dataset["place"] ?? "";
@@ -55,6 +63,10 @@ const readMotionKey = (element: HTMLElement): string | null => {
   if (element.classList.contains("is-ghost")) return null;
   if (cardId !== undefined) return `card:${cardId}`;
   if (pointerTo !== undefined) return `pointer:${pointerTo}@${place}`;
+  if (element.matches(".inbox-part"))
+    return `part:${element.dataset["leadId"]}/${element.dataset["partRef"]}`;
+  if (element.matches(".inbox-hint"))
+    return `hint:${element.dataset["leadId"]}:${element.dataset["hintRef"]}`;
   if (element.matches(".inbox-place > .card-stock")) return `stock:${place}`;
   if (element.matches(".inbox-place-head")) return `head:${place}`;
   if (element.matches(".inbox-requests-label")) return `label:${element.textContent}`;

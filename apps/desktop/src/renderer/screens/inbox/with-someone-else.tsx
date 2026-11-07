@@ -47,6 +47,8 @@ export function WithSomeoneElse({
               key={row.card.id}
               card={row.card}
               homeName={row.homeName}
+              bundle={row.bundle}
+              isFresh={false}
               plugins={plugins}
               monogram={monogram}
               step={index}

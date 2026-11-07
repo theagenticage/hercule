@@ -924,6 +924,11 @@ const buildDetailHandler = (card: InboxCard): Record<string, Handler> => ({
       edges: [{ fromRef: card.ref, toRef: SHOP_WEB.ref }],
       links: [],
       conflicts: [],
+      signals: [],
+      openCount: 0,
+      signalCount: 0,
+      timeline: [],
+      peers: [],
     },
   },
 });

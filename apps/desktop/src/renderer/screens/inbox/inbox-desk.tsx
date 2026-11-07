@@ -1,6 +1,7 @@
 import type { JSX, ReactNode, RefObject } from "react";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import "./inbox.css";
+import "./inbox-bundle.css";
 import "./inbox-states.css";
 
 /** What the desk is showing, which the stylesheet reads from `data-state`. */

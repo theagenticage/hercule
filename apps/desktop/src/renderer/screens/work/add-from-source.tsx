@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import {
+  buildEntitySearch,
   buildSuggestionGroups,
   decideAddList,
   describeAddedLine,
@@ -19,6 +20,7 @@ import {
 } from "@hercule/client-core/work";
 import type {
   EntityPlace,
+  EntitySearchQuery,
   EntitySearchReply,
   EntitySuggestions,
   PluginDetail,
@@ -142,24 +144,6 @@ export function AddFromSource({
   );
 }
 
-/** What is being searched: the words once typing stopped, and the source and context they were asked of. */
-interface Search {
-  readonly source: string;
-  readonly text: string;
-  readonly scopeRef?: string;
-}
-
-/**
- * Returns the search for `words` in `source`, narrowed to `scopeRef` unless that
- * is empty, or `null` when nothing is typed. A pasted link is never narrowed:
- * it names its own source and its own thing.
- */
-const buildSearch = (words: string, source: string, scopeRef: string): Search | null => {
-  const text = words.trim();
-  if (text === "") return null;
-  return { source, text, ...(scopeRef === "" || isPastedLink(text) ? {} : { scopeRef }) };
-};
-
 function SourceSearch({
   client,
   plugins,
@@ -192,7 +176,7 @@ function SourceSearch({
   const [text, setText] = useState("");
   // It keeps the source the words were sent to, so a link that moves the tab
   // does not ask the question again.
-  const [search, setSearch] = useState<Search | null>(null);
+  const [search, setSearch] = useState<EntitySearchQuery | null>(null);
   const [added, setAdded] = useState<ReadonlyMap<string, AddedRow>>(new Map());
   const searchRef = useRef<HTMLInputElement>(null);
   // The gesture reserved for each add that is on its way, by the ref of the thing, until its answer says the line.
@@ -237,7 +221,7 @@ function SourceSearch({
   useEffect(() => {
     if (text.trim() === (search?.text ?? "")) return;
     const timer = setTimeout(() => {
-      setSearch(buildSearch(text, tab, scopeRef));
+      setSearch(buildEntitySearch(text, tab, scopeRef));
     }, TYPING_PAUSE_MS);
     return () => {
       clearTimeout(timer);
@@ -388,7 +372,7 @@ function SourceSearch({
   const submit = (): void => {
     if (text.trim() !== (search?.text ?? "")) {
       // The list on screen is for older words, so Return searches the new ones first.
-      setSearch(buildSearch(text, tab, scopeRef));
+      setSearch(buildEntitySearch(text, tab, scopeRef));
       return;
     }
     const firstAddable = shownRows.find((row) => row.taskId === undefined && !added.has(row.ref));
@@ -413,7 +397,7 @@ function SourceSearch({
   });
   const changeScope = (next: string): void => {
     setChosenScopeRef(next);
-    setSearch(buildSearch(text, tab, next));
+    setSearch(buildEntitySearch(text, tab, next));
   };
 
   return (
@@ -432,7 +416,7 @@ function SourceSearch({
           const nextScopeRef = id === initialSource ? initialScopeRef : "";
           setTab(id);
           setChosenScopeRef(nextScopeRef);
-          setSearch(buildSearch(text, id, nextScopeRef));
+          setSearch(buildEntitySearch(text, id, nextScopeRef));
           searchRef.current?.focus({ preventScroll: true });
         }}
       />

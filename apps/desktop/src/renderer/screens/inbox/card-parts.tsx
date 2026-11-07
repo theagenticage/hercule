@@ -49,3 +49,16 @@ export function CardFactText({ fact }: { readonly fact: CardFact }): JSX.Element
   }
   return <span className="card-fact">{fact.text}</span>;
 }
+
+/**
+ * Renders the small mark of a card a signal just landed on: a 6px dot in the
+ * user's ink, with the word "New" for a screen reader. It stays until the
+ * pointer or the keys reach the card, or the card opens.
+ */
+export function NewMark(): JSX.Element {
+  return (
+    <i className="card-fresh" title="New since you last looked">
+      <span className="inbox-sr">New</span>
+    </i>
+  );
+}

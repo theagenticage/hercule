@@ -25,6 +25,9 @@
  * - `RelationRows`, `ProgressBar`: the rows that draw the places above a
  *   thing, and the 4px bar of a source's reported progress. A place the user
  *   cannot open is a locked row with no title.
+ * - `SignalAnswers`, `LedgerAnswer`: the answers of a signal as ledger rows,
+ *   with their describe lines and Reply boxes. Intake's pane and the Inbox's
+ *   open card both draw them.
  * - `ReadFailure`: the line that says a read failed, with a button to read it
  *   again.
  * - `KeysSheet`: the sheet that lists a page's keys, with Undo and Esc after
@@ -40,6 +43,7 @@ export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";
 export { FilterChips, FilterControl } from "./filter-control";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
+export { LedgerAnswer } from "./ledger-answer";
 export { ProgressBar } from "./progress-bar";
 export { ReadFailure } from "./read-failure";
 export { RelationRows } from "./relation-rows";
@@ -47,6 +51,7 @@ export { SectionHeading } from "./section-heading";
 export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-sheet";
 export type { SheetRect } from "./opening-sheet-geometry";
 export { SideSheet } from "./side-sheet";
+export { SignalAnswers } from "./signal-answers";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
 export { Sunrise } from "./sunrise";
 export {

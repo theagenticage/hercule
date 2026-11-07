@@ -1,4 +1,4 @@
-import { useRef, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildInitials,
@@ -6,18 +6,30 @@ import {
   type HerculeClient,
   type PluginIdentity,
 } from "@hercule/client-core";
+import { buildLinkedRows, readEntityPluginId, type PlaceRow } from "@hercule/client-core/desk";
 import {
+  buildOpenTimeline,
   decideOpenCard,
+  describeTimelineOverflow,
+  findFirstOpenLine,
   isCardTimeDependent,
   readPlaceView,
+  type EntityLinkMove,
   type PlaceView,
+  type TimelineSource,
 } from "@hercule/client-core/inbox";
-import type { Inbox } from "@hercule/contract";
+import type { AddRow } from "@hercule/client-core/work";
+import type { EntityRecord, Inbox } from "@hercule/contract";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { entityQuery, userQuery } from "../../app/queries";
 import { ArrowIcon } from "../../icons/arrow";
 import { OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
 import { OpenCardBody, OpenPlaceBody } from "./open-card-body";
+import { OpenCardLine } from "./open-card-line";
+import { OpenCardLinked } from "./open-card-linked";
+import { OpenCardLinkSearch } from "./open-card-link-search";
 import { readOpenCardPlaces } from "./open-card-places";
+import { OpenCardTimeline } from "./open-card-timeline";
 import type { OpenCard, OpenTarget } from "./use-open-card";
 import { useMinuteClock } from "./use-minute-clock";
 
@@ -29,7 +41,16 @@ export interface OpenCardMoveHandlers {
   readonly onDismiss: (cardId: string) => void;
   /** Goes to the card's Task on Work. Called with the Task's id. */
   readonly onSeeTask: (taskId: string) => void;
+  /** Links two things as the user's own claim. The page plays the move and offers Undo. */
+  readonly onLink: (move: EntityLinkMove) => void;
+  /** Removes the user's own link between two things. The page plays the move and offers Undo. */
+  readonly onUnlink: (move: EntityLinkMove) => void;
+  /** Shows the open signals of the thing with this id, grouped, on Intake. */
+  readonly onSeeInIntake: (entityId: string) => void;
 }
+
+/** How long after a link is made that a press on a link's remove button is ignored: the second click of a double click must not undo the first. */
+const LINK_SETTLE_MS = 400;
 
 /** Returns the name of the card or place `target`, for the dialog's name and for the way back. */
 const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
@@ -43,34 +64,71 @@ const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
 const keyTarget = (target: OpenTarget): string =>
   target.kind === "card" ? `card:${target.id}` : `place:${target.ref}`;
 
+/** Returns the timeline's source for a card the Inbox holds and whose read has not answered: its newest signal alone. */
+const buildListedTimelineSource = (card: Inbox["cards"][number]): TimelineSource => ({
+  ref: card.ref,
+  signals: card.signals.latest === undefined ? [] : [card.signals.latest],
+  timeline: [],
+  places: [],
+  peers: [],
+  links: [],
+});
+
 /**
  * Renders the body of the open sheet for the card `id`. It draws at once from
  * the Inbox's own record of the card, then from `externalEntity.read` when
- * that answers, which also says whether the card's plugin is still active.
- * Orchestrating: it owns this read.
+ * that answers, which also says whether the card's plugin is still active and
+ * holds the card's signals, what changed at its source, and its links.
+ *
+ * - The card opens its newest open signal that is not snoozed, else its
+ *   newest open one, and its answers are read with `signal.read` alone. The
+ *   first open line is chosen once, so answering it does not open the next.
+ * - Linking and unlinking go through the page's moves, so each is one gesture
+ *   on the undo stack. A press on a link's remove button is ignored for a
+ *   moment after a link is made.
+ *
+ * Orchestrating: it owns the read and the choice of the open line.
  */
 function OpenCardContents({
   id,
   inbox,
   client,
   plugins,
+  platform,
   userMonogram,
   onClose,
   onWalk,
+  onWalkCard,
   moves,
 }: {
   readonly id: string;
   readonly inbox: Inbox | undefined;
   readonly client: HerculeClient;
   readonly plugins: readonly PluginIdentity[];
+  readonly platform: DesktopPlatform;
   readonly userMonogram: string;
   readonly onClose: () => void;
   readonly onWalk: (ref: string) => void;
+  readonly onWalkCard: (id: string) => void;
   readonly moves: OpenCardMoveHandlers;
 }): JSX.Element {
   const detail = useQuery(entityQuery(client, id));
-  const record = detail.data ?? inbox?.cards.find((card) => card.id === id);
-  const now = useMinuteClock(record !== undefined && isCardTimeDependent(record));
+  const listed = inbox?.cards.find((card) => card.id === id);
+  const record: EntityRecord | undefined = detail.data ?? listed;
+  const source =
+    detail.data ?? (listed === undefined ? undefined : buildListedTimelineSource(listed));
+  const cards = inbox?.cards ?? [];
+  const lines = source === undefined ? [] : buildOpenTimeline(source, cards);
+  const now = useMinuteClock(
+    (record !== undefined && isCardTimeDependent(record)) || lines.length > 0,
+  );
+
+  // The card opens one line by itself, the first time it has one to open.
+  const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
+  const firstLine = detail.data === undefined ? undefined : findFirstOpenLine(detail.data.signals);
+  if (chosenLine === undefined && firstLine !== undefined) setChosenLine(firstLine);
+  const lastLinkedAt = useRef(0);
+
   if (record === undefined) {
     return (
       <p className="open-card-trust">
@@ -86,12 +144,83 @@ function OpenCardContents({
     detail.data?.kindAvailable ?? true,
     now,
   );
+  const timeline =
+    lines.length === 0 ? null : (
+      <OpenCardTimeline
+        lines={lines}
+        overflow={detail.data === undefined ? undefined : describeTimelineOverflow(detail.data)}
+        now={now}
+        plugins={plugins}
+        openLineId={chosenLine ?? undefined}
+        onToggleLine={(signalId) => {
+          setChosenLine((current) => (current === signalId ? null : signalId));
+        }}
+        onSeeInIntake={() => {
+          moves.onSeeInIntake(id);
+        }}
+        answers={(signalId) => (
+          <OpenCardLine key={signalId} client={client} signalId={signalId} platform={platform} />
+        )}
+      />
+    );
+
+  const buildMove = (toRef: string, toName: string): EntityLinkMove => ({
+    fromRef: record.ref,
+    toRef,
+    fromName: record.identifier,
+    toName,
+  });
+  // A linked thing opens inside the sheet when it has an id to read: a card of this page, or a peer that is a full record.
+  const walkableIds = new Map<string, string>([
+    ...(detail.data?.peers ?? []).flatMap((peer) =>
+      peer.id === undefined ? [] : [[peer.ref, peer.id] as const],
+    ),
+    ...cards.map((card) => [card.ref, card.id] as const),
+  ]);
+  const linked =
+    detail.data === undefined ? null : (
+      <OpenCardLinked
+        rows={buildLinkedRows({ ...detail.data, plugins })}
+        plugins={plugins}
+        canWalk={(row) => walkableIds.has(row.ref)}
+        onWalk={(ref) => {
+          const walkId = walkableIds.get(ref);
+          if (walkId !== undefined) onWalkCard(walkId);
+        }}
+        onUnlink={(row: PlaceRow) => {
+          if (Date.now() - lastLinkedAt.current < LINK_SETTLE_MS) return;
+          moves.onUnlink(
+            buildMove(row.ref, row.isLocked ? row.noun : (row.identifier ?? row.title)),
+          );
+        }}
+        onLink={(row: PlaceRow) => {
+          lastLinkedAt.current = Date.now();
+          moves.onLink(buildMove(row.ref, row.isLocked ? row.noun : (row.identifier ?? row.title)));
+        }}
+        search={
+          words.moves._tag === "off" ? null : (
+            <OpenCardLinkSearch
+              client={client}
+              selfRef={record.ref}
+              links={detail.data.links}
+              ownPluginId={readEntityPluginId(record.kind)}
+              onPick={(row: AddRow) => {
+                lastLinkedAt.current = Date.now();
+                moves.onLink(buildMove(row.ref, row.identifier));
+              }}
+            />
+          )
+        }
+      />
+    );
   return (
     <OpenCardBody
       url={record.url}
       words={words}
       plugins={plugins}
       userMonogram={userMonogram}
+      timeline={timeline}
+      linked={linked}
       onClose={onClose}
       onWalk={onWalk}
       onTake={() => {
@@ -122,6 +251,8 @@ function OpenCardContents({
  *   (`openCard.closeThen`).
  * - A card whose plugin is off keeps its words, its moves are off, and the
  *   sheet says why. A place has no moves.
+ * - `platform` is the platform the app runs on, which decides the key that
+ *   sends a reply written under an opened line.
  *
  * The page renders it once, in the desk's `overlays`. It draws nothing while
  * nothing is open.
@@ -131,14 +262,19 @@ export function InboxOpenCard({
   client,
   inbox,
   plugins,
+  platform,
   onTake,
   onDismiss,
   onSeeTask,
+  onLink,
+  onUnlink,
+  onSeeInIntake,
 }: {
   readonly openCard: OpenCard;
   readonly client: HerculeClient;
   readonly inbox: Inbox | undefined;
   readonly plugins: readonly PluginIdentity[];
+  readonly platform: DesktopPlatform;
 } & OpenCardMoveHandlers): JSX.Element | null {
   const { sheet } = openCard;
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -171,6 +307,8 @@ export function InboxOpenCard({
       isOpen={sheet.isOpen}
       contentKey={keyTarget(shown)}
       label={nameTarget(shown, inbox)}
+      className="open-card-sheet"
+      followsContent
       readPlaces={readPlaces}
       onClosed={() => {
         const origin = sheet.originElement;
@@ -201,10 +339,12 @@ export function InboxOpenCard({
             inbox={inbox}
             client={client}
             plugins={plugins}
+            platform={platform}
             userMonogram={userMonogram}
             onClose={openCard.close}
             onWalk={walkToPlace}
-            moves={{ onTake, onDismiss, onSeeTask }}
+            onWalkCard={walkToCard}
+            moves={{ onTake, onDismiss, onSeeTask, onLink, onUnlink, onSeeInIntake }}
           />
         ) : placeView === undefined ? (
           <p className="open-card-trust">This place is not on the Inbox now.</p>

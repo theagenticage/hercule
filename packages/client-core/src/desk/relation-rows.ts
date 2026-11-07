@@ -9,9 +9,17 @@
  * of a thing list every place above it on every path, each place once, so a
  * list never shows one parent as if it were the only one.
  */
-import type { EntityEdge, EntityPlace, EntityStatus } from "@hercule/contract";
-import { lowerFirst } from "../intake";
+import type {
+  EntityEdge,
+  EntityLink,
+  EntityPeer,
+  EntityPlace,
+  EntityReason,
+  EntityStatus,
+} from "@hercule/contract";
+import { lowerFirst, type PluginName } from "../intake";
 import { readEntityPluginId } from "./entity-words";
+import { describeClaim } from "./link-claim";
 
 /** The records and the `part of` steps a reply carries, which are all the rows are built from. */
 export interface RelationGraph {
@@ -27,6 +35,28 @@ export interface RelationProgress {
   readonly words?: string;
 }
 
+/**
+ * What a row that draws a linked thing knows of the link that brought it.
+ *
+ * - `confirmed`: a source or a person says the two are linked. It shows with
+ *   its status.
+ * - `hint`: a reference found in text. It proves nothing, so it shows with
+ *   the words that say where it was found, and a button to link the two.
+ */
+export interface RowLink {
+  readonly kind: "confirmed" | "hint";
+  /** Who says the two are linked, in words, such as "Linear reports this". */
+  readonly claimWords: string;
+  /** True when the user made the link, so they can remove it. A source's link is never removed. */
+  readonly canUnlink: boolean;
+}
+
+/** The newest thing that changed at a row's source, in finished words. */
+export interface RowChange {
+  readonly say: string;
+  readonly tone: EntityReason["tone"];
+}
+
 /** A place that no Connection can read: it has a kind and a noun, and no title. */
 export interface LockedPlaceRow {
   readonly isLocked: true;
@@ -37,6 +67,8 @@ export interface LockedPlaceRow {
   readonly pluginId: string;
   /** The word for one, such as "Error". */
   readonly noun: string;
+  /** Set on a row that draws a linked thing. */
+  readonly link?: RowLink;
 }
 
 /** A place with a title. */
@@ -50,10 +82,16 @@ export interface OpenPlaceRow {
   readonly caption?: string;
   /** The place's title, or its noun when the source reports no title. */
   readonly title: string;
+  /** How the source names it, such as "SHOP-123", when it has one. */
+  readonly identifier?: string;
   readonly status?: EntityStatus;
   readonly progress?: RelationProgress;
   /** An ISO timestamp the source reports. Write it with `formatTargetDate`. */
   readonly targetDate?: string;
+  /** The latest change at the source, when something changed since the thing was first seen. */
+  readonly latestChange?: RowChange;
+  /** Set on a row that draws a linked thing. */
+  readonly link?: RowLink;
 }
 
 export type PlaceRow = LockedPlaceRow | OpenPlaceRow;
@@ -84,10 +122,39 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     ...base,
     isLocked: false,
     title: place.title ?? place.noun,
+    ...(place.identifier === undefined ? {} : { identifier: place.identifier }),
     ...(place.caption === undefined ? {} : { caption: place.caption }),
     ...(place.status === undefined ? {} : { status: place.status }),
     ...(place.progress === undefined ? {} : { progress: buildRelationProgress(place.progress) }),
     ...(place.targetDate === undefined ? {} : { targetDate: place.targetDate }),
+    ...(place.latestChange === undefined
+      ? {}
+      : { latestChange: { say: place.latestChange.say.say, tone: place.latestChange.say.tone } }),
+  };
+};
+
+/**
+ * Returns the row that draws `peer`, a linked thing with no card of its own.
+ * A restricted peer is a locked row. Its title is its noun when the source
+ * reports none.
+ */
+export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
+  const base = {
+    ref: peer.ref,
+    kind: peer.kind,
+    pluginId: readEntityPluginId(peer.kind),
+    noun: peer.noun,
+  };
+  if (peer.restricted) return { ...base, isLocked: true };
+  return {
+    ...base,
+    isLocked: false,
+    title: peer.title ?? peer.noun,
+    ...(peer.identifier === undefined ? {} : { identifier: peer.identifier }),
+    ...(peer.status === undefined ? {} : { status: peer.status }),
+    ...(peer.latestChange === undefined
+      ? {}
+      : { latestChange: { say: peer.latestChange.say.say, tone: peer.latestChange.say.tone } }),
   };
 };
 
@@ -158,4 +225,67 @@ export const describeLockedRow = (
   const kind = lowerFirst(place.noun);
   const named = pluginName === undefined ? kind : `${pluginName} ${kind}`;
   return `${/^[aeiou]/i.test(named) ? "An" : "A"} ${named} you cannot open`;
+};
+
+/** What `buildLinkedRows` is built from: one thing's links, and the records at their far ends. */
+export interface LinkedThings {
+  /** The ref of the thing whose links these are. */
+  readonly ref: string;
+  readonly links: readonly EntityLink[];
+  /** Where a link's far end is found first. */
+  readonly places: readonly EntityPlace[];
+  /** Where it is found when `places` has no record for it. */
+  readonly peers: readonly EntityPeer[];
+  /** For the plugin names in the words of a claim. */
+  readonly plugins: ReadonlyArray<PluginName>;
+}
+
+/** The rows of the Linked section: what is linked for sure, and what only text says. */
+export interface LinkedRows {
+  readonly confirmed: readonly PlaceRow[];
+  readonly hints: readonly PlaceRow[];
+}
+
+/**
+ * Returns the rows of a thing's links, in the order the links are given. A
+ * link whose far end no record is held for has no row, and neither has a hint
+ * whose far end the user cannot open. A link with a `source`
+ * or `person` claim is confirmed, and one with only a `text` claim is a hint.
+ * Each row carries the words of its claim (`describeClaim`) and whether the
+ * user can remove it. A claim made by the text of the far end names that
+ * thing's identifier ("Found in the description of #6263"); a claim found in
+ * this thing's own text names only the text.
+ */
+export const buildLinkedRows = ({
+  ref,
+  links,
+  places,
+  peers,
+  plugins,
+}: LinkedThings): LinkedRows => {
+  const placeByRef = new Map(places.map((place) => [place.ref, place]));
+  const peerByRef = new Map(peers.map((peer) => [peer.ref, peer]));
+  const confirmed: PlaceRow[] = [];
+  const hints: PlaceRow[] = [];
+  for (const link of links) {
+    const otherRef = link.fromRef === ref ? link.toRef : link.fromRef;
+    const place = placeByRef.get(otherRef);
+    const peer = peerByRef.get(otherRef);
+    const row = place !== undefined ? buildPlaceRow(place) : peer && buildPeerRow(peer);
+    if (row === undefined) continue;
+    const isHint = link.claim.type === "text";
+    // A hint is offered to be linked, which nobody does to a thing they cannot even name.
+    if (isHint && row.isLocked) continue;
+    const mentioner = link.fromRef === ref ? undefined : (place?.identifier ?? peer?.identifier);
+    const linked: PlaceRow = {
+      ...row,
+      link: {
+        kind: isHint ? "hint" : "confirmed",
+        claimWords: describeClaim(link.claim, plugins, mentioner),
+        canUnlink: link.claim.type === "person",
+      },
+    };
+    (isHint ? hints : confirmed).push(linked);
+  }
+  return { confirmed, hints };
 };

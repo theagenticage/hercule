@@ -5,6 +5,9 @@
  * lies. A visit holds, for each card:
  *
  * - its side (a card that gets a Task keeps its column);
+ * - the lead it rides on, if any (a read that says a card now rides on a
+ *   ticket does not move it out of Requests, and one that says it no longer
+ *   does not take it from under the ticket);
  * - its row: the order of the cards inside each list, which is the order they
  *   joined the visit in;
  * - on the wide side, the surfaces it lies on and which of them draws it in
@@ -14,7 +17,8 @@
  * A card new to the visit is placed as the read says. It joins the end of its
  * list, and its surface or group, if it is new too, joins at the end. The
  * user's own Group by or Requests order starts the surfaces or groups over, and
- * so does the next visit. The order of the rows inside a list is held until the
+ * so does the next visit. The user's own Link and Unlink are the one thing that
+ * changes what a card rides on during a visit (`RidingChoices`). The order of the rows inside a list is held until the
  * next visit even then: the user asked for other lists, not for other rows.
  */
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
@@ -44,10 +48,27 @@ export interface PlacementChoice {
   readonly requestsOrder: RequestsOrder;
 }
 
+/**
+ * The lead each card was put on or taken off by the user's own Link or Unlink
+ * in this visit, by card id, as the lead's ref. `undefined` means taken off.
+ * It wins over what a read says, for the rest of the visit.
+ */
+export type RidingChoices = ReadonlyMap<string, string | undefined>;
+
+/** No choice made. */
+export const NO_RIDING_CHOICES: RidingChoices = new Map();
+
 /** What a visit holds of one card. */
 export interface HeldCard {
   /** The side the card was first seen on. */
   readonly side: InboxSide;
+  /**
+   * The ref of the lead the card rode on when it was first seen, or where the
+   * user last put it. `undefined` for a card that rides on nothing. A card
+   * rides only while that lead is a card of the page, so a dismissed lead sets
+   * it free and the lead's return takes it back.
+   */
+  readonly ridesOn: string | undefined;
   /**
    * The position of the card in the order the cards joined the visit, for
    * every list it can lie in. A card that is gone from the reads keeps its
@@ -153,12 +174,15 @@ const appendRanks = <Key extends string>(
  *   Group by is resolved against what `inbox` offers only then, once, and the
  *   result is held with the choice, so a kind of place that leaves the replies
  *   later does not move cards. Sides and positions are never dropped.
+ * - What a card rides on is held like its side. `riding` is the one thing that
+ *   changes it: the user's own Link or Unlink.
  */
 export const placeInboxCards = (
   inbox: Inbox,
   choice: PlacementChoice,
   held: VisitPlacement,
   context: PlaceContext,
+  riding: RidingChoices = NO_RIDING_CHOICES,
 ): VisitPlacement => {
   const keepsSurfaces = held.requestedGrouping === choice.grouping;
   const grouping = keepsSurfaces ? held.grouping : resolveGrouping(inbox, choice.grouping);
@@ -167,9 +191,13 @@ export const placeInboxCards = (
 
   // A card keeps its side and position always; its surfaces and its group only for the same choice.
   const cards = new Map<string, HeldCard>();
+  let isChanged = !keepsSurfaces || !keepsGroups;
   for (const [id, card] of held.cards) {
+    const ridesOn = riding.has(id) ? riding.get(id) : card.ridesOn;
+    if (ridesOn !== card.ridesOn) isChanged = true;
     cards.set(id, {
       side: card.side,
+      ridesOn,
       rank: card.rank,
       heads: keepsSurfaces ? card.heads : undefined,
       requestGroup: keepsGroups ? card.requestGroup : undefined,
@@ -177,7 +205,6 @@ export const placeInboxCards = (
   }
   const newHeads = new Map<string, SurfaceHead>();
   const newGroups = new Set<string>();
-  let isChanged = !keepsSurfaces || !keepsGroups;
 
   for (const card of oldestFirst) {
     const seen = cards.get(card.id);
@@ -197,7 +224,9 @@ export const placeInboxCards = (
       if (!(keepsGroups && held.groupRank.has(requestGroup))) newGroups.add(requestGroup);
       isChanged = true;
     }
-    cards.set(card.id, { side, rank: seen?.rank ?? cards.size, heads, requestGroup });
+    const ridesOn =
+      seen !== undefined ? seen.ridesOn : riding.has(card.id) ? riding.get(card.id) : card.ridesOn;
+    cards.set(card.id, { side, ridesOn, rank: seen?.rank ?? cards.size, heads, requestGroup });
   }
   if (!isChanged) return held;
 

@@ -19,7 +19,9 @@
     .request-mark,
     .request-under,
     .request-trust,
-    .card-wait
+    .card-wait,
+    .inbox-tucked,
+    .inbox-hint
   ) {
   visibility: hidden;
 }
@@ -59,7 +61,9 @@
       .request-title,
       .request-under,
       .request-trust,
-      .card-wait
+      .card-wait,
+      .inbox-tucked,
+      .inbox-hint
     ) {
     animation: inbox-words-in 240ms var(--m-ease)
       calc(var(--arrive-block, 0) * 60ms + min(var(--arrive-step, 0), 16) * 14ms) backwards;

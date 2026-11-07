@@ -57,10 +57,16 @@ const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y
  *   which names whatever lies under the pointer, even a card that is moving
  *   away.
  *
+ * `onReach` is called with the id of each card that becomes the current one, by
+ * the pointer or the keys: reaching a card is what takes its new mark away.
+ *
  * The listeners are on the element `scrollRef` holds, and need no re-render:
  * the mark is an attribute on the card.
  */
-export const useCurrentCard = (scrollRef: RefObject<HTMLElement | null>): CurrentCard => {
+export const useCurrentCard = (
+  scrollRef: RefObject<HTMLElement | null>,
+  onReach?: (id: string) => void,
+): CurrentCard => {
   const current = useRef<Current | null>(null);
   const pointerAt = useRef<Point | null>(null);
   const keysAt = useRef<Point>({ x: 0, y: 0 });
@@ -78,6 +84,7 @@ export const useCurrentCard = (scrollRef: RefObject<HTMLElement | null>): Curren
     if (element === null) return;
     current.current = { id, by };
     element.setAttribute("data-current", by);
+    onReach?.(id);
     if (by === "pointer") {
       // The ring and the pointer's mark must not both stand: the pointer took over.
       const focused = document.activeElement;

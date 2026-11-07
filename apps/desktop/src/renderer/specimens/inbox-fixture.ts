@@ -16,10 +16,17 @@
  *   usual reason, a reason with a tone, a status that is not the usual one, and
  *   one of the user's own.
  * - With someone else: two pull requests that have a Task.
+ * - Links: one issue carries a pull request that rides on it (an asking part), a
+ *   pull request that has no card of its own (a quiet part) and a Sentry issue
+ *   nobody here can read (a locked part), and says how long ago its latest
+ *   signal landed. A pull request that mentions another issue in its text shows
+ *   a hint, and one that is linked to a pull request with no card says so.
  */
 import type {
   Connection,
   EntityEdge,
+  EntityLink,
+  EntityPeer,
   EntityPlace,
   Inbox,
   InboxCard,
@@ -150,6 +157,9 @@ const review = (
     ...overrides,
   });
 
+const ISSUE_412 = "github:issue:acme/storefront-web#412";
+const ISSUE_398 = "github:issue:acme/storefront-web#398";
+
 const CARDS: readonly InboxCard[] = [
   // Ongoing: Storefront web.
   issue(412, "Basket total rounds the wrong way on multi-buy offers", {
@@ -157,6 +167,20 @@ const CARDS: readonly InboxCard[] = [
     yours: false,
     facts: [{ form: "bars", level: 3 }],
     reason: { say: "Tessa commented", tone: "plain" },
+    signals: {
+      openCount: 2,
+      latest: {
+        id: "01a0d1c0-6e80-7000-8000-000000000a01",
+        kind: "github/commented",
+        title: "Tessa commented",
+        asker: "Tessa",
+        priority: "normal",
+        status: "open",
+        createdAt: hoursAgo(26),
+        say: { say: "Tessa commented", tone: "plain" },
+        snoozed: false,
+      },
+    },
   }),
   issue(398, "Keep card numbers out of the gateway debug log", {
     status: { shape: "half", tone: "active", label: "In progress" },
@@ -202,6 +226,7 @@ const CARDS: readonly InboxCard[] = [
     118,
     {
       person: { name: "Felix" },
+      ridesOn: ISSUE_412,
     },
   ),
   review(6230, "Show unit prices on multi-buy offers", 100, {
@@ -249,9 +274,59 @@ const EDGES: readonly EntityEdge[] = [
   ),
 ];
 
+const pullRequestRef = (n: number): string =>
+  `github:pull-request:acme/storefront-web#${String(n)}`;
+
+/** Pull requests with no card of their own, and a Sentry issue nobody here can read: what the links reach that is not on the page. */
+const PEERS: readonly EntityPeer[] = [
+  {
+    ref: pullRequestRef(6101),
+    kind: "github/pull-request",
+    noun: "Pull request",
+    identifier: "#6101",
+    title: "Round multi-buy totals in the basket summary",
+    status: { shape: "join", tone: "good", label: "Merged" },
+    yours: true,
+    restricted: false,
+  },
+  {
+    ref: pullRequestRef(6100),
+    kind: "github/pull-request",
+    noun: "Pull request",
+    identifier: "#6100",
+    title: "Add the promo banner slot",
+    yours: false,
+    restricted: false,
+  },
+  {
+    ref: "sentry:issue:4471",
+    kind: "sentry/issue",
+    noun: "Issue",
+    yours: false,
+    restricted: true,
+  },
+];
+
+/** The claims between the specimen's things: a source's, a person's and a reference found in text. */
+const LINKS: readonly EntityLink[] = [
+  { fromRef: ISSUE_412, toRef: pullRequestRef(6238), claim: { type: "source", plugin: "github" } },
+  { fromRef: ISSUE_412, toRef: pullRequestRef(6101), claim: { type: "person", actor: "user" } },
+  { fromRef: ISSUE_412, toRef: "sentry:issue:4471", claim: { type: "source", plugin: "github" } },
+  {
+    fromRef: pullRequestRef(6219),
+    toRef: ISSUE_398,
+    claim: { type: "text", evidenceKey: "description" },
+  },
+  {
+    fromRef: pullRequestRef(6207),
+    toRef: pullRequestRef(6100),
+    claim: { type: "source", plugin: "github" },
+  },
+];
+
 /** What `externalEntity.queryInbox` answers in the specimen. */
 export const INBOX: Inbox = {
-  ...buildInbox(CARDS, { places: PLACES, edges: EDGES }),
+  ...buildInbox(CARDS, { places: PLACES, edges: EDGES, links: LINKS, peers: PEERS }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
 

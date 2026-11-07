@@ -25,4 +25,12 @@ describe("describeCardAloud", () => {
     const card = buildInboxCard("8", { title: "Fix the cart" });
     expect(describeCardAloud(decideCardFace(card), null)).toBe("Ticket, ACME-8, Fix the cart");
   });
+
+  it.each([
+    [1, "Ticket, ACME-8, Fix the cart, with 1 thing riding on it"],
+    [3, "Ticket, ACME-8, Fix the cart, with 3 things riding on it"],
+  ])("ends with what rides on a card: %s", (riding, words) => {
+    const card = buildInboxCard("8", { title: "Fix the cart" });
+    expect(describeCardAloud(decideCardFace(card), null, riding)).toBe(words);
+  });
 });

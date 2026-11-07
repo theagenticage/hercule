@@ -1,5 +1,14 @@
 /** Test cards for the Inbox, in the invented Northwind Market world. */
-import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
+import type {
+  Connection,
+  EntityLink,
+  EntityPeer,
+  EntityPlace,
+  EntitySignalLine,
+  Inbox,
+  InboxCard,
+  PluginDetail,
+} from "@hercule/contract";
 
 /**
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
@@ -69,6 +78,69 @@ export const buildInboxPlace = (
   caption: "Acme project",
   title,
   restricted: false,
+  ...overrides,
+});
+
+/**
+ * Returns a link between two refs under the claim given: a `source` claim of
+ * the invented `acme` plugin, a `person` claim of the user, or a `text` claim
+ * found in a description.
+ */
+export const buildInboxLink = (
+  fromRef: string,
+  toRef: string,
+  type: EntityLink["claim"]["type"] = "source",
+): EntityLink => ({
+  fromRef,
+  toRef,
+  claim:
+    type === "source"
+      ? { type, plugin: "acme" }
+      : type === "person"
+        ? { type, actor: "user" }
+        : { type, evidenceKey: "description" },
+});
+
+/**
+ * Returns a peer: a linked record with no card of its own, named by an
+ * identifier made from its ref. `overrides` change any field, and
+ * `withoutIdentifier` leaves the identifier out, as a source that has none does.
+ */
+export const buildInboxPeer = (
+  ref: string,
+  overrides: Partial<EntityPeer> = {},
+  withoutIdentifier = false,
+): EntityPeer => {
+  const { identifier, ...rest } = {
+    ref,
+    kind: "acme/ticket",
+    noun: "Ticket",
+    identifier: ref.slice(ref.lastIndexOf(":") + 1).toUpperCase(),
+    title: `Peer ${ref}`,
+    yours: false,
+    restricted: false,
+    ...overrides,
+  };
+  return withoutIdentifier || identifier === undefined ? rest : { ...rest, identifier };
+};
+
+/**
+ * Returns a signal line landed at `createdAt`, whose sentence is `say`. The
+ * kind is the invented `acme/review-requested`. `overrides` change any field.
+ */
+export const buildSignalLine = (
+  id: string,
+  say: string,
+  overrides: Partial<EntitySignalLine> = {},
+): EntitySignalLine => ({
+  id,
+  kind: "acme/review-requested",
+  title: say,
+  priority: "normal",
+  status: "open",
+  createdAt: "2026-11-07T09:00:00.000Z",
+  say: { say, tone: "plain" },
+  snoozed: false,
   ...overrides,
 });
 

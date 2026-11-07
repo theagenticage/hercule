@@ -3,7 +3,7 @@
  * which sources it can search, which contexts of a source narrow a search,
  * and whether typed text is a pasted link.
  */
-import type { EntityPlace, PluginDetail } from "@hercule/contract";
+import type { EntityPlace, EntitySearchQuery, PluginDetail } from "@hercule/contract";
 import { lowerFirst } from "../intake";
 import { parsePluginId } from "../plugin-id";
 
@@ -92,3 +92,18 @@ export const listScopeOptions = (
  * recognizes it, whatever tab the sheet is on.
  */
 export const isPastedLink = (text: string): boolean => /^https?:\/\/\S+$/i.test(text.trim());
+
+/**
+ * Returns the search for `words` in `source`, narrowed to `scopeRef` unless
+ * that is empty, or `null` when nothing is typed. A pasted link is never
+ * narrowed: it names its own source and its own thing.
+ */
+export const buildEntitySearch = (
+  words: string,
+  source: string,
+  scopeRef: string,
+): EntitySearchQuery | null => {
+  const text = words.trim();
+  if (text === "") return null;
+  return { source, text, ...(scopeRef === "" || isPastedLink(text) ? {} : { scopeRef }) };
+};

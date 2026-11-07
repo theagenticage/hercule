@@ -97,3 +97,91 @@ button.relation-go:hover {
   border-radius: 2px;
   background: color-mix(in oklab, var(--ink) 55%, transparent);
 }
+
+/* A row that draws a thing linked to another (the open card's Linked section).
+   Its end is the status shape and word, and who says the two are linked
+   stands over that end while the row is reached for. The drawing does this
+   with `:has()`, which the app does not use in rows that are drawn by the
+   hundred, so the row carries the class instead. */
+.relation-end.is-status {
+  gap: 4px;
+}
+.relation-row.has-claim .relation-claim {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--stock);
+  color: var(--faint);
+  font: var(--type-meta);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick);
+}
+.relation-row.has-claim:hover .relation-claim,
+.relation-row.has-claim:focus-within .relation-claim {
+  opacity: 1;
+}
+.relation-row.has-claim:hover .relation-end,
+.relation-row.has-claim:focus-within .relation-end {
+  opacity: 0;
+}
+/* The button that removes a link the user made. It shows with the claim. */
+.relation-unlink {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  opacity: 0;
+}
+.relation-row:hover .relation-unlink,
+.relation-unlink:focus-visible {
+  opacity: 1;
+}
+.relation-unlink:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+/* A reference found in text: the thing in muted words, where it was found in
+   faint ones, and the button that links the two. */
+.relation-row.is-hint .relation-title {
+  color: var(--muted);
+}
+.relation-why {
+  flex: none;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.relation-row.is-hint .relation-go {
+  min-width: 0;
+}
+
+/* What changed at the source, under the title, in finished words. */
+.relation-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px 0;
+}
+.relation-text .relation-title {
+  flex: none;
+}
+.relation-change {
+  color: var(--faint);
+  font: var(--type-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relation-change[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.relation-change[data-tone="good"] {
+  color: var(--ok);
+}

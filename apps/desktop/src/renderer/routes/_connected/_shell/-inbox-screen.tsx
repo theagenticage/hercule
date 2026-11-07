@@ -7,6 +7,8 @@ import {
   decideEmptyInbox,
   describeFailingSources,
   describeTruncatedInbox,
+  listRiders,
+  nameLinkEnd,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
@@ -93,16 +95,25 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   // keep the place it had.
   const [hasOwnReply, setHasOwnReply] = useState(false);
   if (!hasOwnReply && read.data !== undefined && !isHolding && !read.isError) setHasOwnReply(true);
-  const { inbox, layout, groupings, heldArrivals, emptiedByMove, isWaitingForSunrise } =
-    useInboxVisit({
-      step: {
-        received: moves.inbox,
-        view: { grouping: view.grouping, filter: view.filter, requestsOrder: view.requestsOrder },
-        isFresh: hasOwnReply,
-        hasUserMove: moves.hasPendingEdits,
-      },
-      scrollRef,
-    });
+  const {
+    inbox,
+    layout,
+    groupings,
+    heldArrivals,
+    emptiedByMove,
+    isWaitingForSunrise,
+    freshIds,
+    clearFresh,
+  } = useInboxVisit({
+    step: {
+      received: moves.inbox,
+      view: { grouping: view.grouping, filter: view.filter, requestsOrder: view.requestsOrder },
+      isFresh: hasOwnReply,
+      hasUserMove: moves.hasPendingEdits,
+      riding: moves.riding,
+    },
+    scrollRef,
+  });
   const hasWords = inbox !== undefined && !isHolding;
   const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
 
@@ -120,13 +131,22 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const truncated = inbox === undefined ? undefined : describeTruncatedInbox(inbox);
 
   // ---------- Moves, keys and the open card ----------
-  const current = useCurrentCard(scrollRef);
+  const current = useCurrentCard(scrollRef, clearFresh);
   const openCard = useOpenCard();
+  // A card that opens is reached too: its new mark goes.
+  const openedId = openCard.shown?.kind === "card" ? openCard.shown.id : undefined;
+  useEffect(() => {
+    if (openedId !== undefined) clearFresh(openedId);
+  }, [openedId, clearFresh]);
   const findCard = (id: string): InboxCard | undefined =>
     inbox?.cards.find((card) => card.id === id);
   const seeTask = (card: InboxCard): void => {
     if (card.taskId === undefined) return;
     void navigate({ to: "/work", search: { task: card.taskId } });
+  };
+  // Dismissing a card lets what rides on it stand alone, and the undo line says so.
+  const dismissWithRiders = (card: InboxCard): void => {
+    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id));
   };
   const page = useInboxPage({
     scrollRef,
@@ -135,8 +155,17 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     open: openCard,
     moves: {
       take: moves.take,
-      dismiss: moves.dismiss,
+      dismiss: dismissWithRiders,
       seeTask,
+      link: (fromRef, toRef) => {
+        if (inbox === undefined) return;
+        moves.link({
+          fromRef,
+          toRef,
+          fromName: nameLinkEnd(inbox, fromRef),
+          toName: nameLinkEnd(inbox, toRef),
+        });
+      },
       say: moves.sayWithoutUndo,
     },
   });
@@ -170,6 +199,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           layout={layout}
           plugins={plugins}
           monogram={monogram}
+          freshIds={freshIds}
           note={truncated === undefined ? null : <p className="inbox-note">{truncated}</p>}
         />
         <RequestsSide
@@ -178,6 +208,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           onOrderChange={view.setRequestsOrder}
           plugins={plugins}
           monogram={monogram}
+          freshIds={freshIds}
           isSunriseStill={!emptiedByMove.requests}
         />
       </>
@@ -245,6 +276,13 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
             client={client}
             inbox={inbox}
             plugins={plugins}
+            platform={bridge.platform}
+            onLink={moves.link}
+            onUnlink={moves.unlink}
+            onSeeInIntake={(entityId) => {
+              openCard.close();
+              void navigate({ to: "/intake", search: { entity: entityId } });
+            }}
             onTake={(cardId) => {
               const card = findCard(cardId);
               if (card !== undefined) {
@@ -257,7 +295,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
               const card = findCard(cardId);
               if (card !== undefined) {
                 openCard.closeThen(() => {
-                  moves.dismiss(card);
+                  dismissWithRiders(card);
                 });
               }
             }}

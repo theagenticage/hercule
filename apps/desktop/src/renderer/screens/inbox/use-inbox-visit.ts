@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import {
   advanceInboxVisit,
+  listLandedCards,
   START_OF_VISIT,
   type InboxVisit,
   type VisitStep,
 } from "@hercule/client-core/inbox";
+import type { Inbox } from "@hercule/contract";
 import { waitForStillHand } from "../../app/motion";
 import { comeDownIntoPlace, flipInboxPage } from "./inbox-motion";
 
@@ -32,6 +34,9 @@ const addIds = (before: ReadonlySet<string>, more: readonly string[]): ReadonlyS
  *   caused it, and the cards that make room glide on `hand`.
  * - When the user's own move empties the Inbox, `isWaitingForSunrise` holds
  *   the all-clear back for the time the last card takes to step aside.
+ * - A card a signal landed on since the visit's first read is fresh
+ *   (`freshIds`), and stays fresh until the pointer or the keys reach it, or it
+ *   opens (`clearFresh`). A card that is new to the page is an arrival, not fresh.
  *
  * `step` is the read as `VisitStep` describes it, without the ids released so
  * far, which this hook keeps. `scrollRef` is the element that scrolls the page.
@@ -42,9 +47,29 @@ export const useInboxVisit = ({
 }: {
   readonly step: Omit<VisitStep, "released">;
   readonly scrollRef: RefObject<HTMLElement | null>;
-}): InboxVisit & { readonly isWaitingForSunrise: boolean } => {
+}): InboxVisit & {
+  readonly isWaitingForSunrise: boolean;
+  readonly freshIds: ReadonlySet<string>;
+  readonly clearFresh: (id: string) => void;
+} => {
   const [history, setHistory] = useState(START_OF_VISIT);
   const [released, setReleased] = useState(NOTHING);
+  // The last of the visit's own reads, to see which cards a signal landed on since. A copy kept from
+  // an earlier visit says nothing about this one.
+  const [lastRead, setLastRead] = useState<Inbox | undefined>(undefined);
+  const [freshIds, setFreshIds] = useState(NOTHING);
+  if (step.isFresh && step.received !== undefined && step.received !== lastRead) {
+    setLastRead(step.received);
+    if (lastRead !== undefined) {
+      const landed = listLandedCards(lastRead, step.received);
+      if (landed.length > 0) setFreshIds((before) => addIds(before, landed));
+    }
+  }
+  const clearFresh = (id: string): void => {
+    setFreshIds((before) =>
+      before.has(id) ? new Set([...before].filter((each) => each !== id)) : before,
+    );
+  };
 
   const next = advanceInboxVisit(history, { ...step, released });
   // Set while drawing, so the draw that shows a new read already holds its cards.
@@ -100,5 +125,10 @@ export const useInboxVisit = ({
   }, [isEmptiedByMove]);
   if (!isEmptiedByMove && hasWaitedForSunrise) setHasWaitedForSunrise(false);
 
-  return { ...visit, isWaitingForSunrise: isEmptiedByMove && !hasWaitedForSunrise };
+  return {
+    ...visit,
+    isWaitingForSunrise: isEmptiedByMove && !hasWaitedForSunrise,
+    freshIds,
+    clearFresh,
+  };
 };

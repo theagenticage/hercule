@@ -65,3 +65,75 @@ describe("OpeningSheet", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Words of b" }));
   });
 });
+
+describe("OpeningSheet that follows its content", () => {
+  /** A ResizeObserver a test can fire by hand. */
+  const watchers: Array<() => void> = [];
+  class FakeResizeObserver {
+    constructor(callback: () => void) {
+      watchers.push(callback);
+    }
+    observe(): void {}
+    disconnect(): void {}
+  }
+
+  afterEach(() => {
+    watchers.length = 0;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Draws a sheet whose one element of words is `height` tall, and counts how often the places are read. */
+  const drawFollowing = (followsContent: boolean) => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    let height = 100;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => height);
+    const readPlaces = vi.fn(() => PLACES);
+    render(
+      <OpeningSheet
+        isOpen
+        contentKey="a"
+        label="Details"
+        followsContent={followsContent}
+        readPlaces={readPlaces}
+        onClosed={() => undefined}
+      >
+        <div>Words</div>
+      </OpeningSheet>,
+    );
+    return {
+      readPlaces,
+      grow: (to: number): void => {
+        height = to;
+        for (const watcher of watchers) watcher();
+      },
+    };
+  };
+
+  it("reads the places again when its words grow after it was measured, so a late read is not clipped", () => {
+    const { readPlaces, grow } = drawFollowing(true);
+    const readsWhenOpened = readPlaces.mock.calls.length;
+
+    grow(260);
+
+    expect(readPlaces.mock.calls.length).toBe(readsWhenOpened + 1);
+  });
+
+  it("does not read the places again when the words keep their height", () => {
+    const { readPlaces, grow } = drawFollowing(true);
+    const readsWhenOpened = readPlaces.mock.calls.length;
+
+    grow(100);
+
+    expect(readPlaces.mock.calls.length).toBe(readsWhenOpened);
+  });
+
+  it("leaves a sheet whose height the page decides alone", () => {
+    const { readPlaces, grow } = drawFollowing(false);
+    const readsWhenOpened = readPlaces.mock.calls.length;
+    grow(260);
+
+    expect(watchers).toHaveLength(0);
+    expect(readPlaces.mock.calls.length).toBe(readsWhenOpened);
+  });
+});

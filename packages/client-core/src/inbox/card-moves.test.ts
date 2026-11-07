@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildInbox, buildInboxCard, buildRequestCard } from "./cards.testing";
 import {
   applyInboxEdit,
+  describeDismissal,
   describeMoveRefusal,
   nameCard,
   reapplyInboxEdits,
@@ -78,5 +79,22 @@ describe("reapplyInboxEdits", () => {
   it("returns the Inbox itself when there is no edit", () => {
     const inbox = buildInbox([waiting]);
     expect(reapplyInboxEdits(inbox, [])).toBe(inbox);
+  });
+});
+
+describe("describeDismissal", () => {
+  const lead = buildInboxCard("1");
+  const review = buildRequestCard("2");
+
+  it.each([
+    ["nothing rode on it", [], "Dismissed Ticket ACME-1."],
+    ["one card rode on it", [review], "Dismissed Ticket ACME-1. Review #2 stands alone now."],
+    [
+      "two cards rode on it",
+      [review, buildRequestCard("3")],
+      "Dismissed Ticket ACME-1. 2 things that rode on it stand alone now.",
+    ],
+  ])("says what becomes of what rode on it when %s", (_name, riders, words) => {
+    expect(describeDismissal(lead, riders)).toBe(words);
   });
 });

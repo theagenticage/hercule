@@ -24,8 +24,23 @@
 import { useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
-import { nameCard, reapplyInboxEdits, type InboxEdit } from "@hercule/client-core/inbox";
+import {
+  invalidateWithoutCancelling,
+  queryKeys,
+  readErrorMessage,
+  type HerculeClient,
+} from "@hercule/client-core";
+import {
+  describeDismissal,
+  nameCard,
+  NO_RIDING_CHOICES,
+  planLink,
+  planUnlink,
+  reapplyInboxEdits,
+  type EntityLinkMove,
+  type InboxEdit,
+  type RidingChoices,
+} from "@hercule/client-core/inbox";
 import type { Inbox, InboxCard } from "@hercule/contract";
 import {
   buildCachedCardMover,
@@ -68,6 +83,8 @@ export interface InboxMoves {
   readonly inbox: Inbox | undefined;
   /** Whether a move the user made is applied over the read and not yet answered by the controller. */
   readonly hasPendingEdits: boolean;
+  /** What the user's own Link and Unlink put cards on or took them off, for the visit to hold in place. */
+  readonly riding: RidingChoices;
   /**
    * Takes the card on as a Task. When the controller answers, the card shows
    * the user's monogram where its wait was, and the undo line offers Undo. A
@@ -77,9 +94,21 @@ export interface InboxMoves {
   /**
    * Dismisses the card. It leaves the page at once: a copy steps aside, and the
    * cards after it close up on `hand`. A failure puts it back on `travel`
-   * and says why.
+   * and says why. `riders` are the cards drawn riding on it: they stand alone
+   * from then on, and the undo line says so.
    */
-  readonly dismiss: (card: InboxCard) => void;
+  readonly dismiss: (card: InboxCard, riders?: readonly InboxCard[]) => void;
+  /**
+   * Links two things as the user's own claim. The undo line says what was
+   * linked and offers Undo, which removes the link again. A failure says why.
+   */
+  readonly link: (move: EntityLinkMove) => void;
+  /**
+   * Removes the user's own link between two things. The undo line offers Undo,
+   * which links them again, and says when a link of a source stays. A failure
+   * says why.
+   */
+  readonly unlink: (move: EntityLinkMove) => void;
   /** Reverses the newest gesture on the undo stack, and says what happened. */
   readonly undoLastMove: () => void;
   /** What the undo line shows. */
@@ -113,6 +142,26 @@ export const useInboxMoves = ({
   };
   const nextId = useRef(1);
   const writeCachedInbox = buildCachedInboxWriter(queryClient);
+  // The visit holds what rides on what, so a read cannot move a card. The user's own Link and Unlink can,
+  // and they are kept here, by card, for the length of the screen.
+  const [riding, setRiding] = useState(NO_RIDING_CHOICES);
+  const chooseRiding = (edit: InboxEdit): void => {
+    if (edit.kind !== "set-link" || edit.riding === undefined) return;
+    const { id, ridesOn } = edit.riding;
+    setRiding((before) => new Map(before).set(id, ridesOn));
+  };
+
+  // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
+  const inbox = useMemo(
+    () =>
+      serverInbox === undefined
+        ? undefined
+        : reapplyInboxEdits(
+            serverInbox,
+            pendingEdits.map((each) => each.edit),
+          ),
+    [serverInbox, pendingEdits],
+  );
 
   /**
    * Makes `change` and glides every part of the page that moves because of it
@@ -136,8 +185,17 @@ export const useInboxMoves = ({
     const shown: PendingEdit = { id: nextId.current++, edit };
     const born = playPageChange(spring, () => {
       changePending((edits) => [...edits, shown]);
+      chooseRiding(edit);
     });
     return { shown, born };
+  };
+
+  /** Takes `shown` off the page again, and gives each card back what it rode on before, because the controller refused it. */
+  const takeEditBack = (shown: PendingEdit, reverse: InboxEdit | undefined): void => {
+    playPageChange("hand", () => {
+      changePending((edits) => edits.filter((each) => each.id !== shown.id));
+      if (reverse !== undefined) chooseRiding(reverse);
+    });
   };
 
   /** Writes an edit the controller answered into the cached Inbox, and drops it from the pending list in the same draw. */
@@ -176,6 +234,19 @@ export const useInboxMoves = ({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
     mutationFn: (card: InboxCard) => client.externalEntity.dismiss({ params: { id: card.id } }),
+  });
+
+  const linkEntities = useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: (move: EntityLinkMove) =>
+      client.externalEntity.link({ payload: { fromRef: move.fromRef, toRef: move.toRef } }),
+  });
+  const unlinkEntities = useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: (move: EntityLinkMove) =>
+      client.externalEntity.unlink({ payload: { fromRef: move.fromRef, toRef: move.toRef } }),
   });
 
   // The reversals wait in the same line as the moves, so none overtakes another.
@@ -226,7 +297,7 @@ export const useInboxMoves = ({
     );
   };
 
-  const dismiss = (card: InboxCard): void => {
+  const dismiss = (card: InboxCard, riders: readonly InboxCard[] = []): void => {
     const name = nameCard(card);
     const scroller = scrollRef.current;
     const element = scroller === null ? null : findCardElement(scroller, card.id);
@@ -261,26 +332,118 @@ export const useInboxMoves = ({
       },
     };
     undoStack.reserve(gesture, wasSaved);
-    say(`Dismissed ${name}.`, gesture);
+    say(describeDismissal(card, riders), gesture);
   };
 
-  // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
-  const inbox = useMemo(
-    () =>
-      serverInbox === undefined
-        ? undefined
-        : reapplyInboxEdits(
-            serverInbox,
-            pendingEdits.map((each) => each.edit),
-          ),
-    [serverInbox, pendingEdits],
-  );
+  /** Reads again what a link decides: what rides on what, the count, and every open entity's links. */
+  const readLinksAgain = (): void => {
+    for (const key of [queryKeys.inbox(), queryKeys.inboxCount(), queryKeys.externalEntity()]) {
+      invalidateWithoutCancelling(queryClient, key);
+    }
+  };
+
+  /**
+   * Links the two things, and shows it at once: a request that is linked to a
+   * ticket flies from Requests into the ticket's tucked sheet, and everything
+   * between closes up, in one movement on `hand`. A failure takes it back.
+   */
+  const link = (move: EntityLinkMove): void => {
+    const words = `${move.fromName} and ${move.toName}`;
+    const plan = inbox === undefined ? undefined : planLink(inbox, move.fromRef, move.toRef);
+    const shown = plan === undefined ? undefined : showEdit(plan.edit, "hand").shown;
+    const request = linkEntities.mutateAsync(move);
+    const wasLinked = request.then(
+      () => true,
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: `Linked ${words}`,
+      undo: async (page) => {
+        await reverseMove.mutateAsync(async () => {
+          if (!(await wasLinked)) throw new Error(NOTHING_TO_PUT_BACK);
+          await client.externalEntity.unlink({
+            payload: { fromRef: move.fromRef, toRef: move.toRef },
+          });
+          // The part leaves its lead and goes back where it was, the same way it came.
+          if (plan !== undefined) await page.writeInboxEdit(plan.undo);
+          readLinksAgain();
+        });
+        return undefined;
+      },
+    };
+    undoStack.reserve(gesture, wasLinked);
+    request.then(
+      async () => {
+        if (shown !== undefined) await settleEdit(shown);
+        readLinksAgain();
+        say(`Linked ${words}.`, gesture);
+      },
+      (error: unknown) => {
+        if (shown !== undefined) takeEditBack(shown, plan?.undo);
+        say(`${words} were not linked: ${readReason(error)}. Try again.`);
+      },
+    );
+  };
+
+  /** Removes the user's link between the two things, and shows it at once. A card that rode on the other end stands alone. */
+  const unlink = (move: EntityLinkMove): void => {
+    const words = `${move.fromName} and ${move.toName}`;
+    const plan = inbox === undefined ? undefined : planUnlink(inbox, move.fromRef, move.toRef);
+    const shown = plan === undefined ? undefined : showEdit(plan.edit, "hand").shown;
+    const request = unlinkEntities.mutateAsync(move);
+    const wasRemoved = request.then(
+      ({ removed }) => removed,
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: `Removed the link between ${words}`,
+      undo: async (page) => {
+        await reverseMove.mutateAsync(async () => {
+          if (!(await wasRemoved)) throw new Error(NOTHING_TO_PUT_BACK);
+          await client.externalEntity.link({
+            payload: { fromRef: move.fromRef, toRef: move.toRef },
+          });
+          if (plan !== undefined) await page.writeInboxEdit(plan.undo);
+          readLinksAgain();
+        });
+        return undefined;
+      },
+    };
+    undoStack.reserve(gesture, wasRemoved);
+    request.then(
+      async ({ removed, remaining }) => {
+        if (shown !== undefined) {
+          if (removed) await settleEdit(shown);
+          else takeEditBack(shown, plan?.undo);
+        }
+        readLinksAgain();
+        if (!removed) {
+          say(`You had made no link between ${words}, so none was removed.`);
+          return;
+        }
+        const stays =
+          remaining === "source"
+            ? " The source still reports the link."
+            : remaining === "text"
+              ? " A reference in text still mentions it."
+              : "";
+        say(`Link removed.${stays}`, gesture);
+      },
+      (error: unknown) => {
+        if (shown !== undefined) takeEditBack(shown, plan?.undo);
+        say(`The link between ${words} was not removed: ${readReason(error)}. Try again.`);
+      },
+    );
+  };
 
   return {
     inbox,
     hasPendingEdits: pendingEdits.length > 0,
+    riding,
     take,
     dismiss,
+    link,
+    unlink,
     undoLastMove: undo,
     line,
     sayWithoutUndo: (text) => {

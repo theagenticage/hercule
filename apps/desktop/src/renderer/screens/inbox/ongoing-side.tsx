@@ -17,6 +17,7 @@ import { PlaceSurface } from "./place-surface";
  * - `note` is a quiet line under the work, such as the Inbox being cut short.
  * - `plugins` is what `plugin.query` returns, for the marks.
  * - `monogram` is the user's, for the rows that a Task holds.
+ * - `freshIds` are the cards a signal just landed on, which show the new mark.
  *
  * The surfaces stand as `.inbox-place` elements keyed by their place's ref.
  */
@@ -24,11 +25,13 @@ export function OngoingSide({
   layout,
   plugins,
   monogram,
+  freshIds,
   note,
 }: {
   readonly layout: InboxLayout;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
+  readonly freshIds: ReadonlySet<string>;
   readonly note: ReactNode;
 }): JSX.Element {
   const { ongoing, grouping } = layout;
@@ -44,6 +47,7 @@ export function OngoingSide({
           plugins={plugins}
           showStatus={grouping !== STATUS_GROUPING}
           monogram={monogram}
+          freshIds={freshIds}
           block={index + 2}
         />
       ))}

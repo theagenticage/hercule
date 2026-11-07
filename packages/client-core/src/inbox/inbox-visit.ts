@@ -21,7 +21,12 @@ import {
   type InboxGrouping,
 } from "./groupings";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
-import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
+import {
+  NO_PLACEMENT,
+  NO_RIDING_CHOICES,
+  type RidingChoices,
+  type VisitPlacement,
+} from "./visit-placement";
 
 /** Whether a column shows cards, and when it shows none, whether the user's own move took the last one. */
 type Emptiness = "filled" | "empty" | "emptied by move";
@@ -67,6 +72,11 @@ export interface VisitStep {
    * not an accident: a column they leave empty is `emptiedByMove`.
    */
   readonly hasUserMove: boolean;
+  /**
+   * What the user's own Link and Unlink put cards on or took them off in this
+   * visit. Leave it out when none was made.
+   */
+  readonly riding?: RidingChoices;
 }
 
 /** What the screen draws for one read. */
@@ -153,7 +163,7 @@ export const advanceInboxVisit = (
   }
   const known = isFresh ? history.placement : undefined;
   const { inbox, held } = holdBackArrivals(known, received, released);
-  const layout = layOutInbox(inbox, view, known ?? NO_PLACEMENT);
+  const layout = layOutInbox(inbox, view, known ?? NO_PLACEMENT, step.riding ?? NO_RIDING_CHOICES);
 
   const everything = advanceEmptiness(history.everything, inbox.cards.length === 0, hasUserMove);
   const requests = advanceEmptiness(history.requests, layout.requests.isEmpty, hasUserMove);

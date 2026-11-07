@@ -8,6 +8,14 @@
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { filterItems, type Filter } from "../desk/filter";
 import type { OpenPlaceRow } from "../desk/relation-rows";
+import {
+  buildCardBundle,
+  decideDrawnRiding,
+  EMPTY_BUNDLE,
+  indexBundleSources,
+  type BundleSources,
+  type CardBundle,
+} from "./card-bundles";
 import { buildInboxFacets } from "./facets";
 import {
   buildPlaceContext,
@@ -19,9 +27,11 @@ import {
   type SurfaceHead,
 } from "./inbox-place";
 import {
+  NO_RIDING_CHOICES,
   placeInboxCards,
   type PlacementChoice,
   type RequestsOrder,
+  type RidingChoices,
   type VisitPlacement,
 } from "./visit-placement";
 
@@ -40,6 +50,8 @@ export interface OngoingRow {
   readonly alsoIn?: SurfaceHead;
   /** The places the row names beside its title, such as its milestone. */
   readonly near: readonly OpenPlaceRow[];
+  /** What rides on the card and the hints under it. Empty for a pointer. */
+  readonly bundle: CardBundle;
 }
 
 /** One raised surface and the work on it in the order it joined the visit, then the pointers. */
@@ -53,6 +65,8 @@ export interface ColumnRow {
   readonly card: InboxCard;
   /** The title of the card's first home that has one. */
   readonly homeName: string | undefined;
+  /** The lines under the card ("Mentions OPS-47", "Linked to #6263"). A request carries no parts. */
+  readonly bundle: CardBundle;
 }
 
 /** Requests, in one group, or one group for each place when ordered by place. */
@@ -89,9 +103,16 @@ export interface InboxLayout {
   readonly withSomeoneElse: { readonly rows: readonly ColumnRow[] };
 }
 
-const buildColumnRow = (card: InboxCard, context: PlaceContext): ColumnRow => ({
+/** Builds the row of `card` in a column. Only a card of Requests carries lines: a card a Task holds is plain. */
+const buildColumnRow = (
+  card: InboxCard,
+  context: PlaceContext,
+  sources: BundleSources,
+  side: InboxSide,
+): ColumnRow => ({
   card,
   homeName: findHomeName(card, context),
+  bundle: side === "requests" ? buildCardBundle(card, sources) : EMPTY_BUNDLE,
 });
 
 /** Returns the Requests groups. Cards come in the order given; a group lies where `placement` ranks its key. */
@@ -100,12 +121,13 @@ const groupRequests = (
   order: RequestsOrder,
   context: PlaceContext,
   placement: VisitPlacement,
+  sources: BundleSources,
 ): readonly RequestGroup[] => {
   const byKey = new Map<string, ColumnRow[]>();
   for (const card of cards) {
     const key = placement.cards.get(card.id)?.requestGroup ?? "";
     const rows = byKey.get(key);
-    const row = buildColumnRow(card, context);
+    const row = buildColumnRow(card, context, sources, "requests");
     if (rows === undefined) byKey.set(key, [row]);
     else rows.push(row);
   }
@@ -128,6 +150,7 @@ const buildSurfaces = (
   cards: readonly InboxCard[],
   context: PlaceContext,
   placement: VisitPlacement,
+  sources: BundleSources,
 ): readonly InboxSurface[] => {
   const surfaces = new Map<
     string,
@@ -140,8 +163,13 @@ const buildSurfaces = (
     for (const [index, head] of [first, ...others].entries()) {
       const surface = surfaces.get(head.id) ?? { head, full: [], pointers: [] };
       surfaces.set(head.id, surface);
-      if (index === 0) surface.full.push({ card, near: listNearPlaces(card, head.id, context) });
-      else surface.pointers.push({ card, alsoIn: first, near: [] });
+      if (index === 0) {
+        surface.full.push({
+          card,
+          near: listNearPlaces(card, head.id, context),
+          bundle: buildCardBundle(card, sources),
+        });
+      } else surface.pointers.push({ card, alsoIn: first, near: [], bundle: EMPTY_BUNDLE });
     }
   }
   return [...surfaces.values()]
@@ -165,36 +193,52 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
  * order the surfaces and groups come. The read decides what is written in
  * them, and where a card that is new to the visit lies (`placeInboxCards`).
  * The layout returns what the visit holds now, as `placement`, to pass as `held`
- * with the next read.
+ * with the next read. `riding` is what the user's own Link and Unlink chose
+ * since the visit began (`RidingChoices`).
  *
  * - A card lies in the column of its held side.
  * - Ongoing: a surface for each place, grouped as the held grouping says.
  *   The surfaces keep the order they joined the visit in, and so does each
  *   card's surface. On a surface the cards come in the order they joined the
- *   visit, then the pointers to cards drawn in full elsewhere.
+ *   visit, then the pointers to cards drawn in full elsewhere. A card carries
+ *   the small things that ride on it, and the hints under it (`bundle`).
  * - Requests: in that order, or yours first (still in that order within each
  *   half), or by place with a label for each place. Each request keeps its group.
+ *   A request that rides on a card of the wide side is drawn there, not here.
  * - With someone else: in that order, at the foot of the column.
  *
  * The order the cards join the visit in is oldest first for the first read,
  * and a card that arrives later comes after them, so nothing a reader is
  * looking at moves.
- * - The filter narrows all three. It changes no number the sidebar shows.
+ * - The filter narrows all three. It changes no number the sidebar shows. A card
+ *   of the wide side passes when it or any card that rides on it does, so a
+ *   filter never tears a thing from what it rides on.
  */
-export const layOutInbox = (inbox: Inbox, view: InboxView, held: VisitPlacement): InboxLayout => {
+export const layOutInbox = (
+  inbox: Inbox,
+  view: InboxView,
+  held: VisitPlacement,
+  riding: RidingChoices = NO_RIDING_CHOICES,
+): InboxLayout => {
   const context = buildPlaceContext(inbox);
-  const placement = placeInboxCards(inbox, view, held, context);
+  const placement = placeInboxCards(inbox, view, held, context, riding);
+  const rankOf = (id: string): number => placement.cards.get(id)?.rank ?? 0;
   // Every list keeps the order its cards joined the visit in: oldest first at the start, then arrivals.
-  const inVisitOrder = inbox.cards.toSorted(
-    (a, b) => (placement.cards.get(a.id)?.rank ?? 0) - (placement.cards.get(b.id)?.rank ?? 0),
-  );
+  const inVisitOrder = inbox.cards.toSorted((a, b) => rankOf(a.id) - rankOf(b.id));
+  const drawnRiding = decideDrawnRiding(inbox.cards, placement);
+  const sources = indexBundleSources(inbox, drawnRiding, rankOf, context);
   const shown = new Set(
     filterItems(inVisitOrder, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
   );
+  for (const [id, leadRef] of drawnRiding) {
+    const lead = sources.cardByRef.get(leadRef);
+    if (shown.has(id) && lead !== undefined) shown.add(lead.id);
+  }
   const cardsOn = (side: InboxSide, onlyShown: boolean): InboxCard[] =>
     inVisitOrder.filter(
       (card) =>
         (placement.cards.get(card.id)?.side ?? card.side) === side &&
+        !drawnRiding.has(card.id) &&
         (!onlyShown || shown.has(card.id)),
     );
 
@@ -204,16 +248,28 @@ export const layOutInbox = (inbox: Inbox, view: InboxView, held: VisitPlacement)
     placement,
     grouping: placement.grouping.id,
     ongoing: {
-      surfaces: buildSurfaces(ongoing, context, placement),
+      surfaces: buildSurfaces(ongoing, context, placement, sources),
       ...decideColumnState(ongoing.length, cardsOn("ongoing", false).length),
     },
     requests: {
-      groups: groupRequests(requests, view.requestsOrder, context, placement),
+      groups: groupRequests(requests, view.requestsOrder, context, placement, sources),
       awaitingCount: inbox.counts.requests,
       ...decideColumnState(requests.length, cardsOn("requests", false).length),
     },
     withSomeoneElse: {
-      rows: cardsOn("with-someone-else", true).map((card) => buildColumnRow(card, context)),
+      rows: cardsOn("with-someone-else", true).map((card) =>
+        buildColumnRow(card, context, sources, "with-someone-else"),
+      ),
     },
   };
 };
+
+/**
+ * Returns the cards drawn riding on the card `cardId` in `layout`, or none when
+ * it carries nothing or is not drawn in full. Dismissing the card lets them
+ * stand alone.
+ */
+export const listRiders = (layout: InboxLayout, cardId: string): readonly InboxCard[] =>
+  layout.ongoing.surfaces
+    .flatMap((surface) => surface.rows)
+    .find((row) => row.card.id === cardId && row.alsoIn === undefined)?.bundle.riders ?? [];
