@@ -1,13 +1,14 @@
 # External Entities
 
-*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)*
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md). Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033), slice 5: signals inside their entity, links, hints and the timeline.)*
 
 An **External Entity** is a durable record of an outside thing, such as a pull request, a ticket or an error. It is never a copy of the thing: it holds what a card needs to draw, and a poll keeps it true. The Inbox is the page that lists the ones that concern the user. "External Entity" is a word for code and docs. The UI says the kind's noun, "Pull request", and the word "entity" never reaches a screen.
 
 This document owns the records, their rules, the operations and the Inbox's reads. Other documents link here and do not restate it:
 
 - the plugin interfaces (`EntityKindDeclaration`, `EntityObservation`, `IngestContext.entities`, `EntityLookup`) are pinned in [./05-plugins.md](./05-plugins.md) section 4.3. This document owns what the core does with them;
-- the GitHub plugin's feed is in [./08-events-and-connections.md](./08-events-and-connections.md) section 5.1;
+- the GitHub plugin's feed is in [./08-events-and-connections.md](./08-events-and-connections.md) section 5.1, and the Linear plugin's in section 5.7;
+- the Signal record and how it leaves are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#9-signals);
 - the Task side (links, the active Task) is in [./09-tasks.md](./09-tasks.md#entity-links);
 - the desktop Inbox and Work's additions are in [./17-desktop-app.md](./17-desktop-app.md#inbox).
 
@@ -25,6 +26,8 @@ Keep these questions apart. They are different facts, stored differently.
 | Was the inventory read? | `external_entity_scans`, one row per Connection and kind | `last_complete_at`: one write per poll, however many rows it covers |
 | What is it part of, and what is it linked to? | `external_entity_relation_claims`, one row per claim | who claims it, and on what evidence ([section 6](#6-relation-claims)) |
 | Which Tasks link it? | `task_entity_links`, in the tasks domain | one row per Task and ref ([./09-tasks.md](./09-tasks.md#entity-links)) |
+| Which signals are about it? | `signals`, joined on read by `thread_ref = ref` | nothing is stored on either side ([section 8.5](#85-signals-inside-a-card)) |
+| What changed at the source? | `external_entity_timeline`, one row per change | `reassigned`, `moved` or `linked`, put into words on read ([section 8.7](#87-what-changed-outside)) |
 | Is it on the Inbox? | worked out on read ([section 8](#8-the-inbox)) | |
 
 Observations and claims key on the ref, not on the entity's id. A Connection can hold state for a ref that has no entity yet, and a claim can point at a ref nobody has read. Task links, signals and claims key on the ref too, so pruning an entity leaves them readable.
@@ -46,6 +49,7 @@ Observations and claims key on the ref, not on the entity's id. A Connection can
 | `waiting_since`, `concerned_since` | `waiting_since` is the source's word on when the wait began. `concerned_since` is when the entity last went from no concern to some concern |
 | `source_updated_at`, `source_revision` | The source's own time and revision of the shared fields ([section 3](#3-shared-fields-and-presented_by)) |
 | `first_observed_at`, `updated_at` | |
+| `reason_templates` | *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A JSON copy of the kind's raw `reasons` table, `{ key: { say, tone } }`, made when the thing is observed as `concern_reasons` is. The sentence of a signal and the words of the timeline are built from it, so they read well after the plugin is gone. A shared field: only the accepted shared write sets it |
 | `presented_by` | The Connection whose observation wrote the shared fields. Null when that Connection is deleted |
 | `dismissed_at`, `dismissed_by` | [Section 4.2](#42-dismissal) |
 | `arrival_sequence` | [Section 8.4](#84-counts-and-the-new-mark) |
@@ -63,6 +67,8 @@ Observations and claims key on the ref, not on the entity's id. A Connection can
 **Task link** (`task_entity_links`). `task_id`, `ref`, `linked_at`, `linked_by`, `following`; the primary key is (`task_id`, `ref`), with an index on `ref`. Owned by the tasks domain.
 
 **Task revision** (`tasks.revision`, tasks domain). A count of the edits to a Task, 0 for a Task nobody has edited. Taking back a Task made for an outside thing asks whether it is still 0, which `updated_at` cannot answer when an edit lands in the same millisecond as the creation or the clock steps back.
+
+**Timeline** (`external_entity_timeline`). *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `id`, `ref`, `reason` (`reassigned`, `moved` or `linked`), `person`, `value`, `target_ref` (for `linked`, the thing that was linked) and `observed_at`, with an index on (`ref`, `id`). It keys on the ref, not on the entity's id. The prune sweep deletes the rows of refs that have no entity.
 
 ### 1.2 Three shapes of record
 
@@ -138,7 +144,7 @@ A daily sweep, in the shape of the runner-metrics prune, deletes:
 - entities with no concern, no link from any Task, no open signal on the ref, no path up from anything concerned or linked, no dismissal, and no change for 30 days; and
 - the observation rows of refs with no entity and no reason to be wanted.
 
-It keeps their claims: they are small, and they are history. A dismissal is never pruned, because a record that came back without it would undo "only Undo brings it back".
+It also deletes the timeline rows of refs that have no entity. It keeps their claims: they are small, and they are history. A dismissal is never pruned, because a record that came back without it would undo "only Undo brings it back".
 
 ## 5. What a poll reports
 
@@ -154,6 +160,8 @@ A plugin reads its whole inventory of one kind, then calls `reconcile({ kind, co
 - a kind the source did not declare, or a ref that does not start with the kind's `refPrefix`, or the same ref twice;
 - an oversized field (at most 32 fields, 64 characters in a name, 512 in a text), or more than 64 parents or peers in `relations`;
 - the concern `following`, or any concern on a context kind;
+- a parent or peer in `relations` that starts with `unresolved:`, which the core keeps for its own pending targets ([section 5.4](#54-addresses-and-texts)). The message tells the plugin to report a web address in `relations.linkedUrls` instead;
+- more than 64 `linkedUrls`, one that is not an `http` or `https` address, more than 3 `texts`, a text over 16 KiB or an `evidenceKey` over 128 characters. The bounds are checked before any recognizer is called;
 - a full observation of a work kind with no `url` or `lifecycle`;
 - a status key or reason key that is not in the kind's table, or a template that names a missing field (`renderEntitySlots` fails);
 - a Connection that is deleted, disabled or no longer ingesting (`assertConnectionIngesting`, as `emit` does).
@@ -196,14 +204,52 @@ An entity row holds only normalized fields, checked against the contract before 
 
 ### 5.3 `refresh`, `listWanted` and `reportMissing`
 
-- **`refresh(observations)`** updates what is known without touching any concern. It follows the same validation, shared-field rule, relation rules and partial rules as `reconcile`. It never changes existing concerns and starts new observation rows with none. It updates `owned_by_you` when a full observation supplies `ownedByYou`, and keeps it when absent or partial. It stamps `last_refreshed_at`, sets `access: ok` and resets the backoff, even when nothing changed: the read succeeded. It writes no scan, raises no arrival and changes no dismissal.
-- **`listWanted(kind, limit)`** returns the refs of one kind the core wants this Connection to read, at most `limit`. They are the refs with a live linked Task whose entity is not in this Connection's inventory (not `listed` by it), and the context reachable from what concerns the user: upward through `part of`, at most `MAX_CONTEXT_PARENTS` (32) parents read per thing, plus one read of each `linked` target for its title and access. Its own links and parents are not followed, and no peer is crawled. Slice 5 adds refs with an open signal; the repository holds one obvious place for it. It is a fair, durable rotation:
+- **`refresh(observations)`** updates what is known without touching any concern. It follows the same validation, shared-field rule, relation rules and partial rules as `reconcile`. It never changes existing concerns and starts new observation rows with none. It updates `owned_by_you` when a full observation supplies `ownedByYou`, and keeps it when absent or partial. It stamps `last_refreshed_at`, sets `access: ok` and resets the backoff, even when nothing changed: the read succeeded. It writes no scan and changes no dismissal. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* **A refresh of a ref with no entity creates one, with no concerns.** It never touches another Connection's concerns. The new entity is on the Inbox only while a live signal holds it ([section 8.5](#85-signals-inside-a-card)). Such an entity takes an arrival number when that signal alone puts it on the clock, because a refresh never changes the concerns otherwise.
+- **`listWanted(kind, limit)`** returns the refs of one kind the core wants this Connection to read, at most `limit`. They are the refs with a live linked Task whose entity is not in this Connection's inventory (not `listed` by it), and the context reachable from what concerns the user: upward through `part of`, at most `MAX_CONTEXT_PARENTS` (32) parents read per thing, plus one read of each `linked` target for its title and access. Its own links and parents are not followed, and no peer is crawled. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* It also returns the refs of open signals, snoozed ones included, for a kind that has a card (a work kind, not a context kind): the signals that came through this Connection on a ref that starts with the kind's `refPrefix`, even when no entity exists yet. So a mention of a thing no inventory lists gets its card on a following poll, with no `mentions:@me` search, and old mentions never flood in. A read that fails reports `reportMissing`, and the signal stays on its own. It is a fair, durable rotation:
   - Order: refs this Connection has never tried first, then the oldest `last_attempted_at`, then the ref. A ref backing off waits until its `next_attempt_at`.
   - It stamps `last_attempted_at` on what it returns, before it returns. A request that fails for all 50 refs still moves on: the next call gets the next 50. So 51 wanted refs make progress, and no bad ref can hold up the rest.
   - It excludes refs already in this Connection's inventory, because its next complete scan refreshes them.
 - **`reportMissing(ref, reason)`** says a ref could not be read, with `inaccessible` or `deleted`. It sets that Connection's `access` and leaves everything else: concerns, ownership, facts, claims and `last_refreshed_at`, so a failed read never looks fresh. It never creates an entity. It is the only source of per-ref retry backoff: `attempt_count` goes up by one and `next_attempt_at` is set to now plus 120 seconds doubling with each failure, at most 6 hours. A good `refresh` resets them. `deleted` is explicit evidence and is never inferred from a 403, a 404 or an empty answer.
 - **A batch that fails as a whole** is a failed poll. The host backs the feed off, and the `last_attempted_at` stamp of `listWanted` has already moved the rotation on. Nothing is written for the refs of that batch.
 - None of this announces. Only a change to what a card shows pushes.
+
+### 5.4 Addresses and texts
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A source can say more about a thing than its refs. Two optional fields of an observation carry it, and the core turns them into claims, because only the core knows every plugin's link forms.
+
+**`relations.linkedUrls`** (at most 64 `http` or `https` addresses) holds the addresses the source itself says belong to this thing, such as a Linear attachment that points at a pull request. An address is the source's word whatever happens to its target, so it is always kept, as a `source` claim of the reporting Connection with the address as its `evidence_key`. The core runs a new address through the active plugins' `recognize`, and the first plugin that recognizes it (registry order) decides the target:
+
+| The address is recognized as | The claim's target (`to_ref`) |
+|---|---|
+| a `ref` | that ref. "Linear reports this pull request", with no GitHub Connection involved |
+| `scoped`, such as a Linear issue address | a pending target, resolved by the loop of [section 5.5](#55-resolving-pending-claims) |
+| nothing, because no active plugin knows it | the pending target `unresolved:url:<url>`, tried again when the set of plugins that know addresses changes |
+
+- **A claim is matched by its Connection, `from_ref`, relation and `evidence_key`.** The table applies to an address seen for the first time. An address seen again keeps its target, id and time, whatever the plugins recognize now. So an address that resolved once stays resolved after its plugin is disabled, and also when it recognizes as scoped on every poll.
+- **`complete` applies to addresses by what the source said.** `relations.complete: true` removes a stored address claim only when the source left that address out. A disabled plugin, a failed resolve or a failed recognition never removes one. `complete: false` removes none, and an observation with no `relations` touches none. Reconcile fetches nothing.
+- An address that recognizes as the thing itself makes no claim.
+
+**`texts`** (at most 3, each `{ evidenceKey, text, revision? }`, a text at most 16 KiB, a key at most 128 characters) holds text the core searches for references, such as a description. **The core stores no text.** It runs each text through every active plugin's `recognize` (at most 20 things a text, each once) and keeps only the claims it finds: a `text` claim of the reporting Connection whose `evidence_key` names the text. "The description of #6263" is built from that key when it is drawn.
+
+- A `ref` recognition becomes a claim at once. A `scoped` one is stored as a pending target, and the evidence stays on the claim.
+- **An entry replaces that Connection's `text` claims for its `evidenceKey`:** a reference no longer in the text is removed. An entry with an empty text clears the key. A key the observation leaves out touches nothing. A text whose `revision` equals the one its stored claims were made from is skipped.
+- A stored claim is matched by what the text said (`recognized_as`), so a claim the resolver already settled keeps its id and time while the text still says the same.
+- **A reference is a hint.** It never joins, never groups, never rides and proves nothing. It is drawn only as a hint, which the user may turn into a link ([section 9.5](#95-link-and-unlink)). An unresolved reference draws nothing, so `UTF-8` in a description costs a few failed reads and never reaches a screen.
+
+**The pending target** is the core's own format, in this file's `pending-target.ts` and nowhere else: `unresolved:url:<url>` for an address nothing recognized, or `unresolved:<plugin>:<kind>:<scope>/<identifier>` for something a plugin recognized and cannot place without a read. Every component of the second form is written with `encodeURIComponent` (empty means absent), so none holds `:` or `/` and the form decodes to exactly what was encoded. **A pending target is not an External Ref.** It lives only in claims and never in a link, a peer, a place or the walk of `listWanted`. The generated column `is_pending` marks the claims that hold one, and every read of links filters on it.
+
+**Recognition runs in the plugins domain,** beside the poll, over the lookups of the plugins that are active at that moment (`EntityRecognizer`), before the observations reach this domain. It is pure: no plugin gets credentials or makes a request. The ingest repository stays SQL only and writes the difference between what was recognized and what is stored.
+
+### 5.5 Resolving pending claims
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A loop in the controller daemon gives pending `source` and `text` claims a ref. It runs there and not in the plugin host, because it needs `EntityLookups`, which requires the host, and the host builds the ingest loops: the other way would be a construction cycle.
+
+- **A pass** runs every 30 seconds while the controller serves. It takes at most 20 due pending claims for each reporting Connection, the oldest due first. With nothing pending, a pass is one statement over an empty index.
+- **A claim is read through `EntityLookups.resolve`,** with the rules of [section 10](#10-search-recognition-and-resolution): never the first match, and `ambiguous` and `incomplete` leave the claim pending. A target that several claims hold is read once in a pass. A pending address is recognized again first, because a plugin may have become active: a `ref` settles it, a `scoped` recognition rewrites it to the scoped target and resolves that, and no recognition postpones it. When the set of plugins that know addresses changes, every pending address becomes due at once.
+- **Reads run outside any transaction.** Each result is then written in its own short transaction, which first checks that the claim still exists, is still pending and still holds the target the loop read, because the source may have rewritten it during the read.
+- **Found** rewrites the target to the canonical ref and keeps the claim's type, Connection and id. It resets the backoff and announces both ends. When a `source` claim joins a pair that nothing joined before, it also writes a `linked` change on both timelines ([section 8.7](#87-what-changed-outside)). A ref that is the claim's own origin, or that another claim of the same Connection and text already holds, counts as not placed.
+- **Not placed** waits: 120 seconds, doubling with each failure, at most 6 hours (`resolve_attempts`, `next_resolve_at`, as the backoff of observations).
+- **A failed lookup never marks the reporting Connection unhealthy** or changes its `warning`. The lookup is the target plugin's business, not that Connection's.
 
 ## 6. Relation claims
 
@@ -217,17 +263,17 @@ A claim has a `claim_type`:
 | Claim | By | Meaning |
 |---|---|---|
 | `source` | a Connection (`connection_id`) | The source reports it. `evidence_key` holds the URL it came from, if any |
-| `person` | an actor (`actor`) | A person made it. In this build a person's claim is `linked` only, through a later slice's operation |
-| `text` | a Connection | A reference found in text. `evidence_key` names which text. A hint, not a link |
+| `person` | an actor (`actor`) | A person made it. A person's claim is `linked` only, made by `externalEntity.link` ([section 9.5](#95-link-and-unlink)) |
+| `text` | a Connection | A reference found in text. `evidence_key` names which text. A hint, not a link: it joins, groups and rides nothing |
 
-Each claim also has `observed_revision` (the source's revision of `from_ref`, when it has one), `state` (`current` or `conflicted`), `conflict_reason` and `observed_at`. Two checks keep the stamp honest: a `person` claim has an `actor` and no `connection_id`, and any other claim has a `connection_id` and no `actor`.
+Each claim also has `observed_revision` (the source's revision of `from_ref`, when it has one), `state` (`current` or `conflicted`), `conflict_reason` and `observed_at`. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A claim that waits for a read also has `recognized_as` (the target as the recognizer first named it), `resolve_attempts`, `next_resolve_at` and the generated `is_pending` ([section 5.4](#54-addresses-and-texts)). Two checks keep the stamp honest: a `person` claim has an `actor` and no `connection_id`, and any other claim has a `connection_id` and no `actor`.
 
 **Partial unique keys.** SQLite treats NULLs as distinct, so one unique key over `connection_id` and `actor` would not stop a repeat. Each claim type has its own partial unique index:
 
 | Claim | Unique on |
 |---|---|
 | `source` from a ref | `(from_ref, relation, to_ref, connection_id)` where `evidence_key` is empty |
-| `source` from a URL | `(from_ref, relation, connection_id, evidence_key)` |
+| `source` from a URL | `(from_ref, relation, connection_id, evidence_key)`, whatever its target, so a URL claim keeps its identity when its target is resolved |
 | `text` | `(from_ref, relation, to_ref, connection_id, evidence_key)` |
 | `person` | `(from_ref, relation, to_ref, actor)` |
 
@@ -243,6 +289,7 @@ Partial indexes on `(from_ref, relation)` and `(to_ref, relation)` where `state 
   - `complete: false` adds what it was given and removes nothing.
   - An observation with no `relations` touches no claim. So a failed page, a missing permission, a rate limit or a disabled plugin never reads as "removed".
 - **`part-of` stays acyclic, and the check is inside the write.** Before a new `part-of` claim becomes current, one recursive statement walks up from `to_ref` over current claims, with no depth limit. If it reaches `from_ref`, or the claim makes a thing part of itself, the claim is stored with `state: conflicted` and a `conflict_reason`. The rest of the inventory applies. The claim is kept as evidence and the conflict is visible: the entity's read returns `conflicts`, and the Connection's `warning` names it. There is one writer, so two claims cannot close a loop together. A conflicted claim is not promoted later when the loop opens. A complete read that no longer reports it removes it, and reporting it again checks it again.
+- **A link between peers shows once, under its firmest claim** (`source`, then `person`, then `text`), and names only the claim's plugin or actor, never a Connection. Only a `source` or a `person` claim makes two things joined. A hint stays visible as a hint.
 - **A link grants nothing.** It gives no permission and creates no concern. A target nobody has read stays a ref ([section 1.3](#13-restricted-things)).
 - **Reparenting announces.** A claim replaced by a complete read announces `externalEntity`, and `task` with `derived: true` for the Tasks below it, found by one walk down over current `part-of` claims with no limit, even when the child's own row did not change. The set is the union of the Tasks before and after the change, so Tasks that lost a parent are told too.
 
@@ -268,10 +315,10 @@ The walk down, for reparenting, is a separate statement with no limit: a notific
 A card is a **full record of a work kind**, not dismissed, with at least one of:
 
 - a current concern;
-- an open signal (slice 5);
+- an open signal that is not snoozed now ([section 8.5](#85-signals-inside-a-card));
 - a live linked Task.
 
-Context and partial records have no card. Membership is **one SQL predicate in the external-entities repository**, used by both `queryInbox` and `countInbox`, so the cards and the counts cannot disagree. The predicate does not filter on `lifecycle`, `access`, the Connection's state, the kind being active or `stale`: a card survives a lost token and keeps its last known facts. Slice 5 adds the open-signal condition at one marked place and imports nothing of the signals domain in this slice.
+Context and partial records have no card. Membership is **one SQL predicate in the external-entities repository**, used by both `queryInbox` and `countInbox`, so the cards and the counts cannot disagree. The predicate does not filter on `lifecycle`, `access`, the Connection's state, the kind being active or `stale`: a card survives a lost token and keeps its last known facts. A snooze ends with time and nothing is written when it ends, so every read of the predicate takes the time of the read.
 
 The client's `layOutInbox` does not decide membership. It decides where a card lies on the page: which of its places surfaces, the first one in full, the others as a pointer, counted once ([./17-desktop-app.md](./17-desktop-app.md#inbox)).
 
@@ -291,12 +338,14 @@ A client keeps each card's side for the length of a visit, so a card the user ju
 
 `externalEntity.queryInbox` returns the whole Inbox in one reply and a fixed number of statements, capped at `MAX_INBOX_CARDS` (1,000) with `truncated`:
 
-1. the counts, over all eligible rows;
+1. the riding, decided once over every eligible card ([section 8.6](#86-what-rides)), and the counts, over all eligible rows, with what rides left out of Requests;
 2. the cards, ordered by `firstObservedAt` then `id` (oldest first, stable, never by activity), with one more read as a sentinel;
-3. `readContext` over the listed cards, once (one walk up);
-4. a batch read of the records, observations, Connections and scans of the cards and of every place their edges reach.
+3. the signals of the cards on the page, one statement ([section 8.5](#85-signals-inside-a-card));
+4. `readContext` over the listed cards, once (one walk up);
+5. a batch read of the records, observations, Connections and scans of the cards and of every place their edges reach, and the latest change of each ([section 8.7](#87-what-changed-outside));
+6. the direct links of the cards on the page and, in three statements, the records at their far end that have no card (`peers`).
 
-`places` holds each record above a card once, so 300 cards do not repeat their repository. Its bound is `MAX_INBOX_PLACES`, the card limit plus `MAX_GRAPH_EDGES`.
+`places` holds each record above a card once, so 300 cards do not repeat their repository. Its bound is `MAX_INBOX_PLACES`, the card limit plus `MAX_GRAPH_EDGES`. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `links` holds the direct links of the cards on the page and `peers` the records at their far end; the bounds are `MAX_INBOX_LINKS` and `MAX_INBOX_PEERS`, both `MAX_GRAPH_EDGES`, and a read that reaches either sets `truncated`. A card gains `signals`, `ridesOn` and `latestChange`.
 
 Orders inside the page, and Group by and Filter, are the client's, over this reply: they cost no read and change no number.
 
@@ -307,18 +356,66 @@ Orders inside the page, and Group by and Filter, are the client's, over this rep
 | Count | Meaning |
 |---|---|
 | `onTheClock` | The sidebar's number: distinct refs on the Inbox, not dismissed, with no live Task, of a kind with `pace: fast`, on either side of the page. An entity seen by two accounts, or for two concerns, counts once. Group, filter and order change no number |
-| `requests` | The small count beside Requests. It counts the Requests side only, not With someone else |
+| `requests` | The small count beside Requests. It counts the Requests side only, not With someone else, and leaves out what rides on a lead ([section 8.6](#86-what-rides)). `onTheClock` keeps it: a thing that rides still has its clock |
 | `withSomeoneElse` | The count at the foot of the column |
 | `newestArrival` | The highest `arrival_sequence` among the rows counted in `onTheClock`. Opaque and ordered: a client compares it with the value it stored and never displays it |
 
 `arrival_sequence` comes from the counter table, never from `MAX() + 1`, and never from a time, so no clock is compared. A number is taken only when **a full, fast-paced, not dismissed entity with no live Task goes from no concern to some concern in a `reconcile`**. The concern union over all Connections is what counts, so these never take one:
 
-- a refresh, a change of facts, a summary, or a second signal on a card already there;
+- a refresh of a thing that was already there, a change of facts, a summary, or a second signal on a card already there;
 - an Undo (`restore`), or a Task finishing;
 - a second Connection reporting a concern that is already present;
 - a partial record becoming full when it already had concerns.
 
+A signal alone can bring a card onto the clock. That is an arrival too, taken once: `refresh` takes a number when it creates an entity that a live signal holds, and a raised signal takes one for an existing entity that was off the clock, through `SignalEntities.recordArrival` in the signal's own transaction. The entity must be a full, fast-paced, not dismissed record with no live Task and no concern, and the new signal its only live one. A second signal, or one through a second Connection, finds the card on the clock and takes none.
+
 **The new mark.** The 6px dot shows when `newestArrival` is above the value this client acknowledged. When an Inbox reply is really shown, the client stores that reply's `newestArrival` in local storage, under controller and user. It stores the reply's value and never the time, so an arrival racing the visit stays newer than what was acknowledged.
+
+### 8.5 Signals inside a card
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)* A signal shows inside the card it is about, and stays on Intake. The Signal record is [spec 10 section 9.1](./10-triage-intake-and-notifications.md#91-the-record).
+
+- **The join** is exact string equality, on read: `signals.thread_ref = external_entities.ref`. Nothing is stored on either side, so a signal that came before its entity attaches the moment the entity appears, and an old signal needs no migration. Only an `event` signal has a thread ref: an `api` signal stores none and stays on its own. A ref is never parsed or changed to make it match, and a URL, a repository, a title or a core signal's evidence events never join. `github:pr:` and `github:issue:` are different refs. The index is `signals_thread_ref` on (`thread_ref`, `status`).
+- **Only a work kind joins.** The entity must be a full record of a work kind, the shape that can have a card. A signal on a place (`linear:project:`), a document, a notification, a partial record or a ref nobody has read stays on its own, with Intake's actions. `listWanted`, `SignalEntity` and the Inbox all follow this rule.
+- **Membership and retention differ on purpose:**
+
+  | Question | Rule |
+  |---|---|
+  | Is the card on the Inbox? | An open signal that is not snoozed now puts it there ([section 8.1](#81-membership)). A snoozed signal does not, and shows in the card's lines marked so |
+  | Is the record kept and read? | Any open signal, snoozed or not, stops the prune sweep and makes the ref wanted. A snoozed signal still needs its card to be current when it comes back |
+
+- **Dismissal holds.** A dismissed card stays out of sight whatever signals arrive ([section 4.2](#42-dismissal)). The signal stays open and shows on Intake, so it is not lost.
+- **A card's signals.** `InboxCard.signals` is `{ latest?, openCount }`. `openCount` counts the open signals that are not snoozed, and `latest` is the newest of them, by `createdAt` then `id`. A line (`EntitySignalLine`) holds the id, kind, title, asker, priority, status, time, the sentence (`say`), the `outcome` once the signal has ended and whether it is `snoozed`. It holds no blocks and no answers: opening a line reads `signal.read`.
+- **The detail's signals.** `ExternalEntityDetail` gains `signals` (at most `MAX_ENTITY_SIGNALS`, 50), `openCount` (every open signal, snoozed ones included) and `signalCount` (open and resolved). The newest open signals are selected first, up to 50. The newest resolved ones fill any room left. The selected lines are returned in time order, oldest first, by `createdAt` then `id`. It is one statement, bounded by the limit. Open work is never hidden behind the word "older": a client says how many open lines it left out before it says how many resolved ones.
+- **The sentence.** The Inbox card's `reason` is the sentence of its latest live signal. A card with no live signal keeps the observation's own reason. One function builds the sentence for a card and for every line of its detail. It reads the entity's `reason_templates` under the signal kind's word (the part after `<plugin>/`, so `github/review-requested` reads `review-requested`) and fills `{person}` with the signal's `asker`. It falls back to the signal's title, with the tone `plain`, for a core kind, for a kind the entity stores no template for, and when the template needs a person the signal does not have. The result is cut at a word to the bound of `EntityReason.say`. The templates are stored, never read from the catalog at read time, so a sentence reads well after its plugin is gone.
+- **Arrival** is in [section 8.4](#84-counts-and-the-new-mark).
+- **Acting on a card ends no signal it did not answer.** `takeOn` and `dismiss` end none. The user marks each signal done from its line with `signal.markDone`, or answers it with `signal.act`. A signal is never a fact of the Task. Your work follows the links: it shows a signal on the active Task of its ref only ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)).
+
+### 8.6 What rides
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A compact thing, such as a pull request, rides on a rich thing, such as its ticket, when the two have a direct link whose firmest claim is `source` or `person`. A hint joins nothing, and neither does sharing a repository or a project. `decideRiding(cards, links, now)` in `external-entities/riding.ts` is a pure function, and `queryInbox` and `countInbox` both call it, so the page and the counts cannot disagree.
+
+- **A rider** is a compact card with no live Task, so one that lies in Requests, and a direct confirmed link to a rich card on the Inbox. A compact card that a Task holds stays under With someone else and never rides. Its link is a quiet row on the lead.
+- **With several leads** it rides on the most pressing: the one that has used the largest share of its patience at the time of the read, then the lowest ref. A kind with `pace: slow`, or a card a live Task holds, has used none.
+- Two rich things never ride on each other, and neither do two compact ones. Only a direct link counts, so a chain A to B to C joins only what touches the lead.
+- **Decided over every eligible card, before the page limit.** A dismissed card is not eligible, so it leads nothing, and what rode on it stands alone. `queryInbox` decides once and derives its counts from it. `countInbox` reads only the lean fields riding needs: the cards that have a confirmed link to a card of the other size, and those links. A rider whose lead the page limit cut does not ride, and shows in Requests.
+- **`InboxCard.ridesOn`** is the ref of the lead. `counts.requests` leaves out every rider ([section 8.4](#84-counts-and-the-new-mark)).
+- **`peers`.** `EntityPeer` holds `ref`, `kind`, `noun`, `identifier`, `title`, `status`, `yours`, `restricted` and `latestChange`, and an `id` when the record is a full record of a work kind, so its row can open. A restricted peer holds only `ref`, `kind`, `noun`, `restricted: true` and `yours: false`.
+- **A link** (`EntityLink`) names its claim's type and its plugin or actor. A `text` claim also carries its `evidenceKey` (at most 128 characters), so a client can say "The description of #6263". A `source` claim never carries one: the address it came from stays on the server.
+
+### 8.7 What changed outside
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* **The system shows that something happened at the source, and does not act on it.** Rogier, 2026-11-07: "the system should show that something happened in the external system (someone else assigned the ticket, someone else created a pr, etc.), but not really act on it."
+
+- **Written** by `reconcile` and `refresh`, in their transaction, when a compare of the raw stored values (never of a rendered sentence) shows news, and only on the accepted shared write: an older Connection's rejected observation makes none.
+  - `reassigned`: the update sets an `owner` that differs from the stored one. `person` is the new owner. Clearing the owner is no news.
+  - `moved`: the update sets a status whose word differs from the stored one. `value` is the new word. A thing with no status before is no news.
+  - `linked`: a `source` claim joined a pair that no source or person joined before. It is written once for the pair, on both ends, with `target_ref` the other end and `value` its identifier, else its noun. A second Connection reporting the same edge, a person's link and a hint write none. The resolver loop writes one too when it settles a claim ([section 5.5](#55-resolving-pending-claims)).
+  - **A first observation writes none**, and neither does a partial record that a full observation completes, or a pair whose first end was first seen in this write: what a thing already carried is a baseline, not news.
+- **At most 50 rows for a ref** (`MAX_ENTITY_TIMELINE`). The write that goes over deletes the oldest.
+- **The words** come from the entity's `reason_templates` under the keys `reassigned`, `moved` and `linked`, else from the core's own sentences: "Now with {person}", "Moved to {value}", "Linked {value}". They are built when read, by the function that builds a signal's sentence.
+- **Read.** `ExternalEntityDetail.timeline` holds at most 50 changes, oldest first. Each is `{ reason, say, at, ref? }`, with `ref` for a `linked` change. Each entity record, `EntityPlace` and unrestricted `EntityPeer` has `latestChange`, read for a whole list in one statement, so a Task's linked thing shows its latest change wherever the shared relation row draws it.
+- **Nothing acts on it.** No stage moves, no run stops, no signal ends, no card changes place, no Task changes, and no event or signal is raised. Two pull requests for one ticket are fine: each is linked, and each says so.
 
 ## 9. Operations
 
@@ -326,9 +423,9 @@ The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule
 
 | Operation | Route | Grant | What it does |
 |---|---|---|---|
-| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read` | The Inbox ([section 8.3](#83-reading)) |
-| `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` | `InboxCounts`, for the sidebar |
-| `externalEntity.read` | `GET /external-entities/:id` | `task.read` | One full record of a work kind. `NotFound` for a partial or context record |
+| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read` and `signal.query` | The Inbox ([section 8.3](#83-reading)) |
+| `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` and `signal.query` | `InboxCounts`, for the sidebar |
+| `externalEntity.read` | `GET /external-entities/:id` | `task.read` and `signal.query` | One full record of a work kind. `NotFound` for a partial or context record |
 | `externalEntity.takeOn` | `POST /external-entities/:id/take-on` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |
 | `externalEntity.undoTakeOn` | `POST /external-entities/:id/take-on/undo` | `task.update`, user only | [Section 9.2](#92-undo-of-a-take-or-an-add) |
 | `externalEntity.dismiss` | `POST /external-entities/:id/dismiss` | `task.update`, user only | Sets `dismissed_at` and `dismissed_by` |
@@ -336,10 +433,12 @@ The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule
 | `externalEntity.search` | `GET /external-entities/search` | `task.read` and `connection.query`, user only | [Section 10](#10-search-recognition-and-resolution) |
 | `externalEntity.listSuggestions` | `GET /external-entities/suggestions` | `task.read` | What the Add sheet lists before you type |
 | `externalEntity.addToWork` | `POST /external-entities/add-to-work` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |
+| `externalEntity.link` | `POST /external-entities/links` | `task.update`, user only | [Section 9.5](#95-link-and-unlink) |
+| `externalEntity.unlink` | `POST /external-entities/links/remove` | `task.update`, user only | [Section 9.5](#95-link-and-unlink) |
 
-`read` returns the common fields of a card plus `kindAvailable`, `places`, `edges`, `links` (the relationships between peers, each pair once, under its firmest claim, which names only its plugin or actor and never a Connection) and `conflicts` (the claims the graph refused, with why). The static paths (`inbox`, `search`, `suggestions`, `add-to-work`) sit beside `/external-entities/:id`, and the router prefers them.
+`read` returns the common fields of a card plus `kindAvailable`, `places`, `edges`, `links` (the relationships between peers, each pair once, under its firmest claim, which names only its plugin or actor and never a Connection), `conflicts` (the claims the graph refused, with why), and, from slice 5, `signals`, `openCount`, `signalCount`, `timeline` and `peers` ([sections 8.5 to 8.7](#85-signals-inside-a-card)). It needs `signal.query` besides `task.read`, because it shows signal text. The static paths (`inbox`, `search`, `suggestions`, `add-to-work`) sit beside `/external-entities/:id`, and the router prefers them.
 
-A session may read (`list`, `read`, `suggestions`) but may not take on, add, dismiss or restore: those are user only.
+A session may read (`list`, `read`, `suggestions`) but may not take on, add, dismiss, restore, link or unlink: those are user only. The three reads that show signal text need `signal.query` as well.
 
 ### 9.1 Take on and Add to work
 
@@ -369,6 +468,14 @@ A Take or an Add that `created` a Task undoes with `externalEntity.undoTakeOn { 
 ### 9.4 The project of a Task taken on
 
 Task `projectId` must be a real Project, so a Linear project or a GitHub repository is never used as one. The service takes `repository.target.remote` from the entity, finds its Resource by canonical remote, and finds that Resource's Projects (`project_resources`), leaving out deleted Projects, which keep their rows. With exactly one, it uses it. Otherwise the Task has no project. External team and project facts group things and never create core Projects or Initiatives.
+
+### 9.5 Link and unlink
+
+*(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* The user links two things with one move, and takes the link back. Both are methods on the service, user only, with the grant `task.update`. Refs hold `:`, `/` and `#`, so they travel in a body. The CLI spells them `hercule entity link <ref> --to <ref>` and `hercule entity unlink <ref> --to <ref>`.
+
+- **`externalEntity.link { fromRef, toRef }`** writes a `person` claim of relation `linked`, stamped with the actor. The target may be a ref nobody has read: it is read like any other linked target ([section 5.3](#53-refresh-listwanted-and-reportmissing)). The source is never told. Linking a pair the user already linked, in either direction, changes nothing. It fails `NotFound` when Hercule holds no record of `fromRef`, and `InvalidState` for the same ref twice and for a ref that starts with `unresolved:`.
+- **`externalEntity.unlink { fromRef, toRef }`** removes the user's own claims between the two refs, in either direction, and returns `{ removed, remaining? }`. `removed` is false when the user had made none. `remaining` is the firmest claim type that still joins them (`source`, `person` or `text`). A source's claim stays: only a person's word is the person's to take back.
+- A source's claim is firmer than a person's, so linking a pair that a source reports changes nothing the user sees. Linking a pair that only a hint reports makes it a link, and the hint is no longer drawn.
 
 ## 10. Search, recognition and resolution
 
@@ -413,7 +520,17 @@ Work's Group by and Filter read through a read model, with no new table. `TaskBo
 - `task.queryBoard` needs no new grant: `places` comes with the Task's links.
 - **Hercule's Initiatives and Projects stay separate.** An outside project is only ever a lane or a filter. Filtering or grouping by one never sets a Task's `projectId` or `initiativeId`.
 
-**The details pane.** `TaskDetail` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)) carries the Task's own `entities` (each linked thing as an `EntityPlace`, in link order), `places` and `edges`, read through the same `readContext` for one Task. The pane draws two sections from them, as the shared relation rows: **Part of** lists every place above any linked thing by every path, each once, nearest first, with a place no Connection can read as a locked row; **Linked** lists the linked things themselves, each as its identifier and title and its kind and status. A section with no rows is not drawn. An `EntityPlace` carries `identifier` when the record has one and the place is not restricted, for these rows. The direct links between sources and the references found in text join Linked and Mentioned in slice 5.
+**The details pane.** `TaskDetail` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)) carries the Task's own `entities` (each linked thing as an `EntityPlace`, in link order), `places` and `edges`, read through the same `readContext` for one Task. The pane draws two sections from them, as the shared relation rows: **Part of** lists every place above any linked thing by every path, each once, nearest first, with a place no Connection can read as a locked row; **Linked** lists the linked things themselves, each as its identifier and title and its kind and status. A section with no rows is not drawn. An `EntityPlace` carries `identifier` when the record has one and the place is not restricted, for these rows. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* Each `EntityPlace` carries `latestChange` ([section 8.7](#87-what-changed-outside)), which the shared relation row draws. The direct links between things, the hints found in text and the far-end records are on the thing's own `externalEntity.read` reply.
+
+**Stacks.** *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A stack means what a confirmed link says. `WorkBoard` gains `stackCandidates`, at most `MAX_BOARD_STACK_CANDIDATES` (2,000) pairs `{ leadTaskId, memberTaskId, noun }`, and `stackCandidatesTruncated`. A pair is a Task that links a rich thing and a Task that links a compact thing with a direct `source` or `person` link to it. `noun` is the member thing's kind noun (the lowest, when a member links several). A hint never makes a pair. A Task is never paired with itself, so a Task that links both things makes none, and a pair found through two links is one candidate. Both are decided before the limit, in one statement. What the limit leaves out simply draws as cards.
+
+A Task can link several things, so candidates can compete or point both ways. The client's `arrangeCell` chooses, per cell, by one rule, so stacks never nest:
+
+1. Walk the cell's Tasks in `boardRank` order, then id.
+2. A Task not yet placed, with at least one unplaced candidate member in this cell, becomes a lead and takes all of those members.
+3. Each Task ends up once: a lead, a member of one lead, or a card alone. A lead is never another stack's member.
+
+Nothing stores a stack. A member dragged to another cell is a card. A stack counts as one row, floats as one unit, and is loud, and opens by itself, when its lead or any member is.
 
 Filtering and grouping run in client-core over that reply, so they cost no read. A Task under two places has a card in each; stage headers count distinct Tasks. A drop in an outside lane changes the stage only and never the membership.
 
@@ -427,6 +544,10 @@ The `externalEntity` topic is a mutable topic ([./14-web-app.md](./14-web-app.md
 | A claim changes, or a place's title, status or progress | the Inbox, the board's lanes and filters | the same, for the Tasks below it, found by one walk down |
 | Take, Add, Dismiss, Restore | the Inbox, the count, the board | the service, on both topics |
 | A Task finishes, is deleted, merged, or gains or loses a link | the Inbox's membership, the count | `task` already pushes. The client maps `task` to the Inbox keys, so no reverse import is needed |
+| A signal opens, ends or is snoozed | the Inbox, the count, an open card | `signal` already pushes. The client maps it to the Inbox keys |
+| A snooze runs out | the Inbox, the count | nothing is written, so nothing pushes. The desktop's snooze timer reads them again when the soonest `until` passes |
+| A person links or unlinks two things | the Inbox, an open card, the board | the service announces `externalEntity` for both refs, and `task` with `derived: true` for the Tasks that link them |
+| The resolver settles a claim | the same | the same announcement |
 | A Connection changes status | `stale` | `connection` already pushes. The client maps it to the Inbox keys |
 | A plugin is enabled or disabled | `stale`, `kindAvailable` | `plugin` already pushes. The client maps it to the Inbox keys |
 
@@ -439,23 +560,27 @@ A poll that changes nothing announces nothing, so a quiet Inbox costs no read. N
 Source lives in `apps/controller/src/external-entities/`. It owns entity lifecycle, relation claims, rendering slots, and the Inbox reads. Reading the source stays in the plugin, and polling stays in the host.
 
 ```
-external-entities -> actor db events tasks resources connections plugins
-                     (slice 5 adds signals; slice 6 adds runs and workflows)
+external-entities -> actor db events tasks resources connections plugins signals
+                     (slice 6 adds runs and workflows)
 
 plugins    declares port EntityObservations  -> answered in daemon/ingest/
+           declares EntityRecognizer         -> filled by the plugin host at start
+signals    declares port SignalEntities      -> answered in daemon/ingest/
 tasks      TaskBoardFacts                    -> daemon/tasks/ also reads entities and their ancestors
+daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> the resolver loop
 ```
 
 - No domain imports `external-entities` except through a port, so the arrows only ever point out of it and the graph stays acyclic.
 - `ExternalEntityService` requires `TaskService`, so nothing `TaskService` needs may require `ExternalEntityService`. A port the tasks domain declares is answered from the repository, which needs only the SQL client.
 - `plugins` cannot import `external-entities`, because it imports `plugins` for the catalog. The port is `EntityObservations`, in `plugins/entity-observations.ts`, answered in `daemon/ingest/entity-observations.ts`, as Open Signals is. The host side of search is `EntityLookups` in `plugins/entity-lookups.ts`.
+- *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `external-entities` imports `signals`, for the rows. `signals` imports nothing of it: it declares the port `SignalEntities` (`readByRefs`, `recordArrival`) and the controller daemon answers it from the entity repository.
+- Recognition (pure) is in the plugins domain, as `EntityRecognizer`: the host tells it where its active sources come from when it starts, and the ingest context reads them at call time. `PluginHost` requires the ingest loops, so the ingest context cannot depend on the host. Resolution (credentialed, slow) is the controller daemon's resolver loop, which may require `EntityLookups`; the database side is `ClaimResolution` in this domain ([section 5.5](#55-resolving-pending-claims)).
 - The repository requires the SQL client only. Its write methods join the caller's transaction and never open their own or call a service.
 
 ## Later slices
 
 Not in this document yet, and the tables allow for them:
 
-- Open signals as a reason to be on the Inbox, in pruning and in `listWanted`; stacks, linked rows, hints and person links; Linear (slice 5).
 - Handing a card to an agent, and the acting Connection for outbound work (slice 6).
 - Linking a Thread's pull request to its Task, and moving cards on facts. `repository.head` is stored here and used there (slice 7).
 - A triage cluster as Hercule's own kind, `core/triage-cluster`, written by the core with no Connection. `external_entities.kind` is a string and an entity needs no observation row, so it fits. It is not built.
@@ -464,6 +589,7 @@ Not in this document yet, and the tables allow for them:
 
 - [Work overview: the design and its tickets (#1026)](https://github.com/theagenticage/hercule/issues/1026)
 - [The Inbox of External Entities (#1032)](https://github.com/theagenticage/hercule/issues/1032)
+- [Work overview, slice 5: signals live inside their entity, and Linear joins (#1033)](https://github.com/theagenticage/hercule/issues/1033)
 - [ADR 0054 - External Entities are durable records kept true by polls](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md)
 - [ADR 0006 - Plugins request capabilities and register contributions in code](../adr/0006-plugins-request-capabilities-and-register-contributions-in-code.md)
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
