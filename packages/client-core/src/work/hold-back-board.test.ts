@@ -3,7 +3,7 @@
  * that everything else shows at once.
  */
 import { describe, expect, it } from "vitest";
-import { buildBoard, buildCard, FAILURE, listIds } from "@hercule/client-core/work/testing";
+import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
 import { holdBackBoardChanges, buildArrivalKey } from "./hold-back-board";
 
 const NOTHING = new Set<string>();

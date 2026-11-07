@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { chooseLaneId, type WorkProject } from "@hercule/client-core/work";
+import { chooseLaneId, type HeldChange, type WorkProject } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import { waitForStillHand } from "../../app/motion";
-import type { HeldChange } from "./hold-back-board";
 
 /** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
 const NOTE_SHOWN_MS = 10_000;

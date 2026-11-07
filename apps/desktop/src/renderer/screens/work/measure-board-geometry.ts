@@ -1,12 +1,6 @@
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect } from "../../app/motion";
-import type {
-  BoardGeometry,
-  BoardView,
-  CellBox,
-  LaneBox,
-  StageColumn,
-} from "./board-drag-geometry";
+import type { BoardGeometry, BoardView, CellBox, LaneBox, StageEdge } from "./board-drag-geometry";
 import { findCellFoot, isLaneFolded } from "./board-dom";
 import { buildCardKey } from "./flip-board";
 
@@ -21,7 +15,7 @@ const readStage = (value: string | undefined): BoardStage | undefined =>
   BOARD_STAGES.find((stage) => stage === value);
 
 /**
- * Measures the stage columns, the lanes, the cells and the cards of the board
+ * Measures the stage edges, the lanes, the cells and the cards of the board
  * under `scroller`, in board coordinates (`BoardGeometry`). Cards are where
  * the layout puts them, with the offsets of cards that are still gliding taken
  * away, so the answer is the same whether or not a spring is running.
@@ -45,11 +39,11 @@ export const measureBoardGeometry = (
   const toBoardLeft = (left: number): number => left - view.left + view.scrollLeft;
   const toBoardTop = (top: number): number => top - view.top + view.scrollTop;
 
-  const columns: StageColumn[] = [];
+  const stageEdges: StageEdge[] = [];
   for (const element of scroller.querySelectorAll<HTMLElement>(".board-rule [data-stage]")) {
     const stage = readStage(element.dataset["stage"]);
     if (stage !== undefined) {
-      columns.push({ stage, left: toBoardLeft(element.getBoundingClientRect().left) });
+      stageEdges.push({ stage, left: toBoardLeft(element.getBoundingClientRect().left) });
     }
   }
 
@@ -89,5 +83,5 @@ export const measureBoardGeometry = (
       };
     },
   );
-  return { geometry: { columns, lanes }, view };
+  return { geometry: { stageEdges, lanes }, view };
 };

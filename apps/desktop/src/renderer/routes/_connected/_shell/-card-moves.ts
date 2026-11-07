@@ -59,6 +59,13 @@ interface PendingMove {
    * retires the move.
    */
   readonly isCovered: boolean;
+  /**
+   * Set on the move that undoes another. The move is sent only when this
+   * resolves to true, which it does when the move being undone was saved.
+   * Otherwise the card is still where the undo would put it, or another client
+   * has moved it since, and writing the undo would overwrite that.
+   */
+  readonly isUndoWanted: Promise<boolean> | undefined;
 }
 
 /** The pending moves, oldest first, as a store a component can follow. */
@@ -69,8 +76,10 @@ interface PendingMoves {
   readonly remove: (id: number) => void;
   /** Marks the answered moves covered: no read that is running now may start before their answers. */
   readonly coverAnswered: () => void;
-  /** Removes the covered moves. Called when a read ends successfully. */
-  readonly removeCovered: () => void;
+  /** Returns the ids of the covered moves. */
+  readonly listCoveredIds: () => readonly number[];
+  /** Removes the moves with these ids. */
+  readonly removeAll: (ids: readonly number[]) => void;
   readonly hasUnanswered: () => boolean;
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -98,8 +107,11 @@ const createPendingMoves = (): PendingMoves => {
         change(moves.map((each) => (each.isAnswered ? { ...each, isCovered: true } : each)));
       }
     },
-    removeCovered: () => {
-      if (moves.some((each) => each.isCovered)) change(moves.filter((each) => !each.isCovered));
+    listCoveredIds: () => moves.filter((each) => each.isCovered).map((each) => each.id),
+    removeAll: (ids) => {
+      if (moves.some((each) => ids.includes(each.id))) {
+        change(moves.filter((each) => !ids.includes(each.id)));
+      }
     },
     hasUnanswered: () => moves.some((each) => !each.isAnswered),
     subscribe: (listener) => {
@@ -196,9 +208,11 @@ const readBoardAfterMoves = async (
  *   The gesture moves the card through the screen that is open when Undo is
  *   pressed (`CardMover`), which may be a later screen than the one that made
  *   the gesture. When the card it followed has gone, the card goes last in
- *   that stage, and the line says so. When the gesture's request is refused, the card is
- *   already in that place, which the controller accepts without writing, and
- *   the line says there was nothing to put back.
+ *   that stage, and the line says so. The undo is sent only after the gesture's own
+ *   request was accepted, checked when the undo reaches the front of the queue.
+ *   When the request is refused, the undo is not sent, because the card is
+ *   still where it was or another client has moved it since. The line says
+ *   there was nothing to put back.
  * - The last move to finish cancels the running reads and reads the board
  *   again. Every successful read after that retires the moves answered
  *   before it, whoever started it.
@@ -259,9 +273,15 @@ export const useCardMoves = ({
         ) {
           return;
         }
-        // Queued behind the observers of the read, so the screen gets the new
-        // board and the shorter list in one render.
-        notifyManager.schedule(pending.removeCovered);
+        // The moves covered now are the ones this read shows. The removal is
+        // queued behind the observers of the read, so the screen gets the new
+        // board and the shorter list in one render. A move covered before the
+        // queue runs is not in the list: this read may predate its answer.
+        const coveredIds = pending.listCoveredIds();
+        if (coveredIds.length === 0) return;
+        notifyManager.schedule(() => {
+          pending.removeAll(coveredIds);
+        });
       }),
     [queryClient, pending],
   );
@@ -270,12 +290,19 @@ export const useCardMoves = ({
     mutationKey: CARD_MOVES_KEY,
     // A move in a scope waits for the one before it to finish before it is sent.
     scope: { id: "card-moves" },
-    mutationFn: ({ move }: PendingMove) => {
+    // Resolves to false when the move was not sent because it undoes a move that did not save.
+    mutationFn: async ({ move, isUndoWanted }: PendingMove): Promise<boolean> => {
+      if (isUndoWanted !== undefined && !(await isUndoWanted)) return false;
       const { taskId, ...place } = move;
-      return client.task.move({ params: { id: taskId }, payload: place });
+      await client.task.move({ params: { id: taskId }, payload: place });
+      return true;
     },
-    onSuccess: (_task, { id }) => {
-      pending.markAnswered(id);
+    onSuccess: (isSent, { id }) => {
+      if (isSent) {
+        pending.markAnswered(id);
+      } else {
+        pending.remove(id);
+      }
     },
     onError: (error, { id }) => {
       playBoardChange("travel", () => {
@@ -294,14 +321,20 @@ export const useCardMoves = ({
 
   /**
    * Shows `move` and queues it. Resolves when it was accepted, rejects when it
-   * was not. The cards glide on `hand` when `isPlayed` is true.
+   * was not. The cards glide on `hand` when `isPlayed` is true. Pass
+   * `isUndoWanted` for a move that undoes another (see `PendingMove`).
    */
-  const sendMove = (move: CardMove, isPlayed: boolean): Promise<unknown> => {
+  const sendMove = (
+    move: CardMove,
+    isPlayed: boolean,
+    isUndoWanted: Promise<boolean> | undefined = undefined,
+  ): Promise<unknown> => {
     const request: PendingMove = {
       id: nextId.current++,
       move,
       isAnswered: false,
       isCovered: false,
+      isUndoWanted,
     };
     if (isPlayed) {
       playBoardChange("hand", () => {
@@ -314,14 +347,18 @@ export const useCardMoves = ({
   };
 
   /**
-   * Shows the card back at `place`, as Undo does, and queues the move. Returns
-   * `undefined` when the card is no longer on the board.
+   * Shows the card back at `place`, as Undo does, and queues the move, which is
+   * sent only if `isUndoWanted` resolves to true. Returns `undefined` when the
+   * card is no longer on the board.
    */
-  const putCardBack = (place: CardPlacement): PutBackRequest | undefined => {
+  const putCardBack = (
+    place: CardPlacement,
+    isUndoWanted: Promise<boolean>,
+  ): PutBackRequest | undefined => {
     const board = readShownBoard();
     const restore = board === undefined ? undefined : buildRestoreMove(board, place);
     if (restore === undefined) return undefined;
-    return { isExact: restore.exact, request: sendMove(restore.move, true) };
+    return { isExact: restore.exact, request: sendMove(restore.move, true, isUndoWanted) };
   };
 
   const makeMove = (move: CardMove, words: string, isPlayed: boolean): void => {
@@ -338,7 +375,7 @@ export const useCardMoves = ({
     const gesture: Gesture<CardMover> = {
       words,
       undo: async (mover) => {
-        const putBack = mover.putCardBack(from);
+        const putBack = mover.putCardBack(from, wasSaved);
         if (putBack === undefined) throw new Error("The card is no longer on the board.");
         await putBack.request;
         if (!(await wasSaved)) throw new Error(NOT_SAVED_MESSAGE);

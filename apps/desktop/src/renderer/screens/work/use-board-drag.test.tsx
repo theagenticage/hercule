@@ -50,7 +50,7 @@ const FOLDED_LANE_HEIGHT = 44;
 const columnLeft = (stage: BoardStage): number => 200 + 150 * BOARD_STAGES.indexOf(stage);
 
 /** Returns how tall `element` is in the stubbed layout. A card in the hand takes no room. */
-const heightOf = (element: HTMLElement): number => {
+const readStubbedHeight = (element: HTMLElement): number => {
   if (element.dataset["dragged"] !== undefined) return 0;
   if (element.classList.contains("board-slot")) return Number.parseFloat(element.style.height);
   return element.dataset["cardId"] === undefined ? 0 : CARD_HEIGHT;
@@ -59,10 +59,11 @@ const heightOf = (element: HTMLElement): number => {
 /** Returns the height of the stack of cards in `cell`. */
 const stackHeight = (cell: Element): number => {
   const rows = [...cell.children].filter(
-    (child): child is HTMLElement => child instanceof HTMLElement && heightOf(child) > 0,
+    (child): child is HTMLElement => child instanceof HTMLElement && readStubbedHeight(child) > 0,
   );
   return (
-    rows.reduce((sum, row) => sum + heightOf(row), 0) + CARD_GAP * Math.max(0, rows.length - 1)
+    rows.reduce((sum, row) => sum + readStubbedHeight(row), 0) +
+    CARD_GAP * Math.max(0, rows.length - 1)
   );
 };
 
@@ -110,21 +111,21 @@ const layOut = (element: HTMLElement): DOMRect => {
       stackHeight(element),
     );
   }
-  if (cell instanceof HTMLElement && lane !== null && heightOf(element) > 0) {
+  if (cell instanceof HTMLElement && lane !== null && readStubbedHeight(element) > 0) {
     let above = 0;
     for (
       let before = element.previousElementSibling;
       before !== null;
       before = before.previousElementSibling
     ) {
-      const height = before instanceof HTMLElement ? heightOf(before) : 0;
+      const height = before instanceof HTMLElement ? readStubbedHeight(before) : 0;
       if (height > 0) above += height + CARD_GAP;
     }
     return rect(
       columnLeft(cell.dataset["stage"] as BoardStage),
       laneTop(lane) + LANE_HEAD + above,
       COLUMN_WIDTH,
-      heightOf(element),
+      readStubbedHeight(element),
     );
   }
   return new DOMRect(0, 0, 0, 0);

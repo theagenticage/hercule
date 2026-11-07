@@ -39,7 +39,7 @@ const isSameCard = (a: WorkCard, b: WorkCard): boolean =>
  * thing that makes `arrangeCell` lead a cell with the card, so holding it
  * keeps the card where it was and leaves a move the user made.
  */
-const keepFailureOf = (card: WorkCard, before: WorkCard): WorkCard => {
+const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
   const { failure, ...withoutFailure } = card;
   void failure;
   return before.failure === undefined
@@ -85,7 +85,7 @@ export const holdBackBoardChanges = (
       if (released.has(failureKey)) cards.push(card);
       else {
         held.push({ kind: "failure", cardId: card.id, key: failureKey });
-        cards.push(keepFailureOf(card, before));
+        cards.push(keepShownFailure(card, before));
       }
       continue;
     }

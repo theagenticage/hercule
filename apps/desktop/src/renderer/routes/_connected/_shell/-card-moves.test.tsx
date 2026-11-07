@@ -9,7 +9,7 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testing";
 import { buildWorkBoardKey } from "@hercule/client-core/work";
@@ -94,9 +94,9 @@ const setUp = (readBoard: () => WorkBoard = () => BOARD) => {
     return view;
   };
   const view = mount();
-  const stageOf = (id: string, board = view.result.current.board) =>
+  const findStage = (id: string, board = view.result.current.board) =>
     board?.cards.find((card) => card.id === id)?.stage;
-  return { ...view, held, client, queryClient, undoStack, stageOf, mount };
+  return { ...view, held, client, queryClient, undoStack, findStage, mount };
 };
 
 /** Waits until `count` requests have been sent. A move is sent a moment after it is made. */
@@ -105,15 +105,20 @@ const waitForRequests = (held: readonly HeldMove[], count: number) =>
     expect(held).toHaveLength(count);
   });
 
+/** Lets the promises of the queued requests and the reads that follow them run. */
+const settleQueue = async (): Promise<void> => {
+  for (let turn = 0; turn < 80; turn++) await Promise.resolve();
+};
+
 describe("useCardMoves", () => {
   it("shows a move at once, and says what happened with an Undo", async () => {
-    const { result, stageOf, held } = setUp();
+    const { result, findStage, held } = setUp();
 
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, 'Moved "a" to In review');
     });
 
-    expect(stageOf("a")).toBe("in-review");
+    expect(findStage("a")).toBe("in-review");
     await waitForRequests(held, 1);
     expect(result.current.line).toMatchObject({
       text: 'Moved "a" to In review.',
@@ -141,7 +146,7 @@ describe("useCardMoves", () => {
   });
 
   it("puts the card back and says why when the controller refuses the move", async () => {
-    const { result, stageOf, held } = setUp();
+    const { result, findStage, held } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -153,7 +158,7 @@ describe("useCardMoves", () => {
     });
 
     await waitFor(() => {
-      expect(stageOf("a")).toBe("building");
+      expect(findStage("a")).toBe("building");
     });
     expect(result.current.line.text).toBe(
       "The move did not save, so the card went back: the Task is gone. Try the move again.",
@@ -181,7 +186,7 @@ describe("useCardMoves", () => {
   });
 
   it("puts the card back at once after its move, queued right behind it", async () => {
-    const { result, stageOf, held } = setUp();
+    const { result, findStage, held } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "b", stage: "in-review", afterTaskId: "c" }, "Moved b");
     });
@@ -190,7 +195,7 @@ describe("useCardMoves", () => {
       result.current.undoLastMove();
     });
     // The card is back on screen at once, though only the move itself can be sent so far.
-    expect(stageOf("b")).toBe("building");
+    expect(findStage("b")).toBe("building");
     await waitForRequests(held, 1);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(held).toHaveLength(1);
@@ -246,7 +251,7 @@ describe("useCardMoves", () => {
   });
 
   it("puts the card back through the Work screen that is open now, after a visit elsewhere", async () => {
-    const { result, held, mount, stageOf, unmount } = setUp();
+    const { result, held, mount, findStage, unmount } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -264,17 +269,17 @@ describe("useCardMoves", () => {
       buildCard("c", { stage: "in-review" }),
     );
     const again = mount(movedBoard);
-    expect(stageOf("a", again.result.current.board)).toBe("in-review");
+    expect(findStage("a", again.result.current.board)).toBe("in-review");
     act(() => {
       again.result.current.undoLastMove();
     });
 
-    expect(stageOf("a", again.result.current.board)).toBe("building");
+    expect(findStage("a", again.result.current.board)).toBe("building");
     await waitForRequests(held, 2);
   });
 
-  it("sends nothing that changes the card when the move being undone was refused", async () => {
-    const { result, held, stageOf } = setUp();
+  it("sends no undo when the move being undone was refused", async () => {
+    const { result, held, findStage } = setUp();
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -283,27 +288,52 @@ describe("useCardMoves", () => {
     });
     await waitForRequests(held, 1);
 
-    await act(() => {
+    await act(async () => {
       held[0]!.refuse("the Task is gone.");
-      return Promise.resolve();
+      await settleQueue();
     });
 
-    // The undo asks for the place the card already has, which writes nothing.
-    await waitForRequests(held, 2);
-    expect(held[1]).toMatchObject({
-      taskId: "a",
-      payload: { stage: "building", projectId: null, afterTaskId: null },
-    });
-    await act(() => {
-      held[1]!.accept();
-      return Promise.resolve();
-    });
+    // The card never left its place, so the undo has nothing to write.
+    expect(held).toHaveLength(1);
     await waitFor(() => {
       expect(result.current.line.text).toMatch(
         /^Could not put back: Moved a\. That move did not save/,
       );
     });
-    expect(stageOf("a")).toBe("building");
+    expect(findStage("a")).toBe("building");
+  });
+
+  it("sends no undo when the move being undone was refused over another client's move", async () => {
+    const { result, held, queryClient } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+    });
+    await waitForRequests(held, 1);
+    act(() => {
+      // Another client moved the card to Landed. Undo is pressed before the refusal arrives.
+      queryClient.setQueryData(
+        buildWorkBoardKey(),
+        buildBoard(
+          buildCard("a", { stage: "landed" }),
+          buildCard("b", { stage: "building" }),
+          buildCard("c", { stage: "in-review" }),
+        ),
+      );
+      result.current.undoLastMove();
+    });
+
+    await act(async () => {
+      held[0]!.refuse("afterTaskId is no longer in this cell");
+      await settleQueue();
+    });
+
+    // Sending the undo would drag the card from Landed back to Building.
+    expect(held).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current.line.text).toMatch(
+        /^Could not put back: Moved a\. That move did not save/,
+      );
+    });
   });
 
   it("says nothing was put back when the move being undone did not save", async () => {
@@ -374,7 +404,7 @@ describe("useCardMoves", () => {
 
   it("reads the board again after the last move finishes, and stops applying the move once it has", async () => {
     const reads = vi.fn(() => BOARD);
-    const { result, held, stageOf } = setUp(reads);
+    const { result, held, findStage } = setUp(reads);
     act(() => {
       result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
     });
@@ -389,14 +419,14 @@ describe("useCardMoves", () => {
     });
     // The board the screen was given stands for that read, which holds no move.
     await waitFor(() => {
-      expect(stageOf("a")).toBe("building");
+      expect(findStage("a")).toBe("building");
     });
   });
 
   describe("after a read that failed", () => {
     it("retires an answered move when a later read succeeds, so another client's change shows", async () => {
       let isReadFailing = true;
-      const { result, held, stageOf, client, queryClient } = setUp(() => {
+      const { result, held, findStage, client, queryClient } = setUp(() => {
         if (isReadFailing) throw new Error("offline");
         return BOARD;
       });
@@ -410,20 +440,20 @@ describe("useCardMoves", () => {
       });
       // The read after the last move fails, so the move stays applied.
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(stageOf("a")).toBe("in-review");
+      expect(findStage("a")).toBe("in-review");
 
       // Another client moved the card back, and the next read shows that.
       isReadFailing = false;
       await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
 
       await waitFor(() => {
-        expect(stageOf("a")).toBe("building");
+        expect(findStage("a")).toBe("building");
       });
     });
 
     it("keeps a move that was made after the answer", async () => {
       let isReadFailing = true;
-      const { result, held, stageOf, client, queryClient } = setUp(() => {
+      const { result, held, findStage, client, queryClient } = setUp(() => {
         if (isReadFailing) throw new Error("offline");
         return BOARD;
       });
@@ -445,10 +475,47 @@ describe("useCardMoves", () => {
       await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
 
       await waitFor(() => {
-        expect(stageOf("a")).toBe("building");
+        expect(findStage("a")).toBe("building");
       });
       // The read may have started before b was sent, so b is still shown.
-      expect(stageOf("b")).toBe("planned");
+      expect(findStage("b")).toBe("planned");
+    });
+
+    it("keeps a move that was answered after a read that has already succeeded, when that read's news arrives late", async () => {
+      let isReadFailing = false;
+      const { result, held, findStage, client, queryClient } = setUp(() => {
+        if (isReadFailing) throw new Error("offline");
+        return BOARD;
+      });
+      // Hold back the news of reads, as the default scheduler does with a timer.
+      const delayed: (() => void)[] = [];
+      notifyManager.setScheduler((callback) => {
+        delayed.push(callback);
+      });
+      try {
+        // This read ends before the move below is made.
+        await act(() => queryClient.fetchQuery({ ...workBoardQuery(client), staleTime: 0 }));
+        act(() => {
+          result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+        });
+        await waitForRequests(held, 1);
+        isReadFailing = true;
+        await act(async () => {
+          held[0]!.accept();
+          await settleQueue();
+        });
+        expect(findStage("a")).toBe("in-review");
+
+        // The news of the older read arrives now. It predates the move, so it cannot retire it.
+        await act(async () => {
+          while (delayed.length > 0) delayed.shift()!();
+          await settleQueue();
+        });
+
+        expect(findStage("a")).toBe("in-review");
+      } finally {
+        notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+      }
     });
   });
 

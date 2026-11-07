@@ -1,10 +1,14 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import type { WorkProject } from "@hercule/client-core/work";
+import {
+  buildArrivalKey,
+  holdBackBoardChanges,
+  type HeldChange,
+  type WorkProject,
+} from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import { fadeInCards, riseArrival } from "./board-flights";
 import { flipBoard } from "./flip-board";
-import { buildArrivalKey, holdBackBoardChanges, type HeldChange } from "./hold-back-board";
 import { useHeldChanges } from "./use-held-changes";
 import "./motion.css";
 

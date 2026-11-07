@@ -36,39 +36,43 @@ const WEBSHOP = SIDEBAR_FIXTURE.projects[0]!;
 const OPS = SIDEBAR_FIXTURE.projects[1]!;
 
 /** Returns a valid id for the Task or session numbered `n`. */
-const idOf = (n: number): string => `01a06d02-7e00-7000-8000-${String(n).padStart(12, "0")}`;
+const buildTaskId = (n: number): string => `01a06d02-7e00-7000-8000-${String(n).padStart(12, "0")}`;
 
-const THREAD_ID = idOf(900);
+const THREAD_ID = buildTaskId(900);
 
 const CARDS: readonly WorkCard[] = [
-  buildCard(idOf(1), {
+  buildCard(buildTaskId(1), {
     title: "Refund emails show the wrong currency",
     projectId: WEBSHOP.id,
     openQuestion: {
       sessionId: THREAD_ID,
-      requestId: idOf(901),
+      requestId: buildTaskId(901),
       text: "Which currency should win?",
     },
     openSessionId: THREAD_ID,
   }),
-  buildCard(idOf(2), {
+  buildCard(buildTaskId(2), {
     title: "Cache delivery slot lookups",
     projectId: WEBSHOP.id,
     stage: "in-review",
-    failure: { runId: idOf(902), workflowName: "Review PR", cause: "the branch changed mid-run" },
+    failure: {
+      runId: buildTaskId(902),
+      workflowName: "Review PR",
+      cause: "the branch changed mid-run",
+    },
   }),
-  buildCard(idOf(3), {
+  buildCard(buildTaskId(3), {
     title: "Order history hides cancelled items",
     projectId: WEBSHOP.id,
     stage: "planned",
   }),
-  buildCard(idOf(4), {
+  buildCard(buildTaskId(4), {
     title: "Renew the payment gateway certificate",
     projectId: OPS.id,
     stage: "building",
-    workingSessionId: idOf(903),
+    workingSessionId: buildTaskId(903),
   }),
-  buildCard(idOf(5), { title: "Tidy the depot labels" }),
+  buildCard(buildTaskId(5), { title: "Tidy the depot labels" }),
 ];
 
 const BOARD_PATH = "GET /api/v1/tasks/board";
@@ -78,7 +82,7 @@ const countBoardReads = (calls: readonly Call[]): number =>
   calls.filter((call) => `${call.method} ${call.path}` === BOARD_PATH).length;
 
 const buildCreatedTask = (title: string, projectId: string | undefined): Task => ({
-  id: idOf(50),
+  id: buildTaskId(50),
   title,
   description: "",
   status: "open",
@@ -168,14 +172,16 @@ describe("the Work screen", () => {
     let title = "Order history hides cancelled items";
     const { calls, live } = await openWork({
       board: () =>
-        buildBoard(...CARDS.map((card) => (card.id === idOf(3) ? { ...card, title } : card))),
+        buildBoard(
+          ...CARDS.map((card) => (card.id === buildTaskId(3) ? { ...card, title } : card)),
+        ),
     });
     await screen.findByRole("button", { name: /^Order history hides cancelled items/ });
     await live.waitForFirstPushes();
     const before = countBoardReads(calls);
 
     title = "Order history hides refunded items";
-    live.pushInvalidation("task", [idOf(3)]);
+    live.pushInvalidation("task", [buildTaskId(3)]);
 
     await screen.findByRole("button", { name: /^Order history hides refunded items/ });
     expect(countBoardReads(calls)).toBe(before + 1);
@@ -280,7 +286,10 @@ describe("the Work screen", () => {
   it("opens the rest of a crowded cell in place with its line", async () => {
     const user = userEvent.setup();
     const crowded = Array.from({ length: 8 }, (_, index) =>
-      buildCard(idOf(100 + index), { title: `Crowded card ${String(index)}`, projectId: OPS.id }),
+      buildCard(buildTaskId(100 + index), {
+        title: `Crowded card ${String(index)}`,
+        projectId: OPS.id,
+      }),
     );
     await openWork({ board: () => buildBoard(...crowded) });
 
@@ -473,7 +482,7 @@ describe("the Work screen's keys", () => {
       expect(listMoves()).toHaveLength(1);
     });
     expect(listMoves()[0]).toMatchObject({
-      path: `/api/v1/tasks/${idOf(5)}/move`,
+      path: `/api/v1/tasks/${buildTaskId(5)}/move`,
       body: { stage: "planned" },
     });
 
@@ -612,16 +621,16 @@ describe("the Work screen's keys", () => {
 
     // Three titles hold "ca": the Cache, the cancelled items and the certificate.
     await user.type(find, "ca");
-    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(2)}`);
+    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${buildTaskId(2)}`);
     await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(4)}`);
+    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${buildTaskId(4)}`);
     await user.keyboard("{ArrowDown}");
-    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(4)}`);
+    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${buildTaskId(4)}`);
     await user.keyboard("{ArrowUp}");
-    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(3)}`);
+    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${buildTaskId(3)}`);
     // "c" keeps the cancelled items among its matches, but the choice was made for "ca".
     await user.keyboard("{Backspace}");
-    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${idOf(1)}`);
+    expect(find.getAttribute("aria-activedescendant")).toBe(`desk-find-${buildTaskId(1)}`);
   });
 });
 
@@ -632,10 +641,14 @@ describe("the Work screen's board changes by themselves", () => {
       board: () =>
         buildBoard(
           ...CARDS.map((card) =>
-            card.id === idOf(3) && hasFailed
+            card.id === buildTaskId(3) && hasFailed
               ? {
                   ...card,
-                  failure: { runId: idOf(910), workflowName: "Deploy", cause: "the build broke" },
+                  failure: {
+                    runId: buildTaskId(910),
+                    workflowName: "Deploy",
+                    cause: "the build broke",
+                  },
                 }
               : card,
           ),
@@ -645,7 +658,7 @@ describe("the Work screen's board changes by themselves", () => {
     await live.waitForFirstPushes();
 
     hasFailed = true;
-    live.pushInvalidation("task", [idOf(3)]);
+    live.pushInvalidation("task", [buildTaskId(3)]);
 
     expect(await screen.findByText("Deploy failed")).toBeTruthy();
     expect(getCard("Order history hides cancelled items").textContent).toContain(
@@ -655,7 +668,7 @@ describe("the Work screen's board changes by themselves", () => {
 
   it("draws a Task that arrives in its cell, and says so on the toolbar's line", async () => {
     let hasArrived = false;
-    const arrival = buildCard(idOf(60), { title: "Count the pallets", projectId: OPS.id });
+    const arrival = buildCard(buildTaskId(60), { title: "Count the pallets", projectId: OPS.id });
     const { live } = await openWork({
       board: () => buildBoard(...CARDS, ...(hasArrived ? [arrival] : [])),
     });
@@ -663,7 +676,7 @@ describe("the Work screen's board changes by themselves", () => {
     await live.waitForFirstPushes();
 
     hasArrived = true;
-    live.pushInvalidation("task", [idOf(60)]);
+    live.pushInvalidation("task", [buildTaskId(60)]);
 
     expect(await screen.findByText("New: Count the pallets")).toBeTruthy();
     expect(getCard("Count the pallets")).toBeTruthy();
@@ -671,10 +684,13 @@ describe("the Work screen's board changes by themselves", () => {
 
   it("moves nothing for a Task that arrives past the rows its cell shows, and says it arrived", async () => {
     const crowded = Array.from({ length: 8 }, (_, index) =>
-      buildCard(idOf(100 + index), { title: `Crowded card ${String(index)}`, projectId: OPS.id }),
+      buildCard(buildTaskId(100 + index), {
+        title: `Crowded card ${String(index)}`,
+        projectId: OPS.id,
+      }),
     );
     let hasArrived = false;
-    const arrival = buildCard(idOf(110), { title: "Crowded card late", projectId: OPS.id });
+    const arrival = buildCard(buildTaskId(110), { title: "Crowded card late", projectId: OPS.id });
     const { live } = await openWork({
       board: () => buildBoard(...crowded, ...(hasArrived ? [arrival] : [])),
     });
@@ -682,7 +698,7 @@ describe("the Work screen's board changes by themselves", () => {
     await live.waitForFirstPushes();
 
     hasArrived = true;
-    live.pushInvalidation("task", [idOf(110)]);
+    live.pushInvalidation("task", [buildTaskId(110)]);
 
     expect(await screen.findByText("New: Crowded card late")).toBeTruthy();
     expect(screen.getByRole("button", { name: "5 more" })).toBeTruthy();

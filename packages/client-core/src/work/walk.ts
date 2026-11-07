@@ -69,8 +69,10 @@ const findLaneStop = (lane: ShownLane | undefined): WalkStop | undefined => {
  *   A folded lane has none, so they pass over it.
  * - `left` and `right` go to the nearest column of the same lane that has a
  *   card, skipping empty columns, at the same row or the last one of that
- *   column. They never leave the lane. Every row of a lane has one pitch, so
- *   the card at the same row number is the card at the nearest height.
+ *   column. They never leave the lane. Left and right choose the same row
+ *   number, which is the card at the nearest height while the cards keep one
+ *   height. A card that grows, for example with larger text spacing, can
+ *   make the nearest height a different row; the walk does not measure.
  * - `previousLane` and `nextLane` go to the nearest lane above or below that
  *   has a stop: the first card of an open lane, or the head of a folded one.
  *

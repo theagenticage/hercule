@@ -1,6 +1,6 @@
 /**
  * Tests where a carried card would land for a pointer at a given place, on
- * measurements written out by hand: three columns, two open lanes and a
+ * measurements written out by hand: three stages, two open lanes and a
  * folded one.
  */
 import { describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ const openLane = (
 });
 
 const GEOMETRY: BoardGeometry = {
-  columns: [
+  stageEdges: [
     { stage: "exploring", left: 200 },
     { stage: "planned", left: 350 },
     { stage: "building", left: 500 },
@@ -93,19 +93,19 @@ describe("chooseDropPlace", () => {
       expected: { kind: "cell", laneId: "storefront", stage: "exploring", index: 0 },
     },
     {
-      name: "counts a pointer in the gap before a column as inside that column",
+      name: "counts a pointer in the gap before a stage as inside that stage",
       x: 345,
       y: 300,
       expected: { kind: "cell", laneId: "storefront", stage: "planned", index: 0 },
     },
     {
-      name: "picks the first column for a pointer left of all columns",
+      name: "picks the first stage for a pointer left of all stages",
       x: 20,
       y: 300,
       expected: { kind: "cell", laneId: "storefront", stage: "exploring", index: 0 },
     },
     {
-      name: "picks the last column for a pointer right of all columns",
+      name: "picks the last stage for a pointer right of all stages",
       x: 1190,
       y: 500,
       expected: { kind: "cell", laneId: "no-project", stage: "landed", index: 0 },
@@ -117,7 +117,7 @@ describe("chooseDropPlace", () => {
       expected: { kind: "cell", laneId: "storefront", stage: "building", index: 0 },
     },
     {
-      name: "targets a folded lane as a whole, with the stage of the column the pointer is over",
+      name: "targets a folded lane as a whole, with the stage the pointer is over",
       x: 520,
       y: 420,
       expected: { kind: "folded-lane", laneId: "checkout", stage: "building" },

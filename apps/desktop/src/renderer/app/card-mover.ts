@@ -14,8 +14,14 @@ export interface PutBackRequest {
  */
 export interface CardMover {
   /**
-   * Shows the card back at `place`, as Undo does, and queues the move.
+   * Shows the card back at `place`, as Undo does, and queues the move. The
+   * move is sent only if `isUndoWanted` resolves to true, which it does when
+   * the gesture being undone was saved: a gesture that was refused changed
+   * nothing, and the card may since have been moved by another client.
    * Returns `undefined` when the card is no longer on the board.
    */
-  readonly putCardBack: (place: CardPlacement) => PutBackRequest | undefined;
+  readonly putCardBack: (
+    place: CardPlacement,
+    isUndoWanted: Promise<boolean>,
+  ) => PutBackRequest | undefined;
 }

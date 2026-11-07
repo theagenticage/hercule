@@ -10,8 +10,8 @@
 import type { DropPlace } from "@hercule/client-core/work";
 import type { BoardStage } from "@hercule/contract";
 
-/** Half the space between two columns: a pointer this close left of a column still counts as inside it. */
-const HALF_COLUMN_GAP = 7;
+/** Half the space between two stages: a pointer this close left of a stage still counts as inside it. */
+const HALF_STAGE_GAP = 7;
 
 /** The distance from the top edge of the board, in which a carried card scrolls the board up. */
 const TOP_EDGE_ZONE = 130;
@@ -22,8 +22,8 @@ const BOTTOM_EDGE_ZONE = 70;
 /** How many pixels the board scrolls per frame for each pixel the pointer is inside an edge zone, as a divisor. */
 const EDGE_SCROLL_DIVISOR = 6;
 
-/** The left edge of one stage's column. */
-export interface StageColumn {
+/** The left edge of one stage, where its cells start. */
+export interface StageEdge {
   readonly stage: BoardStage;
   readonly left: number;
 }
@@ -61,7 +61,7 @@ export interface LaneBox {
 
 /** Everything `chooseDropPlace` needs, in board coordinates. */
 export interface BoardGeometry {
-  readonly columns: readonly StageColumn[];
+  readonly stageEdges: readonly StageEdge[];
   readonly lanes: readonly LaneBox[];
 }
 
@@ -98,17 +98,17 @@ export const isSameDropPlace = (a: DropPlace | null, b: DropPlace | null): boole
   );
 };
 
-/** Returns whether `x` is left of the first column, past the half gap that still counts as inside it. */
-const isLeftOfColumns = (columns: readonly StageColumn[], x: number): boolean => {
-  const first = columns[0];
-  return first === undefined || x < first.left - HALF_COLUMN_GAP;
+/** Returns whether `x` is left of the first stage, past the half gap that still counts as inside it. */
+const isLeftOfStages = (stageEdges: readonly StageEdge[], x: number): boolean => {
+  const first = stageEdges[0];
+  return first === undefined || x < first.left - HALF_STAGE_GAP;
 };
 
-/** Returns the stage of the column at `x`: the last column that starts at or left of it, and the first for a pointer left of all. */
-const pickStage = (columns: readonly StageColumn[], x: number): BoardStage | undefined => {
-  let picked = columns[0];
-  for (const column of columns) {
-    if (x >= column.left - HALF_COLUMN_GAP) picked = column;
+/** Returns the stage at `x`: the last stage that starts at or left of it, and the first for a pointer left of all. */
+const pickStage = (stageEdges: readonly StageEdge[], x: number): BoardStage | undefined => {
+  let picked = stageEdges[0];
+  for (const edge of stageEdges) {
+    if (x >= edge.left - HALF_STAGE_GAP) picked = edge;
   }
   return picked?.stage;
 };
@@ -135,8 +135,8 @@ const pickRowIndex = (rows: readonly CellRow[], y: number): number =>
  * Returns where a card carried to the pointer at (`x`, `y`) would land, or
  * `null` when the board has no lane.
  *
- * - The lane is the one under `y`, else the nearest. The stage is the column
- *   at `x`.
+ * - The lane is the one under `y`, else the nearest. The stage is the one at
+ *   `x`.
  * - In an open lane, the card takes the place after every card whose middle
  *   is above `y`, but never past the cell's `lastIndex`. A cell with no card
  *   gives place 0.
@@ -153,10 +153,12 @@ export const chooseDropPlace = (
     return {
       kind: "folded-lane",
       laneId: lane.id,
-      stage: isLeftOfColumns(geometry.columns, x) ? null : (pickStage(geometry.columns, x) ?? null),
+      stage: isLeftOfStages(geometry.stageEdges, x)
+        ? null
+        : (pickStage(geometry.stageEdges, x) ?? null),
     };
   }
-  const stage = pickStage(geometry.columns, x);
+  const stage = pickStage(geometry.stageEdges, x);
   const cell = stage === undefined ? undefined : lane.cells.get(stage);
   if (stage === undefined || cell === undefined) return null;
   const index = Math.min(pickRowIndex(cell.rows, y), cell.lastIndex ?? Infinity);
