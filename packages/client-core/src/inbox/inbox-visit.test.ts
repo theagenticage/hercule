@@ -11,14 +11,17 @@ import {
   buildInboxLink,
   buildInboxPlace,
   buildRequestCard,
+  buildSignalLine,
   listCardIds,
 } from "./cards.testing";
 import { planLink, planUnlink } from "./card-links";
 import {
   advanceInboxVisit,
+  advanceLanding,
   advanceLinkGesture,
   START_OF_VISIT,
   type InboxVisit,
+  type LandingStep,
   type LinkGestureStep,
   type VisitStep,
 } from "./inbox-visit";
@@ -57,6 +60,7 @@ const startVisit = () => {
         released,
         isFresh: true,
         hasUserMove: false,
+        isMotionReduced: () => false,
         ...step,
       });
       history = next.history;
@@ -161,14 +165,28 @@ describe("advanceInboxVisit: arrivals", () => {
 });
 
 describe("advanceInboxVisit: the history", () => {
-  it("returns the history it was given when a read adds nothing to it", () => {
+  it("returns the history it was given when the read is the one it already holds", () => {
     const inbox = inboxOf([ticket("1", [PRICING])]);
-    const first = advanceInboxVisit(START_OF_VISIT, {
+    const step = {
       received: inbox,
+      view: VIEW,
+      released: new Set<string>(),
+      isFresh: true,
+      hasUserMove: false,
+      isMotionReduced: () => false,
+    };
+    const first = advanceInboxVisit(START_OF_VISIT, step);
+    expect(advanceInboxVisit(first.history, step).history).toBe(first.history);
+  });
+
+  it("keeps the placement and the bundles when a read only rewords a card", () => {
+    const first = advanceInboxVisit(START_OF_VISIT, {
+      received: inboxOf([ticket("1", [PRICING])]),
       view: VIEW,
       released: new Set(),
       isFresh: true,
       hasUserMove: false,
+      isMotionReduced: () => false,
     });
     const again = advanceInboxVisit(first.history, {
       received: inboxOf([ticket("1", [PRICING], { title: "Reworded" })]),
@@ -176,8 +194,10 @@ describe("advanceInboxVisit: the history", () => {
       released: new Set(),
       isFresh: true,
       hasUserMove: false,
+      isMotionReduced: () => false,
     });
-    expect(again.history).toBe(first.history);
+    expect(again.history.placement).toBe(first.history.placement);
+    expect(again.history.bundles).toBe(first.history.bundles);
   });
 
   it("leaves no trace of a copy kept from an earlier visit", () => {
@@ -187,6 +207,7 @@ describe("advanceInboxVisit: the history", () => {
       released: new Set(),
       isFresh: false,
       hasUserMove: false,
+      isMotionReduced: () => false,
     });
     expect(hasPlacedCards(placeholder.history.placement)).toBe(false);
     expect(placeholder.visit.layout?.ongoing.surfaces).toHaveLength(1);
@@ -406,5 +427,167 @@ describe("advanceLinkGesture: where a card rides", () => {
     link(visit, alone, A, 1);
     expect(riders(visit.read(alone, { isFresh: false }))).toEqual({ a: ["3"], b: [] });
     expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
+  });
+});
+
+describe("advanceInboxVisit: a signal landing on a card", () => {
+  const saying = (n: number, say: string) => ({
+    signals: { openCount: 1, latest: buildSignalLine(`s${String(n)}`, say) },
+  });
+  const read = (n: number, say: string, others: readonly InboxCard[] = []) =>
+    inboxOf([ticket("1", [PRICING], saying(n, say)), ...others]);
+  const wordsOf = (visit: InboxVisit, id: string) =>
+    visit.inbox!.cards.find((card) => card.id === id)!.signals.latest?.say.say;
+
+  /** Starts a visit that has read `first`, and keeps the history, so steps can be applied to it. */
+  const startLanding = (isReduced = false) => {
+    let history = START_OF_VISIT;
+    let asked = 0;
+    const draw = (received: Inbox | undefined, step: Partial<VisitStep> = {}): InboxVisit => {
+      const next = advanceInboxVisit(history, {
+        received,
+        view: VIEW,
+        released: new Set(),
+        isFresh: true,
+        hasUserMove: false,
+        isMotionReduced: () => {
+          asked += 1;
+          return isReduced;
+        },
+        ...step,
+      });
+      history = next.history;
+      return next.visit;
+    };
+    return {
+      draw,
+      step: (step: LandingStep) => {
+        const next = advanceLanding(history, step);
+        history = next.history;
+        return next.released;
+      },
+      /** Draws the page again from what the visit remembers, as the screen does after a step. */
+      redraw: (received: Inbox) => draw(received),
+      countAsks: () => asked,
+    };
+  };
+
+  it("lands nothing on the first read of the visit", () => {
+    const visit = startLanding();
+    const first = visit.draw(read(1, "Tessa commented"));
+    expect(first.landing).toBeUndefined();
+    expect(first.freshIds.size).toBe(0);
+    expect(visit.countAsks()).toBe(0);
+  });
+
+  it("lands nothing on a copy kept from an earlier visit, and it is no read of this visit", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"), { isFresh: false });
+    const own = visit.draw(read(2, "Omar commented"));
+    expect(own.landing).toBeUndefined();
+    expect(wordsOf(own, "1")).toBe("Omar commented");
+  });
+
+  it("holds the card as it was and asks the screen to play the landing, until the drop has landed", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"));
+    const landed = visit.draw(read(2, "Omar commented"));
+    expect(landed.landing).toEqual({
+      number: 1,
+      isReduced: false,
+      cards: [{ id: "1", tone: "plain" }],
+    });
+    expect(wordsOf(landed, "1")).toBe("Tessa commented");
+    // The card is not fresh while its drop falls, and the screen reader hears nothing yet.
+    expect(landed.freshIds.size).toBe(0);
+    expect(landed.announcement).toBe("");
+
+    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual(["1"]);
+    const after = visit.redraw(read(2, "Omar commented"));
+    expect(wordsOf(after, "1")).toBe("Omar commented");
+    expect([...after.freshIds]).toEqual(["1"]);
+    expect(after.announcement).toBe("Ticket ACME-1: Omar commented");
+    // The same landing, not a new one.
+    expect(after.landing).toBe(landed.landing);
+  });
+
+  it("asks for no landing again for a read that brings the same signal", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"));
+    const landed = visit.draw(read(2, "Omar commented"));
+    visit.step({ _tag: "dropLanded", landing: 1 });
+    const again = visit.draw(read(2, "Omar commented", [ticket("2", [PRICING])]));
+    expect(again.landing).toBe(landed.landing);
+    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
+  });
+
+  it("draws the new words at once under Reduce motion, and holds nothing", () => {
+    const visit = startLanding(true);
+    visit.draw(read(1, "Tessa commented"));
+    const landed = visit.draw(read(2, "Omar commented"));
+    expect(landed.landing).toMatchObject({ number: 1, isReduced: true });
+    expect(wordsOf(landed, "1")).toBe("Omar commented");
+    expect([...landed.freshIds]).toEqual(["1"]);
+    expect(landed.announcement).toBe("Ticket ACME-1: Omar commented");
+    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
+  });
+
+  it("asks about Reduce motion once for each landing, and not for a read that lands nothing", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"));
+    visit.draw(read(1, "Tessa commented", [ticket("2", [PRICING])]));
+    expect(visit.countAsks()).toBe(0);
+    visit.draw(read(2, "Omar commented"));
+    expect(visit.countAsks()).toBe(1);
+  });
+
+  it("keeps the first words a card was held with when a second signal lands, and passes the hold on", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"));
+    visit.draw(read(2, "Omar commented"));
+    const second = visit.draw(read(3, "Ines commented"));
+    expect(second.landing?.number).toBe(2);
+    expect(wordsOf(second, "1")).toBe("Tessa commented");
+    // The first drop lands, but the second landing took the card over, so nothing is released.
+    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
+    expect(wordsOf(visit.redraw(read(3, "Ines commented")), "1")).toBe("Tessa commented");
+    expect(visit.step({ _tag: "dropLanded", landing: 2 })).toEqual(["1"]);
+    const after = visit.redraw(read(3, "Ines commented"));
+    expect(wordsOf(after, "1")).toBe("Ines commented");
+    expect(after.announcement).toBe("Ticket ACME-1: Ines commented");
+  });
+
+  it("holds only the cards a signal landed on, and keeps the order of the page", () => {
+    const visit = startLanding();
+    const quiet = ticket("2", [PRICING]);
+    visit.draw(read(1, "Tessa commented", [quiet]));
+    const landed = visit.draw(read(2, "Omar commented", [quiet]));
+    expect(landed.inbox!.cards.map((card) => card.id)).toEqual(["1", "2"]);
+    expect(landed.inbox!.cards[1]).toBe(quiet);
+  });
+
+  it("clears the new mark when the user reaches the card, and only then", () => {
+    const visit = startLanding();
+    visit.draw(read(1, "Tessa commented"));
+    visit.draw(read(2, "Omar commented"));
+    visit.step({ _tag: "dropLanded", landing: 1 });
+    expect([...visit.redraw(read(2, "Omar commented")).freshIds]).toEqual(["1"]);
+    expect(visit.step({ _tag: "cardReached", id: "9" })).toEqual([]);
+    expect([...visit.redraw(read(2, "Omar commented")).freshIds]).toEqual(["1"]);
+    visit.step({ _tag: "cardReached", id: "1" });
+    expect(visit.redraw(read(2, "Omar commented")).freshIds.size).toBe(0);
+  });
+
+  it("returns the history it was given for a step that changes nothing", () => {
+    const history = advanceInboxVisit(START_OF_VISIT, {
+      received: read(1, "Tessa commented"),
+      view: VIEW,
+      released: new Set(),
+      isFresh: true,
+      hasUserMove: false,
+      isMotionReduced: () => false,
+    }).history;
+    expect(advanceLanding(history, { _tag: "dropLanded", landing: 1 }).history).toBe(history);
+    expect(advanceLanding(history, { _tag: "cardReached", id: "1" }).history).toBe(history);
   });
 });

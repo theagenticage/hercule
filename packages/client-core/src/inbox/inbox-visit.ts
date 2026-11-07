@@ -16,6 +16,12 @@
  *   the one thing that moves it. Each is a gesture the visit follows from
  *   its start to the controller's answer (`advanceLinkGesture`), so the visit
  *   is the only place that knows where a card rides.
+ * - A signal that lands on a card is the visit's too (`recordLandedSignals`).
+ *   When a fresh read brings a card a newer latest signal, the visit draws the
+ *   card with its old words, tells the screen to play the landing
+ *   (`InboxVisit.landing`), and draws the new words when the screen reports
+ *   that the drop has landed. The card is fresh until the user reaches it
+ *   (`advanceLanding`).
  */
 import type { EntityUnlinkResult, Inbox } from "@hercule/contract";
 import { replaceEqualDeep } from "@tanstack/query-core";
@@ -27,6 +33,16 @@ import {
   type InboxGrouping,
 } from "./groupings";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
+import {
+  listShownFreshIds,
+  NO_LANDINGS,
+  reachLandedCard,
+  recordLandedSignals,
+  releaseLandedCards,
+  showHeldCards,
+  type SignalLanding,
+  type SignalLandings,
+} from "./landed-signals";
 import {
   hasPlacedCards,
   NO_PLACEMENT,
@@ -57,6 +73,8 @@ export interface VisitHistory {
   readonly everything: Emptiness;
   /** The Requests column. */
   readonly requests: Emptiness;
+  /** The signals that landed on the cards, the cards held for their drop, and the cards that are fresh. */
+  readonly landings: SignalLandings;
 }
 
 /** A visit that has read nothing yet. */
@@ -65,6 +83,7 @@ export const START_OF_VISIT: VisitHistory = {
   bundles: {},
   everything: "empty",
   requests: "empty",
+  landings: NO_LANDINGS,
 };
 
 /** One read of the Inbox, and what the caller knows about it. */
@@ -88,6 +107,12 @@ export interface VisitStep {
    * not an accident: a column they leave empty is `emptiedByMove`.
    */
   readonly hasUserMove: boolean;
+  /**
+   * Asks whether the reader wants no movement. The visit asks only when a
+   * signal lands, once for that landing, because the answer costs a style
+   * lookup.
+   */
+  readonly isMotionReduced: () => boolean;
 }
 
 /** What the screen draws for one read. */
@@ -108,6 +133,21 @@ export interface InboxVisit {
   readonly heldArrivals: readonly string[];
   /** Whether the user's own move took the last card of the whole page, or of the Requests column. */
   readonly emptiedByMove: { readonly everything: boolean; readonly requests: boolean };
+  /**
+   * The cards a signal landed on, which show the new mark until the user
+   * reaches them (`advanceLanding`). A card whose drop is still falling is not
+   * in it yet.
+   */
+  readonly freshIds: ReadonlySet<string>;
+  /** What a screen reader says for the last signals that landed. Empty before any landed. */
+  readonly announcement: string;
+  /**
+   * The last landing for the screen to play, or `undefined` before any. The
+   * screen plays each landing (by its number) once, and reports back with
+   * `advanceLanding` when the drop has landed. Under Reduce motion there is
+   * nothing to report: the new words are drawn already.
+   */
+  readonly landing: SignalLanding | undefined;
 }
 
 const NO_ARRIVALS: readonly string[] = [];
@@ -159,7 +199,7 @@ export const advanceInboxVisit = (
   history: VisitHistory,
   step: VisitStep,
 ): { readonly visit: InboxVisit; readonly history: VisitHistory } => {
-  const { received, view, released, isFresh, hasUserMove } = step;
+  const { received, view, released, isFresh, hasUserMove, isMotionReduced } = step;
   if (received === undefined) {
     return {
       visit: {
@@ -168,12 +208,23 @@ export const advanceInboxVisit = (
         groupings: GROUPINGS_BEFORE_READ,
         heldArrivals: NO_ARRIVALS,
         emptiedByMove: { everything: false, requests: false },
+        freshIds: history.landings.freshIds,
+        announcement: history.landings.announcement,
+        landing: history.landings.landing,
       },
       history,
     };
   }
+  // A copy kept from an earlier visit says nothing about which signals landed in this one.
+  const landings = isFresh
+    ? recordLandedSignals(history.landings, received, isMotionReduced)
+    : history.landings;
   const known = isFresh && hasPlacedCards(history.placement) ? history.placement : undefined;
-  const { inbox, held } = holdBackArrivals(known, received, released);
+  const { inbox, held } = holdBackArrivals(
+    known,
+    showHeldCards(received, landings.holds),
+    released,
+  );
   // A copy kept from an earlier visit holds nothing in place, but the user's moves that wait still show.
   const placementToLayOut = isFresh
     ? history.placement
@@ -189,7 +240,8 @@ export const advanceInboxVisit = (
     placement === history.placement &&
     bundles === history.bundles &&
     everything === history.everything &&
-    requests === history.requests;
+    requests === history.requests &&
+    landings === history.landings;
   return {
     visit: {
       inbox,
@@ -200,8 +252,11 @@ export const advanceInboxVisit = (
         everything: everything === "emptied by move",
         requests: requests === "emptied by move",
       },
+      freshIds: listShownFreshIds(landings),
+      announcement: landings.announcement,
+      landing: landings.landing,
     },
-    history: isUnchanged ? history : { placement, bundles, everything, requests },
+    history: isUnchanged ? history : { placement, bundles, everything, requests, landings },
   };
 };
 
@@ -241,4 +296,36 @@ export const advanceLinkGesture = (history: VisitHistory, step: LinkGestureStep)
         ? settleRidingMove(placement, step.gesture, step.remaining)
         : refuseRidingMove(placement, step.gesture);
   return next === placement ? history : { ...history, placement: next };
+};
+
+/**
+ * One step in the life of a landing. The screen reports the first, and the user
+ * causes the second.
+ *
+ * - `dropLanded`: the drop of landing `landing` has landed. The cards it holds
+ *   draw their new words from the next draw on.
+ * - `cardReached`: the user reached the card `id` with the pointer or the
+ *   keys, or opened it. Its new mark goes.
+ */
+export type LandingStep =
+  | { readonly _tag: "dropLanded"; readonly landing: number }
+  | { readonly _tag: "cardReached"; readonly id: string };
+
+/**
+ * Returns the history after `step`, and the ids of the cards that draw their
+ * new words because of it (only `dropLanded` releases any). A card that a later
+ * landing took over is not among them. Returns `history` itself when the step
+ * changes nothing. Call it when the screen reports that a drop has landed and
+ * when the user reaches a card. The next `advanceInboxVisit` draws the result.
+ */
+export const advanceLanding = (
+  history: VisitHistory,
+  step: LandingStep,
+): { readonly history: VisitHistory; readonly released: readonly string[] } => {
+  const { landings } = history;
+  const { landings: next, released } =
+    step._tag === "dropLanded"
+      ? releaseLandedCards(landings, step.landing)
+      : { landings: reachLandedCard(landings, step.id), released: NO_ARRIVALS };
+  return { history: next === landings ? history : { ...history, landings: next }, released };
 };
