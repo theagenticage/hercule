@@ -188,7 +188,7 @@ describe("the entity param", () => {
           fireEvent.scroll(this);
         });
       });
-    } as Element["scrollTo"];
+    };
 
     await openIntake(buildLongList(), `/intake?entity=${PULL_REQUEST.id}`);
 

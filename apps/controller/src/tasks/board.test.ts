@@ -993,6 +993,59 @@ describe("the context of the board", () => {
   });
 });
 
+describe("the stack candidates of the board", () => {
+  const epicRef = (name: string) => `${PLUGIN}:epic:${name}`;
+
+  /** Builds the observation of an epic: a rich, slow kind that reports the tickets it holds as its links. */
+  const epic = (name: string, linked: ReadonlyArray<string>): ObservedEntity => ({
+    kind: `${PLUGIN}/epic`,
+    slots: {
+      noun: "Epic",
+      card: "rich",
+      pace: "slow",
+      patience: 336,
+      identifier: name.toUpperCase(),
+      facts: [],
+    },
+    observation: {
+      kind: "epic",
+      ref: epicRef(name),
+      title: `Epic ${name}`,
+      url: `https://tracker.example/epic/${name}`,
+      lifecycle: "open",
+      fields: {},
+      concerns: ["assigned"],
+      sourceUpdatedAt: OBSERVED_AT,
+      relations: { complete: true, partOf: [], linked },
+    },
+  });
+
+  it("pairs the Task of a rich thing with the Tasks of the compact things it reports, and leaves a Task of an unrelated thing out", async () => {
+    const board = await readLinkedBoard({
+      kinds: [
+        {
+          kind: TICKET_KIND,
+          observed: [ticket("one"), ticket("two"), ticket("loose")],
+        },
+        { kind: `${PLUGIN}/epic`, observed: [epic("lead", [ticketRef("one"), ticketRef("two")])] },
+      ],
+      tasks: [[epicRef("lead")], [ticketRef("one")], [ticketRef("two")], [ticketRef("loose")]],
+    });
+
+    const byTitle = new Map(board.cards.map((card) => [card.title, card.id]));
+    const [lead, one, two] = ["Task 0", "Task 1", "Task 2"].map((title) => byTitle.get(title)!);
+    expect(board.stackCandidatesTruncated).toBe(false);
+    expect(board.stackCandidates).toHaveLength(2);
+    expect(board.stackCandidates).toEqual(
+      expect.arrayContaining([
+        { leadTaskId: lead, memberTaskId: one, noun: "Ticket" },
+        { leadTaskId: lead, memberTaskId: two, noun: "Ticket" },
+      ]),
+    );
+    expect(() => Schema.encodeSync(WorkBoard)(board)).not.toThrow();
+  });
+});
+
 describe("the size of the board", () => {
   /** Reads the board when `count` Tasks are on it. */
   const readBoardWithTasks = (count: number) =>

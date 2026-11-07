@@ -49,6 +49,7 @@ export type IconName =
   | "intake"
   | "key"
   | "laptop"
+  | "link"
   | "list"
   | "memory"
   | "mic"
@@ -143,6 +144,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["intake", [13, 14]],
   ["key", [14]],
   ["laptop", [13]],
+  ["link", [12, 13]],
   ["list", [14]],
   ["memory", [15]],
   ["mic", []],

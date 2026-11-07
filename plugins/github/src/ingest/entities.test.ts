@@ -29,6 +29,7 @@ import {
 import { GITHUB_ENTITY_KINDS } from "../entity-kinds";
 import { buildItemRef, buildRepoRef } from "../subject";
 import { pollGithubFeed } from "./index";
+import { pollNotifications } from "./notifications";
 
 const OPENED = "is:pr is:open archived:false author:@me";
 const REVIEW_REQUESTED = "is:pr is:open archived:false review-requested:@me";
@@ -778,5 +779,56 @@ describe("the entities feed's refresh", () => {
     expect(Result.isFailure(result)).toBe(true);
     expect(reported.reconciled).toHaveLength(3);
     expect(reported.refreshed).toEqual([]);
+  });
+});
+
+describe("the entities feed and the notifications feed", () => {
+  it("name a pull request and an issue by the same ref, whatever case GitHub spells the repository in", async () => {
+    const harness = buildIngestHarness();
+    const notified = (id: string, updatedAt: string, subject: string, type: string) => ({
+      id,
+      reason: "mention",
+      updated_at: updatedAt,
+      subject: {
+        title: `Thread ${id}`,
+        url: `https://api.github.com/repos/acme/storefront-web/${subject}`,
+        type,
+      },
+      repository: { full_name: "acme/storefront-web" },
+    });
+    // The first poll only records where the feed stands, so the threads come with the second.
+    const notifications = [
+      { status: 200, body: [], headers: { "last-modified": "Sun, 01 Nov 2026 09:00:00 GMT" } },
+      {
+        status: 200,
+        body: [
+          notified("1", "2026-11-01T10:00:00Z", "pulls/87", "PullRequest"),
+          notified("2", "2026-11-01T10:01:00Z", "issues/42", "Issue"),
+        ],
+        headers: { "last-modified": "Sun, 01 Nov 2026 10:02:00 GMT" },
+      },
+    ];
+    for (const answer of notifications) {
+      await Effect.runPromise(
+        pollNotifications("token", harness.context).pipe(
+          Effect.provide(stubGithub(() => answer).layer),
+        ),
+      );
+    }
+    const stub = stubGraphql({
+      [OPENED]: searchPages([{ nodes: [pullRequestNode(87)] }]),
+      [ASSIGNED]: searchPages([{ nodes: [issueNode(42)] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const events = harness.events.filter((event) => event.kind === "github.notification");
+    const eventRefs = events.map((event) => event.refs[0]);
+    expect(eventRefs).toEqual([
+      "github:pr:acme/storefront-web#87",
+      "github:issue:acme/storefront-web#42",
+    ]);
+    expect(reconciledKind(reported, "pull-request").observations[0]?.ref).toBe(eventRefs[0]);
+    expect(reconciledKind(reported, "issue").observations[0]?.ref).toBe(eventRefs[1]);
   });
 });

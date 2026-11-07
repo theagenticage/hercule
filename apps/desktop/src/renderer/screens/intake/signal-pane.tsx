@@ -14,11 +14,7 @@ import {
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
-import {
-  useQueries,
-  useQuery,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
   DONE_ACTION_ID,

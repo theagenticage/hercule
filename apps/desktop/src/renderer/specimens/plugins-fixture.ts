@@ -39,6 +39,12 @@ export const QUAYSIDE_PLUGIN: PluginDetail = buildPlugin("quayside", "Quayside",
   hue: 190,
 });
 
+/** The Tidewatch plugin, invented: a planning tracker whose tickets lie in projects and milestones. Its mark is a wave, in a declared hue. */
+export const TIDEWATCH_PLUGIN: PluginDetail = buildPlugin("tidewatch", "Tidewatch", {
+  paths: ["M1.5 9c2-3 4-3 6.5 0s4.5 3 6.5 0", "M1.5 12.5c2-3 4-3 6.5 0s4.5 3 6.5 0"],
+  hue: 250,
+});
+
 /**
  * Sentry's mark, as a plugin that draws Sentry's own logo would declare it:
  * the Bureau book's brands.js path (Simple Icons, CC0) scaled by 2/3 onto the

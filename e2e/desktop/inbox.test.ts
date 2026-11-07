@@ -10,7 +10,10 @@
  *   it) and gives the issue a Task;
  * - T takes the pull request on: its card shows that a Task holds it, and the
  *   controller has a Task with its title;
- * - the card's On Work move goes to that Task on Work, where its card is drawn.
+ * - the card's On Work move goes to that Task on Work, where its card is drawn;
+ * - a review request that reaches the pull request as a signal lands on its
+ *   card as a new sentence, the card stays where it was, and the open card
+ *   shows the signal as a line with its answers.
  *
  * GitHub cannot be reached offline, so the entities are written into the
  * scratch database while the controller is stopped, in the shape the GitHub
@@ -18,6 +21,14 @@
  * are `part of` it, and a Connection that reports their concerns. The
  * Connection holds no token, so the controller never polls it and the rows
  * stay as written. The invented world is Northwind Market's web shop.
+ *
+ * The same holds for the signal. A plugin raises a signal from an event only
+ * after it builds the signal by reading GitHub, with the Connection's token,
+ * at a fixed address, so no stub feed can stand in for GitHub in the packaged
+ * binary. The signal is written into the database the way the plugin's
+ * `build` lays it out and the router stores it (an `event` origin that names
+ * the pull request's thread), and the controller reads it as it would read
+ * one the plugin raised. The restart is what delivers it to the open app.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -31,6 +42,9 @@ const CONNECTION_ID = "019a1234-5678-7000-8000-0000000000a1";
 const REPOSITORY_ID = "019a1234-5678-7000-8000-0000000000b1";
 const PULL_REQUEST_ID = "019a1234-5678-7000-8000-0000000000b2";
 const ISSUE_ID = "019a1234-5678-7000-8000-0000000000b3";
+
+const REVIEW_EVENT_DEDUP_KEY = "northwind-review-request-6241";
+const REVIEW_SIGNAL_ID = "019a1234-5678-7000-8000-0000000000c1";
 
 const REPOSITORY_REF = "github:repo:northwind/storefront-web";
 const PULL_REQUEST_REF = "github:pr:northwind/storefront-web#6241";
@@ -175,6 +189,111 @@ function seedEntities(home: string): void {
   }
 }
 
+/**
+ * Gives the pull request the words its kind declares: the sentence it says for
+ * its concern, and the template of a review request, which a signal's asker
+ * fills in. The controller stores both when it observes a pull request. Writes
+ * into the database of the stopped controller whose Hercule Home is `home`.
+ */
+function seedReviewWording(home: string): void {
+  const database = new DatabaseSync(join(home, "data", "hercule.db"));
+  try {
+    database
+      .prepare(
+        "UPDATE external_entities SET concern_reasons = ?, reason_templates = ? WHERE ref = ?",
+      )
+      .run(
+        JSON.stringify({ "review-requested": { say: "Review requested", tone: "plain" } }),
+        JSON.stringify({
+          "review-requested": { say: "{person} asked for your review", tone: "plain" },
+        }),
+        PULL_REQUEST_REF,
+      );
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Writes the review request event of the pull request and the open signal the
+ * GitHub plugin builds from it (kind `github/review-requested`, raised by
+ * `juno-park`, with the review answers and Done), as the router stores them, into
+ * the database of the stopped controller whose Hercule Home is `home`. The
+ * signal names the event, so the router does not raise it a second time.
+ */
+function seedReviewRequestSignal(home: string): void {
+  const database = new DatabaseSync(join(home, "data", "hercule.db"));
+  try {
+    const now = new Date().toISOString();
+    const event = database
+      .prepare(
+        "INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at, " +
+          "dedup_key, refs, url, payload) VALUES ('github', ?, 'github', " +
+          "'github.pr.review-requested', ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        toIdBytes(CONNECTION_ID),
+        now,
+        now,
+        REVIEW_EVENT_DEDUP_KEY,
+        JSON.stringify([PULL_REQUEST_REF, REPOSITORY_REF]),
+        "https://github.example/northwind/storefront-web/pull/6241",
+        JSON.stringify({
+          reviewer: "you",
+          requestedBy: "juno-park",
+          byYou: false,
+          toYou: true,
+        }),
+      );
+    const eventId = Number(event.lastInsertRowid);
+    const address = { repo: "northwind/storefront-web", number: 6241 };
+    database
+      .prepare(
+        "INSERT INTO signals (id, kind, origin, title, asker, place, priority, blocks, actions, " +
+          "match, status, created_at, connection_id, thread_ref) " +
+          "VALUES (?, 'github/review-requested', ?, ?, 'juno-park', ?, 'high', '[]', ?, '{}', " +
+          "'open', ?, ?, ?)",
+      )
+      .run(
+        toIdBytes(REVIEW_SIGNAL_ID),
+        JSON.stringify({
+          type: "event",
+          eventId,
+          connectionId: CONNECTION_ID,
+          threadRef: PULL_REQUEST_REF,
+        }),
+        PULL_REQUEST_TITLE,
+        "northwind/storefront-web#6241",
+        JSON.stringify([
+          {
+            id: "approve",
+            label: "Approve",
+            operation: {
+              op: "github/pr.review",
+              connectionId: CONNECTION_ID,
+              input: { ...address, verdict: "approve" },
+            },
+          },
+          {
+            id: "comment",
+            label: "Comment",
+            operation: { op: "github/pr.comment", connectionId: CONNECTION_ID, input: address },
+            field: { name: "body", placeholder: "Write a comment" },
+          },
+          { id: "done", label: "Done", operation: null },
+        ]),
+        now,
+        toIdBytes(CONNECTION_ID),
+        PULL_REQUEST_REF,
+      );
+    database
+      .prepare("INSERT INTO signal_events (signal_id, event_id) VALUES (?, ?)")
+      .run(toIdBytes(REVIEW_SIGNAL_ID), eventId);
+  } finally {
+    database.close();
+  }
+}
+
 describe("Inbox", () => {
   it("shows a pull request in Requests and an issue under Ongoing, takes the pull request on with T, and goes to its Task on Work", async () => {
     const arranged = await arrangeFleet();
@@ -242,5 +361,56 @@ describe("Inbox", () => {
     const card = page.locator(`.work-desk [data-card-id="${task!.id}"]`);
     await card.waitFor();
     expect(await card.textContent()).toContain(PULL_REQUEST_TITLE);
+  });
+
+  it("lands a review request that reaches the pull request as a signal on its card as a new sentence, leaves the card where it was, and shows the signal and its answers in the open card", async () => {
+    const arranged = await arrangeFleet();
+    await arranged.restartController(() => {
+      seedEntities(arranged.home);
+      seedReviewWording(arranged.home);
+    });
+    const { page } = await openSignedIn(arranged.url);
+    await page
+      .getByRole("tablist", { name: "Sidebar" })
+      .getByRole("tab", { name: "Hercule" })
+      .click();
+    await page
+      .getByRole("navigation", { name: "Hercule", exact: true })
+      .getByRole("link", { name: /^Inbox/ })
+      .click();
+
+    // The card says what its Connection reports, in the kind's words.
+    const request = page.locator(`.inbox-request[data-card-id="${PULL_REQUEST_ID}"]`);
+    const sentence = request.locator(".request-said");
+    await request.waitFor();
+    await expect.poll(() => sentence.textContent()).toBe("Review requested");
+    const before = await request.boundingBox();
+    expect(before).not.toBeNull();
+
+    // The review request arrives as a signal. The app reads the Inbox again
+    // when it reconnects, and the same card now says what the signal says.
+    await arranged.restartController(() => {
+      seedReviewRequestSignal(arranged.home);
+    });
+    await expect.poll(() => sentence.textContent()).toBe("juno-park asked for your review");
+
+    // The card stayed: the same one, in the same place, and no second card.
+    expect(await page.locator('aside[aria-label="Requests"] .inbox-request').count()).toBe(1);
+    // (A landing motion may still be moving the card for a moment, so the
+    // position is polled rather than read once.)
+    await expect.poll(async () => (await request.boundingBox())?.y).toBe(before!.y);
+
+    // The open card shows the signal as a line, opened, with its answers.
+    await request.click();
+    const openCard = page.locator(".open-card");
+    await openCard.waitFor();
+    const timeline = openCard.getByRole("region", { name: "Timeline" });
+    await expect
+      .poll(async () => (await timeline.locator(".open-card-signals li").allTextContents()).length)
+      .toBe(1);
+    const answers = openCard.locator(".open-card-answers");
+    await answers.getByRole("button", { name: "Approve" }).waitFor();
+    await answers.getByRole("button", { name: "Comment" }).waitFor();
+    await answers.getByRole("button", { name: "Done" }).waitFor();
   });
 });
