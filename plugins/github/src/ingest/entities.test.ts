@@ -42,6 +42,7 @@ const pullRequestNode = (number: number, overrides: Record<string, unknown> = {}
   number,
   title: `Pull request ${String(number)}`,
   url: `https://github.com/acme/storefront-web/pull/${String(number)}`,
+  bodyText: "",
   isDraft: false,
   state: "OPEN",
   updatedAt: "2026-11-01T10:00:00Z",
@@ -63,6 +64,7 @@ const issueNode = (number: number, overrides: Record<string, unknown> = {}) => (
   number,
   title: `Issue ${String(number)}`,
   url: `https://github.com/acme/storefront-web/issues/${String(number)}`,
+  bodyText: "",
   state: "OPEN",
   stateReason: null,
   updatedAt: "2026-11-01T10:00:00Z",
@@ -319,6 +321,37 @@ describe("the entities feed's inventory", () => {
         linked: [],
       });
     }
+  });
+
+  it("reports an item's description as a text for the host to search, and no text for an empty one", async () => {
+    const stub = stubGraphql({
+      [OPENED]: searchPages([
+        {
+          nodes: [
+            pullRequestNode(1, { bodyText: "Part of SHOP-123, see the ticket." }),
+            pullRequestNode(2, { bodyText: "   " }),
+          ],
+        },
+      ]),
+      [ASSIGNED]: searchPages([{ nodes: [issueNode(3, { bodyText: "Blocked by SHOP-9" })] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const [described, empty] = reconciledKind(reported, "pull-request").observations.map(full);
+    expect(described?.texts).toEqual([
+      {
+        evidenceKey: "description",
+        text: "Part of SHOP-123, see the ticket.",
+        revision: "2026-11-01T10:00:00Z",
+      },
+    ]);
+    expect(empty?.texts).toBeUndefined();
+    expect(full(reconciledKind(reported, "issue").observations[0]).texts).toMatchObject([
+      { evidenceKey: "description", text: "Blocked by SHOP-9" },
+    ]);
+    expect(reconciledKind(reported, "repository").observations[0]).not.toHaveProperty("texts");
+    expectValidGraphqlFragments(stub);
   });
 
   it("reports each repository seen once, as a context record with no concerns", async () => {

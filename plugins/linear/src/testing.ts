@@ -64,12 +64,19 @@ interface FakeTeam {
   name: string;
 }
 
-/** A project of the fake workspace, and the teams it is shared with. */
+/**
+ * A project of the fake workspace, the teams it is shared with and the
+ * initiatives it is part of. `progress` is the number Linear reports.
+ */
 interface FakeProject {
   id: string;
   name: string;
   url: string;
   teamIds: Array<string>;
+  initiativeIds?: Array<string>;
+  health?: "onTrack" | "atRisk" | "offTrack" | null;
+  progress?: number;
+  targetDate?: string | null;
 }
 
 /** A milestone of a project. */
@@ -77,6 +84,18 @@ interface FakeMilestone {
   id: string;
   name: string;
   projectId: string;
+  progress?: number;
+  targetDate?: string | null;
+}
+
+/** An initiative of the fake workspace, and the initiative above it. */
+interface FakeInitiative {
+  id: string;
+  name: string;
+  url: string;
+  parentId?: string | null;
+  health?: "onTrack" | "atRisk" | "offTrack" | null;
+  targetDate?: string | null;
 }
 
 /** A label: the workspace's when `teamId` is null, or a team's. */
@@ -120,8 +139,13 @@ export interface FakeWorld {
   teams: Array<FakeTeam>;
   projects: Array<FakeProject>;
   milestones: Array<FakeMilestone>;
+  initiatives: Array<FakeInitiative>;
   labels: Array<FakeLabel>;
   issues: Array<FakeIssue>;
+  /** The parent issue of an issue, by issue id. The parent must be an issue of the world. */
+  parents: Record<string, string>;
+  /** The attachment links of an issue, by issue id. */
+  attachments: Record<string, Array<string>>;
   notifications: Array<FakeNotification>;
   /** The most items the fake puts on one page of a paged list, at most the `first` asked for. */
   pageSize: number;
@@ -221,6 +245,7 @@ export const buildFakeWorld = (issues: Array<FakeIssue> = []): FakeWorld => ({
     },
   ],
   milestones: [{ id: "milestone-beta", name: "Beta", projectId: "project-checkout" }],
+  initiatives: [],
   labels: [
     { id: "label-bug", name: "Bug", isGroup: false, parentName: null, teamId: null },
     { id: "label-area", name: "Area", isGroup: true, parentName: null, teamId: "team-eng" },
@@ -228,6 +253,8 @@ export const buildFakeWorld = (issues: Array<FakeIssue> = []): FakeWorld => ({
     { id: "label-infra", name: "Infra", isGroup: false, parentName: null, teamId: "team-ops" },
   ],
   issues,
+  parents: {},
+  attachments: {},
   notifications: [],
   pageSize: 250,
   override: undefined,
@@ -537,6 +564,86 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
       const ids = readIdIn(filter) ?? [];
       const found = world.issues.filter((issue) => ids.includes(issue.id));
       return { issues: buildPage(found, variables, world.pageSize) };
+    }
+    case "LinearIssueContext": {
+      const ids = readIdIn(filter) ?? [];
+      const nodes = world.issues
+        .filter((issue) => ids.includes(issue.id))
+        .map((issue) => {
+          const parent = world.issues.find((candidate) => candidate.id === world.parents[issue.id]);
+          const links = world.attachments[issue.id] ?? [];
+          return {
+            id: issue.id,
+            parent:
+              parent === undefined
+                ? null
+                : { id: parent.id, identifier: parent.identifier, title: parent.title },
+            attachments: {
+              nodes: links.slice(0, 50).map((url) => ({ url })),
+              pageInfo: { hasNextPage: links.length > 50 },
+            },
+          };
+        });
+      return { issues: { nodes } };
+    }
+    case "LinearProjectContext": {
+      const ids = readIdIn(filter) ?? [];
+      const nodes = world.projects
+        .filter((project) => ids.includes(project.id))
+        .map((project) => {
+          const initiatives = (project.initiativeIds ?? []).map((id) => ({ id }));
+          const teams = project.teamIds.map((id) => ({ id }));
+          return {
+            id: project.id,
+            name: project.name,
+            url: project.url,
+            health: project.health ?? null,
+            progress: project.progress ?? 0,
+            targetDate: project.targetDate ?? null,
+            updatedAt: "2026-11-01T10:00:00.000Z",
+            initiatives: {
+              nodes: initiatives.slice(0, 50),
+              pageInfo: { hasNextPage: initiatives.length > 50 },
+            },
+            teams: { nodes: teams.slice(0, 50), pageInfo: { hasNextPage: teams.length > 50 } },
+          };
+        });
+      return { places: { nodes } };
+    }
+    case "LinearInitiativeContext": {
+      const ids = readIdIn(filter) ?? [];
+      const nodes = world.initiatives
+        .filter((initiative) => ids.includes(initiative.id))
+        .map((initiative) => ({
+          id: initiative.id,
+          name: initiative.name,
+          url: initiative.url,
+          health: initiative.health ?? null,
+          targetDate: initiative.targetDate ?? null,
+          updatedAt: "2026-11-01T10:00:00.000Z",
+          parentInitiative: initiative.parentId == null ? null : { id: initiative.parentId },
+        }));
+      return { places: { nodes } };
+    }
+    case "LinearMilestoneContext": {
+      const ids = readIdIn(filter) ?? [];
+      const nodes = world.milestones
+        .filter((milestone) => ids.includes(milestone.id))
+        .map((milestone) => ({
+          id: milestone.id,
+          name: milestone.name,
+          progress: milestone.progress ?? 0,
+          targetDate: milestone.targetDate ?? null,
+          updatedAt: "2026-11-01T10:00:00.000Z",
+        }));
+      return { places: { nodes } };
+    }
+    case "LinearTeamContext": {
+      const ids = readIdIn(filter) ?? [];
+      const nodes = world.teams
+        .filter((team) => ids.includes(team.id))
+        .map((team) => ({ id: team.id, name: team.name, updatedAt: "2026-11-01T10:00:00.000Z" }));
+      return { places: { nodes } };
     }
     case "LinearIdentity":
       return viewerFields;

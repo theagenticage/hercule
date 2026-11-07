@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
 import { EntityFact } from "@hercule/contract";
 import {
+  EntityObservation,
   MAX_ENTITY_OBSERVATIONS,
   type EntityInventory,
-  type EntityObservation,
 } from "@hercule/plugin-host";
 import type { LinearConnectionConfig } from "../connection-type";
 import { LINEAR_ENTITY_KINDS } from "../entity-kinds";
@@ -25,12 +25,17 @@ import {
   stampAt,
   TEST_ORGANIZATION,
   type FakeIssue,
+  type FakeWorld,
   type ReportedEntities,
 } from "../testing";
 import { pollWithConnection } from "./index";
 
 /** The ref the host stores for the fake issue `id`. */
 const refOf = (id: string): string => `linear:issue:${TEST_ORGANIZATION.id}/${id}`;
+
+/** The ref the host stores for the fake place of `kind` with the id `id`. */
+const placeRef = (kind: string, id: string): string =>
+  `linear:${kind}:${TEST_ORGANIZATION.id}/${id}`;
 
 /**
  * Polls the `entities` feed once against a fake Linear holding `issues`, with
@@ -41,13 +46,21 @@ const pollEntitiesFeed = async (
   issues: Array<FakeIssue>,
   options: {
     readonly wanted?: ReadonlyArray<string>;
+    /** The refs the host wants read, by unqualified kind word, besides the issues in `wanted`. */
+    readonly wantedPlaces?: Readonly<Record<string, ReadonlyArray<string>>>;
     readonly config?: LinearConnectionConfig;
     readonly pageSize?: number;
+    /** Changes the fake workspace before the poll. */
+    readonly prepare?: (world: FakeWorld) => void;
   } = {},
 ) => {
   const fake = buildFakeLinear(buildFakeWorld(issues));
   if (options.pageSize !== undefined) fake.world.pageSize = options.pageSize;
-  const { entities, reported } = buildFakeEntities({ issue: options.wanted ?? [] });
+  options.prepare?.(fake.world);
+  const { entities, reported } = buildFakeEntities({
+    ...options.wantedPlaces,
+    issue: options.wanted ?? [],
+  });
   const context = { ...buildIngestHarness().context, entities };
   const result = await runAgainstStub(
     pollWithConnection("entities", options.config ?? {}, context),
@@ -89,6 +102,7 @@ describe("the entities feed's inventory", () => {
       "LinearAssignedIssues",
       "LinearAssignedIssues",
       "LinearAssignedIssues",
+      "LinearIssueContext",
     ]);
   });
 
@@ -296,23 +310,59 @@ describe("the entities feed's refresh", () => {
 });
 
 describe("the entities feed's request count", () => {
-  it("sends one paged read and one batched refresh, never one request per issue", async () => {
+  it("sends one paged read, one batched context read and one batched refresh, never one request per issue", async () => {
     const issues = Array.from({ length: 30 }, (_, index) => buildFakeIssue(index + 1));
     const wanted = Array.from({ length: 20 }, (_, index) => refOf(`issue-${String(index + 100)}`));
 
     const { fake, requestNames, reported } = await pollEntitiesFeed(issues, { wanted });
 
-    expect(requestNames).toEqual(["LinearIdentity", "LinearAssignedIssues", "LinearIssueLookup"]);
-    expect(fake.requests[2]?.variables["filter"]).toEqual({
+    expect(requestNames).toEqual([
+      "LinearIdentity",
+      "LinearAssignedIssues",
+      "LinearIssueContext",
+      "LinearIssueLookup",
+    ]);
+    expect(fake.requests[3]?.variables["filter"]).toEqual({
       id: { in: wanted.map((ref) => ref.split("/")[1]) },
     });
-    expect(reported.listed).toEqual([{ kind: "issue", limit: 50 }]);
+    expect(reported.listed.map(({ kind }) => kind)).toEqual([
+      "issue",
+      "project",
+      "initiative",
+      "milestone",
+      "team",
+    ]);
+  });
+
+  it("reads the context of 120 issues in three requests", async () => {
+    const issues = Array.from({ length: 120 }, (_, index) => buildFakeIssue(index + 1));
+
+    const { requestNames } = await pollEntitiesFeed(issues);
+
+    expect(requestNames.filter((name) => name === "LinearIssueContext")).toHaveLength(3);
+    expect(requestNames).toHaveLength(1 + 1 + 3);
   });
 
   it("sends no refresh request when the host wants nothing read", async () => {
     const { requestNames } = await pollEntitiesFeed([buildFakeIssue(1)]);
 
-    expect(requestNames).toEqual(["LinearIdentity", "LinearAssignedIssues"]);
+    expect(requestNames).toEqual(["LinearIdentity", "LinearAssignedIssues", "LinearIssueContext"]);
+  });
+
+  it("sends one request for each kind of place the host wants, however many it wants", async () => {
+    const wantedPlaces = {
+      project: ["project-checkout", "project-oncall"].map((id) => placeRef("project", id)),
+      team: ["team-eng", "team-ops"].map((id) => placeRef("team", id)),
+    };
+
+    const { requestNames } = await pollEntitiesFeed([], { wantedPlaces });
+
+    expect(requestNames).toEqual([
+      "LinearIdentity",
+      "LinearAssignedIssues",
+      "LinearProjectContext",
+      "LinearTeamContext",
+    ]);
   });
 });
 
@@ -384,6 +434,338 @@ describe("the kind table of an issue", () => {
             : { form: "word", text: String(value) };
         expect(() => Schema.decodeUnknownSync(EntityFact)(shown)).not.toThrow();
       }
+    }
+  });
+});
+
+describe("the context of an issue", () => {
+  /** Polls with a parent issue in another project, a project, a milestone and attachments. */
+  const pollWithContext = (options: {
+    readonly attachments?: Array<string>;
+    readonly description?: string | null;
+    readonly prepare?: (world: FakeWorld) => void;
+  }) => {
+    const child = buildFakeIssue(1, {
+      project: { id: "project-checkout", name: "Checkout revamp" },
+      projectMilestone: { id: "milestone-beta", name: "Beta" },
+      description: options.description === undefined ? "Fixes the button." : options.description,
+    });
+    const parent = buildFakeIssue(2, {
+      assignee: { ...OTHER_USER },
+      project: { id: "project-oncall", name: "On-call tooling" },
+      title: "Checkout epic",
+    });
+    return pollEntitiesFeed([child, parent], {
+      prepare: (world) => {
+        world.parents[child.id] = parent.id;
+        world.attachments[child.id] = options.attachments ?? [];
+        options.prepare?.(world);
+      },
+    });
+  };
+
+  /** The observation the inventory reported for the issue `id`. */
+  const inventoried = (reported: ReportedEntities, id: string) =>
+    full(reconciledIssues(reported).observations.find((o) => o.ref === refOf(id)));
+
+  it("lists every place above an issue by every path, each once: its parent, project, milestone and team", async () => {
+    const { reported } = await pollWithContext({});
+
+    expect(inventoried(reported, "issue-1").relations).toEqual({
+      complete: true,
+      partOf: [
+        refOf("issue-2"),
+        placeRef("project", "project-checkout"),
+        placeRef("milestone", "milestone-beta"),
+        placeRef("team", "team-eng"),
+      ],
+      linked: [],
+      linkedUrls: [],
+    });
+  });
+
+  it("reports the parent issue as a partial observation, so it is a place until it is read in full", async () => {
+    const { reported } = await pollWithContext({});
+
+    // The parent is not assigned to the user, so only the context read knows it.
+    expect(reported.refreshed.flat()).toEqual([
+      expect.objectContaining({
+        kind: "issue",
+        ref: refOf("issue-2"),
+        title: "Checkout epic",
+        partial: true,
+        fields: { key: "ENG-2" },
+      }),
+    ]);
+  });
+
+  it("reports the attachments' links, each once, and leaves out links nobody can open", async () => {
+    const { reported } = await pollWithContext({
+      attachments: [
+        "https://github.com/acme/web/pull/7",
+        "https://github.com/acme/web/pull/7",
+        "slack://channel?id=C1",
+        "https://github.com/acme/web/pull/8",
+      ],
+    });
+
+    expect(inventoried(reported, "issue-1").relations).toMatchObject({
+      complete: true,
+      linkedUrls: ["https://github.com/acme/web/pull/7", "https://github.com/acme/web/pull/8"],
+    });
+  });
+
+  it("reports the description as a text with the issue's update time as its revision", async () => {
+    const { reported } = await pollWithContext({});
+
+    const observation = inventoried(reported, "issue-1");
+    expect(observation.texts).toEqual([
+      {
+        evidenceKey: "description",
+        text: "Fixes the button.",
+        revision: observation.sourceUpdatedAt,
+      },
+    ]);
+  });
+
+  it("reports no text for an issue without a description", async () => {
+    const { reported } = await pollWithContext({ description: null });
+
+    expect(inventoried(reported, "issue-1").texts).toBeUndefined();
+  });
+
+  it("says the relations are not complete when the attachments have another page", async () => {
+    const attachments = Array.from(
+      { length: 51 },
+      (_, i) => `https://example.com/doc/${String(i)}`,
+    );
+
+    const { reported } = await pollWithContext({ attachments });
+
+    const { relations } = inventoried(reported, "issue-1");
+    expect(relations?.complete).toBe(false);
+    expect(relations?.linkedUrls).toHaveLength(50);
+  });
+
+  it("reports an issue whose context read failed with what the issue itself knows, and not complete", async () => {
+    const { reported, result } = await pollWithContext({
+      prepare: (world) => {
+        world.override = (request) =>
+          request.operationName === "LinearIssueContext" ? { status: 500, body: {} } : undefined;
+      },
+    });
+
+    expect(Result.isSuccess(result)).toBe(true);
+    const { relations, texts } = inventoried(reported, "issue-1");
+    expect(relations).toEqual({
+      complete: false,
+      partOf: [
+        placeRef("project", "project-checkout"),
+        placeRef("milestone", "milestone-beta"),
+        placeRef("team", "team-eng"),
+      ],
+      linked: [],
+    });
+    expect(texts).toHaveLength(1);
+    expect(reported.refreshed).toEqual([]);
+  });
+
+  it("reports nothing and asks for a wait when Linear rate limits the context read", async () => {
+    const { reported, result } = await pollWithContext({
+      prepare: (world) => {
+        world.override = (request) =>
+          request.operationName === "LinearIssueContext"
+            ? {
+                status: 400,
+                headers: { "retry-after": "30" },
+                body: { errors: [{ message: "limited", extensions: { code: "RATELIMITED" } }] },
+              }
+            : undefined;
+      },
+    });
+
+    expect(result).toEqual(Result.succeed({ nextAfterSeconds: 30 }));
+    expect(reported.reconciled).toEqual([]);
+  });
+
+  it("reads the context of a refreshed issue too", async () => {
+    const issue = buildFakeIssue(5, { assignee: { ...OTHER_USER } });
+
+    const { reported } = await pollEntitiesFeed([issue], {
+      wanted: [refOf(issue.id)],
+      prepare: (world) => {
+        world.attachments[issue.id] = ["https://github.com/acme/web/pull/9"];
+      },
+    });
+
+    expect(full(reported.refreshed[0]?.[0]).relations?.linkedUrls).toEqual([
+      "https://github.com/acme/web/pull/9",
+    ]);
+  });
+
+  it("reports observations the host's schema accepts", async () => {
+    const { reported } = await pollWithContext({
+      attachments: ["https://github.com/acme/web/pull/7"],
+    });
+
+    for (const observation of [
+      ...reconciledIssues(reported).observations,
+      ...reported.refreshed.flat(),
+    ]) {
+      expect(() => Schema.decodeUnknownSync(EntityObservation)(observation)).not.toThrow();
+    }
+  });
+});
+
+describe("the context of a place", () => {
+  const initiatives = [
+    { id: "init-growth", name: "Grow checkout", url: "https://linear.app/acme/initiative/growth" },
+    {
+      id: "init-q4",
+      name: "Q4 bets",
+      url: "https://linear.app/acme/initiative/q4",
+      parentId: "init-growth",
+      health: "atRisk" as const,
+      targetDate: "2026-12-31",
+    },
+  ];
+
+  /** Polls with the host wanting `wantedPlaces`, over a workspace that holds the initiatives. */
+  const pollPlaces = (
+    wantedPlaces: Readonly<Record<string, ReadonlyArray<string>>>,
+    prepare: (world: FakeWorld) => void = () => {},
+  ) =>
+    pollEntitiesFeed([], {
+      wantedPlaces,
+      prepare: (world) => {
+        world.initiatives = initiatives;
+        prepare(world);
+      },
+    });
+
+  /** Returns the one observation reported for a place. */
+  const refreshedPlace = (reported: ReportedEntities, ref: string) =>
+    full(reported.refreshed.flat().find((observation) => observation.ref === ref));
+
+  it("reports a project in two initiatives and a team as its parents, with what Linear says of its health, date and progress", async () => {
+    const { reported } = await pollPlaces(
+      { project: [placeRef("project", "project-checkout")] },
+      (world) => {
+        const project = world.projects[0]!;
+        Object.assign(project, {
+          initiativeIds: ["init-growth", "init-q4"],
+          health: "offTrack",
+          progress: 0.4,
+          targetDate: "2026-12-01",
+        });
+      },
+    );
+
+    const project = refreshedPlace(reported, placeRef("project", "project-checkout"));
+    expect(project).toMatchObject({
+      kind: "project",
+      title: "Checkout revamp",
+      status: "off-track",
+      progress: { fraction: 0.4 },
+      targetDate: "2026-12-01T12:00:00.000Z",
+      concerns: [],
+      relations: {
+        complete: true,
+        partOf: [
+          placeRef("initiative", "init-growth"),
+          placeRef("initiative", "init-q4"),
+          placeRef("team", "team-eng"),
+        ],
+      },
+    });
+  });
+
+  it("reports the progress Linear gives and never works it out from the issues it can see", async () => {
+    const done = buildFakeIssue(1, {
+      project: { id: "project-checkout", name: "Checkout revamp" },
+      state: { ...FAKE_STATES.completed },
+    });
+
+    const { reported } = await pollEntitiesFeed([done], {
+      wantedPlaces: { project: [placeRef("project", "project-checkout")] },
+      prepare: (world) => {
+        world.projects[0]!.progress = 0.25;
+      },
+    });
+
+    // The only issue of the project is done, which would make 100% if it were counted.
+    expect(refreshedPlace(reported, placeRef("project", "project-checkout")).progress).toEqual({
+      fraction: 0.25,
+    });
+  });
+
+  it("says a project's relations are not complete when Linear has more initiatives than it listed", async () => {
+    const many = Array.from({ length: 51 }, (_, index) => `init-${String(index)}`);
+
+    const { reported } = await pollPlaces(
+      { project: [placeRef("project", "project-checkout")] },
+      (world) => {
+        world.projects[0]!.initiativeIds = many;
+      },
+    );
+
+    const { relations } = refreshedPlace(reported, placeRef("project", "project-checkout"));
+    expect(relations?.complete).toBe(false);
+    expect(relations?.partOf).toHaveLength(50 + 1);
+  });
+
+  it("reports an initiative with its parent initiative, and a milestone and a team with no progress they were not given", async () => {
+    const { reported } = await pollPlaces({
+      initiative: [placeRef("initiative", "init-q4")],
+      milestone: [placeRef("milestone", "milestone-beta")],
+      team: [placeRef("team", "team-ops")],
+    });
+
+    const initiative = refreshedPlace(reported, placeRef("initiative", "init-q4"));
+    expect(initiative).toMatchObject({
+      status: "at-risk",
+      targetDate: "2026-12-31T12:00:00.000Z",
+      relations: { complete: true, partOf: [placeRef("initiative", "init-growth")] },
+    });
+    expect(initiative.progress).toBeUndefined();
+    expect(refreshedPlace(reported, placeRef("milestone", "milestone-beta"))).toMatchObject({
+      kind: "milestone",
+      title: "Beta",
+    });
+    const team = refreshedPlace(reported, placeRef("team", "team-ops"));
+    expect(team).toMatchObject({ kind: "team", title: "Operations" });
+    expect(team.relations).toBeUndefined();
+  });
+
+  it("leaves a project Linear does not return as a claim with no record, reported inaccessible", async () => {
+    const { reported } = await pollPlaces({
+      project: [placeRef("project", "project-oncall"), placeRef("project", "project-secret")],
+    });
+
+    expect(reported.missing).toEqual([
+      { ref: placeRef("project", "project-secret"), reason: "inaccessible" },
+    ]);
+    expect(reported.refreshed.flat().map((observation) => observation.ref)).toEqual([
+      placeRef("project", "project-oncall"),
+    ]);
+  });
+
+  it("reports observations the host's schema accepts", async () => {
+    const { reported } = await pollPlaces(
+      {
+        project: [placeRef("project", "project-checkout")],
+        initiative: [placeRef("initiative", "init-q4")],
+        milestone: [placeRef("milestone", "milestone-beta")],
+        team: [placeRef("team", "team-eng")],
+      },
+      (world) => {
+        Object.assign(world.projects[0]!, { initiativeIds: ["init-q4"], health: "onTrack" });
+      },
+    );
+
+    expect(reported.refreshed.flat()).toHaveLength(4);
+    for (const observation of reported.refreshed.flat()) {
+      expect(() => Schema.decodeUnknownSync(EntityObservation)(observation)).not.toThrow();
     }
   });
 });

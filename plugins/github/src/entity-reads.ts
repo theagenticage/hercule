@@ -12,6 +12,7 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
+  MAX_ENTITY_TEXT_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   type EntityObservation,
   type PluginError,
@@ -42,7 +43,7 @@ export type EntityConcern = "opened" | "review-requested" | "assigned";
 const REPOSITORY_FRAGMENT = `fragment RepositoryFields on Repository { nameWithOwner createdAt }`;
 
 const PULL_REQUEST_FRAGMENT = `fragment PullRequestFields on PullRequest {
-  __typename number title url isDraft state updatedAt
+  __typename number title url bodyText isDraft state updatedAt
   author { login }
   repository { ...RepositoryFields }
   headRefName
@@ -52,7 +53,7 @@ const PULL_REQUEST_FRAGMENT = `fragment PullRequestFields on PullRequest {
 }`;
 
 const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
-  __typename number title url state stateReason updatedAt
+  __typename number title url bodyText state stateReason updatedAt
   repository { ...RepositoryFields }
   assignees(first: ${String(ASSIGNEES_READ)}) { totalCount nodes { login } }
   labels(first: 5) { nodes { name } }
@@ -93,6 +94,8 @@ const PullRequestNode = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   url: Schema.String,
+  /** The description as plain text, which may be empty. */
+  bodyText: Schema.String,
   isDraft: Schema.Boolean,
   /** `OPEN`, `CLOSED` or `MERGED`. */
   state: Schema.String,
@@ -130,6 +133,8 @@ const IssueNode = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   url: Schema.String,
+  /** The description as plain text, which may be empty. */
+  bodyText: Schema.String,
   /** `OPEN` or `CLOSED`. */
   state: Schema.String,
   /** Why a closed issue closed: `COMPLETED`, `NOT_PLANNED` or `DUPLICATE`. Null on an old closed issue. */
@@ -206,6 +211,24 @@ const decideIssueLifecycle = (node: IssueNode): "open" | "completed" | "abandone
     : "completed";
 };
 
+/**
+ * Returns the `texts` of an item: its description, which the host searches for
+ * references to other things. An empty description reports no text, because
+ * the host's schema takes only a text of one character or more.
+ */
+const buildItemTexts = (node: ItemNode): Pick<EntityObservation, "texts"> =>
+  node.bodyText.trim() === ""
+    ? {}
+    : {
+        texts: [
+          {
+            evidenceKey: "description",
+            text: cutText(node.bodyText, MAX_ENTITY_TEXT_LENGTH),
+            revision: node.updatedAt,
+          },
+        ],
+      };
+
 /** Returns the address of a repository the way a plugin reports it: `github.com/owner/repo`, lowercase. */
 const buildRemote = (nameWithOwner: string): string => `github.com/${nameWithOwner.toLowerCase()}`;
 
@@ -249,6 +272,7 @@ const buildPullRequestObservation = (
           }),
     },
     relations: buildRelations(repo),
+    ...buildItemTexts(node),
     fields: {
       number: node.number,
       repo,
@@ -332,6 +356,7 @@ const buildIssueObservation = (
     status: lifecycle === "open" ? "open" : "closed",
     repository: { target: { remote: buildRemote(repo) } },
     relations: buildRelations(repo),
+    ...buildItemTexts(node),
     fields: {
       number: node.number,
       repo,
