@@ -18,7 +18,6 @@ import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { useWindowVisible } from "../../../app/window-visibility";
 import { IconPill, KeysSheet, ReadFailure, UndoLine, type KeyRow } from "../../../screens/desk";
-import { QuestionIcon } from "../../../icons/question";
 import { InboxDesk, type InboxDeskState } from "../../../screens/inbox/inbox-desk";
 import { InboxLoading } from "../../../screens/inbox/inbox-loading";
 import { InboxPill } from "../../../screens/inbox/inbox-pill";
@@ -269,8 +268,8 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           showsControls={empty === null}
           notice={notice}
           end={
-            <IconPill label="Keys" onClick={page.toggleKeysSheet}>
-              <QuestionIcon size={16} />
+            <IconPill label="Show the keys" title="Keys (?)" onClick={page.toggleKeysSheet}>
+              ?
             </IconPill>
           }
         />

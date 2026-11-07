@@ -894,7 +894,7 @@ describe("the Inbox's moves", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Keys" }));
+    await user.click(screen.getByRole("button", { name: "Show the keys" }));
     expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
   });
   it("brings in a card that a read adds, and leaves the cards that were there where they are", async () => {
