@@ -1515,12 +1515,18 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
  * first render, as if the user had made them. Returns once the page is in the
  * document. Fails when the page has no `#root`, draws nothing, or tries to
  * read a record the cache does not hold.
+ *
+ * `pathOpenedAfterDrawn`, when given, is pushed to the address once the page
+ * is drawn, as a click on a card would. Opening it that way leaves the board
+ * where it is. An address that names a Task when the screen opens brings that
+ * Task's card into view, which scrolls the board.
  */
 async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
   screens: OpenScreens,
   unsentThreadIds: readonly string[] = [],
+  pathOpenedAfterDrawn?: string,
 ): Promise<void> {
   applySheetAppearance();
   const answerMove = screens.intake?.answerMove;
@@ -1602,6 +1608,7 @@ async function mountShellSpecimen(
   }
   if (screens.run !== undefined) await waitForElement(findRunDrawnSelector(path));
   assertShellDrawn(queryClient, screens, path);
+  if (pathOpenedAfterDrawn !== undefined) router.history.push(pathOpenedAfterDrawn);
 }
 
 /**
@@ -1836,8 +1843,10 @@ export async function mountWorkSpecimen(
   });
   await mountShellSpecimen(
     records,
-    openTaskId === undefined ? "/work" : `/work?task=${openTaskId}`,
+    "/work",
     { work },
+    [],
+    openTaskId === undefined ? undefined : `/work?task=${openTaskId}`,
   );
 }
 

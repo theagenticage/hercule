@@ -143,6 +143,11 @@ button.task-pane-note:hover {
 .task-pane-context .relation-row:hover {
   background: var(--hover);
 }
+/* A Part of row is a button: the keyboard sees the same ring the Inbox's move rows draw. */
+.task-pane-context button.relation-go:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
 .task-pane-context .relation-go {
   gap: 9px;
   min-height: 32px;

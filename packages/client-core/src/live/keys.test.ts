@@ -145,13 +145,14 @@ describe("the Inbox's and the entities' keys", () => {
     readonly keys: ReadonlyArray<LiveQueryKey>;
   }> = [
     {
-      name: "an externalEntity push naming ids reads every entity pane, not only the named ones",
+      name: "an externalEntity push naming ids reads every entity pane and Task details, not only the named ones",
       topic: "externalEntity",
       ids: ["e1", "e2"],
       keys: [
         ...inboxKeys,
-        queryKeys.workBoard(),
         queryKeys.externalEntity(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
         queryKeys.entitySuggestions(),
       ],
     },
@@ -161,8 +162,9 @@ describe("the Inbox's and the entities' keys", () => {
       ids: [],
       keys: [
         ...inboxKeys,
-        queryKeys.workBoard(),
         queryKeys.externalEntity(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
         queryKeys.entitySuggestions(),
       ],
     },

@@ -493,14 +493,14 @@ const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
 ];
 
 /**
- * The entity reads a `connection` or `plugin` push makes stale: every entity
+ * The entity reads an `externalEntity`, `connection` or `plugin` push makes stale: every entity
  * pane (`kindAvailable`, `stale`, the context's completeness), the Work board
  * (the same facts on its cards, and the claims a deleted Connection takes
  * with it), every Task's details pane (it embeds the same entities, places
  * and edges, and sits under the `task` prefix) and the Add sheet's
  * suggestions (a deleted Connection takes the claims that made a thing concern
- * the user, so it stops qualifying). These changes write no entity row, so no
- * `externalEntity` push comes.
+ * the user, so it stops qualifying). A `connection` or `plugin` change writes
+ * no entity row, so it sends no `externalEntity` push of its own.
  */
 const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
   queryKeys.externalEntity(),
@@ -742,17 +742,14 @@ export const buildQueryKeys = (
   // A poll, a claim, a place's title, status or progress, and the user's own
   // moves (take, add, dismiss, restore) all announce this topic. A card is
   // drawn by the Inbox, the sidebar's count, the Work board's marks and lanes,
-  // an open pane, and the Add sheet's suggestions, so every one of them reads
-  // again. Every open pane reads again, not only the named entities': a pane
-  // embeds its parents' records, so a change to a repository changes the
-  // panes of the entities under it, and the push names only the repository.
+  // an open pane, every Task's details pane (it shows the linked entities'
+  // titles and statuses), and the Add sheet's suggestions, so every one of
+  // them reads again. Every open pane reads again, not only the named
+  // entities': a pane embeds its parents' records, so a change to a repository
+  // changes the panes of the entities under it, and the push names only the
+  // repository.
   if (topic === "externalEntity") {
-    return [
-      ...INBOX_KEYS,
-      queryKeys.workBoard(),
-      queryKeys.externalEntity(),
-      queryKeys.entitySuggestions(),
-    ];
+    return [...INBOX_KEYS, ...ENTITY_SOURCE_KEYS];
   }
   // Provider Accounts are read as one list, so the whole list is refetched
   // whichever account changed. The controller's own read is refetched too:

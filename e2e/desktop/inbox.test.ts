@@ -5,6 +5,9 @@
  * - the Inbox row in the sidebar says one card waits, and opens the Inbox;
  * - a pull request lies in Requests, and an issue lies under Ongoing on the
  *   surface of its repository;
+ * - a click on the issue's row opens its card, and a real click on Take it
+ *   inside the open card reaches its button (the sheet's veil does not cover
+ *   it) and gives the issue a Task;
  * - T takes the pull request on: its card shows that a Task holds it, and the
  *   controller has a Task with its title;
  * - the card's On Work move goes to that Task on Work, where its card is drawn.
@@ -202,8 +205,22 @@ describe("Inbox", () => {
     const issue = repository.locator(`.inbox-row[data-card-id="${ISSUE_ID}"]`);
     expect(await issue.locator(".row-title").textContent()).toBe(ISSUE_TITLE);
 
-    // Opening the Inbox from the sidebar leaves focus on the sidebar's row, and
-    // the page's keys only act when focus is on the page, so the row lets go.
+    // The issue's card opens, and Take it inside it is clicked with the mouse.
+    // Playwright refuses a click whose target another element covers, so this
+    // fails when the sheet's veil lies over the sheet's buttons.
+    await issue.click();
+    const openCard = page.locator(".open-card");
+    await openCard.waitFor();
+    await openCard.getByRole("button", { name: /^Take it/ }).click();
+    await expect
+      .poll(async () =>
+        (await arranged.client.task.queryBoard()).cards.some((each) => each.title === ISSUE_TITLE),
+      )
+      .toBe(true);
+    await openCard.waitFor({ state: "hidden" });
+
+    // Focus is on a button (the sidebar's row, or the card the sheet closed
+    // into), and the page's keys only act when focus is on the page, so it lets go.
     // Under the pointer, the pull request is the current card, and T takes it on.
     await page.evaluate(() => {
       (document.activeElement as HTMLElement | null)?.blur();
