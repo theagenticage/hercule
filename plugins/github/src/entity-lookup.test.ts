@@ -9,7 +9,12 @@ import { AuthError, PluginError } from "@hercule/plugin-host";
 import { readJsonBody } from "./actions/testing";
 import { TEST_TOKEN } from "./actions/testing";
 import { recognizeGithubItems, resolveItem, searchItems } from "./entity-lookup";
-import { runAgainstStub, stubGithub, type StubResponse } from "./testing";
+import {
+  expectValidGraphqlFragments,
+  runAgainstStub,
+  stubGithub,
+  type StubResponse,
+} from "./testing";
 
 const REPOSITORY = { nameWithOwner: "Acme/storefront-web", createdAt: "2024-01-05T08:00:00Z" };
 
@@ -41,7 +46,7 @@ const issue = (number: number) => ({
   stateReason: null,
   updatedAt: "2026-11-01T10:00:00Z",
   repository: REPOSITORY,
-  assignees: { nodes: [] },
+  assignees: { totalCount: 0, nodes: [] },
   labels: { nodes: [] },
 });
 
@@ -114,6 +119,7 @@ describe("searching GitHub", () => {
     const result = await runAgainstStub(searchItems(TEST_TOKEN, { text: "slots", limit: 2 }), stub);
 
     expect(stub.requests).toHaveLength(1);
+    expectValidGraphqlFragments(stub);
     expect(Result.getOrThrow(result).map((found) => found.ref)).toEqual([
       "github:pr:acme/storefront-web#1",
       "github:issue:acme/storefront-web#2",
@@ -153,6 +159,7 @@ describe("searching GitHub", () => {
     );
 
     expect(stub.requests).toHaveLength(1);
+    expectValidGraphqlFragments(stub);
     expect(Result.getOrThrow(result).map((found) => found.ref)).toEqual([
       "github:pr:acme/storefront-web#87",
     ]);
@@ -186,6 +193,22 @@ describe("searching GitHub", () => {
 });
 
 describe("resolving a recognition", () => {
+  it("reads an issue ref with a document that defines only the fragments it uses", async () => {
+    const stub = stubGithub(() => answer({ t0: { issue: issue(42) } }));
+
+    await runAgainstStub(
+      resolveItem(TEST_TOKEN, {
+        recognized: "ref",
+        form: "url",
+        ref: "github:issue:acme/storefront-web#42",
+        kind: "issue",
+      }),
+      stub,
+    );
+
+    expectValidGraphqlFragments(stub);
+  });
+
   it("reads the item a ref names", async () => {
     const stub = stubGithub(() => answer({ t0: { pullRequest: pullRequest(87) } }));
 
@@ -199,6 +222,7 @@ describe("resolving a recognition", () => {
       stub,
     );
 
+    expectValidGraphqlFragments(stub);
     expect(Result.getOrThrow(result)).toMatchObject({
       found: { kind: "pull-request", ref: "github:pr:acme/storefront-web#87", concerns: [] },
     });
@@ -216,6 +240,7 @@ describe("resolving a recognition", () => {
       stub,
     );
 
+    expectValidGraphqlFragments(stub);
     expect(Result.getOrThrow(result)).toMatchObject({
       found: { kind: "issue", ref: "github:issue:acme/storefront-web#42" },
     });

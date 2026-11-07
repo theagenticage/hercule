@@ -281,6 +281,44 @@ describe("taking back a Task made for a ref", () => {
     expect(deleted).toBe(false);
   });
 
+  it("keeps a Task that was edited in the same millisecond it was made", async () => {
+    const { outcome, deleted } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* makeTask;
+        // The clock does not move, so `updatedAt` still equals `createdAt`.
+        const edited = yield* tasks.update({ id: task.id, title: "Renamed" });
+        expect(edited.updatedAt).toBe(task.createdAt);
+        return {
+          outcome: yield* tasks.undoCreatedTask(task.id),
+          deleted: yield* isDeleted(task.id),
+        };
+      }),
+    );
+    expect(outcome).toEqual({ undone: false, reason: "edited" });
+    expect(deleted).toBe(false);
+  });
+
+  it("keeps a Task that was made at Done", async () => {
+    const { outcome, deleted } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* tasks.createTaskLinkedToRef({
+          ref: REF,
+          title: "Already done",
+          stage: "done",
+          following: false,
+        });
+        return {
+          outcome: yield* tasks.undoCreatedTask(task.id),
+          deleted: yield* isDeleted(task.id),
+        };
+      }),
+    );
+    expect(outcome).toEqual({ undone: false, reason: "finished" });
+    expect(deleted).toBe(false);
+  });
+
   it("keeps a Task that links a second ref", async () => {
     const { outcome, deleted } = await run(
       Effect.gen(function* () {

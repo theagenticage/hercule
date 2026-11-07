@@ -23,9 +23,12 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+  MAX_CONTEXT_DEPTH,
+  MAX_CONTEXT_PARENTS,
   MAX_ENTITY_ANCESTORS,
   MAX_ENTITY_LINKS,
   MAX_INBOX_CARDS,
+  MAX_INBOX_PLACES,
   type EntityConflict,
   type EntityPlace,
   type EntityStatus,
@@ -45,7 +48,9 @@ import {
   buildPlace,
   decideContextComplete,
   deriveAccess,
+  deriveStale,
   deriveYours,
+  isReadableNow,
   isWorkRecord,
   readStoredStatus,
   SHARED_COLUMNS,
@@ -58,7 +63,7 @@ import {
   type SharedColumn,
   type SharedValues,
 } from "./entity-records";
-import { relationClaimRepository } from "./relation-claims";
+import { relationClaimRepository, WALK_STATE_ROOM } from "./relation-claims";
 import type { EntitySlots } from "./slots";
 
 export type { EntityEnvironment } from "./entity-records";
@@ -72,9 +77,6 @@ const RETRY_CAP_SECONDS = 6 * 60 * 60;
 /** How long a record nothing needs is kept before the sweep deletes it. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** How many levels above a wanted thing `listWanted` keeps true. It matches `MAX_CONTEXT_DEPTH`. */
-const WANTED_CONTEXT_DEPTH = 8;
-
 /**
  * Returns the seconds a ref waits before it may be read again, after
  * `attemptCount` failed reads: 120 seconds, doubling, at most 6 hours.
@@ -82,22 +84,19 @@ const WANTED_CONTEXT_DEPTH = 8;
 export const computeRetryDelaySeconds = (attemptCount: number): number =>
   Math.min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * 2 ** Math.min(attemptCount, 16));
 
-/**
- * The Connection warnings that entity ingest writes. The warning of a
- * Connection is shared with its account setup, so ingest writes only into an
- * empty slot or over one of these, and clears only one of these. All start
- * with `ENTITY_INGEST_WARNING_START`, which is how it tells them from the
- * setup's own.
- */
-const ENTITY_INGEST_WARNING_START = "The Inbox ";
+// The Connection warnings that entity ingest writes, one sentence per kind
+// and problem. The warning of a Connection is shared with account setup, so
+// ingest replaces a warning only when it is empty or is exactly one of these
+// sentences for a kind the Connection has, and clears it only when it is one
+// of them. Anything else is account setup's and is left as it is.
 
 /** Builds the warning for a complete read that could only be done in part. */
 export const buildIncompleteWarning = (kind: string): string =>
-  `${ENTITY_INGEST_WARNING_START}may be missing items: the ${kind} list could only be read in part.`;
+  `The Inbox may be missing items: the ${kind} list could only be read in part.`;
 
 /** Builds the warning for a relationship that was ignored because it would close a loop. */
 export const buildConflictWarning = (kind: string): string =>
-  `${ENTITY_INGEST_WARNING_START}ignored a relationship of ${kind} that would make a thing part of itself.`;
+  `The Inbox ignored a relationship of ${kind} that would make a thing part of itself.`;
 
 /** The inventory a plugin reported is not valid, for a reason only the repository can see. */
 export class InvalidInventory extends Data.TaggedError("InvalidInventory")<{
@@ -419,20 +418,29 @@ const groupBy = <Row extends { readonly ref: string }>(rows: ReadonlyArray<Row>)
 };
 
 /**
- * Builds a string that is equal for two states of a ref exactly when a card or
- * a place would show the same. It holds the visible shared columns and the
- * concerns, ownership and access worked out from the observations.
+ * Returns a function that builds a string, equal for two states of a ref
+ * exactly when a card, a place, or a card below it would show the same. It
+ * holds the visible shared columns, the concerns, ownership and access worked
+ * out from the observations, whether the thing is stale, and whether some
+ * Connection can read it now (which decides the `contextComplete` of every
+ * card below it). The last two depend on which plugins are active and on the
+ * time, so they use the environment the write was given, before and after.
+ * No time of a read is in it: a freshness change alone shows nothing.
  */
-const projectVisibleState = (
-  entity: EntityRow | undefined,
-  observations: ReadonlyArray<ObservationRow>,
-): string =>
-  JSON.stringify([
-    entity === undefined ? null : VISIBLE_COLUMNS.map((column) => entity[column]),
-    unionConcerns(observations),
-    deriveYours(observations),
-    deriveAccess(observations),
-  ]);
+const buildVisibleStateProjector = (environment: EntityEnvironment) => {
+  const activePluginIds = new Set(environment.activePluginIds);
+  return (entity: EntityRow | undefined, observations: ReadonlyArray<ObservationRow>): string =>
+    JSON.stringify([
+      entity === undefined ? null : VISIBLE_COLUMNS.map((column) => entity[column]),
+      unionConcerns(observations),
+      deriveYours(observations),
+      deriveAccess(observations),
+      deriveStale(observations, activePluginIds),
+      observations.some((observation) =>
+        isReadableNow(observation, activePluginIds, environment.now),
+      ),
+    ]);
+};
 
 const sorted = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
@@ -442,8 +450,11 @@ const sorted = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sor
  *
  * - the roots: refs some Connection reports a concern for, and refs a live
  *   Task links;
- * - everything above the roots, up to `WANTED_CONTEXT_DEPTH` levels of
- *   `part-of`, even where no record exists;
+ * - everything above the roots, up to `MAX_CONTEXT_DEPTH` levels of
+ *   `part-of`, even where no record exists. A thing contributes its first
+ *   `MAX_CONTEXT_PARENTS` parents (by ref), and the walk stops after
+ *   `WALK_STATE_ROOM` states beyond the roots, so the work of one poll stays
+ *   bounded however the graph grows;
  * - the direct peers of the roots, but only while they have no record: a
  *   peer gets one read for its title and access, and its own links and parents
  *   are never followed.
@@ -462,10 +473,16 @@ const WANTED_REFS_SQL = `
   wanted_context(ref, depth) AS (
     SELECT ref, 0 FROM wanted_roots
     UNION
-    SELECT c.to_ref, w.depth + 1
-    FROM wanted_context w JOIN external_entity_relation_claims c
-      ON c.from_ref = w.ref AND c.relation = 'part-of' AND c.state = 'current'
-    WHERE w.depth < ${WANTED_CONTEXT_DEPTH}
+    SELECT parent.value, w.depth + 1
+    FROM wanted_context w,
+      json_each((
+        SELECT json_group_array(to_ref) FROM (
+          SELECT DISTINCT c.to_ref FROM external_entity_relation_claims c
+          WHERE c.from_ref = w.ref AND c.relation = 'part-of' AND c.state = 'current'
+          ORDER BY c.to_ref LIMIT ${MAX_CONTEXT_PARENTS})
+      )) parent
+    WHERE w.depth < ${MAX_CONTEXT_DEPTH}
+    LIMIT (SELECT COUNT(*) FROM wanted_roots) + ${WALK_STATE_ROOM}
   ),
   wanted_peers(ref) AS (
     SELECT c.to_ref FROM wanted_roots r JOIN external_entity_relation_claims c
@@ -708,18 +725,24 @@ const make = Effect.gen(function* () {
 
       const relationChanged = new Set<string>();
       const conflicts: Array<EntityConflict> = [];
-      for (const entry of observed) {
-        const { ref, relations, sourceRevision } = entry.observation;
-        if (relations === undefined) continue;
-        const written = yield* claims.applySourceRelations({
-          connectionId: input.connectionId,
-          fromRef: ref,
-          relations,
-          observedRevision: sourceRevision,
-          now,
-        });
-        if (written.changed) relationChanged.add(ref);
-        conflicts.push(...written.conflicts);
+      const written = yield* claims.applySourceRelations({
+        connectionId: input.connectionId,
+        entries: observed.flatMap(({ observation }) =>
+          observation.relations === undefined
+            ? []
+            : [
+                {
+                  fromRef: observation.ref,
+                  relations: observation.relations,
+                  observedRevision: observation.sourceRevision,
+                },
+              ],
+        ),
+        now,
+      });
+      for (const [ref, relationWrite] of written) {
+        if (relationWrite.changed) relationChanged.add(ref);
+        conflicts.push(...relationWrite.conflicts);
       }
 
       const afterWrite = yield* readRefStates(touched, environment);
@@ -745,6 +768,7 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE external_entities SET ${sql.csv(sets)} WHERE ref = ${ref}`;
       }
 
+      const projectVisibleState = buildVisibleStateProjector(environment);
       const changedRefs = sorted([
         ...touched.filter(
           (ref) =>
@@ -810,11 +834,18 @@ const make = Effect.gen(function* () {
   // -------------------------------------------------------------------------
 
   /**
-   * Sets or clears the warning that says the Inbox may be missing items.
-   * The warning is shared with account setup, so entity ingest writes it only
-   * when the Connection has none or has one of its own, and clears it only
-   * when it is one of this kind's own sentences. Returns whether the row
-   * changed.
+   * Records what the latest inventory of one kind left unresolved
+   * (`wanted`, or nothing when it left nothing), then brings the Connection's
+   * one warning in line with every kind that is still unresolved.
+   *
+   * - The Connection's warning is replaced only when it is empty or is
+   *   exactly one of entity ingest's own sentences. Account setup's warning
+   *   is never touched.
+   * - A warning that still describes an unresolved kind stays. Otherwise the
+   *   first unresolved kind (by name) is shown.
+   * - The warning is cleared only when no kind is unresolved.
+   *
+   * Returns whether the Connection's warning changed.
    */
   const syncConnectionWarning = (input: {
     readonly connectionId: string;
@@ -825,16 +856,40 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* connections.one(input.connectionId);
       if (Option.isNone(found)) return false;
-      const current = found.value.warning;
-      if (input.wanted !== undefined) {
-        const mayWrite = current === undefined || current.startsWith(ENTITY_INGEST_WARNING_START);
-        if (!mayWrite || current === input.wanted) return false;
-        yield* connections.update(input.connectionId, { warning: input.wanted }, input.now);
-        return true;
+      const connection = uuidFromString(input.connectionId);
+      if (input.wanted === undefined) {
+        yield* sql`
+          DELETE FROM external_entity_ingest_warnings
+          WHERE connection_id = ${connection} AND kind = ${input.kind}`;
+      } else {
+        yield* sql`
+          INSERT INTO external_entity_ingest_warnings (connection_id, kind, warning)
+          VALUES (${connection}, ${input.kind}, ${input.wanted})
+          ON CONFLICT (connection_id, kind) DO UPDATE SET warning = excluded.warning`;
       }
-      const ownSentences = [buildIncompleteWarning(input.kind), buildConflictWarning(input.kind)];
-      if (current === undefined || !ownSentences.includes(current)) return false;
-      yield* connections.update(input.connectionId, { warning: null }, input.now);
+      const unresolved = yield* sql<{ readonly kind: string; readonly warning: string }>`
+        SELECT kind, warning FROM external_entity_ingest_warnings
+        WHERE connection_id = ${connection} ORDER BY kind`;
+      const scanned = yield* sql<{ readonly kind: string }>`
+        SELECT kind FROM external_entity_scans WHERE connection_id = ${connection}`;
+
+      const current = found.value.warning;
+      const ownKinds = new Set([
+        input.kind,
+        ...unresolved.map((row) => row.kind),
+        ...scanned.map((row) => row.kind),
+      ]);
+      const isOwn =
+        current === undefined ||
+        [...ownKinds].some(
+          (kind) =>
+            current === buildIncompleteWarning(kind) || current === buildConflictWarning(kind),
+        );
+      if (!isOwn) return false;
+      const shown =
+        unresolved.find((row) => row.warning === current)?.warning ?? unresolved[0]?.warning;
+      if (shown === current) return false;
+      yield* connections.update(input.connectionId, { warning: shown ?? null }, input.now);
       return true;
     });
 
@@ -1039,6 +1094,7 @@ const make = Effect.gen(function* () {
             access = excluded.access, attempt_count = excluded.attempt_count,
             next_attempt_at = excluded.next_attempt_at`;
         const after = yield* readRefStates([ref], environment);
+        const projectVisibleState = buildVisibleStateProjector(environment);
         const changed =
           projectVisibleState(before.entities.get(ref), before.observations.get(ref) ?? []) !==
           projectVisibleState(after.entities.get(ref), after.observations.get(ref) ?? []);
@@ -1117,9 +1173,25 @@ const make = Effect.gen(function* () {
         const rows = truncated ? found.slice(0, MAX_INBOX_CARDS) : found;
 
         const walk = yield* claims.readAncestors(rows.map((row) => row.ref));
-        const placeRefs = sorted(
-          rows.flatMap((row) => (walk.ancestors.get(row.ref) ?? []).slice(0, MAX_ENTITY_ANCESTORS)),
-        );
+
+        // The reply carries at most `MAX_INBOX_PLACES` places. The walk can
+        // find more ancestors than that (every card may have its own parents),
+        // so the cut is made here, on the refs, before any record is read.
+        // Cards come oldest first and each lists its nearest ancestors first,
+        // so the older cards keep their context and a later one loses its
+        // farthest. A card that loses an ancestor does not list it, and the
+        // edges that touch it are dropped, so the reply names no place it
+        // does not carry.
+        const keptPlaceRefs = new Set<string>();
+        const leftOutRefs = new Set<string>();
+        for (const row of rows) {
+          for (const ref of (walk.ancestors.get(row.ref) ?? []).slice(0, MAX_ENTITY_ANCESTORS)) {
+            if (keptPlaceRefs.has(ref)) continue;
+            if (keptPlaceRefs.size < MAX_INBOX_PLACES) keptPlaceRefs.add(ref);
+            else leftOutRefs.add(ref);
+          }
+        }
+        const placeRefs = sorted(keptPlaceRefs);
         const { records: placeRecords, observations } = yield* readRecords([
           ...rows.map((row) => row.ref),
           ...placeRefs,
@@ -1128,8 +1200,14 @@ const make = Effect.gen(function* () {
 
         const cards = rows.map((row): InboxCard => {
           const allAncestors = walk.ancestors.get(row.ref) ?? [];
+          const shownAncestors = allAncestors
+            .slice(0, MAX_ENTITY_ANCESTORS)
+            .filter((ref) => !leftOutRefs.has(ref));
           const contextComplete = decideContextComplete({
-            cut: walk.cutAll || walk.cutRefs.has(row.ref),
+            cut:
+              walk.cutAll ||
+              walk.cutRefs.has(row.ref) ||
+              shownAncestors.length < Math.min(allAncestors.length, MAX_ENTITY_ANCESTORS),
             ancestors: allAncestors,
             maxAncestors: MAX_ENTITY_ANCESTORS,
             records: placeRecords,
@@ -1144,7 +1222,7 @@ const make = Effect.gen(function* () {
               activePluginIds,
               taskId: row.task_id === null ? undefined : uuidToString(row.task_id),
               following: row.following === 1,
-              ancestors: allAncestors.slice(0, MAX_ENTITY_ANCESTORS),
+              ancestors: shownAncestors,
               contextComplete,
             }),
             side: row.side,
@@ -1156,7 +1234,10 @@ const make = Effect.gen(function* () {
             return record === undefined ? [] : [buildPlace(record, observations.get(ref) ?? [])];
           }),
         );
-        return { cards, places, edges: walk.edges, counts, truncated };
+        const edges = walk.edges.filter(
+          (edge) => !leftOutRefs.has(edge.fromRef) && !leftOutRefs.has(edge.toRef),
+        );
+        return { cards, places, edges, counts, truncated };
       }),
 
     /**

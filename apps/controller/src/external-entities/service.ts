@@ -151,6 +151,8 @@ const describeUndoRefusal = (reason: TaskUndoRefusal | "other-task"): string => 
       return "The Task links another thing too, so it stays.";
     case "edited":
       return "The Task was edited after it was made, so it stays.";
+    case "finished":
+      return "The Task is already done or dropped, so it stays.";
     case "other-task":
       return "That Task was not made for this thing, so it stays.";
   }

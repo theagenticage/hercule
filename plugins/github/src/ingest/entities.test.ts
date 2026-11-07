@@ -4,9 +4,12 @@
  * GitHub, and how many requests it costs.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import { EntityFact } from "@hercule/contract";
 import {
   AuthError,
+  MAX_ENTITY_OBSERVATIONS,
   PluginError,
   type EntityInventory,
   type EntityObservation,
@@ -16,12 +19,14 @@ import {
 import { readJsonBody } from "../actions/testing";
 import {
   buildIngestHarness,
+  expectValidGraphqlFragments,
   runAgainstStub,
   stubGithub,
   TEST_IDENTITY,
   type GithubStub,
   type StubResponse,
 } from "../testing";
+import { GITHUB_ENTITY_KINDS } from "../entity-kinds";
 import { buildItemRef, buildRepoRef } from "../subject";
 import { pollGithubFeed } from "./index";
 
@@ -62,7 +67,7 @@ const issueNode = (number: number, overrides: Record<string, unknown> = {}) => (
   stateReason: null,
   updatedAt: "2026-11-01T10:00:00Z",
   repository: { nameWithOwner: "Acme/storefront-web", createdAt: "2024-01-05T08:00:00Z" },
-  assignees: { nodes: [{ login: "octocat" }] },
+  assignees: { totalCount: 1, nodes: [{ login: "octocat" }] },
   labels: { nodes: [{ name: "bug" }, { name: "checkout" }] },
   ...overrides,
 });
@@ -132,7 +137,11 @@ const fakeEntities = (
   return {
     reported,
     entities: {
-      reconcile: (inventory) => Effect.sync(() => void reported.reconciled.push(inventory)),
+      // Like the host, refuses a call with more observations than it takes.
+      reconcile: (inventory) =>
+        inventory.observations.length > MAX_ENTITY_OBSERVATIONS
+          ? Effect.fail(new PluginError({ message: "too many observations in one call" }))
+          : Effect.sync(() => void reported.reconciled.push(inventory)),
       refresh: (observations) => Effect.sync(() => void reported.refreshed.push(observations)),
       listWanted: (kind, limit) =>
         Effect.sync(() => {
@@ -401,14 +410,18 @@ describe("the entities feed's inventory", () => {
     expect(full(reconciledKind(reported, "pull-request").observations[0]).status).toBe(status);
   });
 
-  it("owns an issue assigned to the user, and not one assigned to someone else", async () => {
+  it("owns every issue the assigned search finds, even when the user is past the assignees read", async () => {
     const stub = stubGraphql({
       [ASSIGNED]: searchPages([
         {
           nodes: [
             issueNode(1),
-            issueNode(2, { assignees: { nodes: [{ login: "marta-vos" }, { login: "OctoCat" }] } }),
-            issueNode(3, { assignees: { nodes: [{ login: "marta-vos" }] } }),
+            issueNode(2, {
+              assignees: {
+                totalCount: 7,
+                nodes: ["a", "b", "c", "d", "e"].map((login) => ({ login })),
+              },
+            }),
           ],
         },
       ]),
@@ -417,7 +430,7 @@ describe("the entities feed's inventory", () => {
     const { reported } = await pollEntitiesFeed(stub);
 
     const issues = reconciledKind(reported, "issue").observations.map(full);
-    expect(issues.map((issue) => issue.ownedByYou)).toEqual([true, true, false]);
+    expect(issues.map((issue) => issue.ownedByYou)).toEqual([true, true]);
     expect(issues[0]).toMatchObject({
       fields: {
         number: 1,
@@ -427,6 +440,92 @@ describe("the entities feed's inventory", () => {
       },
       concerns: ["assigned"],
     });
+    expectValidGraphqlFragments(stub);
+  });
+
+  it("never reports more than the host takes in one call, and keeps each work kind whole", async () => {
+    // The most the searches can find: 1,000 per search, each item in its own repository.
+    const searchOf = (build: (number: number) => unknown, first: number) =>
+      searchPages(
+        Array.from({ length: 10 }, (_, page) => ({
+          nodes: Array.from({ length: 100 }, (__, index) => build(first + page * 100 + index)),
+          issueCount: 1000,
+        })),
+      );
+    const inRepository = (number: number) => ({
+      nameWithOwner: `Acme/repo-${String(number)}`,
+      createdAt: "2024-01-05T08:00:00Z",
+    });
+    const stub = stubGraphql({
+      [OPENED]: searchOf((n) => pullRequestNode(n, { repository: inRepository(n) }), 0),
+      [REVIEW_REQUESTED]: searchOf(
+        (n) => pullRequestNode(n, { repository: inRepository(n) }),
+        1000,
+      ),
+      [ASSIGNED]: searchOf((n) => issueNode(n, { repository: inRepository(n) }), 2000),
+    });
+
+    const { result, reported } = await pollEntitiesFeed(stub);
+
+    expect(Result.isSuccess(result)).toBe(true);
+    const repositories = reported.reconciled.filter(({ kind }) => kind === "repository");
+    expect(repositories.map(({ observations }) => observations.length)).toEqual([2000, 1000]);
+    expect(reconciledKind(reported, "pull-request").observations).toHaveLength(2000);
+    expect(reconciledKind(reported, "issue").observations).toHaveLength(1000);
+  });
+
+  it("keeps an issue's labels within the public bound of a word fact", async () => {
+    const names = ["a".repeat(50), "b".repeat(50), "c", "d"];
+    const stub = stubGraphql({
+      [ASSIGNED]: searchPages([
+        {
+          nodes: [
+            issueNode(1, { labels: { nodes: names.map((name) => ({ name })) } }),
+            issueNode(2, { labels: { nodes: [{ name: "bug" }, { name: "checkout" }] } }),
+            issueNode(3, { labels: { nodes: [] } }),
+          ],
+        },
+      ]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const [crowded, short, none] = reconciledKind(reported, "issue").observations.map(full);
+    expect(crowded?.fields["labels"]).toBe(`${"a".repeat(50)} +3`);
+    expect(short?.fields["labels"]).toBe("bug, checkout");
+    expect(none?.fields["labels"]).toBeNull();
+    // The real declaration shows the field as a word fact, and the contract bounds that text.
+    const issueKind = GITHUB_ENTITY_KINDS.find((kind) => kind.word === "issue");
+    expect(issueKind?.facts).toContainEqual({ field: "labels", form: "word" });
+    const decodeFact = Schema.decodeUnknownSync(EntityFact);
+    expect(() => decodeFact({ form: "word", text: crowded?.fields["labels"] })).not.toThrow();
+  });
+});
+
+describe("the fragment check of the tests", () => {
+  const check = (query: string) => {
+    const stub = stubGithub(() => ({ status: 200, body: {} }));
+    stub.requests.push(
+      HttpClientRequest.post("https://api.github.com/graphql").pipe(
+        HttpClientRequest.bodyJsonUnsafe({ query }),
+      ),
+    );
+    return () => expectValidGraphqlFragments(stub);
+  };
+
+  it("refuses a fragment that is defined and never spread, and one spread and never defined", () => {
+    const spread = "query { a { ...One } }\nfragment One on A { x }";
+    expect(check(spread)).not.toThrow();
+    expect(check(`${spread}\nfragment Two on B { y }`)).toThrow("Two is defined but never used");
+    expect(check("query { a { ...One } }")).toThrow("One is spread but not defined");
+  });
+
+  it("refuses a fragment only another unused fragment spreads", () => {
+    expect(
+      check(
+        "query { a { ...One } }\nfragment One on A { x }\nfragment Two on B { ...Three }\nfragment Three on C { z }",
+      ),
+    ).toThrow("never used");
   });
 });
 
@@ -477,6 +576,7 @@ describe("the entities feed's refresh", () => {
     );
 
     const { reported } = await pollEntitiesFeed(stub, { "pull-request": [MERGED_REF] });
+    expectValidGraphqlFragments(stub);
 
     expect(reported.refreshed).toHaveLength(1);
     expect(full(reported.refreshed[0]?.[0])).toMatchObject({
@@ -500,6 +600,7 @@ describe("the entities feed's refresh", () => {
     );
 
     const { reported } = await pollEntitiesFeed(stub, { "pull-request": [MERGED_REF] });
+    expectValidGraphqlFragments(stub);
 
     expect(full(reported.refreshed[0]?.[0])).toMatchObject({
       lifecycle: "abandoned",
@@ -527,6 +628,7 @@ describe("the entities feed's refresh", () => {
       const { reported } = await pollEntitiesFeed(stub, {
         issue: ["github:issue:acme/storefront-web#4"],
       });
+      expectValidGraphqlFragments(stub);
 
       expect(full(reported.refreshed[0]?.[0])).toMatchObject({ lifecycle, status });
     },
@@ -549,6 +651,7 @@ describe("the entities feed's refresh", () => {
     const { reported } = await pollEntitiesFeed(stub, {
       repository: ["github:repo:acme/storefront-web"],
     });
+    expectValidGraphqlFragments(stub);
 
     expect(reported.refreshed[0]?.[0]).toMatchObject({ kind: "repository", concerns: [] });
   });
@@ -573,10 +676,54 @@ describe("the entities feed's refresh", () => {
       "pull-request": [MERGED_REF],
       issue: ["github:issue:acme/storefront-web#4"],
     });
+    expectValidGraphqlFragments(stub);
 
     expect(Result.isSuccess(result)).toBe(true);
     expect(reported.missing).toEqual([{ ref: MERGED_REF, reason: "inaccessible" }]);
     expect(reported.refreshed[0]).toHaveLength(1);
+  });
+
+  describe("who an issue is owned by", () => {
+    const readIssue = async (assignees: {
+      totalCount: number;
+      nodes: Array<{ login: string }>;
+    }) => {
+      const stub = stubGraphql(
+        {},
+        {
+          status: 200,
+          body: { data: { viewer: VIEWER, t0: { issue: issueNode(4, { assignees }) } } },
+        },
+      );
+      const { reported } = await pollEntitiesFeed(stub, {
+        issue: ["github:issue:acme/storefront-web#4"],
+      });
+      return full(reported.refreshed[0]?.[0]);
+    };
+
+    it("is the user when the user is among the assignees", async () => {
+      const issue = await readIssue({
+        totalCount: 2,
+        nodes: [{ login: "marta-vos" }, { login: "OctoCat" }],
+      });
+
+      expect(issue.ownedByYou).toBe(true);
+    });
+
+    it("is not the user when every assignee was read and the user is not one", async () => {
+      const issue = await readIssue({ totalCount: 1, nodes: [{ login: "marta-vos" }] });
+
+      expect(issue.ownedByYou).toBe(false);
+    });
+
+    it("says nothing when the assignees were cut and the user is not among those read", async () => {
+      const issue = await readIssue({
+        totalCount: 6,
+        nodes: ["a", "b", "c", "d", "e"].map((login) => ({ login })),
+      });
+
+      expect("ownedByYou" in issue).toBe(false);
+    });
   });
 
   it("keeps the stored inventory when the refresh fails", async () => {

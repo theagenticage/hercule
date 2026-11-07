@@ -20,6 +20,7 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
+  MAX_ENTITY_OBSERVATIONS,
   MAX_EVENT_TITLE_LENGTH,
   PluginError,
   type EntityObservation,
@@ -40,6 +41,9 @@ import { decodeGithubValue, fetchGraphql, type FeedError } from "./requests";
 /** How many refs of one kind the poll asks the host for, and reads, each time. */
 const WANTED_REFS_PER_KIND = 50;
 
+/** How many assignees of an issue one read lists. */
+const ASSIGNEES_READ = 5;
+
 /** The concerns this feed reports. The host sets the others. */
 type EntityConcern = "opened" | "review-requested" | "assigned";
 
@@ -47,14 +51,10 @@ type EntityConcern = "opened" | "review-requested" | "assigned";
 // What GitHub sends
 // ---------------------------------------------------------------------------
 
-/**
- * The GraphQL fields read for each kind of thing, as named fragments, so the
- * searches, the refresh and the lookup read the same fields. A fragment is
- * sent after the query that spreads it.
- */
-export const ITEM_FRAGMENTS = `
-fragment RepositoryFields on Repository { nameWithOwner createdAt }
-fragment PullRequestFields on PullRequest {
+/** The GraphQL fields of a repository, as a named fragment. The two item fragments spread it. */
+const REPOSITORY_FRAGMENT = `fragment RepositoryFields on Repository { nameWithOwner createdAt }`;
+
+const PULL_REQUEST_FRAGMENT = `fragment PullRequestFields on PullRequest {
   __typename number title url isDraft state updatedAt
   author { login }
   repository { ...RepositoryFields }
@@ -62,13 +62,34 @@ fragment PullRequestFields on PullRequest {
   headRepository { nameWithOwner }
   reviewDecision additions deletions changedFiles
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-}
-fragment IssueFields on Issue {
+}`;
+
+const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
   __typename number title url state stateReason updatedAt
   repository { ...RepositoryFields }
-  assignees(first: 5) { nodes { login } }
+  assignees(first: ${String(ASSIGNEES_READ)}) { totalCount nodes { login } }
   labels(first: 5) { nodes { name } }
 }`;
+
+/**
+ * Returns the fragment definitions a query needs, to be sent after the query.
+ * The searches, the refresh and the lookup read the same fields through these
+ * fragments. GraphQL refuses a document that defines a fragment nothing
+ * spreads, so a query asks for exactly the item fragments it spreads
+ * (`RepositoryFields` is always included: every selection reads it).
+ */
+export const buildFragments = (spreads: {
+  readonly pullRequest: boolean;
+  readonly issue: boolean;
+}): string =>
+  [
+    REPOSITORY_FRAGMENT,
+    ...(spreads.pullRequest ? [PULL_REQUEST_FRAGMENT] : []),
+    ...(spreads.issue ? [ISSUE_FRAGMENT] : []),
+  ].join("\n");
+
+/** The fragments of a query that spreads both item fragments, as a search and a lookup do. */
+export const ITEM_FRAGMENTS = buildFragments({ pullRequest: true, issue: true });
 
 const RepositoryNode = Schema.Struct({
   nameWithOwner: Schema.String,
@@ -128,7 +149,11 @@ const IssueNode = Schema.Struct({
   stateReason: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
   repository: RepositoryNode,
-  assignees: Schema.Struct({ nodes: Schema.NullOr(Schema.Array(AccountNode)) }),
+  assignees: Schema.Struct({
+    /** How many assignees the issue has, of which the read lists the first few. */
+    totalCount: Schema.Int,
+    nodes: Schema.NullOr(Schema.Array(AccountNode)),
+  }),
   labels: Schema.Struct({
     nodes: Schema.NullOr(Schema.Array(Schema.NullOr(Schema.Struct({ name: Schema.String })))),
   }),
@@ -252,6 +277,52 @@ export const buildPullRequestObservation = (
   };
 };
 
+/**
+ * The longest `labels` fact. The core shows the field as a word fact, which
+ * the public API bounds at 80 characters, and refuses a whole inventory when
+ * one card breaks a bound.
+ */
+export const MAX_LABELS_FACT_LENGTH = 80;
+
+/**
+ * Returns the label names as one line for the `labels` fact: as many whole
+ * names as fit, comma separated, and when some are left out, a closing count
+ * such as "bug, checkout +2". Returns null for no labels. The line is never
+ * longer than `MAX_LABELS_FACT_LENGTH`.
+ */
+export const summarizeLabels = (names: ReadonlyArray<string>): string | null => {
+  if (names.length === 0) return null;
+  const all = names.join(", ");
+  if (all.length <= MAX_LABELS_FACT_LENGTH) return all;
+  for (let shown = names.length - 1; shown >= 1; shown--) {
+    const line = `${names.slice(0, shown).join(", ")} +${String(names.length - shown)}`;
+    if (line.length <= MAX_LABELS_FACT_LENGTH) return line;
+  }
+  // Not even the first name fits with a count: GitHub keeps label names to 50 characters, so this is only a guard.
+  return cutText(all, MAX_LABELS_FACT_LENGTH);
+};
+
+/**
+ * Decides whether the user is among an issue's assignees. Returns undefined
+ * when that cannot be told:
+ *
+ * - The `assigned` concern comes from the search `assignee:@me`, which proves
+ *   the user is assigned however many assignees there are.
+ * - Otherwise the read lists only the first few assignees. The user in that
+ *   list is assigned. The user missing from a complete list is not assigned.
+ *   The user missing from a cut list may be the sixth, so nothing is claimed.
+ */
+const decideIssueOwnership = (
+  node: IssueNode,
+  assignees: ReadonlyArray<string>,
+  viewerLogin: string,
+  concerns: ReadonlyArray<EntityConcern>,
+): boolean | undefined => {
+  if (concerns.includes("assigned")) return true;
+  if (assignees.some((login) => isViewer(login, viewerLogin))) return true;
+  return node.assignees.totalCount > assignees.length ? undefined : false;
+};
+
 /** Builds the observation of an issue, as `buildPullRequestObservation` builds a pull request's. */
 export const buildIssueObservation = (
   node: IssueNode,
@@ -264,6 +335,7 @@ export const buildIssueObservation = (
     account === null ? [] : [account.login],
   );
   const labels = (node.labels.nodes ?? []).flatMap((label) => (label === null ? [] : [label.name]));
+  const ownedByYou = decideIssueOwnership(node, assignees, viewerLogin, concerns);
   return {
     kind: ISSUE_KIND,
     ref: buildItemRef({ repo, kind: "issue", number: node.number }),
@@ -277,10 +349,10 @@ export const buildIssueObservation = (
       number: node.number,
       repo,
       assignee: assignees[0] ?? null,
-      labels: labels.length === 0 ? null : labels.join(", "),
+      labels: summarizeLabels(labels),
     },
     concerns,
-    ownedByYou: assignees.some((login) => isViewer(login, viewerLogin)),
+    ...(ownedByYou === undefined ? {} : { ownedByYou }),
     sourceUpdatedAt: node.updatedAt,
   };
 };
@@ -440,11 +512,31 @@ const reconcileInventory = (
       );
     }
 
-    yield* entities.reconcile({
-      kind: REPOSITORY_KIND,
-      complete: true,
-      observations: [...repositories.values()].map(buildRepositoryObservation),
-    });
+    // Each search reads at most 1,000 items, so the repositories of three
+    // searches can pass the host's limit of one call. They go in batches.
+    // Batches can be `complete` because a repository has no concerns: a
+    // complete call empties the concerns of what it leaves out, and there are
+    // none to empty, so a batch never clears what another batch lists.
+    const repositoryObservations = [...repositories.values()].map(buildRepositoryObservation);
+    const batchCount = Math.max(
+      1,
+      Math.ceil(repositoryObservations.length / MAX_ENTITY_OBSERVATIONS),
+    );
+    for (let batch = 0; batch < batchCount; batch++) {
+      yield* entities.reconcile({
+        kind: REPOSITORY_KIND,
+        complete: true,
+        observations: repositoryObservations.slice(
+          batch * MAX_ENTITY_OBSERVATIONS,
+          (batch + 1) * MAX_ENTITY_OBSERVATIONS,
+        ),
+      });
+    }
+    // Pull requests and issues are never batched. A complete call empties the
+    // concerns of every earlier item it leaves out, so each kind must be
+    // reported whole in one call. They fit: a search reads at most 1,000
+    // items, so the two pull request searches give at most 2,000 (exactly the
+    // host's limit) and the issue search at most 1,000.
     yield* entities.reconcile({
       kind: PULL_REQUEST_KIND,
       complete: pullRequestsComplete,
@@ -565,11 +657,15 @@ export const readEntitiesByRef = (
       }
     }
     const selections = targets.map(({ target }, index) => buildSelection(target, index));
+    const fragments = buildFragments({
+      pullRequest: targets.some(({ target }) => target.kind === "pr"),
+      issue: targets.some(({ target }) => target.kind === "issue"),
+    });
     const query = `query (${declarations.join(", ")}) {
   viewer { login }
   ${selections.join("\n  ")}
 }
-${ITEM_FRAGMENTS}`;
+${fragments}`;
 
     const data = yield* fetchGraphql(token, query, variables, { tolerateMissing: true });
     const answer = yield* decodeGithubValue(

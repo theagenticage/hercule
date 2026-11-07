@@ -64,13 +64,20 @@ const report = (
   partOf: ReadonlyArray<string>,
   options: { complete?: boolean; linked?: ReadonlyArray<string>; now?: string } = {},
 ) =>
-  claims.applySourceRelations({
-    connectionId,
-    fromRef,
-    relations: { complete: options.complete ?? true, partOf, linked: options.linked ?? [] },
-    observedRevision: undefined,
-    now: options.now ?? AT,
-  });
+  Effect.map(
+    claims.applySourceRelations({
+      connectionId,
+      entries: [
+        {
+          fromRef,
+          relations: { complete: options.complete ?? true, partOf, linked: options.linked ?? [] },
+          observedRevision: undefined,
+        },
+      ],
+      now: options.now ?? AT,
+    }),
+    (results) => results.get(fromRef)!,
+  );
 
 /** Reads the stored claims from `fromRef`, the way a test can see what was kept. */
 const readStored = (sql: SqlClient.SqlClient, fromRef: string) =>
@@ -144,9 +151,13 @@ describe("writing source claims", () => {
         const partial = yield* report(claims, ERP_ACCOUNT, ORDER, [], { complete: false });
         yield* claims.applySourceRelations({
           connectionId: ERP_ACCOUNT,
-          fromRef: ORDER,
-          relations: { complete: false, partOf: [], linked: [] },
-          observedRevision: "7",
+          entries: [
+            {
+              fromRef: ORDER,
+              relations: { complete: false, partOf: [], linked: [] },
+              observedRevision: "7",
+            },
+          ],
           now: LATER,
         });
         return { partial, rows: yield* readStored(sql, ORDER) };
@@ -201,6 +212,37 @@ describe("writing source claims", () => {
 });
 
 describe("loops in part-of", () => {
+  it("applies every removal of a batch before any addition, so a reversed edge is current", async () => {
+    const { write, rows } = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, ERP_ACCOUNT, ROUND_TWO, [ROUND_ONE]);
+        const write = yield* claims.applySourceRelations({
+          connectionId: ERP_ACCOUNT,
+          entries: [
+            {
+              fromRef: ROUND_ONE,
+              relations: { complete: true, partOf: [ROUND_TWO], linked: [] },
+              observedRevision: undefined,
+            },
+            {
+              fromRef: ROUND_TWO,
+              relations: { complete: true, partOf: [], linked: [] },
+              observedRevision: undefined,
+            },
+          ],
+          now: LATER,
+        });
+        const rows = yield* sql<{ readonly from_ref: string; readonly state: string }>`
+          SELECT from_ref, state FROM external_entity_relation_claims`;
+        return { write, rows };
+      }),
+    );
+
+    expect(rows).toEqual([{ from_ref: ROUND_ONE, state: "current" }]);
+    expect(write.get(ROUND_ONE)).toEqual({ changed: true, conflicts: [] });
+    expect(write.get(ROUND_TWO)).toEqual({ changed: true, conflicts: [] });
+  });
+
   it("stores a claim that closes a loop as conflicted, returns it, and applies the rest", async () => {
     const { write, again, rows, detail } = await run((claims, sql) =>
       Effect.gen(function* () {

@@ -179,7 +179,7 @@ export const deriveObservedAt = (
 };
 
 /** Checks that a Connection read the thing and may be asked again now. */
-const isReadableNow = (
+export const isReadableNow = (
   observation: ObservationRow,
   activePluginIds: ReadonlySet<string>,
   now: string,

@@ -21,6 +21,11 @@
  *   sets `presented_by` to NULL on the entities it presented.
  * - `external_entity_scans` has one row per Connection and kind: when its
  *   inventory was last read completely.
+ * - `external_entity_ingest_warnings` has one row per Connection and kind
+ *   whose latest inventory left something unresolved (a partial read, or a
+ *   refused relationship). The Connection has one warning shared with account
+ *   setup, so these rows are what lets the warning stay until every kind
+ *   has resolved its own.
  * - `external_entity_relation_claims` has one row per claim of a relation
  *   (`part-of` or `linked`) between two refs. Each claim type has its own
  *   partial unique index, because SQLite treats NULLs as distinct, so a
@@ -34,6 +39,10 @@
  *   Existing links are backfilled from the provenance of Tasks that are not
  *   deleted: the oldest entry of each (Task, ref) pair gives `linked_at` and
  *   `linked_by`. Provenance stays the history, and the link is the relation.
+ * - `tasks.revision` counts the writes of an edit to a Task, 0 for a Task nobody
+ *   has edited. Taking back a Task made for an outside thing asks whether it is
+ *   still 0, which `updated_at` cannot answer when an edit lands in the same
+ *   millisecond as the creation or the clock steps back.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -125,6 +134,15 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`
+    CREATE TABLE external_entity_ingest_warnings (
+      connection_id BLOB NOT NULL REFERENCES connections (id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      warning TEXT NOT NULL,
+      PRIMARY KEY (connection_id, kind)
+    ) WITHOUT ROWID
+  `;
+
+  yield* sql`
     CREATE TABLE external_entity_relation_claims (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       from_ref TEXT NOT NULL,
@@ -171,15 +189,18 @@ export default Effect.gen(function* () {
     CREATE INDEX external_entity_claims_conflicted_to
       ON external_entity_relation_claims (to_ref) WHERE state = 'conflicted'
   `;
-  // Serve the walk up from a ref (`readAncestors`) and the walk down.
+  // Serve the walk up from a ref (`readAncestors`), which also reads the
+  // first parents of a ref in order of `to_ref` without a sort, and the walk down.
   yield* sql`
     CREATE INDEX external_entity_claims_from
-      ON external_entity_relation_claims (from_ref, relation) WHERE state = 'current'
+      ON external_entity_relation_claims (from_ref, relation, to_ref) WHERE state = 'current'
   `;
   yield* sql`
     CREATE INDEX external_entity_claims_to
       ON external_entity_relation_claims (to_ref, relation) WHERE state = 'current'
   `;
+
+  yield* sql`ALTER TABLE tasks ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`;
 
   yield* sql`
     CREATE TABLE task_entity_links (

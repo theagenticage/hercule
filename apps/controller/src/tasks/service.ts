@@ -187,7 +187,9 @@ export type TaskUndoRefusal =
   /** The Task links a ref other than the one it was created with. */
   | "has-other-link"
   /** The Task was edited after it was created. */
-  | "edited";
+  | "edited"
+  /** The Task is at Done or Dropped, so it is no longer live work. */
+  | "finished";
 
 /** The result of `undoCreatedTask`. */
 export type CreatedTaskUndo =
@@ -892,7 +894,8 @@ const make = Effect.gen(function* () {
     /**
      * Takes back a Task that `createTaskLinkedToRef` made, by soft-deleting
      * it, but only when nothing has been added to it since: no Thread, no run,
-     * no link to another ref, and no edit since it was created. Otherwise it
+     * no link to another ref, no edit since it was created, and a stage that is
+     * not Done or Dropped. Otherwise it
      * changes nothing and returns `{ undone: false, reason }`. The Task is read
      * by its own id and is never replaced by the Task it was merged into. The
      * check and the delete are one write, so a Thread cannot join in between.
@@ -920,7 +923,9 @@ const make = Effect.gen(function* () {
                   ? "has-other-link"
                   : traces.edited
                     ? "edited"
-                    : undefined;
+                    : isFinishedStage(traces.stage)
+                      ? "finished"
+                      : undefined;
             if (reason !== undefined) return { undone: false, reason } as const;
             // The Task was read live a moment ago, in this transaction.
             yield* Effect.orDie(softDeleteTask(id));

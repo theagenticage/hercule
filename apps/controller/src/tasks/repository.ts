@@ -148,7 +148,9 @@ export interface ActiveTaskOnRef {
  * whether the Task can still be taken back (`readTraces`).
  */
 export interface TaskTraces {
-  /** True when an edit moved `updated_at` past `created_at`. */
+  /** The Task's stage now. */
+  readonly stage: TaskStage;
+  /** True when `update` has written the Task since it was created (its `revision` is above 0). */
   readonly edited: boolean;
   /** True when a Thread (a session) belongs to the Task. */
   readonly hasSession: boolean;
@@ -1179,12 +1181,13 @@ const make = Effect.gen(function* () {
     readTraces: (id: string): Effect.Effect<Option.Option<TaskTraces>, SqlError> =>
       Effect.map(
         sql<{
+          readonly stage: string;
           readonly edited: number;
           readonly has_session: number;
           readonly has_run: number;
           readonly link_count: number;
         }>`
-          SELECT tasks.updated_at <> tasks.created_at AS edited,
+          SELECT tasks.stage, tasks.revision > 0 AS edited,
                  EXISTS (SELECT 1 FROM sessions WHERE sessions.task_id = tasks.id) AS has_session,
                  EXISTS (SELECT 1 FROM runs WHERE runs.task_id = tasks.id) AS has_run,
                  (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count
@@ -1194,6 +1197,7 @@ const make = Effect.gen(function* () {
           return row === undefined
             ? Option.none()
             : Option.some({
+                stage: row.stage as TaskStage,
                 edited: row.edited === 1,
                 hasSession: row.has_session === 1,
                 hasRun: row.has_run === 1,
@@ -1347,7 +1351,10 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
-        const sets = [sql`updated_at = ${at}`];
+        // The revision counts every write of `update`. Unlike `updated_at` it moves even
+        // when the clock has not, so it can tell a Task nobody has edited from one that
+        // was edited in the same millisecond it was created.
+        const sets = [sql`updated_at = ${at}`, sql`revision = revision + 1`];
         if (edit.title !== undefined) sets.push(sql`title = ${edit.title}`);
         if (edit.description !== undefined) sets.push(sql`description = ${edit.description}`);
         if (edit.priority !== undefined) sets.push(sql`priority = ${edit.priority}`);

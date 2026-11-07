@@ -14,9 +14,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { MAX_INBOX_CARDS } from "@hercule/contract";
+import {
+  Inbox,
+  MAX_CONTEXT_PARENTS,
+  MAX_ENTITY_ANCESTORS,
+  MAX_INBOX_CARDS,
+  MAX_INBOX_PLACES,
+} from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
@@ -324,6 +331,40 @@ describe("reconcile: first sight and several Connections", () => {
     });
   });
 
+  it("keeps the warning of one kind until that kind reads completely, whatever another kind does", async () => {
+    const warnings = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1, complete: false });
+        const tickets = yield* readConnectionWarning(sql, ACCOUNT_A);
+        yield* reconcile(ACCOUNT_A, [epic("e1")], { minutes: 2, complete: false, kind: EPIC_KIND });
+        yield* reconcile(ACCOUNT_A, [epic("e1")], { minutes: 3, kind: EPIC_KIND });
+        const epicsRead = yield* readConnectionWarning(sql, ACCOUNT_A);
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 4 });
+        return { tickets, epicsRead, cleared: yield* readConnectionWarning(sql, ACCOUNT_A) };
+      }),
+    );
+    expect(warnings.tickets).toContain("acme-tracker/ticket");
+    expect(warnings.epicsRead).toBe(warnings.tickets);
+    expect(warnings.cleared).toBeNull();
+  });
+
+  it("leaves a setup warning that starts like entity ingest's own sentences", async () => {
+    const warnings = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE connections SET warning = 'The Inbox scope was not granted during setup.'
+          WHERE id = ${uuidFromString(ACCOUNT_A)}`;
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1, complete: false });
+        const afterIncomplete = yield* readConnectionWarning(sql, ACCOUNT_A);
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 2 });
+        return { afterIncomplete, afterComplete: yield* readConnectionWarning(sql, ACCOUNT_A) };
+      }),
+    );
+    expect(warnings).toEqual({
+      afterIncomplete: "The Inbox scope was not granted during setup.",
+      afterComplete: "The Inbox scope was not granted during setup.",
+    });
+  });
+
   it("records a loop as a conflict, applies the rest, and warns once the read is complete", async () => {
     const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
@@ -346,6 +387,51 @@ describe("reconcile: first sight and several Connections", () => {
     expect(steps.changes.relationChangedRefs).toEqual([epicRef("a"), epicRef("b")]);
     expect(steps.warning).toContain("part of itself");
     expect(cardRefs(steps.inbox)).toEqual([epicRef("a"), epicRef("b")]);
+  });
+});
+
+describe("reconcile: relations of one inventory", () => {
+  it("stores a reversed parent as current, and leaves an unchanged claim as it was", async () => {
+    const outcome = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        const partOf = (...refs: Array<string>) => ({ complete: true, partOf: refs, linked: [] });
+        yield* reconcile(
+          ACCOUNT_A,
+          [
+            epic("a", { relations: partOf(PROJECT) }),
+            epic("b", { relations: partOf(epicRef("a")) }),
+          ],
+          { minutes: 1, kind: EPIC_KIND },
+        );
+        const readClaims = sql<{
+          readonly id: number;
+          readonly from_ref: string;
+          readonly to_ref: string;
+          readonly state: string;
+          readonly observed_at: string;
+        }>`SELECT id, from_ref, to_ref, state, observed_at
+          FROM external_entity_relation_claims ORDER BY from_ref`;
+        const before = yield* readClaims;
+        // One inventory turns "b is part of a" around.
+        const changes = yield* reconcile(
+          ACCOUNT_A,
+          [
+            epic("a", { relations: partOf(PROJECT, epicRef("b")) }),
+            epic("b", { relations: partOf() }),
+          ],
+          { minutes: 2, kind: EPIC_KIND },
+        );
+        return { before, changes, after: yield* readClaims };
+      }),
+    );
+    expect(outcome.changes.conflicts).toEqual([]);
+    expect(outcome.after.map((claim) => [claim.from_ref, claim.to_ref, claim.state])).toEqual([
+      [epicRef("a"), PROJECT, "current"],
+      [epicRef("a"), epicRef("b"), "current"],
+    ]);
+    const unchanged = (claims: typeof outcome.before) =>
+      claims.find((claim) => claim.to_ref === PROJECT);
+    expect(unchanged(outcome.after)).toEqual(unchanged(outcome.before));
   });
 });
 
@@ -619,6 +705,62 @@ describe("access and Connections that go away", () => {
     expect(card).toMatchObject({ title: "Known", access: "ok", stale: true });
   });
 
+  it("announces a card that turns stale or recovers while another account still reads it", async () => {
+    const outcome = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_B, [epic("e1")], { minutes: 1, kind: EPIC_KIND });
+        yield* reconcile(ACCOUNT_A, [epic("e1")], { minutes: 2, kind: EPIC_KIND });
+        yield* reconcile(
+          ACCOUNT_A,
+          [ticket("t1", { relations: { complete: true, partOf: [epicRef("e1")], linked: [] } })],
+          { minutes: 3 },
+        );
+        const task = yield* linkTaskToRef(ticketRef("t1"), 4);
+        // Only A can poll. B still holds a good read, so the access stays ok.
+        yield* sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(ACCOUNT_B)}`;
+        const epicCard = (minutes: number) =>
+          Effect.map(readInbox(repository, minutes), (inbox) =>
+            inbox.cards.find((card) => card.ref === epicRef("e1")),
+          );
+        const lost = yield* repository.reportMissing({
+          connectionId: ACCOUNT_A,
+          ref: epicRef("e1"),
+          reason: "inaccessible",
+          environment: environment(5),
+        });
+        const staleCard = yield* epicCard(6);
+        const repeated = yield* repository.reportMissing({
+          connectionId: ACCOUNT_A,
+          ref: epicRef("e1"),
+          reason: "inaccessible",
+          environment: environment(7),
+        });
+        const recovered = yield* repository.refresh({
+          connectionId: ACCOUNT_A,
+          observed: [epic("e1")],
+          environment: environment(8),
+        });
+        const freshCard = yield* epicCard(9);
+        const again = yield* repository.refresh({
+          connectionId: ACCOUNT_A,
+          observed: [epic("e1")],
+          environment: environment(10),
+        });
+        return { task, lost, staleCard, repeated, recovered, freshCard, again };
+      }),
+    );
+    expect(outcome.staleCard).toMatchObject({ access: "ok", stale: true });
+    expect(outcome.lost.changedRefs).toEqual([epicRef("e1")]);
+    // The Task of the ticket below the epic hears about it too.
+    expect(outcome.lost.affectedTaskIds).toEqual([outcome.task.id]);
+    expect(outcome.repeated.changedRefs).toEqual([]);
+    expect(outcome.freshCard).toMatchObject({ access: "ok", stale: false });
+    expect(outcome.recovered.changedRefs).toEqual([epicRef("e1")]);
+    expect(outcome.recovered.affectedTaskIds).toEqual([outcome.task.id]);
+    // Only the time of the read moved.
+    expect(outcome.again.changedRefs).toEqual([]);
+  });
+
   it("keeps the entity when its only Connection is deleted, with nobody presenting it", async () => {
     const outcome = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
@@ -816,6 +958,50 @@ describe("places and context", () => {
         restricted: true,
       },
     ]);
+  });
+
+  it("cuts the places at the reply bound when every card has its own parents", async () => {
+    const cardCount = 101;
+    const parentsPerCard = MAX_ENTITY_ANCESTORS;
+    const parentRef = (card: number, parent: number) => `acme-tracker:project:p${card}-${parent}`;
+    const inbox = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const cards = Array.from({ length: cardCount }, (_, card) =>
+          ticket(`t${String(card).padStart(3, "0")}`, {
+            relations: {
+              complete: true,
+              partOf: Array.from({ length: parentsPerCard }, (_, parent) =>
+                parentRef(card, parent),
+              ),
+              linked: [],
+            },
+          }),
+        );
+        yield* reconcile(ACCOUNT_A, cards, { minutes: 1 });
+        const projects = cards.flatMap((_, card) =>
+          Array.from({ length: parentsPerCard }, (_, parent) =>
+            project({ ref: parentRef(card, parent), title: `Project ${card}-${parent}` }),
+          ),
+        );
+        yield* reconcile(ACCOUNT_A, projects, { minutes: 2, kind: PROJECT_KIND });
+        return yield* readInbox(repository, 3);
+      }),
+    );
+    expect(() => Schema.encodeSync(Inbox)(inbox)).not.toThrow();
+    expect(inbox.places).toHaveLength(MAX_INBOX_PLACES);
+    const placeRefs = new Set(inbox.places.map((place) => place.ref));
+    const cardRefSet = new Set(cardRefs(inbox));
+    // A card that lost an ancestor lists none it cannot show, and says its context is incomplete.
+    const cut = inbox.cards.filter((card) => card.ancestors.length < parentsPerCard);
+    expect(cut.length).toBeGreaterThan(0);
+    expect(cut.every((card) => !card.contextComplete)).toBe(true);
+    for (const card of inbox.cards) {
+      expect(card.ancestors.every((ref) => placeRefs.has(ref))).toBe(true);
+    }
+    for (const edge of inbox.edges) {
+      const known = (ref: string) => placeRefs.has(ref) || cardRefSet.has(ref);
+      expect(known(edge.fromRef) && known(edge.toRef)).toBe(true);
+    }
   });
 
   it("reports the Tasks below a parent whose claims were replaced", async () => {
@@ -1158,6 +1344,35 @@ describe("listWanted and failed reads", () => {
       peer: [ticketRef("peer")],
       peerAfter: [],
     });
+  });
+
+  it("reads at most 32 parents of one thing, the first by ref", async () => {
+    const wanted = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const parents = Array.from(
+          { length: 50 },
+          (_, index) => `acme-tracker:project:p${String(index).padStart(2, "0")}`,
+        );
+        yield* reconcile(
+          ACCOUNT_A,
+          [ticket("t1", { relations: { complete: true, partOf: parents, linked: [] } })],
+          { minutes: 1 },
+        );
+        return yield* repository.listWanted({
+          connectionId: ACCOUNT_A,
+          refPrefix: "acme-tracker:project:",
+          limit: 50,
+          now: at(2),
+        });
+      }),
+    );
+    expect(wanted).toHaveLength(MAX_CONTEXT_PARENTS);
+    expect(wanted).toEqual(
+      Array.from(
+        { length: MAX_CONTEXT_PARENTS },
+        (_, index) => `acme-tracker:project:p${String(index).padStart(2, "0")}`,
+      ),
+    );
   });
 
   it("makes a ref that failed wait 120 seconds, then 240, and a good read resets the wait", async () => {

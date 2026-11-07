@@ -35,7 +35,7 @@ const PULL_REQUEST: EntityKindDeclaration = {
   },
   facts: [
     { field: "diff", form: "delta" },
-    { field: "files", form: "count", unit: "files" },
+    { field: "files", form: "count", unit: "file" },
   ],
   reasons: {
     "review-requested": { say: "{person} asked for your review", tone: "plain" },

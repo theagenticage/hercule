@@ -62,12 +62,18 @@ export interface AncestorWalk {
 }
 
 /**
- * The most (start ref, ancestor, depth) states one walk up may produce. Every
- * start gets one state of its own; the rest is room for the edges a reply may
- * carry at each level. Past it the walk stops, so a wide graph cannot cost
- * unbounded work.
+ * The states a walk up may produce beyond one per start: room for the edges a
+ * reply may carry at each level. Every walk up the graph (the reads of a
+ * reply here, and the question of which refs to keep true in the repository)
+ * stops at its starts plus this, so a wide graph cannot cost unbounded work.
  */
-const stateBudget = (startCount: number) => startCount + MAX_GRAPH_EDGES * MAX_CONTEXT_DEPTH;
+export const WALK_STATE_ROOM = MAX_GRAPH_EDGES * MAX_CONTEXT_DEPTH;
+
+/**
+ * The most (start ref, ancestor, depth) states one walk up may produce. Every
+ * start gets one state of its own, and the rest is `WALK_STATE_ROOM`.
+ */
+const stateBudget = (startCount: number) => startCount + WALK_STATE_ROOM;
 
 /** The reason stored with a claim that was refused because it closes a loop. */
 const LOOP_REASON = "Part of this would make a loop: the parent is already part of this thing.";
@@ -81,6 +87,10 @@ interface ClaimRow {
   readonly relation: Relation;
   readonly to_ref: string;
   readonly state: "current" | "conflicted";
+}
+
+interface StoredClaimRow extends ClaimRow {
+  readonly from_ref: string;
 }
 
 const make = Effect.gen(function* () {
@@ -102,64 +112,98 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Writes the relations one Connection reports for `fromRef`, as `source`
-     * claims, and returns what changed and which claims were refused.
+     * Writes the relations one Connection reports for several refs at once, as
+     * `source` claims, and returns for each ref what changed and which claims
+     * were refused.
      *
      * - A claim already stored keeps its id and time, and nothing is written.
      * - `complete: true` removes this Connection's other source claims from
-     *   `fromRef`. Other Connections' claims and people's claims stay.
+     *   that ref. Other Connections' claims and people's claims stay.
      * - `complete: false` only adds.
      * - A new `part-of` claim that would close a loop is stored as `conflicted`
      *   with a reason, and the rest still applies. A conflicted claim is not
      *   promoted later when the loop opens, but a complete read that no longer
      *   reports it removes it, and reporting it again checks it again.
      *
+     * All removals of the whole batch happen before any claim is added, and the
+     * claims are added in the order of (ref, relation, target). So a batch that
+     * turns B-is-part-of-A into A-is-part-of-B stores the new claim as current,
+     * and which of two claims that close a loop together is refused never
+     * depends on the order the source listed them.
+     *
      * Fails only with a database error. The caller supplies the transaction
      * and the Connection id, so the claim is stamped with who really reported
-     * it.
+     * it. Each ref may appear once.
      */
     applySourceRelations: (input: {
       readonly connectionId: string;
-      readonly fromRef: string;
-      readonly relations: ObservedRelations;
-      readonly observedRevision: string | undefined;
+      readonly entries: ReadonlyArray<{
+        readonly fromRef: string;
+        readonly relations: ObservedRelations;
+        readonly observedRevision: string | undefined;
+      }>;
       readonly now: string;
-    }): Effect.Effect<RelationWrite, SqlError> =>
+    }): Effect.Effect<ReadonlyMap<string, RelationWrite>, SqlError> =>
       Effect.gen(function* () {
-        const { fromRef, relations, observedRevision, now } = input;
+        const { entries, now } = input;
+        const results = new Map<string, RelationWrite>();
+        if (entries.length === 0) return results;
         const connectionId = uuidFromString(input.connectionId);
-
-        const stored = yield* sql<ClaimRow>`
-          SELECT id, relation, to_ref, state FROM external_entity_relation_claims
-          WHERE from_ref = ${fromRef} AND connection_id = ${connectionId}
-            AND claim_type = 'source' AND evidence_key = ''`;
         const keyOf = (relation: string, toRef: string) => `${relation}\u0000${toRef}`;
-        const storedByKey = new Map(stored.map((row) => [keyOf(row.relation, row.to_ref), row]));
 
-        const desired = new Map<string, { relation: Relation; toRef: string }>();
-        for (const toRef of relations.partOf) {
-          desired.set(keyOf("part-of", toRef), { relation: "part-of", toRef });
-        }
-        for (const toRef of relations.linked) {
-          desired.set(keyOf("linked", toRef), { relation: "linked", toRef });
+        const storedRows = yield* sql<StoredClaimRow>`
+          SELECT id, from_ref, relation, to_ref, state FROM external_entity_relation_claims
+          WHERE from_ref IN (SELECT value FROM json_each(${JSON.stringify(entries.map((entry) => entry.fromRef))}))
+            AND connection_id = ${connectionId}
+            AND claim_type = 'source' AND evidence_key = ''`;
+
+        const storedByRef = new Map<string, Array<StoredClaimRow>>();
+        for (const row of storedRows) {
+          const group = storedByRef.get(row.from_ref) ?? [];
+          group.push(row);
+          storedByRef.set(row.from_ref, group);
         }
 
-        const removed = relations.complete
-          ? stored.filter((row) => !desired.has(keyOf(row.relation, row.to_ref)))
-          : [];
-        if (removed.length > 0) {
+        // First work out the whole difference, so that no write depends on
+        // which ref was handled first.
+        const plans = entries.map((entry) => {
+          const stored = storedByRef.get(entry.fromRef) ?? [];
+          const storedKeys = new Set(stored.map((row) => keyOf(row.relation, row.to_ref)));
+          const desired = new Map<string, { relation: Relation; toRef: string }>();
+          for (const toRef of entry.relations.partOf) {
+            desired.set(keyOf("part-of", toRef), { relation: "part-of", toRef });
+          }
+          for (const toRef of entry.relations.linked) {
+            desired.set(keyOf("linked", toRef), { relation: "linked", toRef });
+          }
+          const removed = entry.relations.complete
+            ? stored.filter((row) => !desired.has(keyOf(row.relation, row.to_ref)))
+            : [];
+          const added = [...desired.entries()]
+            .filter(([key]) => !storedKeys.has(key))
+            .map(([, claim]) => claim);
+          return { entry, stored, removed, added };
+        });
+
+        const removedIds = plans.flatMap((plan) => plan.removed.map((row) => row.id));
+        if (removedIds.length > 0) {
           yield* sql`DELETE FROM external_entity_relation_claims
-            WHERE id IN ${sql.in(removed.map((row) => row.id))}`;
+            WHERE id IN (SELECT value FROM json_each(${JSON.stringify(removedIds)}))`;
         }
 
-        // Add in a fixed order, so which claim of two that close a loop together
-        // is refused does not depend on the order the source listed them.
-        const added = [...desired.entries()]
-          .filter(([key]) => !storedByKey.has(key))
-          .map(([, claim]) => claim)
-          .sort((a, b) => a.relation.localeCompare(b.relation) || a.toRef.localeCompare(b.toRef));
-        const refused: Array<EntityConflict> = [];
-        for (const { relation, toRef } of added) {
+        const additions = plans
+          .flatMap((plan) => plan.added.map((claim) => ({ fromRef: plan.entry.fromRef, ...claim })))
+          .sort(
+            (a, b) =>
+              a.fromRef.localeCompare(b.fromRef) ||
+              a.relation.localeCompare(b.relation) ||
+              a.toRef.localeCompare(b.toRef),
+          );
+        const revisionByRef = new Map(
+          entries.map((entry) => [entry.fromRef, entry.observedRevision]),
+        );
+        const refusedByRef = new Map<string, Array<EntityConflict>>();
+        for (const { fromRef, relation, toRef } of additions) {
           const conflictReason =
             relation !== "part-of"
               ? null
@@ -168,6 +212,7 @@ const make = Effect.gen(function* () {
                 : (yield* closesLoop(fromRef, toRef))
                   ? LOOP_REASON
                   : null;
+          const observedRevision = revisionByRef.get(fromRef);
           yield* sql`
             INSERT INTO external_entity_relation_claims
               (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
@@ -176,33 +221,38 @@ const make = Effect.gen(function* () {
                     ${observedRevision ?? null},
                     ${conflictReason === null ? "current" : "conflicted"}, ${conflictReason}, ${now})`;
           if (conflictReason !== null) {
+            const refused = refusedByRef.get(fromRef) ?? [];
             refused.push({ fromRef, relation, toRef, reason: conflictReason });
+            refusedByRef.set(fromRef, refused);
           }
         }
 
-        // A claim that stays keeps its id and time. Only its record of the
-        // source's revision follows the source.
-        if (observedRevision !== undefined) {
-          yield* sql`
-            UPDATE external_entity_relation_claims SET observed_revision = ${observedRevision}
-            WHERE from_ref = ${fromRef} AND connection_id = ${connectionId}
-              AND claim_type = 'source' AND evidence_key = ''
-              AND observed_revision IS NOT ${observedRevision}`;
+        for (const { entry, stored, removed, added } of plans) {
+          const { fromRef, observedRevision } = entry;
+          // A claim that stays keeps its id and time. Only its record of the
+          // source's revision follows the source.
+          if (observedRevision !== undefined) {
+            yield* sql`
+              UPDATE external_entity_relation_claims SET observed_revision = ${observedRevision}
+              WHERE from_ref = ${fromRef} AND connection_id = ${connectionId}
+                AND claim_type = 'source' AND evidence_key = ''
+                AND observed_revision IS NOT ${observedRevision}`;
+          }
+          const removedHere = new Set(removed.map((row) => row.id));
+          const keptConflicts: Array<EntityConflict> = stored
+            .filter((row) => row.state === "conflicted" && !removedHere.has(row.id))
+            .map((row) => ({
+              fromRef,
+              relation: row.relation,
+              toRef: row.to_ref,
+              reason: row.to_ref === fromRef ? SELF_REASON : LOOP_REASON,
+            }));
+          const conflicts = [...keptConflicts, ...(refusedByRef.get(fromRef) ?? [])].sort(
+            (a, b) => a.relation.localeCompare(b.relation) || a.toRef.localeCompare(b.toRef),
+          );
+          results.set(fromRef, { changed: removed.length > 0 || added.length > 0, conflicts });
         }
-
-        const removedIds = new Set(removed.map((row) => row.id));
-        const keptConflicts: Array<EntityConflict> = stored
-          .filter((row) => row.state === "conflicted" && !removedIds.has(row.id))
-          .map((row) => ({
-            fromRef,
-            relation: row.relation,
-            toRef: row.to_ref,
-            reason: row.to_ref === fromRef ? SELF_REASON : LOOP_REASON,
-          }));
-        const conflicts = [...keptConflicts, ...refused].sort(
-          (a, b) => a.relation.localeCompare(b.relation) || a.toRef.localeCompare(b.toRef),
-        );
-        return { changed: removed.length > 0 || added.length > 0, conflicts };
+        return results;
       }),
 
     /**
