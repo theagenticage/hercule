@@ -1416,18 +1416,34 @@ const make = Effect.gen(function* () {
      * model calls.
      *
      * Does nothing for a Task that is deleted, merged or finished. Returns
-     * true when a row was written.
+     * `marked` (a row was written) and `becameStale`: the mark started a
+     * dirty cycle on a Task that has a written summary, so a card that shows
+     * the summary as current is out of date now. Later marks in the same
+     * cycle, and a Task with no summary yet, leave `becameStale` false.
      */
-    markSummaryDirty: (taskId: string, at: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql`INSERT INTO task_summaries (task_id, input_revision, dirty_revision, dirty_at, attempt_count)
-            SELECT t.id, 0, 1, ${at}, 0 FROM tasks t
-            WHERE t.id = ${uuidFromString(taskId)} AND ${taskCanBeSummarized}
-            ON CONFLICT (task_id) DO UPDATE SET dirty_revision = dirty_revision + 1,
-                                                dirty_at = COALESCE(dirty_at, excluded.dirty_at)
-            RETURNING task_id`,
-        (rows) => rows.length > 0,
-      ),
+    markSummaryDirty: (
+      taskId: string,
+      at: string,
+    ): Effect.Effect<{ readonly marked: boolean; readonly becameStale: boolean }, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const held = yield* sql<{ readonly dirty_at: string | null; readonly line: string | null }>`
+          SELECT dirty_at, line FROM task_summaries WHERE task_id = ${key}`;
+        const rows = yield* sql`
+          INSERT INTO task_summaries (task_id, input_revision, dirty_revision, dirty_at, attempt_count)
+          SELECT t.id, 0, 1, ${at}, 0 FROM tasks t
+          WHERE t.id = ${key} AND ${taskCanBeSummarized}
+          ON CONFLICT (task_id) DO UPDATE SET dirty_revision = dirty_revision + 1,
+                                              dirty_at = COALESCE(dirty_at, excluded.dirty_at)
+          RETURNING task_id`;
+        const marked = rows.length > 0;
+        const before = held[0];
+        return {
+          marked,
+          becameStale:
+            marked && before !== undefined && before.dirty_at === null && before.line !== null,
+        };
+      }),
 
     /**
      * Marks a Task's summary as current, so no model call is spent on it: a

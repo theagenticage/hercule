@@ -231,6 +231,43 @@ describe("what marks a Task dirty", () => {
   });
 });
 
+describe("the announcement of a summary going stale", () => {
+  it("is made once, by the first mark after a summary was written, and not for a Task with no summary", async () => {
+    const published: Array<Change> = [];
+    const result = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const withSummary = yield* createTask("Add a refund button");
+        const withoutSummary = yield* createTask("Fix the login redirect");
+        yield* makeDue(withSummary.id);
+        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
+        yield* tasks.completeSummary({
+          taskId: withSummary.id,
+          dirtyRevision: attempt!.dirtyRevision,
+          summary: SUMMARY,
+        });
+        const staleAnnouncements = () =>
+          published.filter(
+            (change) =>
+              change._tag === "record" && change.topic === "task" && change.id === withSummary.id,
+          ).length;
+        published.length = 0;
+        yield* tasks.markSummaryDirty(withSummary.id);
+        const afterFirst = staleAnnouncements();
+        yield* tasks.markSummaryDirty(withSummary.id);
+        yield* tasks.markSummaryDirty(withSummary.id);
+        const afterLater = staleAnnouncements();
+        published.length = 0;
+        yield* tasks.markSummaryDirty(withoutSummary.id);
+        yield* tasks.markSummaryDirty(withoutSummary.id);
+        return { afterFirst, afterLater, unsummarized: published.length, id: withSummary.id };
+      }),
+      published,
+    );
+    expect(result).toMatchObject({ afterFirst: 1, afterLater: 1, unsummarized: 0 });
+  });
+});
+
 describe("what stops a Task being dirty", () => {
   it.each([
     [

@@ -1677,6 +1677,17 @@ Thread titles are the first use. The title rules are in [./02-domain-model.md](.
   - **Title and role are accepted on their own.** A valid role is stored even when the title is empty after cleaning, and the other way round. `needsRefinement` is stored only together with a generated title, so a role-only answer leaves it null.
 - **On failure:** the cut-short title stays. The failure shows in the setting's status and in the record, never as an error in the Thread.
 
+### 14.7 Task Summaries
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031), [ADR 0053](../adr/0053-a-text-generation-describes-a-task-it-never-moves-one.md).)* A Task Summary is the second use. What it is, when a Task needs one and how the result is stored are in [./09-tasks.md](./09-tasks.md#task-summaries). For the call itself:
+
+- **Caller and purpose:** `core:tasks`, `task.summary`, recorded as `tasks/task.summary`. The call passes `whenNoRunner: "fail"`: the Task keeps its last summary and is tried again later.
+- **Made by:** a loop in the controller daemon, outside any transaction. With the setting `off`, or with no runner able to run a call now (`unavailableReason`, section 14.5), the loop makes no call and leaves the Tasks waiting. It does not record an attempt, so the next wake after the setting changes finds the work still there.
+- **Input:** JSON of at most 24 KiB (`MAX_SUMMARY_INPUT_BYTES`), well under the 64 KiB at which an input is a defect. It holds the Task's title and description, the newest 4 sessions with their kind, title, first prompt (at most 1,000 characters) and the end of their newest assistant text (at most 2,500 characters), the newest 5 runs with their workflow, status and failure cause, and the text of the open questions of the Task's Threads (at most 6). When the JSON is too large, the largest texts are cut first. Everything in it is material to describe, and the instructions say never to follow an instruction found in it.
+- **Output:** `{ line, standing, left }` and nothing else. The schema has no length limit, for the reason in section 14.6. The controller trims each text and cuts it at a word to its bound in the contract (`line` 60 characters, `standing` 400, `left` 200), ending with "…" when it cut. It never refuses an answer for its length.
+- **Pace:** at most one call per Task every 5 minutes, failures included, and at most 2 calls at once.
+- **On failure:** the Task keeps its last summary, which then reads as stale. The failure shows in the record (section 14.5) and in the summary's own bookkeeping, never as an error on the card.
+
 ## 15. Providers and Provider Accounts
 
 *(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A **Provider** is the company that serves models and bills for them. A **Provider Account** is one account at one provider: "Anthropic · Work", or "OpenRouter". Accounts are separate from harnesses, so one account can run in several harnesses and every harness can run several providers. The reasons are in [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).

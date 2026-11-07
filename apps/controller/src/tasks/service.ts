@@ -376,7 +376,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Marks the summary of the Task `taskId` dirty in the caller's transaction,
-   * and wakes the summary writer once that transaction commits. A Task that is
+   * and wakes the summary writer once that transaction commits. The first mark
+   * of a dirty cycle on a Task with a written summary also announces the Task
+   * as a derived change, so its card shows the summary as stale. A Task that is
    * deleted, merged or finished is left alone. It writes one row and waits for
    * nothing, so any change a summary reads can call it.
    */
@@ -385,9 +387,12 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const wake = yield* TaskSummaryWake;
-        if (yield* tasks.markSummaryDirty(taskId, yield* nowIso)) {
-          yield* afterCommit(wake.wake);
-        }
+        const { marked, becameStale } = yield* tasks.markSummaryDirty(taskId, yield* nowIso);
+        if (marked) yield* afterCommit(wake.wake);
+        // The card shows a written summary as current until told otherwise.
+        // Only the first mark of a dirty cycle says so; the rest change nothing
+        // a client draws.
+        if (becameStale) yield* announceTaskCardChange(taskId);
       }),
     );
 
@@ -1413,6 +1418,11 @@ const make = Effect.gen(function* () {
      * transaction, and wakes the summary writer once that transaction
      * commits (`TaskSummaryWake`). Call it from the transaction of the change
      * the summary reads, so a crash cannot lose the change.
+     *
+     * When the mark starts a dirty cycle on a Task that has a written summary,
+     * it announces the Task as a derived change (as `completeSummary` does), so
+     * clients draw the summary as stale. Later marks of the same cycle announce
+     * nothing.
      *
      * It raises the row's `dirty_revision`. It sets `dirty_at` to now only
      * when the row is clean, so `dirty_at` is the first change since the last

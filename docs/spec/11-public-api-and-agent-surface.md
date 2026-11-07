@@ -150,6 +150,9 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 | `task.create` | `{ title, description, stage? *(added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029))*, priority?, labels?, projectId?, provenance? }` (`stage` defaults to `planned`: a Task someone files is planned, not explored) | `task.create` | `POST /tasks` |
 | `task.update` | `{ taskId, title?, description?, stage? *(added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029))*, status?, priority?, projectId?, addLabels?, removeLabels?, provenance? }` (`projectId: null` detaches; `provenance` appends; `status` is the legacy coarse write and picks a stage, `stage` is the exact word, and sending both fails `validation` telling the caller to send `stage`, [./09-tasks.md](./09-tasks.md#status-axis-and-lifecycle)) | `task.update` | `PATCH /tasks/{id}` |
 | `task.move` (*added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030)*) | `{ taskId, stage?, projectId?, afterTaskId? }` -> `Task`, below | `task.update` | `POST /tasks/{id}/move` |
+| `task.readDetail` (*added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031)*) | `{ taskId }` -> `TaskDetail`, below | `task.read`, `session.query` and `run.query` | `GET /tasks/{id}/detail` |
+| `task.merge` (*added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031)*) | `{ taskId, intoTaskId }` -> the surviving `Task`, below | `task.update`, user only | `POST /tasks/{id}/merge` |
+| `task.undoTryAgain` (*added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031)*) | `{ taskId, runId }` -> `{ outcome, stopRequested, reason? }`, below | `task.update` and `run.cancel`, user only | `POST /tasks/{id}/try-again/undo` |
 | `task.delete` | `{ taskId }` (soft: sets `deletedAt`, [./09-tasks.md](./09-tasks.md) Delete) | `task.delete` | `DELETE /tasks/{id}` |
 
 ```ts
@@ -254,7 +257,7 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 *(Added 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* **`task.queryBoard`** returns the cards of Work in one read. It exists because `task.query` loads each Task's whole description and provenance and sorts by `updatedAt`, which would reshuffle a board on every summary. It is owned by the tasks domain, like `task.queryTracking`, and reads sessions and runs through a port the controller daemon answers.
 
 - **Reply.** `{ cards: WorkCard[], truncated: boolean }`. The cards are the Tasks at the five board stages that are not deleted, ordered by project, then stage, then `boardRank` (never by recent activity). At most `MAX_BOARD_CARDS` (1000) come back, and `truncated` is true when there were more.
-- **`WorkCard`.** `id`, `title`, `stage` (a board stage), `priority`, `projectId?`, `boardRank`, `openQuestion? { sessionId, requestId, text }`, `failure? { runId, workflowName, cause }`, `openSessionId?`, `threadCount`, `workingSessionId?`, `createdAt`, `stageChangedAt`, `lastActivityAt`. What `openQuestion`, `failure` and `workingSessionId` mean, and that "wants you" is `openQuestion` and nothing else, is in [./09-tasks.md](./09-tasks.md#the-board).
+- **`WorkCard`.** `id`, `title`, `stage` (a board stage), `priority`, `projectId?`, `boardRank`, `openQuestion? { sessionId, requestId, text }`, `failure? { runId, workflowName, cause }`, `openSessionId?`, `threadCount`, `workingSessionId?`, `createdAt`, `stageChangedAt`, `lastActivityAt`, `summary? { line, standing, left, generatedAt, stale }` *(added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031))*. What `openQuestion`, `failure` and `workingSessionId` mean, and that "wants you" is `openQuestion` and nothing else, is in [./09-tasks.md](./09-tasks.md#the-board). `summary` is the Task's [Task Summary](./09-tasks.md#task-summaries), absent until one is written; it describes the Task and never sets the three facts. The board reads it in the same statement as the cards.
 - **Grants.** The operation's row names `task.read`, and the service also checks `session.read` (as `session.query`) and `run.read` (as `run.query`) before it reads anything, because a card shows a Thread's question and a run's state. A caller with `task.read` alone is refused with `forbidden` naming the missing grant, not given a thinner board. The user holds all three.
 - **How it reads.** A fixed number of statements whatever the number of cards, with no transaction, so it runs on the read-only connection.
 - Its CLI row is `hercule task board`. Its help names the three grants.
@@ -266,6 +269,45 @@ type TrackingOutputValue = string | number | boolean | null | { items: number } 
 - **A move that changes nothing writes nothing**, as `task.update`, and emits no event.
 - **Events.** `task.updated` reports `changes.boardRank` beside any `stage` or `projectId` change ([./09-tasks.md](./09-tasks.md#the-board)).
 - Its CLI row is `hercule task move <id> --stage <stage> [--project <id>] [--after <id>]`, with the id, project and card resolved from tails through `task.query` and `project.query`. Not a bound operation: `task.move` lists no `usableIn`.
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **`task.readDetail`** returns what the details pane of one Task draws, in one reply, so the pane never joins reads itself. It is owned by the tasks domain, and reads sessions and runs through ports the controller daemon answers.
+
+```ts
+interface TaskDetail {
+  task: Task                       // in full: description, labels, provenance
+  card: WorkCard                   // the same facts the board shows, its summary included
+  sessions: TaskDetailSession[]    // at most MAX_DETAIL_SESSIONS (10): the unfinished first, then newest
+  sessionCount: number             // how many sessions the Task has
+  runs: TrackingDetailRun[]        // at most MAX_TRACKING_DETAIL_RUNS (20), oldest first, as Tracking lists them
+  runCount: number                 // how many runs the Task has
+  output?: TrackingOutput          // what the newest run's last agent step produced, as Tracking shows it
+}
+
+interface TaskDetailSession {
+  id: string; title: string; role?: string; kind: SessionKind; status: SessionStatus
+  openRequests: SessionRequest[]   // oldest first, the session contract's own type
+  done: boolean                    // the Thread is marked Done
+}
+```
+
+- **The summary is `card.summary`.** `TaskDetail` has no summary field of its own, so the board and the pane cannot disagree.
+- **The Thread that asks the card's `openQuestion` is always in `sessions`,** even when newer sessions would crowd it out, because the pane answers the question from that Thread's Requests. `sessionCount` and `runCount` let the pane say "and 12 more" and link to `session.query` by `taskId` and `run.query` by `taskIds`.
+- **Grants.** The operation's row names `task.read`, and the service also checks `session.query` and `run.query` before it reads anything, as `task.queryBoard` does. A caller that lacks one is refused with `forbidden` naming it, and is not given a thinner reply.
+- **Errors.** `not_found` for a Task that does not exist or is deleted. `invalid_state` for a Task at `done` or `dropped`, which has no card to open: the message says to move it back to a stage first. An id that was merged into another Task returns the survivor's details, whose `task.id` differs ([./09-tasks.md](./09-tasks.md#merging-tasks)).
+- **How it reads.** A fixed number of statements, whatever the number of sessions and runs, with no transaction, so it runs on the read-only connection. It reads no transcript.
+- Its CLI row is `hercule task details <id>`.
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **`task.merge`** merges one Task into another, as the user. The Task in the path is the source and `intoTaskId` is the survivor; it returns the survivor. What the survivor keeps, what moves, the redirect from the source's id and every refusal are in [./09-tasks.md](./09-tasks.md#merging-tasks).
+
+- **Only the user merges.** A session or a workflow step is refused with `forbidden`, whatever its profile holds. The grant is `task.update`.
+- **Errors.** `not_found`, `invalid_state` (a Task at `done` or `dropped`) and `validation` (the same Task twice, a Task already merged, or a result with too many labels or too long a description), each with a message that says what to do.
+- Its CLI row is `hercule task merge <id> --into <id>`, with both ids resolved from tails through `task.query`.
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **`task.undoTryAgain`** undoes a Try again: it asks the run that Try again started to stop, and puts the Task's failure back when nothing newer holds the Task. Its input is `{ taskId, runId }`, it returns `{ outcome: "restored" | "stopped" | "too-late", stopRequested, reason? }`, and its rules are in [./09-tasks.md](./09-tasks.md#a-failure-and-how-it-ends).
+
+- **Only the user undoes,** with the grants `task.update` and `run.cancel`. A repeat of the call returns the first answer.
+- **Errors.** `not_found` when `runId` is not a run whose start ended a failure of exactly this Task. It cancels nothing in that case.
+- Its CLI row is `hidden: true`: the operation exists only for the undo line of Try again, and a terminal user stops a run with `hercule run cancel`.
 
 `task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* `priority` ascends `low, normal, high, urgent`, and `status` ascends `open, in-progress, done, cancelled`. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
 
@@ -372,6 +414,7 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.update` | `{ sessionId, model?, options? }` -> the `Session` | `session.steer` | `PATCH /sessions/{id}` |
 | `session.markDone` *(added 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626))* | `{ sessionIds }`, one or more -> the `Session`s, in the order given *(amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828))* | `session.steer` | `POST /sessions/mark-done` |
 | `session.reopen` *(added 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626))* | `{ sessionIds }`, one or more -> the `Session`s, in the order given *(amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828))* | `session.steer` | `POST /sessions/reopen` |
+| `session.moveToTask` *(added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031), below)* | `{ sessionId, taskId? }` -> the `Session`; the user only | `session.steer` | `POST /sessions/{id}/move-to-task` |
 | `session.archive` *(added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972))* | `{ sessionIds }`, one or more Threads -> the `Session`s, in the order given; the user only (below) | `session.steer` | `POST /sessions/archive` |
 | `session.input` | `{ sessionId, text, attachments?, model?, options?, steer?, dedupKey? }` (`steer` *added 2026-10-10, [#511](https://github.com/theagenticage/hercule/issues/511)*: see below; `dedupKey` *added 2026-10-29, [#898](https://github.com/theagenticage/hercule/issues/898)*: see "Retrying a call" below) -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
 | `session.interrupt` / `session.stop` | `{ sessionId }`; `session.interrupt` also takes `subagentId?` *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))* | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
@@ -409,6 +452,15 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 - **Audit.** Each change writes `session.markedDone` or `session.reopened` in the transaction of the change ([./08-events-and-connections.md](./08-events-and-connections.md) section 3), and is announced on the `session` topic.
 - **The CLI rows**: `hercule session done <id>...` and `hercule session reopen <id>...`, each printing the Sessions it moved; `hercule session list --done true|false` filters. All take a full id or a tail of eight or more characters.
 - *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* **A list, all or nothing.** Both operations take one or more ids (at most one page limit) and apply them in one transaction with one timestamp, so every Thread of a call has the same `done.at` or `reopenedAt`. They return the Sessions after the move, in the order given. When one id is unknown (`not_found`) or is not a Thread (`invalid_state`), the call fails and nothing is written, no audit entry included. A Thread already in the asked state stays as it is, as above. There is one operation each, not a second "many" variant. `session list` also takes `--kind` (repeatable) and `--done-since`, and no longer takes `--thread`.
+
+*(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* **`session.moveToTask`** moves one Thread to another Task, or to a new Task made from it, when the join rule put it on the wrong one ([./09-tasks.md](./09-tasks.md#moving-a-thread-to-another-task)). It returns the Thread.
+
+- **Input.** `{ sessionId, taskId? }`. With `taskId`, the Thread joins that Task, or its survivor if it was merged. Without it, a Task is made from the Thread, as row 4 of the join rule does.
+- **Only the user moves a Thread.** A session is refused with `forbidden`. The grant is `session.steer`, as for `session.markDone`: moving a Thread changes how it is filed.
+- **Errors.** `not_found` for an unknown session or a missing or deleted `taskId`. `invalid_state` for a session that is not a Thread, and for a `taskId` at `done` or `dropped`.
+- **Only this Thread moves.** Its runs stay where they are, and so does the workspace's `task_workspaces` row, so the next Thread started in that folder still joins the old Task.
+- **Audit.** A move that changes the Task writes `session.movedToTask` with the Thread and both Tasks, and announces both cards. Moving a Thread to the Task it is on changes nothing and writes no entry.
+- Its CLI row is `hercule session move-to-task <id> [--task <id>]`.
 
 *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md).)* **`session.archive`** puts Threads away for good ([GLOSSARY](../../GLOSSARY.md) Archived; [./02-domain-model.md](./02-domain-model.md) Session, `archived`):
 

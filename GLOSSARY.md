@@ -25,12 +25,20 @@ A unit of human intent: a described piece of work someone wants done. Work-type-
 _Avoid_: ticket, issue (reserved for external trackers)
 
 **Stage**:
-Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does. A Task's status is a coarse reading of its stage.
+Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
 _Avoid_: step (a workflow's, see Step), status (the coarse reading of the stage, not the stage itself), column (how a board draws a stage), reviewing (the stage is `in-review`)
 
 **Provenance**:
-A task's append-only record of what created or touched it: entries pointing at events, runs, external refs, and the signals handed off onto it. What lets a later event about the same thing find its existing task.
+A task's record of what created or touched it: entries pointing at events, runs, external refs, the signals handed off onto it, and the Tasks merged into it. Entries are only appended, and an entry is never edited or removed; the one thing that can happen to one is that a Merge moves it, unchanged, to the surviving Task. What lets a later event about the same thing find its existing task.
 _Avoid_: history, audit trail (reserved for the event log)
+
+**Task Summary**:
+A description of a Task that a Text Generation writes after the Task's work changes: a line of about six words for the card, where the Task stands, and what is left. It describes and never decides. It holds no question, answer or judgement, never moves a card or changes the Task, and is kept in a table of its own, not on the Task. A card's open question and failure come from real rows, never from a summary. Stale when something changed since it was written or the last attempt failed.
+_Avoid_: description (the Task's own markdown, written by people and agents), status (the coarse reading of the stage), AI summary, digest
+
+**Merge (Task)**:
+The user's act of making two Tasks one (`task.merge`). The Task they name survives, keeping its title, stage, project, priority and place on the board; the other, the merged Task, gives its labels, description, Threads, runs, workspaces, provenance and any failure to the survivor, and its old id then reads as the survivor. A merge is the user's correction of how work is grouped; a session or a workflow never merges. Moving one Thread to another Task is a different act (`session.moveToTask`).
+_Avoid_: combine, join (a Thread joins a Task), dedupe, close as duplicate
 
 **External Ref**:
 A fully-qualified canonical identifier for a thing outside Hercule (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
@@ -121,8 +129,8 @@ A thread that exists as a Session on the controller, whatever its status. Everyt
 _Avoid_: existing thread, materialized thread, live thread
 
 **Done (Thread)**:
-A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
-_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. It is not the Task's `done` stage: the two are separate acts, and neither changes the other. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
+_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), a Task at stage `done`, archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
 
 **Archived (Thread)**:
 A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first. Once every Thread of a workspace is archived, its Agent sessions are archived too, so a sidebar row goes whole, and automatic cleanup may remove the workspace. An archived Thread leaves the sidebar and the Done shelf. Only the user archives, and a working Thread (queued, starting or busy) cannot be archived. There is no undo.
@@ -426,7 +434,7 @@ What one runner found out about one Provider Account in one harness: whether it 
 _Avoid_: provider status
 
 **Text Generation**:
-One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title, and so does a workflow's text generation step, as its run; agents never do.
+One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title or a Task Summary, and so does a workflow's text generation step, as its run; agents never do.
 _Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
 
 **Text Generation Model**:
