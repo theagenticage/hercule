@@ -830,6 +830,13 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
+ * Placement with the task service it gives each new Thread a Task through.
+ * The task service holds no state, so the layer is built once however many
+ * groups are provided it, as the layers around it are.
+ */
+const PlacementWithTasksLayer = PlacementLayer.pipe(Layer.provide(TaskServiceLayer));
+
+/**
  * The workflows domain's services: the workflow service, the trigger health,
  * and the rule the Scheduler applies to cron triggers.
  *
@@ -876,7 +883,9 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
-      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+      Layer.provide(
+        Layer.mergeAll(PlacementWithTasksLayer, LiveLayer).pipe(Layer.provide(DispatchLayer)),
+      ),
     ),
   ),
   Layer.provide(LiveTopicsLayer),
@@ -1062,7 +1071,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(ConversationServiceLayer),
     Layer.provideMerge(AssistantResponderLayer),
     Layer.provideMerge(AssistantSessionsLayer),
-    Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(PlacementWithTasksLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),

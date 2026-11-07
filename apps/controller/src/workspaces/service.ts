@@ -71,6 +71,7 @@ import {
   type Unauthenticated,
   type Validation,
   type Workspace,
+  type WorkspaceKind,
   type WorkspaceStatus,
   type WorkspaceAttachInput,
   THREAD_BRANCH_PREFIX,
@@ -246,7 +247,7 @@ const computeRetentionWindow = (
  * Where a session that asked for a workspace will work, once the rows are
  * written. It holds:
  *
- * - the workspace the session is in
+ * - the workspace the session is in, and whether it is a main or an ephemeral one
  * - the branch the runner switches the main workspace to before the harness
  *   starts
  * - the Connection the session pushes through
@@ -261,6 +262,8 @@ const computeRetentionWindow = (
  */
 interface Opened {
   readonly workspaceId: string | null;
+  /** The kind of the workspace; `null` exactly when `workspaceId` is `null`. */
+  readonly workspaceKind: WorkspaceKind | null;
   readonly checkoutBranch: string | undefined;
   readonly designatedConnectionId: string | null;
   readonly frame?: WorkspaceProvision;
@@ -545,6 +548,7 @@ const make = Effect.gen(function* () {
       const wish = input.wish;
       const nothing: Opened = {
         workspaceId: null,
+        workspaceKind: null,
         checkoutBranch: undefined,
         designatedConnectionId: null,
       };
@@ -610,6 +614,7 @@ const make = Effect.gen(function* () {
         );
         return {
           workspaceId: joined,
+          workspaceKind: row.value.kind,
           checkoutBranch: undefined,
           designatedConnectionId: row.value.designatedConnectionId,
         };
@@ -621,6 +626,7 @@ const make = Effect.gen(function* () {
         if (selected !== undefined) {
           return {
             workspaceId: selected.id,
+            workspaceKind: selected.kind,
             checkoutBranch: wish.branch,
             designatedConnectionId: selected.designatedConnectionId,
           };
@@ -639,6 +645,7 @@ const make = Effect.gen(function* () {
             );
           return {
             workspaceId: standing.value.id,
+            workspaceKind: standing.value.kind,
             checkoutBranch: wish.branch,
             designatedConnectionId: standing.value.designatedConnectionId,
           };
@@ -650,6 +657,7 @@ const make = Effect.gen(function* () {
         );
         return {
           workspaceId: opened.workspace.id,
+          workspaceKind: opened.workspace.kind,
           checkoutBranch: wish.branch,
           designatedConnectionId: opened.workspace.designatedConnectionId,
           frame: opened.frame,
@@ -721,6 +729,7 @@ const make = Effect.gen(function* () {
       );
       return {
         workspaceId: opened.workspace.id,
+        workspaceKind: opened.workspace.kind,
         checkoutBranch: undefined,
         designatedConnectionId: opened.workspace.designatedConnectionId,
         frame: opened.frame,

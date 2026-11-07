@@ -1,7 +1,10 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
+  buildThreadTaskTitle,
   TaskService,
   TaskServiceLayer,
+  type JoinedTask,
+  type JoiningWorkspace,
   type QueryInput,
   type TaskPage,
   type UpdateInput,

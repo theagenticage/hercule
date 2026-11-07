@@ -134,6 +134,13 @@ export interface TrackedTask {
   readonly handoffs: ReadonlyArray<TrackedHandoff>;
 }
 
+/**
+ * The stages at which a Task is finished: `done` and `dropped`. A Task at one
+ * of them takes no new Thread, and a workspace whose Task is at one starts a
+ * new Task.
+ */
+export const FINISHED_STAGES: ReadonlyArray<TaskStage> = ["done", "dropped"];
+
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
   /** The task's id, when the caller chose it; a new one is made when absent. */
@@ -628,6 +635,42 @@ const make = Effect.gen(function* () {
                 updatedAt: row.updated_at,
               })),
           ),
+
+    /**
+     * Returns the id of the Task that the ephemeral workspace's row in
+     * `task_workspaces` names, or none when the workspace has no row or the
+     * Task is deleted or finished (`FINISHED_STAGES`). One query that joins
+     * the row to its Task.
+     */
+    readLiveTaskIdOfWorkspace: (
+      workspaceId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array }>`
+          SELECT w.task_id FROM task_workspaces w JOIN tasks ON tasks.id = w.task_id
+          WHERE w.workspace_id = ${uuidFromString(workspaceId)}
+            AND tasks.deleted_at IS NULL AND tasks.stage NOT IN ${sql.in(FINISHED_STAGES)}`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined ? Option.none() : Option.some(uuidToString(row.task_id));
+        },
+      ),
+
+    /**
+     * Records that the workspace belongs to the Task, replacing the row the
+     * workspace already has. A row that names a finished Task is replaced this
+     * way when the workspace is used again.
+     */
+    recordWorkspaceTask: (
+      workspaceId: string,
+      taskId: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO task_workspaces (workspace_id, task_id, joined_at)
+        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(taskId)}, ${at})
+        ON CONFLICT (workspace_id) DO UPDATE SET task_id = excluded.task_id,
+                                                 joined_at = excluded.joined_at`),
 
     /** Returns true if a project exists and has not been deleted. */
     projectExists: (id: string): Effect.Effect<boolean, SqlError> =>

@@ -114,6 +114,7 @@ import {
 import type { SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
+import { TaskService } from "../tasks";
 import { AccountUsage } from "../usage";
 import { WorkspaceService, type GithubAccount, type Retention } from "../workspaces";
 import {
@@ -839,6 +840,7 @@ const make = Effect.gen(function* () {
   const observer = yield* SessionObserver;
   const editObserver = yield* SessionEditObserver;
   const workspaces = yield* WorkspaceService;
+  const tasks = yield* TaskService;
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
@@ -892,9 +894,16 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Takes the Done mark off a session, in the caller's transaction, and
-   * writes the `session.reopened` audit entry, whose record announces the
-   * change. Writes nothing when the session is not Done.
+   * Takes the Done mark off a session, in the caller's transaction, gives the
+   * Thread a live Task, and writes the `session.reopened` audit entry, whose
+   * record announces the change. Writes nothing when the session is not Done.
+   *
+   * The Thread keeps its Task while that is live. Otherwise (it has none, or
+   * its Task is finished or deleted) it joins the live Task of its workspace
+   * or gets a new one (`TaskService.rejoinThread`), because coming back after
+   * the user closed a Task is new work. This is the only place a resume is
+   * told apart from a reopen: a harness resume of an exited Thread that was
+   * never Done changes nothing and never reaches this function.
    *
    * `inputId` names the input that reopened it, and is left out for an
    * explicit reopen, so a reader of the audit entry can tell the two apart.
@@ -912,6 +921,26 @@ const make = Effect.gen(function* () {
       // unless it has exited. `rejoinOverlaps` checks that itself, and the
       // resume that brings an exited Thread back runs the steps then.
       yield* editObserver.becameUnfinishedAgain(sessionId);
+      // Read after the reopen wrote its row, so the Thread certainly exists.
+      const thread = Option.getOrThrow(yield* sessions.one(sessionId));
+      // A workspace row that is gone counts as no workspace.
+      const workspace =
+        thread.workspaceId === null
+          ? undefined
+          : yield* workspaces.readStoredWorkspace(thread.workspaceId).pipe(
+              Effect.map((stored) => ({ id: stored.id, kind: stored.kind })),
+              Effect.catchIf(
+                (error): error is NotFound => error instanceof NotFound,
+                () => Effect.succeed(undefined),
+              ),
+            );
+      const taskId = yield* tasks.rejoinThread({
+        currentTaskId: thread.taskId ?? undefined,
+        workspace,
+        title: thread.title,
+        projectId: thread.projectId ?? undefined,
+      });
+      if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
       yield* audit.append({
         kind: "session.reopened",
         actor,
@@ -2270,6 +2299,31 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the title a new session will be stored with: `title` when the
+     * caller chose one, otherwise the first non-blank line of `prompt`,
+     * otherwise the name of the first image in `attachments` (`buildTitle`).
+     * The result may be empty when none of them gives text.
+     *
+     * The controller daemon calls it before `create` when it needs the title
+     * earlier, to name the Task a new Thread gets. It then passes the result to
+     * `create` as the chosen title. A session with no images reads nothing.
+     * Fails with `Validation` when an image is gone or was uploaded by someone
+     * else, as `create` does.
+     */
+    buildNewSessionTitle: (input: {
+      readonly title: string | undefined;
+      readonly prompt: string;
+      readonly attachments: ReadonlyArray<string>;
+    }): Effect.Effect<string, Validation | SqlError> =>
+      Effect.gen(function* () {
+        const references =
+          input.attachments.length === 0
+            ? []
+            : yield* provideSql(readClaimableAttachments(input.attachments));
+        return buildTitle(input.title, input.prompt, references[0]?.name);
+      }),
+
+    /**
      * Stores a new session, its first input and the audit entry for it,
      * joining the caller's transaction. This is the only place a session
      * decided by the controller daemon is written. The session is always
@@ -2295,6 +2349,8 @@ const make = Effect.gen(function* () {
         );
         yield* sessions.insert({
           id: open.id,
+          // The caller already built the title when it needed it before this
+          // call (`buildNewSessionTitle`); cutting a cut title changes nothing.
           title: buildTitle(open.title, open.prompt, references[0]?.name),
           role: open.role,
           permissionProfileId: open.permissionProfileId,
@@ -3978,6 +4034,7 @@ export const SessionServiceLayer: Layer.Layer<
   | SessionObserver
   | SessionEditObserver
   | WorkspaceService
+  | TaskService
   | Notifier
   | AccountUsage
 > = Layer.effect(SessionService)(make);

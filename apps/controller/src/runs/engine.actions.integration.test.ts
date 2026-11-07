@@ -99,7 +99,9 @@ describe("a built-in action in a run", () => {
       const run = await waitForRunToFinish(base, arranged.token, runId);
 
       expect(run.status, JSON.stringify(run)).toBe("completed");
-      expect((await listTasks(base, arranged.token)).map((task) => task.title)).toEqual([
+      // The starter's own Thread has a Task too, which this run did not make.
+      const titles = (await listTasks(base, arranged.token)).map((task) => task.title);
+      expect(titles.filter((title) => title === "File the create task")).toEqual([
         "File the create task",
       ]);
     });

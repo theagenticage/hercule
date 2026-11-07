@@ -101,6 +101,21 @@
  * `workspaceId`, or with only a `sessionId`. After the upgrade, `event.query`
  * with `runnerId` returns each entry under its own runner and under no other.
  *
+ * Migration 110 gives every Task a `stage` read from its `status`, and
+ * migration 111 gives each unfinished Thread a Task. The edge binary has Tasks
+ * and Threads but no stage, so the fixture writes five Tasks straight into its
+ * database (one per status, and one in progress with a handoff entry and the
+ * run it started), six Threads (two in one ephemeral workspace, one in a main
+ * workspace, one in none, one Done and one archived), and stores a workflow
+ * whose step is `task.update` with `status: in-progress`. After the upgrade
+ * each Task reads with the stage of its status and with every other field and
+ * time as it was, the handed-off Task is still listed by `hercule task
+ * tracking`, the two shared Threads share one new Task, the main and
+ * workspace-less Threads have a Task each, the Done and archived Threads have
+ * none, and the event log holds no `task.created` it did not hold before. The
+ * stored workflow is then run, and its legacy status step must succeed and
+ * move the Task to `building`.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -281,6 +296,92 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 /** When the seeded released lease keeps its workspace until: far enough that the sweep never collects it. */
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
 
+/**
+ * The migration that adds `tasks.stage`. Migration 111, which gives the
+ * unfinished Threads their Tasks, lands in the same change, so one version
+ * check serves both.
+ */
+const TASK_STAGES_MIGRATION = 110;
+
+/** The times of every seeded Task: the three differ, so a migration that moves one shows. */
+const SEEDED_TASK_CREATED = "2026-10-01T09:00:00.000Z";
+const SEEDED_TASK_STATUS_CHANGED = "2026-10-03T09:00:00.000Z";
+const SEEDED_TASK_UPDATED = "2026-10-05T09:00:00.000Z";
+
+/** The Tasks the fixture writes, and the stage migration 110 gives each one from its status. */
+const SEEDED_TASKS = [
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a01",
+    title: "Add a refund button to Northwind Market's checkout",
+    status: "open",
+    stage: "planned",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a02",
+    title: "Fix the stale cart total on Northwind Market's phone layout",
+    status: "in-progress",
+    stage: "building",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a03",
+    title: "Switch Northwind Market's invoices to PDF/A",
+    status: "done",
+    stage: "done",
+  },
+  {
+    id: "0199e0e7-0000-7000-8000-000000000a04",
+    title: "Rewrite Northwind Market's search in Rust",
+    status: "cancelled",
+    stage: "dropped",
+  },
+] as const;
+
+/** The Task the fixture marks as handed off, with the signal and the run of the handoff. */
+const HANDED_OFF_TASK = {
+  id: "0199e0e7-0000-7000-8000-000000000a05",
+  title: "Retry failed webhooks for Northwind Market's payment provider",
+  signalId: "0199e0e7-0000-7000-8000-000000000a06",
+  runId: "0199e0e7-0000-7000-8000-000000000a07",
+} as const;
+
+/** The workspaces the fixture's Threads work in: one ephemeral, one main. */
+const SEEDED_EPHEMERAL_WORKSPACE_ID = "0199e0e7-0000-7000-8000-000000000a21";
+const SEEDED_MAIN_WORKSPACE_ID = "0199e0e7-0000-7000-8000-000000000a22";
+
+/** When the fixture's Threads were created, oldest first. Migration 111 copies this time to a new Task. */
+const SEEDED_THREAD_CREATED = [
+  "2026-10-10T09:00:00.000Z",
+  "2026-10-10T10:00:00.000Z",
+  "2026-10-10T11:00:00.000Z",
+  "2026-10-10T12:00:00.000Z",
+  "2026-10-10T13:00:00.000Z",
+  "2026-10-10T14:00:00.000Z",
+] as const;
+
+/**
+ * The Threads the fixture writes, in the order of `SEEDED_THREAD_CREATED`.
+ * `shared` holds the two that work in one ephemeral workspace: the first is the
+ * older, so its title becomes the title of their Task.
+ */
+const SEEDED_THREADS = [
+  { name: "sharedOlder", title: "Sketch the refund flow", workspace: "ephemeral" },
+  { name: "sharedNewer", title: "Try the refund flow on a phone", workspace: "ephemeral" },
+  { name: "main", title: "Review the checkout copy", workspace: "main" },
+  { name: "loose", title: "Plan the Northwind Market sale banner", workspace: null },
+  { name: "done", title: "Audit the cart tests", workspace: null, state: "done" },
+  { name: "archived", title: "Try a dark checkout theme", workspace: null, state: "archived" },
+] as const;
+
+type SeededThreadName = (typeof SEEDED_THREADS)[number]["name"];
+
+/** What `persistTaskStageRows` leaves for the checks after the upgrade. */
+interface SeededTaskStageRows {
+  /** How many `task.created` events the edge database held when the rows were written. */
+  readonly taskCreatedEvents: number;
+  /** The id of each seeded Thread. */
+  readonly threadIds: Readonly<Record<SeededThreadName, string>>;
+}
+
 /** The migration that adds `events.runner_id` and fills it for the audit entries already in the log. */
 const EVENTS_RUNNER_ID_MIGRATION = 106;
 
@@ -382,6 +483,37 @@ const LEGACY_BOUND_WORKFLOW = [
   "      description: Filed by the upgrade fixture.",
 ].join("\n");
 
+/**
+ * A workflow written before Tasks had stages: its one step sets
+ * `status: in-progress` on the Task it is given, and its trigger filters on
+ * `event.payload.changes.status`. It is never enabled, because its own step
+ * would raise the `task.updated` event that starts it. The test starts it by
+ * hand.
+ */
+const STATUS_STEP_WORKFLOW = [
+  "name: Upgrade fixture status step",
+  "inputs:",
+  "  - name: task",
+  "    schema:",
+  "      type: string",
+  "    required: true",
+  "triggers:",
+  "  - kind: start",
+  "    id: on_status_change",
+  "    on:",
+  "      kind: task.updated",
+  "      filter: 'has(event.payload.changes.status) && event.payload.changes.status.new == \"in-progress\"'",
+  "    inputs:",
+  "      task: event.payload.taskId",
+  "steps:",
+  "  - id: start_work",
+  "    kind: action",
+  "    action: task.update",
+  "    params:",
+  '      taskId: "{{ inputs.task }}"',
+  "      status: in-progress",
+].join("\n");
+
 /** The spawn bound over today's limits that the fixture stores for `LEGACY_BOUND_TRIGGER`. */
 const LEGACY_SPAWN_BOUND = { maxRuns: 20_000, windowSeconds: Number.MAX_SAFE_INTEGER } as const;
 
@@ -466,6 +598,26 @@ interface SeededTranscriptRow {
 interface SeededInput {
   readonly id: string;
   readonly attachments: ReadonlyArray<{ readonly id: string }>;
+}
+
+/** A Task as either binary prints it. `stage` and `stageChangedAt` exist from migration 110 on. */
+interface ReadTask {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly priority: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly statusChangedAt: string;
+  readonly stage?: string;
+  readonly stageChangedAt?: string;
+}
+
+/** The part of a session that the Task checks read. `taskId` exists from migration 111 on. */
+interface ReadThread {
+  readonly id: string;
+  readonly lastActivityAt: string;
+  readonly taskId?: string;
 }
 
 /** A Provider Account as either binary prints it. `expiresAt` exists from migration 96 on. */
@@ -1224,6 +1376,145 @@ function persistWorkspaceLeases(home: string): boolean {
   }
 }
 
+/**
+ * Writes the Tasks and Threads that migrations 110 and 111 rewrite or read into
+ * the database the edge binary created, when that database has not run them.
+ * Returns what the checks after the upgrade need, or `undefined` when it wrote
+ * nothing.
+ *
+ * - The five Tasks of `SEEDED_TASKS` and `HANDED_OFF_TASK`, with a handoff entry
+ *   and a completed run for the last. The run is completed so that the
+ *   controller's start-up resumes nothing.
+ * - The six Threads of `SEEDED_THREADS`, put in two workspaces of the seeded
+ *   runner that never connects. The ephemeral workspace has an active lease so
+ *   that no sweep collects it.
+ *
+ * The rows go straight into the database because the edge binary has no way to
+ * give a Task a handoff and a finished run without a signed-in harness, and no
+ * way to start a Thread without one. A Thread is written by `persistThreadSession`
+ * and then moved to its workspace, time and state. A database that already
+ * ran migration 110 has a `stage` column, so the Tasks would not be in the old
+ * shape and the fixture is skipped there. The Done and archived states need the
+ * columns of migrations 75 and 104, which the edge release already has.
+ */
+function persistTaskStageRows(
+  home: string,
+  thread: Omit<Parameters<typeof persistThreadSession>[0], "title" | "nativeSessionId">,
+): SeededTaskStageRows | undefined {
+  if (readMigrationVersion(home) >= TASK_STAGES_MIGRATION) return undefined;
+  const threadIds = Object.fromEntries(
+    SEEDED_THREADS.map(({ name, title }) => [
+      name,
+      persistThreadSession({ ...thread, title, nativeSessionId: null }),
+    ]),
+  ) as Record<SeededThreadName, string>;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const insertTask = database.query(
+      `INSERT INTO tasks (id, title, description, status, priority, labels,
+                          created_at, updated_at, status_changed_at)
+       VALUES (?, ?, '', ?, 'normal', '[]', ?, ?, ?)`,
+    );
+    for (const task of [...SEEDED_TASKS, { ...HANDED_OFF_TASK, status: "in-progress" }]) {
+      insertTask.run(
+        uuidBlob(task.id),
+        task.title,
+        task.status,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_UPDATED,
+        SEEDED_TASK_STATUS_CHANGED,
+      );
+    }
+    database
+      .query(
+        `INSERT INTO runs (id, plan, inputs, origin, status, created_at, started_at, finished_at, task_id)
+         VALUES (?, ?, '{}', ?, 'completed', ?, ?, ?, ?)`,
+      )
+      .run(
+        uuidBlob(HANDED_OFF_TASK.runId),
+        JSON.stringify({ name: "Retry failed webhooks", steps: [] }),
+        JSON.stringify({ kind: "manual", actor: "user" }),
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        uuidBlob(HANDED_OFF_TASK.id),
+      );
+    database
+      .query(
+        `INSERT INTO task_provenance (id, task_id, run_id, signal_id, at, actor)
+         VALUES (?, ?, ?, ?, ?, 'user')`,
+      )
+      .run(
+        uuidBlob(Bun.randomUUIDv7()),
+        uuidBlob(HANDED_OFF_TASK.id),
+        uuidBlob(HANDED_OFF_TASK.runId),
+        uuidBlob(HANDED_OFF_TASK.signalId),
+        SEEDED_TASK_CREATED,
+      );
+
+    const insertWorkspace = database.query(
+      `INSERT INTO workspaces (id, runner_id, kind, status, created_at, provisioned_at, last_used_at)
+       VALUES (?, ?, ?, 'ready', ?, ?, ?)`,
+    );
+    for (const [workspaceId, kind] of [
+      [SEEDED_EPHEMERAL_WORKSPACE_ID, "ephemeral"],
+      [SEEDED_MAIN_WORKSPACE_ID, "primary"],
+    ] as const) {
+      insertWorkspace.run(
+        uuidBlob(workspaceId),
+        uuidBlob(SEEDED_RUNNER_ID),
+        kind,
+        SEEDED_THREAD_CREATED[0],
+        SEEDED_THREAD_CREATED[0],
+        SEEDED_THREAD_CREATED[0],
+      );
+    }
+    database
+      .query(
+        `INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+         VALUES (?, 'session', ?, ?)`,
+      )
+      .run(
+        uuidBlob(SEEDED_EPHEMERAL_WORKSPACE_ID),
+        uuidBlob(Bun.randomUUIDv7()),
+        SEEDED_THREAD_CREATED[0],
+      );
+
+    const moveThread = database.query(
+      `UPDATE sessions SET workspace_id = ?, created_at = ?, last_activity_at = ?,
+                           done_at = ?, done_by = ?, archived_at = ?, archived_by = ?
+       WHERE id = ?`,
+    );
+    for (const [index, seeded] of SEEDED_THREADS.entries()) {
+      const createdAt = SEEDED_THREAD_CREATED[index]!;
+      const state = "state" in seeded ? seeded.state : undefined;
+      const workspaceId =
+        seeded.workspace === "ephemeral"
+          ? SEEDED_EPHEMERAL_WORKSPACE_ID
+          : seeded.workspace === "main"
+            ? SEEDED_MAIN_WORKSPACE_ID
+            : undefined;
+      moveThread.run(
+        workspaceId === undefined ? null : uuidBlob(workspaceId),
+        createdAt,
+        createdAt,
+        state === "done" ? createdAt : null,
+        state === "done" ? "user" : null,
+        state === "archived" ? createdAt : null,
+        state === "archived" ? "user" : null,
+        uuidBlob(threadIds[seeded.name]),
+      );
+    }
+
+    const { count } = database
+      .query("SELECT count(*) AS count FROM events WHERE kind = 'task.created'")
+      .get() as { count: number };
+    return { taskCreatedEvents: count, threadIds };
+  } finally {
+    database.close();
+  }
+}
+
 /** An audit entry of the edge binary's log, and the runner the upgraded binary must read it back with. */
 interface ExpectedRunnerEntry {
   readonly id: number;
@@ -1690,6 +1981,16 @@ async function readTriggers(
   return new Map(triggers.map((trigger) => [trigger.triggerId, trigger]));
 }
 
+/** Lists the ids of the Tasks that `hercule task tracking` lists, in the order it prints them. */
+async function readTrackedTaskIds(options: {
+  readonly home: string;
+  readonly binary: string;
+}): Promise<ReadonlyArray<string>> {
+  const ran = await runCli(["task", "tracking", "--json"], options);
+  expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
+  return expectJson<{ rows: ReadonlyArray<{ taskId: string }> }>(ran).rows.map((row) => row.taskId);
+}
+
 /** Returns the id of the last migration the database in `home` ran. */
 function readMigrationVersion(home: string): number {
   const database = new Database(join(home, "data", "hercule.db"), { readonly: true });
@@ -1988,6 +2289,9 @@ describe("upgrading from the previous edge release", () => {
       const legacyBoundWorkflow = expectJson<{ workflow: { id: string } }>(
         await runCli(["workflow", "create", "--json"], { ...edge, stdin: LEGACY_BOUND_WORKFLOW }),
       ).workflow;
+      const statusStepWorkflow = expectJson<{ workflow: { id: string } }>(
+        await runCli(["workflow", "create", "--json"], { ...edge, stdin: STATUS_STEP_WORKFLOW }),
+      ).workflow;
 
       const port = controller.port;
       expect(await controller.stop()).toBe(0);
@@ -2109,6 +2413,13 @@ describe("upgrading from the previous edge release", () => {
         withoutLedger: piAccount.id,
       });
       const workspaceLeasesSeeded = persistWorkspaceLeases(home);
+      const taskStageRows = persistTaskStageRows(home, {
+        home,
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
+        runnerId: SEEDED_RUNNER_ID,
+        permissionProfileId: unrestricted.id,
+      });
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -2185,6 +2496,22 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the session inputs fixture: the edge database already ran migration ${String(DISCUSSIONS_MIGRATION)}.`,
+        );
+      }
+
+      if (taskStageRows !== undefined) {
+        // The edge binary reads the Tasks it never wrote as the Tasks they are,
+        // and lists the handed-off one under Tracking.
+        for (const seeded of [...SEEDED_TASKS, { ...HANDED_OFF_TASK, status: "in-progress" }]) {
+          expect(
+            expectJson<ReadTask>(await runCli(["task", "read", seeded.id, "--json"], edge)),
+            `edge Task ${seeded.title}`,
+          ).toMatchObject({ id: seeded.id, title: seeded.title, status: seeded.status });
+        }
+        expect(await readTrackedTaskIds(edge)).toEqual([HANDED_OFF_TASK.id]);
+      } else {
+        console.log(
+          `Skipping the task stages fixture: the edge database already ran migration ${String(TASK_STAGES_MIGRATION)}.`,
         );
       }
 
@@ -2683,6 +3010,113 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // Migration 110 gave every Task the stage its status reads and moved
+      // nothing else on it. The workflow stored with a status step is still
+      // valid: the controller validated it again when it started.
+      const upgradedStatusStepWorkflow = expectJson<{ invalidSince?: string }>(
+        await runCli(["workflow", "read", statusStepWorkflow.id, "--json"], upgraded),
+      );
+      expect(upgradedStatusStepWorkflow).not.toHaveProperty("invalidSince");
+      if (taskStageRows !== undefined) {
+        const readTask = async (id: string) =>
+          expectJson<ReadTask>(await runCli(["task", "read", id, "--json"], upgraded));
+        for (const seeded of SEEDED_TASKS) {
+          expect(await readTask(seeded.id), `upgraded Task ${seeded.title}`).toMatchObject({
+            title: seeded.title,
+            status: seeded.status,
+            stage: seeded.stage,
+            createdAt: SEEDED_TASK_CREATED,
+            updatedAt: SEEDED_TASK_UPDATED,
+            statusChangedAt: SEEDED_TASK_STATUS_CHANGED,
+            stageChangedAt: SEEDED_TASK_STATUS_CHANGED,
+          });
+        }
+        expect(await readTask(HANDED_OFF_TASK.id)).toMatchObject({
+          status: "in-progress",
+          stage: "building",
+          updatedAt: SEEDED_TASK_UPDATED,
+        });
+        expect(await readTrackedTaskIds(upgraded)).toEqual([HANDED_OFF_TASK.id]);
+
+        // Migration 111 gave the unfinished Threads their Tasks: the two that
+        // share an ephemeral workspace share one, the main workspace's Thread
+        // and the Thread with no workspace have one each, and the Done and
+        // archived Threads have none. A Thread's last activity is untouched.
+        const readThread = async (name: SeededThreadName) =>
+          expectJson<ReadThread>(
+            await runCli(["session", "read", taskStageRows.threadIds[name], "--json"], upgraded),
+          );
+        const threads = {
+          sharedOlder: await readThread("sharedOlder"),
+          sharedNewer: await readThread("sharedNewer"),
+          main: await readThread("main"),
+          loose: await readThread("loose"),
+          done: await readThread("done"),
+          archived: await readThread("archived"),
+        };
+        SEEDED_THREADS.forEach(({ name }, index) => {
+          expect(threads[name].lastActivityAt, `${name} last activity`).toBe(
+            SEEDED_THREAD_CREATED[index],
+          );
+        });
+        expect(threads.done).not.toHaveProperty("taskId");
+        expect(threads.archived).not.toHaveProperty("taskId");
+        const sharedTaskId = threads.sharedOlder.taskId;
+        expect(sharedTaskId).toEqual(expect.any(String));
+        expect(threads.sharedNewer.taskId).toBe(sharedTaskId);
+        const backfilled = [
+          ["sharedOlder", sharedTaskId],
+          ["main", threads.main.taskId],
+          ["loose", threads.loose.taskId],
+        ] as const;
+        expect(new Set(backfilled.map(([, taskId]) => taskId)).size).toBe(backfilled.length);
+        for (const [name, taskId] of backfilled) {
+          const index = SEEDED_THREADS.findIndex((one) => one.name === name);
+          expect(taskId, `${name} Task`).toEqual(expect.any(String));
+          expect(await readTask(taskId!), `${name} Task`).toMatchObject({
+            title: SEEDED_THREADS[index]!.title,
+            status: "open",
+            stage: "exploring",
+            priority: "normal",
+            createdAt: SEEDED_THREAD_CREATED[index],
+            updatedAt: SEEDED_THREAD_CREATED[index],
+          });
+        }
+
+        // The stored workflow sets `status: in-progress` on a Task at
+        // `planned`, which moves it to `building`: the legacy write still works.
+        const started = expectJson<{ runId: string }>(
+          await runCli(
+            [
+              "run",
+              "start",
+              "--workflow",
+              statusStepWorkflow.id,
+              "--inputs",
+              JSON.stringify({ task: SEEDED_TASKS[0].id }),
+              "--json",
+            ],
+            upgraded,
+          ),
+        );
+        const deadline = Date.now() + 30_000;
+        let run: { status: string; failureReason?: string; steps: ReadonlyArray<unknown> };
+        for (;;) {
+          run = expectJson<typeof run>(
+            await runCli(["run", "read", started.runId, "--json"], upgraded),
+          );
+          if (run.status !== "pending" && run.status !== "running") break;
+          if (Date.now() > deadline)
+            throw new Error(`the status step run did not end: ${JSON.stringify(run)}`);
+          await sleep(250);
+        }
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(await readTask(SEEDED_TASKS[0].id)).toMatchObject({
+          status: "in-progress",
+          stage: "building",
+        });
+      }
+
       // The Z.ai key was encrypted under the account by the edge binary, and
       // the upgraded one must still decrypt it. Probing the account makes the
       // controller decrypt it and hand it to the runner, which puts it in the
@@ -2984,6 +3418,46 @@ describe("upgrading from the previous edge release", () => {
               spawned_at: row.state === "spawned" ? row.matched_at : null,
             })),
           );
+        } finally {
+          reader.close();
+        }
+      }
+
+      if (taskStageRows !== undefined) {
+        // Nothing wrote a `task.created` event for the old Threads, so no
+        // workflow started for them. The Tasks are the five that were written
+        // plus the ones the migration made, which are the only ones at stage
+        // `exploring` and each belong to a session. Other fixtures add exited
+        // Threads without a workspace, each of which has a Task of its own, so
+        // the number of new Tasks is at least the three groups seeded here.
+        // The ephemeral workspace remembers the Task its Threads share.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader.query("SELECT count(*) AS count FROM events WHERE kind = 'task.created'").get(),
+          ).toEqual({ count: taskStageRows.taskCreatedEvents });
+          const { count: created } = reader
+            .query("SELECT count(*) AS count FROM tasks WHERE stage = 'exploring'")
+            .get() as { count: number };
+          expect(created).toBeGreaterThanOrEqual(3);
+          expect(reader.query("SELECT count(*) AS count FROM tasks").get()).toEqual({
+            count: SEEDED_TASKS.length + 1 + created,
+          });
+          expect(
+            reader
+              .query(
+                "SELECT count(DISTINCT task_id) AS count FROM sessions WHERE task_id IS NOT NULL",
+              )
+              .get(),
+          ).toEqual({ count: created });
+          expect(
+            reader
+              .query("SELECT workspace_id FROM task_workspaces")
+              .all()
+              .map((row) =>
+                Buffer.from((row as { workspace_id: Uint8Array }).workspace_id).toString("hex"),
+              ),
+          ).toEqual([uuidBlob(SEEDED_EPHEMERAL_WORKSPACE_ID).toString("hex")]);
         } finally {
           reader.close();
         }

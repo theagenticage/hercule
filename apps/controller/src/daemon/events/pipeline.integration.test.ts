@@ -292,7 +292,9 @@ describe("the platform events in the pipeline", () => {
         subscriptionId,
         (found) => found.length >= 2,
       );
-      const createdEvent = (await arranged.harness.platformEvents("task.created"))[0]!;
+      // The subscriber's own Thread got a Task before the subscription existed,
+      // so the event of the Task made here is the newest, not the first.
+      const createdEvent = (await arranged.harness.platformEvents("task.created")).at(-1)!;
       const updatedEvent = (await arranged.harness.platformEvents("task.updated"))[0]!;
       expect(rows.map((row) => row.event_id)).toEqual([createdEvent.id, updatedEvent.id]);
       expect(rows[0]!.text).toContain("task.created");

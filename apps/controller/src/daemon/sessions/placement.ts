@@ -89,6 +89,7 @@ import {
   type DedupOperation,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
+import { buildThreadTaskTitle, TaskService } from "../../tasks";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -321,6 +322,31 @@ type PlaceError = Refusal | GrantsError;
 type ContinueError = Refusal | NotFound;
 
 /**
+ * How a new session gets its Task:
+ *
+ * - `fixed`: the session takes `taskId` as it is and goes through no rule. An
+ *   assistant's session has none. A workflow run's step session has its run's
+ *   Task, even a finished one, and the run may have none.
+ * - `joining`: the session joins a Task by the join rule
+ *   (`TaskService.joinSession`). `requestedTaskId` is the Task the spawn
+ *   named, and `callerTaskId` is the Task of the session that spawned this
+ *   one, or of the parent of a fork.
+ */
+type TaskSource =
+  | { readonly _tag: "fixed"; readonly taskId: string | undefined }
+  | {
+      readonly _tag: "joining";
+      readonly requestedTaskId: string | undefined;
+      readonly callerTaskId: string | undefined;
+    };
+
+/** The Task that was made for a new Thread, and the title it was made with. */
+interface MadeTask {
+  readonly taskId: string;
+  readonly title: string;
+}
+
+/**
  * Everything needed to open one session on a runner, for both a spawn and a
  * continue.
  */
@@ -350,6 +376,7 @@ interface Placing {
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
   readonly projectId: string | undefined;
+  readonly taskSource: TaskSource;
   /** The workspace the session asked for. When undefined, the spec's workspace is kept. */
   readonly workspace: SpawnWorkspace | undefined;
   /** The GitHub connection the session pushes as when its workspace names none. */
@@ -365,6 +392,7 @@ interface Placing {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
+  const tasks = yield* TaskService;
   const rows = yield* sessionRepository;
   const dedupKeys = yield* dedupKeyRepository;
   const agents = yield* agentRepository;
@@ -402,8 +430,20 @@ const make = Effect.gen(function* () {
    * service has already recorded why, and the Thread keeps the cut-short
    * title it was given from the message, and the role it was spawned with, if
    * any.
+   *
+   * `madeTask` is the Task that was made for this Thread, with the title it
+   * was made with, and is undefined when the Thread joined an existing Task,
+   * whose title is not this Thread's to change. When the title is stored, the
+   * Task takes it too (`TaskService.adoptGeneratedTitle`), unless the Thread
+   * has moved to another Task since: a late answer must not rename a Task the
+   * Thread has left. The stored title is used rather than the model's answer,
+   * because `setGeneratedTitleAndRole` cleans the answer and may drop it.
    */
-  const startThreadTitle = (sessionId: string, firstMessage: string): Effect.Effect<void> =>
+  const startThreadTitle = (
+    sessionId: string,
+    firstMessage: string,
+    madeTask: MadeTask | undefined,
+  ): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
       Effect.gen(function* () {
@@ -425,7 +465,26 @@ const make = Effect.gen(function* () {
             .pipe(Effect.flatMap(decodeThreadTitleAndRole)),
         );
         if (Option.isNone(answer)) return;
-        yield* promotion.whenServing(sessions.setGeneratedTitleAndRole(sessionId, answer.value));
+        // The transaction below only reads and writes rows. It never waits on
+        // the generation above, and `whenServing` stays outside it.
+        yield* promotion.whenServing(
+          Effect.gen(function* () {
+            yield* sessions.setGeneratedTitleAndRole(sessionId, answer.value);
+            if (madeTask === undefined) return;
+            yield* withTransaction(
+              sql,
+              Effect.gen(function* () {
+                const session = yield* rows.one(sessionId);
+                if (Option.isNone(session) || session.value.taskId !== madeTask.taskId) return;
+                yield* tasks.adoptGeneratedTitle({
+                  taskId: madeTask.taskId,
+                  from: madeTask.title,
+                  to: session.value.title,
+                });
+              }),
+            );
+          }),
+        );
       }),
     );
 
@@ -867,18 +926,30 @@ const make = Effect.gen(function* () {
 
   /**
    * Writes the workspace and the session in one transaction, joining the
-   * caller's when there is one. Returns the new session's id and the
-   * workspace frame the runner must be told about after the commit, if any.
+   * caller's when there is one. Returns the new session's id, the workspace
+   * frame the runner must be told about after the commit, if any, and the
+   * Task that was made for the session, if one was.
+   *
+   * A session whose `taskSource` is `joining` gets its Task after its
+   * workspace is opened, because the rule reads the workspace, and before the
+   * session is stored, because the session stores the Task. Its title is built
+   * first, because a new Task is named after it. Fails with `NotFound` or
+   * `InvalidState` when the spawn named a Task that is missing, deleted or
+   * finished.
    */
   const writeSession = (
     open: Placing,
   ): Effect.Effect<
-    { readonly sessionId: string; readonly frame: WorkspaceProvision | undefined },
-    Validation | NotFound | SqlError
+    {
+      readonly sessionId: string;
+      readonly frame: WorkspaceProvision | undefined;
+      readonly madeTask: MadeTask | undefined;
+    },
+    Validation | NotFound | InvalidState | SqlError
   > =>
     Effect.gen(function* () {
       const sessionId = uuidToString(mintUuid());
-      const frame = yield* withTransaction(
+      const { frame, madeTask } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -901,6 +972,32 @@ const make = Effect.gen(function* () {
             branch: buildThreadBranch(sessionId),
             at,
           });
+          let title = open.title;
+          let taskId: string | undefined;
+          let madeTask: MadeTask | undefined;
+          if (open.taskSource._tag === "fixed") {
+            taskId = open.taskSource.taskId;
+          } else {
+            title = yield* sessions.buildNewSessionTitle(open);
+            const joined = yield* tasks.joinSession({
+              requestedTaskId: open.taskSource.requestedTaskId,
+              callerTaskId: open.taskSource.callerTaskId,
+              workspace:
+                opened.workspaceId === null || opened.workspaceKind === null
+                  ? undefined
+                  : { id: opened.workspaceId, kind: opened.workspaceKind },
+              // A session with no Agent is a Thread. This matches the `kind`
+              // column the database derives, because a session placed here
+              // answers no conversation and runs no step.
+              sessionKind: open.agentId === undefined ? "thread" : "agent",
+              title,
+              projectId: open.projectId,
+            });
+            taskId = joined?.taskId;
+            if (joined?.created === true) {
+              madeTask = { taskId: joined.taskId, title: buildThreadTaskTitle(title) };
+            }
+          }
           yield* sessions.create({
             id: sessionId,
             permissionProfileId: open.permissionProfileId,
@@ -914,13 +1011,12 @@ const make = Effect.gen(function* () {
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
             attachments: open.attachments,
-            title: open.title,
+            title,
             role: open.role,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
-            // The rule that picks a Task for a new session is not written yet.
-            taskId: undefined,
+            taskId,
             checkoutBranch: open.checkoutBranch ?? opened.checkoutBranch,
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the
@@ -932,10 +1028,10 @@ const make = Effect.gen(function* () {
             githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             at,
           });
-          return opened.frame;
+          return { frame: opened.frame, madeTask };
         }),
       );
-      return { sessionId, frame };
+      return { sessionId, frame, madeTask };
     });
 
   /**
@@ -973,7 +1069,13 @@ const make = Effect.gen(function* () {
    * Prepares and writes the session of a `session.spawn` or `session.continue`
    * in one transaction, then starts it. Returns the new session. For a new
    * Thread with a text message, it also starts the call that generates the
-   * Thread's title and role.
+   * Thread's title and role, and tells it which Task was made for the Thread,
+   * if one was, so the Task takes the generated title too.
+   *
+   * The session also joins its Task in this transaction (`writeSession`), so a
+   * retried call with the same `dedupKey` makes no second Task. Fails with
+   * `NotFound` or `InvalidState` when the call named a Task that is missing,
+   * deleted or finished.
    *
    * `prepare` builds the `Placing` and is the part of the call that can be
    * refused. It runs inside the transaction, so it may wait on nothing but the
@@ -995,7 +1097,7 @@ const make = Effect.gen(function* () {
     operation: DedupOperation,
     dedupKey: string | undefined,
     prepare: Effect.Effect<Placing, E>,
-  ): Effect.Effect<Session, E | Validation | NotFound | SqlError> =>
+  ): Effect.Effect<Session, E | Validation | NotFound | InvalidState | SqlError> =>
     promotion.whenServing(
       Effect.gen(function* () {
         const saved = yield* withTransaction(
@@ -1014,7 +1116,7 @@ const make = Effect.gen(function* () {
           }),
         );
         if (saved._tag === "existing") return yield* readSessionRecord(saved.sessionId);
-        const { open, sessionId, frame } = saved;
+        const { open, sessionId, frame, madeTask } = saved;
         yield* tellRunnerAndDispatch(open.runnerId, frame);
         // Read back instead of using the inserted row, so the caller sees
         // `starting` when dispatch started the session at once, not `queued`.
@@ -1024,7 +1126,7 @@ const make = Effect.gen(function* () {
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
         if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt);
+          yield* startThreadTitle(session.id, open.prompt, madeTask);
         }
         return session;
       }),
@@ -1132,6 +1234,7 @@ const make = Effect.gen(function* () {
           role: undefined,
           kind: "session.spawned",
           projectId: undefined,
+          taskSource: { _tag: "fixed", taskId: undefined },
           workspace: undefined,
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
           checkoutBranch: undefined,
@@ -1155,9 +1258,11 @@ const make = Effect.gen(function* () {
      * its commit: it tells the runner and dispatches.
      *
      * The session runs on the run's runner, in the run's workspace when the
-     * run has one, and takes its lease on that workspace. Its start switches
-     * the workspace's checkout to `checkoutBranch` when that is set. The run
-     * engine sets `checkoutBranch` only for the run's first workspace step.
+     * run has one, and takes its lease on that workspace. It belongs to the
+     * run's Task (`taskId`) as it is, even when that Task is finished, and
+     * joins no other. Its start switches the workspace's checkout to
+     * `checkoutBranch` when that is set. The run engine sets `checkoutBranch`
+     * only for the run's first workspace step.
      *
      * Each setting is the step's value if the step sets one, otherwise the
      * Agent's: the model with its options, and the access mode. The Agent
@@ -1185,6 +1290,8 @@ const make = Effect.gen(function* () {
       readonly checkoutBranch: string | undefined;
       readonly prompt: string;
       readonly title: string;
+      /** The Task of the step's run, if the run has one. The session takes it as it is. */
+      readonly taskId: string | undefined;
     }): Effect.Effect<
       { readonly sessionId: string; readonly start: Effect.Effect<void, SqlError> },
       | InvalidState
@@ -1246,6 +1353,7 @@ const make = Effect.gen(function* () {
           role: undefined,
           kind: "session.spawned",
           projectId: undefined,
+          taskSource: { _tag: "fixed", taskId: request.taskId },
           workspace: undefined,
           fallbackGithubConnectionId: undefined,
           checkoutBranch: request.checkoutBranch,
@@ -1519,6 +1627,11 @@ const make = Effect.gen(function* () {
             role: decoded.role,
             kind: "session.spawned",
             projectId,
+            taskSource: {
+              _tag: "joining",
+              requestedTaskId: decoded.taskId,
+              callerTaskId: caller?.taskId ?? undefined,
+            },
             workspace,
             fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
             checkoutBranch: undefined,
@@ -1633,6 +1746,13 @@ const make = Effect.gen(function* () {
             role: undefined,
             kind: "session.continued",
             projectId: parent.projectId ?? undefined,
+            // A fork takes its parent's Task when that is live, and no fork
+            // can name a Task of its own.
+            taskSource: {
+              _tag: "joining",
+              requestedTaskId: undefined,
+              callerTaskId: parent.taskId ?? undefined,
+            },
             workspace: undefined,
             fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
             checkoutBranch: undefined,
@@ -1663,4 +1783,5 @@ export const PlacementLayer: Layer.Layer<
   | PromotionState
   | TextGeneration
   | ProviderAccountRunners
+  | TaskService
 > = Layer.effect(Placement)(make);

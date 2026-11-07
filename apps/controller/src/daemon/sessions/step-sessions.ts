@@ -101,6 +101,7 @@ export const makeStepSessions = Effect.gen(function* () {
         checkoutBranch: request.checkoutBranch,
         prompt: request.prompt,
         title: request.title,
+        taskId: request.taskId,
       });
       return { sessionId: placed.sessionId, send: placed.start };
     });
