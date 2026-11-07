@@ -321,9 +321,9 @@ interface TaskDetailSession {
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `externalEntity.queryInbox` | none -> `Inbox` | `task.read` | `GET /external-entities/inbox` |
-| `externalEntity.countInbox` | none -> `InboxCounts` | `task.read` | `GET /external-entities/inbox/count` |
-| `externalEntity.read` | `{ id }` -> `ExternalEntityDetail` | `task.read` | `GET /external-entities/{id}` |
+| `externalEntity.queryInbox` | none -> `Inbox` | `task.read` and `signal.query` | `GET /external-entities/inbox` |
+| `externalEntity.countInbox` | none -> `InboxCounts` | `task.read` and `signal.query` | `GET /external-entities/inbox/count` |
+| `externalEntity.read` | `{ id }` -> `ExternalEntityDetail` | `task.read` and `signal.query` | `GET /external-entities/{id}` |
 | `externalEntity.takeOn` | `{ id }` -> `{ taskId, created }` | `task.update`, user only | `POST /external-entities/{id}/take-on` |
 | `externalEntity.undoTakeOn` | `{ id, taskId }` -> `{ undone, reason? }` | `task.update`, user only | `POST /external-entities/{id}/take-on/undo` |
 | `externalEntity.dismiss` | `{ id }` | `task.update`, user only | `POST /external-entities/{id}/dismiss` |
@@ -331,6 +331,8 @@ interface TaskDetailSession {
 | `externalEntity.search` | `{ source, text, scopeRef? }` -> `EntitySearchReply` | `task.read` and `connection.query`, user only | `GET /external-entities/search` |
 | `externalEntity.listSuggestions` | `{ contextRef? }` -> `EntitySuggestions` | `task.read` | `GET /external-entities/suggestions` |
 | `externalEntity.addToWork` | `{ ref, projectId? }` -> `{ id?, taskId, created, stage, followed }` | `task.update`, user only | `POST /external-entities/add-to-work` |
+| `externalEntity.link` | `{ fromRef, toRef }` | `task.update`, user only | `POST /external-entities/links` |
+| `externalEntity.unlink` | `{ fromRef, toRef }` -> `{ removed, remaining? }` | `task.update`, user only | `POST /external-entities/links/remove` |
 
 - **`queryInbox`** returns `{ cards: InboxCard[], places: EntityPlace[], edges: EntityEdge[], counts: InboxCounts, truncated }`: the whole Inbox in one reply, at most `MAX_INBOX_CARDS` (1,000) cards, oldest first inside each side, in a fixed number of statements. A dismissed card is not listed.
 - **`countInbox`** returns the same `counts`, from the same function, for the sidebar. It needs the same grants as `queryInbox`.
@@ -338,8 +340,8 @@ interface TaskDetailSession {
 - **`takeOn` and `addToWork`** fail `invalid_state` for a kind that cannot be taken on (a place) or a thing that could not be read, `conflict` when the entity changed while the Task was being made and the call should be repeated, and `not_found` for an unknown id (and, for `addToWork`, an unknown Project). A repeat returns the same Task.
 - **`undoTakeOn`** deletes the Task only when it is live, not merged and untouched since it was created. Otherwise it changes nothing and answers `{ undone: false, reason }`.
 - **`search`** answers an outcome in the reply, not an error, for everything the source can say: `results`, `no-match`, `inaccessible`, `not-found`, `unknown`, `ambiguous`, `incomplete`, `unknown-link` and `source-unavailable`. A scope the source cannot search by fails `validation`.
-- **A session** may call `queryInbox`, `countInbox`, `read` and `listSuggestions` with `task.read`. The user-only operations refuse a session with `forbidden`.
-- **The CLI rows.** `hercule entity list`, `read <id>`, `take-on <id>`, `dismiss <id>`, `restore <id>`, `search <source> <text> [--scope <ref>]`, `suggestions [--context <ref>]` and `add-to-work <ref> [--project <id>]`. `countInbox` and `undoTakeOn` are `hidden: true`: they exist only for the sidebar and the undo line. An entity's id is given whole; a tail is not accepted.
+- **A session** may call `queryInbox`, `countInbox` and `read` with `task.read` and `signal.query` (they show signal text), and `listSuggestions` with `task.read`. The user-only operations refuse a session with `forbidden`.
+- **The CLI rows.** `hercule entity list`, `read <id>`, `take-on <id>`, `dismiss <id>`, `restore <id>`, `search <source> <text> [--scope <ref>]`, `suggestions [--context <ref>]`, `add-to-work <ref> [--project <id>]`, `link <ref> --to <ref>` and `unlink <ref> --to <ref>`. `countInbox` and `undoTakeOn` are `hidden: true`: they exist only for the sidebar and the undo line. An entity's id is given whole; a tail is not accepted.
 
 ### workflow, trigger, run
 

@@ -45,6 +45,7 @@ export const SHARED_COLUMNS = [
   "repository",
   "reason",
   "concern_reasons",
+  "reason_templates",
   "progress",
   "target_date",
   "waiting_since",

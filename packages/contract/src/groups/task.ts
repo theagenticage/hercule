@@ -841,6 +841,24 @@ export const WorkCard = Schema.Struct({
 
 export type WorkCard = Schema.Schema.Type<typeof WorkCard>;
 
+/** The most stack candidates one Work board carries. A read that hits it sets `stackCandidatesTruncated`. */
+export const MAX_BOARD_STACK_CANDIDATES = 2000;
+
+/**
+ * One pair that may be drawn as a stack on Work: the Task `leadTaskId` links a
+ * rich thing, or a compact thing that a rich one it links reports. The Task
+ * `memberTaskId` links the other end. `noun` names what the member is
+ * ("pull request"), for the stack's reason ("2 pull requests"). A Task can be
+ * in several candidates, so the client chooses per cell which become stacks.
+ */
+export const WorkStackCandidate = Schema.Struct({
+  leadTaskId: Id,
+  memberTaskId: Id,
+  noun: bounded(1, 40),
+});
+
+export type WorkStackCandidate = Schema.Schema.Type<typeof WorkStackCandidate>;
+
 /**
  * What `task.queryBoard` returns: the cards of every unfinished Task. They
  * come ordered by project, then stage, then `boardRank`. Nothing sorts by
@@ -862,6 +880,14 @@ export const WorkBoard = Schema.Struct({
    * be incomplete.
    */
   contextComplete: Schema.Boolean,
+  /**
+   * The pairs of Tasks that may be drawn as one stack: a lead and a member
+   * that it brings along. The client chooses the stacks of each cell from
+   * these, because the cell's cards and their order are the client's.
+   */
+  stackCandidates: atMost(WorkStackCandidate, MAX_BOARD_STACK_CANDIDATES),
+  /** True when more candidates exist than `MAX_BOARD_STACK_CANDIDATES`. What was left out draws as cards. */
+  stackCandidatesTruncated: Schema.Boolean,
 });
 
 export type WorkBoard = Schema.Schema.Type<typeof WorkBoard>;

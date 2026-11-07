@@ -40,7 +40,13 @@ import {
   EntityStatus,
   MAX_GRAPH_EDGES,
 } from "./entity-context";
-import { MAX_SEARCH_TEXT_LENGTH, TaskStage } from "./task";
+import {
+  MAX_SIGNAL_ASKER_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+  SignalKind,
+  SignalStatus,
+} from "./signal";
+import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
 
 export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
 
@@ -82,6 +88,25 @@ export const MAX_ENTITY_ANCESTORS = MAX_CONTEXT_PARENTS;
  * small.
  */
 export const MAX_ENTITY_LINKS = 100;
+
+/**
+ * The most direct links one Inbox read carries: the links of the cards on the
+ * page. It equals `MAX_GRAPH_EDGES`, the bound of the reply's other lists of
+ * pairs. A card links a few things, so the limit is far past real use.
+ */
+export const MAX_INBOX_LINKS = MAX_GRAPH_EDGES;
+
+/**
+ * The most peers one Inbox read carries: the records at the far end of a link
+ * that have no card of their own. At most one per link.
+ */
+export const MAX_INBOX_PEERS = MAX_INBOX_LINKS;
+
+/** The most signal lines one entity read carries. Open signals come first, so open work is never cut for resolved work. */
+export const MAX_ENTITY_SIGNALS = 50;
+
+/** The most changes one entity read carries. The oldest change of a thing is dropped first. */
+export const MAX_ENTITY_TIMELINE = 50;
 
 /** The most suggestions `listSuggestions` returns. The reply says when there were more. */
 export const MAX_ENTITY_SUGGESTIONS = 100;
@@ -187,6 +212,63 @@ export const EntityLink = Schema.Struct({
 export type EntityLink = Schema.Schema.Type<typeof EntityLink>;
 
 /**
+ * One signal as a card draws it. Every field comes from the `Signal` record,
+ * except `outcome`. A line holds no blocks and no answers: opening one reads
+ * `signal.read`, which returns both.
+ */
+export const EntitySignalLine = Schema.Struct({
+  id: Id,
+  kind: SignalKind,
+  title: bounded(1, MAX_SIGNAL_TITLE_LENGTH),
+  asker: Schema.optionalKey(bounded(1, MAX_SIGNAL_ASKER_LENGTH)),
+  priority: TaskPriority,
+  status: SignalStatus,
+  createdAt: Timestamp,
+  /** `resolution.outcome`, when the signal has ended. */
+  outcome: Schema.optionalKey(Schema.String),
+  /** True while the signal is snoozed. */
+  snoozed: Schema.Boolean,
+});
+
+export type EntitySignalLine = Schema.Schema.Type<typeof EntitySignalLine>;
+
+/**
+ * Something that changed at the source, as the thing's timeline tells it:
+ * someone else was assigned, the status moved, a new link arrived. Hercule
+ * shows it and acts on nothing. `say` is finished text, with the person or
+ * the value already put in.
+ */
+export const EntityChange = Schema.Struct({
+  reason: Schema.Literals(["reassigned", "moved", "linked"]),
+  say: EntityReason,
+  at: Timestamp,
+});
+
+export type EntityChange = Schema.Schema.Type<typeof EntityChange>;
+
+/**
+ * A record at the far end of a link that has no card of its own: it is not on
+ * the Inbox, and a card shows it as a quiet row. A `restricted` peer, one no
+ * Connection can read, holds only `ref`, `kind` and `noun`, with `restricted`
+ * true and `yours` false: no title, identifier, status or change.
+ */
+export const EntityPeer = Schema.Struct({
+  ref: ExternalRef,
+  kind: Schema.String,
+  noun: bounded(1, 40),
+  identifier: Schema.optionalKey(bounded(1, 64)),
+  title: Schema.optionalKey(bounded(1, 512)),
+  status: Schema.optionalKey(EntityStatus),
+  /** True when any observing Connection reported the thing as owned by the user. Always false when `restricted`. */
+  yours: Schema.Boolean,
+  restricted: Schema.Boolean,
+  /** The latest change at the source, when there is one. Absent when `restricted`. */
+  latestChange: Schema.optionalKey(EntityChange),
+});
+
+export type EntityPeer = Schema.Schema.Type<typeof EntityPeer>;
+
+/**
  * Which column of the Inbox a card lies in. The server decides it:
  *
  * - `with-someone-else`: the entity has a live Task.
@@ -272,6 +354,8 @@ const entityFields = {
   ancestors: atMost(ExternalRef, MAX_ENTITY_ANCESTORS),
   /** False when part of what is above this thing could not be read. */
   contextComplete: Schema.Boolean,
+  /** The latest change at the source, from the thing's timeline. Absent when nothing has changed since it was first seen. */
+  latestChange: Schema.optionalKey(EntityChange),
 };
 
 /** One full record of a work kind: what every read of an entity holds. An Inbox card is one, with its side. */
@@ -284,7 +368,22 @@ export type EntityRecord = Schema.Schema.Type<typeof EntityRecord>;
  * the user, is not dismissed, and has a current concern, an open signal or a
  * live Task.
  */
-export const InboxCard = Schema.Struct({ ...entityFields, side: InboxSide });
+export const InboxCard = Schema.Struct({
+  ...entityFields,
+  side: InboxSide,
+  signals: Schema.Struct({
+    /** The newest open signal that is not snoozed, by `createdAt`, then `id`. */
+    latest: Schema.optionalKey(EntitySignalLine),
+    /** How many open signals that are not snoozed the card holds. */
+    openCount: Schema.Int,
+  }),
+  /**
+   * Set when this compact thing rides on a rich thing on the Inbox: it has a
+   * direct `source` or `person` link to it. The client draws it with its lead
+   * instead of as a card of its own.
+   */
+  ridesOn: Schema.optionalKey(ExternalRef),
+});
 
 export type InboxCard = Schema.Schema.Type<typeof InboxCard>;
 
@@ -323,6 +422,10 @@ export const Inbox = Schema.Struct({
   places: atMost(EntityPlace, MAX_INBOX_PLACES),
   edges: atMost(EntityEdge, MAX_GRAPH_EDGES),
   counts: InboxCounts,
+  /** The direct links of the cards on the page. */
+  links: atMost(EntityLink, MAX_INBOX_LINKS),
+  /** The records at the far end of those links that have no card of their own. */
+  peers: atMost(EntityPeer, MAX_INBOX_PEERS),
   /** True when more cards exist than `MAX_INBOX_CARDS`. The screen says so. */
   truncated: Schema.Boolean,
 });
@@ -347,6 +450,20 @@ export const ExternalEntityDetail = Schema.Struct({
   links: atMost(EntityLink, MAX_ENTITY_LINKS),
   /** Claims the graph refused, such as a loop, with why. */
   conflicts: atMost(EntityConflict, MAX_ENTITY_LINKS),
+  /**
+   * The signals about this thing, in time order, oldest first. Open ones are
+   * selected first, up to `MAX_ENTITY_SIGNALS`, and resolved ones fill the room
+   * left. Snoozed signals are included, marked `snoozed`.
+   */
+  signals: atMost(EntitySignalLine, MAX_ENTITY_SIGNALS),
+  /** How many open signals the thing has, snoozed ones included. */
+  openCount: Schema.Int,
+  /** How many signals the thing has in all, open and resolved. */
+  signalCount: Schema.Int,
+  /** What changed at the source, in time order, oldest first. */
+  timeline: atMost(EntityChange, MAX_ENTITY_TIMELINE),
+  /** The records at the far end of this thing's links that have no card of their own. */
+  peers: atMost(EntityPeer, MAX_ENTITY_LINKS),
 });
 
 export type ExternalEntityDetail = Schema.Schema.Type<typeof ExternalEntityDetail>;
@@ -538,6 +655,23 @@ export const EntityAddToWorkResult = Schema.Struct({
 
 export type EntityAddToWorkResult = Schema.Schema.Type<typeof EntityAddToWorkResult>;
 
+/** The input of `link` and `unlink`: the two ends of the relationship. */
+export const EntityLinkInput = Schema.Struct({ fromRef: ExternalRef, toRef: ExternalRef });
+
+export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
+
+/**
+ * What `unlink` returns. `removed` is false when the user had made no link
+ * between the two. `remaining` is the firmest claim still joining them, when a
+ * source or a text claim is left: only the user's own claim can be removed.
+ */
+export const EntityUnlinkResult = Schema.Struct({
+  removed: Schema.Boolean,
+  remaining: Schema.optionalKey(Schema.Literals(["source", "person", "text"])),
+});
+
+export type EntityUnlinkResult = Schema.Schema.Type<typeof EntityUnlinkResult>;
+
 /**
  * The External Entity operations: read the Inbox and its counts, read one
  * entity, take one on as a Task, dismiss and restore a card, and the three
@@ -615,6 +749,26 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       payload: EntityAddToWorkInput,
       success: EntityAddToWorkResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
+    }),
+    /**
+     * Links two things, as the user's own claim (`person`). The target may be a
+     * ref nobody has read yet; it is read on the next refresh. The source is
+     * never told. User only: a session cannot link.
+     */
+    HttpApiEndpoint.post("link", "/external-entities/links", {
+      payload: EntityLinkInput,
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Removes the user's own claim between two things, in either direction, and
+     * says what is left. A claim a source made stays. User only. The refs travel
+     * in a body because they hold `:`, `/` and `#`.
+     */
+    HttpApiEndpoint.post("unlink", "/external-entities/links/remove", {
+      payload: EntityLinkInput,
+      success: EntityUnlinkResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

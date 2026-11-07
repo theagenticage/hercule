@@ -32,6 +32,7 @@ import {
   type Conflict,
   type EntityAddToWorkInput,
   type EntityAddToWorkResult,
+  type EntityLinkInput,
   type EntityPlace,
   type EntitySearchQuery,
   type EntitySearchReply,
@@ -41,6 +42,7 @@ import {
   type EntitySuggestionsQuery,
   type EntityTakeOnResult,
   type EntityUndoTakeOnResult,
+  type EntityUnlinkResult,
   type ExternalEntityDetail,
   type Forbidden,
   type Inbox,
@@ -570,31 +572,35 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the Inbox: the cards, the places above them, the edges between
-     * the places and the counts. Needs the grant `task.read`.
+     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text.
      */
     queryInbox: (): Effect.Effect<Inbox, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
         return yield* entities.queryInbox(yield* readEnvironment);
       }),
 
-    /** Returns the counts of the Inbox, from the same definition as `queryInbox`. Needs the grant `task.read`. */
+    /** Returns the counts of the Inbox, from the same definition as `queryInbox`. Needs the grants `task.read` and `signal.query`. */
     countInbox: (): Effect.Effect<InboxCounts, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
         return yield* entities.countInbox();
       }),
 
     /**
      * Returns one entity with the records above it and what it links to.
      * Fails with `NotFound` for an unknown id, a partial record or a place:
-     * only a full record of a work kind has a detail.
+     * only a full record of a work kind has a detail. Needs the grants
+     * `task.read` and `signal.query`, because the detail shows signal text.
      */
     read: (
       id: string,
     ): Effect.Effect<ExternalEntityDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
         const found = yield* entities.readEntity(id, yield* readEnvironment);
         return yield* Option.match(found, {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),
@@ -885,6 +891,27 @@ const make = Effect.gen(function* () {
           followed: made.followed,
         };
       }),
+
+    /**
+     * Links two things as the user's own claim. The target may be a ref nobody
+     * has read. User only.
+     */
+    // Filled in by the link and unlink slice; this stub keeps the route wired.
+    link: (
+      input: EntityLinkInput,
+    ): Effect.Effect<
+      Record<string, never>,
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+    > => Effect.die(new Error(`externalEntity.link is not implemented yet: ${input.fromRef}`)),
+
+    /**
+     * Removes the user's own claim between two things, in either direction,
+     * and returns what is left. A claim a source made stays. User only.
+     */
+    unlink: (
+      input: EntityLinkInput,
+    ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.die(new Error(`externalEntity.unlink is not implemented yet: ${input.fromRef}`)),
 
     /**
      * Deletes the records nothing needs, and returns how many it deleted. The

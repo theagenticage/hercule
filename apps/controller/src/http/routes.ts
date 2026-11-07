@@ -328,7 +328,9 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       )
       .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
       .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
-      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)));
+      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
+      .handle("link", ({ payload }) => withApiErrors(entities.link(payload)))
+      .handle("unlink", ({ payload }) => withApiErrors(entities.unlink(payload)));
   }),
 );
 

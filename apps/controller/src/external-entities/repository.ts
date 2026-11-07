@@ -260,6 +260,7 @@ const buildIncomingValues = ({
     repository: toJson(observation.repository),
     reason: toJson(work?.reason),
     concern_reasons: toJson(work?.concernReasons),
+    reason_templates: toJson(work?.reasonTemplates),
     progress: toJson(observation.progress),
     target_date: observation.targetDate ?? null,
     waiting_since: observation.waitingSince ?? null,
@@ -1291,9 +1292,12 @@ const make = Effect.gen(function* () {
             contextComplete: context.contextComplete.get(row.ref)!,
           }),
           side: row.side,
+          // Filled in by the signals read of the Inbox.
+          signals: { openCount: 0 },
         }));
         const { places, edges } = context;
-        return { cards, places, edges, counts, truncated };
+        // `links` and `peers` are filled in by the links read of the Inbox.
+        return { cards, places, edges, counts, links: [], peers: [], truncated };
       }),
 
     /**
@@ -1355,6 +1359,12 @@ const make = Effect.gen(function* () {
           edges: context.edges,
           links: related.links.slice(0, MAX_ENTITY_LINKS),
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
+          // Filled in by the signals, timeline and peers reads of the detail.
+          signals: [],
+          openCount: 0,
+          signalCount: 0,
+          timeline: [],
+          peers: [],
         });
       }),
 

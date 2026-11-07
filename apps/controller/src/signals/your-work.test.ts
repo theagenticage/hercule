@@ -326,8 +326,10 @@ describe("the query plan of Your work's statements", () => {
 
     // Each of these indexes holds the open signals only, so the scan never
     // reads the resolved ones, which are the vast majority.
-    expect(plan.filter((step) => step.startsWith("SCAN signals"))).toEqual([
-      expect.stringMatching(/^SCAN signals USING (COVERING )?INDEX signals_open/),
+    // The planner may scan the open index in order, or search the open
+    // index on the thread ref (`thread_ref > ?`).
+    expect(plan.filter((step) => /^(SCAN|SEARCH) signals/.test(step))).toEqual([
+      expect.stringMatching(/^(SCAN|SEARCH) signals USING (COVERING )?INDEX signals_open/),
     ]);
     expect(plan.some((step) => step.includes("sqlite_autoindex_signals"))).toBe(false);
   });

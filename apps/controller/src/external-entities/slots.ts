@@ -64,6 +64,17 @@ const WorkEntitySlots = Schema.Struct({
    * of its own.
    */
   concernReasons: Schema.optionalKey(Schema.Record(Schema.String, EntityReason)),
+  /**
+   * The kind's `reasons` table as declared, unfilled, by reason key. The
+   * Inbox builds a signal's sentence and a timeline line from it long after
+   * the plugin is gone, so it is copied here rather than read from the catalog.
+   */
+  reasonTemplates: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({ say: Schema.String, tone: EntityReason.fields.tone }),
+    ),
+  ),
 });
 
 /** The slots of a kind that is a place, such as a repository: no card, no clock, no facts. */
@@ -98,7 +109,8 @@ const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
  * - A kind with cards gets noun, card (`rich` when the declaration leaves it
  *   out), pace, patience, identifier, person, owner, status, facts and reason.
  *   It also gets `concernReasons`: each reason of the declaration that is named
- *   like a concern, filled in, unless a field it needs is missing.
+ *   like a concern, filled in, unless a field it needs is missing. And it gets
+ *   `reasonTemplates`: the declaration's whole `reasons` table, unfilled.
  * - A kind with cards or a place also gets the `home` and `section` its
  *   declaration names, as qualified kinds.
  * - A status keeps its `norm` flag, and a kind with cards also keeps the
@@ -267,6 +279,9 @@ export const renderEntitySlots = (
       facts,
       ...(reason === undefined ? {} : { reason }),
       ...(Object.keys(concernReasons).length === 0 ? {} : { concernReasons }),
+      ...(Object.keys(declaration.reasons).length === 0
+        ? {}
+        : { reasonTemplates: declaration.reasons }),
     }).pipe(Effect.catch(refuseDecode(refuse)));
   });
 

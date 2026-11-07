@@ -290,6 +290,9 @@ const make = Effect.gen(function* () {
           contextComplete:
             context.contextComplete &&
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
+          // Filled in by the stack candidates read of the board.
+          stackCandidates: [],
+          stackCandidatesTruncated: false,
         };
       }),
   };

@@ -55,6 +55,11 @@ const buildDetail = (
     edges: EDGES,
     links: [],
     conflicts: [],
+    signals: [],
+    openCount: 0,
+    signalCount: 0,
+    timeline: [],
+    peers: [],
     ...overrides,
   };
 };
