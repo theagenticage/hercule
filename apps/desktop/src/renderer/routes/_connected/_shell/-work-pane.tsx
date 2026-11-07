@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isNotFound, readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import { findNextAgeChange } from "@hercule/client-core";
@@ -19,7 +19,7 @@ import {
   listUnsentAnswers,
   type PendingIntent,
 } from "../../../app/pending-intents";
-import { controllerQuery } from "../../../app/queries";
+import { controllerQuery, pluginsQuery } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
 import { OpeningSheet, type SheetPlaces } from "../../../screens/desk";
 import { markCardDent, readSheetOrigin } from "../../../screens/work/pane-anchor";
@@ -188,6 +188,7 @@ function PresentedTask({
   const queryClient = useQueryClient();
   const isVisible = useWindowVisible();
   const detail = useQuery({ ...taskDetailQuery(client, presentedId), enabled: isVisible });
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const controller = useQuery(controllerQuery(client));
   const textGeneration = controller.data?.textGeneration ?? TEXT_GENERATION_UNKNOWN;
   const summary = detail.data?.card.summary;
@@ -321,6 +322,7 @@ function PresentedTask({
         pane={pane}
         projectName={projectName}
         read={read}
+        plugins={plugins}
         threadPromptWords={threadPromptWords}
         actions={actions}
       />

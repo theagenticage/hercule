@@ -154,6 +154,10 @@ export interface ActiveTaskOnRef {
 export interface TaskTraces {
   /** The Task's stage now. */
   readonly stage: TaskStage;
+  /** True when the Task was merged into another Task. */
+  readonly merged: boolean;
+  /** True when the Task links the ref that `readTraces` was asked about. */
+  readonly linksRef: boolean;
   /** True when `update` has written the Task since it was created (its `revision` is above 0). */
   readonly edited: boolean;
   /** True when a Thread (a session) belongs to the Task. */
@@ -694,21 +698,25 @@ const make = Effect.gen(function* () {
   /**
    * Links the Task to each ref its new provenance entries carry. A pair that
    * is already linked keeps its row, so the oldest `linked_at` stays and the
-   * active Task of a ref does not change when the Task is updated.
+   * active Task of a ref does not change when the Task is updated. Returns
+   * true when at least one link is new.
    */
   const insertLinks = (
     taskId: Uint8Array,
     entries: ReadonlyArray<ProvenanceInput>,
     link: { readonly at: string; readonly actor: string; readonly following: boolean },
-  ) =>
-    Effect.forEach(
-      entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
-      (ref) => sql`
-        INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
-        VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0})
-        ON CONFLICT (task_id, ref) DO NOTHING
-      `,
-      { discard: true },
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.map(
+      Effect.forEach(
+        entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
+        (ref) => sql`
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0})
+          ON CONFLICT (task_id, ref) DO NOTHING
+          RETURNING ref
+        `,
+      ),
+      (inserted) => inserted.some((rows) => rows.length > 0),
     );
 
   const insertProvenance = (
@@ -1454,21 +1462,30 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns what the Task has gathered since it was created, or none when
-     * there is no such Task or it is deleted. Reads the Task by its own id.
+     * Returns what the Task has gathered since it was created, and whether it
+     * links `ref`, or none when there is no such Task or it is deleted. Reads
+     * the Task by its own id, so a merged Task is returned as itself.
      * Each answer comes from an index: the Thread and run checks use the
      * partial indexes on `sessions.task_id` and `runs.task_id`.
      */
-    readTraces: (id: string): Effect.Effect<Option.Option<TaskTraces>, SqlError> =>
+    readTraces: (
+      id: string,
+      ref: ExternalRef,
+    ): Effect.Effect<Option.Option<TaskTraces>, SqlError> =>
       Effect.map(
         sql<{
           readonly stage: string;
+          readonly merged: number;
+          readonly links_ref: number;
           readonly edited: number;
           readonly has_session: number;
           readonly has_run: number;
           readonly link_count: number;
         }>`
-          SELECT tasks.stage, tasks.revision > 0 AS edited,
+          SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged,
+                 EXISTS (SELECT 1 FROM task_entity_links
+                         WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
+                 tasks.revision > 0 AS edited,
                  EXISTS (SELECT 1 FROM sessions WHERE sessions.task_id = tasks.id) AS has_session,
                  EXISTS (SELECT 1 FROM runs WHERE runs.task_id = tasks.id) AS has_run,
                  (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count
@@ -1479,6 +1496,8 @@ const make = Effect.gen(function* () {
             ? Option.none()
             : Option.some({
                 stage: row.stage as TaskStage,
+                merged: row.merged === 1,
+                linksRef: row.links_ref === 1,
                 edited: row.edited === 1,
                 hasSession: row.has_session === 1,
                 hasRun: row.has_run === 1,
@@ -1627,7 +1646,8 @@ const make = Effect.gen(function* () {
     /**
      * Applies an edit and appends provenance. Only the columns in the edit are
      * written, which also means that a change to anything other than the title
-     * or the description does not touch the full-text index.
+     * or the description does not touch the full-text index. Returns true when
+     * the provenance linked the Task to a ref it did not link before.
      */
     update: (
       id: string,
@@ -1635,7 +1655,7 @@ const make = Effect.gen(function* () {
       provenance: ReadonlyArray<ProvenanceInput>,
       at: string,
       actor: string,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
         // The revision counts every write of `update`. Unlike `updated_at` it moves even
@@ -1663,7 +1683,7 @@ const make = Effect.gen(function* () {
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);
-        yield* insertLinks(key, provenance, { at, actor, following: false });
+        return yield* insertLinks(key, provenance, { at, actor, following: false });
       }),
 
     /**
@@ -1889,6 +1909,27 @@ const make = Effect.gen(function* () {
         sql`UPDATE task_provenance SET task_id = ${uuidFromString(targetId)}
             WHERE task_id = ${uuidFromString(sourceId)}`,
       ),
+
+    /**
+     * Moves the entity links of the Task `sourceId` to `targetId`, for a
+     * merge. A ref that both Tasks link keeps one link: the older
+     * `linked_at` (with the `linked_by` that came with it), and `following`
+     * if either link had it. The source is left with no links.
+     */
+    moveEntityLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const source = uuidFromString(sourceId);
+        yield* sql`
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following
+          FROM task_entity_links WHERE task_id = ${source}
+          ON CONFLICT (task_id, ref) DO UPDATE SET
+            linked_by = CASE WHEN excluded.linked_at < linked_at
+                             THEN excluded.linked_by ELSE linked_by END,
+            linked_at = MIN(linked_at, excluded.linked_at),
+            following = MAX(following, excluded.following)`;
+        yield* sql`DELETE FROM task_entity_links WHERE task_id = ${source}`;
+      }),
 
     /**
      * Moves the workspaces recorded for the Task `sourceId` to `targetId`. A

@@ -8,7 +8,8 @@
  *
  * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
  * - `TaskTrackingRuns` for the runs, the same port Tracking uses;
- * - `TaskDetailFacts` for the sessions and the number of runs.
+ * - `TaskDetailFacts` for the sessions, the number of runs and the outside
+ *   things the Task links.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -19,6 +20,8 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   createInvalidStateError,
   createNotFoundError,
+  type EntityEdge,
+  type EntityPlace,
   type InvalidState,
   type Forbidden,
   type Id,
@@ -56,6 +59,21 @@ export class TaskDetailFacts extends Context.Service<
 
     /** Returns how many runs the Task has. */
     readonly countRuns: (taskId: string) => Effect.Effect<number, SqlError>;
+
+    /**
+     * Returns the outside things the Task links, as places in the order they
+     * were linked (at most `MAX_CARD_CONTEXTS`; a ref with no record is left
+     * out), with every place above them and the `part of` edges between
+     * them. The number of statements is fixed, whatever the number of links.
+     */
+    readonly readLinkedEntities: (taskId: string) => Effect.Effect<
+      {
+        readonly entities: ReadonlyArray<EntityPlace>;
+        readonly places: ReadonlyArray<EntityPlace>;
+        readonly edges: ReadonlyArray<EntityEdge>;
+      },
+      SqlError
+    >;
   }
 >()("hercule/controller/tasks/TaskDetailFacts") {}
 
@@ -75,7 +93,8 @@ const make = Effect.gen(function* () {
      * unfinished first, then newest, and always the Thread that asks the
      * card's open question) with how many it has, up to
      * `MAX_TRACKING_DETAIL_RUNS` of its runs (oldest first, as Tracking lists
-     * them) with how many it has.
+     * them) with how many it has, and the outside things it links with the
+     * places above them.
      *
      * The caller needs `task.read`, `session.query` and `run.query`, because
      * the reply shows a session's open Requests and a run's output. A caller
@@ -126,6 +145,7 @@ const make = Effect.gen(function* () {
         );
         const history = yield* runs.readRunHistory(id);
         const runCount = yield* detailFacts.countRuns(id);
+        const linked = yield* detailFacts.readLinkedEntities(id);
         return {
           task,
           card,
@@ -133,6 +153,7 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
+          ...linked,
         };
       }),
   };

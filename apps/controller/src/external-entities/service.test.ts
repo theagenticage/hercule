@@ -876,6 +876,121 @@ describe("undoTakeOn", () => {
   });
 });
 
+describe("after a merge", () => {
+  it("gives the survivor to a take-on, a read and the Inbox, and keeps the older link of a shared ref", async () => {
+    const { before, after, taken, takenOther, inbox, links } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const one = yield* entityId(ticketRef("1"));
+          const two = yield* entityId(ticketRef("2"));
+          // The survivor is made first; the Task merged into it links both tickets, and links
+          // ticket 1 earlier, so it is the active Task of both until the merge.
+          const survivor = yield* tasks.create({
+            title: "Survivor",
+            description: "",
+            provenance: [{ ref: ticketRef("1") }],
+          });
+          const source = yield* tasks.create({
+            title: "Source",
+            description: "",
+            provenance: [{ ref: ticketRef("1") }, { ref: ticketRef("2") }],
+          });
+          yield* withTransaction(
+            sql,
+            sql`UPDATE task_entity_links SET linked_at = '2020-01-01T00:00:00.000Z', following = 1
+                WHERE task_id = ${uuidFromString(source.id)} AND ref = ${ticketRef("1")}`,
+          );
+          const before = (yield* service.read(one)).taskId;
+          yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+          return {
+            before: { taskId: before, sourceId: source.id, survivorId: survivor.id },
+            after: (yield* service.read(one)).taskId,
+            taken: yield* service.takeOn(one),
+            takenOther: yield* service.takeOn(two),
+            inbox: (yield* service.queryInbox()).cards.map((card) => [
+              card.ref,
+              card.taskId,
+              card.side,
+            ]),
+            links: yield* sql<{ readonly following: number; readonly linked_at: string }>`
+              SELECT following, linked_at FROM task_entity_links
+              WHERE task_id = ${uuidFromString(survivor.id)} AND ref = ${ticketRef("1")}`,
+          };
+        }),
+    );
+    expect(before.taskId).toBe(before.sourceId);
+    expect(after).toBe(before.survivorId);
+    expect(taken).toEqual({ taskId: before.survivorId, created: false });
+    expect(takenOther).toEqual({ taskId: before.survivorId, created: false });
+    expect(inbox).toEqual([
+      [ticketRef("1"), before.survivorId, "with-someone-else"],
+      [ticketRef("2"), before.survivorId, "with-someone-else"],
+    ]);
+    expect(links).toEqual([{ following: 1, linked_at: "2020-01-01T00:00:00.000Z" }]);
+  });
+
+  it("refuses to undo a take-on whose Task was merged, and says why", async () => {
+    const { outcome, survivorLive } = await run(
+      ({ service, tasks, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1")]);
+          const id = yield* entityId(ticketRef("1"));
+          const survivor = yield* tasks.create({ title: "Survivor", description: "" });
+          const made = yield* service.takeOn(id);
+          yield* tasks.merge(made.taskId, { intoTaskId: survivor.id });
+          return {
+            outcome: yield* service.undoTakeOn(id, made.taskId),
+            survivorLive: (yield* tasks.read(survivor.id)).id === survivor.id,
+          };
+        }),
+    );
+    expect(outcome).toEqual({
+      undone: false,
+      reason: "The Task was merged into another Task, which now holds its work, so it stays.",
+    });
+    expect(survivorLive).toBe(true);
+  });
+});
+
+describe("the summary of a Task that links an entity", () => {
+  /** Takes ticket 1 on, then reports it again as `changed` says, and returns the summary's dirty revision before and after. */
+  const reportAgain = (changed: Partial<FullEntityObservation>) =>
+    run(({ service, report, connectionId, entityId, sql }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const made = yield* service.takeOn(yield* entityId(ticketRef("1")));
+        const readRevision = Effect.map(
+          sql<{ readonly dirty_revision: number }>`
+            SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(made.taskId)}`,
+          (rows) => rows[0]?.dirty_revision,
+        );
+        const before = yield* readRevision;
+        yield* report(connectionId, [buildObservation("1", changed)]);
+        return { before, after: yield* readRevision };
+      }),
+    );
+
+  it.each([
+    ["its title", { title: "A new title" }],
+    ["its status", { status: "doing" as const }],
+    ["its lifecycle", { lifecycle: "completed" as const }],
+  ])("is marked dirty when a poll changes %s", async (_name, changed) => {
+    const { before, after } = await reportAgain(changed);
+    expect(after).toBe(before! + 1);
+  });
+
+  it("is left alone when a poll changes nothing the summary reads", async () => {
+    const same = await reportAgain({});
+    const other = await reportAgain({
+      concerns: [],
+      sourceUpdatedAt: "2026-03-02T00:00:00.000Z",
+    });
+    expect(same.after).toBe(same.before);
+    expect(other.after).toBe(other.before);
+  });
+});
+
 describe("dismiss and restore", () => {
   it("takes the card off the Inbox, stamped with the user, and brings it back", async () => {
     const { before, dismissed, dismissedBy, restored } = await run(

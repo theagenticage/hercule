@@ -902,6 +902,17 @@ export const TaskDetail = Schema.Struct({
   runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
   /** How many runs the Task has, with a link to `run.query` by `taskIds`, the same way. */
   runCount: Schema.Int,
+  /**
+   * The outside things the Task links, in the order they were linked, each as
+   * the place it is: the pane draws them as rows. A linked thing no
+   * Connection can read is `restricted`. At most `MAX_CARD_CONTEXTS`, the
+   * same bound as the card's `contextRefs`.
+   */
+  entities: atMost(EntityPlace, MAX_CARD_CONTEXTS),
+  /** Each record above the linked things, and the linked things themselves, once, at most `MAX_CARD_CONTEXTS`. */
+  places: atMost(EntityPlace, MAX_CARD_CONTEXTS),
+  /** The current `part of` steps between them, so the pane rebuilds every path. */
+  edges: atMost(EntityEdge, MAX_GRAPH_EDGES),
 });
 
 export type TaskDetail = Schema.Schema.Type<typeof TaskDetail>;

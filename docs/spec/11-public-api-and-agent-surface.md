@@ -281,6 +281,9 @@ interface TaskDetail {
   sessionCount: number             // how many sessions the Task has
   runs: TrackingDetailRun[]        // at most MAX_TRACKING_DETAIL_RUNS (20), oldest first, as Tracking lists them
   runCount: number                 // how many runs the Task has
+  entities: EntityPlace[]          // the outside things the Task links, in link order, at most MAX_CARD_CONTEXTS (64)
+  places: EntityPlace[]            // the linked things and every place above them, each once, at most MAX_CARD_CONTEXTS
+  edges: EntityEdge[]              // the current `part of` steps between them, at most MAX_GRAPH_EDGES
 }
 
 interface TaskDetailSession {
@@ -290,6 +293,7 @@ interface TaskDetailSession {
 }
 ```
 
+- **`entities`, `places` and `edges` come from one `readContext` over the Task's linked refs** ([./20-external-entities.md](./20-external-entities.md#11-works-context)), so the number of statements does not follow the number of links. A linked thing with no record is left out of `entities`; one no Connection can read is `restricted`. A Task with more links than the bound shows the first ones.
 - **The summary is `card.summary`.** `TaskDetail` has no summary field of its own, so the board and the pane cannot disagree.
 - **The Thread that asks the card's `openQuestion` is always in `sessions`,** even when newer sessions would crowd it out, because the pane answers the question from that Thread's Requests. `sessionCount` and `runCount` let the pane say "and 12 more" and link to `session.query` by `taskId` and `run.query` by `taskIds`.
 - **Grants.** The operation's row names `task.read`, and the service also checks `session.query` and `run.query` before it reads anything, as `task.queryBoard` does. A caller that lacks one is refused with `forbidden` naming it, and is not given a thinner reply.

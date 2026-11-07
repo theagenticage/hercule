@@ -12,7 +12,6 @@ import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { MAX_BOARD_GROUPINGS, MAX_BOARD_PLACES } from "@hercule/contract";
-import { nowIso } from "../../db";
 import { externalEntityRepository, type ContextRead } from "../../external-entities";
 import { PluginHost } from "../../plugins";
 import { runRepository } from "../../runs";
@@ -25,6 +24,7 @@ import {
   type BoardFacts,
   type BoardFactsRequest,
 } from "../../tasks";
+import { readEntityEnvironment } from "./entity-environment";
 
 /** Groups the items by their Task id, keeping their order. */
 const groupByTask = <Item extends { readonly taskId: string }>(
@@ -157,17 +157,12 @@ export const TaskBoardFactsLayer: Layer.Layer<
           );
           const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
           const linkedRefs = [...new Set([...linksByTask.values()].flat())];
-          // The plugins that are running, as the Inbox reads them, so a place
-          // that only a stopped plugin could refresh counts as stale here too.
-          const activePluginIds = [
-            ...new Set((yield* host.listActiveEventSources()).map((source) => source.pluginId)),
-          ];
           const read = yield* entities.readContext({
             starts: linkedRefs,
             alsoPlaces: linkedRefs,
             maxAncestors: MAX_BOARD_PLACES,
             maxPlaces: MAX_BOARD_PLACES,
-            environment: { now: yield* nowIso, activePluginIds },
+            environment: yield* readEntityEnvironment(host),
           });
           const { context, cardFactsByTask } = buildEntityContext(linksByTask, read);
           const totalsByTask = new Map(totals.map((total) => [total.taskId, total] as const));

@@ -360,7 +360,7 @@ Outbound work uses no credential in this slice. Never pick credentials from whic
 
 ### 9.2 Undo of a Take or an Add
 
-A Take or an Add that `created` a Task undoes with `externalEntity.undoTakeOn { id, taskId }`. In one transaction it reads the Task by its own id, **without following a merge redirect**, and deletes it only when it is live, not merged, and untouched since it was created: no Thread, no run, no other link, no edit. Otherwise it changes nothing and answers `{ undone: false, reason }`, the undo line says why, and the Task stays. A check in the client could race a Thread joining, so the check and the delete are one write. A Dismiss undoes with `restore`.
+A Take or an Add that `created` a Task undoes with `externalEntity.undoTakeOn { id, taskId }`. In one transaction it reads the Task by its own id, **without following a merge redirect**, and deletes it only when it is live, not merged, and untouched since it was created: no Thread, no run, no other link, no edit. A Task that was merged into another is refused with its own reason, because the survivor now holds its work and its links. The check also requires the Task to link this entity's ref, so a stale id never deletes another thing's Task. Otherwise it changes nothing and answers `{ undone: false, reason }`, the undo line says why, and the Task stays. A check in the client could race a Thread joining, so the check and the delete are one write. A Dismiss undoes with `restore`.
 
 ### 9.3 The stage a new Task starts at
 
@@ -413,6 +413,8 @@ Work's Group by and Filter read through a read model, with no new table. `TaskBo
 - `task.queryBoard` needs no new grant: `places` comes with the Task's links.
 - **Hercule's Initiatives and Projects stay separate.** An outside project is only ever a lane or a filter. Filtering or grouping by one never sets a Task's `projectId` or `initiativeId`.
 
+**The details pane.** `TaskDetail` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)) carries the Task's own `entities` (each linked thing as an `EntityPlace`, in link order), `places` and `edges`, read through the same `readContext` for one Task. The pane draws two sections from them, as the shared relation rows: **Part of** lists every place above any linked thing by every path, each once, nearest first, with a place no Connection can read as a locked row; **Linked** lists the linked things themselves, each as its identifier and title and its kind and status. A section with no rows is not drawn. An `EntityPlace` carries `identifier` when the record has one and the place is not restricted, for these rows. The direct links between sources and the references found in text join Linked and Mentioned in slice 5.
+
 Filtering and grouping run in client-core over that reply, so they cost no read. A Task under two places has a card in each; stage headers count distinct Tasks. A drop in an outside lane changes the stage only and never the membership.
 
 ## 12. Live updates
@@ -427,6 +429,8 @@ The `externalEntity` topic is a mutable topic ([./14-web-app.md](./14-web-app.md
 | A Task finishes, is deleted, merged, or gains or loses a link | the Inbox's membership, the count | `task` already pushes. The client maps `task` to the Inbox keys, so no reverse import is needed |
 | A Connection changes status | `stale` | `connection` already pushes. The client maps it to the Inbox keys |
 | A plugin is enabled or disabled | `stale`, `kindAvailable` | `plugin` already pushes. The client maps it to the Inbox keys |
+
+A Task's summary reads the kind, identifier, title, status label and lifecycle of each thing the Task links ([./09-tasks.md](./09-tasks.md#task-summaries)). The write that changes one of those marks every live Task that links the ref dirty (`TaskService`'s marker, `makeSummaryDirtyMarker`), in the write's own transaction. A change to concerns, progress, dates or access alone marks nothing, so a busy poll does not cost a model call. The summary's input reads the facts through `externalEntityRepository.listLinkedEntityFacts`, one batched statement, never through the service.
 
 A poll that changes nothing announces nothing, so a quiet Inbox costs no read. Nothing is announced after a rolled-back transaction: the service publishes after commit.
 

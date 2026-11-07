@@ -42,6 +42,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, TaskService | SqlClient.SqlClient
 const A_MINUTE = 60_000;
 const REF: ExternalRef = "github:issue:acme/api#7";
 const OTHER_REF: ExternalRef = "github:issue:acme/api#8";
+const THIRD_REF: ExternalRef = "github:issue:acme/api#9";
 
 /** Creates a Task whose provenance carries `ref`, a minute after the last write. */
 const createTaskOnRef = (title: string, ref: ExternalRef = REF) =>
@@ -218,7 +219,7 @@ describe("taking on work for a ref", () => {
               following: false,
             }),
           ),
-          yield* asSession(tasks.undoCreatedTask(created.id)),
+          yield* asSession(tasks.undoCreatedTask(created.id, REF)),
         ];
       }),
     );
@@ -257,7 +258,7 @@ describe("taking back a Task made for a ref", () => {
         const tasks = yield* TaskService;
         const task = yield* makeTask;
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -274,7 +275,7 @@ describe("taking back a Task made for a ref", () => {
         yield* TestClock.adjust(A_MINUTE);
         yield* tasks.update({ id: task.id, priority: "high" });
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -292,7 +293,7 @@ describe("taking back a Task made for a ref", () => {
         const edited = yield* tasks.update({ id: task.id, title: "Renamed" });
         expect(edited.updatedAt).toBe(task.createdAt);
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -312,7 +313,7 @@ describe("taking back a Task made for a ref", () => {
           following: false,
         });
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -335,7 +336,7 @@ describe("taking back a Task made for a ref", () => {
               VALUES (${uuidFromString(task.id)}, ${OTHER_REF}, ${task.createdAt}, 'user')`,
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -365,7 +366,7 @@ describe("taking back a Task made for a ref", () => {
           }),
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -387,7 +388,7 @@ describe("taking back a Task made for a ref", () => {
                       ${task.createdAt}, ${uuidFromString(task.id)})`,
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id),
+          outcome: yield* tasks.undoCreatedTask(task.id, REF),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -403,8 +404,8 @@ describe("taking back a Task made for a ref", () => {
         const task = yield* makeTask;
         yield* tasks.delete(task.id);
         return [
-          yield* tasks.undoCreatedTask(task.id),
-          yield* tasks.undoCreatedTask("0199e0e7-9999-7000-8000-000000000000"),
+          yield* tasks.undoCreatedTask(task.id, REF),
+          yield* tasks.undoCreatedTask("0199e0e7-9999-7000-8000-000000000000", REF),
         ];
       }),
     );
@@ -412,5 +413,141 @@ describe("taking back a Task made for a ref", () => {
       { undone: false, reason: "task-gone" },
       { undone: false, reason: "task-gone" },
     ]);
+  });
+});
+
+describe("merging Tasks that link refs", () => {
+  const SIGNAL_ID = "0199e0e7-0003-7000-8000-000000000000";
+  const RUN_ID = "0199e0e7-0004-7000-8000-000000000000";
+
+  /** Makes the links of `taskId` to `ref` older or newer, and following or not, as a test needs. */
+  const setLink = (
+    taskId: string,
+    ref: ExternalRef,
+    link: { readonly linkedAt: string; readonly following: boolean },
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* withTransaction(
+        sql,
+        sql`UPDATE task_entity_links
+            SET linked_at = ${link.linkedAt}, linked_by = ${"by " + link.linkedAt},
+                following = ${link.following ? 1 : 0}
+            WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`,
+      );
+    });
+
+  it("keeps one link for a ref both Tasks link: the older time, and following if either was", async () => {
+    const { links, sourceLinks } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const survivor = yield* createTaskOnRef("Survivor", REF);
+        const source = yield* createTaskOnRef("Source", REF);
+        yield* setLink(survivor.id, REF, {
+          linkedAt: "2026-02-01T00:00:00.000Z",
+          following: false,
+        });
+        yield* setLink(source.id, REF, { linkedAt: "2026-01-01T00:00:00.000Z", following: true });
+        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+        return { links: yield* readLinks(survivor.id), sourceLinks: yield* readLinks(source.id) };
+      }),
+    );
+    expect(links).toEqual([
+      {
+        ref: REF,
+        linked_at: "2026-01-01T00:00:00.000Z",
+        linked_by: "by 2026-01-01T00:00:00.000Z",
+        following: 1,
+      },
+    ]);
+    expect(sourceLinks).toEqual([]);
+  });
+
+  it("keeps the survivor's own link when it is the older one", async () => {
+    const links = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const survivor = yield* createTaskOnRef("Survivor", REF);
+        const source = yield* createTaskOnRef("Source", REF);
+        yield* setLink(survivor.id, REF, {
+          linkedAt: "2026-01-01T00:00:00.000Z",
+          following: false,
+        });
+        yield* setLink(source.id, REF, { linkedAt: "2026-02-01T00:00:00.000Z", following: false });
+        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+        return yield* readLinks(survivor.id);
+      }),
+    );
+    expect(links).toEqual([
+      {
+        ref: REF,
+        linked_at: "2026-01-01T00:00:00.000Z",
+        linked_by: "by 2026-01-01T00:00:00.000Z",
+        following: 0,
+      },
+    ]);
+  });
+
+  it("moves the links of the merged Task that the survivor lacks, and the survivor becomes the active Task", async () => {
+    const { links, active, otherActive } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const repository = yield* taskRepository;
+        const survivor = yield* createTaskOnRef("Survivor", REF);
+        const source = yield* createTaskOnRef("Source", OTHER_REF);
+        yield* tasks.update({ id: source.id, provenance: [{ ref: REF }] });
+        yield* setLink(source.id, REF, { linkedAt: "2020-01-01T00:00:00.000Z", following: false });
+        const before = yield* repository.findActiveTaskForRef(REF);
+        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+        return {
+          before,
+          links: (yield* readLinks(survivor.id)).map((link) => link.ref),
+          active: yield* repository.findActiveTaskForRef(REF),
+          otherActive: yield* repository.findActiveTaskForRef(OTHER_REF),
+        };
+      }),
+    );
+    expect(links).toEqual([REF, OTHER_REF]);
+    expect(active._tag === "Some" && active.value.title).toBe("Survivor");
+    expect(otherActive._tag === "Some" && otherActive.value.title).toBe("Survivor");
+  });
+
+  it("lands a link written for the merged id on the survivor, by update and by handoff", async () => {
+    const { survivorLinks, sourceLinks } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const survivor = yield* createTaskOnRef("Survivor", REF);
+        const source = yield* createTaskOnRef("Source", REF);
+        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+        yield* tasks.update({ id: source.id, provenance: [{ ref: OTHER_REF }] });
+        yield* tasks.recordHandoff({
+          taskId: source.id,
+          entry: { signalId: SIGNAL_ID, runId: RUN_ID, ref: THIRD_REF },
+        });
+        return {
+          survivorLinks: (yield* readLinks(survivor.id)).map((link) => link.ref),
+          sourceLinks: yield* readLinks(source.id),
+        };
+      }),
+    );
+    expect(survivorLinks).toEqual([REF, OTHER_REF, THIRD_REF]);
+    expect(sourceLinks).toEqual([]);
+  });
+
+  it("refuses to take back a merged Task, and leaves the survivor and its links", async () => {
+    const { outcome, survivorLinks } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const survivor = yield* createTaskOnRef("Survivor", OTHER_REF);
+        const source = yield* createTaskOnRef("Source", REF);
+        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
+        return {
+          outcome: yield* tasks.undoCreatedTask(source.id, REF),
+          survivorLinks: (yield* readLinks(survivor.id)).map((link) => link.ref),
+        };
+      }),
+    );
+    expect(outcome).toEqual({ undone: false, reason: "task-merged" });
+    expect(survivorLinks).toEqual([REF, OTHER_REF]);
   });
 });

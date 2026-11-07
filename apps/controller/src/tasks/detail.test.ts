@@ -25,8 +25,9 @@ import { CurrentActor, type Actor } from "../actor";
 import { TaskBoardFactsLayer, TaskDetailFactsLayer } from "../daemon/tasks";
 import { buildPluginStack } from "../plugins/testing";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { externalEntityRepository, type ObservedEntity } from "../external-entities";
 import { runRepository } from "../runs";
 import { sessionRepository } from "../sessions";
 import { TaskBoardFacts } from "./board";
@@ -507,6 +508,180 @@ describe("task.readDetail", () => {
   });
 });
 
+describe("the outside things a Task links", () => {
+  const PLUGIN = "acme-tracker";
+  const CONNECTION = "0199e0e7-0010-7000-8000-000000000001";
+  const PROJECT_A = `${PLUGIN}:project:harbour`;
+  const PROJECT_B = `${PLUGIN}:project:lighthouse`;
+  const ticketRef = (name: string) => `${PLUGIN}:ticket:${name}`;
+
+  const ticket = (name: string, partOf: ReadonlyArray<string>): ObservedEntity => ({
+    kind: `${PLUGIN}/ticket`,
+    slots: {
+      noun: "Ticket",
+      card: "compact",
+      pace: "fast",
+      patience: 24,
+      identifier: name.toUpperCase(),
+      facts: [],
+    },
+    observation: {
+      kind: "ticket",
+      ref: ticketRef(name),
+      title: `Ticket ${name}`,
+      url: `https://tracker.example/${name}`,
+      lifecycle: "open",
+      fields: {},
+      concerns: ["assigned"],
+      sourceUpdatedAt: AT,
+      relations: { complete: true, partOf, linked: [] },
+    },
+  });
+
+  const project = (ref: string, title: string): ObservedEntity => ({
+    kind: `${PLUGIN}/project`,
+    slots: { noun: "Project", pace: "context", caption: "Tracker project" },
+    observation: { kind: "project", ref, title, fields: {}, concerns: [], sourceUpdatedAt: AT },
+  });
+
+  /**
+   * Stores one Connection's reading of the projects and of `tickets`, and
+   * returns the id of a Task that links every ticket, in order.
+   */
+  const writeLinkedTask = (tickets: ReadonlyArray<ObservedEntity>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const entities = yield* externalEntityRepository;
+      const tasks = yield* taskRepository;
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
+              status, labels, config, created_at, updated_at)
+            VALUES (${uuidFromString(CONNECTION)}, ${PLUGIN}, ${`${PLUGIN}/account`}, 'a', 'a', 'a',
+              'connected', '[]', '{}', ${AT}, ${AT})`;
+          for (const [kind, observed] of [
+            [
+              `${PLUGIN}/project`,
+              [project(PROJECT_A, "Harbour"), project(PROJECT_B, "Lighthouse")],
+            ],
+            [`${PLUGIN}/ticket`, tickets],
+          ] as const) {
+            yield* entities.reconcile({
+              connectionId: CONNECTION,
+              kind,
+              complete: true,
+              observed,
+              actor: `plugin:${PLUGIN}`,
+              environment: { now: AT, activePluginIds: [PLUGIN] },
+            });
+          }
+          const task = yield* tasks.insert({
+            ...NEW_TASK,
+            provenance: tickets.map((each) => ({ ref: each.observation.ref })),
+          });
+          return task.id;
+        }),
+      );
+    });
+
+  /** Reads the details of a Task that links `tickets`, counting the statements the read sends. */
+  const readLinkedDetail = (
+    tickets: ReadonlyArray<ObservedEntity>,
+    change: Effect.Effect<unknown, unknown, SqlClient.SqlClient> = Effect.void,
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const taskId = yield* writeLinkedTask(tickets);
+        yield* change;
+        const statements: Array<string> = [];
+        const detail = yield* Effect.flatMap(TaskDetails, (details) => details.read(taskId)).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          ),
+        );
+        return {
+          statements,
+          detail: Schema.decodeUnknownSync(TaskDetail)(Schema.encodeSync(TaskDetail)(detail)),
+        };
+      }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(DetailsOverRealPorts)),
+    );
+
+  it("carries the linked things in the order they were linked, with the places above them and the steps between", async () => {
+    const { detail } = await readLinkedDetail([
+      ticket("one", [PROJECT_A, PROJECT_B]),
+      ticket("two", [PROJECT_A]),
+    ]);
+
+    expect(detail.entities.map((entity) => entity.ref)).toEqual([
+      ticketRef("one"),
+      ticketRef("two"),
+    ]);
+    expect(detail.entities[0]).toMatchObject({
+      title: "Ticket one",
+      identifier: "ONE",
+      noun: "Ticket",
+      restricted: false,
+    });
+    expect(detail.places.map((place) => place.ref)).toEqual(
+      [PROJECT_A, PROJECT_B, ticketRef("one"), ticketRef("two")].toSorted(),
+    );
+    expect(detail.edges).toHaveLength(3);
+    expect(detail.edges).toEqual(
+      expect.arrayContaining([
+        { fromRef: ticketRef("one"), toRef: PROJECT_A },
+        { fromRef: ticketRef("one"), toRef: PROJECT_B },
+        { fromRef: ticketRef("two"), toRef: PROJECT_A },
+      ]),
+    );
+  });
+
+  it("marks a place no Connection can read as restricted, with no title", async () => {
+    const { detail } = await readLinkedDetail(
+      [ticket("one", [PROJECT_A, PROJECT_B])],
+      Effect.flatMap(SqlClient.SqlClient, (sql) =>
+        withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'
+              WHERE ref = ${PROJECT_B}`,
+        ),
+      ),
+    );
+
+    const restricted = detail.places.find((place) => place.ref === PROJECT_B);
+    expect(restricted).toMatchObject({ restricted: true, noun: "Project" });
+    expect(restricted).not.toHaveProperty("title");
+    expect(detail.places.find((place) => place.ref === PROJECT_A)).toMatchObject({
+      restricted: false,
+      title: "Harbour",
+    });
+  });
+
+  it("gives a Task that links nothing no entities, places or edges", async () => {
+    const { detail } = await readLinkedDetail([]);
+
+    expect(detail.entities).toEqual([]);
+    expect(detail.places).toEqual([]);
+    expect(detail.edges).toEqual([]);
+  });
+
+  it("sends the same number of statements for 1 linked thing and for 20", async () => {
+    const names = (count: number) => Array.from({ length: count }, (_, n) => `t${String(n)}`);
+    const small = await readLinkedDetail(
+      names(1).map((name) => ticket(name, [PROJECT_A, PROJECT_B])),
+    );
+    const large = await readLinkedDetail(
+      names(20).map((name) => ticket(name, [PROJECT_A, PROJECT_B])),
+    );
+
+    expect(large.detail.entities).toHaveLength(20);
+    expect(large.statements).toHaveLength(small.statements.length);
+  });
+});
+
 describe("who may read the details", () => {
   /** Reads the details as `actor` over ports that record each time they are asked. */
   const readAs = (actor: Actor) => {
@@ -561,6 +736,11 @@ describe("who may read the details", () => {
                       asked.push("run count");
                       return 0;
                     }),
+                  readLinkedEntities: () =>
+                    Effect.sync(() => {
+                      asked.push("linked entities");
+                      return { entities: [], places: [], edges: [] };
+                    }),
                 }),
               ),
             ),
@@ -578,7 +758,13 @@ describe("who may read the details", () => {
       const exit = await result;
 
       expect(exit._tag).toBe("Success");
-      expect(asked).toEqual(["card facts", "sessions", "run history", "run count"]);
+      expect(asked).toEqual([
+        "card facts",
+        "sessions",
+        "run history",
+        "run count",
+        "linked entities",
+      ]);
     }
   });
 

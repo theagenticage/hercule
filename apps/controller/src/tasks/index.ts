@@ -22,6 +22,7 @@ export {
   type SummaryText,
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
+export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {
   buildWorkCard,

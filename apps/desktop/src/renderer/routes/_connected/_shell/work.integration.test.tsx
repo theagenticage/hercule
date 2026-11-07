@@ -916,6 +916,9 @@ const buildDetail = (card: WorkCard, overrides: Partial<TaskDetail> = {}): TaskD
   sessionCount: 0,
   runs: [],
   runCount: 0,
+  entities: [],
+  places: [],
+  edges: [],
   ...overrides,
 });
 
@@ -3168,5 +3171,95 @@ describe("the Work screen's lanes for outside places, in their edge cases", () =
       stage: "exploring",
       ...(projectId === undefined ? {} : { projectId }),
     });
+  });
+});
+
+// ---------- What the details pane says a Task is part of ----------
+
+describe("the details pane's outside things", () => {
+  const ORDER = "forge:issue:pick-lists";
+  const SECRET = "forge:issue:secret";
+  const DEPOT_ROUND = buildPlace("forge:round:depot", "Depot round", {
+    kind: "forge/round",
+    noun: "Round",
+  });
+  const STORE_ROUND = buildPlace("forge:round:store", "Store round", {
+    kind: "forge/round",
+    noun: "Round",
+  });
+  /** A place no Connection can read: it has no title. */
+  const LOCKED_ROUND = {
+    ref: "forge:round:private",
+    kind: "forge/round",
+    noun: "Round",
+    restricted: true,
+  } as const;
+  const PICK_LISTS = buildPlace(ORDER, "Print the pick lists", {
+    kind: "forge/issue",
+    noun: "Issue",
+    identifier: "DEP-12",
+    status: { shape: "ring", tone: "active", label: "In progress" },
+  });
+  const SECRET_ISSUE = {
+    ref: SECRET,
+    kind: "forge/issue",
+    noun: "Issue",
+    restricted: true,
+  } as const;
+  const CARD = buildCard(buildTaskId(40), { title: "Print depot pick lists" });
+
+  const openPaneWith = async (detail: Partial<TaskDetail>) => {
+    const user = userEvent.setup();
+    await openRepositoryWork({
+      board: () => buildBoard(CARD),
+      handlers: { [detailPath(CARD.id)]: { body: buildDetail(CARD, detail) } },
+    });
+    await user.click(await screen.findByRole("button", { name: /^Print depot pick lists/ }));
+    return screen.findByRole("dialog", { name: "Print depot pick lists" });
+  };
+
+  it("lists a place under two parents by both paths, each once, and a place nobody can open as locked", async () => {
+    const pane = await openPaneWith({
+      entities: [PICK_LISTS],
+      places: [PICK_LISTS, DEPOT_ROUND, STORE_ROUND, LOCKED_ROUND],
+      edges: [
+        { fromRef: ORDER, toRef: DEPOT_ROUND.ref },
+        { fromRef: ORDER, toRef: STORE_ROUND.ref },
+        { fromRef: DEPOT_ROUND.ref, toRef: LOCKED_ROUND.ref },
+        { fromRef: STORE_ROUND.ref, toRef: LOCKED_ROUND.ref },
+      ],
+    });
+
+    const partOf = await within(pane).findByRole("region", { name: "Part of" });
+    expect(
+      within(partOf)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["Depot roundRound", "Store roundRound", "A Forge round you cannot open"]);
+    expect(partOf.querySelectorAll(".relation-row.is-locked")).toHaveLength(1);
+  });
+
+  it("lists the linked things with their identifier, and a linked thing nobody can open as locked", async () => {
+    const pane = await openPaneWith({
+      entities: [PICK_LISTS, SECRET_ISSUE],
+      places: [PICK_LISTS, SECRET_ISSUE],
+    });
+
+    const linked = await within(pane).findByRole("region", { name: "Linked" });
+    expect(
+      within(linked)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["DEP-12 Print the pick listsIssue · In progress", "A Forge issue you cannot open"]);
+    // Nothing is above the linked things, so no Part of section is drawn.
+    expect(within(pane).queryByRole("region", { name: "Part of" })).toBeNull();
+  });
+
+  it("draws neither section for a Task that links nothing", async () => {
+    const pane = await openPaneWith({});
+
+    await within(pane).findByRole("button", { name: /^Done/ });
+    expect(within(pane).queryByRole("region", { name: "Part of" })).toBeNull();
+    expect(within(pane).queryByRole("region", { name: "Linked" })).toBeNull();
   });
 });

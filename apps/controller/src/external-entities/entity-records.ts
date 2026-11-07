@@ -232,6 +232,34 @@ export const parseStoredStatus = (
 };
 
 /**
+ * What a Task's summary reads about a thing the Task links. Only these facts
+ * mark the summary out of date when they change, so a poll that changes a
+ * thing's other facts (its concerns, its progress) costs no model call.
+ */
+export interface LinkedEntityFacts {
+  readonly ref: string;
+  readonly kind: string;
+  readonly identifier?: string;
+  readonly title: string;
+  /** The label of the thing's status, such as "In review". */
+  readonly status?: string;
+  readonly lifecycle?: string;
+}
+
+/** Returns the facts of `row` that a Task's summary reads. */
+export const readLinkedEntityFacts = (row: EntityRow): LinkedEntityFacts => {
+  const status = parseStoredStatus(row.status as string | null).status;
+  return {
+    ref: row.ref,
+    kind: row.kind as string,
+    ...(row.identifier === null ? {} : { identifier: row.identifier as string }),
+    title: row.title as string,
+    ...(status === undefined ? {} : { status: status.label }),
+    ...(row.lifecycle === null ? {} : { lifecycle: row.lifecycle as string }),
+  };
+};
+
+/**
  * Builds the place a record draws as above the cards. A thing no Connection
  * reads now is restricted: it keeps its kind and noun, and shows no title,
  * status, progress or date.
@@ -251,6 +279,7 @@ export const buildPlace = (
     noun: row.noun as string,
     ...(row.caption === null ? {} : { caption: row.caption as string }),
     ...(restricted ? {} : { title: row.title as string }),
+    ...(restricted || row.identifier === null ? {} : { identifier: row.identifier as string }),
     ...(status === undefined ? {} : { status }),
     ...(progress === undefined ? {} : { progress }),
     ...(restricted || row.target_date === null ? {} : { targetDate: row.target_date as string }),

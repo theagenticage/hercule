@@ -43,7 +43,7 @@ import {
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { LIVE_TASK_LINKS_SQL, taskRepository } from "../tasks";
+import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
 import {
   buildEntityFields,
   buildPlace,
@@ -54,11 +54,13 @@ import {
   isReadableNow,
   isWorkRecord,
   parseStoredStatus,
+  readLinkedEntityFacts,
   SHARED_COLUMNS,
   unionConcerns,
   VISIBLE_COLUMNS,
   type EntityEnvironment,
   type EntityRow,
+  type LinkedEntityFacts,
   type ObservationRow,
   type PresentedEntityRow,
   type SharedColumn,
@@ -560,6 +562,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* relationClaimRepository;
   const tasks = yield* taskRepository;
+  const markSummaryDirty = yield* makeSummaryDirtyMarker;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
@@ -651,6 +654,17 @@ const make = Effect.gen(function* () {
           WHERE ref IN ${sql.in(chunk)}`,
       ),
       (chunks) => sortUnique(chunks.flat().map((row) => uuidToString(row.task_id))),
+    );
+
+  /**
+   * Marks the summary of every live Task that links one of `refs` out of date,
+   * in the caller's transaction. A Task's summary reads the facts of the
+   * things it links (`readLinkedEntityFacts`), so it must be written again
+   * when they change.
+   */
+  const markLinkedSummariesDirty = (refs: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+    Effect.flatMap(listTaskIdsLinkedTo(refs), (taskIds) =>
+      Effect.forEach(taskIds, markSummaryDirty, { discard: true }),
     );
 
   // -------------------------------------------------------------------------
@@ -819,6 +833,19 @@ const make = Effect.gen(function* () {
         }
         yield* sql`UPDATE external_entities SET ${sql.csv(sets)} WHERE ref = ${ref}`;
       }
+
+      yield* markLinkedSummariesDirty(
+        touched.filter((ref) => {
+          const after = afterWrite.entities.get(ref);
+          if (after === undefined) return false;
+          const beforeRow = before.entities.get(ref);
+          return (
+            beforeRow === undefined ||
+            JSON.stringify(readLinkedEntityFacts(beforeRow)) !==
+              JSON.stringify(readLinkedEntityFacts(after))
+          );
+        }),
+      );
 
       const projectVisibleState = buildVisibleStateProjector(environment);
       const changedRefs = sortUnique([
@@ -1330,6 +1357,21 @@ const make = Effect.gen(function* () {
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
         });
       }),
+
+    /**
+     * Returns the facts a Task's summary reads (`LinkedEntityFacts`) for each
+     * of `refs` that has an entity row, in the order of `refs`. One statement
+     * however many refs there are. A ref with no row is left out.
+     */
+    listLinkedEntityFacts: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<LinkedEntityFacts>, SqlError> =>
+      Effect.map(readEntities(refs), (rows) =>
+        refs.flatMap((ref) => {
+          const row = rows.get(ref);
+          return row === undefined ? [] : [readLinkedEntityFacts(row)];
+        }),
+      ),
 
     /**
      * Returns the record of an entity, found by its id or by its ref, as the

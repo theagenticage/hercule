@@ -332,6 +332,9 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
         buildRun(3, "Check the refund rules", "completed", 5),
       ],
       runCount: 3,
+      entities: [],
+      places: [],
+      edges: [],
     },
     {
       task: {
@@ -371,6 +374,9 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
       sessionCount: 1,
       runs: [buildRun(1, "Review PR", "failed", 3)],
       runCount: 1,
+      entities: [],
+      places: [],
+      edges: [],
     },
   ],
 };

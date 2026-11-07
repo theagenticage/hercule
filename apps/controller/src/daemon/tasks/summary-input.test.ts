@@ -45,6 +45,17 @@ interface RunFixture {
   readonly failure?: string;
 }
 
+/** An outside thing the Task links. With no `title`, the ref has no entity record at all. */
+interface LinkFixture {
+  readonly ref: string;
+  readonly kind?: string;
+  readonly identifier?: string;
+  readonly title?: string;
+  /** The label of the thing's status. */
+  readonly status?: string;
+  readonly lifecycle?: "open" | "completed" | "abandoned";
+}
+
 interface TaskFixture {
   readonly title?: string;
   readonly description?: string;
@@ -52,6 +63,8 @@ interface TaskFixture {
   readonly sessions?: ReadonlyArray<SessionFixture>;
   /** Oldest first. */
   readonly runs?: ReadonlyArray<RunFixture>;
+  /** In the order the Task was linked to them. */
+  readonly links?: ReadonlyArray<LinkFixture>;
 }
 
 const askQuestion = (text: string): SessionRequest => ({
@@ -84,6 +97,13 @@ interface ReadInput {
     readonly failure?: string;
   }>;
   readonly openQuestions: ReadonlyArray<{ readonly question: string }>;
+  readonly links: ReadonlyArray<{
+    readonly kind: string;
+    readonly identifier?: string;
+    readonly title: string;
+    readonly status?: string;
+    readonly lifecycle?: string;
+  }>;
 }
 
 /** Writes the Task of `fixture`, builds its summary call, and returns the call and the statements it sent. */
@@ -195,6 +215,24 @@ const buildCallFor = (fixture: TaskFixture) =>
               AT,
             );
           }
+          for (const [index, link] of (fixture.links ?? []).entries()) {
+            const linkedAt = `2026-11-01T10:${String(index).padStart(2, "0")}:00.000Z`;
+            yield* sql`
+              INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+              VALUES (${uuidFromString(task.id)}, ${link.ref}, ${linkedAt}, 'user', 0)`;
+            if (link.title === undefined) continue;
+            const status =
+              link.status === undefined
+                ? null
+                : JSON.stringify({ shape: "ring", tone: "active", label: link.status });
+            yield* sql`
+              INSERT INTO external_entities
+                (id, ref, kind, noun, completeness, identifier, title, status, lifecycle,
+                 first_observed_at, updated_at)
+              VALUES (${mintUuid()}, ${link.ref}, ${link.kind ?? "acme/ticket"}, 'Ticket', 'full',
+                      ${link.identifier ?? null}, ${link.title}, ${status}, ${link.lifecycle ?? null},
+                      ${AT}, ${AT})`;
+          }
           return task.id;
         }),
       );
@@ -269,7 +307,50 @@ describe("the call that writes a summary", () => {
         { workflow: "Check stock levels", status: "completed" },
       ],
       openQuestions: [{ question: "Which depot opens first?" }],
+      links: [],
     });
+  });
+
+  it("lists each linked thing's kind, identifier, title, status and lifecycle, and skips a ref with no record", async () => {
+    const { input } = await readCall({
+      links: [
+        {
+          ref: "acme:ticket:7",
+          kind: "acme/ticket",
+          identifier: "ACME-7",
+          title: "Refund fails for gift cards",
+          status: "In review",
+          lifecycle: "open",
+        },
+        { ref: "acme:ticket:8" },
+        { ref: "acme:ticket:9", kind: "acme/ticket", title: "Note about depots" },
+      ],
+    });
+
+    expect(input.links).toEqual([
+      {
+        kind: "acme/ticket",
+        identifier: "ACME-7",
+        title: "Refund fails for gift cards",
+        status: "In review",
+        lifecycle: "open",
+      },
+      { kind: "acme/ticket", title: "Note about depots" },
+    ]);
+  });
+
+  it("reads at most eight linked things, the first linked first, in as many statements as for one", async () => {
+    const links = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ref: `acme:ticket:${String(index)}`,
+        title: `Ticket ${String(index)}`,
+      }));
+
+    const one = await readCall({ links: links(1) });
+    const many = await readCall({ links: links(12) });
+
+    expect(many.input.links.map((link) => link.title)).toEqual(links(8).map((link) => link.title));
+    expect(many.statements).toHaveLength(one.statements.length);
   });
 
   it("reads the newest four sessions, newest first, and cuts a first prompt to 1,000 characters", async () => {

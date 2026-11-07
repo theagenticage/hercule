@@ -196,10 +196,10 @@ task_entity_links (task_id, ref, linked_at, linked_by, following INTEGER NOT NUL
 - **The active Task of a ref** is the live Task with the lowest `(linked_at, task_id)`: not `done`, not `dropped`, not deleted and not merged. It is the oldest, so a summary or any other update can never change the answer. One tasks-domain query holds the rule, and everything that needs "the Task of this ref" uses it:
   - Intake's hand-off. The signal's Describe Line and `signal.handOff` both name the active Task of the signal's thread ref and continue it. This replaces the rule "the open Task updated most recently" ([ADR 0046](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md)).
   - An entity's `taskId`, its side on the Inbox, the Inbox count and the Add sheet's "on Work" mark.
-- **Merging, summaries and the details pane** arrive with [#1031](https://github.com/theagenticage/hercule/issues/1031), a slice that can land before or after this one. Whichever lands second writes these rules into its own change, and they are stated here so both agree:
-  - `task.merge` moves the links of the merged Task to the survivor without duplicates. When both Tasks link a ref, one link stays, with the older `linked_at`, and `following` if either had it.
-  - Every writer of a link resolves a merged Task id to its survivor at its final write. `undoTakeOn` reads the Task by its own id and refuses a merged one. A merged Task is not live.
-  - The summary's input gains each linked entity's kind, identifier, title, status and lifecycle. A link added or removed, or a change to a linked entity's title, status or lifecycle, marks the Task's summary dirty in the same transaction. `TaskDetail` carries `entities`, `places` and `edges`.
+- **Merging, summaries and the details pane** meet links in three rules ([Merging Tasks](#merging-tasks), [Task Summaries](#task-summaries)):
+  - `task.merge` moves the links of the merged Task to the survivor without duplicates, in the merge's own transaction. When both Tasks link a ref, one link stays, with the older `linked_at` (and the `linked_by` that came with it), and `following` if either had it. The merged Task is left with no links, so the active Task of each of its refs, an entity's `taskId` and its side on the Inbox all follow the survivor. A merge has no server-side Undo: the desktop app holds the merge back while its undo line shows and sends nothing when the user undoes it ([./17](./17-desktop-app.md)).
+  - Every writer of a link resolves a merged Task id to its survivor at its final write. `updateTask` (and so a handoff that continues a Task) reads the Task through `resolveTaskId` in its own transaction. `insertTask` writes a Task it has just made, which no merge can have touched. `externalEntity.takeOn` and `addToWork` return the active Task of the ref, and a merged Task is never active. `undoTakeOn` reads the Task by its own id and refuses a merged one with its own reason, `task-merged`.
+  - The summary's input gains each linked entity's kind, identifier, title, status label and lifecycle. A link added, or a change to a linked entity's kind, identifier, title, status or lifecycle, marks the Task's summary dirty in the same transaction. No operation removes a link yet, and a merge marks the survivor dirty already. `TaskDetail` carries `entities`, `places` and `edges`.
 - **The board.** A `WorkCard` carries `entityMarks` and `contextRefs`, and `task.queryBoard` carries `places`, `edges`, `groupings` and `contextComplete` ([./20-external-entities.md](./20-external-entities.md#11-works-context)). A Task is matched to a place through its own links and upward `part of` only. Filtering or grouping by an outside place never sets a Task's `projectId` or `initiativeId`.
 
 ## Threads and their Tasks
@@ -334,6 +334,8 @@ interface TaskSummary {
 | A Thread joins the Task, leaves it or is taken off Done onto it | the join rule, `session.moveToTask`, `session.reopen` |
 | A Task is merged into it | `task.merge` |
 | It is taken back from `done` or `dropped` | `task.update`, `task.move` |
+| The Task gains a link to an outside thing it did not link before | where the link is written: a new Task that names a ref, and `task.update` or a handoff that appends one |
+| A thing the Task links changes its kind, identifier, title, status label or lifecycle | the write of the poll or the read that changed the thing ([./20-external-entities.md](./20-external-entities.md)), in that write's own transaction. Only these facts count: a change of concerns, progress or dates, and a poll that changes nothing, mark nothing |
 
 Nothing marks a Task dirty for each token, for each stream event, or when a summary is written. A Task that is deleted, merged or at `done` or `dropped` is left alone, and moving a Task to `done` or `dropped` clears `dirty_at`, so a finished Task costs no call. `dirty_at` is the time of the first change since the last summary. Later changes raise `dirty_revision` and leave `dirty_at` where it is.
 
@@ -400,8 +402,9 @@ A stored summary clears the failure, resets `attempt_count`, writes the audit en
 2. The merge must fit. `validation`, with the number, when the united labels would pass `MAX_TASK_LABELS` or the joined description would pass `MAX_TASK_DESCRIPTION_LENGTH`. The message says to shorten one of the Tasks first, and nothing is written.
 3. `tasks.merged_into_id` is set on the source, and every Task that was merged into the source is repointed to the survivor, so a redirect is always one hop and a chain cannot form.
 4. The source's sessions and runs get the survivor's `taskId`, and its `task_workspaces` rows move. A live run on the source stays live, on the survivor.
-5. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
-6. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
+5. **The source's links to outside things move to the survivor** (`task_entity_links`). A ref both Tasks link keeps one link: the older `linked_at` with the `linked_by` that came with it, and `following` if either link had it ([Links between Tasks and outside things](#entity-links)).
+6. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
+7. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
 
 The merge returns the survivor.
 

@@ -147,10 +147,12 @@ const describeMissing = (ref: string, missing: EntityMissing): string => {
 };
 
 /** Builds the sentence for an undo that left the Task in place. */
-const describeUndoRefusal = (reason: TaskUndoRefusal | "other-task"): string => {
+const describeUndoRefusal = (reason: TaskUndoRefusal): string => {
   switch (reason) {
     case "task-gone":
       return "The Task is already gone, so there is nothing to undo.";
+    case "task-merged":
+      return "The Task was merged into another Task, which now holds its work, so it stays.";
     case "has-thread":
       return "A Thread has joined the Task, so it stays.";
     case "has-run":
@@ -161,7 +163,7 @@ const describeUndoRefusal = (reason: TaskUndoRefusal | "other-task"): string => 
       return "The Task was edited after it was made, so it stays.";
     case "finished":
       return "The Task is already done or dropped, so it stays.";
-    case "other-task":
+    case "not-linked":
       return "That Task was not made for this thing, so it stays.";
   }
 };
@@ -651,11 +653,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const linked = (yield* taskRows.listEntityLinks([taskId])).get(taskId) ?? [];
-            if (!linked.includes(record.ref)) {
-              return { undone: false, reason: describeUndoRefusal("other-task") };
-            }
-            const outcome = yield* tasks.undoCreatedTask(taskId);
+            const outcome = yield* tasks.undoCreatedTask(taskId, record.ref);
             if (!outcome.undone) {
               return { undone: false, reason: describeUndoRefusal(outcome.reason) };
             }

@@ -93,6 +93,11 @@ export const EntityPlace = Schema.Struct({
   caption: Schema.optionalKey(bounded(1, 60)),
   /** Absent when only the ref is known, or the thing is restricted. */
   title: Schema.optionalKey(bounded(1, 512)),
+  /**
+   * How the source names it, such as `SHOP-123`, for the rows of things a Task
+   * links. Absent when the record has none, or the thing is restricted.
+   */
+  identifier: Schema.optionalKey(bounded(1, 64)),
   status: Schema.optionalKey(EntityStatus),
   /** Only when the source reports it. */
   progress: Schema.optionalKey(EntityProgress),

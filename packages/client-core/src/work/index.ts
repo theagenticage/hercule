@@ -31,6 +31,7 @@ export * from "./merge";
 export * from "./question-answers";
 export * from "./selection";
 export * from "./summary-standing";
+export * from "./task-context-rows";
 export * from "./task-pane";
 export * from "./task-run";
 export * from "./task-thread";
