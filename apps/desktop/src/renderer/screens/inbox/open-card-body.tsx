@@ -115,14 +115,14 @@ function WalkRow({
 function OpenCardMoves({
   words,
   pluginName,
-  userInitial,
+  userMonogram,
   onTake,
   onDismiss,
   onSeeTask,
 }: {
   readonly words: OpenCardWords;
   readonly pluginName: string;
-  readonly userInitial: string;
+  readonly userMonogram: string;
   readonly onTake: () => void;
   readonly onDismiss: () => void;
   readonly onSeeTask: (taskId: string) => void;
@@ -153,7 +153,7 @@ function OpenCardMoves({
       <button type="button" className="open-card-row" disabled={isOff} onClick={onTake}>
         <span className="open-card-label">
           <span className="open-card-you" aria-hidden="true">
-            {userInitial}
+            {userMonogram}
           </span>
           Take it
         </span>
@@ -186,7 +186,7 @@ export function OpenCardBody({
   url,
   words,
   plugins,
-  userInitial,
+  userMonogram,
   onClose,
   onWalk,
   onTake,
@@ -196,7 +196,7 @@ export function OpenCardBody({
   readonly url: string;
   readonly words: OpenCardWords;
   readonly plugins: readonly PluginIdentity[];
-  readonly userInitial: string;
+  readonly userMonogram: string;
   readonly onClose: () => void;
   readonly onWalk: (ref: string) => void;
   readonly onTake: () => void;
@@ -246,7 +246,7 @@ export function OpenCardBody({
       <OpenCardMoves
         words={words}
         pluginName={pluginName}
-        userInitial={userInitial}
+        userMonogram={userMonogram}
         onTake={onTake}
         onDismiss={onDismiss}
         onSeeTask={onSeeTask}

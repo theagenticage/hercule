@@ -70,6 +70,8 @@ function Harness({
 beforeEach(() => {
   vi.useFakeTimers();
   hoveredTestId = null;
+  // The mock calls the real method with the element it was called on, so it needs no binding.
+  // oxlint-disable-next-line typescript/unbound-method
   const matches = Element.prototype.matches;
   vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector) {
     return selector === ":hover"

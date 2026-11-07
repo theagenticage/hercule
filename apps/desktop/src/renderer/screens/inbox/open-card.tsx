@@ -54,7 +54,7 @@ function OpenCardContents({
   inbox,
   client,
   plugins,
-  userInitial,
+  userMonogram,
   onClose,
   onWalk,
   moves,
@@ -63,7 +63,7 @@ function OpenCardContents({
   readonly inbox: Inbox | undefined;
   readonly client: HerculeClient;
   readonly plugins: readonly PluginIdentity[];
-  readonly userInitial: string;
+  readonly userMonogram: string;
   readonly onClose: () => void;
   readonly onWalk: (ref: string) => void;
   readonly moves: OpenCardMoveHandlers;
@@ -91,7 +91,7 @@ function OpenCardContents({
       url={record.url}
       words={words}
       plugins={plugins}
-      userInitial={userInitial}
+      userMonogram={userMonogram}
       onClose={onClose}
       onWalk={onWalk}
       onTake={() => {
@@ -165,7 +165,7 @@ export function InboxOpenCard({
   const walkToCard = (id: string): void => {
     sheet.walkInside({ kind: "card", id });
   };
-  const userInitial = buildInitials(username);
+  const userMonogram = buildInitials(username);
   return (
     <OpeningSheet
       isOpen={sheet.isOpen}
@@ -201,7 +201,7 @@ export function InboxOpenCard({
             inbox={inbox}
             client={client}
             plugins={plugins}
-            userInitial={userInitial}
+            userMonogram={userMonogram}
             onClose={openCard.close}
             onWalk={walkToPlace}
             moves={{ onTake, onDismiss, onSeeTask }}

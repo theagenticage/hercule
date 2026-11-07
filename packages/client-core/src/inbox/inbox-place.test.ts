@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { buildInbox, buildInboxCard, buildInboxPlace, buildRequestCard } from "./cards.testing";
 import { buildInboxFacets } from "./facets";
-import { listInboxGroupings } from "./groupings";
+import { keepHeldGrouping, listInboxGroupings } from "./groupings";
 
 const PRICING = buildInboxPlace("acme:project:pricing", "Pricing rules");
 const CHECKOUT = buildInboxPlace("acme:project:checkout", "Checkout");
@@ -116,5 +116,29 @@ describe("buildInboxFacets", () => {
     const [first, second] = inbox.cards;
     expect(first && project?.hasValue(first, PRICING.ref)).toBe(true);
     expect(second && project?.hasValue(second, PRICING.ref)).toBe(false);
+  });
+});
+
+describe("keepHeldGrouping", () => {
+  const offered = [
+    { id: "home", name: "Place" },
+    { id: "acme/team", name: "Acme team" },
+    { id: "status", name: "Status" },
+  ];
+
+  it("puts a kind the page is still grouped by back among the rows, in its place by caption", () => {
+    const held = { id: "acme/project", name: "Acme project" };
+
+    expect(keepHeldGrouping(offered, held)).toEqual([
+      { id: "home", name: "Place" },
+      { id: "acme/project", name: "Acme project" },
+      { id: "acme/team", name: "Acme team" },
+      { id: "status", name: "Status" },
+    ]);
+  });
+
+  it("returns the rows as they are when the held grouping is offered or there is none", () => {
+    expect(keepHeldGrouping(offered, { id: "acme/team", name: "Acme team" })).toBe(offered);
+    expect(keepHeldGrouping(offered, undefined)).toBe(offered);
   });
 });

@@ -277,6 +277,27 @@ describe("the Inbox screen", () => {
     expect(countInboxReads(calls)).toBe(reads);
   });
 
+  it("names the grouping the page keeps for the visit after a read stops offering that kind of place", async () => {
+    const user = userEvent.setup();
+    let inbox = buildPageInbox([ROUNDING]);
+    const { live } = await openInbox({ inbox: () => inbox });
+    await screen.findByText("Fix the basket rounding");
+    await live.waitForFirstPushes();
+    await user.click(screen.getByRole("menuitemradio", { name: "Acme project", hidden: true }));
+
+    // Nothing lies under a project any more, so the menu stops offering the kind.
+    inbox = buildPageInbox([ticket(1, "Fix the basket rounding twice", { ancestors: [] })]);
+    live.pushInvalidation("externalEntity");
+
+    await screen.findByText("Fix the basket rounding twice");
+    expect(screen.getByRole("button", { name: /Group by/ }).textContent).toContain("Acme project");
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Acme project", hidden: true })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("keeps the grouping the user chose when the Inbox is opened again", async () => {
     const user = userEvent.setup();
     await openInbox();

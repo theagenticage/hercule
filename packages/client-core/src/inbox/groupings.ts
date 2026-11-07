@@ -48,3 +48,22 @@ export const listInboxGroupings = (inbox: Inbox): readonly InboxGrouping[] => {
  */
 export const resolveGrouping = (inbox: Inbox, requested: string): string =>
   listInboxGroupings(inbox).some((offered) => offered.id === requested) ? requested : HOME_GROUPING;
+
+/**
+ * Returns the rows of `offered` with `held` among them, in its place by
+ * caption. The page stays grouped by a kind of place for the whole visit,
+ * also after a read stops offering it, so the menu keeps showing it. Returns
+ * `offered` when `held` is `undefined` or already in it.
+ */
+export const keepHeldGrouping = (
+  offered: readonly InboxGrouping[],
+  held: InboxGrouping | undefined,
+): readonly InboxGrouping[] => {
+  if (held === undefined || offered.some((each) => each.id === held.id)) return offered;
+  const levels = offered.filter((each) => each.id !== HOME_GROUPING && each.id !== STATUS_GROUPING);
+  return [
+    { id: HOME_GROUPING, name: "Place" },
+    ...[...levels, held].sort((a, b) => a.name.localeCompare(b.name, "en")),
+    { id: STATUS_GROUPING, name: "Status" },
+  ];
+};

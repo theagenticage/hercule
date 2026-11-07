@@ -7,9 +7,6 @@ import {
   decideEmptyInbox,
   describeFailingSources,
   describeTruncatedInbox,
-  HOME_GROUPING,
-  listInboxGroupings,
-  type InboxGrouping,
   type InboxLayout,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
@@ -33,6 +30,7 @@ import { InboxOpenCard } from "../../../screens/inbox/open-card";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
 import { useInboxArrivals } from "../../../screens/inbox/use-inbox-arrivals";
+import { useInboxGroupings } from "../../../screens/inbox/use-inbox-groupings";
 import { useInboxLayout } from "../../../screens/inbox/use-inbox-layout";
 import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
@@ -52,9 +50,6 @@ const KEY_ROWS: readonly KeyRow[] = [
   ["E", "Dismiss"],
   ["G", "See its Task on Work"],
 ];
-
-/** The Group by menu of a page that has not been read: Place alone, so the toolbar keeps its shape. */
-const GROUPINGS_BEFORE_READ: readonly InboxGrouping[] = [{ id: HOME_GROUPING, name: "Place" }];
 
 /** Returns whether the card `id` is the only request the layout draws, so a dismissal leaves the column empty. */
 const isLastRequest = (layout: InboxLayout, id: string): boolean => {
@@ -131,6 +126,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     hasOwnReply,
   );
   const empty = inbox === undefined ? null : decideEmptyInbox(inbox, connections, plugins);
+  const groupings = useInboxGroupings(inbox, layout?.grouping);
   const failingSources = describeFailingSources(connections, plugins);
   const truncated = inbox === undefined ? undefined : describeTruncatedInbox(inbox);
 
@@ -262,7 +258,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       toolbar={
         <InboxToolbar
           pill={<InboxPill />}
-          groupings={inbox === undefined ? GROUPINGS_BEFORE_READ : listInboxGroupings(inbox)}
+          groupings={groupings}
           grouping={layout?.grouping ?? view.grouping}
           onGroupingChange={view.setGrouping}
           facets={inbox === undefined ? [] : buildInboxFacets(inbox)}

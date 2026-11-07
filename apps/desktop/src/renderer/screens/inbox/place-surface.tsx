@@ -108,8 +108,9 @@ function PlaceHead({
 
 /**
  * Renders one place as one raised surface (12px corner, `--h-rest`): its head,
- * then its cards as rows, oldest first, split by a hairline, then the cards
- * that lie here only as a pointer to the surface they are drawn in full on.
+ * then its cards as rows, in the order the visit holds (new ones at the end),
+ * split by a hairline, then the cards that lie here only as a pointer to the
+ * surface they are drawn in full on.
  *
  * - `showStatus` is false when the page is grouped by status, whose heads say
  *   it already.
