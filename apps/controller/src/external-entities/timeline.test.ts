@@ -4,6 +4,7 @@
  * - `detectSourceChanges`: which updates of an existing entity are news
  * - `renderEntityChange`: the words, from the kind's templates or the core's
  *   own, and the cut to the bound of a sentence
+ * - the words of a link, worked out at read time from what the user can open
  * - the stored list: one insert per call, the cap of 50 per ref, the newest
  *   change of many refs in one read
  *
@@ -26,7 +27,12 @@ import {
 const status = (label: string) => JSON.stringify({ shape: "dot", tone: "quiet", label });
 
 const detect = (
-  existing: { completeness: "full" | "partial"; owner: string | null; status: string | null },
+  existing: {
+    completeness: "full" | "partial";
+    owner: string | null;
+    status: string | null;
+    status_key: string | null;
+  },
   changes: Record<string, string | null>,
   incomingIsPartial = false,
 ) =>
@@ -38,7 +44,12 @@ const detect = (
   });
 
 describe("detectSourceChanges", () => {
-  const full = { completeness: "full", owner: "Mei", status: status("Open") } as const;
+  const full = {
+    completeness: "full",
+    owner: "Mei",
+    status: status("Open"),
+    status_key: "open",
+  } as const;
 
   it("reports a new owner as reassigned to that person", () => {
     expect(detect(full, { owner: "Kofi" })).toEqual([
@@ -50,20 +61,29 @@ describe("detectSourceChanges", () => {
     expect(detect({ ...full, owner: null }, { owner: "Kofi" })).toHaveLength(1);
   });
 
-  it("reports a different status word as moved to the new word", () => {
-    expect(detect(full, { status: status("In review") })).toEqual([
+  it("reports a different status key as moved to the new word", () => {
+    expect(detect(full, { status_key: "in_review", status: status("In review") })).toEqual([
       { ref: "acme:ticket:t1", reason: "moved", value: "In review" },
     ]);
   });
 
   it("reports an owner and a status change together, owner first", () => {
-    const found = detect(full, { owner: "Kofi", status: status("Done") });
+    const found = detect(full, { owner: "Kofi", status_key: "done", status: status("Done") });
     expect(found.map((change) => change.reason)).toEqual(["reassigned", "moved"]);
   });
 
+  it("reports a cleared owner as reassigned to no one", () => {
+    expect(detect(full, { owner: null })).toEqual([
+      { ref: "acme:ticket:t1", reason: "reassigned" },
+    ]);
+  });
+
   it.each([
-    { name: "an update that clears the owner", changes: { owner: null } },
-    { name: "an update that clears the status", changes: { status: null } },
+    { name: "an update that clears the status", changes: { status_key: null, status: null } },
+    {
+      name: "a status key that stays while its word is renamed",
+      changes: { status: status("Open (renamed)") },
+    },
     {
       name: "a status that only changes its tone",
       changes: { status: JSON.stringify({ shape: "dot", tone: "attention", label: "Open" }) },
@@ -73,18 +93,42 @@ describe("detectSourceChanges", () => {
     expect(detect(full, changes)).toEqual([]);
   });
 
+  it("reports nothing for a cleared owner when the thing had none", () => {
+    expect(detect({ ...full, owner: null }, { owner: null })).toEqual([]);
+  });
+
+  it("reports a different key even when the new word equals the old word", () => {
+    expect(detect(full, { status_key: "reopened" })).toEqual([
+      { ref: "acme:ticket:t1", reason: "moved", value: "Open" },
+    ]);
+  });
+
   it("reports nothing for a thing that had no status before", () => {
-    expect(detect({ ...full, status: null }, { status: status("Open") })).toEqual([]);
+    expect(
+      detect({ ...full, status_key: null }, { status_key: "open", status: status("Open") }),
+    ).toEqual([]);
   });
 
   it("reports nothing when a full observation completes a partial record", () => {
-    const partial = { completeness: "partial", owner: null, status: status("Open") } as const;
-    expect(detect(partial, { owner: "Kofi", status: status("Done") })).toEqual([]);
+    const partial = {
+      completeness: "partial",
+      owner: null,
+      status: status("Open"),
+      status_key: "open",
+    } as const;
+    expect(detect(partial, { owner: "Kofi", status_key: "done", status: status("Done") })).toEqual(
+      [],
+    );
   });
 
   it("reports a status change of a partial record that a partial observation updates", () => {
-    const partial = { completeness: "partial", owner: null, status: status("Open") } as const;
-    expect(detect(partial, { status: status("Done") }, true)).toHaveLength(1);
+    const partial = {
+      completeness: "partial",
+      owner: null,
+      status: status("Open"),
+      status_key: "open",
+    } as const;
+    expect(detect(partial, { status_key: "done", status: status("Done") }, true)).toHaveLength(1);
   });
 });
 
@@ -105,13 +149,37 @@ describe("renderEntityChange", () => {
   it.each([
     { reason: "reassigned", facts: { person: "Kofi" }, say: "Now with Kofi" },
     { reason: "moved", facts: { value: "In review" }, say: "Moved to In review" },
-    { reason: "linked", facts: { value: "ACME-12" }, say: "Linked ACME-12" },
+    { reason: "linked", facts: {}, words: "ACME-12", say: "Linked ACME-12" },
   ] as const)("says the core's default for $reason when the kind declares none", (input) => {
-    expect(renderEntityChange(row(input.reason, input.facts))).toEqual({
+    expect(
+      renderEntityChange(
+        row(input.reason, input.facts),
+        "words" in input ? input.words : undefined,
+      ),
+    ).toEqual({
       reason: input.reason,
       say: { say: input.say, tone: "plain" },
       at: "2026-03-01T00:05:00.000Z",
     });
+  });
+
+  it("says the core's own words for a cleared owner, and the kind's when it declares them", () => {
+    const cleared = row("reassigned", {});
+    expect(renderEntityChange(cleared).say).toEqual({ say: "Unassigned", tone: "plain" });
+    const templates = { unassigned: { say: "Nobody has it now", tone: "attention" } };
+    expect(
+      renderEntityChange({ ...cleared, reason_templates: JSON.stringify(templates) }).say,
+    ).toEqual({
+      say: "Nobody has it now",
+      tone: "attention",
+    });
+  });
+
+  it("fills the words of a link into the kind's own sentence", () => {
+    const templates = { linked: { say: "Joined to {value}", tone: "good" } };
+    expect(
+      renderEntityChange(row("linked", {}, templates), "a pull request you cannot open").say,
+    ).toEqual({ say: "Joined to a pull request you cannot open", tone: "good" });
   });
 
   it("uses the kind's own sentence and tone for the reason", () => {
@@ -267,17 +335,71 @@ describe("the stored timeline", () => {
     const read = await run(({ timeline }) =>
       Effect.gen(function* () {
         yield* timeline.recordEntityChanges(
-          [
-            { ref: "a", reason: "linked", value: "ACME-12", targetRef: "acme:pr:12" },
-            moved("a", "Done"),
-          ],
+          [{ ref: "a", reason: "linked", targetRef: "acme:pr:12" }, moved("a", "Done")],
           "2026-03-01T00:00:00.000Z",
         );
         return yield* timeline.readTimeline("a");
       }),
     );
     expect(read.map((change) => change.ref)).toEqual(["acme:pr:12", undefined]);
-    expect(read[0]!.say.say).toBe("Linked ACME-12");
+  });
+
+  it("stores no words for a link, so the stored row names nothing", async () => {
+    const rows = await run(({ timeline, sql }) =>
+      Effect.gen(function* () {
+        yield* timeline.recordLinks(
+          [{ fromRef: "a", toRef: "acme:pr:12" }],
+          "2026-03-01T00:00:00.000Z",
+        );
+        return yield* sql<{ readonly ref: string; readonly value: string | null }>`
+          SELECT ref, value FROM external_entity_timeline ORDER BY id`;
+      }),
+    );
+    expect(rows).toEqual([
+      { ref: "a", value: null },
+      { ref: "acme:pr:12", value: null },
+    ]);
+  });
+
+  it("names a linked thing with no record by the noun of the active kind that owns its ref, else as a thing, reading them in two statements", async () => {
+    const kinds = [
+      { kind: "acme/pull-request", noun: "Pull request", refPrefix: "acme:pr:" },
+      { kind: "acme/issue", noun: "Issue", refPrefix: "acme:issue:" },
+    ];
+    const statements: Array<string> = [];
+    const outcome = await run(({ timeline }) =>
+      Effect.gen(function* () {
+        yield* timeline.recordEntityChanges(
+          [
+            { ref: "a", reason: "linked", targetRef: "acme:pr:12" },
+            { ref: "a", reason: "linked", targetRef: "acme:issue:4" },
+            { ref: "a", reason: "linked", targetRef: "other:thing:9" },
+          ],
+          "2026-03-01T00:00:00.000Z",
+        );
+        const withKinds = yield* timeline.readTimeline("a", kinds).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          ),
+        );
+        return { withKinds, withoutKinds: yield* timeline.readTimeline("a") };
+      }),
+    );
+    expect(outcome.withKinds.map((change) => change.say.say)).toEqual([
+      "Linked a pull request you cannot open",
+      "Linked an issue you cannot open",
+      "Linked a thing you cannot open",
+    ]);
+    expect(outcome.withoutKinds.map((change) => change.say.say)).toEqual([
+      "Linked a thing you cannot open",
+      "Linked a thing you cannot open",
+      "Linked a thing you cannot open",
+    ]);
+    // The timeline itself, the records and the observations of the linked things.
+    expect(statements).toHaveLength(3);
   });
 
   it("deletes the changes of refs that have no entity", async () => {

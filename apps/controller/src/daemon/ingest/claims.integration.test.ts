@@ -352,6 +352,9 @@ describe("an address a source reports", () => {
       Effect.gen(function* () {
         const readLinked = sql<{ readonly ref: string; readonly target_ref: string | null }>`
           SELECT ref, target_ref FROM external_entity_timeline WHERE reason = 'linked' ORDER BY id`;
+        // The thing is known first, so the address it reports later is news.
+        yield* reportItem(forge, { plugin: "forge", n: 1 });
+        yield* Effect.sleep("5 millis");
         yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
         const pending = yield* readLinked;
         answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
@@ -370,6 +373,24 @@ describe("an address a source reports", () => {
       { ref: "tracker:item:47", target_ref: "forge:item:1" },
     ]);
     expect(rows.again).toEqual(rows.resolved);
+  });
+
+  it("writes no linked row when a claim the thing arrived with resolves later", async () => {
+    const outcome = await runInWorld(({ forge, sql, answers }) =>
+      Effect.gen(function* () {
+        // The address is part of the thing's first sight, and no read can place it yet.
+        yield* reportItem(forge, { plugin: "forge", n: 1, urls: [TRACKER_OPS_47] });
+        answers.current = { "tracker-a": () => buildFound("tracker:item:47") };
+        yield* resolvePendingClaims;
+        return {
+          claims: yield* readClaims(sql),
+          linked: yield* sql`SELECT id FROM external_entity_timeline WHERE reason = 'linked'`,
+        };
+      }),
+    );
+
+    expect(outcome.claims.map((claim) => claim.to_ref)).toEqual(["tracker:item:47"]);
+    expect(outcome.linked).toEqual([]);
   });
 
   it("keeps its canonical edge, id and time through another complete read and a disabled recognizer", async () => {

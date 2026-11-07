@@ -7,12 +7,14 @@
  *   partial reads, a failed recognition
  * - texts: no text is stored, a key is replaced or left alone, a revision skips
  *   a text, a hint joins nothing
+ * - the cost of a poll that repeats what is stored: the same statements for 3 refs as for 300
  * - person links: one claim for a pair, removal of only the person's claim
  * - what the reads show: a pending claim is no link
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import type { RecognizedClaims, RecognizedTarget } from "../plugins";
@@ -388,6 +390,61 @@ describe("the references in a text", () => {
     );
 
     expect(rows).toEqual([]);
+  });
+});
+
+describe("a poll that repeats what is stored", () => {
+  /**
+   * Reports `count` observations twice, the second time unchanged, and returns
+   * the statements the second report sent. Each observation has an address and
+   * a description; `namesAThing` decides whether the description names a thing.
+   */
+  const countRepeatStatements = (count: number, namesAThing: boolean) =>
+    run((claims) =>
+      Effect.gen(function* () {
+        const entries = Array.from({ length: count }, (_, index) => {
+          const fromRef = `acme-tracker:ticket:P-${index}`;
+          return {
+            fromRef,
+            relations: { complete: true, linkedUrls: [CHANGE_URL] },
+            texts: [{ evidenceKey: "description", text: namesAThing ? "x" : "", revision: "r1" }],
+            recognized: {
+              urls: [{ url: CHANGE_URL, target: asChange }],
+              texts: [{ evidenceKey: "description", targets: namesAThing ? [asOtherChange] : [] }],
+            },
+            observedRevision: "v1",
+          };
+        });
+        yield* claims.applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT });
+        const statements: Array<string> = [];
+        const write = yield* claims
+          .applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: LATER })
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+            ),
+          );
+        return { statements, write };
+      }),
+    );
+
+  it("sends the same statements for 3 observations as for 300, with descriptions that name a thing", async () => {
+    const small = await countRepeatStatements(3, true);
+    const large = await countRepeatStatements(300, true);
+    expect(small.write.changedRefs).toEqual([]);
+    expect(large.write.changedRefs).toEqual([]);
+    expect(large.statements).toHaveLength(small.statements.length);
+    expect(large.statements.length).toBeLessThanOrEqual(2);
+  });
+
+  it("sends the same statements for 3 observations as for 300, with empty descriptions", async () => {
+    const small = await countRepeatStatements(3, false);
+    const large = await countRepeatStatements(300, false);
+    expect(large.statements).toHaveLength(small.statements.length);
+    expect(large.statements.length).toBeLessThanOrEqual(2);
   });
 });
 

@@ -11,13 +11,21 @@
  *   its open signals, however many resolved ones the ref has.
  * - `external_entity_timeline` has one row per thing that changed at the
  *   source: someone else was assigned (`reassigned`), the status changed
- *   (`moved`), or a new link arrived (`linked`). `person` and `value` hold the
- *   raw words the sentence is built from when the timeline is read. For a
- *   `linked` row, `target_ref` is the ref of the thing that was linked, so a
- *   client can draw its mark and open it. It keys on
- *   the ref, not on an entity, so a row outlives the pruning of the entity
- *   until the entity's rows are deleted with it. The index on `(ref, id)`
+ *   (`moved`), or a new link arrived (`linked`). `person` (the new owner of a
+ *   `reassigned` row, null when the owner was cleared) and `value` (the new
+ *   status word of a `moved` row) hold the raw words the sentence is built
+ *   from when the timeline is read. For a `linked` row, `target_ref` is the
+ *   ref of the thing that was linked, so a client can draw its mark and open
+ *   it. A `linked` row stores no words of the far end: they are worked out
+ *   when the row is read, so a thing the user can no longer open is not
+ *   named. It keys on the ref, not on an entity, so a row outlives the
+ *   pruning of the entity until the entity's rows are deleted with it. The index on `(ref, id)`
  *   serves a ref's newest rows.
+ * - `external_entities.status_key` is the key of the thing's status in the
+ *   kind's status table, such as `in_review`. The status column holds only
+ *   the word and look the user sees, which a plugin may rename, so the
+ *   timeline compares keys to tell a real move from a renamed word. It is
+ *   null for a thing with no status.
  * - `external_entities.reason_templates` is a copy of the kind's raw `reasons`
  *   table (`{ key: { say, tone } }`), made when the thing is observed, as
  *   `concern_reasons` is. A card's sentence for a signal, and the words of a
@@ -63,6 +71,8 @@ export default Effect.gen(function* () {
     ALTER TABLE external_entities
       ADD COLUMN reason_templates TEXT CHECK (reason_templates IS NULL OR json_valid(reason_templates))
   `;
+
+  yield* sql`ALTER TABLE external_entities ADD COLUMN status_key TEXT`;
 
   yield* sql`ALTER TABLE external_entity_relation_claims ADD COLUMN recognized_as TEXT`;
   yield* sql`

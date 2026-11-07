@@ -87,6 +87,29 @@ describe("the signal thread index migration", () => {
     expect(results).toEqual({ json: "Success", none: "Success", notJson: "Failure" });
   });
 
+  it("gives an entity a status key that is empty until an observation sets it", async () => {
+    const rows = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* migrated;
+        yield* sql`INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
+                                                  first_observed_at, updated_at)
+                   VALUES (randomblob(16), 'a', 'github/issue', 'Issue', 'partial', 'A title',
+                           ${AT}, ${AT})`;
+        yield* sql`UPDATE external_entities SET status_key = 'in_review' WHERE ref = 'a'`;
+        yield* sql`INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
+                                                  first_observed_at, updated_at)
+                   VALUES (randomblob(16), 'b', 'github/issue', 'Issue', 'partial', 'A title',
+                           ${AT}, ${AT})`;
+        return yield* sql<{ readonly ref: string; readonly status_key: string | null }>`
+          SELECT ref, status_key FROM external_entities ORDER BY ref`;
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
+    );
+    expect(rows).toEqual([
+      { ref: "a", status_key: "in_review" },
+      { ref: "b", status_key: null },
+    ]);
+  });
+
   it("marks a claim whose target is pending, and serves the due ones from a partial index", async () => {
     const { pending, plan } = await Effect.runPromise(
       Effect.gen(function* () {

@@ -1782,20 +1782,27 @@ describe("what changed outside", () => {
   type WorkSlots = Extract<EntitySlots, { readonly card: string }>;
   const STATUS_OPEN = { shape: "ring", tone: "quiet", label: "Open" } as const;
   const STATUS_REVIEW = { shape: "ring", tone: "active", label: "In review" } as const;
+  /** The word the plugin later gives the status whose key is still `open`. */
+  const STATUS_RENAMED = { shape: "ring", tone: "quiet", label: "Raised" } as const;
 
   /** Builds a ticket with an owner and a status, and the kind's own words for a move when `reasonTemplates` is given. */
   const owned = (
     name: string,
     input: {
       readonly owner?: string;
-      readonly status?: typeof STATUS_OPEN | typeof STATUS_REVIEW;
+      readonly status?: typeof STATUS_OPEN | typeof STATUS_REVIEW | typeof STATUS_RENAMED;
+      /** The key of the status in the kind's table. Defaults to the lower-cased word. */
+      readonly statusKey?: string;
       readonly reasonTemplates?: NonNullable<WorkSlots["reasonTemplates"]>;
       readonly sourceUpdatedAt?: string;
     } = {},
   ) => {
-    const { sourceUpdatedAt, ...slots } = input;
+    const { sourceUpdatedAt, statusKey, ...slots } = input;
     return ticket(name, {
       slots: { ...(TICKET_SLOTS(name) as WorkSlots), ...slots },
+      ...(slots.status === undefined
+        ? {}
+        : { status: statusKey ?? slots.status.label.toLowerCase().replace(" ", "_") }),
       ...(sourceUpdatedAt === undefined ? {} : { sourceUpdatedAt }),
     });
   };
@@ -1848,6 +1855,48 @@ describe("what changed outside", () => {
       { reason: "moved", say: { say: "Moved to In review", tone: "plain" }, at: at(5) },
     ]);
     expect(outcome.detail.latestChange).toEqual(outcome.detail.timeline[1]);
+  });
+
+  it("writes nothing when only the word of a status changes, and a move when its key changes to the same word", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { reconcile } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { status: STATUS_OPEN, statusKey: "open" })], {
+          minutes: 1,
+        });
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { status: STATUS_RENAMED, statusKey: "open", sourceUpdatedAt: at(2) })],
+          { minutes: 3 },
+        );
+        const renamed = (yield* readDetail(context, "t1", 4)).timeline;
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { status: STATUS_RENAMED, statusKey: "raised", sourceUpdatedAt: at(4) })],
+          { minutes: 5 },
+        );
+        return { renamed, moved: (yield* readDetail(context, "t1", 6)).timeline };
+      }),
+    );
+    expect(outcome.renamed).toEqual([]);
+    expect(outcome.moved.map((change) => change.say.say)).toEqual(["Moved to Raised"]);
+  });
+
+  it("writes a reassigned change with no person when the owner is cleared, and says Unassigned", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { reconcile, sql } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei" })], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [owned("t1", { sourceUpdatedAt: at(2) })], { minutes: 3 });
+        const stored = yield* sql<{ readonly reason: string; readonly person: string | null }>`
+          SELECT reason, person FROM external_entity_timeline`;
+        return { stored, detail: yield* readDetail(context, "t1", 4) };
+      }),
+    );
+    expect(outcome.stored).toEqual([{ reason: "reassigned", person: null }]);
+    expect(outcome.detail.timeline).toEqual([
+      { reason: "reassigned", say: { say: "Unassigned", tone: "plain" }, at: at(3) },
+    ]);
   });
 
   it("writes a change when a refresh brings it, and says it in the kind's own words", async () => {
@@ -1935,7 +1984,7 @@ describe("what changed outside", () => {
     const places = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         const placeWith = (label: string, minutes: number) => ({
-          ...project({ sourceUpdatedAt: at(minutes) }),
+          ...project({ sourceUpdatedAt: at(minutes), status: label.toLowerCase() }),
           slots: {
             ...PROJECT_SLOTS,
             status: { shape: "ring", tone: "quiet", label },
@@ -2033,9 +2082,8 @@ describe("a new link from a source as news", () => {
   const readLinkedRows = (sql: SqlClient.SqlClient) =>
     sql<{
       readonly ref: string;
-      readonly value: string | null;
       readonly target_ref: string | null;
-    }>`SELECT ref, value, target_ref FROM external_entity_timeline
+    }>`SELECT ref, target_ref FROM external_entity_timeline
        WHERE reason = 'linked' ORDER BY id`;
 
   it("writes one row on each end for a new source link, and none for a repeat or a second Connection", async () => {
@@ -2072,8 +2120,8 @@ describe("a new link from a source as news", () => {
     );
 
     expect(rows.first).toEqual([
-      { ref: ticketRef("t1"), value: "T2", target_ref: ticketRef("t2") },
-      { ref: ticketRef("t2"), value: "T1", target_ref: ticketRef("t1") },
+      { ref: ticketRef("t1"), target_ref: ticketRef("t2") },
+      { ref: ticketRef("t2"), target_ref: ticketRef("t1") },
     ]);
     expect(rows.last).toEqual(rows.first);
   });

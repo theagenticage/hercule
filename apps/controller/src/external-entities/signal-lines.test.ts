@@ -460,6 +460,32 @@ describe("Inbox membership and arrivals", () => {
     expect(steps.afterMine).toBe(steps.mineArrival);
   });
 
+  it("records no second arrival when a concern joins a card that a live signal holds, in either order", async () => {
+    const steps = await run(({ repository, refresh, reconcile }) =>
+      Effect.gen(function* () {
+        // Signal first: the signal brings the quiet card onto the clock, then the first concern comes.
+        yield* refresh(ACCOUNT_A, [ticket("signal-first")], 1);
+        yield* raiseSignal(ticketRef("signal-first"));
+        yield* repository.recordArrival(ticketRef("signal-first"), at(2));
+        const signalArrival = (yield* repository.countInbox(at(2))).newestArrival;
+        yield* reconcile(ACCOUNT_A, [ticket("signal-first", { concerns: ["assigned"] })], 3);
+        const afterConcern = (yield* repository.countInbox(at(3))).newestArrival;
+
+        // Concern first: a later signal finds the card on the clock already.
+        yield* reconcile(ACCOUNT_A, [ticket("concern-first", { concerns: ["assigned"] })], 4);
+        const concernArrival = (yield* repository.countInbox(at(4))).newestArrival;
+        yield* raiseSignal(ticketRef("concern-first"));
+        yield* repository.recordArrival(ticketRef("concern-first"), at(5));
+        const afterSignal = (yield* repository.countInbox(at(5))).newestArrival;
+        return { signalArrival, afterConcern, concernArrival, afterSignal };
+      }),
+    );
+    expect(steps.signalArrival).toBe(1);
+    expect(steps.afterConcern).toBe(steps.signalArrival);
+    expect(steps.concernArrival).toBe(2);
+    expect(steps.afterSignal).toBe(steps.concernArrival);
+  });
+
   it("raises no arrival for a signal on a dismissed card, and keeps the card off the Inbox", async () => {
     const steps = await run(({ repository, refresh, sql }) =>
       Effect.gen(function* () {
@@ -628,7 +654,7 @@ describe("how the signal reads use the database", () => {
         for (const [text, params] of captured) {
           const rows = yield* sql.unsafe<{ readonly detail: string }>(
             `EXPLAIN QUERY PLAN ${text}`,
-            params as ReadonlyArray<never>,
+            params,
           );
           plans.push(rows.map((row) => row.detail).join("\n"));
         }

@@ -10,6 +10,11 @@
  *
  * A claim whose thing no plugin could place yet is stored with a pending
  * target (see `pending-target.ts`) and is resolved later by the resolver loop.
+ *
+ * The work is bounded by the changes, not by the observations: one write reads
+ * the stored claims of all its refs in one statement per claim type, compares
+ * them in memory, and writes each kind of change in one statement. A poll that
+ * repeats what is stored sends the same few statements for 3 refs as for 300.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -47,15 +52,41 @@ export interface EvidenceWrite {
 
 interface StoredUrlClaim {
   readonly id: number;
+  readonly from_ref: string;
   readonly to_ref: string;
   readonly evidence_key: string;
+  readonly observed_revision: string | null;
 }
 
 interface StoredTextClaim {
   readonly id: number;
+  readonly from_ref: string;
   readonly to_ref: string;
+  readonly evidence_key: string;
   readonly recognized_as: string | null;
   readonly observed_revision: string | null;
+}
+
+/** A claim to insert. */
+interface NewClaim {
+  readonly fromRef: string;
+  readonly toRef: string;
+  readonly evidenceKey: string;
+  readonly revision: string | null;
+  readonly recognizedAs: string | null;
+}
+
+/** The difference between what one write reports and what is stored, before anything is written. */
+interface EvidencePlan {
+  readonly removedClaims: Array<{
+    readonly id: number;
+    readonly fromRef: string;
+    readonly toRef: string;
+  }>;
+  readonly urlClaims: Array<NewClaim>;
+  readonly textClaims: Array<NewClaim>;
+  /** Stored claims that stay but were made from an older revision of their source or text. */
+  readonly revisionUpdates: Array<{ readonly id: number; readonly revision: string | null }>;
 }
 
 /**
@@ -74,6 +105,154 @@ const buildStoredTarget = (fromRef: string, target: RecognizedTarget): string | 
   });
 };
 
+/** Groups rows by their `from_ref`. */
+const groupByFromRef = <Row extends { readonly from_ref: string }>(
+  rows: ReadonlyArray<Row>,
+): Map<string, Array<Row>> => {
+  const groups = new Map<string, Array<Row>>();
+  for (const row of rows) {
+    const group = groups.get(row.from_ref) ?? [];
+    group.push(row);
+    groups.set(row.from_ref, group);
+  }
+  return groups;
+};
+
+/**
+ * Compares the web addresses an observation reports with the `source`
+ * claims stored for it, and adds the difference to `plan`.
+ *
+ * - A stored address keeps its target, id and time, whatever the plugins
+ *   recognize now: a resolved claim stays resolved when the plugin is
+ *   disabled or the address recognizes as scoped on every poll.
+ * - A new address becomes a claim at once. Its target is the recognized ref,
+ *   or a pending target when the thing needs a read or nothing recognized it.
+ * - `relations.complete` removes a stored address the source left out. A
+ *   failed recognition never removes one, because the stored address is
+ *   matched by the address alone.
+ */
+const planUrls = (
+  entry: EvidenceEntry & { readonly observedRevision: string | undefined },
+  stored: ReadonlyArray<StoredUrlClaim>,
+  plan: EvidencePlan,
+): void => {
+  const { fromRef, relations, observedRevision } = entry;
+  if (relations === undefined) return;
+  const reported = [...new Set(relations.linkedUrls ?? [])];
+  const storedKeys = new Set(stored.map((row) => row.evidence_key));
+  const reportedKeys = new Set(reported);
+
+  const kept = relations.complete
+    ? stored.filter((row) => reportedKeys.has(row.evidence_key))
+    : stored;
+  if (relations.complete) {
+    for (const row of stored.filter((claim) => !reportedKeys.has(claim.evidence_key))) {
+      plan.removedClaims.push({ id: row.id, fromRef, toRef: row.to_ref });
+    }
+  }
+
+  const recognizedByUrl = new Map(
+    (entry.recognized?.urls ?? []).map(({ url, target }) => [url, target]),
+  );
+  for (const url of reported.filter((address) => !storedKeys.has(address))) {
+    const recognized = recognizedByUrl.get(url);
+    const toRef =
+      recognized === undefined
+        ? encodePendingTarget({ form: "url", url })
+        : buildStoredTarget(fromRef, recognized);
+    // A thing recognized as the claim's own origin is no link.
+    if (toRef === undefined) continue;
+    plan.urlClaims.push({
+      fromRef,
+      toRef,
+      evidenceKey: url,
+      revision: observedRevision ?? null,
+      recognizedAs: null,
+    });
+  }
+
+  if (observedRevision !== undefined) {
+    for (const row of kept) {
+      if (row.observed_revision !== observedRevision) {
+        plan.revisionUpdates.push({ id: row.id, revision: observedRevision });
+      }
+    }
+  }
+};
+
+/**
+ * Compares the references found in each text an observation carries with the
+ * `text` claims stored for that text's `evidenceKey`, and adds the difference
+ * to `plan`. A key the observation does not carry is not touched. A text
+ * with nothing recognized in it clears the key.
+ *
+ * - A text whose `revision` equals the revision its stored claims were made
+ *   from is skipped: nothing changed, and the plugins that recognized it
+ *   may be disabled now.
+ * - A stored claim is matched by what the text said (`recognized_as`), not by
+ *   its target, so a claim the resolver already rewrote to a ref keeps its id
+ *   and time while its text still says the same.
+ * - A text that recognizes nothing, with nothing stored, changes nothing, so
+ *   it costs no statement. A plugin enabled later finds its references the
+ *   next time the text is reported.
+ */
+const planTexts = (
+  entry: EvidenceEntry,
+  stored: ReadonlyArray<StoredTextClaim>,
+  plan: EvidencePlan,
+): void => {
+  const { fromRef } = entry;
+  const storedByKey = new Map<string, Array<StoredTextClaim>>();
+  for (const row of stored) {
+    const group = storedByKey.get(row.evidence_key) ?? [];
+    group.push(row);
+    storedByKey.set(row.evidence_key, group);
+  }
+  const seen = new Set<string>();
+  for (const text of entry.texts ?? []) {
+    if (seen.has(text.evidenceKey)) continue;
+    seen.add(text.evidenceKey);
+    const storedForKey = storedByKey.get(text.evidenceKey) ?? [];
+    const revision = text.revision;
+    if (
+      revision !== undefined &&
+      storedForKey.length > 0 &&
+      storedForKey.every((row) => row.observed_revision === revision)
+    ) {
+      continue;
+    }
+
+    const desired = new Set<string>();
+    const recognized = entry.recognized?.texts.find(
+      (candidate) => candidate.evidenceKey === text.evidenceKey,
+    );
+    for (const target of recognized?.targets ?? []) {
+      const toRef = buildStoredTarget(fromRef, target);
+      if (toRef !== undefined) desired.add(toRef);
+    }
+    const storedKeys = new Set(storedForKey.map((row) => row.recognized_as ?? row.to_ref));
+
+    const removed = storedForKey.filter(
+      (claim) => !desired.has(claim.recognized_as ?? claim.to_ref),
+    );
+    for (const row of removed) plan.removedClaims.push({ id: row.id, fromRef, toRef: row.to_ref });
+    for (const toRef of desired) {
+      if (storedKeys.has(toRef)) continue;
+      plan.textClaims.push({
+        fromRef,
+        toRef,
+        evidenceKey: text.evidenceKey,
+        revision: revision ?? null,
+        recognizedAs: toRef,
+      });
+    }
+    for (const row of storedForKey) {
+      if (removed.includes(row) || row.observed_revision === (revision ?? null)) continue;
+      plan.revisionUpdates.push({ id: row.id, revision: revision ?? null });
+    }
+  }
+};
+
 /** Builds the writer of evidence claims. Needs the database and the question "does a pair already join". */
 export const makeEvidenceClaims = (input: {
   readonly sql: SqlClient.SqlClient;
@@ -81,171 +260,42 @@ export const makeEvidenceClaims = (input: {
 }) => {
   const { sql, hasEffectiveLink } = input;
 
-  /**
-   * Compares the web addresses an observation reports with the `source`
-   * claims stored for it, and writes the difference.
-   *
-   * - A stored address keeps its target, id and time, whatever the plugins
-   *   recognize now: a resolved claim stays resolved when the plugin is
-   *   disabled or the address recognizes as scoped on every poll.
-   * - A new address becomes a claim at once. Its target is the recognized ref,
-   *   or a pending target when the thing needs a read or nothing recognized it.
-   * - `relations.complete` removes a stored address the source left out. A
-   *   failed recognition never removes one, because the stored address is
-   *   matched by the address alone.
-   */
-  const applyUrls = (
-    connectionId: Uint8Array,
-    entry: EvidenceEntry,
-    revision: string | undefined,
-    now: string,
-    write: { readonly changed: Set<string>; readonly newLinks: Array<NewLink> },
-  ): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const { fromRef, relations } = entry;
-      if (relations === undefined) return;
-      const reported = [...new Set(relations.linkedUrls ?? [])];
-      const stored = yield* sql<StoredUrlClaim>`
-        SELECT id, to_ref, evidence_key FROM external_entity_relation_claims
-        WHERE from_ref = ${fromRef} AND relation = 'linked' AND connection_id = ${connectionId}
-          AND claim_type = 'source' AND evidence_key <> ''`;
-      const storedKeys = new Set(stored.map((row) => row.evidence_key));
-      const reportedKeys = new Set(reported);
+  /** Reads the stored `source` address claims of `refs` from one Connection, in one statement. */
+  const readStoredUrlClaims = (connectionId: Uint8Array, refs: ReadonlyArray<string>) =>
+    refs.length === 0
+      ? Effect.succeed([])
+      : sql<StoredUrlClaim>`
+          SELECT id, from_ref, to_ref, evidence_key, observed_revision
+          FROM external_entity_relation_claims
+          WHERE from_ref IN (SELECT value FROM json_each(${JSON.stringify(refs)}))
+            AND relation = 'linked' AND connection_id = ${connectionId}
+            AND claim_type = 'source' AND evidence_key <> ''`;
 
-      if (relations.complete) {
-        for (const row of stored.filter((claim) => !reportedKeys.has(claim.evidence_key))) {
-          yield* sql`DELETE FROM external_entity_relation_claims WHERE id = ${row.id}`;
-          if (!isPendingTarget(row.to_ref)) {
-            write.changed.add(fromRef);
-            write.changed.add(row.to_ref);
-          }
-        }
-      }
-
-      const recognizedByUrl = new Map(
-        (entry.recognized?.urls ?? []).map(({ url, target }) => [url, target]),
-      );
-      for (const url of reported.filter((address) => !storedKeys.has(address))) {
-        const recognized = recognizedByUrl.get(url);
-        const toRef =
-          recognized === undefined
-            ? encodePendingTarget({ form: "url", url })
-            : buildStoredTarget(fromRef, recognized);
-        // A thing recognized as the claim's own origin is no link.
-        if (toRef === undefined) continue;
-        const pending = isPendingTarget(toRef);
-        const wasLinked = pending ? true : yield* hasEffectiveLink(fromRef, toRef);
-        yield* sql`
-          INSERT INTO external_entity_relation_claims
-            (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-             observed_revision, state, conflict_reason, observed_at)
-          VALUES (${fromRef}, 'linked', ${toRef}, 'source', ${connectionId}, NULL, ${url},
-                  ${revision ?? null}, 'current', NULL, ${now})`;
-        if (!pending) {
-          write.changed.add(fromRef);
-          write.changed.add(toRef);
-          if (!wasLinked) write.newLinks.push({ fromRef, toRef });
-        }
-      }
-
-      if (revision !== undefined) {
-        yield* sql`
-          UPDATE external_entity_relation_claims SET observed_revision = ${revision}
-          WHERE from_ref = ${fromRef} AND relation = 'linked' AND connection_id = ${connectionId}
-            AND claim_type = 'source' AND evidence_key <> ''
-            AND observed_revision IS NOT ${revision}`;
-      }
-    });
-
-  /**
-   * Compares the references found in each text an observation carries with the
-   * `text` claims stored for that text's `evidenceKey`, and writes the
-   * difference. A key the observation does not carry is not touched. A text
-   * with nothing recognized in it clears the key.
-   *
-   * - A text whose `revision` equals the revision its stored claims were made
-   *   from is skipped: nothing changed, and the plugins that recognized it
-   *   may be disabled now.
-   * - A stored claim is matched by what the text said (`recognized_as`), not by
-   *   its target, so a claim the resolver already rewrote to a ref keeps its id
-   *   and time while its text still says the same.
-   */
-  const applyTexts = (
-    connectionId: Uint8Array,
-    entry: EvidenceEntry,
-    now: string,
-    write: { readonly changed: Set<string> },
-  ): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const { fromRef } = entry;
-      const seen = new Set<string>();
-      for (const text of entry.texts ?? []) {
-        if (seen.has(text.evidenceKey)) continue;
-        seen.add(text.evidenceKey);
-        const stored = yield* sql<StoredTextClaim>`
-          SELECT id, to_ref, recognized_as, observed_revision FROM external_entity_relation_claims
-          WHERE from_ref = ${fromRef} AND relation = 'linked' AND connection_id = ${connectionId}
-            AND claim_type = 'text' AND evidence_key = ${text.evidenceKey}`;
-        const revision = text.revision;
-        if (
-          revision !== undefined &&
-          stored.length > 0 &&
-          stored.every((row) => row.observed_revision === revision)
-        ) {
-          continue;
-        }
-
-        const desired = new Set<string>();
-        const recognized = entry.recognized?.texts.find(
-          (candidate) => candidate.evidenceKey === text.evidenceKey,
-        );
-        for (const target of recognized?.targets ?? []) {
-          const toRef = buildStoredTarget(fromRef, target);
-          if (toRef !== undefined) desired.add(toRef);
-        }
-        const storedKeys = new Set(stored.map((row) => row.recognized_as ?? row.to_ref));
-
-        for (const row of stored.filter(
-          (claim) => !desired.has(claim.recognized_as ?? claim.to_ref),
-        )) {
-          yield* sql`DELETE FROM external_entity_relation_claims WHERE id = ${row.id}`;
-          if (!isPendingTarget(row.to_ref)) {
-            write.changed.add(fromRef);
-            write.changed.add(row.to_ref);
-          }
-        }
-        for (const toRef of desired) {
-          const recognizedAs = toRef;
-          if (storedKeys.has(recognizedAs)) continue;
-          // A resolved claim of this text may already hold the same ref under
-          // another wording, which the unique key refuses. The text still
-          // says it, so there is nothing to add.
-          yield* sql`
-            INSERT OR IGNORE INTO external_entity_relation_claims
-              (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-               observed_revision, recognized_as, state, conflict_reason, observed_at)
-            VALUES (${fromRef}, 'linked', ${toRef}, 'text', ${connectionId}, NULL, ${text.evidenceKey},
-                    ${revision ?? null}, ${recognizedAs}, 'current', NULL, ${now})`;
-          if (!isPendingTarget(toRef)) {
-            write.changed.add(fromRef);
-            write.changed.add(toRef);
-          }
-        }
-        yield* sql`
-          UPDATE external_entity_relation_claims SET observed_revision = ${revision ?? null}
-          WHERE from_ref = ${fromRef} AND relation = 'linked' AND connection_id = ${connectionId}
-            AND claim_type = 'text' AND evidence_key = ${text.evidenceKey}
-            AND observed_revision IS NOT ${revision ?? null}`;
-      }
-    });
+  /** Reads the stored `text` claims of `refs` from one Connection, in one statement. */
+  const readStoredTextClaims = (connectionId: Uint8Array, refs: ReadonlyArray<string>) =>
+    refs.length === 0
+      ? Effect.succeed([])
+      : sql<StoredTextClaim>`
+          SELECT id, from_ref, to_ref, evidence_key, recognized_as, observed_revision
+          FROM external_entity_relation_claims
+          WHERE from_ref IN (SELECT value FROM json_each(${JSON.stringify(refs)}))
+            AND relation = 'linked' AND connection_id = ${connectionId}
+            AND claim_type = 'text'`;
 
   return {
     /**
      * Writes the evidence claims of several observations from one Connection,
      * in the caller's transaction, and returns the refs they changed and the
-     * pairs they joined. Each ref may appear once. `revision`, the source's
-     * revision of `fromRef`, is recorded on the address claims; a text claim
-     * records its own text's revision.
+     * pairs they joined. Each ref may appear once. `observedRevision`, the
+     * source's revision of `fromRef`, is recorded on the address claims; a
+     * text claim records its own text's revision.
+     *
+     * Reads the stored claims in two statements however many entries there
+     * are, and writes each kind of change (removals, new address claims, new
+     * text claims, revision updates) in one statement, or none when there is
+     * nothing of that kind. All removals happen before any claim is added, so
+     * whether an added address joins a pair for the first time never depends
+     * on the order of the entries.
      *
      * Fails only with a database error.
      */
@@ -258,14 +308,99 @@ export const makeEvidenceClaims = (input: {
     }): Effect.Effect<EvidenceWrite, SqlError> =>
       Effect.gen(function* () {
         const connectionId = uuidFromString(args.connectionId);
+        const { now } = args;
+        const urlEntries = args.entries.filter((entry) => entry.relations !== undefined);
+        const textEntries = args.entries.filter((entry) => (entry.texts?.length ?? 0) > 0);
+        const storedUrls = groupByFromRef(
+          yield* readStoredUrlClaims(
+            connectionId,
+            urlEntries.map((entry) => entry.fromRef),
+          ),
+        );
+        const storedTexts = groupByFromRef(
+          yield* readStoredTextClaims(
+            connectionId,
+            textEntries.map((entry) => entry.fromRef),
+          ),
+        );
+
+        const plan: EvidencePlan = {
+          removedClaims: [],
+          urlClaims: [],
+          textClaims: [],
+          revisionUpdates: [],
+        };
+        for (const entry of urlEntries) {
+          planUrls(entry, storedUrls.get(entry.fromRef) ?? [], plan);
+        }
+        for (const entry of textEntries) {
+          planTexts(entry, storedTexts.get(entry.fromRef) ?? [], plan);
+        }
+
         const changed = new Set<string>();
         const newLinks: Array<NewLink> = [];
-        for (const entry of args.entries) {
-          yield* applyUrls(connectionId, entry, entry.observedRevision, args.now, {
-            changed,
-            newLinks,
-          });
-          yield* applyTexts(connectionId, entry, args.now, { changed });
+        if (plan.removedClaims.length > 0) {
+          yield* sql`
+            DELETE FROM external_entity_relation_claims
+            WHERE id IN (SELECT value FROM json_each(${JSON.stringify(plan.removedClaims.map((claim) => claim.id))}))`;
+        }
+        for (const claim of plan.removedClaims) {
+          if (isPendingTarget(claim.toRef)) continue;
+          changed.add(claim.fromRef);
+          changed.add(claim.toRef);
+        }
+
+        // The pairs this write adds, so that two entries that report each
+        // other join the pair once, as when they were written one by one.
+        const addedPairs = new Set<string>();
+        for (const claim of plan.urlClaims) {
+          if (isPendingTarget(claim.toRef)) continue;
+          const pairKey = JSON.stringify([claim.fromRef, claim.toRef].sort());
+          const wasLinked =
+            addedPairs.has(pairKey) || (yield* hasEffectiveLink(claim.fromRef, claim.toRef));
+          addedPairs.add(pairKey);
+          changed.add(claim.fromRef);
+          changed.add(claim.toRef);
+          if (!wasLinked) newLinks.push({ fromRef: claim.fromRef, toRef: claim.toRef });
+        }
+        for (const claim of plan.textClaims) {
+          if (isPendingTarget(claim.toRef)) continue;
+          changed.add(claim.fromRef);
+          changed.add(claim.toRef);
+        }
+
+        if (plan.urlClaims.length > 0) {
+          yield* sql`
+            INSERT INTO external_entity_relation_claims
+              (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
+               observed_revision, recognized_as, state, conflict_reason, observed_at)
+            SELECT json_extract(value, '$.fromRef'), 'linked', json_extract(value, '$.toRef'),
+                   'source', ${connectionId}, NULL, json_extract(value, '$.evidenceKey'),
+                   json_extract(value, '$.revision'), NULL, 'current', NULL, ${now}
+            FROM json_each(${JSON.stringify(plan.urlClaims)})`;
+        }
+        if (plan.textClaims.length > 0) {
+          // A resolved claim of a text may already hold the same ref under
+          // another wording, which the unique key refuses. The text still
+          // says it, so there is nothing to add.
+          yield* sql`
+            INSERT OR IGNORE INTO external_entity_relation_claims
+              (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
+               observed_revision, recognized_as, state, conflict_reason, observed_at)
+            SELECT json_extract(value, '$.fromRef'), 'linked', json_extract(value, '$.toRef'),
+                   'text', ${connectionId}, NULL, json_extract(value, '$.evidenceKey'),
+                   json_extract(value, '$.revision'), json_extract(value, '$.recognizedAs'),
+                   'current', NULL, ${now}
+            FROM json_each(${JSON.stringify(plan.textClaims)})`;
+        }
+        if (plan.revisionUpdates.length > 0) {
+          yield* sql`
+            UPDATE external_entity_relation_claims SET observed_revision = updates.revision
+            FROM (
+              SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.revision') AS revision
+              FROM json_each(${JSON.stringify(plan.revisionUpdates)})
+            ) AS updates
+            WHERE external_entity_relation_claims.id = updates.id`;
         }
         return { changedRefs: [...changed].sort(), newLinks };
       }),

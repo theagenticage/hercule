@@ -25,8 +25,10 @@ import { uuidFromString, uuidToString } from "../db";
 import {
   deriveAccess,
   deriveYours,
+  findActiveKind,
   isWorkRecord,
   parseStoredStatus,
+  type ActiveEntityKind,
   type EntityRow,
   type ObservationRow,
 } from "./entity-records";
@@ -128,6 +130,19 @@ export const buildPeer = (
   };
 };
 
+/**
+ * Builds the peer for a link target that has no record. No Connection ever
+ * read it, so it is restricted like a record nobody can read now, with the
+ * kind and noun of the active kind that owns its ref.
+ */
+export const buildUnreadPeer = (ref: string, owner: ActiveEntityKind): EntityPeer => ({
+  ref,
+  kind: owner.kind,
+  noun: owner.noun,
+  yours: false,
+  restricted: true,
+});
+
 /** The cards and links that decide riding, read from the Inbox's population. */
 export interface RidingInputs {
   readonly cards: ReadonlyArray<RidingCard>;
@@ -142,6 +157,7 @@ export const makeEntityLinkReads = (
   sql: SqlClient.SqlClient,
   readLatestChanges: (
     refs: ReadonlyArray<string>,
+    kinds?: ReadonlyArray<ActiveEntityKind>,
   ) => Effect.Effect<ReadonlyMap<string, EntityChange>, SqlError>,
 ) => {
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
@@ -251,37 +267,57 @@ export const makeEntityLinkReads = (
       ),
 
     /**
-     * Returns the records of `refs` that have no card, as peers, sorted by
-     * ref: a ref with no record is left out (a reply invents none), and so is
-     * a ref that is on the Inbox. `eligible` is the Inbox's membership, as in
-     * `readRidingInputs`. Three statements: the records, their observations
-     * and their latest changes.
+     * Returns the things at the far end of links as peers, sorted by ref.
+     * `refs` are the far ends. A ref that is on the Inbox (`eligible` is its
+     * membership, as in `readRidingInputs`) is left out, it has a card.
+     *
+     * - A ref with a record is a peer built from it (`buildPeer`).
+     * - A ref with no record was never read by any Connection. It is a
+     *   restricted peer when an active kind in `kinds` owns the ref (see
+     *   `buildUnreadPeer`), else it is left out.
+     *
+     * Three statements: the records, their observations and their latest
+     * changes.
      */
     listPeers: (
       eligible: Statement.Fragment,
       refs: ReadonlyArray<string>,
+      kinds: ReadonlyArray<ActiveEntityKind> | undefined,
     ): Effect.Effect<Array<EntityPeer>, SqlError> =>
       Effect.gen(function* () {
         if (refs.length === 0) return [];
-        const rows = yield* sql<EntityRow>`
+        const rows = yield* sql<EntityRow & { readonly has_card: number }>`
           WITH ${eligible}
-          SELECT e.* FROM external_entities e
-          WHERE e.ref IN (SELECT value FROM json_each(${refsJson(refs)}))
-            AND NOT EXISTS (SELECT 1 FROM eligible x WHERE x.ref = e.ref)
-          ORDER BY e.ref`;
-        const peerRefs = rows.map((row) => row.ref);
-        if (peerRefs.length === 0) return [];
-        const observations = yield* sql<Pick<ObservationRow, "ref" | "access" | "owned_by_you">>`
-          SELECT ref, access, owned_by_you FROM external_entity_observations
-          WHERE ref IN (SELECT value FROM json_each(${refsJson(peerRefs)}))`;
-        const latestChanges = yield* readLatestChanges(peerRefs);
-        return rows.map((row) =>
-          buildPeer(
-            row,
-            observations.filter((observation) => observation.ref === row.ref),
-            latestChanges.get(row.ref),
-          ),
+          SELECT e.*, EXISTS (SELECT 1 FROM eligible x WHERE x.ref = e.ref) AS has_card
+          FROM external_entities e
+          WHERE e.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`;
+        const recordRefs = new Set(rows.map((row) => row.ref));
+        const records = rows.filter((row) => row.has_card === 0);
+        const unread = refs.flatMap((ref) => {
+          const owner = recordRefs.has(ref) ? undefined : findActiveKind(kinds, ref);
+          return owner === undefined ? [] : [buildUnreadPeer(ref, owner)];
+        });
+        const peerRefs = records.map((row) => row.ref);
+        const observations =
+          peerRefs.length === 0
+            ? []
+            : yield* sql<Pick<ObservationRow, "ref" | "access" | "owned_by_you">>`
+                SELECT ref, access, owned_by_you FROM external_entity_observations
+                WHERE ref IN (SELECT value FROM json_each(${refsJson(peerRefs)}))`;
+        const latestChanges = yield* readLatestChanges(peerRefs, kinds);
+        const observationsByRef = new Map<
+          string,
+          Array<Pick<ObservationRow, "ref" | "access" | "owned_by_you">>
+        >();
+        for (const observation of observations) {
+          const group = observationsByRef.get(observation.ref);
+          if (group === undefined) observationsByRef.set(observation.ref, [observation]);
+          else group.push(observation);
+        }
+        const peers = records.map((row) =>
+          buildPeer(row, observationsByRef.get(row.ref) ?? [], latestChanges.get(row.ref)),
         );
+        return [...peers, ...unread].sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
       }),
 
     /**

@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { MAX_INBOX_CARDS } from "@hercule/contract";
+import { MAX_BOARD_STACK_CANDIDATES, MAX_INBOX_CARDS } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
@@ -232,27 +232,33 @@ describe("riding on the Inbox", () => {
     expect(inbox.links).toHaveLength(1);
   });
 
-  it("does not ride a ticket whose lead the page limit cuts, and shows it in Requests", async () => {
-    const total = MAX_INBOX_CARDS + 1;
+  it("keeps a rider's ride when the page limit cuts its lead: the rider leaves the page with it, so Requests cards and the count agree", async () => {
+    const riders = MAX_INBOX_CARDS;
     const inbox = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
+        // "solo" is the oldest card and rides on nothing. The riders fill the rest of the page.
+        // A complete inventory forgets what it leaves out, so each reconcile lists all it keeps.
+        yield* reconcile(TICKET_KIND, [ticket("solo")], 1);
         yield* reconcile(
           TICKET_KIND,
-          Array.from({ length: total }, (_, index) => ticket(`t${index}`)),
-          1,
+          [ticket("solo"), ...Array.from({ length: riders }, (_, index) => ticket(`t${index}`))],
+          2,
         );
         // The epic is the newest card, so the page of 1000 leaves it out.
-        yield* reconcile(EPIC_KIND, [epic("e1")], 2);
+        yield* reconcile(EPIC_KIND, [epic("e1")], 3);
         yield* sql`INSERT INTO external_entity_relation_claims
           (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
-          SELECT ref, 'linked', ${epicRef("e1")}, 'person', 'user', '', 'current', ${at(3)}
-          FROM external_entities WHERE kind = ${TICKET_KIND}`;
-        return yield* repository.queryInbox(environment(4));
+          SELECT ref, 'linked', ${epicRef("e1")}, 'person', 'user', '', 'current', ${at(4)}
+          FROM external_entities WHERE kind = ${TICKET_KIND} AND ref <> ${ticketRef("solo")}`;
+        return yield* repository.queryInbox(environment(5));
       }),
     );
     expect(inbox.truncated).toBe(true);
-    expect(inbox.cards).toHaveLength(MAX_INBOX_CARDS);
-    expect(inbox.cards.some((card) => card.ridesOn !== undefined)).toBe(false);
+    expect(inbox.cards.map((card) => card.ref)).toEqual([ticketRef("solo")]);
+    expect(inbox.cards.filter((card) => card.side === "requests")).toHaveLength(
+      inbox.counts.requests,
+    );
+    expect(inbox.counts.requests).toBe(1);
   });
 
   it("sends the same number of statements for 2 riders as for 40", async () => {
@@ -358,6 +364,101 @@ describe("links and peers", () => {
     ]);
   });
 
+  it("gives a locked row to a link target that no Connection ever read, named by the kind that owns its ref", async () => {
+    const ghost = ticketRef("ghost");
+    const kinds = [{ kind: TICKET_KIND, noun: "Ticket", refPrefix: "acme-tracker:ticket:" }];
+    const outcome = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(TICKET_KIND, [ticket("t1")], 1);
+        yield* insertClaim(sql, { from: ticketRef("t1"), to: ghost, type: "person" });
+        yield* insertClaim(sql, { from: ticketRef("t1"), to: "other:thing:9", type: "person" });
+        return {
+          named: yield* repository.queryInbox({ ...environment(2), activeEntityKinds: kinds }),
+          anonymous: yield* repository.queryInbox(environment(2)),
+        };
+      }),
+    );
+    // The ref no active kind owns is left out, and so is every ref when no kinds are given.
+    expect(outcome.named.peers).toEqual([
+      { ref: ghost, kind: TICKET_KIND, noun: "Ticket", yours: false, restricted: true },
+    ]);
+    expect(outcome.anonymous.peers).toEqual([]);
+  });
+
+  it("keeps every peer's access apart when many peers have several observations", async () => {
+    const outcome = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        const names = Array.from({ length: 30 }, (_, index) => `p${index}`);
+        yield* reconcile(
+          TICKET_KIND,
+          [ticket("t1"), ...names.map((name) => ticket(name, { concerns: [] }))],
+          1,
+        );
+        for (const name of names.filter((_, index) => index % 2 === 1)) {
+          yield* repository.reportMissing({
+            connectionId: ACCOUNT,
+            ref: ticketRef(name),
+            reason: "inaccessible",
+            environment: environment(2),
+          });
+          yield* insertClaim(sql, { from: ticketRef("t1"), to: ticketRef(name), type: "person" });
+        }
+        for (const name of names.filter((_, index) => index % 2 === 0)) {
+          yield* insertClaim(sql, { from: ticketRef("t1"), to: ticketRef(name), type: "person" });
+        }
+        return yield* repository.queryInbox(environment(3));
+      }),
+    );
+    const restricted = outcome.peers.filter((peer) => peer.restricted).map((peer) => peer.ref);
+    expect(outcome.peers).toHaveLength(30);
+    expect(restricted.sort()).toEqual(
+      Array.from({ length: 15 }, (_, index) => ticketRef(`p${index * 2 + 1}`)).sort(),
+    );
+  });
+
+  it("stops naming a linked thing in the timeline when it becomes inaccessible", async () => {
+    const outcome = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const linkedTo = { complete: true, partOf: [], linked: [ticketRef("t2")] };
+        yield* reconcile(TICKET_KIND, [ticket("t1"), ticket("t2", { concerns: [] })], 1);
+        yield* reconcile(
+          TICKET_KIND,
+          [
+            ticket("t1", { relations: linkedTo, sourceUpdatedAt: at(2) }),
+            ticket("t2", { concerns: [] }),
+          ],
+          3,
+        );
+        const readDetail = (minutes: number) =>
+          Effect.gen(function* () {
+            const inbox = yield* repository.queryInbox(environment(minutes));
+            const detail = yield* repository.readEntity(inbox.cards[0]!.id, {
+              ...environment(minutes),
+              activeKinds: new Set([TICKET_KIND]),
+            });
+            return {
+              timeline: detail._tag === "Some" ? detail.value.timeline : [],
+              latestChange: inbox.cards[0]!.latestChange,
+            };
+          });
+        const open = yield* readDetail(4);
+        yield* repository.reportMissing({
+          connectionId: ACCOUNT,
+          ref: ticketRef("t2"),
+          reason: "inaccessible",
+          environment: environment(5),
+        });
+        return { open, locked: yield* readDetail(6) };
+      }),
+    );
+    expect(outcome.open.timeline.map((change) => change.say.say)).toEqual(["Linked T"]);
+    expect(outcome.open.latestChange?.say.say).toBe("Linked T");
+    const locked = ["Linked a ticket you cannot open"];
+    expect(outcome.locked.timeline.map((change) => change.say.say)).toEqual(locked);
+    expect(outcome.locked.timeline[0]!.ref).toBe(ticketRef("t2"));
+    expect(outcome.locked.latestChange?.say.say).toBe(locked[0]);
+  });
+
   it("gives the detail the same peers", async () => {
     const detail = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
@@ -442,5 +543,29 @@ describe("stack candidates on Work", () => {
       }),
     );
     expect(result.found.candidates).toEqual([]);
+  });
+
+  it("returns at most MAX_BOARD_STACK_CANDIDATES pairs and says there are more", async () => {
+    const result = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const names = Array.from({ length: MAX_BOARD_STACK_CANDIDATES + 1 }, (_, n) => `t${n}`);
+        yield* reconcile(
+          TICKET_KIND,
+          names.map((name) => ticket(name)),
+          1,
+        );
+        yield* reconcile(EPIC_KIND, [epic("e1", names.map(ticketRef))], 2);
+        const lead = yield* makeTaskLinking([epicRef("e1")], 3);
+        const members: Array<string> = [];
+        for (const name of names) members.push(yield* makeTaskLinking([ticketRef(name)], 4));
+        const exact = yield* repository.listStackCandidates([lead, ...members.slice(1)]);
+        const over = yield* repository.listStackCandidates([lead, ...members]);
+        return { exact, over };
+      }),
+    );
+    expect(result.exact.candidates).toHaveLength(MAX_BOARD_STACK_CANDIDATES);
+    expect(result.exact.truncated).toBe(false);
+    expect(result.over.candidates).toHaveLength(MAX_BOARD_STACK_CANDIDATES);
+    expect(result.over.truncated).toBe(true);
   });
 });

@@ -143,7 +143,10 @@ const make = Effect.gen(function* () {
      * written only when it still holds `expectedTarget` and is still pending.
      *
      * - `found` rewrites the target to the ref, keeping the claim's type,
-     *   Connection and id, and announces both ends. It is treated as
+     *   Connection and id, and announces both ends. A new link is written on the
+     *   timelines of both ends, unless the claim was made no later than the
+     *   first time the thing was seen: what a thing arrived with is not news,
+     *   however late its claim resolves. The outcome is treated as
      *   `unplaced` when the ref is the claim's own origin, or when another
      *   claim of the same Connection and text already holds the ref, which the
      *   unique key refuses: the claim then waits instead of being deleted, so
@@ -161,10 +164,19 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const now = yield* nowIso;
-          const found = yield* sql<DueRow & { readonly connection_id: Uint8Array }>`
-            SELECT id, from_ref, claim_type, to_ref, resolve_attempts, connection_id
-            FROM external_entity_relation_claims
-            WHERE id = ${input.claimId} AND to_ref = ${input.expectedTarget} AND is_pending = 1`;
+          const found = yield* sql<
+            DueRow & {
+              readonly connection_id: Uint8Array;
+              readonly existed_at_first_sight: number;
+            }
+          >`
+            SELECT c.id, c.from_ref, c.claim_type, c.to_ref, c.resolve_attempts, c.connection_id,
+              EXISTS (
+                SELECT 1 FROM external_entities e
+                WHERE e.ref = c.from_ref AND c.observed_at <= e.first_observed_at
+              ) AS existed_at_first_sight
+            FROM external_entity_relation_claims c
+            WHERE c.id = ${input.claimId} AND c.to_ref = ${input.expectedTarget} AND c.is_pending = 1`;
           const claim = found[0];
           if (claim === undefined) return NOT_APPLIED;
           const { outcome } = input;
@@ -194,7 +206,9 @@ const make = Effect.gen(function* () {
                 UPDATE external_entity_relation_claims
                 SET to_ref = ${outcome.ref}, resolve_attempts = 0, next_resolve_at = ''
                 WHERE id = ${claim.id}`;
-              if (newLink) {
+              // A claim the source already made when it first showed the thing
+              // is part of what the thing came with, not news.
+              if (newLink && claim.existed_at_first_sight === 0) {
                 yield* timeline.recordLinks([{ fromRef: claim.from_ref, toRef: outcome.ref }], now);
               }
               yield* announceLink([claim.from_ref, outcome.ref]);

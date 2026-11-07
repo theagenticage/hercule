@@ -212,6 +212,11 @@ const make = Effect.gen(function* () {
       now: yield* nowIso,
       activePluginIds: catalog.activePluginIds,
       activeKinds: new Set(catalog.kinds.keys()),
+      activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) => ({
+        kind: declaration.word,
+        noun: declaration.noun,
+        refPrefix: declaration.refPrefix,
+      })),
     };
   });
 

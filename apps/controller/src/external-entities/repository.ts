@@ -250,6 +250,7 @@ const buildIncomingValues = ({
       home: slots.home,
       section: slots.section,
       status: slots.status === undefined ? undefined : JSON.stringify(slots.status),
+      status_key: observation.status,
       url: observation.url,
       lifecycle: observation.lifecycle,
       repository:
@@ -275,6 +276,7 @@ const buildIncomingValues = ({
     title: observation.title,
     url: observation.url ?? null,
     status: toJson(slots.status),
+    status_key: observation.status ?? null,
     lifecycle: observation.lifecycle ?? null,
     person: toJson(work?.person),
     owner: work?.owner ?? null,
@@ -801,6 +803,13 @@ const make = Effect.gen(function* () {
       const before = yield* readRefStates(touched, environment);
       const activeTasks = yield* tasks.listActiveTasksForRefs(touched);
       const refsWithTask = new Set(activeTasks.map((task) => task.ref));
+      // Which of the refs no Connection reports a concern for were on the
+      // Inbox before this write (a live signal held them). A thing that was
+      // on the Inbox already does not arrive again when a concern joins.
+      const noConcernBefore = touched.filter(
+        (ref) => unionConcerns(before.observations.get(ref) ?? []).length === 0,
+      );
+      const eligibleBefore = yield* listEligibleRefs(noConcernBefore, now);
 
       for (const entry of observed) {
         const ref = entry.observation.ref;
@@ -905,28 +914,20 @@ const make = Effect.gen(function* () {
           continue;
         }
         const sets = [sql`updated_at = ${now}`];
-        if (reported.length === 0) {
-          sets.push(sql`concerned_since = ${now}`);
-          if (countsOnTheClock(entity, refsWithTask.has(ref))) {
-            sets.push(sql`arrival_sequence = ${yield* takeArrivalSequence}`);
-          }
-        }
+        if (reported.length === 0) sets.push(sql`concerned_since = ${now}`);
         yield* sql`UPDATE external_entities SET ${sql.csv(sets)} WHERE ref = ${ref}`;
       }
 
-      // A thing this write created with no concern is on the Inbox only while
-      // a live signal holds it. Then a signal alone brought it onto the clock,
-      // which is an arrival, as a new concern would be.
-      const createdWithoutConcern = touched.filter(
-        (ref) =>
-          !before.entities.has(ref) &&
-          afterWrite.entities.has(ref) &&
-          unionConcerns(afterWrite.observations.get(ref) ?? []).length === 0,
+      // A thing that was off the Inbox and is on it now has arrived, whether
+      // a concern or a live signal brought it. One that was on it already,
+      // held by a signal before a concern joined, has not.
+      const mayHaveArrived = noConcernBefore.filter(
+        (ref) => !eligibleBefore.has(ref) && afterWrite.entities.has(ref),
       );
-      const heldBySignal = yield* signalLines.countLiveSignals(createdWithoutConcern, now);
-      for (const ref of createdWithoutConcern) {
+      const eligibleAfter = yield* listEligibleRefs(mayHaveArrived, now);
+      for (const ref of mayHaveArrived) {
         if (
-          heldBySignal.has(ref) &&
+          eligibleAfter.has(ref) &&
           countsOnTheClock(afterWrite.entities.get(ref)!, refsWithTask.has(ref))
         ) {
           yield* sql`
@@ -1073,6 +1074,24 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Returns which of `refs` are eligible for the Inbox at `now` (the one
+   * definition in `ELIGIBLE_ENTITIES_SQL`). One statement, none for no refs.
+   */
+  const listEligibleRefs = (
+    refs: ReadonlyArray<string>,
+    now: string,
+  ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+    refs.length === 0
+      ? Effect.succeed(new Set())
+      : Effect.map(
+          sql<{ readonly ref: string }>`
+            WITH ${buildEligibleEntities(now)}
+            SELECT ref FROM eligible
+            WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+          (rows) => new Set(rows.map((row) => row.ref)),
+        );
+
+  /**
    * Decides who rides on whom over every eligible card, at `now`, before any
    * page limit. Returns the rider to lead map (see `decideRiding`).
    */
@@ -1090,9 +1109,8 @@ const make = Effect.gen(function* () {
     riding: ReadonlyMap<string, string>,
   ): InboxCounts => ({ ...counts, requests: counts.requests - riding.size });
 
-  /** Returns the `ridesOn` field of a card whose lead is on the page, else nothing: a lead the page limit cut leaves its rider in Requests. */
-  const buildRidesOn = (lead: string | undefined, pageRefs: ReadonlySet<string>) =>
-    lead !== undefined && pageRefs.has(lead) ? { ridesOn: lead } : {};
+  /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
+  const buildRidesOn = (lead: string | undefined) => (lead === undefined ? {} : { ridesOn: lead });
 
   /** Counts the Inbox at `now`: the eligible entities, with what rides left out of Requests. */
   const readInboxCounts = (now: string): Effect.Effect<InboxCounts, SqlError> =>
@@ -1151,9 +1169,10 @@ const make = Effect.gen(function* () {
       const placeRefs = [...kept];
       const records = yield* readEntities(placeRefs);
       const observations = yield* readObservations([...starts, ...placeRefs]);
-      const latestChanges = yield* timeline.readLatestChanges([
-        ...new Set([...starts, ...placeRefs]),
-      ]);
+      const latestChanges = yield* timeline.readLatestChanges(
+        [...new Set([...starts, ...placeRefs])],
+        environment.activeEntityKinds,
+      );
       const activePluginIds = new Set(environment.activePluginIds);
 
       const ancestors = new Map<string, ReadonlyArray<string>>();
@@ -1430,10 +1449,11 @@ const make = Effect.gen(function* () {
      *
      * Riding is decided once over every eligible card, before the page limit
      * (`decideRiding`), and the Requests count follows the same decision. A
-     * rider whose lead the page limit cuts does not ride: it shows in
-     * Requests. `links` are the direct links of the cards on the page and
-     * `peers` the records at their far end that have no card. If either hits
-     * its bound, `truncated` is set.
+     * rider rides whether or not its lead made the page. When the page limit
+     * cuts the lead, the rider leaves the page with it, so the page never
+     * draws a Requests card that the count left out. `links` are the direct
+     * links of the cards on the page and `peers` the records at their far end
+     * that have no card. If either hits its bound, `truncated` is set.
      *
      * A constant number of statements however many cards there are: the
      * counts, the riding read, the cards, one walk up for every card, the
@@ -1448,7 +1468,12 @@ const make = Effect.gen(function* () {
           WITH ${buildEligibleEntities(environment.now)}
           SELECT * FROM eligible ORDER BY first_observed_at, id LIMIT ${MAX_INBOX_CARDS + 1}`;
         const cardsTruncated = found.length > MAX_INBOX_CARDS;
-        const rows = cardsTruncated ? found.slice(0, MAX_INBOX_CARDS) : found;
+        const sliced = cardsTruncated ? found.slice(0, MAX_INBOX_CARDS) : found;
+        const slicedRefs = new Set(sliced.map((row) => row.ref));
+        const rows = sliced.filter((row) => {
+          const lead = riding.get(row.ref);
+          return lead === undefined || slicedRefs.has(lead);
+        });
         const pageRefs = new Set(rows.map((row) => row.ref));
 
         // Cards come oldest first, so the older cards keep their context and
@@ -1481,7 +1506,7 @@ const make = Effect.gen(function* () {
           }),
           side: row.side,
           ...buildCardSignalFields(cardSignals.get(row.ref)),
-          ...buildRidesOn(riding.get(row.ref), pageRefs),
+          ...buildRidesOn(riding.get(row.ref)),
         }));
         const { places, edges } = context;
 
@@ -1495,6 +1520,7 @@ const make = Effect.gen(function* () {
         const foundPeers = yield* linkReads.listPeers(
           buildEligibleEntities(environment.now),
           farRefs,
+          environment.activeEntityKinds,
         );
         const peers = foundPeers.slice(0, MAX_INBOX_PEERS);
         const truncated =
@@ -1575,10 +1601,11 @@ const make = Effect.gen(function* () {
             row.reason_templates as string | null,
             environment.now,
           )),
-          timeline: yield* timeline.readTimeline(row.ref),
+          timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
             buildEligibleEntities(environment.now),
             linkedRefs,
+            environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS),
         });
       }),

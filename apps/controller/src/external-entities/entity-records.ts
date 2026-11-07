@@ -39,6 +39,7 @@ export const SHARED_COLUMNS = [
   "title",
   "url",
   "status",
+  "status_key",
   "lifecycle",
   "person",
   "owner",
@@ -113,7 +114,28 @@ export interface EntityEnvironment {
   readonly now: string;
   /** The plugins that are active in this process right now. */
   readonly activePluginIds: ReadonlyArray<string>;
+  /**
+   * The entity kinds of those plugins. A read uses them to name a linked
+   * thing that has no record, by the `refPrefix` its ref starts with. Reads
+   * that name no such thing do not need them; absent means none.
+   */
+  readonly activeEntityKinds?: ReadonlyArray<ActiveEntityKind>;
 }
+
+/** What a read needs to know of an active entity kind: which refs it owns and what to call one. */
+export interface ActiveEntityKind {
+  /** The qualified kind, such as `acme-tracker/ticket`. */
+  readonly kind: string;
+  /** The singular noun, such as "Pull request". */
+  readonly noun: string;
+  readonly refPrefix: string;
+}
+
+/** Returns the active kind that owns `ref`, or undefined when no active kind's `refPrefix` starts it. */
+export const findActiveKind = (
+  kinds: ReadonlyArray<ActiveEntityKind> | undefined,
+  ref: string,
+): ActiveEntityKind | undefined => kinds?.find((entry) => ref.startsWith(entry.refPrefix));
 
 /** Checks that the Connection of an observation can poll now. */
 export const canPoll = (
@@ -154,8 +176,7 @@ export const deriveAccess = (
 /** Checks that any Connection reports the thing as the user's own. */
 export const deriveYours = (
   observations: ReadonlyArray<Pick<ObservationRow, "owned_by_you">>,
-): boolean =>
-  observations.some((observation) => observation.owned_by_you === 1);
+): boolean => observations.some((observation) => observation.owned_by_you === 1);
 
 /** Checks that no Connection with a good read of the thing can poll now. */
 export const deriveStale = (
