@@ -1,7 +1,13 @@
-/** Tests the hand-off of a colleague's head and paws, and the same played backwards for Undo. */
+/** Tests the hand-off of a colleague's head and paws, played backwards for Undo, and the copies of cards in flight. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findBody } from "../../app/motion";
-import { playHandOff, playHandOffBack } from "./board-flights";
+import {
+  growCardsFromOrigins,
+  launchFlights,
+  playHandOff,
+  playHandOffBack,
+  recordGrowthOrigins,
+} from "./board-flights";
 
 /** One frame of a 60 Hz display, in milliseconds. */
 const FRAME = 16;
@@ -88,5 +94,48 @@ describe("playHandOffBack", () => {
     playHandOffBack(reduced.card);
     expect(findBody(reduced.head)).toBeUndefined();
     expect(findBody(reduced.paws)).toBeUndefined();
+  });
+});
+
+describe("copies of cards in flight", () => {
+  /** Returns a desk with a scroller holding one lane with one card on screen. */
+  const makeBoard = () => {
+    const desk = document.createElement("div");
+    desk.className = "work-desk";
+    const scroller = document.createElement("div");
+    const lane = document.createElement("section");
+    lane.dataset["laneId"] = "lane-1";
+    const card = document.createElement("div");
+    card.dataset["cardId"] = "t1";
+    card.dataset["stage"] = "building";
+    scroller.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 600);
+    card.getBoundingClientRect = () => new DOMRect(100, 100, 200, 90);
+    lane.append(card);
+    scroller.append(lane);
+    desk.append(scroller);
+    document.body.append(desk);
+    return { desk, scroller, lane, card };
+  };
+
+  it("is not found as a card by the id the real cards are found by", () => {
+    const { desk, scroller, card } = makeBoard();
+
+    launchFlights(scroller, [card], 0);
+
+    expect(desk.querySelectorAll("[data-card-id]")).toHaveLength(1);
+    expect(desk.querySelector(".board-flights [data-flight-card]")).not.toBeNull();
+  });
+
+  it("is reused when the lane opens again while it flies: the card grows from the copy, which goes", () => {
+    const { desk, scroller, lane, card } = makeBoard();
+    launchFlights(scroller, [card], 0);
+
+    const origins = recordGrowthOrigins(scroller, [lane]);
+
+    expect(origins.size).toBe(1);
+    expect([...origins.values()][0]).toMatchObject({ isLive: true, opacity: 1 });
+    expect(desk.querySelector("[data-flight-card]")).toBeNull();
+    growCardsFromOrigins([lane], origins);
+    expect(findBody(card)).toBeDefined();
   });
 });

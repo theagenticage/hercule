@@ -20,18 +20,14 @@ import {
 } from "@hercule/client-core/work";
 import type { TaskDetail, WorkCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
-import {
-  listFailedAnswers,
-  listHeldAnswers,
-  type PendingIntent,
-} from "../../../app/pending-intents";
+import { listHeldAnswers, type PendingIntent } from "../../../app/pending-intents";
 import { usePendingIntents } from "../../../app/use-pending-intents";
-import { settleUnsentAnswers } from "../../../app/unsent-answers";
 import { playHandOffBack } from "../../../screens/work/board-flights";
 import { useHandOffs } from "../../../screens/work/use-hand-offs";
 import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import type { CardMoves } from "./-card-moves";
 import { answerFromPane } from "./-pane-answers";
+import { useSettleUnsentAnswers } from "./-settle-unsent-answers";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
 /**
@@ -72,20 +68,21 @@ export interface PaneChangesState {
 /**
  * Wires the details pane's answer and Try again buttons for the Task
  * `openTaskId`, and returns the cards to draw. `boardCards` are the cards the
- * board shows, and `isBoardRead` says the board was read. `moves` shows the
+ * board shows, `isBoardRead` says the board was read, and `boardReadAt` is when. `moves` shows the
  * undo line and keeps the undo stack, `scrollRef` is the element that scrolls
  * the board, and `closePane` closes the pane.
  *
  * An answer that was not sent belongs to the Task it was given on. When the
  * board no longer shows that Task, the Task is read to see whether it was
  * merged into another (the answer then shows on that one), finished or
- * deleted (the answer is discarded): see `settleUnsentAnswers`.
+ * deleted (the answer is discarded): see `useSettleUnsentAnswers`.
  */
 export const usePaneChanges = ({
   controller,
   username,
   boardCards,
   isBoardRead,
+  boardReadAt,
   moves,
   openTaskId,
   scrollRef,
@@ -95,6 +92,8 @@ export const usePaneChanges = ({
   readonly username: string;
   readonly boardCards: readonly WorkCard[];
   readonly isBoardRead: boolean;
+  /** When the board was last read, in milliseconds, which tells an unsent answer's Task to be looked up again. */
+  readonly boardReadAt: number;
   readonly moves: Pick<CardMoves, "sayWithUndo" | "sayWithoutUndo">;
   readonly openTaskId: string | null;
   readonly scrollRef: RefObject<HTMLElement | null>;
@@ -106,22 +105,14 @@ export const usePaneChanges = ({
   const heldAnswers = useMemo(() => listHeldAnswers(intents), [intents]);
   const cards = useMemo(() => showHeldAnswers(boardCards, heldAnswers), [boardCards, heldAnswers]);
 
-  // The Tasks of unsent answers that the board does not show. A key of their
-  // ids, so a board read that changes nothing here starts no reads.
-  const missingTaskIds = isBoardRead
-    ? [
-        ...new Set(
-          listFailedAnswers(intents)
-            .map((intent) => intent.taskId)
-            .filter((taskId) => !boardCards.some((card) => card.id === taskId)),
-        ),
-      ]
-    : [];
-  const missingTaskKey = missingTaskIds.join(",");
-  useEffect(() => {
-    if (missingTaskKey === "") return;
-    void settleUnsentAnswers(controller.client, store, missingTaskKey.split(","));
-  }, [controller.client, store, missingTaskKey]);
+  useSettleUnsentAnswers({
+    client: controller.client,
+    store,
+    intents,
+    boardCards,
+    isBoardRead,
+    boardReadAt,
+  });
 
   // A Try again that was accepted plays its hand-off once the board stops
   // showing the card's failure, or at once when it already stopped.

@@ -52,16 +52,24 @@ describe("settling the unsent answers of a Task", () => {
     ]);
   });
 
-  it.each([
-    ["gone", "not_found"],
-    ["finished", "invalid_state"],
-  ] as const)("discards them when the read says the Task is %s", async (_, code) => {
+  it("discards them when the read says the Task is deleted", async () => {
     const store = await storeWithUnsentAnswer("task-s");
-    const client = buildClient(() => Promise.reject(new ApiError(code, "No.")));
+    const client = buildClient(() => Promise.reject(new ApiError("not_found", "No.")));
 
-    await settleUnsentAnswers(client, store, ["task-s"]);
+    const isSettled = await settleUnsentAnswers(client, store, ["task-s"]);
 
+    expect(isSettled).toBe(true);
     expect(store.getSnapshot()).toEqual([]);
+  });
+
+  it("keeps them when the Task is finished, because it can be moved back and its question may be open", async () => {
+    const store = await storeWithUnsentAnswer("task-s");
+    const client = buildClient(() => Promise.reject(new ApiError("invalid_state", "Finished.")));
+
+    const isSettled = await settleUnsentAnswers(client, store, ["task-s"]);
+
+    expect(isSettled).toBe(true);
+    expect(listUnsentAnswers(store.getSnapshot(), "task-s")).toHaveLength(1);
   });
 
   it("keeps them when the Task is as it was, and when the read fails some other way", async () => {
@@ -72,12 +80,13 @@ describe("settling the unsent answers of a Task", () => {
       store,
       ["task-s"],
     );
-    await settleUnsentAnswers(
+    const isSettled = await settleUnsentAnswers(
       buildClient(() => Promise.reject(new Error("cannot reach http://127.0.0.1:4937"))),
       store,
       ["task-s"],
     );
 
+    expect(isSettled).toBe(false);
     expect(listUnsentAnswers(store.getSnapshot(), "task-s")).toHaveLength(1);
   });
 });

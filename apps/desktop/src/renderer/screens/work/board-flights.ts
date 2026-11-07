@@ -56,6 +56,19 @@ const findFlightLayer = (scroller: HTMLElement): HTMLElement | null => {
   return layer;
 };
 
+/**
+ * The attribute that tells which card a copy in flight stands for. It is not
+ * `data-card-id`, which the lookups, the keyboard walk and the drag use to find
+ * the real cards, so a copy in flight is never taken for one.
+ */
+const FLIGHT_CARD_ATTRIBUTE = "data-flight-card";
+
+/** Marks `ghost`, the copy of `card` in flight, with the id of the card, and returns it. */
+const markAsFlightOf = (ghost: HTMLElement, card: HTMLElement): HTMLElement => {
+  ghost.setAttribute(FLIGHT_CARD_ATTRIBUTE, card.dataset["cardId"] ?? "");
+  return ghost;
+};
+
 /** Takes the layer away when no copy is left in it. */
 const removeEmptyLayer = (layer: HTMLElement): void => {
   if (layer.childElementCount === 0) layer.remove();
@@ -106,7 +119,7 @@ export const launchFlights = (
   return cards
     .filter((card) => isInView(card, view))
     .map((card, index) => ({
-      ghost: ghostElement(card, layer, copyCardForMotion(card)),
+      ghost: markAsFlightOf(ghostElement(card, layer, copyCardForMotion(card)), card),
       delay: staggerDelay(index, gap),
       cardId: card.dataset["cardId"] ?? "",
       laneId: card.closest<HTMLElement>("[data-lane-id]")?.dataset["laneId"] ?? "",
@@ -214,9 +227,9 @@ export const recordGrowthOrigins = (
     }
   }
   const layer = scroller.closest(".work-desk")?.querySelector(`:scope > .${FLIGHT_LAYER_CLASS}`);
-  for (const ghost of layer?.querySelectorAll<HTMLElement>("[data-card-id]") ?? []) {
+  for (const ghost of layer?.querySelectorAll<HTMLElement>(`[${FLIGHT_CARD_ATTRIBUTE}]`) ?? []) {
     const place = computeCenter(ghost.getBoundingClientRect());
-    origins.set(buildGrowthKey("", ghost.dataset["cardId"] ?? ""), {
+    origins.set(buildGrowthKey("", ghost.getAttribute(FLIGHT_CARD_ATTRIBUTE) ?? ""), {
       ...place,
       scale: findBody(ghost)?.values.s ?? 1,
       opacity: 1,

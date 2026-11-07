@@ -154,6 +154,7 @@ export function WorkScreen({
     username,
     boardCards: shownBoard?.cards ?? EMPTY_CARDS,
     isBoardRead: shownBoard !== undefined,
+    boardReadAt: board.dataUpdatedAt,
     moves,
     openTaskId,
     scrollRef,
