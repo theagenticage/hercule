@@ -18,9 +18,13 @@ import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   checkEmittedEvent,
+  MAX_ENTITY_OBSERVATIONS,
   PluginError,
   type EmittedEvent,
+  type EntityInventory,
+  type EntityObservation,
   type IngestContext,
+  type IngestEntities,
   type KeyValueStore,
   type OpenSignal,
 } from "@hercule/plugin-host";
@@ -235,6 +239,42 @@ const readRequestBody = (request: HttpClientRequest.HttpClientRequest): unknown 
     ? JSON.parse(new TextDecoder().decode(request.body.body))
     : undefined;
 
+/**
+ * Checks the fragment rules of GraphQL that Linear enforces and a fake does
+ * not. Throws an error naming the first problem:
+ *
+ * - every spread fragment (`...Name`) is defined in the document;
+ * - every defined fragment is reachable from the operation, through spreads,
+ *   because GraphQL refuses a document with a fragment nothing uses.
+ *
+ * The documents of this plugin put the operation first and the fragments
+ * after it, each starting with `fragment Name on`.
+ */
+const checkFragments = (query: string): void => {
+  const definitions = [...query.matchAll(/^fragment (\w+) on /gm)];
+  const operation = query.slice(0, definitions[0]?.index ?? query.length);
+  const bodies = new Map<string, string>(
+    definitions.map((definition, index) => [
+      definition[1]!,
+      query.slice(definition.index, definitions[index + 1]?.index),
+    ]),
+  );
+  const spreadsOf = (text: string): Array<string> =>
+    [...text.matchAll(/\.\.\.(\w+)/g)].map((spread) => spread[1]!);
+  const reachable = new Set<string>();
+  const pending = spreadsOf(operation);
+  while (pending.length > 0) {
+    const name = pending.pop()!;
+    if (reachable.has(name)) continue;
+    if (!bodies.has(name)) throw new Error(`The fragment ${name} is spread but not defined.`);
+    reachable.add(name);
+    pending.push(...spreadsOf(bodies.get(name)!));
+  }
+  for (const name of bodies.keys()) {
+    if (!reachable.has(name)) throw new Error(`The fragment ${name} is defined but never used.`);
+  }
+};
+
 /** Reads a request as the fake records it. */
 const readFakeRequest = (request: HttpClientRequest.HttpClientRequest): FakeRequest => {
   const body = (readRequestBody(request) ?? {}) as {
@@ -350,7 +390,14 @@ const matchIssue = (issue: FakeIssue, filter: Record<string, unknown>, viewerId:
       case "id":
         return matchComparator(issue.id, sub);
       case "team":
-        return matchRelation(issue.team, sub, viewerId);
+        return Object.entries(sub).every(([field, comparator]) =>
+          field === "key"
+            ? matchComparator(issue.team.key, comparator as Record<string, unknown>)
+            : matchRelation(issue.team, { [field]: comparator }, viewerId),
+        );
+      case "number":
+        // The issue number is the part of the identifier after the dash.
+        return Number(issue.identifier.split("-").at(-1)) === sub["eq"];
       case "assignee":
         return matchRelation(issue.assignee, sub, viewerId);
       case "project":
@@ -456,6 +503,36 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
       );
       return { issues: buildPage(listed, variables, world.pageSize) };
     }
+    case "LinearAssignedIssues": {
+      // The inventory lists the most recently updated first, and leaves archived and trashed issues out.
+      const listed = world.issues
+        .filter(
+          (issue) =>
+            issue.archivedAt === null &&
+            issue.trashed !== true &&
+            (filter === null || matchIssue(issue, filter, world.viewer.id)),
+        )
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      return { issues: buildPage(listed, variables, world.pageSize) };
+    }
+    case "LinearSearchIssues": {
+      const term = String(variables["term"]).toLowerCase();
+      const found = world.issues.filter(
+        (issue) =>
+          issue.archivedAt === null &&
+          issue.trashed !== true &&
+          (issue.title.toLowerCase().includes(term) || issue.identifier.toLowerCase() === term) &&
+          (filter === null || matchIssue(issue, filter, world.viewer.id)),
+      );
+      return { searchIssues: buildPage(found, variables, world.pageSize), ...viewerFields };
+    }
+    case "LinearReadIssue": {
+      // Reads archived and trashed issues too, as the query asks.
+      const found = world.issues.filter(
+        (issue) => filter === null || matchIssue(issue, filter, world.viewer.id),
+      );
+      return { issues: buildPage(found, variables, world.pageSize), ...viewerFields };
+    }
     case "LinearIssueLookup": {
       const ids = readIdIn(filter) ?? [];
       const found = world.issues.filter((issue) => ids.includes(issue.id));
@@ -547,6 +624,8 @@ export const buildFakeLinear = (world: FakeWorld = buildFakeWorld()): FakeLinear
     Effect.sync(() => {
       const read = readFakeRequest(request);
       requests.push(read);
+      const query = (readRequestBody(request) as { query?: string } | undefined)?.query;
+      if (query !== undefined) checkFragments(query);
       const overridden = world.override?.(read);
       if (overridden !== undefined) return buildResponse(request, overridden);
       if (read.authorization !== world.apiKey) {
@@ -639,5 +718,41 @@ export const buildIngestHarness = (
     events,
     state,
     openSignals,
+  };
+};
+
+/** What a fake host was told by the `entities` feed. */
+export interface ReportedEntities {
+  readonly reconciled: Array<EntityInventory>;
+  readonly refreshed: Array<ReadonlyArray<EntityObservation>>;
+  readonly missing: Array<{ readonly ref: string; readonly reason: string }>;
+  readonly listed: Array<{ readonly kind: string; readonly limit: number }>;
+}
+
+/**
+ * Builds the `entities` member of an ingest context, which records every call.
+ * `wanted` holds the refs `listWanted` returns, by kind. Like the host, it
+ * refuses a `reconcile` call with more observations than the host takes.
+ */
+export const buildFakeEntities = (
+  wanted: Readonly<Record<string, ReadonlyArray<string>>> = {},
+): { readonly entities: IngestEntities; readonly reported: ReportedEntities } => {
+  const reported: ReportedEntities = { reconciled: [], refreshed: [], missing: [], listed: [] };
+  return {
+    reported,
+    entities: {
+      reconcile: (inventory) =>
+        inventory.observations.length > MAX_ENTITY_OBSERVATIONS
+          ? Effect.fail(new PluginError({ message: "too many observations in one call" }))
+          : Effect.sync(() => void reported.reconciled.push(inventory)),
+      refresh: (observations) => Effect.sync(() => void reported.refreshed.push(observations)),
+      listWanted: (kind, limit) =>
+        Effect.sync(() => {
+          reported.listed.push({ kind, limit });
+          return wanted[kind] ?? [];
+        }),
+      reportMissing: (ref, reason) =>
+        Effect.sync(() => void reported.missing.push({ ref, reason })),
+    },
   };
 };

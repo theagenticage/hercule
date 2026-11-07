@@ -45,7 +45,7 @@ import {
   type OpenSignal,
   type PollResult,
 } from "@hercule/plugin-host";
-import { MAX_PAGE_SIZE, readPages, type LinearRateLimited } from "../api";
+import { MAX_PAGE_SIZE, readPages, type LinearFailure, type LinearRateLimited } from "../api";
 import type { LinearConnectionConfig } from "../connection-type";
 import type { IssueBlock, IssueChanges, WorkspaceBlock } from "../kinds";
 import {
@@ -90,6 +90,33 @@ const LOOKUP_QUERY = `query LinearIssueLookup($filter: IssueFilter, $first: Int,
   }
 }
 ${ISSUE_FRAGMENT}`;
+
+/**
+ * Reads issues by id in as many pages as the ids need, archived and trashed
+ * ones included, and returns them by id. An id Linear does not return is
+ * absent from the map. Fails with a `PluginError` when Linear has more pages
+ * than the ids can fill, because an issue on an unread page would look
+ * deleted, and as `callLinear` does otherwise.
+ */
+export const readIssuesById = (
+  authorization: string,
+  ids: ReadonlyArray<string>,
+): Effect.Effect<Map<string, ApiIssue>, LinearFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const found = yield* readPages(
+      authorization,
+      { name: "LinearIssueLookup", text: LOOKUP_QUERY, variables: { filter: { id: { in: ids } } } },
+      "issues",
+      ApiIssue,
+      Math.ceil(ids.length / MAX_PAGE_SIZE),
+    );
+    if (found.hasMore) {
+      return yield* new PluginError({
+        message: `Linear answered the lookup of ${String(ids.length)} issues by id with more pages than it should need.`,
+      });
+    }
+    return new Map(found.items.map((issue) => [issue.id, issue]));
+  });
 
 /** The fields of an issue a poll compares, each a key of `IssueChanges`. */
 const COMPARED_FIELDS = [
@@ -247,27 +274,10 @@ export const pollLinearIssues = (
         ...[...followed.keys()].filter((id) => !listed.has(id)),
       ]),
     ];
-    const lookedUp = new Map<string, ApiIssue>();
-    if (lookupIds.length > 0) {
-      const found = yield* readPages(
-        authorization,
-        {
-          name: "LinearIssueLookup",
-          text: LOOKUP_QUERY,
-          variables: { filter: { id: { in: lookupIds } } },
-        },
-        "issues",
-        ApiIssue,
-        Math.ceil(lookupIds.length / MAX_PAGE_SIZE),
-      );
-      // An issue on a page this poll did not read would look deleted.
-      if (found.hasMore) {
-        return yield* new PluginError({
-          message: `Linear answered the lookup of ${String(lookupIds.length)} issues by id with more pages than it should need.`,
-        });
-      }
-      for (const issue of found.items) lookedUp.set(issue.id, issue);
-    }
+    const lookedUp =
+      lookupIds.length === 0
+        ? new Map<string, ApiIssue>()
+        : yield* readIssuesById(authorization, lookupIds);
 
     // One event per issue and kind: a followed issue that leaves the watched
     // set because it closed gets one `closed` event, the end of its signals.
