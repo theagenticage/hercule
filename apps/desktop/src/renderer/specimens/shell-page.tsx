@@ -179,6 +179,7 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { createAccountScopes } from "../app/account-scope";
 import { CleanupProvider } from "../app/cleanup";
 import {
   decideStorageNow,
@@ -1066,11 +1067,18 @@ function AssistantRoute(): JSX.Element {
  */
 const buildRouter = (
   client: HerculeClient,
+  queryClient: QueryClient,
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
 ) => {
   const rootRoute = createRootRoute();
+  const accountScopes = createAccountScopes({
+    controllerUrl: CONTROLLER_URL,
+    client,
+    queryClient,
+    storage: localStorage,
+  });
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",
@@ -1083,12 +1091,19 @@ const buildRouter = (
         client,
         live: SILENT_LIVE,
         pendingSubmissions,
+        accountScopes,
       },
     }),
   });
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
+    // Opens the account scope of the signed-in user as the app's shell route
+    // does. The cache already holds the user, so this sends no request.
+    loader: async () => {
+      const { username } = await queryClient.ensureQueryData(userQuery(client));
+      accountScopes.open(username);
+    },
     component: ShellLayout,
   });
   // `update` is typed for the options a route may change once it is built,
@@ -1518,7 +1533,13 @@ async function mountShellSpecimen(
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    queryClient,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+  );
   await router.load();
 
   const root = document.getElementById("root");
