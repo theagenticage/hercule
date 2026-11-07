@@ -3,22 +3,42 @@
  * sources.
  *
  * Two callers need it. `EntityLookups.recognize` answers the Add button on
- * Work. The ingest context recognizes the web addresses and texts a plugin's
- * poll reports. The ingest context cannot depend on the plugin host, which
- * needs the ingest loops that build it, so it reads the host's active sources
- * through `EntityRecognizer`, a small accessor the host fills in when it
- * starts.
+ * Work. The External Entities ingest recognizes the web addresses and texts a
+ * plugin's poll reports: the ingest context hands it a `RecognizeText` over
+ * the sources that are active at that moment.
  */
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import { ExternalRef } from "@hercule/contract";
 import type { EntityRecognition } from "@hercule/plugin-host";
-import type { ScopedTarget } from "./entity-observations";
 import type { RegisteredEventSource } from "./event-sources";
 
 /** The most recognitions one plugin returns for a text. */
 const MAX_RECOGNITIONS = 20;
+
+/**
+ * A thing that a plugin recognized but cannot place without reading it. `kind`
+ * is the qualified kind word and `scopeHint` the scope the text named, either
+ * of which may be absent. A pending claim keeps the same four fields in its
+ * target (see `PendingTarget`).
+ */
+export interface ScopedTarget {
+  readonly pluginId: string;
+  readonly kind?: string;
+  readonly scopeHint?: string;
+  readonly identifier: string;
+}
+
+/** What recognition found a reference to. A `ref` names exactly one thing. A `scoped` target needs a read to place. */
+export type RecognizedTarget =
+  | { readonly recognized: "ref"; readonly ref: string }
+  | ({ readonly recognized: "scoped" } & ScopedTarget);
+
+/** Recognizes a text over the plugins that are active now. Pure: it makes no request. */
+export type RecognizeText = (text: string) => Effect.Effect<ReadonlyArray<PluginRecognition>>;
+
+/** Lists the event sources of the plugins that are active now. */
+export type ListActiveSources = () => Effect.Effect<ReadonlyArray<RegisteredEventSource>>;
 
 /** One plugin's recognition of a text. The recognition's `kind`, when it has one, is qualified. */
 export interface PluginRecognition {
@@ -81,42 +101,48 @@ export const recognizeInSources = (
     (perSource) => perSource.flat(),
   );
 
-/** Lists the event sources of the plugins that are active now. */
-type ListActiveSources = () => Effect.Effect<ReadonlyArray<RegisteredEventSource>>;
-
-const makeRecognizer = Effect.gen(function* () {
-  const listSources = yield* Ref.make<ListActiveSources>(() => Effect.succeed([]));
-  return {
-    /**
-     * Tells the recognizer where the active sources come from. The plugin host
-     * calls it once, when it starts. Until then no plugin is active, so
-     * nothing is recognized.
-     */
-    useActiveSources: (list: ListActiveSources): Effect.Effect<void> => Ref.set(listSources, list),
-
-    /**
-     * Returns a function that recognizes a text over the plugins that are
-     * active at this moment. Read it once per call that recognizes several
-     * texts, so they all see the same plugins.
-     */
-    readRecognizer: (): Effect.Effect<
-      (text: string) => Effect.Effect<ReadonlyArray<PluginRecognition>>
-    > =>
-      Effect.map(
-        Effect.flatMap(Ref.get(listSources), (list) => list()),
-        (sources) => (text) => recognizeInSources(sources, text),
-      ),
-  };
-});
+const isExternalRef = Schema.is(ExternalRef);
 
 /**
- * Gives the ingest context the host's active sources at call time, without a
- * dependency on the plugin host (which would be a construction cycle).
+ * Converts a plugin's recognition to a target for a claim. Returns undefined
+ * for a ref that is not a valid External Ref (or that is a pending target in
+ * disguise) and for a scoped recognition with no identifier. Both the poll
+ * and the resolver loop use it, so a target is checked the same way wherever
+ * it comes from.
  */
-export class EntityRecognizer extends Context.Service<
-  EntityRecognizer,
-  Effect.Success<typeof makeRecognizer>
->()("hercule/controller/plugins/EntityRecognizer") {}
+export const buildRecognizedTarget = ({
+  pluginId,
+  recognition,
+}: PluginRecognition): RecognizedTarget | undefined => {
+  if (recognition.recognized === "ref") {
+    return isExternalRef(recognition.ref) && !recognition.ref.startsWith("unresolved:")
+      ? { recognized: "ref", ref: recognition.ref }
+      : undefined;
+  }
+  if (recognition.identifier === "") return undefined;
+  return {
+    recognized: "scoped",
+    pluginId,
+    ...(recognition.kind === undefined || recognition.kind === ""
+      ? {}
+      : { kind: recognition.kind }),
+    ...(recognition.scopeHint === undefined || recognition.scopeHint === ""
+      ? {}
+      : { scopeHint: recognition.scopeHint }),
+    identifier: recognition.identifier,
+  };
+};
 
-export const EntityRecognizerLayer: Layer.Layer<EntityRecognizer> =
-  Layer.effect(EntityRecognizer)(makeRecognizer);
+/**
+ * Returns the target of a web address from what the plugins recognized in it:
+ * the first recognition with `form: "url"`, in registry order. Returns
+ * undefined when no plugin recognized the address, or when the first one is
+ * not a usable target (see `buildRecognizedTarget`). The poll and the resolver
+ * loop both read an address this way, so one address is never two things.
+ */
+export const findUrlTarget = (
+  recognitions: ReadonlyArray<PluginRecognition>,
+): RecognizedTarget | undefined => {
+  const found = recognitions.find(({ recognition }) => recognition.form === "url");
+  return found === undefined ? undefined : buildRecognizedTarget(found);
+};

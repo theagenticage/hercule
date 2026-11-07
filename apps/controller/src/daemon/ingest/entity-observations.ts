@@ -9,8 +9,6 @@ const make = Effect.gen(function* () {
   return EntityObservations.of({
     reconcile: ingest.reconcile,
     refresh: ingest.refresh,
-    readStoredTextRevisions: (reporter, refs) =>
-      Effect.orDie(ingest.readStoredTextRevisions(reporter, refs)),
     listWanted: (reporter, kind, limit) => Effect.orDie(ingest.listWanted(reporter, kind, limit)),
     reportMissing: ingest.reportMissing,
   });

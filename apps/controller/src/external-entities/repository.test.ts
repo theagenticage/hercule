@@ -2149,8 +2149,8 @@ describe("a new link from a source as news", () => {
         sourceUpdatedAt: at(minutes),
       }),
       recognized: {
-        urls: [{ url, target: { recognized: "ref", ref: ticketRef("t2") } }],
-        texts: [],
+        urlTargets: new Map([[url, { recognized: "ref", ref: ticketRef("t2") }]]),
+        textTargets: new Map(),
       },
     });
 

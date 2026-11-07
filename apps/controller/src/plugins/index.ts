@@ -23,17 +23,17 @@ export {
   type LookupObservation,
   type SearchOutcome,
 } from "./entity-lookups";
+export { EntityObservations, type EntityReporter } from "./entity-observations";
 export {
-  EntityObservations,
-  type EntityReporter,
-  type RecognizedClaims,
-  type RecognizedClaimsByRef,
+  buildRecognizedTarget,
+  buildScopedRecognition,
+  findUrlTarget,
+  type ListActiveSources,
+  type PluginRecognition,
   type RecognizedTarget,
+  type RecognizeText,
   type ScopedTarget,
-  type StoredTextRevisions,
-} from "./entity-observations";
-export { buildRecognizedTarget } from "./claim-recognition";
-export { buildScopedRecognition, type PluginRecognition } from "./entity-recognition";
+} from "./entity-recognition";
 export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";

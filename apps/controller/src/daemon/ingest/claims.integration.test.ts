@@ -34,7 +34,6 @@ import {
   ClaimResolution,
   decodePendingTarget,
 } from "../../external-entities";
-import { relationClaimRepository } from "../../external-entities/relation-claims";
 import { EntityLookups, EntityLookupsLayer, PluginHost, Plugins } from "../../plugins";
 import { ingestContexts } from "../../plugins/ingest-context";
 import { asUser, buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../plugins/testing";
@@ -244,6 +243,7 @@ const runInWorld = <A>(
             accountId: connection.accountId,
             displayName: connection.displayName,
           },
+          host.listActiveEventSources,
         );
       return yield* body({
         answers,
@@ -597,17 +597,21 @@ describe("a reference in a text", () => {
   });
 
   it("joins nothing: a resolved reference is a hint", async () => {
-    const joined = await runInWorld(({ tracker, answers }) =>
+    const joined = await runInWorld(({ tracker, answers, sql }) =>
       Effect.gen(function* () {
-        const claims = yield* relationClaimRepository;
         answers.current = { "tracker-a": () => buildFound("tracker:item:123") };
         yield* reportItem(tracker, { plugin: "tracker", n: 1, texts: description("SHOP-123") });
         yield* resolvePendingClaims();
-        return yield* claims.hasEffectiveLink("tracker:item:1", "tracker:item:123");
+        // A claim that joins two things is a current, resolved one of a source or a person.
+        return yield* sql`
+          SELECT id FROM external_entity_relation_claims
+          WHERE relation = 'linked' AND state = 'current' AND is_pending = 0
+            AND claim_type IN ('source', 'person')
+            AND to_ref = 'tracker:item:123'`;
       }),
     );
 
-    expect(joined).toBe(false);
+    expect(joined).toEqual([]);
   });
 });
 

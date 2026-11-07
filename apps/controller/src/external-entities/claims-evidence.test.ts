@@ -1,7 +1,7 @@
 /**
- * Tests the claims a Connection makes from evidence, against a migrated
- * database with an invented tracker: tickets that carry attachment links, and
- * descriptions that mention other tickets.
+ * Tests the claims a Connection makes from evidence, through the claims
+ * module and against a migrated database with an invented tracker: tickets
+ * that carry attachment links, and descriptions that mention other tickets.
  *
  * - web addresses: the first sight, the match by address alone, complete and
  *   partial reads, a failed recognition
@@ -17,9 +17,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { mintUuid, uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import type { RecognizedClaims, RecognizedTarget } from "../plugins";
+import type { RecognizedTarget } from "../plugins";
+import { claimRepository, type RecognizedEvidence } from "./claims";
 import { encodePendingTarget } from "./pending-target";
-import { relationClaimRepository } from "./relation-claims";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const LATER = "2026-01-02T00:00:00.000Z";
@@ -53,7 +53,7 @@ const PENDING_OPS_47 = encodePendingTarget({
   identifier: "OPS-47",
 })!;
 
-type Claims = Effect.Success<typeof relationClaimRepository>;
+type Claims = Effect.Success<typeof claimRepository>;
 
 /** Runs `body` on a fresh migrated database with two Connections of one plugin. */
 const run = <A>(
@@ -76,7 +76,7 @@ const run = <A>(
           VALUES (${uuidFromString(id)}, 'acme-tracker', 'acme-tracker/tracker', ${account}, ${account},
             ${account}, 'connected', '[]', '{}', ${AT}, ${AT})`;
       }
-      const claims = yield* relationClaimRepository;
+      const claims = yield* claimRepository;
       return yield* body(claims, sql);
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
@@ -88,7 +88,7 @@ interface Report {
   /** Leave out to report no `relations` at all. */
   readonly urls?: ReadonlyArray<string>;
   readonly texts?: ReadonlyArray<{ evidenceKey: string; text: string; revision?: string }>;
-  readonly recognized?: RecognizedClaims;
+  readonly recognized?: RecognizedEvidence;
   /** Whether the thing was not yet a full record before this report. */
   readonly inBaseline?: boolean;
   readonly now?: string;
@@ -96,7 +96,7 @@ interface Report {
 
 /** Reports the evidence of one observation, the way the ingest does after recognition. */
 const report = (claims: Claims, input: Report) =>
-  claims.applyEvidenceClaims({
+  claims.applyObservedClaims({
     connectionId: input.connectionId ?? TRACKER_ACCOUNT,
     entries: [
       {
@@ -104,7 +104,7 @@ const report = (claims: Claims, input: Report) =>
         relations:
           input.urls === undefined
             ? undefined
-            : { complete: input.complete ?? true, linkedUrls: input.urls },
+            : { complete: input.complete ?? true, partOf: [], linked: [], linkedUrls: input.urls },
         texts: input.texts,
         recognized: input.recognized,
         observedRevision: undefined,
@@ -116,10 +116,17 @@ const report = (claims: Claims, input: Report) =>
 
 const recognizedUrls = (
   ...entries: ReadonlyArray<readonly [string, RecognizedTarget | undefined]>
-): RecognizedClaims => ({
-  urls: entries.map(([url, target]) => (target === undefined ? { url } : { url, target })),
-  texts: [],
+): RecognizedEvidence => ({
+  urlTargets: new Map(
+    entries.flatMap(([url, target]) => (target === undefined ? [] : [[url, target] as const])),
+  ),
+  textTargets: new Map(),
 });
+
+const textClaims = (
+  key: string,
+  ...targets: ReadonlyArray<RecognizedTarget>
+): RecognizedEvidence => ({ urlTargets: new Map(), textTargets: new Map([[key, targets]]) });
 
 const asChange: RecognizedTarget = { recognized: "ref", ref: CHANGE };
 const asOtherChange: RecognizedTarget = { recognized: "ref", ref: OTHER_CHANGE };
@@ -139,6 +146,16 @@ const readStored = (sql: SqlClient.SqlClient, fromRef = TICKET) =>
   sql<StoredClaim>`
     SELECT id, from_ref, to_ref, claim_type, evidence_key, observed_revision, observed_at, is_pending
     FROM external_entity_relation_claims WHERE from_ref = ${fromRef} ORDER BY id`;
+
+/** Returns true when a current claim of a source or a person, with a ref at both ends, links the two refs. */
+const joins = (sql: SqlClient.SqlClient, a: string, b: string) =>
+  Effect.map(
+    sql`SELECT id FROM external_entity_relation_claims
+      WHERE relation = 'linked' AND state = 'current' AND is_pending = 0
+        AND claim_type IN ('source', 'person')
+        AND ((from_ref = ${a} AND to_ref = ${b}) OR (from_ref = ${b} AND to_ref = ${a}))`,
+    (rows) => rows.length > 0,
+  );
 
 /** Inserts the least a record needs, so that a person can link from its ref. */
 const insertEntity = (sql: SqlClient.SqlClient, ref: string) =>
@@ -251,12 +268,12 @@ describe("a web address a source reports", () => {
         });
         const pending = {
           detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
-          joined: yield* claims.hasEffectiveLink(TICKET, PENDING_OPS_47),
+          joined: yield* joins(sql, TICKET, PENDING_OPS_47),
         };
         yield* sql`UPDATE external_entity_relation_claims SET to_ref = ${OTHER_CHANGE}`;
         const resolved = {
           detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
-          joined: yield* claims.hasEffectiveLink(TICKET, OTHER_CHANGE),
+          joined: yield* joins(sql, TICKET, OTHER_CHANGE),
         };
         return { pending, resolved };
       }),
@@ -270,11 +287,6 @@ describe("a web address a source reports", () => {
 });
 
 describe("the references in a text", () => {
-  const textClaims = (
-    key: string,
-    ...targets: ReadonlyArray<RecognizedTarget>
-  ): RecognizedClaims => ({ urls: [], texts: [{ evidenceKey: key, targets }] });
-
   it("stores the claims and never the text", async () => {
     const description = "Blocked until OPS-47 ships, which is quite a long time away";
     const rows = await run((claims, sql) =>
@@ -309,11 +321,11 @@ describe("the references in a text", () => {
             { evidenceKey: "notes", text: "y", revision: "n1" },
           ],
           recognized: {
-            urls: [],
-            texts: [
-              { evidenceKey: "description", targets: [asChange] },
-              { evidenceKey: "notes", targets: [asOtherChange] },
-            ],
+            urlTargets: new Map(),
+            textTargets: new Map([
+              ["description", [asChange]],
+              ["notes", [asOtherChange]],
+            ]),
           },
         });
         const kept = yield* readStored(sql);
@@ -377,7 +389,7 @@ describe("the references in a text", () => {
           texts: [{ evidenceKey: "description", text: "x", revision: "r1" }],
           recognized: textClaims("description", asChange),
         });
-        const joinedByHint = yield* claims.hasEffectiveLink(TICKET, CHANGE);
+        const joinedByHint = yield* joins(sql, TICKET, CHANGE);
         yield* report(claims, {
           texts: [{ evidenceKey: "description", text: "", revision: "r2" }],
           recognized: textClaims("description"),
@@ -419,20 +431,20 @@ describe("a poll that repeats what is stored", () => {
           const fromRef = `acme-tracker:ticket:P-${index}`;
           return {
             fromRef,
-            relations: { complete: true, linkedUrls: [CHANGE_URL] },
+            relations: { complete: true, partOf: [], linked: [], linkedUrls: [CHANGE_URL] },
             texts: [{ evidenceKey: "description", text: namesAThing ? "x" : "", revision: "r1" }],
             recognized: {
-              urls: [{ url: CHANGE_URL, target: asChange }],
-              texts: [{ evidenceKey: "description", targets: namesAThing ? [asOtherChange] : [] }],
+              urlTargets: new Map([[CHANGE_URL, asChange]]),
+              textTargets: new Map([["description", namesAThing ? [asOtherChange] : []]]),
             },
             observedRevision: "v1",
             inBaseline: false,
           };
         });
-        yield* claims.applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT });
+        yield* claims.applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT });
         const statements: Array<string> = [];
         const write = yield* claims
-          .applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: LATER })
+          .applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: LATER })
           .pipe(
             Effect.provideService(Statement.CurrentTransformer, (statement) =>
               Effect.sync(() => {
@@ -463,6 +475,11 @@ describe("a poll that repeats what is stored", () => {
 });
 
 describe("a person's link", () => {
+  const link = (claims: Claims, fromRef: string, toRef: string) =>
+    claims.changePersonLink({ change: "link", fromRef, toRef, actor: "user", now: AT });
+  const unlink = (claims: Claims, fromRef: string, toRef: string) =>
+    claims.changePersonLink({ change: "unlink", fromRef, toRef });
+
   it("is one claim for a pair in either direction, and unlink removes only the person's claim", async () => {
     const result = await run((claims, sql) =>
       Effect.gen(function* () {
@@ -472,30 +489,12 @@ describe("a person's link", () => {
           urls: [CHANGE_URL],
           recognized: recognizedUrls([CHANGE_URL, asChange]),
         });
-        const added = yield* claims.addPersonLink({
-          fromRef: TICKET,
-          toRef: CHANGE,
-          actor: "user",
-          now: AT,
-        });
-        const repeated = yield* claims.addPersonLink({
-          fromRef: CHANGE,
-          toRef: TICKET,
-          actor: "user",
-          now: AT,
-        });
-        const unread = yield* claims.addPersonLink({
-          fromRef: TICKET,
-          toRef: "acme-forge:change:never-read",
-          actor: "user",
-          now: AT,
-        });
-        const removed = yield* claims.removePersonLinks({ a: CHANGE, b: TICKET });
-        const again = yield* claims.removePersonLinks({ a: CHANGE, b: TICKET });
-        const unreadRemoved = yield* claims.removePersonLinks({
-          a: "acme-forge:change:never-read",
-          b: TICKET,
-        });
+        const added = yield* link(claims, TICKET, CHANGE);
+        const repeated = yield* link(claims, CHANGE, TICKET);
+        const unread = yield* link(claims, TICKET, "acme-forge:change:never-read");
+        const removed = yield* unlink(claims, CHANGE, TICKET);
+        const again = yield* unlink(claims, CHANGE, TICKET);
+        const unreadRemoved = yield* unlink(claims, "acme-forge:change:never-read", TICKET);
         return {
           added,
           repeated,
@@ -508,13 +507,34 @@ describe("a person's link", () => {
       }),
     );
 
-    expect(result.added).toBe("added");
-    expect(result.repeated).toBe("already-linked");
-    expect(result.unread).toBe("added");
-    expect(result.removed).toEqual({ removed: true, remaining: "source" });
-    expect(result.again).toEqual({ removed: false, remaining: "source" });
-    expect(result.unreadRemoved).toEqual({ removed: true });
+    // A person's own link is no news from outside: it changes refs and adds no new link.
+    expect(result.added).toMatchObject({
+      changedRefs: [TICKET, CHANGE].sort(),
+      newLinks: [],
+      fromRefKnown: true,
+    });
+    expect(result.repeated).toMatchObject({ changedRefs: [], newLinks: [] });
+    expect(result.unread.changedRefs).toEqual([TICKET, "acme-forge:change:never-read"].sort());
+    expect(result.removed).toMatchObject({
+      changedRefs: [TICKET, CHANGE].sort(),
+      remaining: "source",
+    });
+    expect(result.again).toMatchObject({ changedRefs: [], remaining: "source" });
+    expect(result.unreadRemoved).toMatchObject({ remaining: undefined });
+    expect(result.unreadRemoved.changedRefs).toHaveLength(2);
     expect(result.left.map((row) => row.claim_type)).toEqual(["source"]);
+  });
+
+  it("writes nothing when Hercule holds no record of the ref it links from", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const changes = yield* link(claims, TICKET, CHANGE);
+        return { changes, rows: yield* readStored(sql) };
+      }),
+    );
+
+    expect(result.changes).toMatchObject({ fromRefKnown: false, changedRefs: [] });
+    expect(result.rows).toEqual([]);
   });
 
   it("reports the hint that is left", async () => {
@@ -523,14 +543,14 @@ describe("a person's link", () => {
         yield* insertEntity(sql, TICKET);
         yield* report(claims, {
           texts: [{ evidenceKey: "description", text: "x" }],
-          recognized: { urls: [], texts: [{ evidenceKey: "description", targets: [asChange] }] },
+          recognized: textClaims("description", asChange),
         });
-        yield* claims.addPersonLink({ fromRef: TICKET, toRef: CHANGE, actor: "user", now: AT });
-        return yield* claims.removePersonLinks({ a: TICKET, b: CHANGE });
+        yield* link(claims, TICKET, CHANGE);
+        return yield* unlink(claims, TICKET, CHANGE);
       }),
     );
 
-    expect(result).toEqual({ removed: true, remaining: "text" });
+    expect(result).toMatchObject({ changedRefs: [TICKET, CHANGE].sort(), remaining: "text" });
   });
 });
 
@@ -541,7 +561,7 @@ describe("what a write reads and records about the thing's baseline", () => {
         Effect.gen(function* () {
           const entries = Array.from({ length: count }, (_, index) => ({
             fromRef: `acme-tracker:ticket:N-${index}`,
-            relations: { complete: true, linkedUrls: [CHANGE_URL] },
+            relations: { complete: true, partOf: [], linked: [], linkedUrls: [CHANGE_URL] },
             texts: undefined,
             recognized: recognizedUrls([CHANGE_URL, asChange]),
             observedRevision: undefined,
@@ -549,7 +569,7 @@ describe("what a write reads and records about the thing's baseline", () => {
           }));
           const statements: Array<string> = [];
           const write = yield* claims
-            .applyEvidenceClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT })
+            .applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT })
             .pipe(
               Effect.provideService(Statement.CurrentTransformer, (statement) =>
                 Effect.sync(() => {
@@ -598,10 +618,9 @@ describe("what a write reads and records about the thing's baseline", () => {
 });
 
 describe("the revisions the stored texts were made from", () => {
-  const text = (revision: string) => ({ evidenceKey: "description", text: "x", revision });
   const named = (key: string, revision: string, target: RecognizedTarget) => ({
     texts: [{ evidenceKey: key, text: "x", revision }],
-    recognized: { urls: [], texts: [{ evidenceKey: key, revision, targets: [target] }] },
+    recognized: textClaims(key, target),
   });
 
   it("lists a key only when all of its claims share one revision", async () => {
@@ -610,17 +629,11 @@ describe("the revisions the stored texts were made from", () => {
         yield* report(claims, named("description", "r1", asChange));
         yield* report(claims, {
           texts: [{ evidenceKey: "notes", text: "y", revision: "n1" }],
-          recognized: {
-            urls: [],
-            texts: [{ evidenceKey: "notes", revision: "n1", targets: [asChange, asOtherChange] }],
-          },
+          recognized: textClaims("notes", asChange, asOtherChange),
         });
         yield* report(claims, {
           texts: [{ evidenceKey: "bare", text: "z" }],
-          recognized: {
-            urls: [],
-            texts: [{ evidenceKey: "bare", targets: [asChange] }],
-          },
+          recognized: textClaims("bare", asChange),
         });
         const stored = yield* claims.readStoredTextRevisions(TRACKER_ACCOUNT, [
           TICKET,
@@ -640,14 +653,17 @@ describe("the revisions the stored texts were made from", () => {
     expect(result.otherConnection).toBe(0);
   });
 
-  it("leaves the claims of a text alone when the host did not search it", async () => {
+  it("leaves the claims of a text alone when the plugins did not search it", async () => {
     const rows = await run((claims, sql) =>
       Effect.gen(function* () {
         yield* report(claims, named("description", "r1", asChange));
-        // Same revision, nothing recognized: the host skipped the search.
+        // Same revision: the search was skipped.
         yield* report(claims, {
-          texts: [text("r1")],
-          recognized: { urls: [], texts: [{ evidenceKey: "description", revision: "r1" }] },
+          texts: [{ evidenceKey: "description", text: "x", revision: "r1" }],
+          recognized: {
+            urlTargets: new Map(),
+            textTargets: new Map([["description", "unchanged"]]),
+          },
           now: LATER,
         });
         return yield* readStored(sql);

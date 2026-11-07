@@ -99,7 +99,7 @@ export const runIngestReconciler: Effect.Effect<
       }
     }
     for (const [id, { source, connection }] of wanted) {
-      if (!keptOpen.has(id)) yield* ingest.open(source, connection);
+      if (!keptOpen.has(id)) yield* ingest.open(source, connection, host.listActiveEventSources);
     }
   });
 

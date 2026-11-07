@@ -28,15 +28,21 @@ import {
 } from "@hercule/plugin-host";
 import { assertConnectionIngesting, canConnectionPoll, connectionRepository } from "../connections";
 import { announce, nowIso, withTransaction } from "../db";
-import type { EntityReporter, RecognizedClaimsByRef, StoredTextRevisions } from "../plugins";
+import {
+  buildRecognizedTarget,
+  findUrlTarget,
+  type EntityReporter,
+  type RecognizedTarget,
+  type RecognizeText,
+} from "../plugins";
 import { announceEntityChanges } from "./announce";
 import {
   buildConflictWarning,
   buildIncompleteWarning,
   decideConnectionWarning,
 } from "./connection-warning";
+import { claimRepository, type RecognizedEvidence } from "./claims";
 import { isPendingTarget } from "./pending-target";
-import { relationClaimRepository } from "./relation-claims";
 import {
   externalEntityRepository,
   type EntityEnvironment,
@@ -171,7 +177,6 @@ export const prepareObservations = (
   reporter: EntityReporter,
   input: ReadonlyArray<unknown>,
   onlyKind?: string,
-  recognized?: RecognizedClaimsByRef,
 ): Effect.Effect<ReadonlyArray<ObservedEntity>, PluginError> =>
   Effect.gen(function* () {
     if (input.length > MAX_ENTITY_OBSERVATIONS) {
@@ -234,21 +239,116 @@ export const prepareObservations = (
       if (decoded.partial !== true) yield* assertFullObservationFits(declaration, decoded);
       const observation = yield* normalizeTimes(decoded);
       const slots = yield* renderObservationSlots(declaration, observation);
-      const claims = recognized?.get(decoded.ref);
-      prepared.push({
-        kind: declaration.word,
-        observation,
-        slots,
-        ...(claims === undefined ? {} : { recognized: claims }),
-      });
+      prepared.push({ kind: declaration.word, observation, slots });
     }
     return prepared;
+  });
+
+/** The most things one text may name. The rest of the text is not searched for more. */
+const MAX_TARGETS_PER_TEXT = 20;
+
+const buildTargetKey = (target: RecognizedTarget): string =>
+  target.recognized === "ref"
+    ? `ref\u0000${target.ref}`
+    : JSON.stringify([target.pluginId, target.kind, target.scopeHint, target.identifier]);
+
+/**
+ * Recognizes the web addresses and texts of prepared observations over the
+ * plugins behind `recognize`, and returns the observations with the result
+ * attached (`ObservedEntity.recognized`). Observations that carry neither are
+ * returned as they are.
+ *
+ * - A web address is given the first recognition with `form: "url"` among the
+ *   active plugins, in registry order. No such recognition leaves it out.
+ * - A text is given every thing any plugin recognizes in it, each once, at
+ *   most `MAX_TARGETS_PER_TEXT`.
+ * - The same address or text is recognized once per call, however many
+ *   observations carry it.
+ * - A text with a `revision` is not searched when the stored claims of its
+ *   `evidenceKey` were made from the same revision (`readStoredRevisions`,
+ *   called once for the whole call). It is marked `"unchanged"` and its claims
+ *   stay as they are, even when the plugin that found them is disabled now.
+ *
+ * Run it after `prepareObservations`, so every address and text is within the
+ * bounds, and outside the transaction: recognition is pure but may take as
+ * many calls as the call has texts.
+ */
+const recognizeEvidence = (
+  observed: ReadonlyArray<ObservedEntity>,
+  recognize: RecognizeText,
+  readStoredRevisions: (
+    refs: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyMap<string, ReadonlyMap<string, string>>>,
+): Effect.Effect<ReadonlyArray<ObservedEntity>> =>
+  Effect.gen(function* () {
+    const carriers = observed.filter(
+      ({ observation }) =>
+        (observation.relations?.linkedUrls?.length ?? 0) > 0 ||
+        (observation.texts?.length ?? 0) > 0,
+    );
+    if (carriers.length === 0) return observed;
+
+    const refsWithRevisions = carriers
+      .filter(({ observation }) =>
+        observation.texts?.some(({ revision }) => revision !== undefined),
+      )
+      .map(({ observation }) => observation.ref);
+    const storedRevisions =
+      refsWithRevisions.length === 0
+        ? new Map<string, ReadonlyMap<string, string>>()
+        : yield* readStoredRevisions(refsWithRevisions);
+
+    const urlTargets = new Map<string, RecognizedTarget | undefined>();
+    const textTargets = new Map<string, ReadonlyArray<RecognizedTarget>>();
+    const recognizeUrl = (url: string) =>
+      Effect.gen(function* () {
+        if (urlTargets.has(url)) return urlTargets.get(url);
+        const target = findUrlTarget(yield* recognize(url));
+        urlTargets.set(url, target);
+        return target;
+      });
+    const recognizeText = (text: string) =>
+      Effect.gen(function* () {
+        const known = textTargets.get(text);
+        if (known !== undefined) return known;
+        const targets = new Map<string, RecognizedTarget>();
+        for (const recognition of yield* recognize(text)) {
+          const target = buildRecognizedTarget(recognition);
+          if (target !== undefined) targets.set(buildTargetKey(target), target);
+          if (targets.size === MAX_TARGETS_PER_TEXT) break;
+        }
+        const list = [...targets.values()];
+        textTargets.set(text, list);
+        return list;
+      });
+
+    const recognizedByRef = new Map<string, RecognizedEvidence>();
+    for (const { observation } of carriers) {
+      const urls = new Map<string, RecognizedTarget>();
+      for (const url of new Set(observation.relations?.linkedUrls ?? [])) {
+        const target = yield* recognizeUrl(url);
+        if (target !== undefined) urls.set(url, target);
+      }
+      const texts = new Map<string, ReadonlyArray<RecognizedTarget> | "unchanged">();
+      for (const { evidenceKey, text, revision } of observation.texts ?? []) {
+        if (texts.has(evidenceKey)) continue;
+        const unchanged =
+          revision !== undefined &&
+          storedRevisions.get(observation.ref)?.get(evidenceKey) === revision;
+        texts.set(evidenceKey, unchanged ? "unchanged" : yield* recognizeText(text));
+      }
+      recognizedByRef.set(observation.ref, { urlTargets: urls, textTargets: texts });
+    }
+    return observed.map((entry) => {
+      const recognized = recognizedByRef.get(entry.observation.ref);
+      return recognized === undefined ? entry : { ...entry, recognized };
+    });
   });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* externalEntityRepository;
-  const claims = yield* relationClaimRepository;
+  const claims = yield* claimRepository;
   const connections = yield* connectionRepository;
 
   /**
@@ -272,6 +372,23 @@ const make = Effect.gen(function* () {
         Effect.andThen(assertConnectionIngesting(sql, reporter.connectionId), write(environment)),
       );
     }).pipe(Effect.catchTag("SqlError", (error) => Effect.die(error)));
+
+  /**
+   * Attaches what the plugins recognize in the addresses and texts of
+   * `observed` (see `recognizeEvidence`), reading the stored text revisions
+   * with one statement of its own. A database failure is a defect. Returns
+   * `observed` as it is when there is no recognizer.
+   */
+  const recognizeObserved = (
+    reporter: EntityReporter,
+    observed: ReadonlyArray<ObservedEntity>,
+    recognize: RecognizeText | undefined,
+  ): Effect.Effect<ReadonlyArray<ObservedEntity>> =>
+    recognize === undefined
+      ? Effect.succeed(observed)
+      : recognizeEvidence(observed, recognize, (refs) =>
+          Effect.orDie(claims.readStoredTextRevisions(reporter.connectionId, refs)),
+        );
 
   /**
    * Stores observations as a refresh does (see `repository.refresh`) and
@@ -323,7 +440,7 @@ const make = Effect.gen(function* () {
     reconcile: (
       reporter: EntityReporter,
       inventory: EntityInventory,
-      recognized?: RecognizedClaimsByRef,
+      recognize?: RecognizeText,
     ): Effect.Effect<void, PluginError> =>
       Effect.gen(function* () {
         const declaration = findDeclaration(reporter, inventory.kind);
@@ -334,11 +451,10 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const observed = yield* prepareObservations(
+        const observed = yield* recognizeObserved(
           reporter,
-          inventory.observations,
-          inventory.kind,
-          recognized,
+          yield* prepareObservations(reporter, inventory.observations, inventory.kind),
+          recognize,
         );
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
@@ -377,10 +493,14 @@ const make = Effect.gen(function* () {
     refresh: (
       reporter: EntityReporter,
       observations: ReadonlyArray<EntityObservation>,
-      recognized?: RecognizedClaimsByRef,
+      recognize?: RecognizeText,
     ): Effect.Effect<void, PluginError> =>
       Effect.gen(function* () {
-        const observed = yield* prepareObservations(reporter, observations, undefined, recognized);
+        const observed = yield* recognizeObserved(
+          reporter,
+          yield* prepareObservations(reporter, observations),
+          recognize,
+        );
         yield* writeAsReporter(reporter, (environment) =>
           refreshAndAnnounce(reporter.connectionId, observed, environment),
         );
@@ -417,17 +537,6 @@ const make = Effect.gen(function* () {
         });
         return true;
       }),
-
-    /**
-     * Returns the revisions that the stored `text` claims of the reporter's
-     * Connection were made from, for `refs` (see `readStoredTextRevisions` of
-     * the claims). The host reads them before it searches a text.
-     */
-    readStoredTextRevisions: (
-      reporter: EntityReporter,
-      refs: ReadonlyArray<string>,
-    ): Effect.Effect<StoredTextRevisions, SqlError> =>
-      claims.readStoredTextRevisions(reporter.connectionId, refs),
 
     /**
      * Returns up to `limit` refs of the unqualified kind that the Connection

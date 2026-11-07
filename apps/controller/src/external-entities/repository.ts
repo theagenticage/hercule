@@ -46,7 +46,6 @@ import {
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
-import type { RecognizedClaims } from "../plugins";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
 import {
@@ -72,16 +71,11 @@ import {
   type SharedValues,
 } from "./entity-records";
 import { announceEntityChanges } from "./announce";
-import { makeEntityLinkReads, readFarEnd } from "./entity-links";
+import { CURRENT_LINKED_SQL, makeEntityLinkReads, readFarEnd } from "./entity-links";
 import { decideRiding, selectInboxPage, type RidingCard } from "./riding";
-import { CURRENT_LINKED_SQL } from "./claim-sql";
-import {
-  CURRENT_PART_OF_SQL,
-  relationClaimRepository,
-  WALK_DOWN_SQL,
-  WALK_STATE_ROOM,
-  WALK_UP_SQL,
-} from "./relation-claims";
+import { CURRENT_PART_OF_SQL, WALK_DOWN_SQL, WALK_STATE_ROOM, WALK_UP_SQL } from "./claim-graph";
+import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
+import { computeRetryDelaySeconds } from "./retry-backoff";
 import {
   buildLiveSignalExists,
   buildCardSignalFields,
@@ -94,21 +88,8 @@ import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from
 
 export type { EntityEnvironment } from "./entity-records";
 
-/** How long a failed read waits before the first retry. Each failure doubles it. */
-const RETRY_BASE_SECONDS = 120;
-
-/** The longest a failed read waits before a retry. */
-const RETRY_CAP_SECONDS = 6 * 60 * 60;
-
 /** How long a record nothing needs is kept before the sweep deletes it. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
-
-/**
- * Returns the seconds a ref waits before it may be read again, after
- * `attemptCount` failed reads: 120 seconds, doubling, at most 6 hours.
- */
-export const computeRetryDelaySeconds = (attemptCount: number): number =>
-  Math.min(RETRY_CAP_SECONDS, RETRY_BASE_SECONDS * 2 ** Math.min(attemptCount, 16));
 
 /**
  * One thing a Connection read, ready to store. `kind` is the qualified kind.
@@ -123,7 +104,7 @@ export interface ObservedEntity {
   readonly observation: EntityObservation;
   readonly slots: EntitySlots;
   /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
-  readonly recognized?: RecognizedClaims;
+  readonly recognized?: RecognizedEvidence;
 }
 
 /** What a write changed, so it can be announced once the transaction commits. Both lists are sorted by ref, each once. */
@@ -618,7 +599,7 @@ interface EligibleCard extends RidingCard {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const claims = yield* relationClaimRepository;
+  const claims = yield* claimRepository;
   const tasks = yield* taskRepository;
   const signalLines = makeSignalLineReads(sql);
   const timeline = yield* timelineRepository;
@@ -731,6 +712,28 @@ const make = Effect.gen(function* () {
         entityIds: found.map((row) => uuidToString(row.id)),
         affectedTaskIds: yield* listTaskIdsLinkedTo(refs),
       });
+    });
+
+  /**
+   * Writes a `linked` change on the timelines of both ends of every new link
+   * in `changes`, in the caller's transaction. The one place a claim change
+   * reaches a timeline.
+   */
+  const recordNewLinks = (changes: ClaimChanges, now: string): Effect.Effect<void, SqlError> =>
+    timeline.recordLinks(changes.newLinks, now);
+
+  /**
+   * Applies what an operation on the claims changed (see `ClaimChanges`) to
+   * the rest of the domain, in the caller's transaction: writes the new links
+   * on the timelines and announces the refs whose claims changed, with the
+   * Tasks that link them. Does nothing when no claim changed. A write of
+   * observations does not call this: it announces through the changes it
+   * returns, together with the other things it changed.
+   */
+  const applyClaimChanges = (changes: ClaimChanges, now: string): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* recordNewLinks(changes, now);
+      if (changes.changedRefs.length > 0) yield* announceRefs(changes.changedRefs);
     });
 
   /**
@@ -895,32 +898,7 @@ const make = Effect.gen(function* () {
       // it arrived with, so the links it joins then are not news.
       const isBaseline = (ref: string): boolean =>
         before.entities.get(ref)?.completeness !== "full";
-      const relationChanged = new Set<string>();
-      const conflicts: Array<EntityConflict> = [];
-      const { writes, refsBelowBefore, linkedPeers, newLinks } = yield* claims.applySourceRelations(
-        {
-          connectionId: input.connectionId,
-          entries: observed.flatMap(({ observation }) =>
-            observation.relations === undefined
-              ? []
-              : [
-                  {
-                    fromRef: observation.ref,
-                    relations: observation.relations,
-                    observedRevision: observation.sourceRevision,
-                    inBaseline: isBaseline(observation.ref),
-                  },
-                ],
-          ),
-          now,
-        },
-      );
-      for (const [ref, relationWrite] of writes) {
-        if (relationWrite.changed) relationChanged.add(ref);
-        conflicts.push(...relationWrite.conflicts);
-      }
-      for (const peer of linkedPeers) relationChanged.add(peer);
-      const evidence = yield* claims.applyEvidenceClaims({
+      const claimChanges = yield* claims.applyObservedClaims({
         connectionId: input.connectionId,
         entries: observed.map(({ observation, recognized }) => ({
           fromRef: observation.ref,
@@ -932,9 +910,7 @@ const make = Effect.gen(function* () {
         })),
         now,
       });
-      for (const ref of evidence.changedRefs) relationChanged.add(ref);
-      // A pair a source joined is news on both ends.
-      yield* timeline.recordLinks([...newLinks, ...evidence.newLinks], now);
+      yield* recordNewLinks(claimChanges, now);
 
       const afterWrite = yield* readRefStates(touched, environment);
       const becameWorkRecord = touched.filter((ref) => {
@@ -1000,13 +976,13 @@ const make = Effect.gen(function* () {
               afterWrite.observations.get(ref) ?? [],
             ),
         ),
-        ...relationChanged,
+        ...claimChanges.changedRefs,
       ]);
       // The Tasks below a ref whose claims changed are found with the walk
       // from before the claims were removed, as well as the walk from now.
       const affectedTaskIds = yield* listAffectedTaskIds({
         changedRefs,
-        refsBelowBefore,
+        refsBelowBefore: claimChanges.refsBelowBefore,
       });
       return {
         entityIds: changedRefs.flatMap((ref) => {
@@ -1014,12 +990,7 @@ const make = Effect.gen(function* () {
           return entity === undefined ? [] : [uuidToString(entity.id)];
         }),
         affectedTaskIds,
-        conflicts: conflicts.sort(
-          (a, b) =>
-            a.fromRef.localeCompare(b.fromRef) ||
-            a.relation.localeCompare(b.relation) ||
-            a.toRef.localeCompare(b.toRef),
-        ),
+        conflicts: claimChanges.conflicts,
         signalIds,
       };
     });
@@ -1321,7 +1292,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    announceRefs,
+    applyClaimChanges,
 
     /**
      * Replaces what one Connection says about one kind, and returns what

@@ -34,9 +34,9 @@ import {
   type PendingClaim,
 } from "../../external-entities";
 import {
-  buildRecognizedTarget,
   buildScopedRecognition,
   EntityLookups,
+  findUrlTarget,
   PluginHost,
   type DecidedResolution,
   type RegisteredEventSource,
@@ -109,9 +109,7 @@ const recognizeAddresses = (now: string) =>
     const outcomes = new Map<string, ClaimResolutionOutcome | undefined>();
     const recognize = (url: string) =>
       Effect.gen(function* () {
-        const recognitions = yield* lookups.recognize(url);
-        const found = recognitions.find(({ recognition }) => recognition.form === "url");
-        const target = found === undefined ? undefined : buildRecognizedTarget(found);
+        const target = findUrlTarget(yield* lookups.recognize(url));
         if (target === undefined) return undefined;
         if (target.recognized === "ref") {
           return { kind: "found", ref: target.ref } satisfies ClaimResolutionOutcome;

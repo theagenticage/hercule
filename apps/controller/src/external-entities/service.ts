@@ -71,7 +71,7 @@ import {
 import { announceEntityChanges } from "./announce";
 import { buildActiveEntityKind } from "./entity-records";
 import { isPendingTarget } from "./pending-target";
-import { relationClaimRepository } from "./relation-claims";
+import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import {
   externalEntityRepository,
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
   const lookups = yield* EntityLookups;
   const ingest = yield* ExternalEntityIngest;
   const host = yield* PluginHost;
-  const claims = yield* relationClaimRepository;
+  const claims = yield* claimRepository;
 
   /** Reads the entity kinds and plugins that are active now. */
   const readCatalog: Effect.Effect<Catalog> = Effect.map(
@@ -943,15 +943,21 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const outcome = yield* claims.addPersonLink({ fromRef, toRef, actor, now });
-            if (outcome === "no-record") {
+            const changes = yield* claims.changePersonLink({
+              change: "link",
+              fromRef,
+              toRef,
+              actor,
+              now,
+            });
+            if (!changes.fromRefKnown) {
               return yield* Effect.fail(
                 createNotFoundError(
                   `Hercule holds no record of ${fromRef}, so it cannot be linked from.`,
                 ),
               );
             }
-            if (outcome === "added") yield* entities.announceRefs([fromRef, toRef]);
+            yield* entities.applyClaimChanges(changes, now);
           }),
         );
         return {};
@@ -968,12 +974,20 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
+        const now = yield* nowIso;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const result = yield* claims.removePersonLinks({ a: input.fromRef, b: input.toRef });
-            if (result.removed) yield* entities.announceRefs([input.fromRef, input.toRef]);
-            return result;
+            const changes = yield* claims.changePersonLink({
+              change: "unlink",
+              fromRef: input.fromRef,
+              toRef: input.toRef,
+            });
+            yield* entities.applyClaimChanges(changes, now);
+            return {
+              removed: changes.changedRefs.length > 0,
+              ...(changes.remaining === undefined ? {} : { remaining: changes.remaining }),
+            };
           }),
         );
       }),

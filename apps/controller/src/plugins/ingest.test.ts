@@ -69,7 +69,7 @@ const openConnection = (
     const source = (yield* host.listActiveEventSources())[0];
     if (source === undefined) return yield* Effect.die("the fixture registered no source");
     const ingest = yield* IngestLoops;
-    yield* ingest.open(source, connection);
+    yield* ingest.open(source, connection, host.listActiveEventSources);
     yield* advance(0);
     return { connection, ingest };
   });
@@ -296,11 +296,10 @@ describe("IngestLoops failures", () => {
             connections.one(connection.id),
           ),
         );
-        const source = (yield* Effect.flatMap(PluginHost, (host) =>
-          host.listActiveEventSources(),
-        ))[0];
+        const host = yield* PluginHost;
+        const source = (yield* host.listActiveEventSources())[0];
         if (source === undefined) return yield* Effect.die("the fixture registered no source");
-        yield* ingest.open(source, stored);
+        yield* ingest.open(source, stored, host.listActiveEventSources);
         yield* advance(0);
         const afterReopen = (yield* readStatus(connection)).status;
         yield* advance(1740);

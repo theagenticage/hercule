@@ -76,7 +76,6 @@ import {
 import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "../intake-settings";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
-import { EntityRecognizer, EntityRecognizerLayer } from "./entity-recognition";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
 import type { EntityObservations } from "./entity-observations";
@@ -520,7 +519,6 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const ingest = yield* IngestLoops;
-  const recognizer = yield* EntityRecognizer;
   const promotion = yield* PromotionState;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
@@ -886,9 +884,6 @@ const make = Effect.gen(function* () {
     Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
       sources.filter((source) => active.has(source.pluginId)),
     );
-  // The ingest contexts recognize web addresses over the plugins that are
-  // active at the moment of each call, and cannot depend on this host.
-  yield* recognizer.useActiveSources(listActiveEventSources);
 
   return {
     /**
@@ -1242,7 +1237,7 @@ const PluginIntakeLayer: Layer.Layer<PluginIntake, never, SqlClient.SqlClient | 
  * Ingest Executor, which the controller daemon provides.
  */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost | IngestLoops | ActivePlugins | PluginIntake | EntityRecognizer,
+  PluginHost | IngestLoops | ActivePlugins | PluginIntake,
   never,
   | SqlClient.SqlClient
   | Secrets
@@ -1254,13 +1249,7 @@ export const PluginHostLayer: Layer.Layer<
   | EntityObservations
   | PromotionState
 > = Layer.mergeAll(ActivePluginsLayer, PluginIntakeLayer).pipe(
-  Layer.provideMerge(
-    Layer.effect(PluginHost)(make).pipe(
-      Layer.provideMerge(IngestLoopsLayer),
-      // One recognizer for both: the ingest loops read it, the host fills it in.
-      Layer.provideMerge(EntityRecognizerLayer),
-    ),
-  ),
+  Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),
 );
 
 /**

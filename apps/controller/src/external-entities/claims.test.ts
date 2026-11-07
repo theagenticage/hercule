@@ -1,5 +1,5 @@
 /**
- * Tests the relation claims against a migrated database, with an invented
+ * Tests the claims module against a migrated database, with an invented
  * graph: a purchase order delivered in two rounds, both rounds under one site.
  *
  * - writing source claims: repeats, complete and partial reads, two reporters
@@ -15,7 +15,7 @@ import * as Statement from "effect/sql/Statement";
 import { MAX_CONTEXT_DEPTH, MAX_GRAPH_EDGES } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { relationClaimRepository } from "./relation-claims";
+import { claimRepository, type ObservedClaims } from "./claims";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const LATER = "2026-01-02T00:00:00.000Z";
@@ -34,7 +34,7 @@ const OTHER_ERP_ACCOUNT = "0190c000-0000-7000-8000-0000000000c2";
 /** Runs `body` on a fresh migrated database with two Connections of one plugin. */
 const run = <A>(
   body: (
-    claims: Effect.Success<typeof relationClaimRepository>,
+    claims: Effect.Success<typeof claimRepository>,
     sql: SqlClient.SqlClient,
   ) => Effect.Effect<A, unknown, SqlClient.SqlClient>,
 ) =>
@@ -52,12 +52,27 @@ const run = <A>(
           VALUES (${uuidFromString(id)}, 'acme-erp', 'acme-erp/erp', ${account}, ${account},
             ${account}, 'connected', '[]', '{}', ${AT}, ${AT})`;
       }
-      const claims = yield* relationClaimRepository;
+      const claims = yield* claimRepository;
       return yield* body(claims, sql);
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
-type Claims = Effect.Success<typeof relationClaimRepository>;
+type Claims = Effect.Success<typeof claimRepository>;
+
+/** Applies a batch of observations that report parents and peers only. */
+const applyBatch = (
+  claims: Claims,
+  connectionId: string,
+  entries: ReadonlyArray<
+    Pick<ObservedClaims, "fromRef" | "relations" | "observedRevision" | "inBaseline">
+  >,
+  now: string,
+) =>
+  claims.applyObservedClaims({
+    connectionId,
+    entries: entries.map((entry) => ({ ...entry, texts: undefined, recognized: undefined })),
+    now,
+  });
 
 /** Reports `partOf` and `linked` from `fromRef` as a complete (default) or partial read. */
 const report = (
@@ -73,9 +88,10 @@ const report = (
   } = {},
 ) =>
   Effect.map(
-    claims.applySourceRelations({
+    applyBatch(
+      claims,
       connectionId,
-      entries: [
+      [
         {
           fromRef,
           relations: { complete: options.complete ?? true, partOf, linked: options.linked ?? [] },
@@ -83,9 +99,13 @@ const report = (
           inBaseline: options.inBaseline ?? false,
         },
       ],
-      now: options.now ?? AT,
+      options.now ?? AT,
+    ),
+    (changes) => ({
+      // The ref's own claims changed: it is among the changed refs.
+      changed: changes.changedRefs.includes(fromRef),
+      conflicts: changes.conflicts,
     }),
-    ({ writes }) => writes.get(fromRef)!,
   );
 
 /** Reads the stored claims from `fromRef`, the way a test can see what was kept. */
@@ -159,9 +179,10 @@ describe("writing source claims", () => {
         yield* report(claims, ERP_ACCOUNT, ROUND_ONE, [ORDER]);
         yield* report(claims, ERP_ACCOUNT, SITE, [ROUND_ONE]);
         const apply = (partOf: ReadonlyArray<string>) =>
-          claims.applySourceRelations({
-            connectionId: ERP_ACCOUNT,
-            entries: [
+          applyBatch(
+            claims,
+            ERP_ACCOUNT,
+            [
               {
                 fromRef: ROUND_ONE,
                 relations: { complete: true, partOf, linked: [] },
@@ -169,8 +190,8 @@ describe("writing source claims", () => {
                 inBaseline: false,
               },
             ],
-            now: LATER,
-          });
+            LATER,
+          );
         const repeated = (yield* apply([ORDER])).refsBelowBefore;
         const changed = (yield* apply([])).refsBelowBefore;
         return { changed, repeated };
@@ -186,9 +207,10 @@ describe("writing source claims", () => {
       Effect.gen(function* () {
         yield* report(claims, ERP_ACCOUNT, ORDER, [ROUND_ONE, ROUND_TWO]);
         const partial = yield* report(claims, ERP_ACCOUNT, ORDER, [], { complete: false });
-        yield* claims.applySourceRelations({
-          connectionId: ERP_ACCOUNT,
-          entries: [
+        yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
             {
               fromRef: ORDER,
               relations: { complete: false, partOf: [], linked: [] },
@@ -196,8 +218,8 @@ describe("writing source claims", () => {
               inBaseline: false,
             },
           ],
-          now: LATER,
-        });
+          LATER,
+        );
         return { partial, rows: yield* readStored(sql, ORDER) };
       }),
     );
@@ -303,34 +325,30 @@ describe("writing source claims", () => {
         const count = (peers: number) =>
           Effect.gen(function* () {
             const statements: Array<string> = [];
-            yield* claims
-              .applySourceRelations({
-                connectionId: ERP_ACCOUNT,
-                entries: [
-                  {
-                    fromRef: `acme-erp:purchase-order:batch-${peers}`,
-                    relations: {
-                      complete: true,
-                      partOf: [],
-                      linked: Array.from(
-                        { length: peers },
-                        (_, n) => `acme-erp:site:${peers}-${n}`,
-                      ),
-                    },
-                    observedRevision: undefined,
-                    inBaseline: false,
+            yield* applyBatch(
+              claims,
+              ERP_ACCOUNT,
+              [
+                {
+                  fromRef: `acme-erp:purchase-order:batch-${peers}`,
+                  relations: {
+                    complete: true,
+                    partOf: [],
+                    linked: Array.from({ length: peers }, (_, n) => `acme-erp:site:${peers}-${n}`),
                   },
-                ],
-                now: AT,
-              })
-              .pipe(
-                Effect.provideService(Statement.CurrentTransformer, (statement) =>
-                  Effect.sync(() => {
-                    statements.push(statement.compile()[0]);
-                    return statement;
-                  }),
-                ),
-              );
+                  observedRevision: undefined,
+                  inBaseline: false,
+                },
+              ],
+              AT,
+            ).pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile()[0]);
+                  return statement;
+                }),
+              ),
+            );
             return statements.filter((statement) => statement.includes("EXISTS")).length;
           });
         return { few: yield* count(2), many: yield* count(20) };
@@ -344,9 +362,10 @@ describe("writing source claims", () => {
   it("leaves the pairs of a thing's baseline out of the new links", async () => {
     const result = await run((claims) =>
       Effect.gen(function* () {
-        const arriving = yield* claims.applySourceRelations({
-          connectionId: ERP_ACCOUNT,
-          entries: [
+        const arriving = yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
             {
               fromRef: ORDER,
               relations: { complete: true, partOf: [], linked: [SITE] },
@@ -354,8 +373,8 @@ describe("writing source claims", () => {
               inBaseline: true,
             },
           ],
-          now: AT,
-        });
+          AT,
+        );
         const later = yield* report(claims, OTHER_ERP_ACCOUNT, ROUND_ONE, [], {
           linked: [ORDER],
         });
@@ -373,9 +392,10 @@ describe("loops in part-of", () => {
     const { write, rows } = await run((claims, sql) =>
       Effect.gen(function* () {
         yield* report(claims, ERP_ACCOUNT, ROUND_TWO, [ROUND_ONE]);
-        const { writes: write } = yield* claims.applySourceRelations({
-          connectionId: ERP_ACCOUNT,
-          entries: [
+        const write = yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
             {
               fromRef: ROUND_ONE,
               relations: { complete: true, partOf: [ROUND_TWO], linked: [] },
@@ -389,8 +409,8 @@ describe("loops in part-of", () => {
               inBaseline: false,
             },
           ],
-          now: LATER,
-        });
+          LATER,
+        );
         const rows = yield* sql<{ readonly from_ref: string; readonly state: string }>`
           SELECT from_ref, state FROM external_entity_relation_claims`;
         return { write, rows };
@@ -398,8 +418,8 @@ describe("loops in part-of", () => {
     );
 
     expect(rows).toEqual([{ from_ref: ROUND_ONE, state: "current" }]);
-    expect(write.get(ROUND_ONE)).toEqual({ changed: true, conflicts: [] });
-    expect(write.get(ROUND_TWO)).toEqual({ changed: true, conflicts: [] });
+    expect(write.changedRefs).toEqual([ROUND_ONE, ROUND_TWO]);
+    expect(write.conflicts).toEqual([]);
   });
 
   it("stores a claim that closes a loop as conflicted, returns it, and applies the rest", async () => {

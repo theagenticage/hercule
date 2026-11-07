@@ -25,7 +25,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { NewLink } from "./claim-sql";
+import type { NewLink } from "./claim-changes";
 import {
   deriveAccess,
   findActiveKind,
