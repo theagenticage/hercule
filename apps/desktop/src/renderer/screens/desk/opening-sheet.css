@@ -1,0 +1,74 @@
+/* The sheet that opens out of a card, from the drawing's `.pane` (`css/pane.css`).
+   It floats over the page, which must not reflow, so its parent is positioned.
+   Its box and corner are written by `OpeningSheet` as it moves, and so is
+   `--sheet-progress`, from 0 to 1, for the parts a page draws to follow it. */
+.opening-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  pointer-events: none;
+  --sheet-progress: 0;
+}
+.opening-sheet {
+  position: absolute;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  --sheet-corner: 12px;
+}
+.opening-sheet[inert] {
+  pointer-events: none;
+}
+/* The sheet's own paper is a layer behind its words, so the colleague at its
+   top edge, one layer further back, stands behind it. */
+.opening-sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--sheet-corner);
+  background: var(--stock);
+  box-shadow: var(--h-carry);
+}
+.opening-sheet > .card-holder {
+  z-index: -2;
+}
+.opening-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--sheet-corner);
+}
+/* The words are laid out once at the open size, and the growing sheet reveals them. */
+.opening-words {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  display: flex;
+  flex-direction: column;
+}
+.opening-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The card's own words, which ride on the sheet and fade out. */
+.opening-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.opening-ghost .card-stock,
+.opening-ghost .card-holder,
+.opening-ghost .card-paws {
+  display: none;
+}
+/* The hint for the browser, only while the sheet moves. */
+.opening-layer.is-moving .opening-words {
+  will-change: transform, opacity;
+}

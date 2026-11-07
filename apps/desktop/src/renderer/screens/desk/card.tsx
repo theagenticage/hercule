@@ -21,11 +21,12 @@ export interface CardColleague {
 }
 
 /**
- * How the second line of a card reads: `plain` is a summary in `--muted`,
- * `question` is what a Thread asks, in `--you-ink`, and `failed` is what a
- * run broke, in ink after the failed mark.
+ * How the second line of a card reads: `summary` is the Task's summary in
+ * `--muted`, `pending` is "Writing a summary" in `--faint`, `question` is what
+ * a Thread asks, in `--you-ink`, and `failed` is what a run broke, in ink
+ * after the failed mark.
  */
-export type CardNowTone = "plain" | "question" | "failed";
+export type CardNowTone = "summary" | "pending" | "question" | "failed";
 
 /** What each watched title calls with whether it takes two lines. */
 const titleListeners = new Map<Element, (isLong: boolean) => void>();
@@ -91,8 +92,8 @@ function useIsTitleLong(hasSecondLine: boolean): {
  * classes `is-focus` and `is-carried`.
  *
  * - `title` is up to two lines. A long title leaves the second line one line.
- * - `now` is the second line, in the tone `nowTone`. A
- *   `failed` line gets the failed mark in front of it.
+ * - `now` is the second line, in the tone `nowTone` (`summary` when absent).
+ *   A `failed` line gets the failed mark in front of it.
  * - `meta` holds what sits at the bottom right beside the age, as the caller
  *   draws it, such as a `<time>`.
  * - `colleague` stands behind the top edge. Only a live Thread has one.
@@ -109,7 +110,7 @@ function useIsTitleLong(hasSecondLine: boolean): {
 export function Card({
   title,
   now,
-  nowTone,
+  nowTone: nowToneOrDefault,
   meta,
   colleague,
   landed,
@@ -119,12 +120,13 @@ export function Card({
 }: Omit<HTMLAttributes<HTMLDivElement>, "title" | "children"> & {
   readonly title: string;
   readonly now?: ReactNode;
-  readonly nowTone: CardNowTone;
+  readonly nowTone?: CardNowTone | undefined;
   readonly meta?: ReactNode;
   readonly colleague?: CardColleague | null;
   readonly landed: boolean;
   readonly ref?: Ref<HTMLDivElement>;
 }): JSX.Element {
+  const nowTone = nowToneOrDefault ?? "summary";
   const hasSecondLine = now !== null && now !== undefined;
   const { titleRef, isLong } = useIsTitleLong(hasSecondLine);
   const classes = ["desk-card", isLong ? "has-long-title" : null, className]
@@ -146,7 +148,7 @@ export function Card({
             {title}
           </p>
           {hasSecondLine && (
-            <p className={nowTone === "plain" ? "card-now" : `card-now card-${nowTone}`}>
+            <p className={nowTone === "summary" ? "card-now" : `card-now card-${nowTone}`}>
               {nowTone === "failed" && <FailedMark />}
               {now}
             </p>

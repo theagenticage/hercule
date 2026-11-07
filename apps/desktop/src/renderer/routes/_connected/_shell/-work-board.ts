@@ -22,6 +22,22 @@ export const workBoardQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Returns the query that reads what the details pane of one Task draws: the
+ * Task, its card with the summary, its Threads and its runs. Like every live
+ * read, it stays fresh until a push says otherwise. A `task` push that names
+ * the Task reads it again, a derived one too (see `buildQueryKeys`).
+ *
+ * The route's loader never starts it: the pane starts it when it opens, and
+ * draws its quiet bars until it ends.
+ */
+export const taskDetailQuery = (client: HerculeClient, taskId: string) =>
+  queryOptions({
+    queryKey: queryKeys.taskDetail(taskId),
+    queryFn: () => client.task.readDetail({ params: { id: taskId } }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the board while the window is visible. A hidden window starts no read:
  * a push that arrives meanwhile only marks the board out of date, and the
  * board is read once when the window shows again.

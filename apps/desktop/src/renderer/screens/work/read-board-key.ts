@@ -1,4 +1,4 @@
-import type { BoardWalk } from "@hercule/client-core/work";
+import type { BoardWalk, EndStage } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
@@ -11,6 +11,12 @@ export type BoardKeyCommand =
   | { readonly kind: "shift-stage"; readonly direction: -1 | 1 }
   | { readonly kind: "pick-stage"; readonly stage: BoardStage }
   | { readonly kind: "add" }
+  /** Marks the card Done (`D`) or Dropped (`⌫`). */
+  | { readonly kind: "end"; readonly stage: EndStage }
+  /** Asks what a new Thread on the card should do (`T`). */
+  | { readonly kind: "start-thread" }
+  /** Starts picking the card to merge the card into (`M`). */
+  | { readonly kind: "merge" }
   | { readonly kind: "fold-lane" }
   | { readonly kind: "fold-all-lanes" }
   | { readonly kind: "find" }
@@ -47,7 +53,9 @@ const LETTER_WALKS: Readonly<Record<string, BoardWalk>> = {
  * board does not use the key.
  *
  * A single key is one that types a character: a letter, a digit, a bracket,
- * `/` or `?`. Single keys are the only ones `hasSingleKeys` turns off. The
+ * `/` or `?`. Backspace and Delete count as single keys too, though they type
+ * nothing: they drop a card, and Display's switch is how a user makes sure a
+ * stray key never does. Single keys are the only ones `hasSingleKeys` turns off. The
  * arrows, Return, Space, Esc and ⌘Z stay on, because they act on the focused
  * element or are not typed characters. Shift only counts with the arrows (to
  * move a card) and with F (to fold every lane): Alt, and ⌘ or Ctrl other than
@@ -82,6 +90,9 @@ export const readBoardKey = (
   if (key === "Enter" || key === " ") return shiftKey ? null : { kind: "open-card" };
 
   if (!hasSingleKeys) return null;
+  if (key === "Backspace" || key === "Delete") {
+    return shiftKey ? null : { kind: "end", stage: "dropped" };
+  }
   if (key === "?") return { kind: "toggle-keys-sheet" };
   if (key === "/") return { kind: "find" };
   if (key === "[") return { kind: "walk", walk: "previousLane" };
@@ -92,6 +103,9 @@ export const readBoardKey = (
   if (letter === "f") return { kind: shiftKey ? "fold-all-lanes" : "fold-lane" };
   if (shiftKey) return null;
   if (letter === "a") return { kind: "add" };
+  if (letter === "d") return { kind: "end", stage: "done" };
+  if (letter === "t") return { kind: "start-thread" };
+  if (letter === "m") return { kind: "merge" };
   const letterWalk = LETTER_WALKS[letter];
   return letterWalk === undefined ? null : { kind: "walk", walk: letterWalk };
 };

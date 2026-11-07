@@ -22,14 +22,17 @@ import {
 import {
   chooseDropPlace,
   computeEdgeScrollSpeed,
+  findMergeCandidate,
   isSameDropPlace,
   toBoardPoint,
   type BoardGeometry,
   type BoardView,
 } from "./board-drag-geometry";
+import { playMergeIn } from "./board-flights";
 import { flipBoard } from "./flip-board";
 import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
+import { markMergeTarget, unmarkMergeTarget } from "./merge-target";
 import "./drag.css";
 
 /** How far the pointer moves, in pixels, before a press becomes a carry. Less than this is a click. */
@@ -59,6 +62,24 @@ const FASTEST_THROW = 2500;
 /** How long, in milliseconds, a click right after a carry is swallowed. */
 const CLICK_GUARD_MS = 50;
 
+/** How long, in milliseconds, the hand must rest over the middle of a card before the two are drawn together. */
+const MERGE_DWELL_MS = 1000;
+
+/** How far, in pixels, the pointer may drift from where it began to rest before the wait starts again. */
+const MERGE_STILL_DISTANCE = 6;
+
+/** Where the card in the hand docks on the card it merges into: this far across and down from its corner, in pixels. */
+const DOCK_ACROSS = 10;
+const DOCK_DOWN = 8;
+
+/** How the card in the hand looks when docked: smaller, tilted, and lifted less. */
+const DOCK_SCALE = 0.96;
+const DOCK_TILT = 1.6;
+const DOCK_LIFT = 0.6;
+
+/** How long, in milliseconds, a card that leaves its dock glides to the pointer instead of jumping to it. */
+const UNDOCK_GLIDE_MS = 200;
+
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
   /** The element that scrolls the board. It stays mounted for the life of the screen, so it holds the pointer. */
@@ -81,6 +102,14 @@ export interface BoardDragOptions {
   readonly moveCard: (move: CardMove, words: string, note?: string) => void;
   /** Shows `text` on the undo line, with no Undo, for a drop that sent nothing. */
   readonly say: (text: string) => void;
+  /**
+   * Merges the card `sourceCardId` into the card `targetCardId`: holds the
+   * merge for the undo line and shows it done, so the source card leaves the
+   * board. Called inside the drag's committed change (`flushSync`), so the
+   * board is measured after it. Returns `false`, and holds nothing, when
+   * either card is no longer on the board.
+   */
+  readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
   /**
    * Called with `true` when a card enters the hand and with `false` when it
    * leaves it. The screen keeps the value and draws it as the desk's
@@ -137,6 +166,23 @@ interface Carry {
   scrollFrame: number;
   /** The folded lane that is marked as the target, if one is. */
   markedLane: HTMLElement | null;
+  /** The card the carry is drawn into for a merge, or `null`. */
+  merge: MergeChoice | null;
+  /** The card whose middle the pointer is over, or `null`. A merge needs the pointer to rest there. */
+  hoverCardId: string | null;
+  /** Where the pointer began to rest over `hoverCardId`. */
+  rest: { readonly x: number; readonly y: number };
+  dwellTimer: number | undefined;
+  /** Whether Option (Alt) is held, which chooses the card at once. */
+  isAltHeld: boolean;
+  /** Until this time (`performance.now()`), a card that left its dock glides to the pointer. */
+  glideUntil: number;
+}
+
+/** The card a carry would merge into: its id and its element, which carries the marks. */
+interface MergeChoice {
+  readonly cardId: string;
+  readonly element: HTMLElement;
 }
 
 /** What a drop sends, with the words for the undo line and the note that follows them, if any. */
@@ -278,11 +324,110 @@ const createBoardDrag = (
     moveSlot(c, cell.element, before?.element ?? findCellFoot(cell.element));
   };
 
-  /** Works out which place the pointer points at, from the measurements, and shows it when it changed. */
+  /** Docks the card in the hand on the corner of the card it merges into, smaller and tilted. */
+  const dockOnMerge = (c: Carry): void => {
+    if (c.merge === null) return;
+    const place = measureLayoutRect(c.merge.element);
+    c.body.to(
+      {
+        x: place.left + DOCK_ACROSS - c.home.left,
+        y: place.top + DOCK_DOWN - c.home.top,
+        s: DOCK_SCALE,
+        r: DOCK_TILT,
+        l: DOCK_LIFT,
+      },
+      "hand",
+      { reduced: c.reduced },
+    );
+  };
+
+  /**
+   * Draws the card in the hand into the card `cardId` for a merge, or undoes
+   * it all at once when `cardId` is `null`: the card in the hand comes back
+   * to the pointer, the target settles, and the slot opens again.
+   */
+  const setMergeTarget = (c: Carry, cardId: string | null): void => {
+    if (c.merge?.cardId === cardId) return;
+    if (c.merge !== null) {
+      unmarkMergeTarget(c.merge.element);
+      c.merge = null;
+      c.slot.classList.remove("is-shut");
+      c.glideUntil = performance.now() + UNDOCK_GLIDE_MS;
+      c.body.to(
+        {
+          x: c.hand.x - c.grab.x - c.home.left,
+          y: c.hand.y - c.grab.y - c.home.top,
+          s: CARRY_SCALE,
+          l: 1,
+        },
+        "hand",
+        { reduced: c.reduced },
+      );
+    }
+    if (cardId === null) return;
+    const element = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
+    const card = readOptions().cards.find((each) => each.id === cardId);
+    if (element === null || card === undefined) return;
+    c.merge = { cardId, element };
+    c.slot.classList.add("is-shut");
+    markMergeTarget(element, card.title);
+    dockOnMerge(c);
+  };
+
+  /**
+   * Decides from where the pointer rests whether the carry is drawn into the
+   * card `candidateId` (the card whose middle it is over, or `null`). Only a
+   * hand held still over a card's middle means merge, or Option at once:
+   * passing over a card, or still deciding where to put the card, starts
+   * nothing. The wait starts again when the pointer moves more than
+   * `MERGE_STILL_DISTANCE` or reaches another card, and moving off the middle
+   * of the target undoes the merge at once.
+   */
+  const followMergeWish = (c: Carry, candidateId: string | null): void => {
+    const hasMoved = Math.hypot(c.hand.x - c.rest.x, c.hand.y - c.rest.y) > MERGE_STILL_DISTANCE;
+    const isSameWish = candidateId === c.hoverCardId && !hasMoved;
+    if (!isSameWish) {
+      c.hoverCardId = candidateId;
+      c.rest = { x: c.hand.x, y: c.hand.y };
+      window.clearTimeout(c.dwellTimer);
+    }
+    if (candidateId === null) {
+      setMergeTarget(c, null);
+    } else if (c.merge?.cardId === candidateId) {
+      // Drifting inside the middle of the target keeps it.
+    } else if (c.isAltHeld) {
+      setMergeTarget(c, candidateId);
+    } else if (!isSameWish) {
+      setMergeTarget(c, null);
+      c.dwellTimer = window.setTimeout(() => {
+        if (carry === c && c.hoverCardId === candidateId) setMergeTarget(c, candidateId);
+      }, MERGE_DWELL_MS);
+    }
+  };
+
+  /**
+   * Works out which place the pointer points at, from the measurements, and
+   * shows it when it changed. Over the middle of a card, the place is the
+   * one right after that card, and it is only opened when the slot is in
+   * another cell: the card must stay under the pointer.
+   */
   const choosePlace = (c: Carry): void => {
     const point = toBoardPoint(c.view, c.hand.x, c.hand.y);
-    const place = chooseDropPlace(c.geometry, point.x, point.y);
-    if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
+    const candidate = findMergeCandidate(c.geometry, point.x, point.y);
+    if (candidate === null) {
+      followMergeWish(c, null);
+      const place = chooseDropPlace(c.geometry, point.x, point.y);
+      if (place !== null && !isSameDropPlace(place, c.place)) showPlace(c, place);
+      return;
+    }
+    const { place } = candidate;
+    const isSlotInCell =
+      c.place?.kind === "cell" &&
+      place.kind === "cell" &&
+      c.place.laneId === place.laneId &&
+      c.place.stage === place.stage;
+    if (!isSlotInCell) showPlace(c, place);
+    followMergeWish(c, candidate.cardId);
   };
 
   /** Scrolls the board for as long as the card is held near its top or bottom edge. */
@@ -312,14 +457,23 @@ const createBoardDrag = (
     hand.x = x;
     hand.y = y;
     hand.movedAt = now;
-    c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
-    if (!c.reduced) {
+    if (c.merge !== null) {
+      // Drawn into a card, the card in the hand stays docked until the pointer leaves it.
+      dockOnMerge(c);
+    } else if (now < c.glideUntil) {
+      c.body.to({ x: x - c.grab.x - c.home.left, y: y - c.grab.y - c.home.top }, "hand", {
+        reduced: c.reduced,
+      });
+    } else {
+      c.body.follow(x - c.grab.x - c.home.left, y - c.grab.y - c.home.top);
+    }
+    if (!c.reduced && c.merge === null) {
       c.body.to({ r: limitSymmetric(hand.vx * LEAN_PER_SPEED, MOST_LEAN) }, "hand", {
         reduced: false,
       });
       window.clearTimeout(c.uprightTimer);
       c.uprightTimer = window.setTimeout(() => {
-        c.body.to({ r: 0 }, "hand", { reduced: false });
+        if (c.merge === null) c.body.to({ r: 0 }, "hand", { reduced: false });
       }, STILL_AFTER_MS);
     }
     choosePlace(c);
@@ -346,6 +500,7 @@ const createBoardDrag = (
   const endCarry = (c: Carry): void => {
     carry = null;
     window.clearTimeout(c.uprightTimer);
+    window.clearTimeout(c.dwellTimer);
     cancelAnimationFrame(c.scrollFrame);
     c.watcher.disconnect();
     scroller.removeEventListener("lostpointercapture", onLostCapture);
@@ -356,6 +511,7 @@ const createBoardDrag = (
 
   /** Takes the marks of a carry off the page. */
   const clearMarks = (c: Carry): void => {
+    if (c.merge !== null) unmarkMergeTarget(c.merge.element);
     delete c.root.dataset["dragStage"];
     if (c.markedLane !== null) delete c.markedLane.dataset["dropTarget"];
   };
@@ -394,6 +550,35 @@ const createBoardDrag = (
   };
 
   /**
+   * Lets go of the card over the card it is drawn into. The merge is held for
+   * the undo line, and the copy in the hand slides in under the card it
+   * merged into and fades. When either card has left the board meanwhile,
+   * nothing is merged: the card goes home and the undo line says so.
+   */
+  const mergeCarry = (c: Carry, target: MergeChoice): void => {
+    swallowNextClick(true);
+    const pose = readReleasePose(c);
+    endCarry(c);
+    const options = readOptions();
+    let isHeld = false;
+    flipBoard(scroller, "hand", () => {
+      c.slot.remove();
+      delete c.source.dataset["dragged"];
+      clearMarks(c);
+      flushSync(() => {
+        options.onCarryingChange(false);
+        isHeld = options.holdMerge(c.card.id, target.cardId);
+      });
+    });
+    if (isHeld) {
+      playMergeIn(scroller, c.ghost, target.cardId);
+      return;
+    }
+    landCard(scroller, c, pose, "travel", undefined);
+    options.say("A card left the board, so nothing was merged.");
+  };
+
+  /**
    * Lets go of the card where the slot is, and sends the move. The move is
    * built from the board the carry showed, then checked against the board as it
    * is now (`settleDropMove`): when the card it follows has gone it lands last
@@ -401,6 +586,10 @@ const createBoardDrag = (
    * gone nothing is sent and the line says why.
    */
   const dropCard = (c: Carry): void => {
+    if (c.merge !== null) {
+      mergeCarry(c, c.merge);
+      return;
+    }
     swallowNextClick(true);
     const options = readOptions();
     const { place } = c;
@@ -520,6 +709,12 @@ const createBoardDrag = (
       uprightTimer: undefined,
       scrollFrame: 0,
       markedLane: null,
+      merge: null,
+      hoverCardId: null,
+      rest: { x: event.clientX, y: event.clientY },
+      dwellTimer: undefined,
+      isAltHeld: event.altKey,
+      glideUntil: 0,
     };
     carry = c;
     followHand(c, event.clientX, event.clientY);
@@ -540,6 +735,8 @@ const createBoardDrag = (
       cancelCarry(false);
       return;
     }
+    // A card that is replaced by a new element lost its marks, so the wait starts again.
+    if (c.merge !== null && !c.merge.element.isConnected) setMergeTarget(c, null);
     remeasure(c);
   }
 
@@ -554,6 +751,7 @@ const createBoardDrag = (
     if (c === null) return;
     c.view = { ...c.view, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop };
     choosePlace(c);
+    dockOnMerge(c);
   }
 
   /** Runs when the system took the pointer away from the board other than by letting it go. */
@@ -563,7 +761,10 @@ const createBoardDrag = (
 
   function onPointerMove(event: PointerEvent): void {
     if (carry !== null) {
-      if (event.pointerId === carry.pointerId) followHand(carry, event.clientX, event.clientY);
+      if (event.pointerId === carry.pointerId) {
+        carry.isAltHeld = event.altKey;
+        followHand(carry, event.clientX, event.clientY);
+      }
       return;
     }
     if (press === null || event.pointerId !== press.pointerId) return;
@@ -595,12 +796,27 @@ const createBoardDrag = (
     }
   }
 
-  /** Sends the card home on Esc while a card is in the hand, and keeps the key from reaching anything else. No other key is handled. */
+  /**
+   * Sends the card home on Esc while a card is in the hand, and keeps the key
+   * from reaching anything else. Option chooses the card under the pointer to
+   * merge into at once. No other key is handled.
+   */
   function onKeyDown(event: KeyboardEvent): void {
-    if (carry === null || event.key !== "Escape") return;
+    if (carry === null) return;
+    if (event.key === "Alt") {
+      carry.isAltHeld = true;
+      choosePlace(carry);
+      return;
+    }
+    if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopImmediatePropagation();
     cancelCarry(false);
+  }
+
+  /** Notes that Option was let go. A card already chosen to merge into stays chosen until the pointer leaves it. */
+  function onKeyUp(event: KeyboardEvent): void {
+    if (carry !== null && event.key === "Alt") carry.isAltHeld = false;
   }
 
   /** Sends the card home when the window loses the focus: the pointer's release may never arrive. */
@@ -618,6 +834,7 @@ const createBoardDrag = (
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("blur", onWindowAway);
     document.addEventListener("visibilitychange", onVisibilityChange);
   }
@@ -627,6 +844,7 @@ const createBoardDrag = (
     window.removeEventListener("pointerup", onPointerUp);
     window.removeEventListener("pointercancel", onPointerCancel);
     window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("keyup", onKeyUp, true);
     window.removeEventListener("blur", onWindowAway);
     document.removeEventListener("visibilitychange", onVisibilityChange);
   }
@@ -681,6 +899,12 @@ const createBoardDrag = (
  * - A folded lane is a target as a whole, since it has no cells to put a slot
  *   in. A slot after the last card of a cell that hides some lands before the
  *   first hidden card.
+ * - Held still for a second over the middle 40% of another card, or with
+ *   Option held, the carry is drawn into that card to merge: the card in the
+ *   hand docks on its corner, and the target takes a ring and two labels
+ *   (whom it is merged into, and what stays). Moving more than 6px starts
+ *   the wait again, and moving off the middle undoes it at once. Letting go
+ *   calls `holdMerge`, and the copy slides in under the target.
  * - The page is scrolled at the top and bottom edges. The board is measured
  *   when a carry starts and when the page or the slot changes, never when the
  *   pointer moves or the board scrolls.

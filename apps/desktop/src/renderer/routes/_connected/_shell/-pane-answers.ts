@@ -1,0 +1,102 @@
+/**
+ * Answering a Thread's question from the details pane. The answer is not sent
+ * at once: it waits in the pending intents (`app/pending-intents.ts`) for the
+ * undo line, then goes out as `session.respondToQuestion`. Because the store
+ * lives in the controller and not in this screen, the send still happens when
+ * the user leaves Work meanwhile.
+ */
+import type { QueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@hercule/client-core";
+import {
+  buildPaneAnswers,
+  decideQuestionAnswers,
+  describeAnswerGiven,
+  type PaneAnswer,
+} from "@hercule/client-core/work";
+import type { TaskDetail } from "@hercule/contract";
+import type { CardMover } from "../../../app/card-mover";
+import { findHeldAnswer, type PendingIntents } from "../../../app/pending-intents";
+import type { Gesture } from "../../../app/undo-stack";
+
+/** What the screen lends the answer, to show its result and close the pane. */
+export interface PaneAnswerCallbacks {
+  /**
+   * Shows `text` on the undo line with Undo, and puts `gesture` on the undo
+   * stack. Returns a function that takes it off again.
+   */
+  readonly sayWithUndo: (text: string, gesture: Gesture<CardMover>) => () => void;
+  /** Shows `text` on the undo line with no Undo. */
+  readonly sayWithoutUndo: (text: string) => void;
+  /** Closes the details pane. */
+  readonly closePane: () => void;
+}
+
+/**
+ * Answers the question that the details of the Task `taskId` show with
+ * `answer`, a chip or the user's own words. The pane closes at once and the
+ * undo line offers Undo for as long as the answer is held.
+ *
+ * Does nothing when the question already has an answer held or being sent,
+ * which a second press or Return would otherwise answer twice. When the
+ * question is gone, or the pane cannot answer it, or the words are refused,
+ * the undo line says so and the pane stays open.
+ *
+ * An earlier answer to the same question that was not sent is replaced: the
+ * new answer is the one the user wants sent.
+ */
+export const answerFromPane = (
+  queryClient: QueryClient,
+  store: PendingIntents,
+  taskId: string,
+  answer: PaneAnswer,
+  callbacks: PaneAnswerCallbacks,
+): void => {
+  const detail = queryClient.getQueryData<TaskDetail>(queryKeys.taskDetail(taskId));
+  const question = detail === undefined ? null : decideQuestionAnswers(detail);
+  if (question?.kind !== "answerable") {
+    callbacks.sayWithoutUndo("That question is no longer open. Open the thread to see it.");
+    return;
+  }
+  if (findHeldAnswer(store.getSnapshot(), question.sessionId, question.requestId) !== undefined) {
+    return;
+  }
+  const built = buildPaneAnswers(question, answer);
+  if (built.kind === "refuse") {
+    if (built.notice !== null) callbacks.sayWithoutUndo(built.notice);
+    return;
+  }
+  for (const intent of store.getSnapshot()) {
+    if (
+      intent.kind === "answer" &&
+      intent.state === "failed" &&
+      intent.sessionId === question.sessionId &&
+      intent.requestId === question.requestId
+    ) {
+      store.discard(intent.intentId);
+    }
+  }
+  const intentId = store.hold({
+    kind: "answer",
+    taskId,
+    sessionId: question.sessionId,
+    requestId: question.requestId,
+    answers: built.answers,
+  });
+  callbacks.closePane();
+  const words = describeAnswerGiven(built.answers);
+  const takeOffStack = callbacks.sayWithUndo(`${words}.`, {
+    words,
+    undo: () => {
+      if (!store.undo(intentId)) return Promise.reject(new Error("It was already sent."));
+      return Promise.resolve(undefined);
+    },
+  });
+  // Once the answer is on its way, Undo can no longer stop it, so the gesture
+  // leaves the stack and the next Undo reaches the gesture before it.
+  const stopWatching = store.subscribe(() => {
+    const held = store.getSnapshot().find((intent) => intent.intentId === intentId);
+    if (held?.state === "pending") return;
+    stopWatching();
+    takeOffStack();
+  });
+};

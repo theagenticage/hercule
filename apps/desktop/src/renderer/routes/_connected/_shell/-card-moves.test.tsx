@@ -40,8 +40,9 @@ const BOARD = buildBoard(
   buildCard("c", { stage: "in-review" }),
 );
 
-/** A request the test answers when it chooses. */
+/** A request the test answers when it chooses. `via` is the operation it calls. */
 interface HeldMove {
+  readonly via: "move" | "update";
   readonly payload: unknown;
   readonly taskId: string;
   readonly accept: () => void;
@@ -49,27 +50,32 @@ interface HeldMove {
 }
 
 /**
- * Returns a client whose `task.move` waits for the test to accept or refuse
- * each request, and whose board read answers with `readBoard()`.
+ * Returns a client whose `task.move` and `task.update` wait for the test to
+ * accept or refuse each request, and whose board read answers with `readBoard()`.
  */
 const buildClient = (readBoard: () => WorkBoard | Promise<WorkBoard>) => {
   const held: HeldMove[] = [];
+  const hold =
+    (via: HeldMove["via"]) =>
+    ({ params, payload }: { params: { id: string }; payload: unknown }) =>
+      new Promise((resolve, reject) => {
+        held.push({
+          via,
+          payload,
+          taskId: params.id,
+          accept: () => {
+            resolve({});
+          },
+          refuse: (message) => {
+            reject(new Error(message));
+          },
+        });
+      });
   const client = {
     task: {
       queryBoard: () => Promise.resolve().then(readBoard),
-      move: ({ params, payload }: { params: { id: string }; payload: unknown }) =>
-        new Promise((resolve, reject) => {
-          held.push({
-            payload,
-            taskId: params.id,
-            accept: () => {
-              resolve({});
-            },
-            refuse: (message) => {
-              reject(new Error(message));
-            },
-          });
-        }),
+      move: hold("move"),
+      update: hold("update"),
     },
   } as unknown as HerculeClient;
   return { client, held };
@@ -101,6 +107,7 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(queryKeys.workBoard(), BOARD);
   const undoStack = createUndoStack<CardMover>();
+  const returning: Array<readonly [string, string]> = [];
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
@@ -110,7 +117,15 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
     const view = renderHook(
       () => {
         const { data } = useQuery(workBoardQuery(client));
-        return useCardMoves({ client, undoStack, serverBoard: data, scrollRef });
+        return useCardMoves({
+          client,
+          undoStack,
+          serverBoard: data,
+          scrollRef,
+          onCardReturning: (taskId, stage) => {
+            returning.push([taskId, stage]);
+          },
+        });
       },
       { wrapper },
     );
@@ -120,7 +135,7 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
   const view = mount();
   const findStage = (id: string, board = view.result.current.board) =>
     board?.cards.find((card) => card.id === id)?.stage;
-  return { ...view, held, client, queryClient, undoStack, findStage, mount };
+  return { ...view, held, client, queryClient, undoStack, findStage, mount, returning };
 };
 
 /** Waits until `count` requests have been sent. A move is sent a moment after it is made. */
@@ -746,6 +761,167 @@ describe("useCardMoves", () => {
       await waitFor(() => {
         expect(takePlayedSprings()).toEqual(["travel"]);
       });
+    });
+  });
+  describe("ending a card (Done and Drop)", () => {
+    /** Accepts the request at `index` and lets the queue go on. */
+    const accept = async (held: readonly HeldMove[], index: number): Promise<void> => {
+      await act(() => {
+        held[index]!.accept();
+        return Promise.resolve();
+      });
+    };
+
+    /** Returns the board the controller shows once it has ended `taskId`: the board without that Task. */
+    const withoutTask = (taskId: string): WorkBoard =>
+      buildBoard(...BOARD.cards.filter((card) => card.id !== taskId));
+
+    it("takes the card off the board at once, sends task.update, and offers Undo with a note", async () => {
+      const { result, held } = setUp();
+
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+
+      expect(listIds(result.current.board!.cards)).toEqual(["a", "c"]);
+      await waitForRequests(held, 1);
+      expect(held[0]).toMatchObject({ via: "update", taskId: "b", payload: { stage: "done" } });
+      expect(result.current.line).toMatchObject({
+        text: 'Marked "Task b" Done. It has left the board.',
+        canUndo: true,
+        isShown: true,
+      });
+      expect(takePlayedSprings()).toEqual(["hand"]);
+    });
+
+    it("says a dropped card was dropped", async () => {
+      const { result, held } = setUp();
+      act(() => {
+        result.current.endCard("a", "dropped");
+      });
+      await waitForRequests(held, 1);
+      expect(held[0]).toMatchObject({ via: "update", payload: { stage: "dropped" } });
+      expect(result.current.line.text).toBe('Dropped "Task a". It has left the board.');
+    });
+
+    it("writes the answered end into the cached board, so a late read cannot bring the card back", async () => {
+      const { result, held, queryClient } = setUp(() => withoutTask("b"));
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+      await waitForRequests(held, 1);
+
+      await accept(held, 0);
+
+      await waitFor(() => {
+        expect(listIds(queryClient.getQueryData<WorkBoard>(queryKeys.workBoard())!.cards)).toEqual([
+          "a",
+          "c",
+        ]);
+      });
+    });
+
+    it("puts the card back in its exact place with task.move and the old stage and afterTaskId", async () => {
+      const { result, held, returning } = setUp(() => withoutTask("b"));
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+      await waitForRequests(held, 1);
+      await accept(held, 0);
+
+      act(() => {
+        result.current.undoLastMove();
+      });
+      // The card is back on screen at once, right after a.
+      expect(listIds(result.current.board!.cards)).toEqual(["a", "b", "c"]);
+      expect(returning).toEqual([["b", "done"]]);
+      await waitForRequests(held, 2);
+      expect(held[1]).toMatchObject({
+        via: "move",
+        taskId: "b",
+        payload: { stage: "building", projectId: null, afterTaskId: "a" },
+      });
+      await accept(held, 1);
+      await waitFor(() => {
+        expect(result.current.line.text).toBe('Put back: Marked "Task b" Done.');
+      });
+    });
+
+    it("brings the card back, says why, and offers no Undo when the controller refuses the update", async () => {
+      const { result, held, returning } = setUp();
+      act(() => {
+        result.current.endCard("b", "dropped");
+      });
+      await waitForRequests(held, 1);
+
+      await act(() => {
+        held[0]!.refuse("Order is locked.");
+        return Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(listIds(result.current.board!.cards)).toEqual(["a", "b", "c"]);
+      });
+      expect(returning).toEqual([["b", "dropped"]]);
+      expect(result.current.line).toMatchObject({
+        text: 'Dropping "Task b" did not save, so the card came back: Order is locked. Try again.',
+        canUndo: false,
+      });
+      expect(takePlayedSprings()).toContain("travel");
+      // The refused update left nothing for Undo to reverse.
+      act(() => {
+        result.current.undoLastMove();
+      });
+      await waitFor(() => {
+        expect(result.current.line.text).toBe("Nothing to undo.");
+      });
+      expect(held).toHaveLength(1);
+    });
+
+    it("sends no undo when the update it would undo was refused", async () => {
+      const { result, held } = setUp();
+      act(() => {
+        result.current.endCard("b", "done");
+      });
+      act(() => {
+        result.current.undoLastMove();
+      });
+      await waitForRequests(held, 1);
+
+      await act(() => {
+        held[0]!.refuse("Order is locked.");
+        return Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(listIds(result.current.board!.cards)).toEqual(["a", "b", "c"]);
+      });
+      await settleNews();
+      expect(held).toHaveLength(1);
+    });
+
+    it("leaves a card that is not on the board alone", () => {
+      const { result, held } = setUp();
+      act(() => {
+        result.current.endCard("nobody", "done");
+      });
+      expect(held).toHaveLength(0);
+      expect(result.current.line.isShown).toBe(false);
+    });
+
+    it("sends an end after the moves made before it", async () => {
+      const { result, held } = setUp();
+      act(() => {
+        result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+        result.current.endCard("a", "done");
+      });
+      await waitForRequests(held, 1);
+      expect(held.map((each) => each.via)).toEqual(["move"]);
+
+      await accept(held, 0);
+
+      await waitForRequests(held, 2);
+      expect(held.map((each) => each.via)).toEqual(["move", "update"]);
     });
   });
 });

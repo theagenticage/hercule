@@ -72,6 +72,10 @@
   opacity: 0;
   transition: none;
 }
+/* The slot closes while a merge is chosen, but keeps its room, so nothing jumps. */
+.board-slot.is-shut {
+  opacity: 0;
+}
 
 /* ---------- The aisle ---------- */
 /* The stage the card would land in shows a faint column behind its cells. At
@@ -107,11 +111,12 @@
 }
 
 /* ---------- Landing ---------- */
-/* A card that landed in Landed gets a thin ring that fades away. The ring is a
-   pseudo-element that fades by opacity alone, so nothing repaints per frame.
+/* A card that landed in Landed, and a card that took part in a merge, get a
+   thin ring that fades away. The ring is a pseudo-element that fades by opacity alone, so nothing repaints per frame.
    Under Reduce motion it is never drawn. */
 @media (prefers-reduced-motion: no-preference) {
-  .desk-card[data-just-landed]::before {
+  .desk-card[data-just-landed]::before,
+  .desk-card[data-merged]::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -128,6 +133,69 @@
   to {
     opacity: 0;
   }
+}
+
+/* ---------- Merging ---------- */
+/* The card that is merged into stands above its neighbours, takes a ring, and
+   shows two labels on its edges: whom it is merged into on the top edge, and
+   what stays on the bottom edge. The hook sets `data-merge-target` and the two
+   labels' words as data attributes, outside React. The labels are
+   pseudo-elements, so they cost no element and take no pointer. */
+.desk-card[data-merge-target] {
+  z-index: 5;
+}
+.desk-card[data-merge-target] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--focus);
+}
+.desk-card[data-merge-target]::after,
+.desk-card[data-merge-target]::before {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--stock-carry);
+  box-shadow:
+    inset 0 0 0 1px var(--stock-rim),
+    var(--shadow-1);
+  font: var(--type-meta);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.desk-card[data-merge-target]::after {
+  content: attr(data-merge-label);
+  top: -12px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.desk-card[data-merge-target]::before {
+  content: attr(data-merge-keeps);
+  bottom: -12px;
+  color: var(--muted);
+}
+
+/* Picking the card to merge into by key: the card to merge dashes, and the
+   walk's ring is the accent. The ring is the walk's alone, so the target's
+   ring is not drawn twice. */
+.work-desk[data-merge-picking] .desk-card[data-merge-source] .card-stock {
+  outline: 1px dashed var(--faint);
+  outline-offset: 2px;
+}
+.work-desk[data-merge-picking] .desk-card:focus-visible:not([data-merge-source]) .card-stock {
+  outline-color: var(--accent);
+}
+.work-desk[data-merge-picking] .desk-card[data-merge-target] .card-stock {
+  box-shadow: var(--h-hover);
+}
+
+/* A card that took part in a merge stands above the card sliding in or out
+   under it, and wears the same thin ring that fades as a card that landed. */
+.desk-card[data-merged] {
+  z-index: 9;
 }
 
 @media (prefers-reduced-motion: reduce) {

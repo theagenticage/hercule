@@ -3,11 +3,12 @@ import { flushSync } from "react-dom";
 import {
   buildArrivalKey,
   holdBackBoardChanges,
+  type EndStage,
   type HeldChange,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
-import { fadeInCards, riseArrival } from "./board-flights";
+import { fadeInCards, returnCard, riseArrival } from "./board-flights";
 import { flipBoard } from "./flip-board";
 import { useHeldChanges } from "./use-held-changes";
 import "./motion.css";
@@ -26,6 +27,14 @@ export interface BoardReads {
    * user's hand is still.
    */
   readonly noteAddedTask: (taskId: string) => void;
+  /**
+   * Tells the board that the card of `taskId`, which was marked Done or
+   * Dropped (`how`), is about to be drawn again, because the user pressed Undo
+   * or the update was refused. The card is then let in at once and plays its
+   * way back (`returnCard`), instead of waiting for a still hand as a Task
+   * that arrived by itself does.
+   */
+  readonly noteReturnedTask: (taskId: string, how: EndStage) => void;
 }
 
 /** What the board has drawn, the read it was made from, and the changes released when it was made. */
@@ -128,6 +137,7 @@ export const useBoardReads = ({
 
   const latest = useRef<Inputs>({ board, serverBoard, released, picture });
   const ownTaskIds = useRef(new Set<string>());
+  const returnedTasks = useRef(new Map<string, EndStage>());
   useLayoutEffect(() => {
     latest.current = { board, serverBoard, released, picture };
   });
@@ -154,19 +164,25 @@ export const useBoardReads = ({
         return;
       }
       const shownIds = new Set(shown.board.cards.map((card) => card.id));
-      const isAddedByUser = next.board.cards.some(
-        (card) => !shownIds.has(card.id) && ownTaskIds.current.has(card.id),
+      const isCausedByUser = next.board.cards.some(
+        (card) =>
+          !shownIds.has(card.id) &&
+          (ownTaskIds.current.has(card.id) || returnedTasks.current.has(card.id)),
       );
-      const { born } = flipBoard(scroller, isAddedByUser ? "travel" : "self", commit);
+      const { born } = flipBoard(scroller, isCausedByUser ? "travel" : "self", commit);
       for (const card of born) {
         const id = card.dataset["cardId"];
         if (id === undefined) continue;
         const arrivalKey = buildArrivalKey(id);
-        if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
+        const returnedHow = returnedTasks.current.get(id);
+        if (returnedHow !== undefined) {
+          returnCard(scroller, card, returnedHow, card.dataset["stage"] ?? "");
+        } else if (ownTaskIds.current.has(id)) fadeInCards([card], "travel");
         else if (next.released.has(arrivalKey) && !shown.released.has(arrivalKey))
           riseArrival(card);
         else fadeInCards([card], "self");
       }
+      returnedTasks.current.clear();
     });
     return () => {
       isCancelled = true;
@@ -189,5 +205,10 @@ export const useBoardReads = ({
     setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
   }, []);
 
-  return { board: drawn, note, noteAddedTask };
+  const noteReturnedTask = useCallback((taskId: string, how: EndStage): void => {
+    returnedTasks.current.set(taskId, how);
+    setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
+  }, []);
+
+  return { board: drawn, note, noteAddedTask, noteReturnedTask };
 };

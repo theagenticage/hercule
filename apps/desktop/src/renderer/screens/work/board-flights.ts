@@ -1,8 +1,9 @@
 /**
  * The parts of the board's motion that are more than a card gliding to a new
  * place: copies of cards that fly into a count or a button, cards that grow
- * out of a count, and a Task that rises into its cell. Everything here moves
- * `transform` and `opacity` only, through the motion kernel, and does nothing
+ * out of a count, a Task that rises into its cell, a colleague whose head comes
+ * up behind a card, and a card that is marked Done or Dropped and the one that
+ * comes back. Everything here moves `transform` and `opacity` only, through the motion kernel, and does nothing
  * at all under Reduce motion except where a function says otherwise.
  */
 import {
@@ -266,6 +267,54 @@ export const fadeInCards = (cards: readonly HTMLElement[], spring: "travel" | "s
   }
 };
 
+/** How long after the head starts to rise the colleague's paws reach the edge on a hand-off, in milliseconds. */
+const HAND_OFF_PAWS_DELAY = 90;
+
+/** Returns the head and the paws of the colleague behind `card`; each is `null` when the card has none. */
+const findColleagueParts = (card: HTMLElement) => ({
+  head: card.querySelector<HTMLElement>(".card-head"),
+  paws: card.querySelector<HTMLElement>(".card-paws"),
+});
+
+/**
+ * Plays a hand-off on `card`: the colleague's head rises from behind the
+ * edge on `travel`, and its paws reach the edge 90ms later. Nothing around
+ * the card moves. Trying a failed run again and starting a Thread play it.
+ * Does nothing under Reduce motion, or when the card has no colleague.
+ */
+export const playHandOff = (card: HTMLElement): void => {
+  if (isMotionReduced()) return;
+  const { head, paws } = findColleagueParts(card);
+  if (head === null) return;
+  trackBody(head).set({ y: HEAD_DEPTH });
+  trackBody(head).to({ y: 0 }, "travel");
+  if (paws === null) return;
+  trackBody(paws).set({ o: 0 });
+  trackBody(paws).to({ o: 1 }, "travel", { delay: HAND_OFF_PAWS_DELAY });
+};
+
+/**
+ * Plays a hand-off backwards on `card`, for Undo of Try again: the paws leave
+ * the edge on `travel`, and the head sinks behind the edge 90ms later. Each
+ * part hands its element back to the stylesheet when it is done, so the card
+ * then shows the colleague the board gives it (the plaster, once the board
+ * shows the failure again). Does nothing under Reduce motion, or when the card
+ * has no colleague.
+ */
+export const playHandOffBack = (card: HTMLElement): void => {
+  if (isMotionReduced()) return;
+  const { head, paws } = findColleagueParts(card);
+  if (head === null) return;
+  const handBack = (part: HTMLElement) => () => {
+    findBody(part)?.clear();
+  };
+  if (paws !== null) trackBody(paws).to({ o: 0 }, "travel", { done: handBack(paws) });
+  trackBody(head).to({ y: HEAD_DEPTH }, "travel", {
+    delay: HAND_OFF_PAWS_DELAY,
+    done: handBack(head),
+  });
+};
+
 /**
  * Lifts a Task that arrived into its cell: it rises from 12px down and 0.97
  * scale with opacity from 0 on `self`. 620ms later its colleague's head comes
@@ -295,4 +344,164 @@ export const riseArrival = (card: HTMLElement): void => {
     card.removeEventListener("animationend", clearRing);
   };
   card.addEventListener("animationend", clearRing);
+};
+
+/** How a card looks once it is dropped: 12px lower, a little smaller, tilted, and gone. */
+const SUNK = { y: 12, s: 0.97, r: -1.6, o: 0 } as const;
+
+/**
+ * Returns the element a card that is marked Done flies into: the count of its
+ * stage in the stage headers, or the stage's name when the count is not drawn
+ * (a stage with no card left has none).
+ */
+const findStageCount = (scroller: HTMLElement, stage: string): Element | null =>
+  scroller.querySelector(`.board-rule [data-stage="${stage}"] .desk-heading-count`) ??
+  scroller.querySelector(`.board-rule [data-stage="${stage}"]`);
+
+/**
+ * Makes a copy of the card `cardId` to fly away while the real card is gone.
+ * Call it before the change that removes the card, and give the copy to
+ * `sendLeavingCard` after it. Returns `null` when the card is out of view or
+ * not on the board, and under Reduce motion: the card then just goes.
+ */
+export const launchLeavingCard = (scroller: HTMLElement, cardId: string): HTMLElement | null => {
+  const card = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
+  return card === null ? null : (launchFlights(scroller, [card], 0)[0]?.ghost ?? null);
+};
+
+/**
+ * Sends the copy of a card that has left the board on its way, on `travel`.
+ * A card marked Done shrinks into the count of `stage`, the stage it was in
+ * (call it after the change, so the count has its new number). A dropped card
+ * sinks 12px, tilts a little and fades where it stood.
+ */
+export const sendLeavingCard = (
+  scroller: HTMLElement,
+  ghost: HTMLElement,
+  how: "done" | "dropped",
+  stage: string,
+): void => {
+  if (how === "done") {
+    flyFlightsTo([{ ghost, delay: 0 }], () => findStageCount(scroller, stage), INTO_COUNT);
+    return;
+  }
+  trackBody(ghost).to(SUNK, "travel", {
+    done: () => {
+      removeFlight(ghost);
+    },
+  });
+};
+
+/**
+ * Plays the way a card left, backwards, on `card`, the element that has just
+ * come back: out of the count of its `stage` after a Done, and up from 12px
+ * lower, tilted, after a Drop. Under Reduce motion the card fades in where it
+ * stands.
+ */
+export const returnCard = (
+  scroller: HTMLElement,
+  card: HTMLElement,
+  how: "done" | "dropped",
+  stage: string,
+): void => {
+  const body = trackBody(card);
+  const count = how === "done" ? findStageCount(scroller, stage) : null;
+  if (count === null) {
+    body.set(SUNK);
+    body.to({ y: 0, s: 1, r: 0, o: 1 }, "travel");
+    return;
+  }
+  const from = computeCenter(count.getBoundingClientRect());
+  const to = computeCenter(measureLayoutRect(card));
+  body.set({ x: from.x - to.x, y: from.y - to.y, s: 0.1, o: 0 });
+  body.to({ x: 0, y: 0, s: 1, o: 1 }, "travel");
+};
+
+/** How long after the merged card starts to slide in the card it merged into settles, in milliseconds. */
+const MERGE_SETTLE_DELAY = 60;
+
+/** How far the card merged into swells before it settles. */
+const MERGE_SWELL = 1.03;
+
+/** How long the thin ring on a card that took part in a merge stays on it, in milliseconds. A little longer than the ring's fade. */
+const MERGED_RING_MS = 620;
+
+/**
+ * Marks `card` as having taken part in a merge for the length of the ring's
+ * fade (`data-merged`). The card stands above its neighbours meanwhile, so the
+ * card sliding in or out passes under it.
+ */
+const markMerged = (card: HTMLElement): void => {
+  card.dataset["merged"] = "";
+  window.setTimeout(() => {
+    delete card.dataset["merged"];
+  }, MERGED_RING_MS);
+};
+
+/**
+ * Plays a merge on the board: `ghost`, the copy of the card that merged away,
+ * slides to the card `targetCardId` and fades on `hand`. 60ms later that card
+ * settles from 1.03 to 1 on `hand`, and a thin ring on it fades. Call it after
+ * the change that hid the merged card, so the target stands in its new place.
+ * Removes `ghost` (and its layer, if it is the last copy in it) when done.
+ * Under Reduce motion the copy just fades and the target does not swell.
+ */
+export const playMergeIn = (
+  scroller: HTMLElement,
+  ghost: HTMLElement,
+  targetCardId: string,
+): void => {
+  const target = scroller.querySelector<HTMLElement>(`[data-card-id="${targetCardId}"]`);
+  const body = trackBody(ghost);
+  if (target === null) {
+    body.to({ s: 0.97, o: 0 }, "hand", {
+      done: () => {
+        removeFlight(ghost);
+      },
+    });
+    return;
+  }
+  const from = measureLayoutRect(ghost);
+  const to = measureLayoutRect(target);
+  body.to({ x: to.left - from.left, y: to.top - from.top, s: 0.97, o: 0 }, "hand", {
+    done: () => {
+      removeFlight(ghost);
+    },
+  });
+  markMerged(target);
+  if (isMotionReduced()) return;
+  const targetBody = trackBody(target);
+  targetBody.set({ s: MERGE_SWELL });
+  targetBody.to({ s: 1 }, "hand", {
+    delay: MERGE_SETTLE_DELAY,
+    done: () => {
+      targetBody.clear();
+    },
+  });
+};
+
+/** How small the card is when it starts to come out from under the card it merged into. */
+const MERGE_OUT_SCALE = 0.94;
+
+/**
+ * Plays a merge backwards on `card`, the element that has just come back: it
+ * comes out from under the card it merged into, whose place was `from` before
+ * the change, and grows and fades in on `hand`. Under Reduce motion it just
+ * fades in where it stands.
+ */
+export const playMergeOut = (
+  card: HTMLElement,
+  from: DOMRect,
+  target: HTMLElement | null,
+): void => {
+  const place = measureLayoutRect(card);
+  const body = trackBody(card);
+  body.set({
+    x: from.left - place.left,
+    y: from.top - place.top,
+    s: MERGE_OUT_SCALE,
+    o: 0,
+  });
+  body.to({ x: 0, y: 0, s: 1, o: 1 }, "hand");
+  if (target !== null) markMerged(target);
 };

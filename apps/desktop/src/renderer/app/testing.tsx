@@ -1759,14 +1759,16 @@ export interface LiveStub {
    * Sends the app an invalidation on its subscription to `topic`, naming `ids`
    * as `kind` (updated when left out). `conversationIds` maps each session a `session` push names to
    * its conversation, as the controller sends it; leave it out to play a
-   * controller that does not send it. Throws when the app has no socket or no
-   * subscription to `topic`.
+   * controller that does not send it. `derived` marks a `task` push as one the
+   * Task's sessions, runs or summary caused, with no change to its own record.
+   * Throws when the app has no socket or no subscription to `topic`.
    */
   readonly pushInvalidation: (
     topic: MutableLiveTopic,
     ids?: readonly string[],
     conversationIds?: Readonly<Record<string, string | null>>,
     kind?: "created" | "updated" | "deleted",
+    derived?: boolean,
   ) => void;
   /**
    * Sends the app stored rows on its subscription to `session:<sessionId>:stream`,
@@ -1865,12 +1867,13 @@ const buildTestContext = async (
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
     isConnected: () => sockets.at(-1)?.readyState === 1,
-    pushInvalidation: (topic, ids = [], conversationIds, kind = "updated") => {
+    pushInvalidation: (topic, ids = [], conversationIds, kind = "updated", derived = false) => {
       readSocket().push(topic, {
         _tag: "invalidate",
         ids,
         kind,
         ...(conversationIds === undefined ? {} : { conversationIds }),
+        ...(derived ? { derived: true } : {}),
       });
     },
     pushStreamRows: (sessionId, rows, subagentId) => {

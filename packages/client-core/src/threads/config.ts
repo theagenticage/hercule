@@ -60,6 +60,11 @@ export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 export interface MessageDraft {
   readonly text: string;
   readonly attachments: readonly ShelfItem[];
+  /**
+   * The Task a start card pointed the message at. A Draft Thread that starts
+   * with it joins that Task, instead of getting one of its own.
+   */
+  readonly taskId?: string;
 }
 
 /**

@@ -112,10 +112,22 @@ describe("the Work board's key", () => {
     }
   });
 
-  it("is the only read of a derived task push, which leaves Tracking and Your work alone", () => {
-    for (const ids of [[], ["t1"]]) {
-      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [queryKeys.workBoard()]);
-    }
+  it("is, with the named Tasks' details, the only read of a derived task push, which leaves Tracking and Your work alone", () => {
+    assert.deepStrictEqual(buildQueryKeys("task", [], undefined, true), [queryKeys.workBoard()]);
+    assert.deepStrictEqual(buildQueryKeys("task", ["t1", "t2"], undefined, true), [
+      queryKeys.workBoard(),
+      queryKeys.taskDetail("t1"),
+      queryKeys.taskDetail("t2"),
+    ]);
+  });
+
+  it("reads a Task's detail again on an ordinary task push, with or without ids", () => {
+    assert.isTrue(
+      buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
+    );
+    assert.isTrue(
+      buildQueryKeys("task", []).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
+    );
   });
 });
 

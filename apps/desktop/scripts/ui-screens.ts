@@ -230,6 +230,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
+    name: "work-details",
+    path: "work.html?details",
+    contentSelector: ".opening-sheet .task-pane-title",
+    nonTextParts: [],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",

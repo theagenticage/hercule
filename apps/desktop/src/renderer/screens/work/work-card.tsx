@@ -25,12 +25,16 @@ const buildColleague = (card: WorkCard, isStill: boolean): CardColleague | null 
 };
 
 /**
- * Renders one card of the board: its title, what it asks or what broke on the
- * second line, its age, and the colleague behind its top edge. A card in
- * Landed with nothing to say is only words.
+ * Renders one card of the board: its title, on the second line what broke,
+ * what it asks, what the user answered while that answer is held, or else its
+ * summary ("Writing a summary" until there is one),
+ * its age, and the colleague behind its top edge. A card in
+ * Landed is only words.
  *
  * - `isTabStop` makes this the one card the Tab key leads onto. The arrows
  *   walk the rest from there, so every other card has `tabIndex` -1.
+ * - `canWriteSummaries` is whether Text Generation can run. When it cannot, a
+ *   card with no summary has no second line (see `chooseCardSecondLine`).
  * - `onOpen` is called with the card when it is pressed: it opens the card's
  *   newest Thread.
  * - `onFocus` is called with the card's id when it takes the focus.
@@ -49,20 +53,22 @@ export const WorkCardView = memo(function WorkCardView({
   card,
   isTabStop,
   isStill,
+  canWriteSummaries,
   onOpen,
   onFocus,
 }: {
   readonly card: WorkCard;
   readonly isTabStop: boolean;
   readonly isStill: boolean;
+  readonly canWriteSummaries: boolean;
   readonly onOpen: (card: WorkCard) => void;
   readonly onFocus: (cardId: string) => void;
 }): JSX.Element {
   const age = useDeskAgeLabel(card.lastActivityAt, true);
   const reading = useClockValue(card.lastActivityAt, true, findNextDeskAgeChange, (now) =>
-    describeCardForReader(card, now),
+    describeCardForReader(card, now, canWriteSummaries),
   );
-  const secondLine = chooseCardSecondLine(card);
+  const secondLine = chooseCardSecondLine(card, canWriteSummaries);
   return (
     <Card
       role="button"
@@ -72,7 +78,7 @@ export const WorkCardView = memo(function WorkCardView({
       data-stage={card.stage}
       title={card.title}
       now={secondLine?.text}
-      nowTone={secondLine?.tone ?? "plain"}
+      nowTone={secondLine?.tone}
       colleague={buildColleague(card, isStill)}
       landed={card.stage === "landed" && !isLoudCard(card)}
       meta={<time dateTime={card.lastActivityAt}>{age}</time>}

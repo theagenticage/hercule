@@ -16,6 +16,7 @@ import {
   walkBoard,
   type ArrangedLane,
   type CardMove,
+  type EndStage,
   type WalkStop,
   type WorkProject,
 } from "@hercule/client-core/work";
@@ -24,6 +25,7 @@ import { isTextField } from "../../app/text-field";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { keepCardInView } from "./keep-in-view";
 import { readBoardKey } from "./read-board-key";
+import type { MergePick } from "./use-merge-pick";
 import type { WorkView } from "./use-work-view";
 
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
@@ -33,7 +35,7 @@ const POINTER_MOVE_MIN = 4;
  * What a key press can land on without being the board's: a menu or popover, a
  * dialog, and the Add to Work sheet. They keep their own keys.
  */
-const OVERLAY_SELECTOR = "[popover], dialog, [role='menu'], .side-sheet";
+const OVERLAY_SELECTOR = "[popover], dialog, [role='menu'], .side-sheet, .opening-sheet";
 
 /** Matches a popover or a dialog that is open right now, which closes itself on Esc. */
 const OPEN_OVERLAY_SELECTOR = 'dialog[open], [popover="auto"]:popover-open';
@@ -63,10 +65,22 @@ export interface BoardKeysInput {
   /** The Find box's input. */
   readonly findRef: RefObject<HTMLInputElement | null>;
   readonly onOpenCard: (card: WorkCard) => void;
+  /** Marks the card Done or Dropped (`D`, `⌫`). */
+  readonly onEndCard: (card: WorkCard, stage: EndStage) => void;
+  /** Asks what a new Thread on the card should do (`T`). */
+  readonly onStartThread: (card: WorkCard) => void;
+  /**
+   * The merge by key: `M` picks the card to merge, the arrows walk to the card
+   * to merge it into, Return merges and Esc cancels. While a card is picked
+   * no other key means anything.
+   */
+  readonly mergePick: MergePick;
   /** Opens Add to Work in the lane `laneId`: the lane of the current card, or its focused head. `undefined` when the keys have none. */
   readonly onAdd: (laneId: string | undefined) => void;
   /** The Add to Work sheet: whether it is open, and a way to close it. */
   readonly addSheet: { readonly isOpen: boolean; readonly close: () => void };
+  /** The Task's details sheet: whether it is open, and a way to close it. */
+  readonly taskPane: { readonly isOpen: boolean; readonly close: () => void };
 }
 
 /** What `useBoardKeys` gives back to the screen. */
@@ -94,7 +108,7 @@ export interface BoardKeys {
  *   uses that one card. While focus is on a lane's head there is no card with
  *   focus, so A and F act on that lane unless the pointer rests on a card.
  * - Esc steps back one thing at a time: the keys sheet, the Add to Work sheet,
- *   the Find text, then the filter. An open menu closes itself first.
+ *   the details sheet, the Find text, then the filter. An open menu closes itself first.
  * - While a card is in the hand of a drag, no key does anything here.
  */
 export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
@@ -140,6 +154,13 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     hoveredCardId.current = null;
     element.focus({ preventScroll: true });
     if (scrollRef.current !== null) keepCardInView(scrollRef.current, element);
+    // With the details open, walking to a card shows that Task's details.
+    // While a card is picked to merge, walking only chooses the card to merge into.
+    const card =
+      input.taskPane.isOpen && input.mergePick.sourceId === null
+        ? cards.find((each) => each.id === cardId)
+        : undefined;
+    if (card !== undefined) input.onOpenCard(card);
     return true;
   };
 
@@ -185,10 +206,14 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
 
   const stepBack = (event: KeyboardEvent): void => {
     if (document.querySelector(OPEN_OVERLAY_SELECTOR) !== null) return;
-    if (isKeysSheetOpen) {
+    if (input.mergePick.sourceId !== null) {
+      input.mergePick.cancel();
+    } else if (isKeysSheetOpen) {
       setKeysSheetOpen(false);
     } else if (input.addSheet.isOpen) {
       input.addSheet.close();
+    } else if (input.taskPane.isOpen) {
+      input.taskPane.close();
     } else if (view.findText !== "") {
       view.setFindText("");
     } else if (isFilterOn(view.filter)) {
@@ -231,6 +256,15 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         ? headLaneId
         : chooseLaneId(currentCard, new Set(projects.map((project) => project.id)));
 
+    // While a card is picked to merge, only walking, Return and Esc mean anything.
+    if (
+      input.mergePick.sourceId !== null &&
+      command.kind !== "walk" &&
+      command.kind !== "open-card"
+    ) {
+      return;
+    }
+
     switch (command.kind) {
       case "walk": {
         event.preventDefault();
@@ -265,6 +299,21 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       case "add":
         event.preventDefault();
         input.onAdd(currentLaneId);
+        return;
+      case "end":
+        if (currentCard === undefined) return;
+        event.preventDefault();
+        input.onEndCard(currentCard, command.stage);
+        return;
+      case "merge":
+        if (currentCard === undefined) return;
+        event.preventDefault();
+        input.mergePick.start(currentCard);
+        return;
+      case "start-thread":
+        if (currentCard === undefined) return;
+        event.preventDefault();
+        input.onStartThread(currentCard);
         return;
       case "fold-lane": {
         if (currentLaneId === undefined) return;

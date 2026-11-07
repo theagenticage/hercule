@@ -24,7 +24,8 @@ const StarterThreads = lazy(() =>
  * place, see `StarterThreads`.
  *
  * A click hands the card's `message`, one line that points the thread's
- * agent at the task, to `onStart`, which adds it to the Message Draft. The
+ * agent at the task, and the task's id to `onStart`, which adds the message to
+ * the Message Draft and joins the thread to the task. The
  * cards render nothing until the tasks are read, so a failed read leaves the
  * draft as it would be without them.
  */
@@ -37,7 +38,7 @@ export function StartCards({
   readonly projectId: string;
   readonly projectName: string;
   readonly hasRepository: boolean;
-  readonly onStart: (message: string) => void;
+  readonly onStart: (message: string, taskId?: string) => void;
 }): JSX.Element | null {
   const { controller } = useRouteContext({ from: "/_connected" });
   const tasks = useQuery(startTasksQuery(controller.client, projectId)).data;
@@ -66,7 +67,7 @@ export function StartCards({
             type="button"
             className="start"
             onClick={() => {
-              onStart(card.message);
+              onStart(card.message, card.taskId);
             }}
           >
             <span className="start-top">

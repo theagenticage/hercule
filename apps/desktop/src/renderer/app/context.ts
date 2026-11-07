@@ -17,6 +17,7 @@ import {
 import type { Bridge } from "../../ipc/bridge";
 import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
+import { createPendingIntentsHolder, type PendingIntentsHolder } from "./pending-intents";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
@@ -68,6 +69,13 @@ export interface SavedController {
    * `createAppRouter`). Nothing is saved.
    */
   readonly undoStack: UndoStack<CardMover>;
+  /**
+   * The answers the user gave from the Work pane and the app holds back for the
+   * undo line before it sends them. They belong to this controller and this
+   * user, so the store opens once the shell knows the user, and the router
+   * closes it when the user signs out (see `createAppRouter`).
+   */
+  readonly pendingIntents: PendingIntentsHolder;
 }
 
 export interface RouterContext {
@@ -104,6 +112,7 @@ const buildSavedController = (
     }),
     threadCopies: createThreadCopies(url),
     undoStack: createUndoStack(),
+    pendingIntents: createPendingIntentsHolder(url, localStorage),
   };
 };
 

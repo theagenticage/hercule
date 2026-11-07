@@ -35,6 +35,7 @@ export function BoardCell({
   cell,
   tabStopCardId,
   isStill,
+  canWriteSummaries,
   onToggleCell,
   onOpenCard,
   onFocusCard,
@@ -45,6 +46,7 @@ export function BoardCell({
   readonly cell: ArrangedLaneCell;
   readonly tabStopCardId: string | null;
   readonly isStill: boolean;
+  readonly canWriteSummaries: boolean;
   readonly onToggleCell: (cellId: string) => void;
   readonly onOpenCard: (card: WorkCard) => void;
   readonly onFocusCard: (cardId: string) => void;
@@ -66,6 +68,7 @@ export function BoardCell({
           card={card}
           isTabStop={card.id === tabStopCardId}
           isStill={isStill}
+          canWriteSummaries={canWriteSummaries}
           onOpen={onOpenCard}
           onFocus={onFocusCard}
         />

@@ -9,6 +9,7 @@
  */
 export * from "./arrange-cell";
 export * from "./arrange-lanes";
+export * from "./card-change";
 export * from "./card-move";
 export * from "./card-pose";
 export * from "./card-words";
@@ -16,6 +17,14 @@ export * from "./describe-card-move";
 export * from "./drop-move";
 export * from "./facets";
 export * from "./find";
+export * from "./held-answers";
 export * from "./hold-back-board";
 export * from "./lanes";
+export * from "./merge";
+export * from "./question-answers";
+export * from "./summary-standing";
+export * from "./task-actions";
+export * from "./task-thread";
+export * from "./thread-changes";
+export * from "./try-again";
 export * from "./walk";

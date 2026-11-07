@@ -23,7 +23,6 @@ export function FirstRun({ onStartThread }: { readonly onStartThread: () => void
             className="board-ghost"
             title="Your first Task lands here"
             now="It keeps its place, and moves when the work does."
-            nowTone="plain"
             colleague={{ look: HERCULE_LOOK, pose: "waiting", seed: "hercule", still: true }}
             landed={false}
           />

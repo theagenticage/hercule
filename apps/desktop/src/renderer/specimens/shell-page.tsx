@@ -870,6 +870,20 @@ const seedQueryCache = (
   }
   if (work !== undefined) {
     queryClient.setQueryData(queryKeys.workBoard(), work.board);
+    for (const detail of work.details ?? []) {
+      queryClient.setQueryData(queryKeys.taskDetail(detail.task.id), detail);
+    }
+    if (work.details !== undefined) {
+      // The details say whether summaries are on.
+      queryClient.setQueryData(controllerQuery(client).queryKey, {
+        id: "01a06d02-7800-7000-8000-000000000001",
+        publicKey: "controller-key",
+        version: "0.4.2",
+        defaultRunnerId: null,
+        localRunnerId: null,
+        textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+      });
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1755,16 +1769,25 @@ export async function mountWorkflowsSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Work board open: the main pane shows the app's real Work screen,
  * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
- * folded, as if the user had folded them. Returns once a card is in the
- * document. Fails when the page has no `#root`, draws no sidebar row and no
+ * folded, as if the user had folded them, and the details of `openTaskId` open
+ * beside it when one is given (`work.details` holds what they read). Returns
+ * once a card is in the document. Fails when the page has no `#root`, draws no sidebar row and no
  * card, or tries to read a record the cache does not hold.
  */
-export async function mountWorkSpecimen(records: SidebarRecords, work: WorkRecords): Promise<void> {
+export async function mountWorkSpecimen(
+  records: SidebarRecords,
+  work: WorkRecords,
+  openTaskId?: string,
+): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
     foldedLaneIds: work.foldedLaneIds,
     display: DEFAULT_WORK_DISPLAY,
   });
-  await mountShellSpecimen(records, "/work", { work });
+  await mountShellSpecimen(
+    records,
+    openTaskId === undefined ? "/work" : `/work?task=${openTaskId}`,
+    { work },
+  );
 }
 
 /**

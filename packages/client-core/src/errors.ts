@@ -33,6 +33,7 @@ export interface ErrorEnvelope {
  *
  * - `{ grant }` for `forbidden`;
  * - `{ issues }` for `validation`;
+ * - `{ reason }` for some `invalid_state` errors (see `isRequestClosed`);
  * - a size or a count for `cap_exceeded`;
  * - `{ previousSize, size }` for `shrink_rejected`;
  * - absent for every other code.
@@ -118,6 +119,25 @@ export const isConflict = (error: unknown): boolean =>
  */
 export const isInvalidState = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "invalid_state";
+
+/**
+ * Returns true when the error is an `invalid_state` response that says the
+ * Request a decision or an answer was for is not open: the session waits on
+ * no Request or on another one, or it has exited. Also true for `not_found`,
+ * which means the session is gone. Other `invalid_state` refusals, such as
+ * the runner being away, are false: the Request may still be open.
+ */
+export const isRequestClosed = (error: unknown): boolean => {
+  if (isNotFound(error)) return true;
+  if (!isInvalidState(error)) return false;
+  const details = (error as ApiError).details;
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    "reason" in details &&
+    details.reason === "request-closed"
+  );
+};
 
 /**
  * Returns the issues of a `validation` error response, in order, or

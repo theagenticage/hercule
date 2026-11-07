@@ -67,7 +67,17 @@ export const measureBoardGeometry = (
           const { cardId, dragged } = child.dataset;
           if (cardId === undefined || dragged !== undefined) return [];
           const place = places?.get(buildCardKey(cardId)) ?? measureLayoutRect(child);
-          return [{ id: cardId, element: child, middle: toBoardTop(place.top + place.height / 2) }];
+          return [
+            {
+              id: cardId,
+              element: child,
+              left: toBoardLeft(place.left),
+              right: toBoardLeft(place.left + place.width),
+              top: toBoardTop(place.top),
+              bottom: toBoardTop(place.top + place.height),
+              middle: toBoardTop(place.top + place.height / 2),
+            },
+          ];
         });
         // The card in the hand still counts as shown: it leaves a place that a drop may take again.
         const hasClosedMoreLine =

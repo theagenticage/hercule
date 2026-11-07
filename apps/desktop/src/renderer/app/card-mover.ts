@@ -1,4 +1,5 @@
-import type { CardPlacement } from "@hercule/client-core/work";
+import type { CardPlacement, EndStage } from "@hercule/client-core/work";
+import type { WorkCard } from "@hercule/contract";
 
 /** A card being put back: whether it went exactly where it was, and the request that moves it. */
 export interface PutBackRequest {
@@ -22,6 +23,18 @@ export interface CardMover {
    */
   readonly putCardBack: (
     place: CardPlacement,
+    isUndoWanted: Promise<boolean>,
+  ) => PutBackRequest | undefined;
+  /**
+   * Shows `card`, a card that ended at `stage` (Done or Dropped), back at
+   * `place`, and queues the move that takes the Task out of its end. The move
+   * is sent only if `isUndoWanted` resolves to true. Returns `undefined` when
+   * the card is on the board already.
+   */
+  readonly putEndedCardBack: (
+    card: WorkCard,
+    place: CardPlacement,
+    stage: EndStage,
     isUndoWanted: Promise<boolean>,
   ) => PutBackRequest | undefined;
 }

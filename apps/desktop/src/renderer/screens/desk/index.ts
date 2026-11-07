@@ -17,13 +17,16 @@
  * - `ViewPill`: the pill that names a place and switches between its views.
  * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
  *   headings.
- * - `SideSheet`, `UndoLine`, `Sunrise`: the sheet at the right, the line at
- *   the foot, and what shows when all is done.
+ * - `SideSheet`, `OpeningSheet`, `UndoLine`, `Sunrise`: the sheet at the
+ *   right that slides in, the one that opens out of a card, the line at the
+ *   foot, and what shows when all is done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { FilterChips, FilterControl } from "./filter-control";
 export { SectionHeading } from "./section-heading";
+export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-sheet";
+export type { SheetRect } from "./opening-sheet-geometry";
 export { SideSheet } from "./side-sheet";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
 export { Sunrise } from "./sunrise";

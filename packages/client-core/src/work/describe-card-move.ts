@@ -7,7 +7,7 @@ import { NO_PROJECT_LANE_NAME, type WorkProject } from "./lanes";
 const MOST_TITLE_CHARACTERS = 32;
 
 /** Returns the title cut to `MOST_TITLE_CHARACTERS`, with an ellipsis when it was cut. */
-const shortenTitle = (title: string): string =>
+export const shortenTitle = (title: string): string =>
   title.length <= MOST_TITLE_CHARACTERS ? title : `${title.slice(0, MOST_TITLE_CHARACTERS - 1)}…`;
 
 /**

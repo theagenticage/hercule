@@ -91,6 +91,8 @@ export const createAppRouter = (context: RouterContext) => {
       router.clearCache();
       // The gestures were the signed-out user's: Undo must not reach the next one.
       context.controller?.undoStack.clear();
+      // What the user had not sent yet stays in storage as unsent. It is never sent by itself.
+      context.controller?.pendingIntents.close();
     }
     // A page that closes while signing out must not save its copy: the thread
     // copy hook saves nothing while the token is gone, and this delete also

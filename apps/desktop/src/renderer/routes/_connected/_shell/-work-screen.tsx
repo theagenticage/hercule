@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
@@ -9,22 +9,31 @@ import {
   buildWorkFacets,
   chooseLaneId,
   countCardsByStage,
-  findCardsByTitle,
+  describeCardMove,
+  type EndStage,
+  findCards,
   listShownCardIds,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
   STAGE_NAMES,
 } from "@hercule/client-core/work";
-import { BOARD_STAGES, MAX_BOARD_CARDS, type WorkCard } from "@hercule/contract";
+import {
+  BOARD_STAGES,
+  MAX_BOARD_CARDS,
+  type BoardStage,
+  type ControllerInfo,
+  type WorkCard,
+} from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
-import { projectsQuery, userQuery } from "../../../app/queries";
+import { controllerQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
+import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
@@ -32,6 +41,7 @@ import { BoardLoading } from "../../../screens/work/board-loading";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
+import { useMergePick } from "../../../screens/work/use-merge-pick";
 import { useBoardReads } from "../../../screens/work/use-board-reads";
 import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
 import { useViewMotion } from "../../../screens/work/use-view-motion";
@@ -39,6 +49,10 @@ import { useWorkView } from "../../../screens/work/use-work-view";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
+import { useMergeCards } from "./-merge-cards";
+import { usePaneChanges } from "./-pane-changes";
+import { useTaskThreads } from "./-task-threads";
+import { WorkPane } from "./-work-pane";
 import { hasAnyTaskQuery, useWorkBoard } from "./-work-board";
 
 /** Below this window width, lanes are bands: side labels would cost the cards 210px. */
@@ -51,6 +65,27 @@ const ARRIVAL_MS = 1_200;
 const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
+
+/** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
+const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
+  controllerInfo.textGeneration.unavailableReason === null;
+
+/**
+ * What the details pane's buttons that change something do for now: nothing.
+ * THE NEXT SLICE STEP WIRES THESE. Each one is called with only what the user
+ * chose, and the screen sends it and says what happened (see
+ * `TaskPaneChanges` in `screens/work/task-pane.tsx`). Until then the buttons
+ * draw and press, and nothing happens.
+ */
+const TASK_PANE_CHANGES_NOT_WIRED: Pick<
+  TaskPaneChanges,
+  "onTryAgain" | "onAnswer" | "onSendAnswerAgain" | "onDiscardAnswer"
+> = {
+  onTryAgain: () => undefined,
+  onAnswer: () => undefined,
+  onSendAnswerAgain: () => undefined,
+  onDiscardAnswer: () => undefined,
+};
 
 /** Returns the line that says since when the controller cannot be reached. */
 const describeOffline = (since: Date): string =>
@@ -65,17 +100,41 @@ const describeOffline = (since: Date): string =>
  * - The board is read while the window is visible, and read again on every
  *   `task` push. A move shows at once and is sent in order (`useCardMoves`).
  * - Filtering and Find run over the board already read, in the client.
- * - A card opens its newest Thread. A Task with no Thread opens nothing yet,
- *   and the undo line says so, because there is no details pane to show it in.
+ * - A card opens its details on a sheet over the board. Which Task is open
+ *   is in the address (`openTaskId`), so the screen only asks to change it.
  */
-export function WorkScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
+export function WorkScreen({
+  controller,
+  openTaskId,
+  onChangeOpenTask,
+}: {
+  readonly controller: SavedController;
+  /** The Task whose details are open, from the address, or `null` when none is. */
+  readonly openTaskId: string | null;
+  /** Puts a Task's id in the address to open its details, or `null` to close them. */
+  readonly onChangeOpenTask: (taskId: string | null) => void;
+}): JSX.Element {
   const { client, url, live, undoStack } = controller;
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
+  // Until the controller's record is read, nothing says a summary is coming, so no card promises one.
+  const canWriteSummaries =
+    useQuery({ ...controllerQuery(client), select: canTextGenerationRun }).data === true;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const moves = useCardMoves({ client, undoStack, serverBoard: board.data, scrollRef });
+  // A card that Undo or a refused update brings back is let in at once by the
+  // board's reads, which are made after the moves, so the moves call it through this.
+  const noteReturnedTask = useRef<(taskId: string, how: EndStage) => void>(() => undefined);
+  const moves = useCardMoves({
+    client,
+    undoStack,
+    serverBoard: board.data,
+    scrollRef,
+    onCardReturning: (taskId, how) => {
+      noteReturnedTask.current(taskId, how);
+    },
+  });
   const savedView = useWorkView(buildWorkViewKey(url, username));
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
   const offlineSince = useOfflineSince(live);
@@ -95,10 +154,39 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     isCarrying,
     scrollRef,
   });
+  useLayoutEffect(() => {
+    noteReturnedTask.current = reads.noteReturnedTask;
+  });
   const view = useViewMotion(savedView, scrollRef);
   usePausePawsOffScreen(scrollRef);
   const shownBoard = reads.board;
-  const cards = shownBoard?.cards ?? EMPTY_CARDS;
+  // The answers the user gave from the pane and the app still holds show on
+  // their cards as answered; the pane's answer and Try again buttons act here.
+  const pane = usePaneChanges({
+    controller,
+    username,
+    boardCards: shownBoard?.cards ?? EMPTY_CARDS,
+    moves,
+    openTaskId,
+    scrollRef,
+    closePane: () => {
+      onChangeOpenTask(null);
+    },
+  });
+  // A merge held for the undo line hides the card that merges away.
+  const merging = useMergeCards({
+    controller,
+    username,
+    boardCards: pane.cards,
+    isBoardRead: shownBoard !== undefined,
+    moves,
+    scrollRef,
+    openTaskId,
+    closePane: () => {
+      onChangeOpenTask(null);
+    },
+  });
+  const { cards } = merging;
 
   // The lanes of the whole board, for the Filter menu: a Project the filter
   // hides stays in the menu to be chosen again.
@@ -116,7 +204,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     if (next !== filter) setFilter(next);
   }, [shownBoard, facets, filter, setFilter]);
 
-  const found = findCardsByTitle(cards, view.findText);
+  const found = findCards(cards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
   const lanes = buildLanes({ cards: visibleCards }, projects);
   const arrangedLanes = arrangeLanes(lanes, {
@@ -149,12 +237,58 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     };
   }, [startedLoading, hasBoard]);
 
+  // Merging by key: `M` or the details' Merge picks a card, and choosing
+  // another card (Return, or a click) merges the first into it.
+  const mergePick = useMergePick({
+    scrollRef,
+    cards,
+    merge: merging.mergeCard,
+    say: moves.sayWithoutUndo,
+    onStart: () => {
+      onChangeOpenTask(null);
+    },
+  });
+
+  // A card opens its details. Choosing another card while the sheet is open
+  // swaps the Task it shows, and choosing the one that is open does nothing.
+  // While a card is picked to merge, choosing a card merges into it instead.
   const openCard = (card: WorkCard): void => {
-    if (card.openSessionId === undefined) {
-      moves.sayWithoutUndo("This Task has no Thread yet.");
+    if (mergePick.sourceId !== null) {
+      mergePick.confirm(card.id);
       return;
     }
-    void navigate({ to: "/threads/$sessionId", params: { sessionId: card.openSessionId } });
+    if (card.id !== openTaskId) onChangeOpenTask(card.id);
+  };
+
+  // Starting a Thread from a card, and moving a Thread to a new Task.
+  const threads = useTaskThreads({
+    client,
+    cards,
+    openTaskId,
+    scrollRef,
+    say: moves.sayWithoutUndo,
+    openPane: openCard,
+    closePane: () => {
+      onChangeOpenTask(null);
+    },
+  });
+
+  /**
+   * Marks a Task Done or Dropped from a key or the details' foot. The card
+   * leaves the board, and the details close when they show that Task. It
+   * does nothing but say so while a Try again is still starting the Task's
+   * run, because ending the Task then would race that run.
+   */
+  const endTask = (taskId: string, stage: EndStage): void => {
+    if (pane.refuseEndWhileTryingAgain(taskId, stage)) return;
+    moves.endCard(taskId, stage);
+    if (taskId === openTaskId) onChangeOpenTask(null);
+  };
+
+  /** Moves a card to a stage from the details' stage path, as the number keys do. */
+  const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
+    const move = { taskId: card.id, stage };
+    moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
   };
 
   // ---------- Add to Work ----------
@@ -166,6 +300,8 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddResult(null);
     setAddLane(lane);
+    // Two sheets would cover each other at the right.
+    if (openTaskId !== null) onChangeOpenTask(null);
   };
   const closeAddSheet = (): void => {
     setAddLane(null);
@@ -220,7 +356,12 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     arrangedLanes,
     moveCard: moves.moveCard,
     say: moves.sayWithoutUndo,
-    onCarryingChange: setIsCarrying,
+    holdMerge: merging.holdMerge,
+    onCarryingChange: (isCarryingNow) => {
+      setIsCarrying(isCarryingNow);
+      // A card in the hand ends the key flow of a merge.
+      if (isCarryingNow) mergePick.cancel();
+    },
   });
 
   // ---------- Keys ----------
@@ -237,10 +378,21 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
     scrollRef,
     findRef,
     onOpenCard: openCard,
+    onEndCard: (card, stage) => {
+      endTask(card.id, stage);
+    },
+    onStartThread: threads.askThread,
+    mergePick,
     onAdd: (laneId) => {
       openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId));
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
+    taskPane: {
+      isOpen: openTaskId !== null,
+      close: () => {
+        onChangeOpenTask(null);
+      },
+    },
   });
 
   // ---------- What the screen draws ----------
@@ -291,6 +443,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
             arrangedLane={each}
             tabStopCardId={tabStopCardId}
             isStill={view.display.isStill}
+            canWriteSummaries={canWriteSummaries}
             onToggleLane={view.toggleLane}
             onToggleCell={view.toggleCell}
             onAddTask={(laneId) => {
@@ -350,6 +503,33 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
               }}
             />
           )}
+          <WorkPane
+            client={client}
+            taskId={openTaskId}
+            cards={cards}
+            projects={projects}
+            scrollRef={scrollRef}
+            isStill={view.display.isStill}
+            intents={pane.intents}
+            threadPromptWords={threads.threadPromptWords}
+            changes={{
+              ...TASK_PANE_CHANGES_NOT_WIRED,
+              ...pane.changes,
+              onMerge: () => {
+                const card = cards.find((each) => each.id === openTaskId);
+                if (card !== undefined) mergePick.start(card);
+              },
+              ...threads.changes,
+              onDone: () => {
+                if (openTaskId !== null) endTask(openTaskId, "done");
+              },
+              onDrop: () => {
+                if (openTaskId !== null) endTask(openTaskId, "dropped");
+              },
+            }}
+            moveToStage={moveCardToStage}
+            onChangeTask={onChangeOpenTask}
+          />
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
           <UndoLine
             text={moves.line.text}
@@ -363,7 +543,7 @@ export function WorkScreen({ controller }: { readonly controller: SavedControlle
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
-      hasSheet={addLane !== null}
+      hasSheet={addLane !== null || openTaskId !== null}
       isArriving={startedLoading && hasBoard && !arrivalOver}
       state={state}
       scrollRef={scrollRef}

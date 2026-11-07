@@ -44,6 +44,7 @@ export function BoardLane({
   arrangedLane,
   tabStopCardId,
   isStill,
+  canWriteSummaries,
   onToggleLane,
   onToggleCell,
   onAddTask,
@@ -53,6 +54,7 @@ export function BoardLane({
   readonly arrangedLane: ArrangedLane;
   readonly tabStopCardId: string | null;
   readonly isStill: boolean;
+  readonly canWriteSummaries: boolean;
   readonly onToggleLane: (laneId: string) => void;
   readonly onToggleCell: (cellId: string) => void;
   readonly onAddTask: (laneId: string) => void;
@@ -126,6 +128,7 @@ export function BoardLane({
               cell={cell}
               tabStopCardId={tabStopCardId}
               isStill={isStill}
+              canWriteSummaries={canWriteSummaries}
               onToggleCell={onToggleCell}
               onOpenCard={onOpenCard}
               onFocusCard={onFocusCard}

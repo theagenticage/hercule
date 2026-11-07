@@ -17,16 +17,26 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A count that changed rises into place. Only `transform` and `opacity` move,
-   and nothing moves under Reduce motion. */
+/* A count that changed rolls into place: a larger one rises from below, a
+   smaller one comes down from above. Only `transform` and `opacity` move, and
+   nothing moves under Reduce motion. */
 @media (prefers-reduced-motion: no-preference) {
   .desk-heading-count[data-rises] {
     animation: desk-count-rise var(--m-base) var(--m-ease);
+  }
+  .desk-heading-count[data-falls] {
+    animation: desk-count-fall var(--m-base) var(--m-ease);
   }
 }
 @keyframes desk-count-rise {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+@keyframes desk-count-fall {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
   }
 }
