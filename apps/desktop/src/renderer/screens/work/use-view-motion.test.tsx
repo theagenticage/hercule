@@ -85,7 +85,7 @@ function StackBoard(): JSX.Element {
     <div ref={scrollRef} data-testid="scroller">
       <section className="board-lane" data-lane-id="lane" data-open={isOpen}>
         <div className="board-cell" data-cell-id="lane/exploring" data-stage="exploring">
-          <div className="board-stack">
+          <div className="board-stack" data-stack-lead="ticket">
             <div data-card-id="ticket" data-stage="exploring" />
             <button
               type="button"

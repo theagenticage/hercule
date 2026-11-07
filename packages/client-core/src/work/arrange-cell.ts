@@ -187,8 +187,10 @@ const splitClosed = (ordered: readonly CellRow[], stage: BoardStage): RowSplit =
  * order, as `buildLanes` returns them. The result lists the cards to draw,
  * the cards left out and the line under them.
  *
- * `candidates` are the pairs `WorkBoard.stackCandidates` holds, for the whole
- * board. Only the pairs with both Tasks in this cell can make a stack. A stack
+ * `candidates` are the pairs `WorkBoard.stackCandidates` holds that have
+ * their lead in this cell (the caller selects them, so this function does not
+ * walk the whole board's pairs). Only the pairs with both Tasks in this cell
+ * can make a stack. A stack
  * is one row: the failed rows lead the cell, a stack counts as failed or loud
  * when its lead or any member is, and the row limit counts it once.
  *
@@ -198,7 +200,7 @@ const splitClosed = (ordered: readonly CellRow[], stage: BoardStage): RowSplit =
 export const arrangeCell = (
   cards: readonly WorkCard[],
   view: CellView,
-  candidates: readonly WorkStackCandidate[] = [],
+  candidates: readonly WorkStackCandidate[],
 ): ArrangedCell => {
   const { rows, nouns } = buildRows(cards, candidates);
   const ordered = [...rows.filter(isFailedRow), ...rows.filter((row) => !isFailedRow(row))];

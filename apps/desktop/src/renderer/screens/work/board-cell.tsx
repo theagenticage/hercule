@@ -111,7 +111,11 @@ export function BoardCell({
         const stackId = buildStackId(laneId, card.id);
         const isStackOpen = cell.openStackLeadIds.has(card.id);
         return (
-          <div key={card.id} className={isStackOpen ? "board-stack is-open" : "board-stack"}>
+          <div
+            key={card.id}
+            className={isStackOpen ? "board-stack is-open" : "board-stack"}
+            data-stack-lead={card.id}
+          >
             {drawCard(card)}
             <button
               type="button"

@@ -11,6 +11,7 @@ import {
   recordGrowthOrigins,
   TO_BUTTON,
 } from "./board-flights";
+import { findStack, findStackMembers } from "./dragged-card";
 import { flipBoard } from "./flip-board";
 import type { WorkView } from "./use-work-view";
 
@@ -292,7 +293,7 @@ export const useViewMotion = (
     const findBar = (): HTMLElement | null =>
       scroller?.querySelector<HTMLElement>(`[data-stack-bar="${CSS.escape(stackId)}"]`) ?? null;
     const bar = findBar();
-    const stack = bar?.closest<HTMLElement>(".board-stack") ?? null;
+    const stack = bar === null ? null : findStack(bar);
     if (scroller === null || bar === null || stack === null) {
       view.toggleStack(stackId);
       return;
@@ -308,7 +309,7 @@ export const useViewMotion = (
         const flights = isClosing
           ? launchFlights(
               scroller,
-              listCards([...stack.querySelectorAll(".board-stack-members")]),
+              listCards([findStackMembers(stack)].filter((members) => members !== null)),
               0,
             )
           : [];
@@ -318,7 +319,8 @@ export const useViewMotion = (
             flyFlightsTo(flights, findBar, TO_BUTTON);
             return;
           }
-          const opened = findBar()?.closest<HTMLElement>(".board-stack") ?? null;
+          const openedBar = findBar();
+          const opened = openedBar === null ? null : findStack(openedBar);
           if (opened !== null) fadeInCardsNotIn(opened, before);
         };
       },

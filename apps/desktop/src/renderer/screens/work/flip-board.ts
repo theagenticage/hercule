@@ -4,6 +4,7 @@ import {
   type FlipByKeyOptions,
   type SpringName,
 } from "../../app/motion";
+import { findStack, findStackLead } from "./dragged-card";
 
 /**
  * What moves when the board changes: cards, lane heads, the counts of folded
@@ -48,10 +49,11 @@ const buildMotionKeyReader =
     if (element.closest("[data-dragged]") !== null) return null;
     const { laneHead, foldRow, moreCellId, stackBar } = element.dataset;
     if (element.dataset["cardId"] !== undefined) return cardKeys().get(element) ?? null;
-    // The sheet is keyed by its lead card, which stands right before it. The
+    // The sheet is keyed by its lead card, which stands in the same stack. The
     // lead's key tells copies of a Task in two lanes apart.
     if (stackBar !== undefined) {
-      const lead = element.previousElementSibling;
+      const stack = findStack(element);
+      const lead = stack === null ? null : findStackLead(stack);
       const leadKey = lead === null ? undefined : cardKeys().get(lead);
       return leadKey === undefined ? null : `stack:${leadKey}`;
     }

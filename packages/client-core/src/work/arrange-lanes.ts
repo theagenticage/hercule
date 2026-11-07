@@ -103,9 +103,26 @@ const chooseCellDot = (cards: readonly WorkCard[]): CellDot | null => {
   return cards.some((card) => card.openQuestion !== undefined) ? "question" : null;
 };
 
+/** Returns `candidates` grouped by the Task that would lead the stack, each group in board order. */
+const groupCandidatesByLead = (
+  candidates: readonly WorkStackCandidate[],
+): ReadonlyMap<string, readonly WorkStackCandidate[]> => {
+  const byLead = new Map<string, WorkStackCandidate[]>();
+  for (const candidate of candidates) {
+    const group = byLead.get(candidate.leadTaskId) ?? [];
+    group.push(candidate);
+    byLead.set(candidate.leadTaskId, group);
+  }
+  return byLead;
+};
+
 /** Returns each of `lanes` with what its cells show under `view`. */
-export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readonly ArrangedLane[] =>
-  lanes.map((lane) => ({
+export const arrangeLanes = (
+  lanes: readonly WorkLane[],
+  view: LaneView,
+): readonly ArrangedLane[] => {
+  const candidatesByLead = groupCandidatesByLead(view.stackCandidates);
+  return lanes.map((lane) => ({
     lane,
     isFolded: view.foldedLaneIds.has(lane.id),
     failedCount: lane.cells.reduce(
@@ -121,7 +138,7 @@ export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readon
           opened: view.openedCellIds.has(cellId),
           filtered: view.isFiltering,
         },
-        view.stackCandidates,
+        cell.cards.flatMap((card) => candidatesByLead.get(card.id) ?? []),
       );
       const openStackLeadIds = listOpenStackLeadIds(lane.id, arrangement, view.openedStackIds);
       return {
@@ -139,6 +156,7 @@ export const arrangeLanes = (lanes: readonly WorkLane[], view: LaneView): readon
       };
     }),
   }));
+};
 
 /**
  * Returns how many Tasks stand at each stage across `lanes`, shown or not,

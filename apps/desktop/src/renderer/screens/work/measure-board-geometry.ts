@@ -2,6 +2,7 @@ import type { ArrangedLane } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect } from "../../app/motion";
 import type { BoardGeometry, BoardView, CellBox, LaneBox, StageEdge } from "./board-drag-geometry";
+import { findStackLead } from "./dragged-card";
 import { buildCardKeys } from "./flip-board";
 
 /** The measurements of the board a carry needs: the geometry, and the scroller it was measured in. */
@@ -66,8 +67,8 @@ export const measureBoardGeometry = (
           (child): { card: HTMLElement; row: HTMLElement }[] => {
             if (!(child instanceof HTMLElement)) return [];
             if (child.dataset["cardId"] !== undefined) return [{ card: child, row: child }];
-            const lead = child.classList.contains("board-stack") ? child.firstElementChild : null;
-            return lead instanceof HTMLElement ? [{ card: lead, row: child }] : [];
+            const lead = findStackLead(child);
+            return lead === null ? [] : [{ card: lead, row: child }];
           },
         );
         const rows = shownCards.flatMap(({ card, row }) => {
