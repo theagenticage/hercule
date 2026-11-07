@@ -61,21 +61,28 @@ export function IconPill({
 
 /**
  * Renders a removable filter: its value in medium weight, after a quiet
- * caption when `caption` is given, such as "Linear project". Pressing it
- * calls `onRemove`.
+ * caption such as "Linear project", or none when `caption` is empty. Pressing it
+ * calls `onRemove`. Assistive technology reads it as "Remove filter" and the
+ * caption and the value, because the caption is hidden when room runs out.
  */
 export function FilterChip({
   caption,
   name,
   onRemove,
 }: {
-  readonly caption?: string;
+  readonly caption: string;
   readonly name: string;
   readonly onRemove: () => void;
 }): JSX.Element {
   return (
-    <button type="button" className="desk-chip" title="Remove this filter" onClick={onRemove}>
-      {caption !== undefined && <small>{caption}</small>}
+    <button
+      type="button"
+      className="desk-chip"
+      title="Remove this filter"
+      aria-label={`Remove filter ${caption === "" ? "" : `${caption} `}${name}`}
+      onClick={onRemove}
+    >
+      {caption !== "" && <small>{caption}</small>}
       <b>{name}</b>
       <CloseIcon size={11} />
     </button>

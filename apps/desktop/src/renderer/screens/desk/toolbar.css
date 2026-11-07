@@ -150,6 +150,11 @@
     inset 0 1px 0 var(--glass-edge),
     var(--shadow-2);
 }
+/* A menu for a button at the right end of the row opens toward the left, so it
+   stays inside the window. */
+.pop.popover-menu.menu--tool.menu--tool-end {
+  position-area: block-end span-inline-start;
+}
 @media (prefers-reduced-motion: no-preference) {
   .menu--tool:popover-open {
     animation: tool-menu-arrive var(--m-base) var(--m-ease) both;

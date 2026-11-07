@@ -29,6 +29,12 @@ export interface MoveOptions {
   readonly reduced?: boolean;
 }
 
+/** How fast an offset changes, in pixels a second. */
+export interface Velocity {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** The class the stylesheet turns into `will-change`, set only while the body moves. */
 export const MOVING_CLASS = "is-moving";
 
@@ -52,8 +58,11 @@ export class MotionBody implements Moving {
   private delayed: DelayedMove | null = null;
   private onRest: (() => void) | null = null;
   private isLifted = false;
+  private readonly element: HTMLElement;
 
-  constructor(private readonly element: HTMLElement) {}
+  constructor(element: HTMLElement) {
+    this.element = element;
+  }
 
   /** The values the element shows right now. */
   get values(): ChannelValues {
@@ -100,14 +109,25 @@ export class MotionBody implements Moving {
     this.set({ x, y });
   }
 
+  /** How fast the offset changes now, in pixels a second. */
+  get velocity(): Velocity {
+    return { x: this.channels.readSpeed("x"), y: this.channels.readSpeed("y") };
+  }
+
   /**
-   * Puts the offset at `x`, `y` and draws it, keeping the speed and the goal.
-   * Used when the layout moved under a body: the offset that keeps it where it
-   * looks is new, and the motion it had goes on from there.
+   * Puts the offset at `x`, `y` and draws it, keeping the goal. Used when the
+   * layout moved under a body: the offset that keeps it where it looks is
+   * new, and the motion it had goes on from there. The speed stays as it is,
+   * unless `velocity` gives one: a body that takes over from another element
+   * starts with that element's speed.
    */
-  relocate(x: number, y: number): void {
+  relocate(x: number, y: number, velocity?: Velocity): void {
     this.channels.relocate("x", x);
     this.channels.relocate("y", y);
+    if (velocity !== undefined) {
+      this.channels.setSpeed("x", velocity.x);
+      this.channels.setSpeed("y", velocity.y);
+    }
     this.paint();
   }
 

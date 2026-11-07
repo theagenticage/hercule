@@ -14,7 +14,7 @@ import { MenuPick, ToolMenu } from "./tool-menu";
 function TestMenu({ onPick }: { readonly onPick: (name: string) => void }): JSX.Element {
   const { menuProps, buildItemProps } = usePopoverMenu();
   return (
-    <ToolMenu menuProps={menuProps} label="Filter">
+    <ToolMenu menuProps={menuProps} label="Filter" edge="start">
       <MenuPick
         itemProps={buildItemProps("project", { checked: true })}
         kind="choice"

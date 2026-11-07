@@ -20,6 +20,7 @@ import { Route as ConnectedShellIntakeRouteImport } from './routes/_connected/_s
 import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
 import { Route as ConnectedShellWikiRouteRouteImport } from './routes/_connected/_shell/wiki/route'
+import { Route as ConnectedShellWorkRouteImport } from './routes/_connected/_shell/work'
 import { Route as ConnectedShellWorkflowsRouteRouteImport } from './routes/_connected/_shell/workflows/route'
 import { Route as ConnectedShellAssistantsAssistantIdRouteImport } from './routes/_connected/_shell/assistants/$assistantId'
 import { Route as ConnectedShellDiscussionsDiscussionIdRouteImport } from './routes/_connected/_shell/discussions/$discussionId'
@@ -100,6 +101,11 @@ const ConnectedShellSettingsRouteRoute =
 const ConnectedShellWikiRouteRoute = ConnectedShellWikiRouteRouteImport.update({
   id: '/wiki',
   path: '/wiki',
+  getParentRoute: () => ConnectedShellRoute,
+} as any)
+const ConnectedShellWorkRoute = ConnectedShellWorkRouteImport.update({
+  id: '/work',
+  path: '/work',
   getParentRoute: () => ConnectedShellRoute,
 } as any)
 const ConnectedShellWorkflowsRouteRoute =
@@ -269,6 +275,7 @@ export interface FileRoutesByFullPath {
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
+  '/work': typeof ConnectedShellWorkRoute
   '/settings/skills': typeof ConnectedShellSettingsSkillsRouteRouteWithChildren
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
@@ -305,6 +312,7 @@ export interface FileRoutesByTo {
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
+  '/work': typeof ConnectedShellWorkRoute
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
   '/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
   '/fleet/$runnerId': typeof ConnectedShellFleetRunnerIdRoute
@@ -342,6 +350,7 @@ export interface FileRoutesById {
   '/_connected/_shell/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/_connected/_shell/intake': typeof ConnectedShellIntakeRoute
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
+  '/_connected/_shell/work': typeof ConnectedShellWorkRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
   '/_connected/_shell/settings/skills': typeof ConnectedShellSettingsSkillsRouteRouteWithChildren
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
@@ -382,6 +391,7 @@ export interface FileRouteTypes {
     | '/workflows'
     | '/intake'
     | '/office'
+    | '/work'
     | '/settings/skills'
     | '/threads/$sessionId'
     | '/assistants/$assistantId'
@@ -418,6 +428,7 @@ export interface FileRouteTypes {
     | '/workflows'
     | '/intake'
     | '/office'
+    | '/work'
     | '/assistants/$assistantId'
     | '/discussions/$discussionId'
     | '/fleet/$runnerId'
@@ -454,6 +465,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/workflows'
     | '/_connected/_shell/intake'
     | '/_connected/_shell/office'
+    | '/_connected/_shell/work'
     | '/_connected/_shell/'
     | '/_connected/_shell/settings/skills'
     | '/_connected/_shell/threads/$sessionId'
@@ -565,6 +577,13 @@ declare module '@tanstack/react-router' {
       path: '/wiki'
       fullPath: '/wiki'
       preLoaderRoute: typeof ConnectedShellWikiRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
+    '/_connected/_shell/work': {
+      id: '/_connected/_shell/work'
+      path: '/work'
+      fullPath: '/work'
+      preLoaderRoute: typeof ConnectedShellWorkRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
     '/_connected/_shell/workflows': {
@@ -882,6 +901,7 @@ interface ConnectedShellRouteChildren {
   ConnectedShellWorkflowsRouteRoute: typeof ConnectedShellWorkflowsRouteRouteWithChildren
   ConnectedShellIntakeRoute: typeof ConnectedShellIntakeRoute
   ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
+  ConnectedShellWorkRoute: typeof ConnectedShellWorkRoute
   ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
   ConnectedShellThreadsSessionIdRouteRoute: typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   ConnectedShellAssistantsAssistantIdRoute: typeof ConnectedShellAssistantsAssistantIdRoute
@@ -901,6 +921,7 @@ const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
     ConnectedShellWorkflowsRouteRouteWithChildren,
   ConnectedShellIntakeRoute: ConnectedShellIntakeRoute,
   ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
+  ConnectedShellWorkRoute: ConnectedShellWorkRoute,
   ConnectedShellIndexRoute: ConnectedShellIndexRoute,
   ConnectedShellThreadsSessionIdRouteRoute:
     ConnectedShellThreadsSessionIdRouteRouteWithChildren,

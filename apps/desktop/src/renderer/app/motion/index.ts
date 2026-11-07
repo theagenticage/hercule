@@ -6,13 +6,22 @@
  * while a body moves, by the `is-moving` class; and the clock asks for a frame
  * only while something moves.
  */
-export { trackBody, MotionBody, RISING_CLASS, type MoveOptions } from "./body";
 export {
+  findBody,
+  trackBody,
+  MotionBody,
+  RISING_CLASS,
+  type MoveOptions,
+  type Velocity,
+} from "./body";
+export {
+  flipByKey,
   flipElements,
   ghostElement,
   measureLayoutRect,
   staggerDelay,
   LONGEST_STAGGER,
+  type FlipByKeyOptions,
   type FlipOptions,
   type LayoutRect,
 } from "./layout";
@@ -26,3 +35,4 @@ export {
   type SpringName,
 } from "./springs";
 export { animateValue, type MotionValue } from "./value";
+export { waitForStillHand, type StillHandOptions } from "./still-hand";

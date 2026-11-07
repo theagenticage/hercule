@@ -2,7 +2,10 @@
  * The Office's top bar: slim glass pills floating over the top of the
  * Office, as the Bureau book's office header draws them.
  *
- * - The Office's pill: its title, Overview, and the room directory.
+ * - The Overview's view pill, which the Work view draws too, so the user can
+ *   switch between the two.
+ * - The Office's own pill: the button that shows the whole office, and the
+ *   room directory.
  * - The counts of who is doing what. A click on a count selects the next
  *   colleague in that state, so repeated clicks walk through all of them.
  *
@@ -22,6 +25,7 @@ import {
 import { describePose, type OfficePose } from "@hercule/client-core";
 import type { World } from "../world/types";
 import { Mark } from "../../marks";
+import { OverviewPill } from "../../screens/overview/overview-pill";
 import { OfficeIcon } from "../../icons/office";
 import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
 import { RoomDirectory } from "./room-directory";
@@ -82,19 +86,19 @@ export function TopBar({
   readonly office: BuiltOffice | null;
 }): JSX.Element {
   const state = useSyncExternalStore(subscribeOffice, readOffice);
-  const inOverview = state.selectedId === null && state.roomId === null;
+  const showingWholeOffice = state.selectedId === null && state.roomId === null;
   return (
     <header className="office-top">
+      <OverviewPill />
       <nav className="pill" aria-label="Office">
-        <span className="pill-title">Office</span>
         <button
           type="button"
-          className={inOverview ? "ptab is-on" : "ptab"}
-          aria-pressed={inOverview}
-          onClick={() => sendOfficeCommand({ kind: "overview" })}
+          className={showingWholeOffice ? "ptab is-on" : "ptab"}
+          aria-pressed={showingWholeOffice}
+          onClick={() => sendOfficeCommand({ kind: "show-whole-office" })}
         >
           <OfficeIcon size={14} />
-          Overview
+          Whole office
         </button>
         <RoomDirectory office={office} />
       </nav>

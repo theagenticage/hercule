@@ -664,9 +664,17 @@ _Avoid_: category, area, folder
 
 ### Office
 
+**Overview**:
+The place in the desktop app where the user sees all their work at once. It has two views, the Office and Work, and one pill names the place and switches between them. The sidebar's Overview row opens the view used last. Not the Office's camera button, which flies back to the whole building and reads "Whole office".
+_Avoid_: dashboard, home; "overview" for the Office's camera button or for a camera position
+
+**Work**:
+The view of the Overview that draws every unfinished Task as a card, placed by Stage in a lane for each Project. A view, not a record: the cards are Tasks, and nothing is stored as a board. What a card shows (a Thread's open question, a failed run, a working session) is decided on the controller. The sidebar's section is headed Work too, and the view is only ever a tab in the Overview's pill.
+_Avoid_: board as the name of a record, table or type (the read `task.queryBoard` returns what Work draws; nothing is stored as a board), kanban, column (a Stage, how Work draws it)
+
 **Office**:
-The view that shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
-_Avoid_: virtual office, floor view, scene
+One of the two views of the Overview. It shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
+_Avoid_: virtual office, floor view, scene; overview (the place with the Office and Work, see Overview)
 
 **Office Map**:
 The description an Office is built from: its fixed rooms and their furniture, what a wing and a room stand for, and the named rule by which the place grows as sessions arrive. A bureau, a tower and a cave are different office maps of the same Office; inside the Office the UI says "map".

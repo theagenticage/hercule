@@ -1,0 +1,143 @@
+/* Carrying a card on the Work board. From the Overview drawing's
+   `css/work.css` ("Carrying"), with the differences React makes:
+
+   - The card in the hand is a copy in `.board-carry`. The card in the page
+     stays mounted and is hidden with `data-dragged`, because React must be
+     able to keep it. State set from outside React is written as data
+     attributes, which React never rewrites, and never as classes, which it
+     does when a card's `className` changes.
+   - The hollow `.board-slot` is made by the hook and lives in a cell. */
+
+/* ---------- Motion ---------- */
+/* A CSS transition fights a spring, and a card gliding or landing stands above
+   the cards it passes. The kernel puts `is-moving` on whatever it moves. */
+.work-desk .is-moving {
+  will-change: transform;
+}
+.desk-card.is-moving {
+  z-index: 3;
+  transition: none;
+}
+.desk-card.is-rising {
+  z-index: 6;
+}
+.desk-card[data-landing].is-moving {
+  z-index: 8;
+}
+
+/* ---------- The card in the hand ---------- */
+.board-carry {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+.board-carry .desk-card {
+  cursor: grabbing;
+}
+/* A card that stands as words alone in Landed needs a sheet's padding in the hand, where it is lifted onto a sheet. */
+.board-carry .desk-card[data-state="landed"] {
+  padding-left: var(--card-pad-x);
+  padding-right: var(--card-pad-x);
+}
+
+/* The card in the page waits, out of the layout, until it lands. */
+.desk-card[data-dragged] {
+  display: none;
+}
+
+/* While a card is in the hand the pointer is a grabbing hand everywhere, and
+   nothing under it reacts to a hover. */
+.work-desk[data-carrying],
+.work-desk[data-carrying] * {
+  cursor: grabbing !important;
+}
+.work-desk[data-carrying] .board-lanes {
+  pointer-events: none;
+}
+/* The page must not get shorter under a carried card, or the row under it would jump. */
+.work-desk[data-carrying] .board-canvas {
+  padding-bottom: 340px;
+}
+
+/* ---------- The slot ---------- */
+.board-slot {
+  flex: none;
+  border-radius: var(--card-r);
+  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent);
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.board-slot.is-new {
+  opacity: 0;
+  transition: none;
+}
+
+/* ---------- The aisle ---------- */
+/* The stage the card would land in shows a faint column behind its cells. At
+   rest the stages are only alignment, so the grid shows only when it is needed. */
+.work-desk[data-carrying] .board-cell {
+  position: relative;
+}
+.work-desk[data-carrying] .board-cell::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: -10px;
+  bottom: -14px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 1.8%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.work-desk[data-drag-stage="exploring"] .board-cell[data-stage="exploring"]::before,
+.work-desk[data-drag-stage="planned"] .board-cell[data-stage="planned"]::before,
+.work-desk[data-drag-stage="building"] .board-cell[data-stage="building"]::before,
+.work-desk[data-drag-stage="in-review"] .board-cell[data-stage="in-review"]::before,
+.work-desk[data-drag-stage="landed"] .board-cell[data-stage="landed"]::before {
+  opacity: 1;
+}
+
+/* A folded lane has no cell to hold a slot, so its head is the target. */
+.board-lane[data-drop-target] .board-lane-head {
+  box-shadow: inset 0 0 0 1px var(--focus);
+  border-radius: var(--r-xs);
+}
+
+/* ---------- Landing ---------- */
+/* A card that landed in Landed gets a thin ring that fades away. */
+.desk-card[data-just-landed] .card-stock {
+  animation: board-landed var(--m-long) var(--m-ease);
+}
+@keyframes board-landed {
+  from {
+    box-shadow: 0 0 0 1.5px var(--focus);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* A stage's count rises into place when it changes. */
+.desk-heading-count[data-rolling] {
+  animation: board-count-roll var(--m-base) var(--m-ease);
+}
+@keyframes board-count-roll {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-slot,
+  .work-desk[data-carrying] .board-cell::before {
+    transition: none;
+  }
+  .desk-card[data-just-landed] .card-stock,
+  .desk-heading-count[data-rolling] {
+    animation: none;
+  }
+}

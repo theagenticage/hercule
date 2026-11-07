@@ -21,6 +21,7 @@ import { createPendingSubmissions, type PendingSubmissions } from "./pending-sub
 import { createQueryClient } from "./query-client";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
 import { createDesktopTokenStore } from "./token-store";
+import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
  * The controller whose URL is saved in the app's settings, a client for it,
@@ -58,6 +59,14 @@ export interface SavedController {
    * the store built for the new URL deletes the copies when it opens.
    */
   readonly threadCopies: ThreadCopies;
+  /**
+   * The gestures the user made on Work and the Inbox in this window, which
+   * Undo reverses one at a time. They belong to this controller and this user:
+   * main reloads the window for another controller, which builds a new stack,
+   * and the router clears this one when the user signs out (see
+   * `createAppRouter`). Nothing is saved.
+   */
+  readonly undoStack: UndoStack;
 }
 
 export interface RouterContext {
@@ -93,6 +102,7 @@ const buildSavedController = (
       concurrency: UPLOAD_CONCURRENCY,
     }),
     threadCopies: createThreadCopies(url),
+    undoStack: createUndoStack(),
   };
 };
 

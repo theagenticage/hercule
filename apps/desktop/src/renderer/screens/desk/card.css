@@ -244,6 +244,10 @@
   .card-paws[data-pose="working"]:not([data-still]) i + i {
     animation-delay: calc(var(--paw-delay, 0s) + 0.16s);
   }
+  /* A card scrolled out of view stops tapping: the board marks it. */
+  .desk-card[data-offscreen] .card-paws[data-pose="working"] i {
+    animation-play-state: paused;
+  }
 }
 @keyframes paw-tap {
   0%,

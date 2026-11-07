@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   animateValue,
+  flipByKey,
   flipElements,
   ghostElement,
   staggerDelay,
@@ -305,6 +306,98 @@ describe("flipping elements", () => {
     play(SETTLE_TIME / 4);
     expect(vi.getTimerCount()).toBe(0);
     expect(last.style.transform).toBe("");
+  });
+});
+
+describe("flipping by key", () => {
+  /** Makes an element for `key` at layout `top`. */
+  const makeKeyed = (key: string, top: number): HTMLElement => {
+    const element = makeElement();
+    element.dataset.key = key;
+    placeOnScreen(element, top);
+    return element;
+  };
+
+  /** Flips the keyed elements of the page around `mutate`. */
+  const flip = (mutate: () => void, options: { spring?: "self" } = {}): void => {
+    flipByKey({
+      root: document.body,
+      selector: "[data-key]",
+      readKey: (element) => element.dataset.key ?? null,
+      mutate,
+      ...options,
+    });
+  };
+
+  /** Replaces the element of its key by a new one at layout `top`, as React does for a card in another column. */
+  const replace = (old: HTMLElement, top: number): HTMLElement => {
+    const next = makeKeyed(old.dataset.key!, top);
+    old.remove();
+    return next;
+  };
+
+  it("moves a new element for the same key from where the old one looked", () => {
+    const old = makeKeyed("a", 100);
+    let next!: HTMLElement;
+
+    flip(() => {
+      next = replace(old, 300);
+    });
+    expect(seenTop(next)).toBe(100);
+
+    play(SETTLE_TIME);
+    expect(seenTop(next)).toBe(300);
+    expect(next.style.transform).toBe("");
+  });
+
+  it("starts a replacing element from what is on screen, at the speed of the element it replaces", () => {
+    const old = makeKeyed("a", 100);
+    flip(() => layoutTop.set(old, 300));
+    play(FRAME * 4);
+    const seenMidway = seenTop(old);
+    const speed = trackBody(old).velocity.y;
+    expect(speed).toBeGreaterThan(0);
+    let next!: HTMLElement;
+
+    flip(() => {
+      next = replace(old, 300);
+    });
+
+    // Continuous: it looks where the old one looked, and heads the same way (down the screen).
+    expect(seenTop(next)).toBeCloseTo(seenMidway, 5);
+    expect(trackBody(next).velocity.y).toBeCloseTo(speed, 5);
+    play(FRAME);
+    expect(seenTop(next)).toBeGreaterThan(seenMidway);
+    // The old element's body let go of the clock.
+    expect(old.style.transform).toBe("");
+
+    play(SETTLE_TIME);
+    expect(seenTop(next)).toBe(300);
+  });
+
+  it("leaves alone a key that left, a key that is new, and an element with no key", () => {
+    const gone = makeKeyed("gone", 100);
+    const unkeyed = makeElement();
+    placeOnScreen(unkeyed, 50);
+    unkeyed.dataset.key = "";
+    let arrived!: HTMLElement;
+
+    flip(() => {
+      gone.remove();
+      arrived = makeKeyed("new", 200);
+    });
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(arrived.style.transform).toBe("");
+    expect(unkeyed.style.transform).toBe("");
+  });
+
+  it("flips an element that stays the same element, as flipElements does", () => {
+    const element = makeKeyed("a", 100);
+    flip(() => layoutTop.set(element, 300));
+    expect(seenTop(element)).toBe(100);
+    play(SETTLE_TIME);
+    expect(seenTop(element)).toBe(300);
   });
 });
 

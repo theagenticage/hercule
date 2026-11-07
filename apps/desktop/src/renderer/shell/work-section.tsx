@@ -1,5 +1,6 @@
-import type { JSX } from "react";
-import { Link, useMatch } from "@tanstack/react-router";
+import { useSyncExternalStore, type JSX } from "react";
+import { Link, useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
+import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
 import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
 import { IntakeIcon } from "../icons/intake";
@@ -12,7 +13,10 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * Renders the Hercule face's Work section, each row selected while its
  * screen is open:
  *
- * - The office, first, with no count.
+ * - Overview, first, which opens the view of the Overview used last, the
+ *   Office or Work. It is selected on Work only: the Office has its own row
+ *   just below, which stays selected on the Office as before. With no count.
+ * - The office, with no count.
  * - Intake, ending in its To do count in marigold: the open signals and the
  *   rows of Tracking that wait on the user. The count is hidden at 0.
  * - Workflows, with no count: a total of the user's workflows gives the user
@@ -28,11 +32,33 @@ export function WorkSection(): JSX.Element {
   const toDoCount = useToDoCount();
   const runOpen =
     useMatch({ from: "/_connected/_shell/runs/$runId", shouldThrow: false }) !== undefined;
+  const navigate = useNavigate();
+  const { controller } = useRouteContext({ from: "/_connected/_shell" });
+  const overviewView = useSyncExternalStore(subscribeOverviewView, () =>
+    readOverviewView(controller.url),
+  );
   return (
     <section className="side-sec">
       <h3 className="side-h">
         <span>Work</span>
       </h3>
+      {/* The link is to Work, so it is selected on Work only: a link to the
+          Office would be selected on the Office too, where the row below is
+          the selected one. When the Office was the view used last, the click
+          is sent there instead. */}
+      <Link
+        to="/work"
+        className="nav-row"
+        activeProps={SELECTED_LINK_PROPS}
+        onClick={(event) => {
+          if (overviewView !== "office") return;
+          event.preventDefault();
+          void navigate({ to: "/office" });
+        }}
+      >
+        <OfficeIcon />
+        <span>Overview</span>
+      </Link>
       <Link to="/office" className="nav-row" activeProps={SELECTED_LINK_PROPS}>
         <OfficeIcon />
         <span>The office</span>

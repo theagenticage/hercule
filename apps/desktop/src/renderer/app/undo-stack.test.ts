@@ -73,7 +73,7 @@ describe("createUndoStack", () => {
     expect(await stack.undo()).toEqual({ kind: "empty" });
   });
 
-  it("tells subscribers about each change and about nothing after they stop", async () => {
+  it("tells subscribers about each change and about nothing after they stop", () => {
     const stack = createUndoStack();
     let calls = 0;
     const stop = stack.subscribe(() => {

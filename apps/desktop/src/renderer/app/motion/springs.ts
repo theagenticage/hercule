@@ -82,7 +82,11 @@ export class SpringChannels {
     l: SPRINGS.hand,
   };
 
-  constructor(private readonly tolerance: Tolerance) {}
+  private readonly tolerance: Tolerance;
+
+  constructor(tolerance: Tolerance) {
+    this.tolerance = tolerance;
+  }
 
   /** Sends the given channels to new goals on `spring`, keeping the position and speed they have. */
   aim(goals: PartialChannelValues, spring: Spring): void {
@@ -108,6 +112,16 @@ export class SpringChannels {
   /** Puts a channel at `value` and leaves its speed and goal alone, so the next steps carry on with the motion it had. */
   relocate(channel: Channel, value: number): void {
     this.values[channel] = value;
+  }
+
+  /** Returns how fast a channel moves now, in its unit a second. */
+  readSpeed(channel: Channel): number {
+    return this.speeds[channel];
+  }
+
+  /** Sets how fast a channel moves now, and leaves its value and goal alone. */
+  setSpeed(channel: Channel, speed: number): void {
+    this.speeds[channel] = speed;
   }
 
   /** Puts every channel back at rest, with no speed. */

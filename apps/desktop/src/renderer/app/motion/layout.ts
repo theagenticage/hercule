@@ -6,7 +6,7 @@
  * Each function reads the page once, before it writes, so a long list costs
  * one layout and not one per element.
  */
-import { findBody, MOVING_CLASS, RISING_CLASS, trackBody } from "./body";
+import { findBody, MOVING_CLASS, RISING_CLASS, trackBody, type Velocity } from "./body";
 import { isMotionReduced } from "./reduced";
 import type { SpringName } from "./springs";
 
@@ -59,6 +59,41 @@ export const measureLayoutRect = (element: HTMLElement): LayoutRect => {
   };
 };
 
+/** Where an element looked before the page changed, and the speed it moved at. */
+interface FlipStart {
+  readonly rect: DOMRect;
+  readonly velocity?: Velocity | undefined;
+}
+
+/**
+ * Moves `element` from `start` to `to`, the place the layout now gives it. A
+ * move shorter than half a pixel is not drawn, unless the element still
+ * carries an offset from an earlier move. Under Reduce motion, and for a move
+ * of more than a screen, the element goes straight to its place.
+ */
+const springFrom = (
+  element: HTMLElement,
+  start: FlipStart,
+  to: LayoutRect,
+  spring: SpringName,
+  delay: number,
+  reduced: boolean,
+): void => {
+  const body = trackBody(element);
+  const dx = start.rect.left - to.left;
+  const dy = start.rect.top - to.top;
+  const isMoved = Math.abs(dx) >= SMALLEST_MOVE || Math.abs(dy) >= SMALLEST_MOVE;
+  const hasOffset = body.values.x !== 0 || body.values.y !== 0;
+  if (!isMoved && !hasOffset) return;
+  if (reduced || Math.abs(dy) > LONGEST_JOURNEY) {
+    body.set({ x: 0, y: 0 });
+    return;
+  }
+  body.relocate(dx, dy, start.velocity);
+  if (dy > 0) element.classList.add(RISING_CLASS);
+  body.to({ x: 0, y: 0 }, spring, { delay: Math.min(delay, LONGEST_STAGGER), reduced });
+};
+
 /**
  * Runs `mutate`, then moves every element in `elements` from where it was on
  * screen to where `mutate` put it. "Where it was" is what the user saw,
@@ -83,21 +118,94 @@ export const flipElements = (
     const from = before[index];
     const to = after[index];
     if (from === undefined || to === undefined || to === null) return;
-    const body = trackBody(element);
-    const dx = from.left - to.left;
-    const dy = from.top - to.top;
-    const isMoved = Math.abs(dx) >= SMALLEST_MOVE || Math.abs(dy) >= SMALLEST_MOVE;
-    const hasOffset = body.values.x !== 0 || body.values.y !== 0;
-    if (!isMoved && !hasOffset) return;
-    if (reduced || Math.abs(dy) > LONGEST_JOURNEY) {
-      body.set({ x: 0, y: 0 });
-      return;
-    }
-    body.relocate(dx, dy);
-    if (dy > 0) element.classList.add(RISING_CLASS);
-    const delay = Math.min(options.stagger?.(element, index) ?? 0, LONGEST_STAGGER);
-    body.to({ x: 0, y: 0 }, spring, { delay, reduced });
+    springFrom(
+      element,
+      { rect: from },
+      to,
+      spring,
+      options.stagger?.(element, index) ?? 0,
+      reduced,
+    );
   });
+};
+
+/** How `flipByKey` finds and moves the elements. */
+export interface FlipByKeyOptions {
+  /** The element that holds every element to move, before and after `mutate`. It must stay on the page. */
+  readonly root: ParentNode;
+  /** The CSS selector of the elements to move. */
+  readonly selector: string;
+  /** Returns the key that tells the same thing apart across a change, or `null` for an element to leave alone. */
+  readonly readKey: (element: HTMLElement) => string | null;
+  /** Changes the page. It must commit the change before it returns: the new places are measured right after. */
+  readonly mutate: () => void;
+  /** The spring they move on. Defaults to `hand`. */
+  readonly spring?: SpringName;
+  /** Returns the milliseconds to delay the element at `index` of the elements found after `mutate`. The delay is cut to `LONGEST_STAGGER`. */
+  readonly stagger?: (element: HTMLElement, index: number) => number;
+}
+
+/** Collects the elements under `root` that match `selector`, by key. The first element of a key wins. */
+const collectByKey = (
+  root: ParentNode,
+  selector: string,
+  readKey: (element: HTMLElement) => string | null,
+): Map<string, HTMLElement> => {
+  const found = new Map<string, HTMLElement>();
+  for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+    const key = readKey(element);
+    if (key !== null && !found.has(key)) found.set(key, element);
+  }
+  return found;
+};
+
+/**
+ * Like `flipElements`, for a page where React may replace an element with a
+ * new one for the same thing, such as a card that moves to another column.
+ * Measures every element under `root` that matches `selector`, by key, runs
+ * `mutate`, finds the elements again by key, and moves each from where it
+ * looked to where it is now.
+ *
+ * - An element that was mid-flight starts from what is on screen. When the
+ *   element is a new one, it takes over the old element's speed too, and the
+ *   old element's body is stopped.
+ * - A key found only before `mutate` (the thing left) or only after (it is
+ *   new) is left alone.
+ * - Reads the page once before `mutate` and once after, then writes.
+ */
+export const flipByKey = (options: FlipByKeyOptions): void => {
+  const { root, selector, readKey, mutate } = options;
+  const before = new Map<string, FlipStart & { readonly element: HTMLElement }>();
+  for (const [key, element] of collectByKey(root, selector, readKey)) {
+    before.set(key, {
+      element,
+      rect: element.getBoundingClientRect(),
+      velocity: findBody(element)?.velocity,
+    });
+  }
+  mutate();
+  const reduced = isMotionReduced();
+  const spring = options.spring ?? "hand";
+  const after = [...collectByKey(root, selector, readKey)].flatMap(([key, element], index) => {
+    const start = before.get(key);
+    return start === undefined ? [] : [{ element, index, start, to: measureLayoutRect(element) }];
+  });
+  for (const { element, index, start, to } of after) {
+    const isReplaced = start.element !== element;
+    if (isReplaced) {
+      // The old element may be gone, or may still be on the page: either way
+      // it no longer shows the thing, so its body must stop moving.
+      if (!start.element.isConnected) findBody(start.element)?.clear();
+    }
+    springFrom(
+      element,
+      isReplaced ? start : { rect: start.rect },
+      to,
+      spring,
+      options.stagger?.(element, index) ?? 0,
+      reduced,
+    );
+  }
 };
 
 /**

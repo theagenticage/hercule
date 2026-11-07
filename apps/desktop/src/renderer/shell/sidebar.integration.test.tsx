@@ -1050,7 +1050,7 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists The office, Intake, Workflows, Discussions and Wiki, all but Intake with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists Overview, The office, Intake, Workflows, Discussions and Wiki, all but Intake with no count, in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
@@ -1060,7 +1060,15 @@ describe("the sidebar's faces", () => {
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual(["The office", expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
+    ).toEqual([
+      "Overview",
+      "The office",
+      expect.stringMatching(/^Intake/),
+      "Workflows",
+      "Discussions",
+      "Wiki",
+    ]);
+    expect(within(work).getByRole("link", { name: "Overview" }).getAttribute("href")).toBe("/work");
     expect(within(work).getByRole("link", { name: "The office" }).getAttribute("href")).toBe(
       "/office",
     );
@@ -1079,6 +1087,49 @@ describe("the sidebar's faces", () => {
     });
     expect(workflows.getAttribute("aria-current")).toBe("page");
     expect(workflows.classList.contains("is-on")).toBe(true);
+  });
+
+  it("marks Overview on Work only, and The office on the Office as before", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const overview = within(nav).getByRole("link", { name: "Overview" });
+    const office = within(nav).getByRole("link", { name: "The office" });
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([null, null]);
+
+    await userEvent.click(overview);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/work");
+    });
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([
+      "page",
+      null,
+    ]);
+
+    await act(() => router.navigate({ to: "/office" }));
+
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([
+      null,
+      "page",
+    ]);
+  });
+
+  it("opens the Office from Overview when the Office was the view used last", async () => {
+    localStorage.setItem(`overview-view:${CONTROLLER_URL}`, "office");
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+
+    await userEvent.click(within(nav).getByRole("link", { name: "Overview" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/office");
+    });
+    // The Office row is the selected one there, not Overview.
+    expect(within(nav).getByRole("link", { name: "Overview" }).getAttribute("aria-current")).toBe(
+      null,
+    );
   });
 
   it.each([

@@ -13,16 +13,25 @@ export type MenuItemProps = ReturnType<PopoverMenu["buildItemProps"]>;
 /**
  * Renders the menu of a toolbar control as a popover, 8px under the button
  * that opens it (`usePopoverMenu`'s `triggerProps` go on that button, and its
- * `menuProps` here). Fill it with `MenuPick`, `MenuBack`, `MenuHeading` and
- * `MenuLine`. `label` names the menu for assistive technology.
+ * `menuProps` here). The menu must be the element right after that button, so
+ * the button can draw itself as open. Fill it with `MenuPick`, `MenuBack`,
+ * `MenuHeading` and `MenuLine`. `label` names the menu for assistive
+ * technology.
+ *
+ * `edge` says which edge of the button the menu lines up with: `start` puts
+ * its left edge on the button's and it grows to the right, as for Filter.
+ * `end` puts its right edge on the button's and it grows to the left, for a
+ * button at the right end of the row, such as Display.
  */
 export function ToolMenu({
   menuProps,
   label,
+  edge,
   children,
 }: {
   readonly menuProps: PopoverMenu["menuProps"];
   readonly label: string;
+  readonly edge: "start" | "end";
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -31,7 +40,11 @@ export function ToolMenu({
       popover="auto"
       role="menu"
       aria-label={label}
-      className="pop popover-menu menu--tool"
+      className={
+        edge === "end"
+          ? "pop popover-menu menu--tool menu--tool-end"
+          : "pop popover-menu menu--tool"
+      }
     >
       {children}
     </div>

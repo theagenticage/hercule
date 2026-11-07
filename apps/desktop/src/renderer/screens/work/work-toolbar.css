@@ -1,0 +1,46 @@
+/* The Work board's toolbar: what the drawing's `css/toolbar.css` has beyond
+   the shared parts in `screens/desk/toolbar.css`. */
+
+/* The quiet line before Find, such as what just happened on the board. It
+   gives up its room first when the row is full. */
+.work-toolbar-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 12px;
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--type-summary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-toolbar-line:empty {
+  display: none;
+}
+
+/* Two chips drop their captions in a window narrower than 1400px, as three or
+   more do at any width, so each keeps its value and Clear stays in reach. The
+   Clear button is there exactly when there are two or more chips. */
+@media (max-width: 1399.98px) {
+  .tools-main:has(.chip-clear) .desk-chip small {
+    display: none;
+  }
+}
+
+/* A facet with more than seven values opens with a Find box over them. */
+input.field.work-menu-find {
+  display: block;
+  width: calc(100% - 8px);
+  height: 30px;
+  margin: 2px 4px 4px;
+  padding: 0 9px;
+  border-radius: var(--r-btn);
+}
+input.field.work-menu-find:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+/* A long list of values scrolls inside the menu, under the Find box. */
+.work-menu-values {
+  max-height: 320px;
+  overflow-y: auto;
+}
