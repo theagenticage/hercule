@@ -22,7 +22,7 @@ import { PromotionState } from "../../promotion";
 import { runnerRepository } from "../../runners";
 import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the sweep runs. The limit the sweep applies is a session's

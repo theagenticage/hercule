@@ -20,19 +20,17 @@ import {
   createInvalidStateError,
   createNotFoundError,
   type InvalidState,
-  isFinishedStage,
   type Forbidden,
   type Id,
   MAX_DETAIL_SESSIONS,
   type NotFound,
-  type Task,
   type TaskDetail,
   type TaskDetailSession,
   type Unauthenticated,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { buildWorkCard, TaskBoardFacts } from "./board";
-import { taskRepository, type BoardTask } from "./repository";
+import { taskRepository } from "./repository";
 import { TaskTrackingRuns } from "./tracking";
 
 export class TaskDetailFacts extends Context.Service<
@@ -70,35 +68,6 @@ const make = Effect.gen(function* () {
   const runs = yield* TaskTrackingRuns;
   const detailFacts = yield* TaskDetailFacts;
 
-  /**
-   * Reads the live Task `requestedId` stands for, and its card on the board
-   * (none when the Task is at `done` or `dropped`). Fails with `NotFound`
-   * when there is no such live Task.
-   *
-   * The two reads are separate statements on a connection that holds no
-   * snapshot, so a merge, a stage change or a delete can land between them.
-   * Each statement follows a merged id to its survivor by itself, and this
-   * reads again when the two answers do not describe one Task at one stage,
-   * until they agree. Each retry needs another change to have landed, so the
-   * loop ends.
-   */
-  const readTaskAndCard = (
-    requestedId: string,
-  ): Effect.Effect<
-    { readonly task: Task; readonly boardTask: BoardTask | undefined },
-    NotFound | SqlError
-  > =>
-    Effect.gen(function* () {
-      const task = Option.getOrUndefined(yield* tasks.readLiveOrSurvivor(requestedId));
-      if (task === undefined) return yield* Effect.fail(createNotFoundError("no such task"));
-      const boardTask = Option.getOrUndefined(yield* tasks.readBoardTask(requestedId));
-      const agrees =
-        boardTask === undefined
-          ? isFinishedStage(task.stage)
-          : boardTask.id === task.id && boardTask.stage === task.stage;
-      return agrees ? { task, boardTask } : yield* readTaskAndCard(requestedId);
-    });
-
   return {
     /**
      * Returns the details of one Task: the Task in full, the card the board
@@ -123,10 +92,9 @@ const make = Effect.gen(function* () {
      *
      * It opens no transaction, so every statement runs on the read-only
      * connection. The number of statements is fixed, whatever the number of
-     * sessions and runs, except that the Task and its card are read again when
-     * a change lands between them (`readTaskAndCard`). Later statements can
-     * still see a newer state than the Task, and the push that change makes
-     * brings the next read.
+     * sessions and runs. The Task and its card come from one statement, so
+     * they always agree. Later statements can still see a newer state than the
+     * Task, and the push that change makes brings the next read.
      */
     read: (
       requestedId: Id,
@@ -138,7 +106,9 @@ const make = Effect.gen(function* () {
         yield* requireGrant("task.readDetail");
         yield* requireGrant("session.query");
         yield* requireGrant("run.query");
-        const { task, boardTask } = yield* readTaskAndCard(requestedId);
+        const found = Option.getOrUndefined(yield* tasks.readLiveWithCard(requestedId));
+        if (found === undefined) return yield* Effect.fail(createNotFoundError("no such task"));
+        const { task, card: boardTask } = found;
         if (boardTask === undefined) {
           return yield* Effect.fail(createInvalidStateError(NO_BOARD_CARD));
         }

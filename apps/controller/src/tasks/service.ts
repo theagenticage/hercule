@@ -63,14 +63,12 @@ import {
   type TaskStage,
   type TaskStatus,
   type TaskMergeInput,
-  TaskSummary,
   type TaskUpdatedEventPayload,
   type TryAgainUndo,
   type Unauthenticated,
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
-  addSeconds,
   afterCommit,
   announce,
   announceTaskCardChange,
@@ -87,13 +85,11 @@ import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
 import { TaskLinkOwners } from "./link-owners";
 import { TaskSummaryWake } from "./summary-wake";
-import { cutText } from "../text";
 import {
   taskRepository,
   type BoardCell,
   type NewTask,
   type ProvenanceInput,
-  type SummaryAttempt,
   type TaskEdit,
   type TaskFailureState,
   type TaskOrder,
@@ -126,35 +122,6 @@ export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 const MoveInput = Schema.Struct({ id: Id, ...TaskMoveInput.fields });
 
 export type MoveInput = Schema.Schema.Type<typeof MoveInput>;
-
-/**
- * How long after the first change since its last summary a Task waits before
- * its summary is written, in seconds. A burst of changes then makes one
- * summary. Later changes do not extend the wait: a busy Task is paced by
- * `SUMMARY_MIN_INTERVAL_SECONDS` instead.
- */
-export const SUMMARY_QUIET_SECONDS = 30;
-
-/**
- * The fewest seconds between two attempts to write one Task's summary,
- * failed attempts included. A failure waits longer each time it repeats.
- */
-export const SUMMARY_MIN_INTERVAL_SECONDS = 300;
-
-/** The most seconds a Task waits after repeated failures: one hour. */
-const SUMMARY_MAX_BACKOFF_SECONDS = 3600;
-
-/** The most characters of a failure reason that are stored. */
-const MAX_SUMMARY_FAILURE_REASON = 500;
-
-/** The text a summary write carries, checked against the contract's bounds. */
-const SummaryText = Schema.Struct({
-  line: TaskSummary.fields.line,
-  standing: TaskSummary.fields.standing,
-  left: TaskSummary.fields.left,
-});
-
-const decodeSummaryText = Schema.decodeUnknownEffect(SummaryText);
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
@@ -1434,7 +1401,7 @@ const make = Effect.gen(function* () {
      * the summary reads, so a crash cannot lose the change.
      *
      * When the mark starts a dirty cycle on a Task that has a written summary,
-     * it announces the Task as a derived change (as `storeSummary` does), so
+     * it announces the Task as a derived change (as the summary writer does), so
      * clients draw the summary as stale. Later marks of the same cycle announce
      * nothing.
      *
@@ -1447,141 +1414,6 @@ const make = Effect.gen(function* () {
      * grant and waits for nothing.
      */
     markSummaryDirty,
-
-    /**
-     * Picks the Tasks whose summary is due, oldest change first, at most
-     * `limit` of them, and records an attempt on each, in one short
-     * transaction. A Task is due when it is live (not deleted, merged or
-     * finished), first changed at least `SUMMARY_QUIET_SECONDS` ago, and is past
-     * its `next_attempt_at`. Each pick sets `next_attempt_at` to
-     * `SUMMARY_MIN_INTERVAL_SECONDS` from now, so a Task is called for at most
-     * once in that time, failures included.
-     *
-     * Returns the Task ids with the `dirtyRevision` to hand back to
-     * `storeSummary` or `failSummary`. Checks no grant.
-     */
-    claimSummaryAttempts: (input: {
-      readonly limit: number;
-    }): Effect.Effect<ReadonlyArray<SummaryAttempt>, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const at = yield* nowIso;
-          return yield* tasks.claimSummaryAttempts({
-            limit: input.limit,
-            at,
-            quietBefore: addSeconds(at, -SUMMARY_QUIET_SECONDS),
-            nextAttemptAt: addSeconds(at, SUMMARY_MIN_INTERVAL_SECONDS),
-          });
-        }),
-      ),
-
-    /**
-     * Stores the summary the writer made for the revision it was given by
-     * `claimSummaryAttempts`, in one short transaction, and returns whether it
-     * stored it. It stores nothing when the Task is no longer live (deleted,
-     * merged or finished), and never makes a row.
-     *
-     * - When the Task has not changed since the claim, the summary is current:
-     *   the row is clean.
-     * - When it changed meanwhile, the summary is stored all the same and the
-     *   row stays dirty, so the card shows it as stale and the next attempt,
-     *   paced by `next_attempt_at`, brings it up to date. A Task that changes
-     *   during every call would otherwise never get a summary.
-     *
-     * A stored summary clears the failure and resets the failure count. It
-     * writes a `task.summarized` audit entry stamped with the system actor and
-     * announces the Task as a derived change, which clients read at the slower
-     * pace. It does not touch the Task's `updatedAt`, writes no `task.updated`
-     * event, and marks nothing dirty, because none of those would be a
-     * decision of a model.
-     *
-     * The text must fit the contract's bounds (`MAX_SUMMARY_LINE` and the
-     * other two): the writer cuts it at a word first, and an overlong text is
-     * a defect here, because a stored text over its bound would fail every
-     * read of the board. Checks no grant.
-     */
-    storeSummary: (input: {
-      readonly taskId: string;
-      readonly dirtyRevision: number;
-      readonly summary: Pick<TaskSummary, "line" | "standing" | "left">;
-    }): Effect.Effect<boolean, SqlError> =>
-      Effect.gen(function* () {
-        const summary = yield* Effect.orDie(decodeSummaryText(input.summary));
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            const written = yield* tasks.writeSummary({
-              taskId: input.taskId,
-              dirtyRevision: input.dirtyRevision,
-              summary,
-              at,
-            });
-            if (!written) return false;
-            // Only ids go in the entry: the text of a summary is not kept in
-            // the log.
-            yield* audit.append({
-              kind: "task.summarized",
-              actor: SYSTEM_ACTOR,
-              payload: { taskId: input.taskId, dirtyRevision: input.dirtyRevision },
-              at,
-            });
-            yield* announceTaskCardChange(input.taskId);
-            return true;
-          }),
-        );
-      }),
-
-    /**
-     * Returns the time the first dirty Task becomes due for a summary, or none
-     * when no live Task is dirty. It is the earliest time at which
-     * `claimSummaryAttempts` would pick a Task: `SUMMARY_QUIET_SECONDS` after
-     * the first change, or the Task's `next_attempt_at` when that is later.
-     * The summary writer sleeps until then. Runs outside a transaction, so it
-     * reads on the read connection and never waits for the writer. Checks no
-     * grant.
-     */
-    readNextSummaryDueAt: (): Effect.Effect<Option.Option<string>, SqlError> =>
-      tasks.readNextSummaryDueAt(SUMMARY_QUIET_SECONDS),
-
-    /**
-     * Records that the attempt for the revision `claimSummaryAttempts` gave
-     * failed, in one short transaction, and returns whether it recorded it.
-     * It keeps the last summary, stores the (cut) `reason` with the time,
-     * raises the failure count, and sets `next_attempt_at` to now plus
-     * `SUMMARY_MIN_INTERVAL_SECONDS` doubled for each failure in a row, at
-     * most one hour. The row stays dirty, so the card shows the summary as
-     * stale. Unlike `storeSummary`, it records nothing when the Task changed
-     * since: a failure of an older attempt says nothing about the Task now.
-     * It also records nothing when the Task is no longer live, so a late
-     * failure cannot touch a Task that was merged away. Checks no grant.
-     */
-    failSummary: (input: {
-      readonly taskId: string;
-      readonly dirtyRevision: number;
-      readonly reason: string;
-    }): Effect.Effect<boolean, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const at = yield* nowIso;
-          return yield* tasks.writeSummaryFailure({
-            taskId: input.taskId,
-            dirtyRevision: input.dirtyRevision,
-            reason: cutText(input.reason, MAX_SUMMARY_FAILURE_REASON),
-            at,
-            chooseNextAttempt: (attemptCount) =>
-              addSeconds(
-                at,
-                Math.min(
-                  SUMMARY_MIN_INTERVAL_SECONDS * 2 ** attemptCount,
-                  SUMMARY_MAX_BACKOFF_SECONDS,
-                ),
-              ),
-          });
-        }),
-      ),
 
     /**
      * Gives the Task made for a Thread the Thread's generated title. It

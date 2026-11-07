@@ -1,14 +1,11 @@
 import type { JSX, KeyboardEvent } from "react";
 import {
   chooseCardColleaguePose,
-  decideQuestionAnswers,
-  listTaskActions,
   STAGE_NAMES,
-  type AnswerableTaskQuestion,
   type PaneAnswer,
   type SummaryStanding,
   type TaskActionId,
-  type UnsentAnswer,
+  type TaskPaneContent,
 } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage, type TaskDetail, type WorkCard } from "@hercule/contract";
 import { buildLook } from "../../faces";
@@ -30,16 +27,12 @@ export interface TaskPaneChanges {
   /**
    * Return was pressed on the pane's title: does what Return does for this
    * Task, which is to try again after a failure, else to send the suggested
-   * answer of a question (`TaskActions.returnKey`). The same happens when
+   * answer of a question (`TaskActions.returnAction`). The same happens when
    * Return is pressed on the Task's card on the board.
    */
   readonly onReturn: () => void;
-  /**
-   * Answers `question`, by a chip or by the user's own words. `question` is
-   * the one the control that was used belongs to, so the answer goes to it
-   * even when the Task's open question has changed since it was drawn.
-   */
-  readonly onAnswer: (answer: PaneAnswer, question: AnswerableTaskQuestion) => void;
+  /** Answers the question the pane shows, by a chip or by the user's own words. */
+  readonly onAnswer: (answer: PaneAnswer) => void;
   readonly onDone: () => void;
   readonly onDrop: () => void;
   /** Asks what a Thread on this Task should do: the foot turns into a line to write it on. */
@@ -58,18 +51,6 @@ export interface TaskPaneChanges {
   readonly onDiscardAnswer: (intentId: string) => void;
   /** Asks the run `runId`, which runs the workflow `workflowName`, to stop. */
   readonly onStopRun: (runId: string, workflowName: string) => void;
-}
-
-/** What the pane shows of the answers the user gave to this Task's questions. */
-export interface TaskPaneAnswers {
-  /**
-   * What the user said to the question the pane shows, while the answer waits
-   * in the undo line or is being sent, or `null`. The question's chips and
-   * line give way to it, so the question cannot be answered twice.
-   */
-  readonly said: string | null;
-  /** The answers of this Task that were not sent, with their words and what to do about them. */
-  readonly unsent: readonly UnsentAnswer[];
 }
 
 /** Everything the pane's buttons do: the changes above, and where the others lead. */
@@ -137,10 +118,10 @@ export function TaskPaneColleague({
   card,
   isStill,
 }: {
-  readonly card: WorkCard | null;
+  readonly card: WorkCard | undefined;
   readonly isStill: boolean;
 }): JSX.Element | null {
-  const colleague = card === null ? null : chooseCardColleaguePose(card);
+  const colleague = card === undefined ? null : chooseCardColleaguePose(card);
   if (colleague === null) return null;
   return (
     <Colleague
@@ -156,16 +137,15 @@ export function TaskPaneColleague({
  * Renders a Task's details, the words of the opening sheet. It is
  * presentational: it reads nothing, and every button calls a callback.
  *
- * - `card` is the Task as the board shows it, or the read's when the board
- *   has not got it, or `null` while neither is there. It gives the title, the
- *   stage and the failure, so they show before the read arrives.
+ * - `pane` is what the pane shows and does for the Task: its card (the title,
+ *   the stage and the failure, which show before the read arrives), the
+ *   question, the actions, and the answers the user gave. Every button acts on
+ *   this value.
  * - `projectName` is the crumb.
  * - `read` is what the details read gives: quiet bars while it is on its
  *   way, a line and a retry after it failed, a line when the Task is gone.
  *   The pane has its final size at once, so nothing moves when the words
  *   arrive.
- * - `answers` is what the user said to the Task's questions: the words of one
- *   held for sending, and the ones that were not sent.
  * - `threadPromptWords` turns the foot into the line that asks what a new
  *   Thread should do, with those words in it to start with (empty for a new
  *   line). `null` leaves the foot as it is.
@@ -181,30 +161,21 @@ export function TaskPaneColleague({
  * is in the pane, the sheet moves the focus to the new title.
  */
 export function TaskPane({
-  card,
+  pane,
   projectName,
   read,
-  answers,
   threadPromptWords,
   actions,
 }: {
-  readonly card: WorkCard | null;
+  readonly pane: TaskPaneContent;
   readonly projectName: string | null;
   readonly read: TaskPaneRead;
-  readonly answers: TaskPaneAnswers;
   /** The words the line that asks what a new Thread should do starts with, or `null` when the foot is not that line. */
   readonly threadPromptWords: string | null;
   readonly actions: TaskPaneActions;
 }): JSX.Element {
-  const detail = read.status === "ready" ? read.detail : null;
+  const { card, question, actions: taskActions } = pane;
   const isGone = read.status === "gone";
-  // The failure is the card's, so that what the section shows and what its
-  // buttons do read the same card. The question is the details': a card whose
-  // answer is held has had its question taken off.
-  const question = detail === null ? null : decideQuestionAnswers(detail);
-  // A Task that no longer exists offers nothing to do to it.
-  const taskActions =
-    card === null || isGone ? null : listTaskActions({ failure: card.failure, question });
   const act = (id: TaskActionId): void => {
     switch (id) {
       case "try-again":
@@ -245,7 +216,6 @@ export function TaskPane({
     actions.onReturn();
   };
 
-  const hasCard = card !== null;
   return (
     <div className="task-pane" onKeyDown={handleKeyDown} aria-busy={read.status === "loading"}>
       <div className="task-pane-scroll">
@@ -253,7 +223,7 @@ export function TaskPane({
           <p className="task-pane-crumb">
             <span className="task-pane-crumb-text">{projectName}</span>
           </p>
-          {hasCard ? (
+          {card !== undefined ? (
             <h2 className="task-pane-title" tabIndex={-1} data-sheet-focus>
               {card.title}
             </h2>
@@ -262,7 +232,7 @@ export function TaskPane({
               <span className="task-pane-title-bar" />
             </h2>
           )}
-          {hasCard && (
+          {card !== undefined && (
             <StagePath
               stage={card.stage}
               isDisabled={isGone}
@@ -307,10 +277,10 @@ export function TaskPane({
             ) : (
               <p className="task-pane-note">{read.standing.note}</p>
             )}
-            {card !== null && (
+            {card !== undefined && (
               <FailureSection card={card} actions={taskActions?.failure ?? []} onAction={act} />
             )}
-            {answers.unsent.map((unsent) => (
+            {pane.unsent.map((unsent) => (
               <UnsentAnswerSection
                 key={unsent.intentId}
                 unsent={unsent}
@@ -322,7 +292,7 @@ export function TaskPane({
             {question !== null && (
               <QuestionSection
                 question={question}
-                said={answers.said}
+                said={pane.said}
                 openThread={taskActions?.openThread ?? null}
                 onAnswer={actions.onAnswer}
                 onOpenThread={actions.onOpenThread}

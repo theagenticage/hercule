@@ -17,8 +17,13 @@ const NOTHING_RELEASED: ReadonlySet<string> = new Set();
 
 /** The board the screen draws, and what the reads did to it. */
 export interface BoardReads {
-  /** The board to draw, or `undefined` until the first read ends. */
-  readonly board: WorkBoard | undefined;
+  /**
+   * The drawn board: the logical board with the changes nobody here caused
+   * held back. Only what the screen draws reads it (the lanes, the Filter,
+   * Find, the counts); every action reads the logical board. `undefined`
+   * until the first read ends.
+   */
+  readonly drawnBoard: WorkBoard | undefined;
   /** What the board did by itself last, such as "Review PR failed", for the toolbar's line. `null` when nothing is worth saying. */
   readonly note: string | null;
   /**
@@ -42,11 +47,14 @@ interface Picture {
   readonly board: WorkBoard;
   readonly server: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
+  /** The Tasks the logical board left out when this picture was made. */
+  readonly hidden: ReadonlySet<string>;
 }
 
 /** What the screen gave `useBoardReads` at its last render. */
 interface Inputs {
-  readonly board: WorkBoard | undefined;
+  readonly logicalBoard: WorkBoard | undefined;
+  readonly hiddenIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
   readonly picture: Picture | undefined;
@@ -55,22 +63,28 @@ interface Inputs {
 /** Returns the picture to draw next, and the changes it holds back until the hand is still. */
 const decidePicture = (
   picture: Picture | undefined,
-  board: WorkBoard,
+  logicalBoard: WorkBoard,
+  hiddenIds: ReadonlySet<string>,
   serverBoard: WorkBoard | undefined,
   released: ReadonlySet<string>,
 ): { readonly next: Picture; readonly held: readonly HeldChange[] } => {
   const decided =
     picture === undefined
-      ? { board, held: [] }
-      : holdBackBoardChanges(picture.board, board, released);
-  return { next: { board: decided.board, server: serverBoard, released }, held: decided.held };
+      ? { board: logicalBoard, held: [] }
+      : holdBackBoardChanges(picture.board, logicalBoard, released, picture.hidden);
+  return {
+    next: { board: decided.board, server: serverBoard, released, hidden: hiddenIds },
+    held: decided.held,
+  };
 };
 
 /**
  * Decides what the Work board draws from what it reads, and plays what a read
- * changes. `board` is the board with the user's pending moves applied and
- * `serverBoard` the board as the last read gave it; a change of the second is
- * a read, and a change of only the first is the user's own move.
+ * changes. `logicalBoard` is the board with everything the user did applied
+ * (`buildLogicalBoard`), `hiddenIds` the Tasks it left out on purpose, and
+ * `serverBoard` the board as the last read gave it; a change of the last is a
+ * read, and a change of only the logical board is the user's own change.
+ * Returns the drawn board.
  *
  * - A user's own move is drawn at once, in the render: the code that makes it
  *   plays it.
@@ -94,13 +108,15 @@ const decidePicture = (
  * Nothing is measured unless a read changes what is drawn.
  */
 export const useBoardReads = ({
-  board,
+  logicalBoard,
+  hiddenIds,
   serverBoard,
   projects,
   isCarrying,
   scrollRef,
 }: {
-  readonly board: WorkBoard | undefined;
+  readonly logicalBoard: WorkBoard | undefined;
+  readonly hiddenIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly projects: readonly WorkProject[];
   readonly isCarrying: boolean;
@@ -113,11 +129,11 @@ export const useBoardReads = ({
 
   // The drawn board is derived while rendering, and the picture is kept to
   // compare the next render with.
-  let drawn = board;
+  let drawn = logicalBoard;
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
-  if (board !== undefined) {
-    const decided = decidePicture(picture, board, serverBoard, released);
+  if (logicalBoard !== undefined) {
+    const decided = decidePicture(picture, logicalBoard, hiddenIds, serverBoard, released);
     held = decided.held;
     const isRead =
       picture !== undefined && (serverBoard !== picture.server || released !== picture.released);
@@ -135,11 +151,11 @@ export const useBoardReads = ({
     }
   }
 
-  const latest = useRef<Inputs>({ board, serverBoard, released, picture });
+  const latest = useRef<Inputs>({ logicalBoard, hiddenIds, serverBoard, released, picture });
   const ownTaskIds = useRef(new Set<string>());
   const returnedTasks = useRef(new Map<string, EndStage>());
   useLayoutEffect(() => {
-    latest.current = { board, serverBoard, released, picture };
+    latest.current = { logicalBoard, hiddenIds, serverBoard, released, picture };
   });
 
   // Draws a read: measures the board, commits the new picture, and plays what
@@ -150,9 +166,20 @@ export const useBoardReads = ({
     let isCancelled = false;
     queueMicrotask(() => {
       if (isCancelled) return;
-      const { board: latestBoard, serverBoard: latestServer, picture: shown } = latest.current;
+      const {
+        logicalBoard: latestBoard,
+        hiddenIds: latestHidden,
+        serverBoard: latestServer,
+        picture: shown,
+      } = latest.current;
       if (latestBoard === undefined || shown === undefined) return;
-      const { next } = decidePicture(shown, latestBoard, latestServer, latest.current.released);
+      const { next } = decidePicture(
+        shown,
+        latestBoard,
+        latestHidden,
+        latestServer,
+        latest.current.released,
+      );
       const commit = (): void => {
         flushSync(() => {
           setPicture(next);
@@ -191,7 +218,7 @@ export const useBoardReads = ({
 
   const note = useHeldChanges({
     held,
-    board,
+    board: logicalBoard,
     projects,
     isCarrying,
     scrollRef,
@@ -210,5 +237,5 @@ export const useBoardReads = ({
     setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
   }, []);
 
-  return { board: drawn, note, noteAddedTask, noteReturnedTask };
+  return { drawnBoard: drawn, note, noteAddedTask, noteReturnedTask };
 };

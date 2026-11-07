@@ -48,13 +48,14 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
 };
 
 /**
- * Returns the board to draw, given the board `shown` now and the `latest`
- * board, and the changes of `latest` that it holds back. Everything else in
+ * Returns the drawn board, given the board `shown` now and the `latest`
+ * logical board (`buildLogicalBoard`), and the changes of `latest` that it holds back. Everything else in
  * `latest` is shown at once. This is the one place that decides what waits
  * for a still hand, so `arrangeCell` stays pure.
  *
  * - A card that is new to `shown` is left out until its `arrival` key is in
- *   `released`.
+ *   `released`. A card in `hiddenBefore` is not new: the user's own gesture
+ *   took it off the board and it comes back, so it is drawn at once.
  * - A card whose run just failed (it shows a failure `shown` does not) keeps
  *   the failure it has in `shown` (none, or the one before) until its
  *   `failure` key is in `released`, so it does not rise to the top of its cell
@@ -68,6 +69,7 @@ export const holdBackBoardChanges = (
   shown: WorkBoard,
   latest: WorkBoard,
   released: ReadonlySet<string>,
+  hiddenBefore: ReadonlySet<string>,
 ): HeldBoard => {
   const shownById = new Map(shown.cards.map((card) => [card.id, card]));
   const held: HeldChange[] = [];
@@ -76,7 +78,7 @@ export const holdBackBoardChanges = (
     const before = shownById.get(card.id);
     if (before === undefined) {
       const key = buildArrivalKey(card.id);
-      if (released.has(key)) cards.push(card);
+      if (released.has(key) || hiddenBefore.has(card.id)) cards.push(card);
       else held.push({ kind: "arrival", cardId: card.id, key });
       continue;
     }

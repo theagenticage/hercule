@@ -73,10 +73,13 @@ describe("useUndoLine", () => {
     });
 
     it("hides a line after 5.2 seconds, and a line without Undo after 8", () => {
-      const { result } = renderHook(() => useUndoLine(createUndoStack<string>()));
+      const stack = createUndoStack<string>();
+      const moved = reversing("Moved A");
+      stack.push(moved);
+      const { result } = renderHook(() => useUndoLine(stack));
 
       act(() => {
-        result.current.say("Moved A.", true);
+        result.current.say("Moved A.", moved);
       });
       act(() => {
         vi.advanceTimersByTime(5_100);
@@ -90,7 +93,7 @@ describe("useUndoLine", () => {
       expect(result.current.line.text).toBe("Moved A.");
 
       act(() => {
-        result.current.say("It did not save.", false);
+        result.current.say("It did not save.");
       });
       act(() => {
         vi.advanceTimersByTime(7_900);
@@ -102,17 +105,45 @@ describe("useUndoLine", () => {
       expect(result.current.line.isShown).toBe(false);
     });
 
+    it("stops offering Undo when its gesture leaves the stack, so Undo cannot reach an older gesture", () => {
+      const stack = createUndoStack<string>();
+      const older = reversing("Moved A");
+      const held = reversing("Answered B");
+      stack.push(older);
+      stack.push(held);
+      const { result } = renderHook(() => useUndoLine(stack));
+      act(() => {
+        result.current.say("Answered B.", held);
+      });
+      expect(result.current.line.canUndo).toBe(true);
+
+      // The held answer is sent at 5.0 s and leaves the stack; the line stays until 5.2 s.
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+        result.current.withdraw(held);
+      });
+
+      expect(result.current.line.isShown).toBe(true);
+      expect(result.current.line.canUndo).toBe(false);
+      expect(stack.holds(older)).toBe(true);
+      // Withdrawing does not give the line more time: it still goes at 5.2 s.
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(result.current.line.isShown).toBe(false);
+    });
+
     it("starts the timer again when a new line comes", () => {
       const { result } = renderHook(() => useUndoLine(createUndoStack<string>()));
 
       act(() => {
-        result.current.say("Moved A.", true);
+        result.current.say("Moved A.");
       });
       act(() => {
         vi.advanceTimersByTime(4_000);
       });
       act(() => {
-        result.current.say("Moved B.", true);
+        result.current.say("Moved B.");
       });
       act(() => {
         vi.advanceTimersByTime(4_000);

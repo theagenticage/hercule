@@ -11,7 +11,8 @@
  * fails, which keeps it as `failed` with its content and the error's message,
  * so the user can send it again or discard it.
  *
- * The store is held by the shell, outside every component, so changing route
+ * The store is held by the account scope (`account-scope.ts`), outside every
+ * component, so changing route
  * or closing a pane does nothing to an intent. Every change writes the
  * unfinished intents to storage under a key made of the controller and the
  * signed-in user. A new store with the same key finds them again as `failed`
@@ -381,59 +382,6 @@ export const createPendingIntents = (options: {
       isDisposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
-    },
-  };
-};
-
-/**
- * The place where the window keeps the store of the signed-in user. A store
- * belongs to one controller and one user, but the user is known only after
- * the shell has read it, so the store is opened then.
- */
-export interface PendingIntentsHolder {
-  /**
-   * Returns the store of the user `username`, creating it on first use.
-   * Asking again for the same user returns the same store. Asking for another
-   * user disposes the first user's store, so an intent never reaches the next
-   * user.
-   *
-   * It is safe to call while a component renders: creating a store only reads
-   * storage, and starts no timer and sends nothing until an intent is held. A
-   * render that is repeated or thrown away finds the same store. Another user
-   * can only be asked for after sign-out, which closes the store first.
-   */
-  readonly open: (
-    username: string,
-    send: (intent: IntentContent) => Promise<unknown>,
-  ) => PendingIntents;
-  /**
-   * Disposes the open store, as sign-out does. What it still held stays in
-   * storage and comes back as unsent when the user opens a store again.
-   */
-  readonly close: () => void;
-}
-
-/** Creates the holder for the controller at `controllerUrl`, keeping intents in `storage`. */
-export const createPendingIntentsHolder = (
-  controllerUrl: string,
-  storage: IntentStorage,
-): PendingIntentsHolder => {
-  let current: { readonly username: string; readonly store: PendingIntents } | null = null;
-  return {
-    open: (username, send) => {
-      if (current?.username === username) return current.store;
-      current?.store.dispose();
-      const store = createPendingIntents({
-        storage,
-        storageKey: buildPendingIntentsKey(controllerUrl, username),
-        send,
-      });
-      current = { username, store };
-      return store;
-    },
-    close: () => {
-      current?.store.dispose();
-      current = null;
     },
   };
 };

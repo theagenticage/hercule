@@ -2,6 +2,7 @@
 import type { DropPlace } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import type { LayoutRect, MotionBody } from "../../app/motion";
+import type { MergeGesture } from "./board-drag-merge";
 import type { BoardGeometry, BoardView } from "./board-drag-geometry";
 
 /** How much bigger a card is in the hand. */
@@ -58,21 +59,6 @@ export interface Carry {
   scrollFrame: number;
   /** The folded lane that is marked as the target, if one is. */
   markedLane: HTMLElement | null;
-  /** The card the carry is drawn into for a merge, or `null`. */
-  merge: MergeChoice | null;
-  /** The card whose middle the pointer is over, or `null`. A merge needs the pointer to rest there. */
-  hoverCardId: string | null;
-  /** Where the pointer began to rest over `hoverCardId`. */
-  rest: { readonly x: number; readonly y: number };
-  dwellTimer: number | undefined;
-  /** Whether Option (Alt) is held, which chooses the card at once. */
-  isAltHeld: boolean;
-  /** Until this time (`performance.now()`), a card that left its dock glides to the pointer. */
-  glideUntil: number;
-}
-
-/** The card a carry would merge into: its id and its element, which carries the marks. */
-export interface MergeChoice {
-  readonly cardId: string;
-  readonly element: HTMLElement;
+  /** The merge of the carry into a card: the wait, the card chosen, the dock and the marks. */
+  readonly merge: MergeGesture;
 }

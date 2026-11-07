@@ -61,6 +61,7 @@ const PATHS = [
   join(HERE, "-work-screen.tsx"),
   join(HERE, "-work-board.ts"),
   join(HERE, "-card-moves.ts"),
+  join(HERE, "-logical-board.ts"),
   join(HERE, "-merge-cards.ts"),
   join(HERE, "-stop-run.ts"),
   join(HERE, "../../../app/use-undo-line.ts"),

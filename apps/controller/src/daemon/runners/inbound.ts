@@ -42,7 +42,7 @@ import { Settings } from "../../settings";
 import { Secrets } from "../../secrets";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { absorbFailures, forkAndAbsorbFailures } from "../../absorbing";
 import { DiscussionInputs } from "../discussions";
 import { ProviderAccountProbing } from "../provider-accounts";
 import { Dispatch, Live, makeGithubTokenAnswers } from "../sessions";

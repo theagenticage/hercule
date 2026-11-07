@@ -12,17 +12,12 @@
  * - The store lives in the controller, not here, so a merge goes on when the
  *   user leaves Work during the undo line.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import {
-  describeMerge,
-  describeMergedInto,
-  describeMergeFailure,
-  hideHeldMergeSources,
-} from "@hercule/client-core/work";
-import type { WorkCard } from "@hercule/contract";
-import type { SavedController } from "../../../app/context";
-import { listFailedMerges, listHeldMerges } from "../../../app/pending-intents";
+import { describeMerge, describeMergedInto, describeMergeFailure } from "@hercule/client-core/work";
+import type { WorkBoard } from "@hercule/contract";
+import type { AccountScope } from "../../../app/account-scope";
+import { listFailedMerges } from "../../../app/pending-intents";
 import { holdWithUndo, usePendingIntents } from "../../../app/use-pending-intents";
 import {
   launchLeavingCard,
@@ -35,8 +30,6 @@ import type { CardMoves } from "./-card-moves";
 
 /** What `useMergeCards` returns. */
 export interface MergeCards {
-  /** `boardCards` without the card of each merge that is held or on its way. */
-  readonly cards: readonly WorkCard[];
   /**
    * Holds the merge of the card `sourceCardId` into the card `targetCardId`
    * for the undo line and shows it done, with no motion: the source leaves the
@@ -55,44 +48,38 @@ export interface MergeCards {
 }
 
 /**
- * Returns the merge actions for the board of `boardCards`, and the cards to
- * draw. `isBoardRead` is whether the board was read: a merge that failed while
+ * Returns the merge actions. `readBoard` returns the logical board as it is
+ * this instant (`useLogicalBoard`), which leaves out the card of each merge
+ * that is held or on its way, and has it again once the merge failed.
+ * `isBoardRead` is whether the board was read: a merge that failed while
  * the app was closed is reported once the card's title is known. `moves` shows
  * the undo line and keeps the undo stack, `scrollRef` is the element that
  * scrolls the board, `openTaskId` is the Task whose details are open, and
  * `closePane` closes them (a merge away of the open Task closes them).
  */
 export const useMergeCards = ({
-  controller,
-  username,
-  boardCards,
+  scope,
+  readBoard,
   isBoardRead,
   moves,
   scrollRef,
   openTaskId,
   closePane,
 }: {
-  readonly controller: SavedController;
-  readonly username: string;
-  readonly boardCards: readonly WorkCard[];
+  readonly scope: AccountScope;
+  readonly readBoard: () => WorkBoard | undefined;
   readonly isBoardRead: boolean;
   readonly moves: Pick<CardMoves, "sayWithUndo" | "sayWithoutUndo">;
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly openTaskId: string | null;
   readonly closePane: () => void;
 }): MergeCards => {
-  const { store, intents } = usePendingIntents(controller, username);
-
-  const heldMerges = useMemo(() => listHeldMerges(intents), [intents]);
-  const cards = useMemo(
-    () => hideHeldMergeSources(boardCards, heldMerges),
-    [boardCards, heldMerges],
-  );
+  const { store } = usePendingIntents(scope);
 
   // The listeners of the store outlive a render, so they read the newest values from here.
-  const latest = useRef({ boardCards, isBoardRead, moves, openTaskId, closePane });
+  const latest = useRef({ readBoard, isBoardRead, moves, openTaskId, closePane });
   useLayoutEffect(() => {
-    latest.current = { boardCards, isBoardRead, moves, openTaskId, closePane };
+    latest.current = { readBoard, isBoardRead, moves, openTaskId, closePane };
   });
 
   /** Runs `change` as one committed change that glides the board on `hand`. With no board on screen, just runs it. */
@@ -131,14 +118,10 @@ export const useMergeCards = ({
   };
 
   const holdMerge = (sourceCardId: string, targetCardId: string): boolean => {
-    const {
-      boardCards: shown,
-      openTaskId: openId,
-      closePane: close,
-      moves: lines,
-    } = latest.current;
-    const source = shown.find((card) => card.id === sourceCardId);
-    const target = shown.find((card) => card.id === targetCardId);
+    const { readBoard: read, openTaskId: openId, closePane: close, moves: lines } = latest.current;
+    const cards = read()?.cards ?? [];
+    const source = cards.find((card) => card.id === sourceCardId);
+    const target = cards.find((card) => card.id === targetCardId);
     if (source === undefined || target === undefined || source.id === target.id) return false;
     holdWithUndo(
       store,
@@ -178,7 +161,7 @@ export const useMergeCards = ({
    * until the board is read, because the line names the card.
    */
   const reportFailedMerges = (isPlayed: boolean): void => {
-    const { boardCards: shown, isBoardRead: isRead, moves: lines } = latest.current;
+    const { readBoard: read, isBoardRead: isRead, moves: lines } = latest.current;
     if (!isRead) return;
     for (const intent of listFailedMerges(store.getSnapshot())) {
       const scroller = scrollRef.current;
@@ -194,7 +177,7 @@ export const useMergeCards = ({
       } else {
         store.discard(intent.intentId);
       }
-      const title = shown.find((each) => each.id === intent.taskId)?.title ?? "The card";
+      const title = read()?.cards.find((each) => each.id === intent.taskId)?.title ?? "The card";
       lines.sayWithoutUndo(
         describeMergeFailure(title, intent.failure?.message ?? "It was not sent."),
       );
@@ -216,5 +199,5 @@ export const useMergeCards = ({
     reportRef.current(false);
   }, [isBoardRead]);
 
-  return { cards, holdMerge, mergeCard };
+  return { holdMerge, mergeCard };
 };

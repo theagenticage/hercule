@@ -29,7 +29,7 @@ import {
   type RegisteredEventSource,
 } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the Ingest Reconciler compares the open handles with the

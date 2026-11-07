@@ -37,7 +37,7 @@ import { Secrets } from "../../secrets";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
 import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { buildSessionCoordination } from "./coordination";
 
 const make = Effect.gen(function* () {

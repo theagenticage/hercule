@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildPendingIntentsKey,
   createPendingIntents,
-  createPendingIntentsHolder,
   findHeldAnswer,
   listFailedMerges,
   listHeldAnswers,
@@ -441,40 +440,5 @@ describe("showing unsent answers on another Task", () => {
     intents.subscribe(listener);
     intents.moveFailedAnswers("task-1", "task-9");
     expect(listener).not.toHaveBeenCalled();
-  });
-});
-
-describe("the holder of the signed-in user's store", () => {
-  const URL = "http://127.0.0.1:4937";
-
-  it("hands out one store per user, and keeps it until another user opens one", () => {
-    const holder = createPendingIntentsHolder(URL, createMemoryStorage());
-    const send = createSend().send;
-
-    const first = holder.open("ada", send);
-    expect(holder.open("ada", send)).toBe(first);
-    const other = holder.open("bob", send);
-
-    expect(other).not.toBe(first);
-    // The first user's store is disposed: it holds and sends nothing any more.
-    expect(first.hold(ANSWER)).toEqual(expect.any(String));
-    expect(first.getSnapshot()).toEqual([]);
-  });
-
-  it("closes the store at sign-out, and the next store finds what was unsent, never sent by itself", async () => {
-    vi.useFakeTimers();
-    const storage = createMemoryStorage();
-    const stub = createSend();
-    const holder = createPendingIntentsHolder(URL, storage);
-    holder.open("ada", stub.send).hold(ANSWER);
-
-    holder.close();
-    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
-    const again = holder.open("ada", stub.send);
-
-    expect(stub.calls).toHaveLength(0);
-    expect(again.getSnapshot()).toMatchObject([
-      { ...ANSWER, state: "failed", failure: { reason: "interrupted" } },
-    ]);
   });
 });

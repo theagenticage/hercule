@@ -20,6 +20,7 @@ import { readEventsOfKind } from "../../events/testing";
 import { SessionTokensLayer } from "../../permissions";
 import { EventKindCatalogLayer, PluginHost } from "../../plugins";
 import { buildPluginStack, USER } from "../../plugins/testing";
+import { ServingPromotionStateLayer } from "../../promotion/testing";
 import { ProviderAccountRunnersLayer } from "../../provider-accounts";
 import { RunService, RunServiceLayer } from "../../runs";
 import { buildHeldAction, waitForHeldExecutions, type HeldAction } from "../../runs/testing";
@@ -30,6 +31,8 @@ import { sessionRepository } from "../../sessions";
 import {
   TaskService,
   TaskServiceLayer,
+  TaskSummaries,
+  TaskSummariesLayer,
   taskRepository,
   TaskTracking,
   TaskTrackingLayer,
@@ -41,7 +44,7 @@ import { WorkspaceServiceLayer } from "../../workspaces";
 import { RunExecutorLayer, TaskTrackingRunsLayer } from "../runs";
 import { TaskLinkOwnersLayer } from "./link-owners";
 
-type Deps = RunService | TaskService | TaskTracking | SqlClient.SqlClient;
+type Deps = RunService | TaskService | TaskSummaries | TaskTracking | SqlClient.SqlClient;
 
 /** Runs `body` against a fresh controller on a temporary database, as `actor`, with the held plugin booted. */
 const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor: Actor = USER) => {
@@ -57,6 +60,8 @@ const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor:
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskSummariesLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer))),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
@@ -696,7 +701,9 @@ describe("a summary", () => {
     const result = await run(() =>
       Effect.gen(function* () {
         const tasks = yield* TaskService;
+        const summaries = yield* TaskSummaries;
         const sql = yield* SqlClient.SqlClient;
+        const taskServices = yield* Effect.context<TaskService>();
         const source = yield* createTask("Refund bug");
         const survivor = yield* createTask("Refund flow");
         yield* tasks.markSummaryDirty(source.id);
@@ -705,35 +712,56 @@ describe("a summary", () => {
           sql,
           sql`UPDATE task_summaries SET dirty_at = '2020-01-01T00:00:00.000Z'`,
         );
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 5 });
-        yield* merge(source.id, survivor.id);
-        const stored = yield* tasks.storeSummary({
-          taskId: attempt!.taskId,
-          dirtyRevision: attempt!.dirtyRevision,
-          summary: { line: "Refunds fail", standing: "Found.", left: "A fix." },
+        const described: Array<string> = [];
+        const texts = { line: "Refunds fail", standing: "Found.", left: "A fix." };
+        // The merge lands while the model works on the source.
+        yield* summaries.writeDue({
+          canDescribe: Effect.succeed(true),
+          describe: (taskId) =>
+            Effect.gen(function* () {
+              described.push(taskId);
+              if (taskId === source.id) {
+                yield* merge(source.id, survivor.id).pipe(
+                  Effect.provide(taskServices),
+                  Effect.orDie,
+                );
+              }
+              return texts;
+            }),
         });
-        const failed = yield* tasks.failSummary({
-          taskId: attempt!.taskId,
-          dirtyRevision: attempt!.dirtyRevision,
-          reason: "timeout",
+        const afterMerge = yield* sql<{
+          readonly task_id: Uint8Array;
+          readonly line: string | null;
+          readonly dirty_at: string | null;
+        }>`SELECT task_id, line, dirty_at FROM task_summaries`;
+        // The merge marked the survivor, and it is written once it has been quiet.
+        yield* withTransaction(
+          sql,
+          sql`UPDATE task_summaries SET dirty_at = '2020-01-01T00:00:00.000Z'`,
+        );
+        yield* summaries.writeDue({
+          canDescribe: Effect.succeed(true),
+          describe: (taskId) => Effect.sync(() => (described.push(taskId), texts)),
         });
-        const rows = yield* sql<{ readonly task_id: Uint8Array; readonly dirty_at: string | null }>`
-          SELECT task_id, dirty_at FROM task_summaries`;
+        const rows = yield* sql<{ readonly task_id: Uint8Array; readonly line: string | null }>`
+          SELECT task_id, line FROM task_summaries`;
         return {
-          claimed: attempt!.taskId,
+          described,
           source,
           survivor,
-          stored,
-          failed,
-          rows: rows.map((row) => [uuidToString(row.task_id), row.dirty_at !== null]),
+          afterMerge: afterMerge.map((row) => [
+            uuidToString(row.task_id),
+            row.line,
+            row.dirty_at !== null,
+          ]),
+          rows: rows.map((row) => [uuidToString(row.task_id), row.line]),
         };
       }),
     );
 
-    expect(result.claimed).toBe(result.source.id);
-    expect(result.stored).toBe(false);
-    expect(result.failed).toBe(false);
-    expect(result.rows).toEqual([[result.survivor.id, true]]);
+    expect(result.described).toEqual([result.source.id, result.survivor.id]);
+    expect(result.afterMerge).toEqual([[result.survivor.id, null, true]]);
+    expect(result.rows).toEqual([[result.survivor.id, "Refunds fail"]]);
   });
 });
 

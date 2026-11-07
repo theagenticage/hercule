@@ -12,44 +12,40 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import { describeRunStopRefused, describeRunStopRequested } from "@hercule/client-core/work";
-import { buildStillSignedInCheck } from "../../../app/still-signed-in";
+import type { AccountScope } from "../../../app/account-scope";
 
 /**
- * Returns the function that asks the run `runId` of the Task `taskId`, which
+ * Returns the function that, for the user of `scope`, asks the run `runId` of the Task `taskId`, which
  * runs the workflow `workflowName`, to stop. `say` shows a line on the undo
  * line with no Undo. The Task's workspace of the run is kept, as Tracking's
  * Stop keeps it, so nothing the run made is lost.
  */
 export const useStopRun = ({
   client,
+  scope,
   say,
 }: {
   readonly client: HerculeClient;
+  readonly scope: AccountScope;
   readonly say: (text: string) => void;
 }): ((taskId: string, runId: string, workflowName: string) => void) => {
   const queryClient = useQueryClient();
   const stop = useMutation({
-    mutationFn: ({
-      runId,
-    }: {
-      taskId: string;
-      runId: string;
-      workflowName: string;
-      isStillSignedIn: () => boolean;
-    }) => client.run.cancel({ params: { id: runId }, payload: { keepWorkspace: true } }),
-    onSuccess: (cancelled, { taskId, runId, workflowName, isStillSignedIn }) => {
-      if (!isStillSignedIn()) return;
+    mutationFn: ({ runId }: { taskId: string; runId: string; workflowName: string }) =>
+      client.run.cancel({ params: { id: runId }, payload: { keepWorkspace: true } }),
+    onSuccess: (cancelled, { taskId, runId, workflowName }) => {
+      if (!scope.isCurrent()) return;
       queryClient.setQueryData(queryKeys.run(runId), cancelled);
       invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
       invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
       say(describeRunStopRequested(workflowName));
     },
-    onError: (error, { workflowName, isStillSignedIn }) => {
-      if (!isStillSignedIn()) return;
+    onError: (error, { workflowName }) => {
+      if (!scope.isCurrent()) return;
       say(describeRunStopRefused(workflowName, readErrorMessage(error)));
     },
   });
   return (taskId, runId, workflowName) => {
-    stop.mutate({ taskId, runId, workflowName, isStillSignedIn: buildStillSignedInCheck(client) });
+    stop.mutate({ taskId, runId, workflowName });
   };
 };

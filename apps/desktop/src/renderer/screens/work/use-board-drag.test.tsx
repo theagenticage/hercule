@@ -161,18 +161,20 @@ interface Harness {
 
 /** Renders the board as the Work screen does, with the drag hook on it. */
 function Board({
+  drawnCards,
   cards,
-  currentCards,
   foldedLaneIds,
   harness,
 }: {
+  /** The cards the board draws. */
+  readonly drawnCards: readonly WorkCard[];
+  /** The cards of the logical board, which the hook reads. They differ from the drawn ones while the screen holds changes back. */
   readonly cards: readonly WorkCard[];
-  readonly currentCards: readonly WorkCard[];
   readonly foldedLaneIds: ReadonlySet<string>;
   readonly harness: Harness;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const arrangedLanes = arrangeLanes(buildLanes({ cards }, PROJECTS), {
+  const arrangedLanes = arrangeLanes(buildLanes({ cards: drawnCards }, PROJECTS), {
     foldedLaneIds,
     openedCellIds: new Set(),
     isFiltering: false,
@@ -181,7 +183,6 @@ function Board({
   useBoardDrag({
     scrollRef,
     cards,
-    currentCards,
     projects: PROJECTS,
     arrangedLanes,
     selectedIds: harness.selectedIds,
@@ -240,7 +241,7 @@ const renderBoard = (
     onOpenCard: vi.fn(),
   };
   const view = render(
-    <Board cards={cards} currentCards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
+    <Board drawnCards={cards} cards={cards} foldedLaneIds={foldedLaneIds} harness={harness} />,
   );
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
@@ -255,7 +256,7 @@ const renderBoard = (
     scroller,
     rerenderWith: (next: readonly WorkCard[], folded: ReadonlySet<string> = foldedLaneIds) => {
       view.rerender(
-        <Board cards={next} currentCards={next} foldedLaneIds={folded} harness={harness} />,
+        <Board drawnCards={next} cards={next} foldedLaneIds={folded} harness={harness} />,
       );
     },
     /**
@@ -266,8 +267,8 @@ const renderBoard = (
     changeBoardBehindCarry: (current: readonly WorkCard[]) => {
       view.rerender(
         <Board
-          cards={cards}
-          currentCards={current}
+          drawnCards={cards}
+          cards={current}
           foldedLaneIds={foldedLaneIds}
           harness={harness}
         />,

@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { CronTriggerScheduler, FIRING_TOLERANCE } from "../../workflows";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the Scheduler looks for cron triggers whose time has come, which

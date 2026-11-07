@@ -55,7 +55,7 @@ export function QuestionSection({
   /** What the user said to this question, while the answer is held or sent, or `null`. */
   readonly said: string | null;
   readonly openThread: TaskAction | null;
-  readonly onAnswer: (answer: PaneAnswer, question: AnswerableTaskQuestion) => void;
+  readonly onAnswer: (answer: PaneAnswer) => void;
   readonly onOpenThread: (sessionId: string) => void;
 }): JSX.Element {
   const answerable: AnswerableTaskQuestion | null =
@@ -96,7 +96,7 @@ export function QuestionSection({
               title={chip.description}
               className={chip.suggested ? "task-pane-answer is-suggested" : "task-pane-answer"}
               onClick={() => {
-                onAnswer({ kind: "chip", label: chip.label }, answerable);
+                onAnswer({ kind: "chip", label: chip.label });
               }}
             >
               {chip.label}
@@ -109,7 +109,7 @@ export function QuestionSection({
           key={question.requestId}
           placeholder={answerable.placeholder}
           onSend={(text) => {
-            onAnswer({ kind: "text", text }, answerable);
+            onAnswer({ kind: "text", text });
           }}
         />
       )}

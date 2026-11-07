@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { Gesture } from "../../../app/undo-stack";
 import type { CardMover } from "../../../app/card-mover";
+import { openTestAccountScope } from "../../../app/testing-account-scope";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
 const failedCard = (runId: string): FailedCard => ({
@@ -47,6 +48,7 @@ const setUp = () => {
     task: { undoTryAgain: () => Promise.resolve({ outcome: "restored", stopRequested: false }) },
   } as unknown as HerculeClient;
   const queryClient = new QueryClient();
+  const { scope, scopes } = openTestAccountScope(client, queryClient);
   const gestures: Gesture<CardMover>[] = [];
   const sayWithoutUndo = vi.fn();
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
@@ -54,7 +56,7 @@ const setUp = () => {
   );
   const { result } = renderHook(
     () =>
-      useTryAgain(client, {
+      useTryAgain(client, scope, {
         sayWithUndo: (_text, gesture) => {
           gestures.push(gesture);
           return () => undefined;
@@ -73,6 +75,9 @@ const setUp = () => {
     sayWithoutUndo,
     signOut: () => {
       token = null;
+    },
+    closeScope: () => {
+      scopes.close();
     },
   };
 };

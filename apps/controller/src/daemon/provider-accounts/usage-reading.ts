@@ -24,7 +24,7 @@ import {
 } from "../../provider-accounts";
 import { PromotionState } from "../../promotion";
 import { AccountUsage } from "../../usage";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { ProviderAccountProbing } from "./probing";
 
 /**

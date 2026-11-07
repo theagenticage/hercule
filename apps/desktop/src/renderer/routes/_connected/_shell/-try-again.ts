@@ -36,7 +36,7 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import type { CardMover } from "../../../app/card-mover";
-import { buildStillSignedInCheck } from "../../../app/still-signed-in";
+import type { AccountScope } from "../../../app/account-scope";
 import type { Gesture } from "../../../app/undo-stack";
 
 /** The key every Try again runs under, so the screen can find the requests. */
@@ -47,8 +47,6 @@ interface TryAgainRequest {
   readonly taskId: string;
   readonly runId: string;
   readonly title: string;
-  /** Tells whether the user who pressed Try again is still signed in. */
-  readonly isStillSignedIn: () => boolean;
 }
 
 /** The failed card a Try again needs: its Task, its title and the run that failed. */
@@ -117,12 +115,14 @@ interface TryAgainCallbacks {
 }
 
 /**
- * Returns the function that tries a failed card's run again. It returns
+ * Returns the function that tries a failed card's run again for the user of
+ * `scope`. It returns
  * whether it sent the request, which it does not when a Try again of that
  * run is already starting.
  */
 export const useTryAgain = (
   client: HerculeClient,
+  scope: AccountScope,
   callbacks: TryAgainCallbacks,
 ): ((card: FailedCard) => boolean) => {
   const queryClient = useQueryClient();
@@ -137,7 +137,7 @@ export const useTryAgain = (
       const { taskId, title } = request;
       // The user may have signed out while the request was on its way. Its
       // Undo would then run as the next account.
-      if (!request.isStillSignedIn()) return;
+      if (!scope.isCurrent()) return;
       // The `run` push brings the board too. This makes sure a read that
       // started after the run committed arrives, even if that push is lost,
       // so the lock always ends.
@@ -154,21 +154,23 @@ export const useTryAgain = (
             });
             const result = describeTryAgainUndo(answer);
             if (result.kind === "stayed") throw new Error(result.reason);
-            callbacks.onUndone(taskId);
+            if (scope.isCurrent()) callbacks.onUndone(taskId);
             return undefined;
           } finally {
             // The failure is back, or the Task stays as it is: either way the
             // run is no longer one to wait for.
             releaseRequest(queryClient, request);
-            invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
-            invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
+            if (scope.isCurrent()) {
+              invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+              invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
+            }
           }
         },
       });
       callbacks.onStarted(taskId);
     },
-    onError: (error, { title, isStillSignedIn }) => {
-      if (!isStillSignedIn()) return;
+    onError: (error, { title }) => {
+      if (!scope.isCurrent()) return;
       callbacks.sayWithoutUndo(describeTryAgainFailure(title, readErrorMessage(error)));
     },
   });
@@ -177,12 +179,7 @@ export const useTryAgain = (
     if (isTryAgainStarting(queryClient, taskId, failure.runId)) return false;
     // Every earlier request has ended or was refused, so the new one replaces them.
     releaseTask(queryClient, taskId);
-    rerun.mutate({
-      taskId,
-      runId: failure.runId,
-      title,
-      isStillSignedIn: buildStillSignedInCheck(client),
-    });
+    rerun.mutate({ taskId, runId: failure.runId, title });
     return true;
   };
 };

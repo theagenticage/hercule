@@ -3,8 +3,6 @@
  * rows and a clock the tests move:
  *
  * - what marks a Task dirty, and what stops it being dirty;
- * - which Tasks the writer may claim, how often, and when the first is due;
- * - what the write of a finished attempt does, and does not do;
  * - the wake that tells the writer something is dirty.
  *
  * The board's reply that carries the summary is tested in `board.test.ts`,
@@ -12,29 +10,29 @@
  * integration tests.
  */
 import { describe, expect, it } from "vitest";
-import { Clock, Duration, Effect, Fiber, Layer, Option } from "effect";
+import { Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as Statement from "effect/sql/Statement";
 import * as SqlClient from "effect/sql/SqlClient";
-import { MAX_SUMMARY_LINE, type TaskStage } from "@hercule/contract";
+import type { TaskStage } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { AfterCommit, uuidFromString, withTransaction, type Change } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
-import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
-import { taskRepository } from "./repository";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import {
-  SUMMARY_MIN_INTERVAL_SECONDS,
   SUMMARY_QUIET_SECONDS,
   TaskService,
   TaskServiceLayer,
+  TaskSummaries,
+  TaskSummariesLayer,
   TaskSummaryWake,
   makeSummaryWake,
 } from "./index";
 import { TaskLinkOwnersLayer } from "../daemon/tasks";
 
-const layer = TaskServiceLayer.pipe(
+const layer = Layer.mergeAll(TaskServiceLayer, TaskSummariesLayer).pipe(
+  Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(TaskLinkOwnersLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
@@ -53,7 +51,7 @@ const USER: Actor = {
  * announces is added to `published`.
  */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, TaskService | SqlClient.SqlClient>,
+  effect: Effect.Effect<A, E, TaskService | TaskSummaries | SqlClient.SqlClient>,
   published: Array<Change> = [],
 ) =>
   Effect.runPromise(
@@ -101,13 +99,16 @@ const createTask = (title: string, stage: TaskStage = "building") =>
 /** Moves the clock forward. */
 const wait = (seconds: number) => TestClock.adjust(Duration.seconds(seconds));
 
-/** Claims what is due, then returns the claimed Task ids. */
-const claim = (limit = 10) =>
-  Effect.flatMap(TaskService, (tasks) =>
-    Effect.map(tasks.claimSummaryAttempts({ limit }), (attempts) =>
-      attempts.map((attempt) => attempt.taskId),
-    ),
-  );
+/** Writes what is due with a stand-in model that answers at once, and returns the Task ids it was asked about. */
+const writeDue = Effect.gen(function* () {
+  const summaries = yield* TaskSummaries;
+  const described: Array<string> = [];
+  yield* summaries.writeDue({
+    canDescribe: Effect.succeed(true),
+    describe: (taskId) => Effect.sync(() => (described.push(taskId), SUMMARY)),
+  });
+  return described;
+});
 
 /** Marks the Task dirty and lets the quiet time pass, so the writer may claim it. */
 const makeDue = (taskId: string) =>
@@ -212,10 +213,10 @@ describe("what marks a Task dirty", () => {
         // A change every 10 seconds: 20 seconds after the first change, then 30.
         yield* wait(10);
         yield* tasks.markSummaryDirty(task.id);
-        const early = yield* claim();
+        const early = yield* writeDue;
         yield* wait(10);
         yield* tasks.markSummaryDirty(task.id);
-        const due = yield* claim();
+        const due = yield* writeDue;
         const claimed = yield* readRow(task.id);
         yield* tasks.markSummaryDirty(task.id);
         const changedAgain = yield* readRow(task.id);
@@ -240,12 +241,7 @@ describe("the announcement of a summary going stale", () => {
         const withSummary = yield* createTask("Add a refund button");
         const withoutSummary = yield* createTask("Fix the login redirect");
         yield* makeDue(withSummary.id);
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.storeSummary({
-          taskId: withSummary.id,
-          dirtyRevision: attempt!.dirtyRevision,
-          summary: SUMMARY,
-        });
+        yield* writeDue;
         const staleAnnouncements = () =>
           published.filter(
             (change) =>
@@ -288,7 +284,7 @@ describe("what stops a Task being dirty", () => {
         yield* makeDue(task.id);
         yield* end(task.id);
         const afterEnd = yield* readRow(task.id);
-        const claimed = yield* claim();
+        const claimed = yield* writeDue;
         yield* tasks.markSummaryDirty(task.id);
         return { afterEnd, claimed, afterMark: yield* readRow(task.id) };
       }),
@@ -311,507 +307,6 @@ describe("what stops a Task being dirty", () => {
     );
     expect(row?.dirty_at).not.toBeNull();
     expect(row?.dirty_revision).toBe(2);
-  });
-});
-
-describe("the Tasks the writer claims", () => {
-  it("claims the oldest change first, at most the limit, once the Task has been quiet", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const first = yield* createTask("first");
-        const second = yield* createTask("second");
-        const third = yield* createTask("third");
-        yield* tasks.markSummaryDirty(second.id);
-        yield* wait(1);
-        yield* tasks.markSummaryDirty(first.id);
-        yield* wait(1);
-        yield* tasks.markSummaryDirty(third.id);
-        const tooSoon = yield* claim();
-        yield* wait(SUMMARY_QUIET_SECONDS);
-        const attempts = yield* tasks.claimSummaryAttempts({ limit: 2 });
-        const rest = yield* claim();
-        return { first, second, third, tooSoon, attempts, rest };
-      }),
-    );
-    expect(result.tooSoon).toEqual([]);
-    expect(result.attempts).toEqual([
-      { taskId: result.second.id, dirtyRevision: 1 },
-      { taskId: result.first.id, dirtyRevision: 1 },
-    ]);
-    expect(result.rest).toEqual([result.third.id]);
-  });
-
-  it("calls for a Task at most once in the minimum interval, however often it changes", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const first = yield* claim();
-        const claimed = yield* readRow(task.id);
-        yield* tasks.markSummaryDirty(task.id);
-        yield* wait(SUMMARY_MIN_INTERVAL_SECONDS - 1);
-        const early = yield* claim();
-        yield* wait(1);
-        const due = yield* claim();
-        return { task, first, claimed, early, due };
-      }),
-    );
-    expect(result.first).toEqual([result.task.id]);
-    expect(result.claimed?.next_attempt_at).toBe(
-      new Date((SUMMARY_QUIET_SECONDS + SUMMARY_MIN_INTERVAL_SECONDS) * 1000).toISOString(),
-    );
-    expect(result.early).toEqual([]);
-    expect(result.due).toEqual([result.task.id]);
-  });
-
-  it.each([
-    [
-      "finished",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "done" })),
-    ],
-    ["deleted", (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.delete(id))],
-    [
-      "merged",
-      (id: string) =>
-        Effect.flatMap(SqlClient.SqlClient, (sql) =>
-          withTransaction(
-            sql,
-            sql`UPDATE tasks SET merged_into_id = ${uuidFromString("0199e0e7-0004-7000-8000-000000000009")}
-                WHERE id = ${uuidFromString(id)}`,
-          ),
-        ),
-    ],
-  ])("never claims a Task that is %s, even one still marked dirty", async (_name, end) => {
-    const claimed = await run(
-      Effect.gen(function* () {
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        yield* end(task.id);
-        // A merge does not clear the mark itself; the claim must not depend on it.
-        yield* Effect.flatMap(SqlClient.SqlClient, (sql) =>
-          withTransaction(
-            sql,
-            sql`UPDATE task_summaries SET dirty_at = '1970-01-01T00:00:00.000Z'
-                WHERE task_id = ${uuidFromString(task.id)}`,
-          ),
-        );
-        return yield* claim();
-      }),
-    );
-    expect(claimed).toEqual([]);
-  });
-
-  it("reads the due Tasks from the index of dirty rows, in its own order", async () => {
-    const plan = await Effect.runPromise(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const tasks = yield* taskRepository;
-        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
-        yield* withTransaction(
-          sql,
-          tasks
-            .claimSummaryAttempts({
-              limit: 2,
-              at: "2026-11-07T10:00:00.000Z",
-              quietBefore: "2026-11-07T09:59:30.000Z",
-              nextAttemptAt: "2026-11-07T10:05:00.000Z",
-            })
-            .pipe(
-              Effect.provideService(Statement.CurrentTransformer, (statement) =>
-                Effect.sync(() => {
-                  statements.push(statement.compile());
-                  return statement;
-                }),
-              ),
-            ),
-        );
-        const [text, params] = statements[0]!;
-        const rows = yield* sql.unsafe<{ readonly detail: string }>(
-          `EXPLAIN QUERY PLAN ${text}`,
-          params,
-        );
-        return rows.map((row) => row.detail);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
-    );
-    expect(plan.join("\n")).toContain("USING INDEX task_summaries_dirty");
-    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
-  });
-});
-
-describe("the time the first Task is due", () => {
-  const readDueAt = Effect.flatMap(TaskService, (tasks) => tasks.readNextSummaryDueAt());
-  const at = (seconds: number) => new Date(seconds * 1000).toISOString();
-
-  it("is none while no Task is dirty, and for a dirty Task that is finished", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        const clean = yield* readDueAt;
-        yield* tasks.markSummaryDirty(task.id);
-        yield* tasks.update({ id: task.id, stage: "done" });
-        return { clean, finished: yield* readDueAt };
-      }),
-    );
-    expect(result).toEqual({ clean: Option.none(), finished: Option.none() });
-  });
-
-  it("is the quiet time after the first change, however many changes follow", async () => {
-    const dueAt = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* tasks.markSummaryDirty(task.id);
-        yield* wait(10);
-        yield* tasks.markSummaryDirty(task.id);
-        return yield* readDueAt;
-      }),
-    );
-    expect(dueAt).toEqual(Option.some(at(SUMMARY_QUIET_SECONDS)));
-  });
-
-  it("is the least over the dirty Tasks, and waits for next_attempt_at when that is later", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const first = yield* createTask("Add a refund button");
-        yield* makeDue(first.id);
-        // Claiming paces the Task: its next attempt is five minutes away.
-        yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.markSummaryDirty(first.id);
-        const paced = yield* readDueAt;
-        yield* wait(10);
-        const second = yield* createTask("Second");
-        yield* tasks.markSummaryDirty(second.id);
-        return { paced, withSecond: yield* readDueAt };
-      }),
-    );
-    expect(result.paced).toEqual(
-      Option.some(at(SUMMARY_QUIET_SECONDS + SUMMARY_MIN_INTERVAL_SECONDS)),
-    );
-    expect(result.withSecond).toEqual(Option.some(at(SUMMARY_QUIET_SECONDS + 10 + 30)));
-  });
-});
-
-describe("the read of the time the first Task is due", () => {
-  it("walks the index of dirty rows and scans neither table", async () => {
-    const plan = await Effect.runPromise(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const tasks = yield* taskRepository;
-        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
-        yield* tasks.readNextSummaryDueAt(SUMMARY_QUIET_SECONDS).pipe(
-          Effect.provideService(Statement.CurrentTransformer, (statement) =>
-            Effect.sync(() => {
-              statements.push(statement.compile());
-              return statement;
-            }),
-          ),
-        );
-        const [text, params] = statements[0]!;
-        const rows = yield* sql.unsafe<{ readonly detail: string }>(
-          `EXPLAIN QUERY PLAN ${text}`,
-          params,
-        );
-        return rows.map((row) => row.detail);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
-    );
-    expect(plan.join("\n")).toContain("USING INDEX task_summaries_dirty");
-    expect(plan.filter((step) => step.startsWith("SCAN") && !step.includes("USING"))).toEqual([]);
-  });
-});
-
-describe("a finished attempt", () => {
-  it("is written once, makes the row current, and changes nothing else about the Task", async () => {
-    const published: Array<Change> = [];
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        published.length = 0;
-        const before = yield* tasks.read(task.id);
-        const updatedEvents = (yield* readEventsOfKind("task.updated")).length;
-        yield* wait(5);
-        const written = yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: attempt!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        return {
-          written,
-          row: yield* readRow(task.id),
-          before,
-          after: yield* tasks.read(task.id),
-          updatedEvents,
-          updatedEventsAfter: (yield* readEventsOfKind("task.updated")).length,
-          summarized: yield* readEventsOfKind("task.summarized"),
-          taskId: task.id,
-        };
-      }),
-      published,
-    );
-    expect(result.written).toBe(true);
-    expect(result.row).toMatchObject({
-      line: SUMMARY.line,
-      dirty_at: null,
-      dirty_revision: 1,
-      input_revision: 1,
-      attempt_count: 0,
-      failed_at: null,
-    });
-    expect(result.after).toEqual(result.before);
-    expect(result.updatedEventsAfter).toBe(result.updatedEvents);
-    expect(result.summarized).toHaveLength(1);
-    expect(result.summarized[0]).toMatchObject({
-      actor: "system",
-      payload: { taskId: result.taskId, dirtyRevision: 1 },
-    });
-    expect(published.filter((change) => change._tag === "record")).toEqual([
-      { _tag: "record", topic: "task", id: result.taskId, kind: "updated", derived: true },
-    ]);
-  });
-
-  it("is stored when the Task changed while the writer worked, and the row stays dirty", async () => {
-    const published: Array<Change> = [];
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.markSummaryDirty(task.id);
-        const before = yield* readRow(task.id);
-        published.length = 0;
-        const written = yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: attempt!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        const failed = yield* tasks.failSummary({
-          taskId: task.id,
-          dirtyRevision: attempt!.dirtyRevision,
-          reason: "late",
-        });
-        return {
-          written,
-          failed,
-          before,
-          row: yield* readRow(task.id),
-          summarized: yield* readEventsOfKind("task.summarized"),
-          taskId: task.id,
-        };
-      }),
-      published,
-    );
-    expect(result.written).toBe(true);
-    // A failure of the older attempt says nothing about the Task now.
-    expect(result.failed).toBe(false);
-    expect(result.row).toMatchObject({
-      line: SUMMARY.line,
-      dirty_revision: 2,
-      input_revision: 1,
-      attempt_count: 0,
-      failed_at: null,
-      dirty_at: result.before?.dirty_at,
-      next_attempt_at: result.before?.next_attempt_at,
-    });
-    expect(result.row?.dirty_at).not.toBeNull();
-    expect(result.summarized).toHaveLength(1);
-    expect(published.filter((change) => change._tag === "record")).toEqual([
-      { _tag: "record", topic: "task", id: result.taskId, kind: "updated", derived: true },
-    ]);
-  });
-
-  it("is refreshed by the next attempt after a stale write, which then makes the row clean", async () => {
-    const row = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [slow] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.markSummaryDirty(task.id);
-        yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: slow!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        yield* wait(SUMMARY_MIN_INTERVAL_SECONDS);
-        const [next] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: next!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        return yield* readRow(task.id);
-      }),
-    );
-    expect(row).toMatchObject({ dirty_revision: 2, input_revision: 2, dirty_at: null });
-  });
-
-  it("is dropped when the row already holds a summary made from a newer revision", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [slow] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.markSummaryDirty(task.id);
-        yield* wait(SUMMARY_MIN_INTERVAL_SECONDS);
-        const [newer] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: newer!.dirtyRevision,
-          summary: { ...SUMMARY, line: "Newer" },
-        });
-        const written = yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: slow!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        return { written, row: yield* readRow(task.id) };
-      }),
-    );
-    expect(result.written).toBe(false);
-    expect(result.row).toMatchObject({ line: "Newer", input_revision: 2, dirty_at: null });
-  });
-
-  it.each([
-    [
-      "finished",
-      (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "dropped" })),
-    ],
-    ["deleted", (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.delete(id))],
-  ])("is dropped, answer or failure, when the Task is %s meanwhile", async (_name, end) => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* end(task.id);
-        const input = { taskId: task.id, dirtyRevision: attempt!.dirtyRevision };
-        return {
-          written: yield* tasks.storeSummary({ ...input, summary: SUMMARY }),
-          failed: yield* tasks.failSummary({ ...input, reason: "late" }),
-          row: yield* readRow(task.id),
-        };
-      }),
-    );
-    expect(result.written).toBe(false);
-    expect(result.failed).toBe(false);
-    expect(result.row).toMatchObject({ line: null, attempt_count: 0, failed_at: null });
-  });
-
-  it("makes no row for a Task that has none, so a late write cannot recreate a deleted one", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        return {
-          written: yield* tasks.storeSummary({
-            taskId: task.id,
-            dirtyRevision: 1,
-            summary: SUMMARY,
-          }),
-          failed: yield* tasks.failSummary({ taskId: task.id, dirtyRevision: 1, reason: "late" }),
-          row: yield* readRow(task.id),
-        };
-      }),
-    );
-    expect(result).toEqual({ written: false, failed: false, row: undefined });
-  });
-
-  it("refuses a line longer than the contract allows, which would fail every read of the board", async () => {
-    const outcome = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        return yield* Effect.exit(
-          tasks.storeSummary({
-            taskId: task.id,
-            dirtyRevision: attempt!.dirtyRevision,
-            summary: { ...SUMMARY, line: "x".repeat(MAX_SUMMARY_LINE + 1) },
-          }),
-        );
-      }),
-    );
-    expect(outcome._tag).toBe("Failure");
-  });
-});
-
-describe("a failed attempt", () => {
-  it("keeps the last summary, shows the Task as dirty, and waits twice as long each time, up to an hour", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [first] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: first!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        yield* makeDue(task.id);
-        // The pacing of the first attempt must pass before the next claim.
-        yield* wait(SUMMARY_MIN_INTERVAL_SECONDS);
-        const waits: Array<number> = [];
-        for (let failure = 1; failure <= 6; failure += 1) {
-          const [attempt] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-          const recorded = yield* tasks.failSummary({
-            taskId: task.id,
-            dirtyRevision: attempt!.dirtyRevision,
-            reason: `provider said no ${String(failure)}`,
-          });
-          expect(recorded).toBe(true);
-          const row = yield* readRow(task.id);
-          const now = yield* Clock.currentTimeMillis;
-          waits.push((Date.parse(row!.next_attempt_at!) - now) / 1000);
-          yield* wait(waits.at(-1)!);
-        }
-        return { waits, lastRow: yield* readRow(task.id) };
-      }),
-    );
-    expect(result.waits).toEqual([600, 1200, 2400, 3600, 3600, 3600]);
-    expect(result.lastRow).toMatchObject({
-      line: SUMMARY.line,
-      attempt_count: 6,
-      failed_reason: "provider said no 6",
-    });
-    expect(result.lastRow?.dirty_at).not.toBeNull();
-    expect(result.lastRow?.failed_at).not.toBeNull();
-  });
-
-  it("starts the count again after a success", async () => {
-    const row = await run(
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        yield* makeDue(task.id);
-        const [failing] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.failSummary({
-          taskId: task.id,
-          dirtyRevision: failing!.dirtyRevision,
-          reason: "no",
-        });
-        yield* wait(3600);
-        const [retry] = yield* tasks.claimSummaryAttempts({ limit: 1 });
-        yield* tasks.storeSummary({
-          taskId: task.id,
-          dirtyRevision: retry!.dirtyRevision,
-          summary: SUMMARY,
-        });
-        return yield* readRow(task.id);
-      }),
-    );
-    expect(row).toMatchObject({ attempt_count: 0, failed_at: null, failed_reason: null });
   });
 });
 

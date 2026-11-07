@@ -179,9 +179,6 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
-import { createPendingCardMoves } from "../app/pending-card-moves";
-import { createPendingIntentsHolder } from "../app/pending-intents";
-import { createUndoStack } from "../app/undo-stack";
 import { CleanupProvider } from "../app/cleanup";
 import {
   decideStorageNow,
@@ -1086,9 +1083,6 @@ const buildRouter = (
         client,
         live: SILENT_LIVE,
         pendingSubmissions,
-        undoStack: createUndoStack(),
-        pendingCardMoves: createPendingCardMoves(),
-        pendingIntents: createPendingIntentsHolder(CONTROLLER_URL, localStorage),
       },
     }),
   });

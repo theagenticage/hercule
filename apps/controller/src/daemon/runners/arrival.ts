@@ -29,7 +29,7 @@ import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
 import { WorkspaceService } from "../../workspaces";
-import { forkAndAbsorbFailures } from "../absorbing";
+import { forkAndAbsorbFailures } from "../../absorbing";
 import { TextGenerationTargetChanges } from "../text-generation";
 import { makeRemovalSender } from "../workspaces";
 

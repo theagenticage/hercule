@@ -57,6 +57,21 @@ describe("Sign Out from the app menu", () => {
     expect(clearRouterCache).toHaveBeenCalledOnce();
   });
 
+  it("opens the account scope when the shell shows, and closes it, with its undo stack and held intents", async () => {
+    const { fake, context } = await startSignedIn();
+    const { accountScopes } = context.controller!;
+    const scope = accountScopes.read();
+    expect(scope.isCurrent()).toBe(true);
+    scope.undoStack.push({ words: "Moved a", undo: () => Promise.resolve(undefined) });
+
+    fake.sendMenuCommand("signOut");
+    expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
+
+    expect(scope.isCurrent()).toBe(false);
+    expect(await scope.undoStack.undo({} as never)).toEqual({ kind: "empty" });
+    expect(() => accountScopes.read()).toThrow();
+  });
+
   it("deletes every saved thread copy", async () => {
     const { fake, context } = await startSignedIn();
     const threadCopies = context.controller!.threadCopies;

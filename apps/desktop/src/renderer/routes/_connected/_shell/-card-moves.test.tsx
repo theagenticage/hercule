@@ -6,17 +6,18 @@
  * card back where it stood. What the cards do on screen needs a real layout,
  * so these tests only check which spring a change is played on.
  */
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { notifyManager, QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
+import { buildLogicalBoard } from "@hercule/client-core/work";
 import { buildBoard, buildCard, listIds } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
 import { flipByKey } from "../../../app/motion";
 import type { CardMover } from "../../../app/card-mover";
-import { createPendingCardMoves } from "../../../app/pending-card-moves";
-import { createUndoStack } from "../../../app/undo-stack";
+import type { PendingMove } from "../../../app/pending-card-moves";
+import { openTestAccountScope } from "../../../app/testing-account-scope";
 import { useCardMoves } from "./-card-moves";
 import { workBoardQuery } from "./-work-board";
 
@@ -113,9 +114,9 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
   const { client, held, signInAsAnotherUser } = buildClient(readBoard);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(queryKeys.workBoard(), BOARD);
-  const undoStack = createUndoStack<CardMover>();
-  // Like the stack, the pending moves belong to the app and outlive a screen.
-  const pendingMoves = createPendingCardMoves();
+  // The undo stack and the pending moves belong to the scope and outlive a screen.
+  const { scope, scopes } = openTestAccountScope(client, queryClient);
+  const { undoStack, pendingCardMoves: pendingMoves } = scope;
   const returning: Array<readonly [string, string]> = [];
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -126,16 +127,33 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
     const view = renderHook(
       () => {
         const { data } = useQuery(workBoardQuery(client));
-        return useCardMoves({
+        // The screen's logical board (`useLogicalBoard`), without held answers or merges.
+        const shownMoves = useSyncExternalStore(pendingMoves.subscribe, pendingMoves.getSnapshot);
+        const buildShownBoard = (
+          serverBoard: WorkBoard | undefined,
+          pending: readonly PendingMove[],
+        ) =>
+          serverBoard === undefined
+            ? undefined
+            : buildLogicalBoard(serverBoard, {
+                changes: pending.map((each) => each.change),
+                heldAnswers: [],
+                heldMerges: [],
+              }).board;
+        const moves = useCardMoves({
           client,
-          undoStack,
-          pendingMoves,
-          serverBoard: data,
+          scope,
+          readBoard: () =>
+            buildShownBoard(
+              queryClient.getQueryData<WorkBoard>(queryKeys.workBoard()),
+              pendingMoves.getSnapshot(),
+            ),
           scrollRef,
           onCardReturning: (taskId, stage) => {
             returning.push([taskId, stage]);
           },
         });
+        return { ...moves, board: buildShownBoard(data, shownMoves) };
       },
       { wrapper },
     );
@@ -151,6 +169,7 @@ const setUp = (readBoard: () => WorkBoard | Promise<WorkBoard> = () => BOARD) =>
     client,
     queryClient,
     undoStack,
+    scopes,
     findStage,
     mount,
     returning,
@@ -1020,6 +1039,31 @@ describe("useCardMoves across a sign-out", () => {
     expect(
       queryClient.getQueryData<WorkBoard>(queryKeys.workBoard())?.cards.map((card) => card.stage),
     ).toEqual(["building", "building"]);
+  });
+
+  it("leaves no pending move and no Undo when the scope is closed, and writes nothing for the late answer", async () => {
+    const { result, held, queryClient, undoStack, scopes } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", stage: "in-review" }, "Moved a");
+    });
+    await waitForRequests(held, 1);
+    const { pendingCardMoves } = scopes.read();
+    expect(pendingCardMoves.getSnapshot()).toHaveLength(1);
+
+    act(() => {
+      scopes.close();
+    });
+    expect(pendingCardMoves.getSnapshot()).toEqual([]);
+    expect(await undoStack.undo({} as CardMover)).toEqual({ kind: "empty" });
+    await act(() => {
+      held[0]!.accept();
+      return Promise.resolve();
+    });
+    await settleQueue();
+
+    expect(
+      queryClient.getQueryData<WorkBoard>(queryKeys.workBoard())?.cards.map((card) => card.stage),
+    ).toEqual(BOARD.cards.map((card) => card.stage));
   });
 
   it("does not send a queued move, nor say that it failed, for a user who has signed out", async () => {

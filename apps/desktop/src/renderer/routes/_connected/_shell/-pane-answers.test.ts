@@ -1,11 +1,6 @@
-/**
- * Tests `answerFromPane`: an answer goes to the question the pane drew, never
- * to whichever question the cache holds when the click arrives.
- */
+/** Tests `answerFromPane`: an answer goes to the question the pane drew, and only once. */
 import { describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
-import { queryKeys } from "@hercule/client-core";
-import { decideQuestionAnswers, type AnswerableTaskQuestion } from "@hercule/client-core/work";
+import { buildTaskPane, type AnswerableTaskQuestion } from "@hercule/client-core/work";
 import { buildCard } from "@hercule/client-core/work/testing";
 import type { TaskDetail } from "@hercule/contract";
 import { createPendingIntents } from "../../../app/pending-intents";
@@ -51,13 +46,19 @@ const buildAskingDetail = (requestId: string, question: string): TaskDetail =>
   }) as unknown as TaskDetail;
 
 const readQuestion = (detail: TaskDetail): AnswerableTaskQuestion => {
-  const question = decideQuestionAnswers(detail);
+  const { question } = buildTaskPane({
+    taskId: "task-1",
+    boardCards: [],
+    detail,
+    isGone: false,
+    heldAnswers: [],
+    unsentAnswers: [],
+  });
   if (question?.kind !== "answerable") throw new Error("The test question is not answerable.");
   return question;
 };
 
 const setUp = () => {
-  const queryClient = new QueryClient();
   const store = createPendingIntents({
     storage: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
     storageKey: "test",
@@ -68,20 +69,17 @@ const setUp = () => {
     sayWithoutUndo: vi.fn(),
     closePane: vi.fn(),
   };
-  return { queryClient, store, callbacks };
+  return { store, callbacks };
 };
 
 describe("answerFromPane", () => {
   it("answers the question that was drawn", () => {
-    const { queryClient, store, callbacks } = setUp();
-    const detail = buildAskingDetail("request-a", "Which currency should win?");
-    queryClient.setQueryData(queryKeys.taskDetail("task-1"), detail);
+    const { store, callbacks } = setUp();
 
     answerFromPane(
-      queryClient,
       store,
       "task-1",
-      readQuestion(detail),
+      readQuestion(buildAskingDetail("request-a", "Which currency should win?")),
       { kind: "chip", label: "The shop's" },
       callbacks,
     );
@@ -93,29 +91,26 @@ describe("answerFromPane", () => {
     store.dispose();
   });
 
-  it("holds nothing when a push replaced the question after it was drawn, and says it is no longer open", () => {
-    const { queryClient, store, callbacks } = setUp();
-    const drawn = readQuestion(buildAskingDetail("request-a", "Which currency should win?"));
-    // The cache now holds the Thread's next question, which the pane has not drawn yet.
-    queryClient.setQueryData(
-      queryKeys.taskDetail("task-1"),
-      buildAskingDetail("request-b", "Which store should win?"),
-    );
+  it("holds one answer however often the question is answered", () => {
+    const { store, callbacks } = setUp();
+    const question = readQuestion(buildAskingDetail("request-a", "Which currency should win?"));
 
-    answerFromPane(
-      queryClient,
-      store,
-      "task-1",
-      drawn,
-      { kind: "chip", label: "The shop's" },
-      callbacks,
-    );
+    answerFromPane(store, "task-1", question, { kind: "chip", label: "The shop's" }, callbacks);
+    answerFromPane(store, "task-1", question, { kind: "chip", label: "The customer's" }, callbacks);
+
+    expect(store.getSnapshot()).toHaveLength(1);
+    expect(callbacks.closePane).toHaveBeenCalledTimes(1);
+    store.dispose();
+  });
+
+  it("holds nothing and keeps the pane open for blank words, and says why when there is a reason", () => {
+    const { store, callbacks } = setUp();
+    const question = readQuestion(buildAskingDetail("request-a", "Which currency should win?"));
+
+    answerFromPane(store, "task-1", question, { kind: "text", text: "   " }, callbacks);
 
     expect(store.getSnapshot()).toEqual([]);
     expect(callbacks.closePane).not.toHaveBeenCalled();
-    expect(callbacks.sayWithoutUndo).toHaveBeenCalledWith(
-      "That question is no longer open. Open the thread to see it.",
-    );
     store.dispose();
   });
 });

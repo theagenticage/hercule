@@ -1,25 +1,25 @@
 /**
  * Tests the summary writer's loop on real rows, with a clock the test moves and
- * a stand-in for the model (the edge of the system):
+ * a stand-in for the model (the edge of the system). It tests what the loop
+ * adds to `TaskSummaries.writeDue`:
  *
- * - how many calls a burst of changes makes, and how many run at once;
- * - what happens to an answer that arrives after the Task changed;
- * - what a restart, a model that is Off and a failing model do to the pacing;
- * - that one Task's trouble does not stop the others.
+ * - that it sleeps until the first Task is due, wakes when a Task is marked,
+ *   and never spins;
+ * - that a model that is Off, or that no runner can run, costs no attempt;
+ * - what the describer records when the model fails or answers badly.
  *
- * The bookkeeping itself (which Tasks are due, how a write is guarded) is
- * tested in `tasks/summary.test.ts`; the input and the answer's parsing in
- * `summary-input.test.ts`.
+ * The rules of writing (which Tasks are due, the pacing, a late answer, one
+ * Task's trouble) are tested in `tasks/summaries.test.ts`; the input and the
+ * answer's parsing in `summary-input.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Clock, Deferred, Duration, Effect, Fiber, Layer } from "effect";
+import { Clock, Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../../actor";
 import { AfterCommit, uuidFromString, withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../../events";
-import { readEventsOfKind } from "../../events/testing";
 import { NotifierLayer } from "../../notifications";
 import { PluginHost } from "../../plugins";
 import { buildPluginStack } from "../../plugins/testing";
@@ -27,7 +27,13 @@ import { ServingPromotionStateLayer } from "../../promotion/testing";
 import { ModelCatalogsLayer, ProviderAccountRunnersLayer } from "../../provider-accounts";
 import { inertMembership } from "../../provider-accounts/testing";
 import { Settings, SettingsLayer } from "../../settings";
-import { makeSummaryWake, TaskService, TaskServiceLayer, TaskSummaryWake } from "../../tasks";
+import {
+  makeSummaryWake,
+  TaskService,
+  TaskServiceLayer,
+  TaskSummariesLayer,
+  TaskSummaryWake,
+} from "../../tasks";
 import {
   TextGeneration,
   TextGenerationError,
@@ -89,9 +95,9 @@ const buildStandInModel = (): StandInModel => ({
 const layerOf = (model: StandInModel) =>
   Layer.mergeAll(
     TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer)),
+    TaskSummariesLayer.pipe(Layer.provide(ServingPromotionStateLayer)),
     TaskTrackingRunsLayer,
     TextGenerationModelsLayer,
-    ServingPromotionStateLayer,
     Layer.succeed(TextGeneration)({
       generate: (call) =>
         Effect.gen(function* () {
@@ -121,7 +127,11 @@ const layerOf = (model: StandInModel) =>
   );
 
 /** What a test body may use: the loop's own services, the settings and the tasks. */
-type Services = Effect.Services<typeof runTaskSummaryLoop> | Settings | SqlClient.SqlClient;
+type Services =
+  | Effect.Services<typeof runTaskSummaryLoop>
+  | TaskService
+  | Settings
+  | SqlClient.SqlClient;
 
 /**
  * Runs `body` on a fresh database, with a Text Generation Model that a
@@ -198,209 +208,6 @@ const readRow = (taskId: string) =>
 const failing = (reason: "timeout" | "unavailable" = "timeout") =>
   Effect.fail(new TextGenerationError({ reason, message: "the model did not answer" }));
 
-describe("the calls the writer makes", () => {
-  it("makes one call for a Task however many changes, at the same moment or spread out, came before it", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        const task = yield* createTask("Add a refund button");
-        const loop = yield* startLoop;
-        yield* Effect.all([markDirty(task.id), markDirty(task.id)], { concurrency: 2 });
-        yield* elapse(10);
-        yield* markDirty(task.id);
-        yield* elapse(10);
-        yield* markDirty(task.id);
-        const beforeQuiet = model.calls.length;
-        yield* elapse(120);
-        const afterQuiet = model.calls.length;
-        yield* elapse(3600);
-        yield* Fiber.interrupt(loop);
-        return { beforeQuiet, afterQuiet, calls: model.calls.length, row: yield* readRow(task.id) };
-      }),
-    );
-
-    expect(result.beforeQuiet).toBe(0);
-    expect(result.afterQuiet).toBe(1);
-    expect(result.calls).toBe(1);
-    expect(result.row).toMatchObject({ dirty_revision: 4, input_revision: 4, dirty_at: null });
-  });
-
-  it("stores the answer without touching the Task, and then waits for the next change", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        model.answer = () => Effect.succeed({ ...GOOD_ANSWER, line: "" });
-        const task = yield* createTask("Add a refund button");
-        yield* markDirty(task.id);
-        const before = yield* tasks.read(task.id);
-        const updatedEvents = (yield* readEventsOfKind("task.updated")).length;
-        const loop = yield* startLoop;
-        yield* elapse(3600);
-        yield* Fiber.interrupt(loop);
-        return {
-          before,
-          after: yield* tasks.read(task.id),
-          updatedEventsAfter: (yield* readEventsOfKind("task.updated")).length,
-          updatedEvents,
-          calls: model.calls.length,
-          row: yield* readRow(task.id),
-        };
-      }),
-    );
-
-    expect(result.calls).toBe(1);
-    // An empty line is stored as it is: the card keeps its fallback.
-    expect(result.row).toMatchObject({ line: "", dirty_revision: 1, dirty_at: null });
-    expect(result.after.updatedAt).toBe(result.before.updatedAt);
-    expect(result.updatedEventsAfter).toBe(result.updatedEvents);
-  });
-
-  it("never has more than two calls in flight, and still drains the backlog", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        model.answer = () =>
-          Effect.andThen(Effect.sleep(Duration.seconds(20)), Effect.succeed(GOOD_ANSWER));
-        const ids = yield* Effect.forEach(["a", "b", "c", "d", "e"], (title) =>
-          Effect.map(createTask(title), (task) => task.id),
-        );
-        yield* Effect.forEach(ids, markDirty);
-        const loop = yield* startLoop;
-        yield* elapse(300);
-        yield* Fiber.interrupt(loop);
-        const rows = yield* Effect.forEach(ids, readRow);
-        return { mostInFlight: model.mostInFlight, calls: model.calls.length, rows };
-      }),
-    );
-
-    expect(result.mostInFlight).toBe(2);
-    expect(result.calls).toBe(5);
-    expect(result.rows.map((row) => row.dirty_at)).toEqual([null, null, null, null, null]);
-  });
-
-  it.each([
-    [
-      "done",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "done" })),
-    ],
-    [
-      "dropped",
-      (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "dropped" })),
-    ],
-    ["deleted", (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.delete(id))],
-  ])("makes no call for a Task that is %s before it is due", async (_name, end) => {
-    const calls = await run((model) =>
-      Effect.gen(function* () {
-        const task = yield* createTask("Add a refund button");
-        yield* markDirty(task.id);
-        const loop = yield* startLoop;
-        yield* elapse(10);
-        yield* end(task.id);
-        yield* elapse(3600);
-        yield* Fiber.interrupt(loop);
-        return model.calls.length;
-      }),
-    );
-
-    expect(calls).toBe(0);
-  });
-});
-
-describe("a Task merged away", () => {
-  it("makes no call before it is due, and the survivor, marked dirty by the merge, gets one", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const source = yield* createTask("Add a refund button");
-        const survivor = yield* createTask("Refund flow");
-        yield* markDirty(source.id);
-        const loop = yield* startLoop;
-        yield* elapse(10);
-        yield* tasks.merge(source.id, { intoTaskId: survivor.id });
-        yield* elapse(3600);
-        yield* Fiber.interrupt(loop);
-        return { titles: model.calls.map((call) => call.title), row: yield* readRow(survivor.id) };
-      }),
-    );
-
-    expect(result.titles).toEqual(["Refund flow"]);
-    expect(result.row).toMatchObject({ dirty_at: null, line: "Refund bug found" });
-  });
-});
-
-describe("an answer that arrives after the Task changed", () => {
-  it("is stored as a stale summary, and the next call waits for the pacing of the first and then refreshes it", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        const gate = yield* Deferred.make<void>();
-        model.answer = () => Effect.andThen(Deferred.await(gate), Effect.succeed(GOOD_ANSWER));
-        const task = yield* createTask("Add a refund button");
-        yield* markDirty(task.id);
-        const loop = yield* startLoop;
-        yield* elapse(60);
-        const inFlight = model.inFlight;
-        yield* markDirty(task.id);
-        yield* Deferred.succeed(gate, undefined);
-        yield* elapse(10);
-        const stale = yield* readRow(task.id);
-        const callsAtStale = model.calls.length;
-        yield* elapse(200);
-        const callsDuringPacing = model.calls.length;
-        model.answer = () => Effect.succeed({ ...GOOD_ANSWER, line: "Refund bug fixed" });
-        yield* elapse(200);
-        yield* Fiber.interrupt(loop);
-        return {
-          inFlight,
-          stale,
-          callsAtStale,
-          callsDuringPacing,
-          calls: model.calls.length,
-          row: yield* readRow(task.id),
-        };
-      }),
-    );
-
-    expect(result.inFlight).toBe(1);
-    // The answer is kept although the Task changed; the row is still dirty.
-    expect(result.stale).toMatchObject({
-      line: "Refund bug found",
-      dirty_revision: 2,
-      input_revision: 1,
-    });
-    expect(result.stale.dirty_at).not.toBeNull();
-    expect(result.callsAtStale).toBe(1);
-    expect(result.callsDuringPacing).toBe(1);
-    expect(result.calls).toBe(2);
-    expect(result.row).toMatchObject({
-      line: "Refund bug fixed",
-      input_revision: 2,
-      dirty_at: null,
-    });
-  });
-
-  it("gives a Task that changes during every call a summary all the same", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        const tasks = yield* TaskService;
-        const task = yield* createTask("Add a refund button");
-        // The Task changes while each call is out.
-        model.answer = () =>
-          Effect.andThen(
-            tasks.markSummaryDirty(task.id).pipe(Effect.orDie),
-            Effect.succeed(GOOD_ANSWER),
-          );
-        yield* markDirty(task.id);
-        const loop = yield* startLoop;
-        yield* elapse(60);
-        yield* Fiber.interrupt(loop);
-        return yield* readRow(task.id);
-      }),
-    );
-
-    expect(result.line).toBe("Refund bug found");
-    expect(result.dirty_at).not.toBeNull();
-  });
-});
-
 describe("the wait for the first Task to be due", () => {
   /** Starts the loop with a count of how often it looks up the Text Generation Model. */
   const startCountingLoop = (lookups: { count: number }) =>
@@ -430,8 +237,11 @@ describe("the wait for the first Task to be due", () => {
         yield* elapse(10);
         const beforeDue = { lookups: lookups.count, row: yield* readRow(task.id) };
         yield* elapse(10);
+        const row = yield* readRow(task.id);
+        // Once written, the loop sleeps: nothing is due for an hour.
+        yield* elapse(3600);
         yield* Fiber.interrupt(loop);
-        return { idle, beforeDue, calls: model.calls, row: yield* readRow(task.id) };
+        return { idle, beforeDue, calls: model.calls, row };
       }),
     );
 
@@ -462,35 +272,6 @@ describe("a restart", () => {
 
     expect(result.calls).toBe(1);
     expect(result.row).toMatchObject({ line: "Refund bug found", dirty_at: null });
-  });
-
-  it("repeats a call it cut off, but only after the Task's next attempt time", async () => {
-    const result = await run((model) =>
-      Effect.gen(function* () {
-        model.answer = () => Effect.never;
-        const task = yield* createTask("Add a refund button");
-        yield* markDirty(task.id);
-        const first = yield* startLoop;
-        yield* elapse(60);
-        yield* Fiber.interrupt(first);
-        const cutOff = model.calls.length;
-        model.answer = () => Effect.succeed(GOOD_ANSWER);
-        const second = yield* startLoop;
-        yield* elapse(200);
-        const callsDuringPacing = model.calls.length;
-        yield* elapse(200);
-        yield* Fiber.interrupt(second);
-        return {
-          cutOff,
-          callsDuringPacing,
-          calls: model.calls.length,
-          row: yield* readRow(task.id),
-        };
-      }),
-    );
-
-    expect(result).toMatchObject({ cutOff: 1, callsDuringPacing: 1, calls: 2 });
-    expect(result.row.dirty_at).toBeNull();
   });
 });
 
@@ -540,7 +321,7 @@ describe("a model that cannot run", () => {
 });
 
 describe("a model that fails", () => {
-  it("calls at most once every five minutes, and waits longer after each failure in a row", async () => {
+  it("does not spin: the loop sleeps until the Task is due again, and notices within its backstop", async () => {
     const result = await run((model) =>
       Effect.gen(function* () {
         model.answer = () => failing();
@@ -553,17 +334,13 @@ describe("a model that fails", () => {
       }),
     );
 
-    const gaps = result.times.slice(1).map((time, index) => time - result.times[index]!);
-    // 10, 20, 40 minutes, then the one-hour ceiling. The loop notices a Task is due
-    // within its one-minute backstop.
-    const waits = [600, 1200, 2400, 3600, 3600];
-    expect(gaps.length).toBeGreaterThanOrEqual(waits.length);
-    for (const [index, wait] of waits.entries()) {
-      expect(gaps[index]).toBeGreaterThanOrEqual(wait);
-      expect(gaps[index]).toBeLessThan(wait + 120);
-    }
+    // Waits of 10, 20, 40 minutes and then an hour (see `tasks/summaries.test.ts`) leave
+    // about six calls in four hours. The second one comes within the backstop of the first wait.
+    expect(result.times.length).toBeGreaterThanOrEqual(5);
+    expect(result.times.length).toBeLessThanOrEqual(7);
+    expect(result.times[1]! - result.times[0]!).toBeGreaterThanOrEqual(600);
+    expect(result.times[1]! - result.times[0]!).toBeLessThan(720);
     expect(result.row).toMatchObject({ line: null, attempt_count: result.times.length });
-    expect(result.row.dirty_at).not.toBeNull();
   });
 
   it.each([
@@ -590,37 +367,4 @@ describe("a model that fails", () => {
     expect(result.row).toMatchObject({ line: null, attempt_count: 1, failed_reason: reason });
     expect(result.row.dirty_at).not.toBeNull();
   });
-
-  it.each([
-    ["fails", () => failing()],
-    ["breaks", () => Effect.die(new Error("the stand-in model broke"))],
-  ])(
-    "does not stop the Task beside the one whose call %s, nor the next round",
-    async (_name, trouble) => {
-      const result = await run((model) =>
-        Effect.gen(function* () {
-          model.answer = (title) => (title === "broken" ? trouble() : Effect.succeed(GOOD_ANSWER));
-          const broken = yield* createTask("broken");
-          const fine = yield* createTask("fine");
-          yield* markDirty(broken.id);
-          yield* markDirty(fine.id);
-          const loop = yield* startLoop;
-          yield* elapse(120);
-          const later = yield* createTask("later");
-          yield* markDirty(later.id);
-          yield* elapse(120);
-          yield* Fiber.interrupt(loop);
-          return {
-            fine: yield* readRow(fine.id),
-            later: yield* readRow(later.id),
-            broken: yield* readRow(broken.id),
-          };
-        }),
-      );
-
-      expect(result.fine.line).toBe("Refund bug found");
-      expect(result.later.line).toBe("Refund bug found");
-      expect(result.broken.line).toBeNull();
-    },
-  );
 });

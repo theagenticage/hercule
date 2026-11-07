@@ -5,19 +5,17 @@ import { isNotFound, readErrorMessage, type HerculeClient } from "@hercule/clien
 import { findNextAgeChange } from "@hercule/client-core";
 import {
   buildCellId,
+  buildTaskPane,
   chooseLaneId,
-  chooseTaskCard,
-  decideQuestionAnswers,
-  describeHeldAnswer,
   describeSummaryStanding,
-  describeUnsentAnswer,
   type ArrangedLane,
   type SummaryStanding,
+  type TaskPaneContent,
 } from "@hercule/client-core/work";
 import type { BoardStage, Project, WorkCard } from "@hercule/contract";
 import { useClockValue } from "../../../app/age-clock";
 import {
-  findHeldAnswer,
+  listHeldAnswers,
   listUnsentAnswers,
   type PendingIntent,
 } from "../../../app/pending-intents";
@@ -30,7 +28,6 @@ import {
   TaskPane,
   TaskPaneColleague,
   type TaskPaneActions,
-  type TaskPaneAnswers,
   type TaskPaneChanges,
   type TaskPaneRead,
 } from "../../../screens/work/task-pane";
@@ -65,7 +62,9 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * element. `threadPromptWords` turns the pane's foot into the line that asks what a new
  * Thread should do, starting with those words; `null` leaves the foot as it is.
  * `intents` are the answers the app holds, which the pane shows as said or
- * as not sent. `changes` are the pane's buttons that change something. `moveToStage` is how a
+ * as not sent. `onShown` is told the pane's content after every draw, and
+ * with `null` when the sheet is gone, so that the keys act on the content
+ * that is on screen. `changes` are the pane's buttons that change something. `moveToStage` is how a
  * click on the stage path moves the card, through the board's own moves.
  * `onChangeTask` changes the address: a Task's id to show it, `null` to close.
  */
@@ -81,6 +80,7 @@ export function WorkPane({
   threadPromptWords,
   changes,
   moveToStage,
+  onShown,
   onChangeTask,
 }: {
   readonly client: HerculeClient;
@@ -94,6 +94,7 @@ export function WorkPane({
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
+  readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
 }): JSX.Element | null {
   const [presentedId, setPresentedId] = useState(taskId);
@@ -141,6 +142,7 @@ export function WorkPane({
       threadPromptWords={threadPromptWords}
       changes={changes}
       moveToStage={moveToStage}
+      onShown={onShown}
       onChangeTask={onChangeTask}
       onClosed={() => {
         // A sheet that was opened again while it closed has an id to show.
@@ -163,6 +165,7 @@ function PresentedTask({
   threadPromptWords,
   changes,
   moveToStage,
+  onShown,
   onChangeTask,
   onClosed,
 }: {
@@ -177,6 +180,7 @@ function PresentedTask({
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
+  readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
   readonly onClosed: () => void;
 }): JSX.Element {
@@ -200,10 +204,31 @@ function PresentedTask({
       ? null
       : describeSummaryStanding(summary, new Date(nowMs), textGeneration);
 
-  // The board's card is what the board shows now, a move not yet answered
-  // included, so the title and the stage path never lag behind the board.
-  const boardCard = cards.find((each) => each.id === presentedId);
-  const card = chooseTaskCard(cards, presentedId, detail.data) ?? null;
+  // A read that says the Task is gone wins over the details kept from before:
+  // the cache keeps the old data after a failed refetch, and a deleted Task
+  // must not stay actionable.
+  const isGone = detail.isError && isNotFound(detail.error);
+
+  // Everything the sheet shows and does, worked out once. The buttons and the
+  // Return key act on this same value, through `onShown`.
+  const pane = buildTaskPane({
+    taskId: presentedId,
+    boardCards: cards,
+    detail: detail.data,
+    isGone,
+    heldAnswers: listHeldAnswers(intents),
+    unsentAnswers: listUnsentAnswers(intents, presentedId),
+  });
+  const card = pane.card;
+  useLayoutEffect(() => {
+    onShown(pane);
+  });
+  useLayoutEffect(
+    () => () => {
+      onShown(null);
+    },
+    [onShown],
+  );
   // A Task with no Project has an empty crumb.
   const projectName =
     card?.projectId === undefined
@@ -219,10 +244,6 @@ function PresentedTask({
     onChangeTask(survivorId);
   }, [survivorId, presentedId, isWanted, queryClient, client, detail.data, onChangeTask]);
 
-  // A read that says the Task is gone wins over the details kept from before:
-  // the cache keeps the old data after a failed refetch, and a deleted Task
-  // must not stay actionable.
-  const isGone = detail.isError && isNotFound(detail.error);
   useEffect(() => {
     if (!isGone || !isWanted) return;
     const timer = setTimeout(() => {
@@ -244,20 +265,10 @@ function PresentedTask({
     read = { status: "loading" };
   }
 
-  // What the user said to the Task's questions. A question whose answer waits
-  // in the undo line or is being sent shows the words in place of its chips.
-  const question = detail.data === undefined ? null : decideQuestionAnswers(detail.data);
-  const held =
-    question === null ? undefined : findHeldAnswer(intents, question.sessionId, question.requestId);
-  const answers: TaskPaneAnswers = {
-    said: held?.kind === "answer" ? describeHeldAnswer(held.answers) : null,
-    unsent: listUnsentAnswers(intents, presentedId).map(describeUnsentAnswer),
-  };
-
   const actions: TaskPaneActions = {
     ...changes,
     onMoveToStage: (stage) => {
-      if (card !== null) moveToStage(card, stage);
+      if (card !== undefined) moveToStage(card, stage);
     },
     onOpenRun: (runId) => {
       void navigate({ to: "/runs/$runId", params: { runId } });
@@ -282,6 +293,7 @@ function PresentedTask({
     const destination = computeTaskPaneRect(
       desk ?? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
     );
+    const boardCard = cards.find((each) => each.id === presentedId);
     if (boardCard === undefined)
       return { origin: readSheetOrigin(scroller ?? null, null), destination };
     const laneId = chooseLaneId(boardCard, new Set(projects.map((each) => each.id)));
@@ -306,10 +318,9 @@ function PresentedTask({
       head={<TaskPaneColleague card={card} isStill={isStill} />}
     >
       <TaskPane
-        card={card}
+        pane={pane}
         projectName={projectName}
         read={read}
-        answers={answers}
         threadPromptWords={threadPromptWords}
         actions={actions}
       />

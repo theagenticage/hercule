@@ -3,8 +3,8 @@
  * It follows the Done moves (`app/done-moves.tsx`):
  *
  * - Moves are sent one at a time, in the order the user made them.
- * - The card moves on screen at once. The screen shows the board in the
- *   query cache with every pending move applied over it (`reapplyCardMoves`),
+ * - The card moves on screen at once. The logical board (`-logical-board.ts`)
+ *   is the board in the query cache with every pending move applied over it,
  *   so a read that lands while a move is on its way cannot put the card back.
  *   A move is pending from the moment it is made until the controller answers.
  * - When the controller accepts a move, the move is written into the cached
@@ -29,7 +29,7 @@
  *   them back in the order they stood, so each lands after the card it
  *   followed.
  */
-import { useRef, useSyncExternalStore, type RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
@@ -47,7 +47,6 @@ import {
   describeCardsLeftAsTheyAre,
   describeMoveFailure,
   readPlacement,
-  reapplyCardChanges,
   type CardChange,
   type CardMove,
   type CardPlacement,
@@ -55,32 +54,20 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
-import { buildStillSignedInCheck } from "../../../app/still-signed-in";
+import type { AccountScope } from "../../../app/account-scope";
 import type { CardMover, PutBackRequest } from "../../../app/card-mover";
-import type { PendingCardMoves, PendingMove } from "../../../app/pending-card-moves";
-import type { Gesture, UndoStack } from "../../../app/undo-stack";
+import type { PendingMove } from "../../../app/pending-card-moves";
+import type { Gesture } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { launchLeavingCard, sendLeavingCard } from "../../../screens/work/board-flights";
 import { flipBoard } from "../../../screens/work/flip-board";
 import { workBoardQuery } from "./-work-board";
-
-/**
- * A pending move with the check that the user who made it is still signed in.
- * The move waits in a queue and its answer arrives later, and both can happen
- * after a sign-out.
- */
-interface QueuedMove {
-  readonly request: PendingMove;
-  readonly isStillSignedIn: () => boolean;
-}
 
 /** The key every card move runs under, so the moves can be counted. */
 const CARD_MOVES_KEY = ["card-moves"];
 
 /** What `useCardMoves` returns. */
 export interface CardMoves {
-  /** The board with the pending moves applied, or `undefined` until the first read ends. */
-  readonly board: WorkBoard | undefined;
   /**
    * Moves a card. The card moves on screen at once, and a failure puts it
    * back and says why. `words` say what happened, in the past tense, such as
@@ -216,9 +203,9 @@ const findNeighbourCardId = (card: HTMLElement): string | null => {
 };
 
 /**
- * Moves cards for `client` and returns the board to draw. `serverBoard` is the
- * board as the last read gave it, and `scrollRef` is the element that scrolls
- * the board, which the motion of a move measures.
+ * Moves cards for `client`, for the user of `scope`. `readBoard` returns the logical board as it is
+ * this instant (`useLogicalBoard`), which every gesture reads, and `scrollRef`
+ * is the element that scrolls the board, which the motion of a move measures.
  *
  * - `moveCard` shows the move at once, sends `task.move` after the moves
  *   before it, and pushes a gesture on `undoStack`. A move that fails leaves
@@ -247,17 +234,19 @@ const findNeighbourCardId = (card: HTMLElement): string | null => {
  */
 export const useCardMoves = ({
   client,
-  undoStack,
-  pendingMoves,
-  serverBoard,
+  scope,
+  readBoard,
   scrollRef,
   onCardReturning,
 }: {
   readonly client: HerculeClient;
-  readonly undoStack: UndoStack<CardMover>;
-  /** The moves the controller has not answered yet. They outlive this screen. */
-  readonly pendingMoves: PendingCardMoves;
-  readonly serverBoard: WorkBoard | undefined;
+  /**
+   * The signed-in user's scope. It holds the undo stack and the moves the
+   * controller has not answered yet, which outlive this screen, and it says
+   * whether a move's user is still the one signed in.
+   */
+  readonly scope: AccountScope;
+  readonly readBoard: () => WorkBoard | undefined;
   readonly scrollRef: RefObject<HTMLElement | null>;
   /**
    * Called just before a card that was marked Done or Dropped is drawn on the
@@ -268,10 +257,8 @@ export const useCardMoves = ({
   readonly onCardReturning: (taskId: string, stage: EndStage) => void;
 }): CardMoves => {
   const queryClient = useQueryClient();
-  // A gesture reads the store's snapshot directly, so two gestures before one
-  // render see each other's move. `shownMoves` is what this render draws.
-  const shownMoves = useSyncExternalStore(pendingMoves.subscribe, pendingMoves.getSnapshot);
-  const { line, say, undo } = useUndoLine(undoStack);
+  const { undoStack, pendingCardMoves: pendingMoves, isCurrent } = scope;
+  const { line, say, withdraw, undo } = useUndoLine(undoStack);
 
   /**
    * Makes `change` and glides every part of the board that moves because of
@@ -289,16 +276,6 @@ export const useCardMoves = ({
     });
   };
 
-  const readShownBoard = (): WorkBoard | undefined => {
-    const cached = queryClient.getQueryData<WorkBoard>(queryKeys.workBoard());
-    return cached === undefined
-      ? undefined
-      : reapplyCardChanges(
-          cached,
-          pendingMoves.getSnapshot().map((each) => each.change),
-        );
-  };
-
   const { mutateAsync } = useMutation({
     mutationKey: CARD_MOVES_KEY,
     // A move in a scope waits for the one before it to finish before it is sent.
@@ -307,11 +284,11 @@ export const useCardMoves = ({
     // that did not save, or because the user who made it signed out. The client
     // sends the token it holds when it is called, so a move sent after a
     // sign-out would go out as the next account.
-    mutationFn: async ({ request, isStillSignedIn }: QueuedMove): Promise<boolean> => {
+    mutationFn: async (request: PendingMove): Promise<boolean> => {
       const { change, isUndoWanted } = request;
-      if (!isStillSignedIn()) return false;
+      if (!isCurrent()) return false;
       if (isUndoWanted !== undefined && !(await isUndoWanted)) return false;
-      if (!isStillSignedIn()) return false;
+      if (!isCurrent()) return false;
       if (change.kind === "end") {
         await client.task.update({
           params: { id: change.card.id },
@@ -323,15 +300,15 @@ export const useCardMoves = ({
       await client.task.move({ params: { id: taskId }, payload: place });
       return true;
     },
-    onSuccess: async (isSent, { request, isStillSignedIn }) => {
-      if (isSent && isStillSignedIn()) {
+    onSuccess: async (isSent, request) => {
+      if (isSent && isCurrent()) {
         // A read that started before this answer could end after the patch and
         // put the card back. Cancelling reverts it, and the push that follows
         // starts a read that began after the answer.
         await queryClient.cancelQueries({ queryKey: queryKeys.workBoard() });
         // The cache may belong to the next account by now. Its board has not
         // seen this move, and the move's card is the previous account's.
-        if (isStillSignedIn()) {
+        if (isCurrent()) {
           queryClient.setQueryData<WorkBoard>(queryKeys.workBoard(), (cached) =>
             cached === undefined ? undefined : applyCardChange(cached, request.change),
           );
@@ -341,10 +318,10 @@ export const useCardMoves = ({
       // patched board and the shorter list together.
       pendingMoves.remove(request);
     },
-    onError: (error, { request, isStillSignedIn }) => {
+    onError: (error, request) => {
       const { change } = request;
       // The undo line and the card belong to the next account by now.
-      if (!isStillSignedIn()) {
+      if (!isCurrent()) {
         pendingMoves.remove(request);
         return;
       }
@@ -356,13 +333,12 @@ export const useCardMoves = ({
         change.kind === "end"
           ? describeCardEndFailure(change.card, change.stage, readErrorMessage(error))
           : describeMoveFailure(readErrorMessage(error)),
-        false,
       );
     },
     // Runs after the answer or the error. The move being settled still counts
     // as a running mutation, so it is the last one when the count is one.
-    onSettled: (_isSent, _error, { isStillSignedIn }) => {
-      if (!isStillSignedIn() || queryClient.isMutating({ mutationKey: CARD_MOVES_KEY }) !== 1) {
+    onSettled: () => {
+      if (!isCurrent() || queryClient.isMutating({ mutationKey: CARD_MOVES_KEY }) !== 1) {
         return;
       }
       // The read runs even while the window is hidden: a move the user just
@@ -387,7 +363,6 @@ export const useCardMoves = ({
     onShown: (() => void) | undefined = undefined,
   ): Promise<unknown> => {
     const request: PendingMove = { change, isUndoWanted };
-    const queued: QueuedMove = { request, isStillSignedIn: buildStillSignedInCheck(client) };
     if (isPlayed) {
       playBoardChange("hand", () => {
         pendingMoves.add(request);
@@ -396,7 +371,7 @@ export const useCardMoves = ({
       pendingMoves.add(request);
     }
     onShown?.();
-    return mutateAsync(queued);
+    return mutateAsync(request);
   };
 
   const sendMove = (
@@ -414,7 +389,7 @@ export const useCardMoves = ({
     place: CardPlacement,
     isUndoWanted: Promise<boolean>,
   ): PutBackRequest | undefined => {
-    const board = readShownBoard();
+    const board = readBoard();
     const restore = board === undefined ? undefined : buildRestoreMove(board, place);
     if (restore === undefined) return undefined;
     return { isExact: restore.exact, request: sendMove(restore.move, true, isUndoWanted) };
@@ -432,7 +407,7 @@ export const useCardMoves = ({
     stage: EndStage,
     isUndoWanted: Promise<boolean>,
   ): PutBackRequest | undefined => {
-    const board = readShownBoard();
+    const board = readBoard();
     if (board === undefined || board.cards.some((each) => each.id === card.id)) return undefined;
     const restore = buildMoveToPlacement(board, place);
     onCardReturning(card.id, stage);
@@ -479,9 +454,9 @@ export const useCardMoves = ({
       },
     };
     undoStack.push(gesture);
-    say(note === undefined ? `${words}.` : `${words}. ${note}`, true);
+    say(note === undefined ? `${words}.` : `${words}. ${note}`, gesture);
     void Promise.all(parts.map((part) => part.wasSaved)).then((saved) => {
-      if (!saved.some(Boolean)) undoStack.remove(gesture);
+      if (!saved.some(Boolean)) withdraw(gesture);
     });
   };
 
@@ -489,7 +464,7 @@ export const useCardMoves = ({
   const endGroup = useRef<EndGroup | null>(null);
 
   const endCard = (taskId: string, stage: EndStage): void => {
-    const board = readShownBoard();
+    const board = readBoard();
     const card = board?.cards.find((each) => each.id === taskId);
     // Cards ending together are put back where they stood before the first one ended.
     const group = endGroup.current;
@@ -528,7 +503,7 @@ export const useCardMoves = ({
   };
 
   const endCardsTogether = (stage: EndStage, act: () => void): void => {
-    const startBoard = readShownBoard();
+    const startBoard = readBoard();
     if (startBoard === undefined || endGroup.current !== null) {
       act();
       return;
@@ -560,7 +535,7 @@ export const useCardMoves = ({
     note: string | undefined,
     isPlayed: boolean,
   ): void => {
-    const board = readShownBoard();
+    const board = readBoard();
     if (board === undefined) return;
     const from = readPlacement(board, move.taskId);
     if (from === undefined) return;
@@ -587,7 +562,7 @@ export const useCardMoves = ({
     describe: (moves: readonly CardMove[]) => string,
     note?: string,
   ): void => {
-    const original = readShownBoard();
+    const original = readBoard();
     if (original === undefined) return;
     const sent: { readonly move: CardMove; readonly part: UndoPart }[] = [];
     for (const move of moves) {
@@ -595,7 +570,7 @@ export const useCardMoves = ({
       // group moved. Whether the card needs to move at all depends on where
       // it stands now, after the cards before it have moved.
       const from = readPlacement(original, move.taskId);
-      const board = readShownBoard();
+      const board = readBoard();
       if (from === undefined || board === undefined) continue;
       const stands = readPlacement(board, move.taskId);
       if (stands === undefined) continue;
@@ -630,13 +605,6 @@ export const useCardMoves = ({
   };
 
   return {
-    board:
-      serverBoard === undefined
-        ? undefined
-        : reapplyCardChanges(
-            serverBoard,
-            shownMoves.map((each) => each.change),
-          ),
     moveCard,
     moveCardWithMotion,
     moveCards,
@@ -645,13 +613,13 @@ export const useCardMoves = ({
     undoLastMove,
     line,
     sayWithoutUndo: (text) => {
-      say(text, false);
+      say(text);
     },
     sayWithUndo: (text, gesture) => {
       undoStack.push(gesture);
-      say(text, true);
+      say(text, gesture);
       return () => {
-        undoStack.remove(gesture);
+        withdraw(gesture);
       };
     },
   };

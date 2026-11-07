@@ -1,7 +1,5 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
-  SUMMARY_MIN_INTERVAL_SECONDS,
-  SUMMARY_QUIET_SECONDS,
   TaskService,
   TaskServiceLayer,
   type FailureRestoration,
@@ -10,7 +8,16 @@ export {
   type TaskPage,
   type UpdateInput,
 } from "./service";
-export { taskRepository, type BoardTask, type NewTask, type SummaryAttempt } from "./repository";
+export { taskRepository, type BoardTask, type NewTask } from "./repository";
+export {
+  SUMMARY_CONCURRENCY,
+  SUMMARY_MIN_INTERVAL_SECONDS,
+  SUMMARY_QUIET_SECONDS,
+  TaskSummaries,
+  TaskSummariesLayer,
+  type SummaryDescriber,
+  type SummaryText,
+} from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {

@@ -51,6 +51,7 @@ import type { PressedKeys } from "../../../screens/work/work-card";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
+import { useLogicalBoard } from "./-logical-board";
 import { useMergeCards } from "./-merge-cards";
 import { useStopRun } from "./-stop-run";
 import { usePaneChanges } from "./-pane-changes";
@@ -100,7 +101,8 @@ export function WorkScreen({
   /** Puts a Task's id in the address to open its details, or `null` to close them. */
   readonly onChangeOpenTask: (taskId: string | null) => void;
 }): JSX.Element {
-  const { client, url, live, undoStack, pendingCardMoves } = controller;
+  const { client, url, live } = controller;
+  const scope = controller.accountScopes.read();
   const navigate = useNavigate();
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -112,11 +114,15 @@ export function WorkScreen({
   // A card that Undo or a refused update brings back is let in at once by the
   // board's reads, which are made after the moves, so the moves call it through this.
   const noteReturnedTask = useRef<(taskId: string, how: EndStage) => void>(() => undefined);
+  // The logical board is what is true now, and every action reads it. The
+  // drawn board (below) is the same board with arrivals and failures held
+  // back for a still hand, and only what is drawn reads that.
+  const logical = useLogicalBoard({ scope, serverBoard: board.data });
+  const logicalCards = logical.board?.cards ?? EMPTY_CARDS;
   const moves = useCardMoves({
     client,
-    undoStack,
-    pendingMoves: pendingCardMoves,
-    serverBoard: board.data,
+    scope,
+    readBoard: logical.readBoardNow,
     scrollRef,
     onCardReturning: (taskId, how) => {
       noteReturnedTask.current(taskId, how);
@@ -135,7 +141,8 @@ export function WorkScreen({
   // Task that arrives or a run that fails waits for a still hand, and a
   // working colleague whose card is scrolled out of view stops tapping.
   const reads = useBoardReads({
-    board: moves.board,
+    logicalBoard: logical.board,
+    hiddenIds: logical.hiddenIds,
     serverBoard: board.data,
     projects,
     isCarrying,
@@ -146,14 +153,15 @@ export function WorkScreen({
   });
   const view = useViewMotion(savedView, scrollRef);
   usePausePawsOffScreen(scrollRef);
-  const shownBoard = reads.board;
+  const drawnBoard = reads.drawnBoard;
+  const drawnCards = drawnBoard?.cards ?? EMPTY_CARDS;
   // The answers the user gave from the pane and the app still holds show on
   // their cards as answered; the pane's answer and Try again buttons act here.
   const pane = usePaneChanges({
-    controller,
-    username,
-    boardCards: shownBoard?.cards ?? EMPTY_CARDS,
-    isBoardRead: shownBoard !== undefined,
+    client,
+    scope,
+    boardCards: logicalCards,
+    isBoardRead: logical.board !== undefined,
     boardReadAt: board.dataUpdatedAt,
     moves,
     openTaskId,
@@ -164,10 +172,9 @@ export function WorkScreen({
   });
   // A merge held for the undo line hides the card that merges away.
   const merging = useMergeCards({
-    controller,
-    username,
-    boardCards: pane.cards,
-    isBoardRead: shownBoard !== undefined,
+    scope,
+    readBoard: logical.readBoardNow,
+    isBoardRead: logical.board !== undefined,
     moves,
     scrollRef,
     openTaskId,
@@ -175,11 +182,10 @@ export function WorkScreen({
       onChangeOpenTask(null);
     },
   });
-  const { cards } = merging;
 
   // The lanes of the whole board, for the Filter menu: a Project the filter
   // hides stays in the menu to be chosen again.
-  const allLanes = buildLanes({ cards }, projects);
+  const allLanes = buildLanes({ cards: drawnCards }, projects);
   const facets = buildWorkFacets(allLanes);
 
   // Failed and Has a question lift themselves once no card has them, so an
@@ -188,12 +194,12 @@ export function WorkScreen({
   // view without motion.
   const { filter, setFilter } = savedView;
   useEffect(() => {
-    if (shownBoard === undefined) return;
-    const next = dropEmptyValues(filter, facets, shownBoard.cards);
+    if (drawnBoard === undefined) return;
+    const next = dropEmptyValues(filter, facets, drawnCards);
     if (next !== filter) setFilter(next);
-  }, [shownBoard, facets, filter, setFilter]);
+  }, [drawnBoard, drawnCards, facets, filter, setFilter]);
 
-  const found = findCards(cards, view.findText);
+  const found = findCards(drawnCards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
   const lanes = buildLanes({ cards: visibleCards }, projects);
   const arrangedLanes = arrangeLanes(lanes, {
@@ -210,14 +216,14 @@ export function WorkScreen({
       ? view.currentCardId
       : firstShownId;
 
-  const isBoardEmpty = shownBoard !== undefined && cards.length === 0;
+  const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
   const hasAnyTask = hasAnyTaskRead.data;
 
   // The first board fades its words in from the top left, once.
   const [startedLoading] = useState(board.data === undefined);
   const [arrivalOver, setArrivalOver] = useState(false);
-  const hasBoard = shownBoard !== undefined;
+  const hasBoard = drawnBoard !== undefined;
   useEffect(() => {
     if (!startedLoading || !hasBoard) return;
     const timer = setTimeout(() => {
@@ -232,7 +238,7 @@ export function WorkScreen({
   // another card (Return, or a click) merges the first into it.
   const mergePick = useMergePick({
     scrollRef,
-    cards,
+    cards: logicalCards,
     merge: merging.mergeCard,
     say: moves.sayWithoutUndo,
     onStart: () => {
@@ -251,12 +257,14 @@ export function WorkScreen({
     if (card.id !== openTaskId) onChangeOpenTask(card.id);
   };
 
-  const stopRun = useStopRun({ client, say: moves.sayWithoutUndo });
+  const stopRun = useStopRun({ client, scope, say: moves.sayWithoutUndo });
 
   // Starting a Thread from a card, and moving a Thread to a new Task.
   const threads = useTaskThreads({
     client,
-    cards,
+    scope,
+    cards: logicalCards,
+    readCard: pane.readCard,
     openTaskId,
     scrollRef,
     say: moves.sayWithoutUndo,
@@ -321,7 +329,7 @@ export function WorkScreen({
   /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
   const chooseAddLane = (): AddTaskLane => {
     const projectIds = new Set(projects.map((project) => project.id));
-    const current = cards.find((card) => card.id === tabStopCardId);
+    const current = logicalCards.find((card) => card.id === tabStopCardId);
     const laneId =
       current === undefined
         ? (lanes[0]?.id ?? NO_PROJECT_LANE_ID)
@@ -355,8 +363,7 @@ export function WorkScreen({
   // ---------- Dragging ----------
   useBoardDrag({
     scrollRef,
-    cards,
-    currentCards: moves.board?.cards ?? EMPTY_CARDS,
+    cards: logicalCards,
     projects,
     arrangedLanes,
     selectedIds: selection.selectedIds,
@@ -400,7 +407,7 @@ export function WorkScreen({
   }, []);
   const keys = useBoardKeys({
     view,
-    cards,
+    cards: logicalCards,
     arrangedLanes,
     findMatches: found.topMatches,
     projects,
@@ -438,7 +445,7 @@ export function WorkScreen({
   // ---------- What the screen draws ----------
   let state: DeskState = "board";
   let body: JSX.Element | null;
-  if (shownBoard === undefined) {
+  if (drawnBoard === undefined) {
     state = "loading";
     body = board.isError ? (
       <ReadFailure
@@ -516,7 +523,7 @@ export function WorkScreen({
             totalCount: found.matches.length,
             activeId: keys.activeFindId,
             onOpen: (id) => {
-              const card = cards.find((each) => each.id === id);
+              const card = logicalCards.find((each) => each.id === id);
               if (card !== undefined) openCard(card);
             },
           }}
@@ -547,7 +554,7 @@ export function WorkScreen({
           <WorkPane
             client={client}
             taskId={openTaskId}
-            cards={cards}
+            cards={logicalCards}
             projects={projects}
             scrollRef={scrollRef}
             drawnLanes={arrangedLanes}
@@ -557,7 +564,7 @@ export function WorkScreen({
             changes={{
               ...pane.changes,
               onMerge: () => {
-                const card = cards.find((each) => each.id === openTaskId);
+                const card = logicalCards.find((each) => each.id === openTaskId);
                 if (card !== undefined) mergePick.start(card);
               },
               ...threads.changes,
@@ -572,6 +579,7 @@ export function WorkScreen({
               },
             }}
             moveToStage={moveCardToStage}
+            onShown={pane.onPaneShown}
             onChangeTask={onChangeOpenTask}
           />
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
@@ -593,7 +601,7 @@ export function WorkScreen({
           />
         </>
       }
-      stageCounts={shownBoard === undefined ? null : countCardsByStage(arrangedLanes)}
+      stageCounts={drawnBoard === undefined ? null : countCardsByStage(arrangedLanes)}
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
@@ -603,7 +611,7 @@ export function WorkScreen({
       scrollRef={scrollRef}
     >
       {body}
-      {shownBoard?.truncated === true && (
+      {drawnBoard?.truncated === true && (
         <p className="board-note" role="status">
           The board shows the first {MAX_BOARD_CARDS.toLocaleString("en")} Tasks, and more exist.
           Finish or drop some to bring the rest in.

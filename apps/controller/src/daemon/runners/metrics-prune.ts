@@ -10,7 +10,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { PromotionState } from "../../promotion";
 import { RunnerMetricsService } from "../../runner-metrics";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the prune runs. The table grows by one row per runner per

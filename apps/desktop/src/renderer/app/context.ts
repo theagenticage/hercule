@@ -17,14 +17,11 @@ import {
 import type { Bridge } from "../../ipc/bridge";
 import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
-import { createPendingCardMoves, type PendingCardMoves } from "./pending-card-moves";
-import { createPendingIntentsHolder, type PendingIntentsHolder } from "./pending-intents";
+import { createAccountScopes, type AccountScopes } from "./account-scope";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
 import { createDesktopTokenStore } from "./token-store";
-import type { CardMover } from "./card-mover";
-import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
  * The controller whose URL is saved in the app's settings, a client for it,
@@ -63,29 +60,12 @@ export interface SavedController {
    */
   readonly threadCopies: ThreadCopies;
   /**
-   * The gestures the user made on Work and the Inbox in this window, which
-   * Undo reverses one at a time. They belong to this controller and this user:
-   * main reloads the window for another controller, which builds a new stack,
-   * and the router clears this one when the user signs out (see
-   * `createAppRouter`). Nothing is saved.
+   * What the window holds for the signed-in user: the undo stack, the card
+   * moves and the held intents, and the check that a request is still the
+   * signed-in user's. The shell opens it once it knows the user and the router
+   * closes it at sign-out (see `AccountScope`).
    */
-  readonly undoStack: UndoStack<CardMover>;
-  /**
-   * The card moves the controller has not answered yet. They live here, not in
-   * the Work screen, so a screen opened again after a visit elsewhere still
-   * draws a card as Done while its update is on the way, and Undo can queue
-   * its inverse behind that update. Like the undo stack, the router clears
-   * them when the user signs out.
-   */
-  readonly pendingCardMoves: PendingCardMoves;
-  /**
-   * The answers the user gave from the Work pane and the merges the user asked
-   * for, which the app holds back for the undo line before it sends them. They
-   * belong to this controller and this user, so the store opens once the shell
-   * knows the user, and the router closes it when the user signs out (see
-   * `createAppRouter`).
-   */
-  readonly pendingIntents: PendingIntentsHolder;
+  readonly accountScopes: AccountScopes;
 }
 
 export interface RouterContext {
@@ -101,13 +81,16 @@ export interface RouterContext {
 /**
  * Returns the saved controller at `url`: a client that sends `token` and
  * stores any change to it through main, a live connection that is not
- * started yet, no pending submissions, no uploads, and the store of saved
- * thread copies, which opens its database when first used.
+ * started yet, no pending submissions, no uploads, the store of saved
+ * thread copies, which opens its database when first used, and no account
+ * scope open yet. `queryClient` is the cache the account scope's requests
+ * refresh.
  */
 const buildSavedController = (
   url: string,
   token: string | null,
   bridge: Bridge,
+  queryClient: QueryClient,
 ): SavedController => {
   const client = createControllerClient(url, createDesktopTokenStore(token, bridge));
   return {
@@ -121,9 +104,12 @@ const buildSavedController = (
       concurrency: UPLOAD_CONCURRENCY,
     }),
     threadCopies: createThreadCopies(url),
-    undoStack: createUndoStack(),
-    pendingCardMoves: createPendingCardMoves(),
-    pendingIntents: createPendingIntentsHolder(url, localStorage),
+    accountScopes: createAccountScopes({
+      controllerUrl: url,
+      client,
+      queryClient,
+      storage: localStorage,
+    }),
   };
 };
 
@@ -140,10 +126,14 @@ export const buildRouterContext = async (bridge: Bridge): Promise<RouterContext>
     bridge.controllerUrl.read(),
     bridge.token.read(),
   ]);
+  const queryClient = createQueryClient();
   return {
     bridge,
-    controller: controllerUrl === null ? null : buildSavedController(controllerUrl, token, bridge),
-    queryClient: createQueryClient(),
+    controller:
+      controllerUrl === null
+        ? null
+        : buildSavedController(controllerUrl, token, bridge, queryClient),
+    queryClient,
     appearance: createAppearanceStore(bridge),
   };
 };

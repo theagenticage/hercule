@@ -21,14 +21,13 @@ import {
 } from "@hercule/client-core";
 import {
   buildTaskThreadStart,
-  chooseTaskCard,
   describeThreadRefused,
   describeThreadStarted,
   THREAD_MOVED_WORDS,
   type NewestSessionPlace,
 } from "@hercule/client-core/work";
-import type { TaskDetail, WorkCard } from "@hercule/contract";
-import { buildStillSignedInCheck } from "../../../app/still-signed-in";
+import type { WorkCard } from "@hercule/contract";
+import type { AccountScope } from "../../../app/account-scope";
 import { useHandOffs } from "../../../screens/work/use-hand-offs";
 import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 
@@ -80,11 +79,13 @@ const readNewestSessionPlace = async (
  */
 const useTaskThreadRequests = ({
   client,
+  scope,
   say,
   onStarted,
   onRefused,
 }: {
   readonly client: HerculeClient;
+  readonly scope: AccountScope;
   readonly say: (text: string) => void;
   readonly onStarted: (taskId: string) => void;
   readonly onRefused: (card: WorkCard, prompt: string) => void;
@@ -96,31 +97,24 @@ const useTaskThreadRequests = ({
   };
 
   const start = useMutation({
-    mutationFn: async ({
-      card,
-      prompt,
-      isStillSignedIn,
-    }: {
-      card: WorkCard;
-      prompt: string;
-      isStillSignedIn: () => boolean;
-    }) => {
+    mutationFn: async ({ card, prompt }: { card: WorkCard; prompt: string }) => {
       const place = await readNewestSessionPlace(client, card.id);
       // The read can end after sign-out, and the spawn would then go out as the next account.
-      if (!isStillSignedIn()) throw new Error("You signed out before the thread started.");
+      if (!scope.isCurrent()) throw new Error("You signed out before the thread started.");
       const { input, note } = buildTaskThreadStart(prompt, card, place);
       await client.session.spawn({ payload: input });
       return note;
     },
     onSuccess: (note, { card }) => {
+      if (!scope.isCurrent()) return;
       say(
         note === undefined ? describeThreadStarted(card) : `${describeThreadStarted(card)} ${note}`,
       );
       readAgain(card.id);
       onStarted(card.id);
     },
-    onError: (error, { card, prompt, isStillSignedIn }) => {
-      if (!isStillSignedIn()) return;
+    onError: (error, { card, prompt }) => {
+      if (!scope.isCurrent()) return;
       say(describeThreadRefused(card, readErrorMessage(error)));
       onRefused(card, prompt);
     },
@@ -130,17 +124,19 @@ const useTaskThreadRequests = ({
     mutationFn: ({ sessionId }: { taskId: string; sessionId: string }) =>
       client.session.moveToTask({ params: { id: sessionId }, payload: {} }),
     onSuccess: (_, { taskId }) => {
+      if (!scope.isCurrent()) return;
       say(THREAD_MOVED_WORDS);
       readAgain(taskId);
     },
     onError: (error) => {
+      if (!scope.isCurrent()) return;
       say(`Could not move the thread to a new Task: ${readErrorMessage(error)}`);
     },
   });
 
   return {
     startThread: (card, prompt) => {
-      start.mutate({ card, prompt, isStillSignedIn: buildStillSignedInCheck(client) });
+      start.mutate({ card, prompt });
     },
     moveThreadToNewTask: (taskId, sessionId) => {
       move.mutate({ taskId, sessionId });
@@ -188,7 +184,9 @@ export interface TaskThreadsState {
  */
 export const useTaskThreads = ({
   client,
+  scope,
   cards,
+  readCard,
   openTaskId,
   scrollRef,
   say,
@@ -196,20 +194,24 @@ export const useTaskThreads = ({
   closePane,
 }: {
   readonly client: HerculeClient;
+  /** The signed-in user's scope: requests that end after sign-out do nothing. */
+  readonly scope: AccountScope;
   readonly cards: readonly WorkCard[];
+  /** Returns the card of a Task as the open pane shows it (`usePaneChanges`). */
+  readonly readCard: (taskId: string) => WorkCard | undefined;
   readonly openTaskId: string | null;
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly say: (text: string) => void;
   readonly openPane: (card: WorkCard) => void;
   readonly closePane: () => void;
 }): TaskThreadsState => {
-  const queryClient = useQueryClient();
   const { noteHandOff } = useHandOffs(scrollRef, cards);
   const [askedTaskId, setAskedTaskId] = useState<string | null>(null);
   // What the line starts with: the words of a start that was refused, else nothing.
   const [askedWords, setAskedWords] = useState("");
   const requests = useTaskThreadRequests({
     client,
+    scope,
     say,
     onStarted: (taskId) => {
       noteHandOff(taskId, "colleague-arrives");
@@ -229,16 +231,6 @@ export const useTaskThreads = ({
     if (askedTaskId !== openTaskId) setAskedTaskId(null);
   }
 
-  /** Returns the open Task's card: the board's, else the one its details were read with. */
-  const readOpenCard = (): WorkCard | undefined =>
-    openTaskId === null
-      ? undefined
-      : chooseTaskCard(
-          cards,
-          openTaskId,
-          queryClient.getQueryData<TaskDetail>(queryKeys.taskDetail(openTaskId)),
-        );
-
   return {
     threadPromptWords: openTaskId !== null && askedTaskId === openTaskId ? askedWords : null,
     askThread: (card) => {
@@ -252,7 +244,7 @@ export const useTaskThreads = ({
         setAskedTaskId(openTaskId);
       },
       onSendThreadPrompt: (prompt) => {
-        const card = readOpenCard();
+        const card = openTaskId === null ? undefined : readCard(openTaskId);
         setAskedTaskId(null);
         if (card === undefined) return;
         requests.startThread(card, prompt);
