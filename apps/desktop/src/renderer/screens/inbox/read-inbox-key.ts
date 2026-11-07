@@ -1,5 +1,5 @@
 import type { InboxWalk } from "@hercule/client-core/inbox";
-import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
+import { isUndoKey, type DeskKeyPress } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 
 /** What a key press asks of the Inbox page. */
@@ -12,15 +12,6 @@ export type InboxKeyCommand =
   | { readonly kind: "undo" }
   | { readonly kind: "toggle-keys-sheet" }
   | { readonly kind: "step-back" };
-
-/** The parts of a keyboard event that decide which command a key is. */
-export interface InboxKeyPress {
-  readonly key: string;
-  readonly shiftKey: boolean;
-  readonly altKey: boolean;
-  readonly metaKey: boolean;
-  readonly ctrlKey: boolean;
-}
 
 const ARROW_WALKS: Readonly<Record<string, InboxWalk>> = {
   ArrowUp: "up",
@@ -48,18 +39,11 @@ const LETTER_COMMANDS: Readonly<Record<string, InboxKeyCommand>> = {
  * undoes.
  */
 export const readInboxKey = (
-  press: InboxKeyPress,
+  press: DeskKeyPress,
   platform: DesktopPlatform,
 ): InboxKeyCommand | null => {
   if (press.altKey) return null;
-  if (press.metaKey || press.ctrlKey) {
-    const isUndo =
-      press.key.toLowerCase() === "z" &&
-      !press.shiftKey &&
-      isPrimaryModifierHeld(press, platform) &&
-      !isOtherModifierHeld(press, platform);
-    return isUndo ? { kind: "undo" } : null;
-  }
+  if (press.metaKey || press.ctrlKey) return isUndoKey(press, platform) ? { kind: "undo" } : null;
   const { key, shiftKey } = press;
   if (key === "?") return { kind: "toggle-keys-sheet" };
   if (key === "Escape") return { kind: "step-back" };

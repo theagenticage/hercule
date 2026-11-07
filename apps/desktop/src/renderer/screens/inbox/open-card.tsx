@@ -13,7 +13,7 @@ import { ArrowIcon } from "../../icons/arrow";
 import { OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
 import { OpenCardBody, OpenPlaceBody } from "./open-card-body";
 import { readOpenCardPlaces } from "./open-card-places";
-import type { OpenCard } from "./use-open-card";
+import type { OpenCard, OpenTarget } from "./use-open-card";
 import { useMinuteClock } from "./use-minute-clock";
 
 /** What the open card needs of the page: the moves it offers. Each is called with the card's id. */
@@ -26,16 +26,17 @@ export interface OpenCardMoveHandlers {
   readonly onSeeTask: (taskId: string) => void;
 }
 
-/** Returns what the shown id is: a place of the Inbox read, or else a card. */
-const findPlaceView = (id: string, inbox: Inbox | undefined): PlaceView | undefined =>
-  inbox === undefined ? undefined : readPlaceView(id, inbox);
-
-/** Returns the name of the card or place `id`, for the dialog's name and for the way back. */
-const nameShown = (id: string, inbox: Inbox | undefined): string => {
-  const card = inbox?.cards.find((each) => each.id === id);
-  if (card !== undefined) return card.title;
-  return inbox?.places.find((each) => each.ref === id)?.title ?? "Back";
+/** Returns the name of the card or place `target`, for the dialog's name and for the way back. */
+const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
+  if (target.kind === "card") {
+    return inbox?.cards.find((each) => each.id === target.id)?.title ?? "Back";
+  }
+  return inbox?.places.find((each) => each.ref === target.ref)?.title ?? "Back";
 };
+
+/** Returns the key that tells one thing the sheet shows from another, such that a card and a place never share one. */
+const keyTarget = (target: OpenTarget): string =>
+  target.kind === "card" ? `card:${target.id}` : `place:${target.ref}`;
 
 /**
  * Renders the body of the open sheet for the card `id`. It draws at once from
@@ -112,7 +113,8 @@ function OpenCardContents({
  *   component draws it and walks inside it.
  * - `inbox` is the page's read, which a place is drawn from (no new read).
  * - `moves` are the page's moves. A move on a card calls them, and the page
- *   folds the sheet (`openCard.close()`) before it plays the move.
+ *   folds the sheet and plays the move when it has landed
+ *   (`openCard.closeThen`).
  * - A card whose plugin is off keeps its words, its moves are off, and the
  *   sheet says why. A place has no moves.
  *
@@ -137,8 +139,8 @@ export function InboxOpenCard({
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const contentRef = useRef<HTMLDivElement>(null);
   const heldDestinationRef = useRef<SheetRect | null>(null);
-  const { shownId } = sheet;
-  if (shownId === null) return null;
+  const { shown } = sheet;
+  if (shown === null) return null;
 
   const readPlaces = (): SheetPlaces => {
     const places = readOpenCardPlaces(
@@ -149,20 +151,28 @@ export function InboxOpenCard({
     heldDestinationRef.current = places.destination;
     return places;
   };
-  const placeView = findPlaceView(shownId, inbox);
-  const backId = sheet.trail.at(-1);
+  const placeView: PlaceView | undefined =
+    shown.kind === "place" && inbox !== undefined ? readPlaceView(shown.ref, inbox) : undefined;
+  const back = sheet.trail.at(-1);
+  const walkToPlace = (ref: string): void => {
+    sheet.walkInside({ kind: "place", ref });
+  };
+  const walkToCard = (id: string): void => {
+    sheet.walkInside({ kind: "card", id });
+  };
   const userInitial = username.charAt(0).toUpperCase();
   return (
     <OpeningSheet
       isOpen={sheet.isOpen}
-      contentKey={shownId}
-      label={nameShown(shownId, inbox)}
+      contentKey={keyTarget(shown)}
+      label={nameTarget(shown, inbox)}
       readPlaces={readPlaces}
       onClosed={() => {
         const origin = sheet.originElement;
         heldDestinationRef.current = null;
-        sheet.finishClose();
+        // Focus goes home first: the move the sheet was closed for runs in `finishClose`, and may take the card away.
         origin?.focus({ preventScroll: true });
+        sheet.finishClose();
       }}
       behind={
         <div
@@ -173,31 +183,33 @@ export function InboxOpenCard({
       }
     >
       <div ref={contentRef} className="open-card">
-        {backId !== undefined && (
+        {back !== undefined && (
           <button type="button" className="open-card-back" onClick={sheet.walkBack}>
             <ArrowIcon size={12} />
-            <span>{nameShown(backId, inbox)}</span>
+            <span>{nameTarget(back, inbox)}</span>
           </button>
         )}
-        {placeView === undefined ? (
+        {shown.kind === "card" ? (
           <OpenCardContents
-            key={shownId}
-            id={shownId}
+            key={shown.id}
+            id={shown.id}
             inbox={inbox}
             client={client}
             plugins={plugins}
             userInitial={userInitial}
             onClose={openCard.close}
-            onWalk={sheet.walkInside}
+            onWalk={walkToPlace}
             moves={{ onTake, onDismiss, onSeeTask }}
           />
+        ) : placeView === undefined ? (
+          <p className="open-card-trust">This place is not on the Inbox now.</p>
         ) : (
           <OpenPlaceBody
             view={placeView}
             plugins={plugins}
             onClose={openCard.close}
-            onWalk={sheet.walkInside}
-            onWalkCard={sheet.walkInside}
+            onWalk={walkToPlace}
+            onWalkCard={walkToCard}
           />
         )}
       </div>

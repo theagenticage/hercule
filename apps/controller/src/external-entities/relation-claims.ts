@@ -73,7 +73,39 @@ export const WALK_STATE_ROOM = MAX_GRAPH_EDGES * MAX_CONTEXT_DEPTH;
  * The most (start ref, ancestor, depth) states one walk up may produce. Every
  * start gets one state of its own, and the rest is `WALK_STATE_ROOM`.
  */
-const stateBudget = (startCount: number) => startCount + WALK_STATE_ROOM;
+const computeStateBudget = (startCount: number) => startCount + WALK_STATE_ROOM;
+
+/**
+ * The test for an edge the walks follow: a claim, aliased `c`, that a child is
+ * part of a parent and is current (not refused). Every statement that walks
+ * `part-of` builds on it, so what counts as an edge is decided here once.
+ */
+export const CURRENT_PART_OF_SQL = "c.relation = 'part-of' AND c.state = 'current'";
+
+/**
+ * A recursive common table expression, `walk_up(ref)`: the refs in
+ * `walk_start(ref)` and every ref above them, however many levels. The
+ * statement that uses it defines `walk_start` before it, and uses one walk
+ * (up or down) at a time.
+ */
+export const WALK_UP_SQL = `
+  walk_up(ref) AS (
+    SELECT ref FROM walk_start
+    UNION
+    SELECT c.to_ref
+    FROM walk_up u JOIN external_entity_relation_claims c ON c.from_ref = u.ref
+    WHERE ${CURRENT_PART_OF_SQL}
+  )`;
+
+/** Like `WALK_UP_SQL`, but `walk_down(ref)` holds the refs in `walk_start(ref)` and everything below them. */
+export const WALK_DOWN_SQL = `
+  walk_down(ref) AS (
+    SELECT ref FROM walk_start
+    UNION
+    SELECT c.from_ref
+    FROM walk_down d JOIN external_entity_relation_claims c ON c.to_ref = d.ref
+    WHERE ${CURRENT_PART_OF_SQL}
+  )`;
 
 /** The reason stored with a claim that was refused because it closes a loop. */
 const LOOP_REASON = "Part of this would make a loop: the parent is already part of this thing.";
@@ -99,16 +131,24 @@ const make = Effect.gen(function* () {
   /** Returns true when making `fromRef` part of `toRef` would close a loop of current `part-of` claims. */
   const closesLoop = (fromRef: string, toRef: string) =>
     sql<{ readonly cycle: number }>`
-      WITH RECURSIVE up(ref) AS (
-        SELECT ${toRef}
-        UNION
-        SELECT c.to_ref
-        FROM external_entity_relation_claims c JOIN up u ON c.from_ref = u.ref
-        WHERE c.relation = 'part-of' AND c.state = 'current'
-      )
-      SELECT EXISTS (SELECT 1 FROM up WHERE ref = ${fromRef}) AS cycle`.pipe(
+      WITH RECURSIVE walk_start(ref) AS (SELECT ${toRef}), ${sql.literal(WALK_UP_SQL)}
+      SELECT EXISTS (SELECT 1 FROM walk_up WHERE ref = ${fromRef}) AS cycle`.pipe(
       Effect.map((rows) => rows[0]?.cycle === 1),
     );
+
+  /** Returns `refs` and every ref below them, sorted. Never cut. */
+  const listRefsBelow = (
+    refs: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    refs.length === 0
+      ? Effect.succeed([])
+      : sql<{ readonly ref: string }>`
+          WITH RECURSIVE
+          walk_start(ref) AS (SELECT value FROM json_each(${JSON.stringify([...new Set(refs)])})),
+          ${sql.literal(WALK_DOWN_SQL)}
+          SELECT ref FROM walk_down ORDER BY ref`.pipe(
+          Effect.map((rows) => rows.map((row) => row.ref)),
+        );
 
   return {
     /**
@@ -143,13 +183,23 @@ const make = Effect.gen(function* () {
         readonly observedRevision: string | undefined;
       }>;
       readonly now: string;
-    }): Effect.Effect<ReadonlyMap<string, RelationWrite>, SqlError> =>
+    }): Effect.Effect<
+      {
+        readonly writes: ReadonlyMap<string, RelationWrite>;
+        /**
+         * The refs below every ref whose claims changed (those refs included),
+         * as they stood before any claim was removed. Empty when nothing changed.
+         */
+        readonly refsBelowBefore: ReadonlyArray<string>;
+      },
+      SqlError
+    > =>
       Effect.gen(function* () {
         const { entries, now } = input;
-        const results = new Map<string, RelationWrite>();
-        if (entries.length === 0) return results;
+        const writes = new Map<string, RelationWrite>();
+        if (entries.length === 0) return { writes, refsBelowBefore: [] };
         const connectionId = uuidFromString(input.connectionId);
-        const keyOf = (relation: string, toRef: string) => `${relation}\u0000${toRef}`;
+        const buildClaimKey = (relation: string, toRef: string) => `${relation}\u0000${toRef}`;
 
         const storedRows = yield* sql<StoredClaimRow>`
           SELECT id, from_ref, relation, to_ref, state FROM external_entity_relation_claims
@@ -168,22 +218,30 @@ const make = Effect.gen(function* () {
         // which ref was handled first.
         const plans = entries.map((entry) => {
           const stored = storedByRef.get(entry.fromRef) ?? [];
-          const storedKeys = new Set(stored.map((row) => keyOf(row.relation, row.to_ref)));
+          const storedKeys = new Set(stored.map((row) => buildClaimKey(row.relation, row.to_ref)));
           const desired = new Map<string, { relation: Relation; toRef: string }>();
           for (const toRef of entry.relations.partOf) {
-            desired.set(keyOf("part-of", toRef), { relation: "part-of", toRef });
+            desired.set(buildClaimKey("part-of", toRef), { relation: "part-of", toRef });
           }
           for (const toRef of entry.relations.linked) {
-            desired.set(keyOf("linked", toRef), { relation: "linked", toRef });
+            desired.set(buildClaimKey("linked", toRef), { relation: "linked", toRef });
           }
           const removed = entry.relations.complete
-            ? stored.filter((row) => !desired.has(keyOf(row.relation, row.to_ref)))
+            ? stored.filter((row) => !desired.has(buildClaimKey(row.relation, row.to_ref)))
             : [];
           const added = [...desired.entries()]
             .filter(([key]) => !storedKeys.has(key))
             .map(([, claim]) => claim);
           return { entry, stored, removed, added };
         });
+
+        // The refs below the ones whose claims change, read before a claim is
+        // removed. Nothing is read when the observations repeat what is stored.
+        const refsBelowBefore = yield* listRefsBelow(
+          plans
+            .filter((plan) => plan.removed.length > 0 || plan.added.length > 0)
+            .map((plan) => plan.entry.fromRef),
+        );
 
         const removedIds = plans.flatMap((plan) => plan.removed.map((row) => row.id));
         if (removedIds.length > 0) {
@@ -250,9 +308,9 @@ const make = Effect.gen(function* () {
           const conflicts = [...keptConflicts, ...(refusedByRef.get(fromRef) ?? [])].sort(
             (a, b) => a.relation.localeCompare(b.relation) || a.toRef.localeCompare(b.toRef),
           );
-          results.set(fromRef, { changed: removed.length > 0 || added.length > 0, conflicts });
+          writes.set(fromRef, { changed: removed.length > 0 || added.length > 0, conflicts });
         }
-        return results;
+        return { writes, refsBelowBefore };
       }),
 
     /**
@@ -274,7 +332,7 @@ const make = Effect.gen(function* () {
         if (starts.length === 0) {
           return { ancestors, edges: [], cutRefs: new Set(), cutAll: false };
         }
-        const budget = stateBudget(starts.length);
+        const budget = computeStateBudget(starts.length);
 
         // The walk keeps states, not paths, so a diamond is walked once per
         // distinct length. The `UNION` drops repeated states, which is also what
@@ -293,7 +351,7 @@ const make = Effect.gen(function* () {
             UNION
             SELECT w.start_ref, c.to_ref, w.depth + 1
             FROM walk w JOIN external_entity_relation_claims c
-              ON c.from_ref = w.ancestor_ref AND c.relation = 'part-of' AND c.state = 'current'
+              ON c.from_ref = w.ancestor_ref AND ${sql.literal(CURRENT_PART_OF_SQL)}
             WHERE w.depth < ${MAX_CONTEXT_DEPTH}
             LIMIT ${budget + 1}
           ),
@@ -304,7 +362,7 @@ const make = Effect.gen(function* () {
             SELECT DISTINCT c.from_ref, c.to_ref
             FROM (SELECT DISTINCT ancestor_ref FROM walked WHERE depth < ${MAX_CONTEXT_DEPTH}) n
             CROSS JOIN external_entity_relation_claims c
-              ON c.from_ref = n.ancestor_ref AND c.relation = 'part-of' AND c.state = 'current'
+              ON c.from_ref = n.ancestor_ref AND ${sql.literal(CURRENT_PART_OF_SQL)}
             ORDER BY c.from_ref, c.to_ref
             LIMIT ${MAX_GRAPH_EDGES + 1}
           )
@@ -316,7 +374,7 @@ const make = Effect.gen(function* () {
           SELECT DISTINCT 'depth-cut', w.start_ref, NULL, NULL, NULL FROM walked w
           WHERE w.depth = ${MAX_CONTEXT_DEPTH} AND EXISTS (
             SELECT 1 FROM external_entity_relation_claims c
-            WHERE c.from_ref = w.ancestor_ref AND c.relation = 'part-of' AND c.state = 'current')
+            WHERE c.from_ref = w.ancestor_ref AND ${sql.literal(CURRENT_PART_OF_SQL)})
           UNION ALL
           SELECT 'state-cut', NULL, NULL, NULL, NULL
           WHERE (SELECT COUNT(*) FROM walked) > ${budget}`;
@@ -358,20 +416,7 @@ const make = Effect.gen(function* () {
      * `part-of` claims, sorted. Nothing is cut: a caller that announces a
      * change to everything under a parent must not miss a deep descendant.
      */
-    listRefsBelow: (refs: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      refs.length === 0
-        ? Effect.succeed([])
-        : sql<{ readonly ref: string }>`
-            WITH RECURSIVE below(ref) AS (
-              SELECT value FROM json_each(${JSON.stringify([...new Set(refs)])})
-              UNION
-              SELECT c.from_ref
-              FROM external_entity_relation_claims c JOIN below b ON c.to_ref = b.ref
-              WHERE c.relation = 'part-of' AND c.state = 'current'
-            )
-            SELECT ref FROM below ORDER BY ref`.pipe(
-            Effect.map((rows) => rows.map((row) => row.ref)),
-          ),
+    listRefsBelow,
 
     /**
      * Returns the peers `ref` is linked to and the claims refused on `ref`,
@@ -403,8 +448,13 @@ const make = Effect.gen(function* () {
           SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id
           FROM external_entity_relation_claims c
           LEFT JOIN connections k ON k.id = c.connection_id
-          WHERE c.relation = 'linked' AND c.state = 'current'
-            AND (c.from_ref = ${ref} OR c.to_ref = ${ref})`;
+          WHERE c.relation = 'linked' AND c.state = 'current' AND c.from_ref = ${ref}
+          UNION ALL
+          SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, k.plugin_id
+          FROM external_entity_relation_claims c
+          LEFT JOIN connections k ON k.id = c.connection_id
+          WHERE c.relation = 'linked' AND c.state = 'current' AND c.to_ref = ${ref}
+            AND c.from_ref <> ${ref}`;
         const firmest = new Map<string, (typeof linkClaims)[number]>();
         for (const claim of linkClaims) {
           const pair = [claim.from_ref, claim.to_ref].sort().join("\u0000");
@@ -435,9 +485,13 @@ const make = Effect.gen(function* () {
           readonly to_ref: string;
           readonly conflict_reason: string;
         }>`
-          SELECT DISTINCT from_ref, relation, to_ref, conflict_reason
+          SELECT from_ref, relation, to_ref, conflict_reason
           FROM external_entity_relation_claims
-          WHERE state = 'conflicted' AND (from_ref = ${ref} OR to_ref = ${ref})
+          WHERE state = 'conflicted' AND from_ref = ${ref}
+          UNION
+          SELECT from_ref, relation, to_ref, conflict_reason
+          FROM external_entity_relation_claims
+          WHERE state = 'conflicted' AND to_ref = ${ref}
           ORDER BY from_ref, relation, to_ref`;
         const conflicts = refused.map((row) => ({
           fromRef: row.from_ref,

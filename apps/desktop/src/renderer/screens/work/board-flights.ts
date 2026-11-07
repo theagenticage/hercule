@@ -7,6 +7,7 @@
  */
 import {
   computeCenter,
+  ensureOverlayLayer,
   findBody,
   ghostElement,
   isMotionReduced,
@@ -38,17 +39,9 @@ const HEAD_DEPTH = 18;
  * the desk and sits over the board, so a copy flying across a scroll that the
  * change itself causes is not carried off with the page.
  */
-const findFlightLayer = (scroller: HTMLElement): HTMLElement | null => {
+const ensureFlightLayer = (scroller: HTMLElement): HTMLElement | null => {
   const desk = scroller.closest<HTMLElement>(".work-desk");
-  if (desk === null) return null;
-  let layer = desk.querySelector<HTMLElement>(`:scope > .${FLIGHT_LAYER_CLASS}`);
-  if (layer === null) {
-    layer = document.createElement("div");
-    layer.className = FLIGHT_LAYER_CLASS;
-    layer.setAttribute("aria-hidden", "true");
-    desk.append(layer);
-  }
-  return layer;
+  return desk === null ? null : ensureOverlayLayer(desk, FLIGHT_LAYER_CLASS);
 };
 
 /** Takes the layer away when no copy is left in it. */
@@ -95,7 +88,7 @@ export const launchFlights = (
   cards: readonly HTMLElement[],
   gap: number,
 ): readonly CardFlight[] => {
-  const layer = isMotionReduced() ? null : findFlightLayer(scroller);
+  const layer = isMotionReduced() ? null : ensureFlightLayer(scroller);
   if (layer === null) return [];
   const view = scroller.getBoundingClientRect();
   return cards

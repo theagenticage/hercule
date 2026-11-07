@@ -184,7 +184,7 @@ interface Arranged {
   readonly countTasks: Effect.Effect<number, unknown>;
 }
 
-const layerOf = (script: Script) =>
+const buildLayer = (script: Script) =>
   ExternalEntityServiceLayer.pipe(
     Layer.provideMerge(Layer.succeed(EntityLookups)(buildLookups(script))),
     Layer.provideMerge(
@@ -291,7 +291,7 @@ const run = <A>(
       });
     }).pipe(
       Effect.provideService(CurrentActor, USER),
-      Effect.provide(layerOf(script)),
+      Effect.provide(buildLayer(script)),
     ) as Effect.Effect<A>,
   );
 };
@@ -637,7 +637,7 @@ describe("takeOn", () => {
 
 describe("addToWork", () => {
   it("creates the entity and then the Task for a thing Hercule has never seen, and follows it", async () => {
-    const { result, task, links, inbox, stillThere } = await run((arranged) =>
+    const { result, task, followed, inbox, stillThere } = await run((arranged) =>
       Effect.gen(function* () {
         const { script, service, tasks, sql, connectionId, entityId } = arranged;
         script.resolve = () => ({
@@ -647,8 +647,7 @@ describe("addToWork", () => {
           },
         });
         const result = yield* service.addToWork({ ref: ticketRef("9") });
-        const links = yield* sql<{ readonly following: number }>`
-          SELECT following FROM task_entity_links`;
+        const followed = (yield* service.read(yield* entityId(ticketRef("9")))).concerns;
         // A poll that lists nothing must not take the entity off Work.
         const entities = yield* externalEntityRepository;
         yield* withTransaction(
@@ -667,7 +666,7 @@ describe("addToWork", () => {
         return {
           result,
           task: yield* tasks.read(result.taskId),
-          links,
+          followed,
           inbox: yield* service.queryInbox(),
           stillThere: detail.concerns,
         };
@@ -675,7 +674,7 @@ describe("addToWork", () => {
     );
     expect(result).toMatchObject({ created: true, stage: "building", followed: true });
     expect(task).toMatchObject({ stage: "building", title: "Ticket 9" });
-    expect(links).toEqual([{ following: 1 }]);
+    expect(followed).toEqual(["following"]);
     expect(inbox.cards.map((card) => card.ref)).toEqual([ticketRef("9")]);
     expect(inbox.cards[0]).toMatchObject({ side: "with-someone-else" });
     expect(stillThere).toEqual(["following"]);

@@ -1,6 +1,7 @@
 /** Tests how the keys walk the Inbox page and which card the page moves on to after a move. */
 import { describe, expect, it } from "vitest";
 import {
+  decideFollowingWaitingCard,
   decideNextWaitingCard,
   walkInbox,
   type InboxStop,
@@ -99,5 +100,24 @@ describe("decideNextWaitingCard", () => {
   it("has no next card when it is the last that waits, or when it is not on the page", () => {
     expect(decideNextWaitingCard([stop("a", "wide", 0)], "a")).toBeUndefined();
     expect(decideNextWaitingCard(PAGE, "gone")).toBeUndefined();
+  });
+});
+
+describe("decideFollowingWaitingCard", () => {
+  it("moves on to the first card after it in its column that waits", () => {
+    const page = [stop("a", "wide", 0), stop("b", "wide", 1, false), stop("c", "wide", 2)];
+    expect(decideFollowingWaitingCard(page, "a")).toBe("c");
+    expect(decideFollowingWaitingCard(PAGE, "r")).toBe("s");
+  });
+
+  it("has no card to move on to at the foot of its column, where the keys would go back", () => {
+    expect(decideFollowingWaitingCard(PAGE, "c")).toBeUndefined();
+    expect(decideFollowingWaitingCard(PAGE, "s")).toBeUndefined();
+    expect(decideNextWaitingCard(PAGE, "c")).toBe("b");
+  });
+
+  it("has none when the cards after it do not wait, or when it is not on the page", () => {
+    expect(decideFollowingWaitingCard(PAGE, "s")).toBeUndefined();
+    expect(decideFollowingWaitingCard(PAGE, "gone")).toBeUndefined();
   });
 });

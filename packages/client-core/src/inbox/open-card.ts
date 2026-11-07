@@ -4,9 +4,9 @@
  * it offers. Everything is worked out from the record `externalEntity.read`
  * returns (or the same fields on an Inbox card), so no kind is named here.
  */
-import type { EntityReason } from "@hercule/contract";
+import type { EntityReason, EntityRecord } from "@hercule/contract";
 import { readAncestorRows, type AncestorRow, type RelationGraph } from "../desk/relation-rows";
-import { decideCardFace, type CardFace, type CardRecord } from "./card-face";
+import { decideCardFace, type CardFace } from "./card-face";
 import { describeCardTrust, describeCardWait, type CardWait } from "./card-wait";
 
 /**
@@ -42,7 +42,7 @@ export interface OpenCardWords {
 export const KIND_UNAVAILABLE_REASON =
   "Its plugin is turned off, so there is nothing to do with this card here. It shows what was read last.";
 
-const decideMoves = (record: CardRecord, kindAvailable: boolean): OpenCardMoves => {
+const decideMoves = (record: EntityRecord, kindAvailable: boolean): OpenCardMoves => {
   if (record.taskId !== undefined) return { _tag: "task", taskId: record.taskId };
   return kindAvailable ? { _tag: "free" } : { _tag: "off", reason: KIND_UNAVAILABLE_REASON };
 };
@@ -54,7 +54,7 @@ const decideMoves = (record: CardRecord, kindAvailable: boolean): OpenCardMoves 
  * wait and the age of the facts are counted to.
  */
 export const decideOpenCard = (
-  record: CardRecord,
+  record: EntityRecord,
   graph: RelationGraph,
   kindAvailable: boolean,
   now: Date,

@@ -172,9 +172,12 @@ export type FailureRestoration =
 const ONLY_THE_USER_RECORDS_HANDOFF =
   "only the user may record a handoff: handing a signal off is the user's act, so a session or a workflow step may not; ask the user instead";
 
-/** The refusal of `createTaskLinkedToRef` and `undoCreatedTask` for a caller who is not the user. */
-const ONLY_THE_USER_TAKES_ON_WORK =
-  "only the user may take work on from an outside thing or take it back: that is the user's act, so a session or a workflow step may not; ask the user instead";
+/**
+ * The refusal of `createTaskLinkedToRef`, `undoCreatedTask` and the Inbox
+ * moves of External Entities for a caller who is not the user.
+ */
+export const ONLY_THE_USER_TAKES_ON_WORK =
+  "only the user may take work on from an outside thing, take it back, or set it aside: those are the user's own acts, so a session or a workflow step may not; ask the user instead";
 
 /** Why `undoCreatedTask` left a Task in place. */
 export type TaskUndoRefusal =

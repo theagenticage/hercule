@@ -12,7 +12,12 @@
  * This file holds the operations and the schemas they carry. The status, the
  * place and the edge are in `entity-context.ts`, which the Work board shares.
  */
-import { EntityRepository, PluginId } from "@hercule/plugin-host";
+import {
+  ENTITY_CONCERNS,
+  EntityRepository,
+  MAX_ENTITY_FACTS,
+  PluginId,
+} from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -37,7 +42,7 @@ import {
 } from "./entity-context";
 import { MAX_SEARCH_TEXT_LENGTH, TaskStage } from "./task";
 
-export { EntityRepository };
+export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
 
 /** The most cards one Inbox read returns. The reply says when there were more. */
 export const MAX_INBOX_CARDS = 1000;
@@ -84,9 +89,6 @@ export const MAX_ENTITY_SUGGESTIONS = 100;
 /** The most other contexts a suggestion names ("Also in Pricing rules"). */
 export const MAX_SUGGESTION_CONTEXTS = 8;
 
-/** The most facts a card shows. */
-export const MAX_ENTITY_FACTS = 3;
-
 /**
  * Why a thing concerns the user. A thing concerns the user while at least one
  * Connection reports a concern for it, or a live Task follows it.
@@ -96,14 +98,6 @@ export const MAX_ENTITY_FACTS = 3;
  * - `following`: never reported. It is worked out on read, from a live Task
  *   whose link to the thing was made by `addToWork`.
  */
-export const ENTITY_CONCERNS = [
-  "assigned",
-  "opened",
-  "review-requested",
-  "mentioned",
-  "following",
-] as const;
-
 export const EntityConcern = Schema.Literals(ENTITY_CONCERNS);
 
 export type EntityConcern = Schema.Schema.Type<typeof EntityConcern>;
@@ -185,7 +179,7 @@ export const EntityLink = Schema.Struct({
   /** The firmest claim, for the hover. It names only a plugin or an actor, never a Connection. */
   claim: Schema.Struct({
     type: Schema.Literals(["source", "person", "text"]),
-    plugin: Schema.optionalKey(Schema.String),
+    plugin: Schema.optionalKey(PluginId),
     actor: Schema.optionalKey(Actor),
   }),
 });
@@ -214,7 +208,7 @@ export type InboxSide = Schema.Schema.Type<typeof InboxSide>;
  * `person`, `facts` and the rest) come from the kind table, and the core
  * renders them from the plugin's raw fields before storing the row.
  */
-const EntityFields = {
+const entityFields = {
   id: Id,
   ref: ExternalRef,
   /** The qualified kind word, such as `github/pull-request`. */
@@ -280,12 +274,17 @@ const EntityFields = {
   contextComplete: Schema.Boolean,
 };
 
+/** One full record of a work kind: what every read of an entity holds. An Inbox card is one, with its side. */
+export const EntityRecord = Schema.Struct(entityFields);
+
+export type EntityRecord = Schema.Schema.Type<typeof EntityRecord>;
+
 /**
  * One card on the Inbox. A card is a full record of a work kind that concerns
  * the user, is not dismissed, and has a current concern, an open signal or a
  * live Task.
  */
-export const InboxCard = Schema.Struct({ ...EntityFields, side: InboxSide });
+export const InboxCard = Schema.Struct({ ...entityFields, side: InboxSide });
 
 export type InboxCard = Schema.Schema.Type<typeof InboxCard>;
 
@@ -336,7 +335,7 @@ export type Inbox = Schema.Schema.Type<typeof Inbox>;
  * actions are off, and it shows why.
  */
 export const ExternalEntityDetail = Schema.Struct({
-  ...EntityFields,
+  ...entityFields,
   kindAvailable: Schema.Boolean,
   /**
    * The records above this one and the targets of its links, each once. Its
@@ -368,7 +367,7 @@ export type EntityUndoTakeOnInput = Schema.Schema.Type<typeof EntityUndoTakeOnIn
 /**
  * What `undoTakeOn` returns. `undone` is false when the Task is no longer
  * untouched since it was created (a Thread, a run, another link or an edit
- * appeared), or is merged or not live. Then nothing changed, and `reason`
+ * appeared), or is not live. Then nothing changed, and `reason`
  * says why in a sentence the undo line shows.
  */
 export const EntityUndoTakeOnResult = Schema.Struct({
@@ -460,13 +459,13 @@ export const ENTITY_SEARCH_OUTCOMES = [
 /** What `search` returns. */
 export const EntitySearchReply = Schema.Struct({
   /** The source that was read. It differs from the query's when a pasted link belongs to another plugin. */
-  source: Schema.String,
+  source: PluginId,
   outcome: Schema.Literals(ENTITY_SEARCH_OUTCOMES),
   results: atMost(EntitySearchResult, MAX_ENTITY_SEARCH_RESULTS),
   /** True when a Connection failed, or eligible ones were left out by the limit, so the list may be short. */
   incomplete: Schema.Boolean,
   /** Plugins that can read links, for "a link from elsewhere". */
-  linkSources: Schema.Array(Schema.String),
+  linkSources: Schema.Array(PluginId),
 });
 
 export type EntitySearchReply = Schema.Schema.Type<typeof EntitySearchReply>;

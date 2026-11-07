@@ -90,6 +90,23 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
   };
 };
 
+/** What `readAncestorRows` walks: each ref's parents in the order of the edges, and each ref's record. */
+export interface RelationIndex {
+  readonly parents: ReadonlyMap<string, readonly string[]>;
+  readonly placeByRef: ReadonlyMap<string, EntityPlace>;
+}
+
+/** Returns the lookups over `graph` that `readAncestorRows` walks. Build it once for many walks over one graph. */
+export const indexRelationGraph = (graph: RelationGraph): RelationIndex => {
+  const parents = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const known = parents.get(edge.fromRef);
+    if (known === undefined) parents.set(edge.fromRef, [edge.toRef]);
+    else known.push(edge.toRef);
+  }
+  return { parents, placeByRef: new Map(graph.places.map((place) => [place.ref, place])) };
+};
+
 /**
  * Returns every place above `ref`, each once, nearest first. A place two
  * parents lead to comes once, at its shortest distance, and parents of the
@@ -97,24 +114,26 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
  * not hold has no row (the reply's `contextComplete` says when that happens).
  * A loop in the edges cannot repeat a place, and a thing is never its own
  * ancestor.
+ *
+ * `index` is the lookups of `graph`. A caller that walks many refs of one
+ * graph passes it, so the graph is indexed once and not for every walk.
  */
-export const readAncestorRows = (ref: string, graph: RelationGraph): readonly AncestorRow[] => {
-  const parents = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    parents.set(edge.fromRef, [...(parents.get(edge.fromRef) ?? []), edge.toRef]);
-  }
-  const placeByRef = new Map(graph.places.map((place) => [place.ref, place]));
+export const readAncestorRows = (
+  ref: string,
+  graph: RelationGraph,
+  index: RelationIndex = indexRelationGraph(graph),
+): readonly AncestorRow[] => {
   const seen = new Set([ref]);
   const rows: AncestorRow[] = [];
   let level = [ref];
   for (let depth = 1; level.length > 0; depth += 1) {
     const next: string[] = [];
     for (const child of level) {
-      for (const parentRef of parents.get(child) ?? []) {
+      for (const parentRef of index.parents.get(child) ?? []) {
         if (seen.has(parentRef)) continue;
         seen.add(parentRef);
         next.push(parentRef);
-        const place = placeByRef.get(parentRef);
+        const place = index.placeByRef.get(parentRef);
         if (place !== undefined) rows.push({ ...buildPlaceRow(place), depth });
       }
     }
@@ -123,10 +142,23 @@ export const readAncestorRows = (ref: string, graph: RelationGraph): readonly An
   return rows;
 };
 
+/** Returns `word` with its first letter in lower case, unless the word starts with an acronym ("PR"). */
+export const lowerFirst = (word: string): string =>
+  /^[A-Z]{2}/.test(word) ? word : word.charAt(0).toLowerCase() + word.slice(1);
+
 /**
- * Returns the words for a locked row, such as "A Sentry issue you cannot
- * open". `pluginName` is the plugin's display name. The row never gets the
- * title, because a title learned through someone else's read must not leak.
+ * Returns the words for a place no Connection can read, such as "A Sentry
+ * issue you cannot open". `place` is a locked row or a place record: only its
+ * `noun` is used, and never a title, because a title learned through someone
+ * else's read must not leak. `pluginName` is the plugin's display name; leave
+ * it out where it is not at hand ("An issue you cannot open"). This is the one
+ * place that words it, so every screen agrees on the article and the case.
  */
-export const describeLockedRow = (row: LockedPlaceRow, pluginName: string): string =>
-  `${/^[aeiou]/i.test(pluginName) ? "An" : "A"} ${pluginName} ${row.noun.toLowerCase()} you cannot open`;
+export const describeLockedRow = (
+  place: { readonly noun: string },
+  pluginName?: string,
+): string => {
+  const kind = lowerFirst(place.noun);
+  const named = pluginName === undefined ? kind : `${pluginName} ${kind}`;
+  return `${/^[aeiou]/i.test(named) ? "An" : "A"} ${named} you cannot open`;
+};

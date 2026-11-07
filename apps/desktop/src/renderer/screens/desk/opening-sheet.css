@@ -47,6 +47,11 @@
   inset: 0;
   overflow: hidden;
   border-radius: inherit;
+  /* `--sheet-progress` is written on the sheet for every frame. Left to
+     inherit, an unregistered custom property restyles every element inside the
+     sheet on every frame. Resetting it here stops that at the clip, so the
+     words inside cannot read it: anything driven by it lies outside the clip. */
+  --sheet-progress: 0;
 }
 /* The words lie at the destination in the page while the window grows round
    them, so they never reflow during the opening. */

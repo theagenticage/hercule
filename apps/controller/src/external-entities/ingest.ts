@@ -33,7 +33,6 @@ import {
   externalEntityRepository,
   type EntityEnvironment,
   type EntityWriteChanges,
-  type InvalidInventory,
   type ObservedEntity,
 } from "./repository";
 import { renderEntitySlots, type EntitySlots, type FullEntityObservation } from "./slots";
@@ -219,10 +218,6 @@ export const prepareObservations = (
     return prepared;
   });
 
-/** Turns the repository's refusal of a duplicate ref into the plugin's error. */
-const refuseInvalidInventory = (error: InvalidInventory): Effect.Effect<never, PluginError> =>
-  Effect.fail(refuse(error.message));
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repository = yield* externalEntityRepository;
@@ -254,7 +249,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* Effect.provideService(
         announceEntityChanges({
-          changedRefs: [...new Set([...changes.changedRefs, ...changes.relationChangedRefs])],
+          changedRefs: changes.changedRefs,
           affectedTaskIds: changes.affectedTaskIds,
         }),
         SqlClient.SqlClient,
@@ -292,16 +287,14 @@ const make = Effect.gen(function* () {
         );
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
-            const changes = yield* repository
-              .reconcile({
-                connectionId: reporter.connectionId,
-                kind: declaration.word,
-                complete: inventory.complete,
-                observed,
-                actor: `plugin:${reporter.pluginId}`,
-                environment,
-              })
-              .pipe(Effect.catchTag("InvalidInventory", refuseInvalidInventory));
+            const changes = yield* repository.reconcile({
+              connectionId: reporter.connectionId,
+              kind: declaration.word,
+              complete: inventory.complete,
+              observed,
+              actor: `plugin:${reporter.pluginId}`,
+              environment,
+            });
             yield* announceWrite(reporter.connectionId, changes);
           }),
         );
@@ -316,9 +309,11 @@ const make = Effect.gen(function* () {
         const observed = yield* prepareObservations(reporter, observations);
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
-            const changes = yield* repository
-              .refresh({ connectionId: reporter.connectionId, observed, environment })
-              .pipe(Effect.catchTag("InvalidInventory", refuseInvalidInventory));
+            const changes = yield* repository.refresh({
+              connectionId: reporter.connectionId,
+              observed,
+              environment,
+            });
             yield* announceWrite(reporter.connectionId, changes);
           }),
         );

@@ -384,7 +384,7 @@ describe("reconcile: first sight and several Connections", () => {
       }),
     );
     expect(steps.changes.conflicts).toHaveLength(1);
-    expect(steps.changes.relationChangedRefs).toEqual([epicRef("a"), epicRef("b")]);
+    expect(steps.changes.changedRefs).toEqual([epicRef("a"), epicRef("b")]);
     expect(steps.warning).toContain("part of itself");
     expect(cardRefs(steps.inbox)).toEqual([epicRef("a"), epicRef("b")]);
   });
@@ -586,19 +586,6 @@ describe("reconcile: which Connection wins the shared fields", () => {
       }),
     );
     expect(title).toBe("Second");
-  });
-
-  it("rejects an inventory that names a ref twice, before writing anything", async () => {
-    const outcome = await run(({ reconcile, sql }) =>
-      Effect.gen(function* () {
-        const failure = yield* Effect.flip(
-          reconcile(ACCOUNT_A, [ticket("t1"), ticket("t1")], { minutes: 1 }),
-        );
-        return { failure, entities: yield* countRows(sql, "external_entities") };
-      }),
-    );
-    expect(outcome.failure._tag).toBe("InvalidInventory");
-    expect(outcome.entities).toBe(0);
   });
 });
 
@@ -1019,7 +1006,6 @@ describe("places and context", () => {
         return { task, moved };
       }),
     );
-    expect(outcome.moved.relationChangedRefs).toEqual([ticketRef("t1")]);
     expect(outcome.moved.changedRefs).toEqual([ticketRef("t1")]);
     expect(outcome.moved.affectedTaskIds).toEqual([outcome.task.id]);
   });
@@ -1240,7 +1226,7 @@ describe("the arrival counter", () => {
         const inbox = yield* readInbox(repository, 2);
         const id = inbox.cards[0]!.id;
         yield* repository.dismiss(id, "user", at(3));
-        yield* repository.restore(id, at(4));
+        yield* repository.restore(id, "user", at(4));
         const afterRestore = yield* repository.countInbox();
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         yield* repository.pruneEntities(atDay(40));
@@ -1254,9 +1240,49 @@ describe("the arrival counter", () => {
   });
 });
 
+describe("the sentence of a card", () => {
+  const concernReasons = {
+    assigned: { say: "Assigned to you", tone: "plain" as const },
+    "review-requested": { say: "Mei asked for your review", tone: "plain" as const },
+  };
+
+  it("comes from the kind's reason for the first concern when the source names none, and the source's own wins", async () => {
+    const reasons = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const slots = {
+          noun: "Ticket",
+          card: "compact",
+          pace: "fast",
+          patience: 24,
+          identifier: "T",
+          facts: [],
+          concernReasons,
+        } as const;
+        yield* reconcile(
+          ACCOUNT_A,
+          [
+            ticket("t1", { slots, concerns: ["review-requested"] }),
+            ticket("t2", {
+              slots: { ...slots, reason: { say: "Checks failed", tone: "bad" } },
+              concerns: ["assigned"],
+            }),
+          ],
+          { minutes: 1 },
+        );
+        const inbox = yield* readInbox(repository, 2);
+        return inbox.cards.map((card) => [card.ref, card.reason?.say]);
+      }),
+    );
+    expect(reasons).toEqual([
+      [ticketRef("t1"), "Mei asked for your review"],
+      [ticketRef("t2"), "Checks failed"],
+    ]);
+  });
+});
+
 describe("dismissal", () => {
   it("keeps a dismissed card out through a new concern, its concerns emptying, 30 days and a concern returning, until restore", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+    const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
         const id = (yield* readInbox(repository, 2)).cards[0]!.id;
@@ -1274,7 +1300,12 @@ describe("dismissal", () => {
         const pruned = yield* repository.pruneEntities(atDay(31));
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 32 * 24 * 60 });
         const afterReturn = yield* repository.queryInbox(environment(32 * 24 * 60 + 1));
-        const restored = yield* repository.restore(id, atDay(33));
+        const restored = yield* repository.restore(id, "session:abc", atDay(33));
+        const restoredBy = yield* sql<{
+          readonly restored_by: string | null;
+          readonly dismissed_by: string | null;
+        }>`
+          SELECT restored_by, dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
         const afterRestore = yield* repository.queryInbox(environment(33 * 24 * 60 + 1));
         const unknown = yield* repository.dismiss(uuidToString(mintUuid()), "user", at(1));
         return {
@@ -1284,6 +1315,7 @@ describe("dismissal", () => {
           pruned,
           afterReturn,
           restored,
+          restoredBy,
           afterRestore,
           unknown,
         };
@@ -1295,6 +1327,7 @@ describe("dismissal", () => {
     expect(steps.pruned.entities).toBe(0);
     expect(steps.afterReturn.cards).toEqual([]);
     expect(steps.restored).toEqual(Option.some({ ref: ticketRef("t1"), changed: true }));
+    expect(steps.restoredBy).toEqual([{ restored_by: "session:abc", dismissed_by: null }]);
     expect(cardRefs(steps.afterRestore)).toEqual([ticketRef("t1")]);
     expect(Option.isNone(steps.unknown)).toBe(true);
   });
@@ -1348,6 +1381,39 @@ describe("listWanted and failed reads", () => {
       }),
     );
     expect(wanted).toEqual({ own: [], other: [ticketRef("t1")] });
+  });
+
+  it("does not ask a Connection to read a place its own complete inventory lists, and asks again once the inventory drops it", async () => {
+    const outcome = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        const relations = { complete: true, partOf: [PROJECT], linked: [] };
+        const listProject = (minutes: number) =>
+          reconcile(ACCOUNT_A, [project()], { minutes, kind: PROJECT_KIND });
+        const ask = (connectionId: string, minutes: number) =>
+          repository.listWanted({
+            connectionId,
+            refPrefix: "acme-tracker:project:",
+            limit: 50,
+            now: at(minutes),
+          });
+        yield* reconcile(ACCOUNT_A, [ticket("t1", { relations })], { minutes: 1 });
+        yield* listProject(2);
+        const before = yield* snapshotRows(sql);
+        const listedByOwner = yield* ask(ACCOUNT_A, 3);
+        const unchanged =
+          (yield* snapshotRows(sql)).observations.length === before.observations.length;
+        const wantedByOther = yield* ask(ACCOUNT_B, 4);
+        yield* reconcile(ACCOUNT_A, [], { minutes: 5, kind: PROJECT_KIND });
+        const afterDropped = yield* ask(ACCOUNT_A, 6);
+        return { listedByOwner, unchanged, wantedByOther, afterDropped };
+      }),
+    );
+    expect(outcome).toEqual({
+      listedByOwner: [],
+      unchanged: true,
+      wantedByOther: [PROJECT],
+      afterDropped: [PROJECT],
+    });
   });
 
   it("wants the project above a concerned ticket, and the peers of a root once", async () => {

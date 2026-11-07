@@ -59,7 +59,7 @@ export function InboxDesk({
   return (
     <div className={classes} data-state={state}>
       {toolbar}
-      <div ref={scrollRef} className="inbox-scroll">
+      <div ref={scrollRef} className="inbox-scroll" tabIndex={-1}>
         <div className="inbox-page">{children}</div>
       </div>
       {overlays}

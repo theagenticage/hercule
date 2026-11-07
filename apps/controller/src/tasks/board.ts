@@ -29,7 +29,6 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   describeFailureCause,
   MAX_BOARD_CARDS,
-  MAX_BOARD_PLACES,
   MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
   MAX_ENTITY_MARKS,
@@ -262,8 +261,9 @@ const make = Effect.gen(function* () {
      * connection and never waits for a writer. A Task may change between two
      * statements, and the push that change makes brings the next read.
      *
-     * The board's `places` are cut at `MAX_BOARD_PLACES`. When that, or a
-     * card's `MAX_CARD_CONTEXTS`, cuts anything, or the walk up was cut,
+     * The board's `places` are cut at `MAX_BOARD_PLACES` by the read of the
+     * entity records, which then reports an incomplete context. When that, or
+     * a card's `MAX_CARD_CONTEXTS`, cuts anything, or the walk up was cut,
      * `contextComplete` is false.
      *
      * The number of statements is fixed, whatever the number of cards.
@@ -279,12 +279,11 @@ const make = Effect.gen(function* () {
         return {
           cards: listed.map((task, index) => buildWorkCard(task, cards[index]!)),
           truncated: read.length > MAX_BOARD_CARDS,
-          places: context.places.slice(0, MAX_BOARD_PLACES),
+          places: context.places,
           edges: context.edges,
           groupings: context.groupings,
           contextComplete:
             context.contextComplete &&
-            context.places.length <= MAX_BOARD_PLACES &&
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
         };
       }),

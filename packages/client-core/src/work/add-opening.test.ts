@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildCard, buildPlace } from "./cards.testing";
-import { chooseAddOpening } from "./add-opening";
+import { chooseAddOpening, chooseLaneProject } from "./add-opening";
 import { buildLane } from "./lanes";
 
 const BASKET = buildPlace("relay:project:basket", "Basket rebuild", { kind: "relay/project" });
@@ -93,5 +93,57 @@ describe("chooseAddOpening with no lane", () => {
     expect(
       chooseAddOpening({ places: [secret], filter: { "acme/project": [secret.ref] } }),
     ).toEqual({});
+  });
+});
+
+describe("chooseLaneProject", () => {
+  const PROJECTS = new Set(["webshop", "billing"]);
+  const outside = (...cards: ReturnType<typeof buildCard>[]) =>
+    buildLane(`place:${REPO.ref}`, "acme/storefront-web", null, cards, {
+      pluginId: "acme",
+      caption: "Acme repository",
+      cardPlaces: {},
+    });
+
+  it("gives a Project lane its own Project", () => {
+    const lane = buildLane("billing", "Billing", "billing", [buildCard("a")]);
+
+    expect(chooseLaneProject(lane, PROJECTS)).toBe("billing");
+  });
+
+  it("gives an outside lane the Project that most of its cards are in", () => {
+    const lane = outside(
+      buildCard("a", { projectId: "webshop" }),
+      buildCard("b", { projectId: "webshop" }),
+      buildCard("c", { projectId: "billing" }),
+      buildCard("d"),
+    );
+
+    expect(chooseLaneProject(lane, PROJECTS)).toBe("webshop");
+  });
+
+  it("gives no Project on a tie between two Projects", () => {
+    const lane = outside(
+      buildCard("a", { projectId: "webshop" }),
+      buildCard("b", { projectId: "billing" }),
+    );
+
+    expect(chooseLaneProject(lane, PROJECTS)).toBeNull();
+  });
+
+  it("gives no Project when as many cards have none as the best Project has", () => {
+    const lane = outside(buildCard("a", { projectId: "webshop" }), buildCard("b"));
+
+    expect(chooseLaneProject(lane, PROJECTS)).toBeNull();
+  });
+
+  it("counts a deleted Project as no Project, and gives none for a lane with no card", () => {
+    const gone = outside(
+      buildCard("a", { projectId: "deleted" }),
+      buildCard("b", { projectId: "deleted" }),
+    );
+
+    expect(chooseLaneProject(gone, PROJECTS)).toBeNull();
+    expect(chooseLaneProject(outside(), PROJECTS)).toBeNull();
   });
 });

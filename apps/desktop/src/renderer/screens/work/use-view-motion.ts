@@ -92,7 +92,7 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
 
 /** Finds the section of a lane. */
 const findLane = (scroller: HTMLElement, laneId: string): HTMLElement | null =>
-  scroller.querySelector<HTMLElement>(`.board-lane[data-lane-id="${laneId}"]`);
+  scroller.querySelector<HTMLElement>(`.board-lane[data-lane-id="${CSS.escape(laneId)}"]`);
 
 /** Returns the cards under `elements`, in order. */
 const listCards = (elements: readonly Element[]): HTMLElement[] =>
@@ -117,7 +117,7 @@ const buildFold = (
         flights,
         (flight) =>
           scroller.querySelector(
-            `[data-fold-row="${flight.laneId}"] [data-stage="${flight.stage}"]`,
+            `[data-fold-row="${CSS.escape(flight.laneId)}"] [data-stage="${flight.stage}"]`,
           ),
         INTO_COUNT,
       );
@@ -241,7 +241,8 @@ export const useViewMotion = (
 
   const toggleCell = (cellId: string): void => {
     const scroller = scrollRef.current;
-    const cell = scroller?.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`) ?? null;
+    const cell =
+      scroller?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`) ?? null;
     if (scroller === null || cell === null) {
       view.toggleCell(cellId);
       return;
@@ -249,7 +250,9 @@ export const useViewMotion = (
     const isClosing = view.openedCellIds.has(cellId);
     // The page keeps the pressed button still, so the pointer stays on it. Anchoring the lane
     // instead would leave the button far off screen after "Show fewer" in a deep cell.
-    const button = scroller.querySelector<HTMLElement>(`[data-more-cell-id="${cellId}"]`);
+    const button = scroller.querySelector<HTMLElement>(
+      `[data-more-cell-id="${CSS.escape(cellId)}"]`,
+    );
     playChange(scroller, {
       commit: () => {
         view.toggleCell(cellId);
@@ -261,7 +264,9 @@ export const useViewMotion = (
         return () => {
           if (isClosing) {
             // A copy flies back to the button of its cell only if its card left the page.
-            const buttonAfter = scroller.querySelector(`[data-more-cell-id="${cellId}"]`);
+            const buttonAfter = scroller.querySelector(
+              `[data-more-cell-id="${CSS.escape(cellId)}"]`,
+            );
             flyFlightsTo(
               flights,
               (flight) =>

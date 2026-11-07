@@ -2,18 +2,44 @@ import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
-import {
-  decideCardFace,
-  describeCardAloud,
-  describeCardTrust,
-  describeCardWait,
-  isCardTimeDependent,
-} from "@hercule/client-core/inbox";
+import { decideCardFace, describeCardAloud } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { CardMonogram, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure } from "./card-parts";
-import { useMinuteClock } from "./use-minute-clock";
+import { useCardTime } from "./use-card-time";
+
+interface CardRowProps {
+  readonly card: InboxCard;
+  readonly near: readonly OpenPlaceRow[];
+  readonly plugins: readonly PluginIdentity[];
+  readonly showMark: boolean;
+  readonly showStatus: boolean;
+  readonly monogram: string;
+  readonly step: number;
+}
+
+const isSameNear = (before: readonly OpenPlaceRow[], after: readonly OpenPlaceRow[]): boolean =>
+  before.length === after.length &&
+  before.every((place, index) => {
+    const other = after[index];
+    return (
+      other !== undefined &&
+      place.ref === other.ref &&
+      place.title === other.title &&
+      place.targetDate === other.targetDate
+    );
+  });
+
+/**
+ * Checks whether two sets of props draw the same row. The layout builds a new
+ * `near` list on each read, so the lists are compared by what they draw, and
+ * every other prop by identity.
+ */
+const arePropsEqual = (before: CardRowProps, after: CardRowProps): boolean =>
+  (Object.keys(after) as (keyof CardRowProps)[]).every((key) =>
+    key === "near" ? isSameNear(before.near, after.near) : Object.is(before[key], after[key]),
+  );
 
 /**
  * Renders a card of lasting work as a row on the surface of its place: its
@@ -38,10 +64,10 @@ import { useMinuteClock } from "./use-minute-clock";
  * what is added to a row (its moves, its open sheet) does not move it. The
  * moves lie over the end of the first line and show while the page marks the
  * row as the current card (`data-current`, set by the page's pointer and keys).
- * It is memoized: it draws again only when its own values change, or each
- * minute while its wait or the age of its facts counts.
+ * It is memoized: it draws again only when its own values change, or when its
+ * wait or the age of its facts changes (`useCardTime`).
  */
-export const CardRow = memo(function CardRow({
+function CardRowView({
   card,
   near,
   plugins,
@@ -49,19 +75,9 @@ export const CardRow = memo(function CardRow({
   showStatus,
   monogram,
   step,
-}: {
-  readonly card: InboxCard;
-  readonly near: readonly OpenPlaceRow[];
-  readonly plugins: readonly PluginIdentity[];
-  readonly showMark: boolean;
-  readonly showStatus: boolean;
-  readonly monogram: string;
-  readonly step: number;
-}): JSX.Element {
-  const now = useMinuteClock(isCardTimeDependent(card));
+}: CardRowProps): JSX.Element {
+  const { wait, trust } = useCardTime(card);
   const face = decideCardFace(card);
-  const wait = describeCardWait(card, now);
-  const trust = describeCardTrust(card, now);
   return (
     <div
       className="inbox-row"
@@ -115,4 +131,6 @@ export const CardRow = memo(function CardRow({
       </span>
     </div>
   );
-});
+}
+
+export const CardRow = memo(CardRowView, arePropsEqual);

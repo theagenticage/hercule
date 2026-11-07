@@ -34,6 +34,7 @@ import {
   buildRepoSubject,
   parseItemRef,
   parseRepoRef,
+  splitRepoName,
 } from "../subject";
 import { cutText } from "../text";
 import { decodeGithubValue, fetchGraphql, type FeedError } from "./requests";
@@ -493,7 +494,11 @@ const reconcileInventory = (
       const result = yield* searchAllPages(token, qualifier);
       viewerLogin = result.viewerLogin;
       for (const node of result.items) {
-        const key = `${node.__typename}:${node.repository.nameWithOwner.toLowerCase()}#${String(node.number)}`;
+        const key = buildItemRef({
+          repo: node.repository.nameWithOwner,
+          kind: node.__typename === "PullRequest" ? "pr" : "issue",
+          number: node.number,
+        });
         const entry = found.get(key);
         if (entry === undefined) found.set(key, { node, concerns: [concern] });
         else entry.concerns.push(concern);
@@ -647,7 +652,7 @@ export const readEntitiesByRef = (
     const declarations: Array<string> = [];
     const variables: Record<string, string | number> = {};
     for (const [index, { target }] of targets.entries()) {
-      const [owner = "", name = ""] = target.repo.split("/");
+      const { owner, name } = splitRepoName(target.repo);
       declarations.push(`$o${String(index)}: String!`, `$n${String(index)}: String!`);
       variables[`o${String(index)}`] = owner;
       variables[`n${String(index)}`] = name;

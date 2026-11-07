@@ -2,7 +2,7 @@
  * The daily prune of External Entities nothing needs.
  *
  * The rule itself is `ExternalEntityService.prune`: which records go. This
- * module only repeats it.
+ * module only runs it again every day.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";

@@ -146,6 +146,30 @@ describe("searching GitHub", () => {
     });
   });
 
+  it("drops results from other repositories when the user's own text widens the search", async () => {
+    const elsewhere = {
+      ...pullRequest(9),
+      repository: { ...REPOSITORY, nameWithOwner: "other/tools" },
+    };
+    const stub = stubGithub(() =>
+      answer({ search: { nodes: [pullRequest(1), elsewhere, issue(2)] } }),
+    );
+
+    const result = await runAgainstStub(
+      searchItems(TEST_TOKEN, {
+        text: "slots repo:other/tools",
+        scopeRef: "github:repo:acme/storefront-web",
+        limit: 20,
+      }),
+      stub,
+    );
+
+    expect(Result.getOrThrow(result).map((found) => found.ref)).toEqual([
+      "github:pr:acme/storefront-web#1",
+      "github:issue:acme/storefront-web#2",
+    ]);
+  });
+
   it("reads the item itself when the text is a bare number and a scope is chosen", async () => {
     const stub = stubGithub(() => answer({ repository: { issueOrPullRequest: pullRequest(87) } }));
 

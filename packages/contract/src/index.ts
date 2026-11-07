@@ -720,6 +720,7 @@ export {
   EntitySuggestions,
   EntitySuggestionsQuery,
   EntityTakeOnResult,
+  EntityRecord,
   EntityUndoTakeOnInput,
   EntityUndoTakeOnResult,
   ExternalEntityDetail,

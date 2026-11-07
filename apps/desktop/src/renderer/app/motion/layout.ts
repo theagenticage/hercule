@@ -195,6 +195,22 @@ export const flipByKey = (options: FlipByKeyOptions): FlipByKeyResult => {
 };
 
 /**
+ * Returns the hidden layer of `desk` that holds copies in flight, the child
+ * of `desk` with the class `className`, and makes it on first use. The page's
+ * stylesheet gives the layer its place and clipping.
+ */
+export const ensureOverlayLayer = (desk: HTMLElement, className: string): HTMLElement => {
+  let layer = desk.querySelector<HTMLElement>(`:scope > .${className}`);
+  if (layer === null) {
+    layer = document.createElement("div");
+    layer.className = className;
+    layer.setAttribute("aria-hidden", "true");
+    desk.append(layer);
+  }
+  return layer;
+};
+
+/**
  * Appends to `layer` a copy of `element` that looks exactly as it does now,
  * and returns it, so the copy can keep moving after the original has left the
  * page. The copy has no `id` or `tabindex`, and has the class `is-ghost`. The

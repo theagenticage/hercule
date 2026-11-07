@@ -104,24 +104,3 @@ export function AllClear({ isStill }: { readonly isStill: boolean }): JSX.Elemen
     </div>
   );
 }
-
-/**
- * Renders a read that failed: `reason` says why, and a button reads it again
- * with `onRetry`. It is an alert, so a screen reader says it when it appears.
- */
-export function ReadFailure({
-  reason,
-  onRetry,
-}: {
-  readonly reason: string;
-  readonly onRetry: () => void;
-}): JSX.Element {
-  return (
-    <p className="inbox-note" role="alert">
-      The Inbox could not be read: {reason}
-      <button type="button" onClick={onRetry}>
-        Try again
-      </button>
-    </p>
-  );
-}

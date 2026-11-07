@@ -8,7 +8,6 @@ import {
   describeFailingSources,
   describeTruncatedInbox,
   HOME_GROUPING,
-  layOutInbox,
   listInboxGroupings,
   readMonogram,
   type InboxGrouping,
@@ -19,14 +18,15 @@ import type { SavedController } from "../../../app/context";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { connectionsQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
+import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { useWindowVisible } from "../../../app/window-visibility";
-import { IconPill, KeysSheet, UndoLine, type KeyRow } from "../../../screens/desk";
+import { IconPill, KeysSheet, ReadFailure, UndoLine, type KeyRow } from "../../../screens/desk";
 import { QuestionIcon } from "../../../icons/question";
 import { InboxDesk, type InboxDeskState } from "../../../screens/inbox/inbox-desk";
 import { InboxLoading } from "../../../screens/inbox/inbox-loading";
 import { InboxPill } from "../../../screens/inbox/inbox-pill";
-import { AllClear, FirstRun, ReadFailure } from "../../../screens/inbox/inbox-states";
+import { AllClear, FirstRun } from "../../../screens/inbox/inbox-states";
 import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
 import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
 import { OngoingSide } from "../../../screens/inbox/ongoing-side";
@@ -34,27 +34,15 @@ import { InboxOpenCard } from "../../../screens/inbox/open-card";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
 import { useInboxArrivals } from "../../../screens/inbox/use-inbox-arrivals";
-import { useHeldSides } from "../../../screens/inbox/use-held-sides";
+import { useInboxLayout } from "../../../screens/inbox/use-inbox-layout";
 import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
-import { useOpenCard, type OpenCard } from "../../../screens/inbox/use-open-card";
+import { useOpenCard } from "../../../screens/inbox/use-open-card";
 import { useInboxMoves } from "./-inbox-moves";
 import { useInbox } from "./-inbox-read";
 
-/** How long the first read's words take to fade in, which is when the screen stops marking the page as arriving. */
-const ARRIVAL_MS = 1_200;
-
 /** How long the sunrise waits after the user's own move empties the Inbox, which is the time the last card takes to step aside. */
 const SUNRISE_DELAY_MS = 320;
-
-/** How long the open sheet takes to fold back into its card, in milliseconds. A move chosen inside the sheet starts as the sheet lands, so it plays on the card where it lies. */
-const FOLD_MS = 280;
-
-/** Folds the open sheet back into its card, and runs `move` as it lands. */
-const playAfterFold = (openCard: OpenCard, move: () => void): void => {
-  openCard.close();
-  setTimeout(move, FOLD_MS);
-};
 
 /** The keys of the Inbox page and what each does, as its sheet lists them. */
 const KEY_ROWS: readonly KeyRow[] = [
@@ -109,46 +97,40 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const scrollRef = useRef<HTMLDivElement>(null);
   const read = useInbox(client);
   const moves = useInboxMoves({ client, undoStack, serverInbox: read.data, scrollRef });
-  const inbox = useInboxArrivals({ inbox: moves.inbox, scrollRef });
   const isVisible = useWindowVisible();
   const offlineSince = useOfflineSince(live);
   const view = useInboxView(buildInboxViewKey(url, username));
-  const heldSides = useHeldSides(inbox);
   const monogram = readMonogram(username);
 
   // The words of the last visit's cards wait while this visit's read is on its way.
   const [isHolding, setIsHolding] = useState(read.isFetching);
   if (isHolding && !read.isFetching) setIsHolding(false);
-  const [startedWithoutWords] = useState(inbox === undefined || read.isFetching);
-  const [arrivalOver, setArrivalOver] = useState(false);
+  // The cards the cache kept from the last visit stand in until this visit's own reply comes. Only
+  // that reply decides where cards lie and which are new, so a card that changed meanwhile does not
+  // keep the place it had.
+  const [hasOwnReply, setHasOwnReply] = useState(false);
+  if (!hasOwnReply && read.data !== undefined && !isHolding && !read.isError) setHasOwnReply(true);
+  const { inbox, hasHeldArrivals } = useInboxArrivals({
+    inbox: moves.inbox,
+    isFresh: hasOwnReply,
+    scrollRef,
+  });
   const hasWords = inbox !== undefined && !isHolding;
-  useEffect(() => {
-    if (!startedWithoutWords || !hasWords) return;
-    const timer = setTimeout(() => {
-      setArrivalOver(true);
-    }, ARRIVAL_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [startedWithoutWords, hasWords]);
+  const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
 
-  // The new mark goes when a reply is really shown.
-  const newestArrival = inbox?.counts.newestArrival;
+  // The new mark goes when a reply is really shown: its words are in view and no card of it is held back.
+  const newestArrival = hasWords && !hasHeldArrivals ? inbox.counts.newestArrival : undefined;
   useEffect(() => {
     if (newestArrival !== undefined && isVisible) {
       acknowledgeInboxArrival(url, username, newestArrival);
     }
   }, [url, username, newestArrival, isVisible]);
 
-  const layout =
-    inbox === undefined
-      ? undefined
-      : layOutInbox(inbox, {
-          grouping: view.grouping,
-          filter: view.filter,
-          requestsOrder: view.requestsOrder,
-          heldSides,
-        });
+  const layout = useInboxLayout(
+    inbox,
+    { grouping: view.grouping, filter: view.filter, requestsOrder: view.requestsOrder },
+    hasOwnReply,
+  );
   const empty = inbox === undefined ? null : decideEmptyInbox(inbox, connections, plugins);
   const failingSources = describeFailingSources(connections, plugins);
   const truncated = inbox === undefined ? undefined : describeTruncatedInbox(inbox);
@@ -207,6 +189,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     state = "loading";
     body = read.isError ? (
       <ReadFailure
+        what="The Inbox"
         reason={readErrorMessage(read.error)}
         onRetry={() => {
           void read.refetch();
@@ -243,11 +226,29 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     );
   }
 
+  // A read that fails while the page holds cards keeps them and says so here. With no cards the body says it.
+  const readFailure =
+    read.isError && inbox !== undefined
+      ? `The Inbox could not be read: ${readErrorMessage(read.error).replace(/\.+$/, "")}. What you see is from earlier.`
+      : undefined;
   const notice =
     offlineSince !== null ? (
       <div className="inbox-notice" role="status">
         <i className="notice-dot" />
         <span>{describeOffline(offlineSince)}</span>
+      </div>
+    ) : readFailure !== undefined ? (
+      <div className="inbox-notice" role="alert">
+        <i className="notice-dot" />
+        <span title={readFailure}>{readFailure}</span>
+        <button
+          type="button"
+          onClick={() => {
+            void read.refetch();
+          }}
+        >
+          Try again
+        </button>
       </div>
     ) : failingSources !== undefined ? (
       <div className="inbox-notice" role="status">
@@ -288,17 +289,19 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
             plugins={plugins}
             onTake={(cardId) => {
               const card = findCard(cardId);
-              if (card !== undefined)
-                playAfterFold(openCard, () => {
+              if (card !== undefined) {
+                openCard.closeThen(() => {
                   moves.take(card);
                 });
+              }
             }}
             onDismiss={(cardId) => {
               const card = findCard(cardId);
-              if (card !== undefined)
-                playAfterFold(openCard, () => {
+              if (card !== undefined) {
+                openCard.closeThen(() => {
                   dismissCard(card);
                 });
+              }
             }}
             onSeeTask={(taskId) => {
               openCard.close();
@@ -316,7 +319,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       }
       state={state}
       isHolding={isHolding && inbox !== undefined}
-      isArriving={startedWithoutWords && hasWords && !arrivalOver}
+      isArriving={isArriving}
       isOffline={offlineSince !== null}
       scrollRef={scrollRef}
     >

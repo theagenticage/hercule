@@ -5,9 +5,10 @@
  */
 import type { Inbox, InboxCard } from "@hercule/contract";
 import type { FilterFacet } from "../desk/filter";
+import { buildPlaceFacets } from "../desk/place-facets";
 
 /** The id of the facet for whose a card is. */
-export const WHOSE_FACET_ID = "whose";
+const WHOSE_FACET_ID = "whose";
 
 const MINE = "mine";
 const OTHERS = "others";
@@ -34,22 +35,11 @@ const buildWhoseFacet = (): FilterFacet<InboxCard> => ({
 export const buildInboxFacets = (inbox: Inbox): readonly FilterFacet<InboxCard>[] => {
   const cardRefs = new Set(inbox.cards.map((card) => card.ref));
   const aboveCards = new Set(inbox.cards.flatMap((card) => card.ancestors));
-  const kinds = new Map<string, { caption: string; values: { id: string; name: string }[] }>();
-  for (const place of inbox.places) {
-    if (place.title === undefined || !aboveCards.has(place.ref) || cardRefs.has(place.ref))
-      continue;
-    const kind = kinds.get(place.kind) ?? { caption: place.caption ?? place.noun, values: [] };
-    kind.values.push({ id: place.ref, name: place.title });
-    kinds.set(place.kind, kind);
-  }
-  const placeFacets = [...kinds].map(([kind, { caption, values }]): FilterFacet<InboxCard> => ({
-    id: kind,
-    caption,
-    values: values.sort((a, b) => a.name.localeCompare(b.name, "en")),
-    hasValue: (card, valueId) => card.ancestors.includes(valueId),
-  }));
   return [
     buildWhoseFacet(),
-    ...placeFacets.sort((a, b) => a.caption.localeCompare(b.caption, "en")),
+    ...buildPlaceFacets(
+      inbox.places.filter((place) => aboveCards.has(place.ref) && !cardRefs.has(place.ref)),
+      (card: InboxCard) => card.ancestors,
+    ),
   ];
 };

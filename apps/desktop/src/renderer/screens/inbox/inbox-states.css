@@ -222,7 +222,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.inbox-notice a {
+.inbox-notice a,
+.inbox-notice button {
   flex: none;
   margin-left: 4px;
   color: inherit;

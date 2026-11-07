@@ -165,6 +165,33 @@ describe("renderEntitySlots renders", () => {
           { form: "count", value: 4, unit: "file" },
         ],
         reason: { say: "mei-tanaka asked for your review", tone: "plain" },
+        concernReasons: {
+          opened: { say: "You opened it", tone: "plain" },
+          "review-requested": { say: "mei-tanaka asked for your review", tone: "plain" },
+        },
+      },
+    },
+    {
+      name: "a pull request with no author: the reason that needs a person is left out, the others stay",
+      declaration: PULL_REQUEST,
+      observation: observe(
+        "pull-request",
+        { number: 88, author: null, diff: "+1 -1", files: 1 },
+        { status: "open" },
+      ),
+      expected: {
+        noun: "Pull request",
+        card: "compact",
+        pace: "fast",
+        patience: 24,
+        home: "github/repository",
+        identifier: "#88",
+        status: { shape: "fork", tone: "quiet", label: "Open", norm: true, stage: "in-review" },
+        facts: [
+          { form: "delta", added: 1, removed: 1 },
+          { form: "count", value: 1, unit: "file" },
+        ],
+        concernReasons: { opened: { say: "You opened it", tone: "plain" } },
       },
     },
     {
@@ -184,6 +211,7 @@ describe("renderEntitySlots renders", () => {
         identifier: "#12",
         status: { shape: "ring", tone: "quiet", label: "Open", norm: true },
         facts: [],
+        concernReasons: { assigned: { say: "Assigned to you", tone: "plain" } },
       },
     },
     {

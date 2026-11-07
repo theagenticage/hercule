@@ -8,7 +8,7 @@ import type { Filter } from "../desk/filter";
 import { parsePluginId } from "../plugin-id";
 import { SOURCE_FACET_ID } from "./facets";
 import { readPlaceLaneRef } from "./context-lanes";
-import type { WorkLane } from "./lanes";
+import { chooseLaneId, NO_PROJECT_LANE_ID, type WorkLane } from "./lanes";
 
 /** The source and context the sheet opens on. A part that is absent means no choice was made. */
 export interface AddOpening {
@@ -47,6 +47,38 @@ const findLaneContext = (
   }
   const [best] = [...tally].toSorted(([refA, a], [refB, b]) => b - a || (refA < refB ? -1 : 1));
   return best === undefined ? undefined : contexts.get(best[0]);
+};
+
+/**
+ * Returns the Project that a Task added from `lane` joins, or `null` for none.
+ *
+ * - A Project lane gives its own Project, and the "No project" lane gives
+ *   `null`.
+ * - A lane for an outside place has no Project of its own (a drop there never
+ *   changes membership), so a new Task takes the Project that most of its
+ *   cards are in. Only a Project in `projectIds` counts: a card whose Project
+ *   was deleted counts as being in no Project, as the board draws it.
+ * - The Project must have more cards than every other Project and more than
+ *   the cards with no Project. On a tie, or when most cards have no Project,
+ *   the answer is `null`: the new Task shows under "No <caption>" rather than
+ *   in a Project picked by chance.
+ */
+export const chooseLaneProject = (
+  lane: Pick<WorkLane, "projectId" | "outside" | "cells">,
+  projectIds: ReadonlySet<string>,
+): string | null => {
+  if (lane.outside === undefined) return lane.projectId;
+  const tally = new Map<string, number>();
+  for (const cell of lane.cells) {
+    for (const card of cell.cards) {
+      const laneId = chooseLaneId(card, projectIds);
+      tally.set(laneId, (tally.get(laneId) ?? 0) + 1);
+    }
+  }
+  const [best, runnerUp] = [...tally].toSorted(([, a], [, b]) => b - a);
+  return best !== undefined && best[0] !== NO_PROJECT_LANE_ID && best[1] > (runnerUp?.[1] ?? 0)
+    ? best[0]
+    : null;
 };
 
 /**

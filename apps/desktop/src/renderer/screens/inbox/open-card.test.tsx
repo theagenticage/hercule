@@ -77,7 +77,7 @@ const renderPage = (card: InboxCard, detail: ExternalEntityDetail): Rendered => 
       <div className="inbox-desk">
         <button
           onClick={(event) => {
-            openCard.open(card.id, event.currentTarget);
+            openCard.open({ kind: "card", id: card.id }, event.currentTarget);
           }}
         >
           Open the card

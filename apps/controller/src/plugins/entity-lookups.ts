@@ -17,6 +17,7 @@
  *   things, so a resolution is decided over all of them (see `decideScoped`).
  */
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -29,9 +30,11 @@ import {
   AuthError,
   ConnectionUnavailable,
   PluginError,
+  type EntityLookup,
   type EntityLookupContext,
   type EntityObservation,
   type EntityRecognition,
+  type EntityMissing,
   type EntityResolution,
   type IngestConnection,
 } from "@hercule/plugin-host";
@@ -90,7 +93,7 @@ export interface SearchOutcome {
  */
 export type DecidedResolution =
   | { readonly found: LookupObservation }
-  | { readonly missing: "inaccessible" | "unknown" | "not-found" }
+  | { readonly missing: EntityMissing }
   | { readonly ambiguous: ReadonlyArray<string> }
   | { readonly incomplete: true }
   | { readonly unavailable: true };
@@ -106,14 +109,18 @@ interface ConnectionAnswer {
   readonly asked: Asked<EntityResolution>;
 }
 
-type Missing = "inaccessible" | "unknown" | "not-found";
-
 /** The order of firmness of a `missing` answer, firmest first. */
-const MISSING_FIRMEST_FIRST: ReadonlyArray<Missing> = ["inaccessible", "unknown", "not-found"];
+const MISSING_FIRMEST_FIRST: ReadonlyArray<EntityMissing> = [
+  "inaccessible",
+  "unknown",
+  "not-found",
+];
 
 /** Returns the firmest `missing` among the answers, or undefined when no Connection said one. */
-const pickFirmestMissing = (answers: ReadonlyArray<ConnectionAnswer>): Missing | undefined => {
-  const said = new Set<Missing>();
+const pickFirmestMissing = (
+  answers: ReadonlyArray<ConnectionAnswer>,
+): EntityMissing | undefined => {
+  const said = new Set<EntityMissing>();
   for (const { asked } of answers) {
     if (asked.status === "answered" && "missing" in asked.value) said.add(asked.value.missing);
   }
@@ -123,7 +130,7 @@ const pickFirmestMissing = (answers: ReadonlyArray<ConnectionAnswer>): Missing |
 /**
  * Decides the answer for a `ref` recognition, after the Connections were
  * asked in turn and none found it. `skipped` is whether eligible Connections
- * were left out by the limit.
+ * were left out, by the limit or by the deadline.
  */
 const decideUnfoundRef = (
   answers: ReadonlyArray<ConnectionAnswer>,
@@ -187,18 +194,23 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
 
   /**
-   * Returns the active event source of the plugin that offers a lookup, if any.
-   * Registration allows one `entityLookup` per plugin, so the first source with
-   * a lookup is the only one.
+   * Returns the active event source of the plugin that offers a lookup, with
+   * that lookup, if any. Registration allows one `entityLookup` per plugin, so
+   * the first source with a lookup is the only one.
    */
   const findLookupSource = (
     pluginId: string,
-  ): Effect.Effect<Option.Option<RegisteredEventSource>> =>
-    Effect.map(host.listActiveEventSources(), (sources) =>
-      Option.fromNullishOr(
-        sources.find((source) => source.pluginId === pluginId && source.entityLookup !== undefined),
-      ),
-    );
+  ): Effect.Effect<
+    Option.Option<{ readonly source: RegisteredEventSource; readonly lookup: EntityLookup }>
+  > =>
+    Effect.map(host.listActiveEventSources(), (sources) => {
+      for (const source of sources) {
+        if (source.pluginId === pluginId && source.entityLookup !== undefined) {
+          return Option.some({ source, lookup: source.entityLookup });
+        }
+      }
+      return Option.none();
+    });
 
   /** Lists the Connections a lookup may use for `source`, oldest first. */
   const listEligibleConnections = (
@@ -303,25 +315,36 @@ const make = Effect.gen(function* () {
      * Returns what each active plugin's lookup recognizes in `text`, plugin by
      * plugin in registry order. Pure: no plugin gets credentials, and none
      * makes a request. A recognition's `kind`, when it has one, is qualified
-     * with the plugin id. A lookup that throws recognizes nothing.
+     * with the plugin id. A lookup that throws recognizes nothing, and a warning
+     * in the log names the plugin.
      */
     recognize: (text: string): Effect.Effect<ReadonlyArray<PluginRecognition>> =>
-      Effect.map(host.listActiveEventSources(), (sources) =>
-        sources.flatMap((source) => {
-          const lookup = source.entityLookup;
-          if (lookup === undefined) return [];
-          try {
-            return lookup
-              .recognize(text)
-              .slice(0, MAX_RECOGNITIONS)
-              .map((recognition) => ({
-                pluginId: source.pluginId,
-                recognition: qualifyKind(source.pluginId, recognition),
-              }));
-          } catch {
-            return [];
-          }
-        }),
+      Effect.flatMap(host.listActiveEventSources(), (sources) =>
+        Effect.map(
+          Effect.forEach(sources, (source) => {
+            const lookup = source.entityLookup;
+            if (lookup === undefined) return Effect.succeed<ReadonlyArray<PluginRecognition>>([]);
+            try {
+              return Effect.succeed(
+                lookup
+                  .recognize(text)
+                  .slice(0, MAX_RECOGNITIONS)
+                  .map((recognition) => ({
+                    pluginId: source.pluginId,
+                    recognition: qualifyKind(source.pluginId, recognition),
+                  })),
+              );
+            } catch (error) {
+              return Effect.as(
+                Effect.logWarning(
+                  `The entity lookup of ${source.pluginId} failed to recognize a text: ${String(error)}`,
+                ),
+                [] as ReadonlyArray<PluginRecognition>,
+              );
+            }
+          }),
+          (perSource) => perSource.flat(),
+        ),
       ),
 
     /** Returns the ids of the active plugins whose lookup recognizes links, in registry order. */
@@ -352,9 +375,7 @@ const make = Effect.gen(function* () {
         };
         const found = yield* findLookupSource(pluginId);
         if (Option.isNone(found)) return unavailable;
-        const source = found.value;
-        const lookup = source.entityLookup;
-        if (lookup === undefined) return unavailable;
+        const { source, lookup } = found.value;
         const eligible = yield* listEligibleConnections(source);
         if (eligible.length === 0) return unavailable;
         const asked = eligible.slice(0, MAX_SEARCH_CONNECTIONS);
@@ -393,7 +414,10 @@ const make = Effect.gen(function* () {
      * all of them. `target` is a recognition as `recognize` returned it, with
      * a qualified `kind`.
      *
-     * - A `ref` recognition asks in turn, until one Connection finds it.
+     * - A `ref` recognition asks in turn, until one Connection finds it. It
+     *   starts no new call once 8 seconds have passed since it began, so a
+     *   row of slow Connections cannot hold the caller for a minute: the
+     *   rest are left out, as the limit leaves out.
      * - A `scoped` recognition asks every Connection at once.
      *
      * The answer is `unavailable` when the plugin has no lookup, no
@@ -405,9 +429,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const found = yield* findLookupSource(pluginId);
         if (Option.isNone(found)) return { unavailable: true };
-        const source = found.value;
-        const lookup = source.entityLookup;
-        if (lookup === undefined) return { unavailable: true };
+        const { source, lookup } = found.value;
         const eligible = yield* listEligibleConnections(source);
         if (eligible.length === 0) return { unavailable: true };
         const asking = eligible.slice(0, MAX_RESOLVE_CONNECTIONS);
@@ -428,8 +450,14 @@ const make = Effect.gen(function* () {
           return decideScoped(answers, skipped);
         }
 
+        const startedAt = yield* Clock.currentTimeMillis;
         const answers: Array<ConnectionAnswer> = [];
         for (const connection of asking) {
+          const elapsed = (yield* Clock.currentTimeMillis) - startedAt;
+          if (elapsed >= LOOKUP_TIMEOUT_SECONDS * 1000) {
+            // Later Connections are left out, so the answer says it is not sure.
+            return decideUnfoundRef(answers, true);
+          }
           const answer = yield* askConnection(connection);
           if (answer.asked.status === "answered" && "found" in answer.asked.value) {
             return {

@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { listUrgentSignals } from "@hercule/client-core";
 import { CleanupProvider } from "../../app/cleanup";
-import { DoneMovesProvider } from "../../app/done-moves";
+import { DoneMovesProvider, useDoneMoves } from "../../app/done-moves";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
@@ -15,6 +15,7 @@ import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
 import { buildWaitingRequest, useOpenDestination } from "./-destinations";
 import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
+import { useUndoAnywhere } from "./-undo-anywhere";
 
 /**
  * The shell's layout route. Every screen inside the app is a child of this
@@ -28,6 +29,10 @@ import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
  * the sidebar's New thread open, and the New project dialog that the
  * picker's last row opens. A project added there opens a Draft Thread in it.
  * Go > Office (⌘⇧O) opens the Office, and Settings… (⌘,) opens Settings.
+ *
+ * The shell listens for Undo (⌘Z) on the screens that have no gestures of
+ * their own, so a dismissal or a move is undone from any view
+ * (`useUndoAnywhere`).
  *
  * The shell runs the snooze timer, which brings a snoozed signal back to
  * To do when its snooze runs out, whichever screen shows.
@@ -83,6 +88,14 @@ function ShellScreen(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
+  const { toasts } = useDoneMoves();
+  useUndoAnywhere({
+    client: controller.client,
+    queryClient,
+    undoStack: controller.undoStack,
+    toasts,
+    platform: bridge.platform,
+  });
   const waiting = useWaiting();
   const openDestination = useOpenDestination();
   const [dialog, setDialog] = useState<NewThreadDialog | null>(null);

@@ -21,6 +21,7 @@ import {
 } from "@hercule/client-core/work";
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
+import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { findCardElement, isSameCardInLane, readCardInLane } from "./card-in-lane";
 import { keepCardInView } from "./keep-in-view";
@@ -29,15 +30,6 @@ import type { WorkView } from "./use-work-view";
 
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
 const POINTER_MOVE_MIN = 4;
-
-/**
- * What a key press can land on without being the board's: a menu or popover, a
- * dialog, and the Add to Work sheet. They keep their own keys.
- */
-const OVERLAY_SELECTOR = "[popover], dialog, [role='menu'], .side-sheet";
-
-/** Matches a popover or a dialog that is open right now, which closes itself on Esc. */
-const OPEN_OVERLAY_SELECTOR = 'dialog[open], [popover="auto"]:popover-open';
 
 /** What `useBoardKeys` needs from the Work screen. */
 export interface BoardKeysInput {
@@ -144,7 +136,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
   /** Moves focus to the head button of the lane, which has no card to take it, and hands the keys over from the pointer. Returns whether the lane is on screen. */
   const focusLaneHead = (laneId: string): boolean => {
     const button = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-lane-head="${laneId}"] .board-lane-button`,
+      `[data-lane-head="${CSS.escape(laneId)}"] .board-lane-button`,
     );
     if (button === null || button === undefined) return false;
     hoveredCard.current = null;
@@ -161,7 +153,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       return;
     }
     scroller
-      ?.querySelector<HTMLElement>(`[data-lane-head="${laneId}"] .board-lane-button`)
+      ?.querySelector<HTMLElement>(`[data-lane-head="${CSS.escape(laneId)}"] .board-lane-button`)
       ?.focus({ preventScroll: true });
   };
 
@@ -179,7 +171,9 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     // The cell shows only some of its cards, and the moved one is behind its
     // line ("3 landed", "13 more"). Focus goes to that line.
     scrollRef.current
-      ?.querySelector<HTMLElement>(`[data-more-cell-id="${buildCellId(laneId, stage)}"]`)
+      ?.querySelector<HTMLElement>(
+        `[data-more-cell-id="${CSS.escape(buildCellId(laneId, stage))}"]`,
+      )
       ?.focus({ preventScroll: true });
   };
 

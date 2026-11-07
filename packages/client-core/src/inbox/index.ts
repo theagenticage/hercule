@@ -18,14 +18,9 @@ export * from "./groupings";
 export * from "./inbox-notes";
 export * from "./open-card";
 export * from "./place-view";
-export {
-  decideInboxPlace,
-  HOME_GROUPING,
-  STATUS_GROUPING,
-  type InboxPlace,
-  type SurfaceHead,
-} from "./inbox-place";
+export { HOME_GROUPING, STATUS_GROUPING, type SurfaceHead } from "./inbox-place";
 export * from "./lay-out";
+export { NO_PLACEMENT, type RequestsOrder, type VisitPlacement } from "./visit-placement";
 export { isMarkShownByHead, listSurfaceAboveWords, nameSurface } from "./surface-words";
 export * from "./card-moves";
 export * from "./inbox-walk";

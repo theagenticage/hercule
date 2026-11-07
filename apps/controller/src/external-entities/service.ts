@@ -52,6 +52,7 @@ import {
 import {
   PluginError,
   type EntityRecognition,
+  type EntityMissing,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
 import { currentStamp, requireGrant, requireUserActor } from "../actor";
@@ -59,7 +60,12 @@ import { connectionRepository, INGESTING_STATUSES } from "../connections";
 import { nowIso, withTransaction } from "../db";
 import { EntityLookups, PluginHost, type EntityReporter, type LookupObservation } from "../plugins";
 import { resourceRepository } from "../resources";
-import { TaskService, taskRepository, type TaskUndoRefusal } from "../tasks";
+import {
+  ONLY_THE_USER_TAKES_ON_WORK,
+  TaskService,
+  taskRepository,
+  type TaskUndoRefusal,
+} from "../tasks";
 import { announceEntityChanges } from "./announce";
 import { prepareObservations } from "./ingest";
 import { relationClaimRepository } from "./relation-claims";
@@ -71,8 +77,14 @@ import {
   type TaskableEntity,
 } from "./repository";
 
-const ONLY_THE_USER_TAKES_ON_WORK =
-  "only the user may take work on from an outside thing, take it back, or set it aside: those are the user's own acts, so a session or a workflow step may not; ask the user instead";
+/** Builds the reply of `search` from how the search ended. */
+const buildSearchReply = (
+  source: string,
+  linkSources: ReadonlyArray<string>,
+  outcome: EntitySearchReply["outcome"],
+  results: ReadonlyArray<EntitySearchResult> = [],
+  incomplete = false,
+): EntitySearchReply => ({ source, outcome, results, incomplete, linkSources });
 
 const ONLY_THE_USER_SEARCHES =
   "only the user may search a source: the search reads through the user's own accounts, so a session or a workflow step may not; ask the user instead";
@@ -124,10 +136,7 @@ export const chooseStageForEntity = (entity: Pick<TaskableEntity, "stage">): Tas
 const isSingleUrl = (text: string): boolean => /^https?:\/\/\S+$/i.test(text);
 
 /** Builds the sentence for a thing that could not be read at its source. */
-const describeMissing = (
-  ref: string,
-  missing: "inaccessible" | "unknown" | "not-found",
-): string => {
+const describeMissing = (ref: string, missing: EntityMissing): string => {
   switch (missing) {
     case "inaccessible":
       return `${ref} cannot be taken on: the source refused every connected account that was asked. Connect an account that can open it, then try again.`;
@@ -391,17 +400,12 @@ const make = Effect.gen(function* () {
               ),
             );
           }
-          const written = yield* Effect.orDie(
-            entities.refresh({
-              connectionId: preparation.connectionId,
-              observed: [preparation.entity],
-              environment: { now, activePluginIds: catalog.activePluginIds },
-            }),
-          );
-          yield* announceRefs(
-            [...new Set([...written.changedRefs, ...written.relationChangedRefs])],
-            written.affectedTaskIds,
-          );
+          const written = yield* entities.refresh({
+            connectionId: preparation.connectionId,
+            observed: [preparation.entity],
+            environment: { now, activePluginIds: catalog.activePluginIds },
+          });
+          yield* announceRefs(written.changedRefs, written.affectedTaskIds);
         }
         const record = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
         const declaration =
@@ -540,7 +544,7 @@ const make = Effect.gen(function* () {
         outcome: EntitySearchReply["outcome"],
         results: ReadonlyArray<EntitySearchResult> = [],
         incomplete = false,
-      ): EntitySearchReply => ({ source: pluginId, outcome, results, incomplete, linkSources });
+      ) => buildSearchReply(pluginId, linkSources, outcome, results, incomplete);
       const decided = yield* lookups.resolve(pluginId, recognition);
       if ("found" in decided) {
         const { results, dropped } = yield* buildSearchResults(catalog, pluginId, [decided.found]);
@@ -690,7 +694,7 @@ const make = Effect.gen(function* () {
     restore: (
       id: string,
     ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      moveCard((now) => entities.restore(id, now)),
+      moveCard((now, actor) => entities.restore(id, actor, now)),
 
     /**
      * Searches a source live, for the Add to Work sheet. Needs the grants
@@ -718,10 +722,8 @@ const make = Effect.gen(function* () {
         const catalog = yield* readCatalog;
         const linkSources = yield* lookups.listLinkSources();
         const text = query.text.trim();
-        const emptyReply = (
-          source: string,
-          outcome: EntitySearchReply["outcome"],
-        ): EntitySearchReply => ({ source, outcome, results: [], incomplete: false, linkSources });
+        const emptyReply = (source: string, outcome: EntitySearchReply["outcome"]) =>
+          buildSearchReply(source, linkSources, outcome);
         if (text === "") return emptyReply(query.source, "no-match");
 
         if (isSingleUrl(text)) {
@@ -767,13 +769,13 @@ const make = Effect.gen(function* () {
           searched.observations,
         );
         const incomplete = searched.incomplete || dropped;
-        return {
-          source: query.source,
-          outcome: results.length > 0 ? "results" : incomplete ? "incomplete" : "no-match",
-          results: results.slice(0, MAX_ENTITY_SEARCH_RESULTS),
-          incomplete,
+        return buildSearchReply(
+          query.source,
           linkSources,
-        };
+          results.length > 0 ? "results" : incomplete ? "incomplete" : "no-match",
+          results.slice(0, MAX_ENTITY_SEARCH_RESULTS),
+          incomplete,
+        );
       }),
 
     /**

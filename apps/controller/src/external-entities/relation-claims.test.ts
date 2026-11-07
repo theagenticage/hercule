@@ -76,7 +76,7 @@ const report = (
       ],
       now: options.now ?? AT,
     }),
-    (results) => results.get(fromRef)!,
+    ({ writes }) => writes.get(fromRef)!,
   );
 
 /** Reads the stored claims from `fromRef`, the way a test can see what was kept. */
@@ -142,6 +142,33 @@ describe("writing source claims", () => {
       { to_ref: ROUND_TWO, claim_type: "source" },
       { to_ref: SITE, claim_type: "person" },
     ]);
+  });
+
+  it("returns the refs below a ref whose claims change, from before the change, and none when nothing changes", async () => {
+    const { changed, repeated } = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, ERP_ACCOUNT, ROUND_ONE, [ORDER]);
+        yield* report(claims, ERP_ACCOUNT, SITE, [ROUND_ONE]);
+        const apply = (partOf: ReadonlyArray<string>) =>
+          claims.applySourceRelations({
+            connectionId: ERP_ACCOUNT,
+            entries: [
+              {
+                fromRef: ROUND_ONE,
+                relations: { complete: true, partOf, linked: [] },
+                observedRevision: undefined,
+              },
+            ],
+            now: LATER,
+          });
+        const repeated = (yield* apply([ORDER])).refsBelowBefore;
+        const changed = (yield* apply([])).refsBelowBefore;
+        return { changed, repeated };
+      }),
+    );
+
+    expect(repeated).toEqual([]);
+    expect(changed).toEqual([ROUND_ONE, SITE]);
   });
 
   it("removes nothing on a partial read or when the observation has no relations", async () => {
@@ -216,7 +243,7 @@ describe("loops in part-of", () => {
     const { write, rows } = await run((claims, sql) =>
       Effect.gen(function* () {
         yield* report(claims, ERP_ACCOUNT, ROUND_TWO, [ROUND_ONE]);
-        const write = yield* claims.applySourceRelations({
+        const { writes: write } = yield* claims.applySourceRelations({
           connectionId: ERP_ACCOUNT,
           entries: [
             {

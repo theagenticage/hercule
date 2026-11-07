@@ -96,24 +96,50 @@ export const walkInbox = (
 };
 
 /**
+ * Returns the cards of `id`'s column that come after it on the page and the
+ * cards that come before it (nearest first), or `undefined` when `id` is not
+ * on the page.
+ */
+const splitColumnAround = (
+  stops: readonly InboxStop[],
+  id: string,
+): { readonly after: readonly InboxStop[]; readonly before: readonly InboxStop[] } | undefined => {
+  const from = stops.find((stop) => stop.id === id);
+  if (from === undefined) return undefined;
+  const inColumn = stops.filter((stop) => stop.column === from.column);
+  const index = inColumn.indexOf(from);
+  return { after: inColumn.slice(index + 1), before: inColumn.slice(0, index).reverse() };
+};
+
+/**
+ * Returns the id of the first card after `id` in its column that still waits,
+ * or `undefined` when there is none. After a card leaves the page, this is the
+ * card that moves up into its place, so it is the one a pointer that stays
+ * where it was can reach again. Read the stops before the move, because a move
+ * can take the card off the page.
+ */
+export const decideFollowingWaitingCard = (
+  stops: readonly InboxStop[],
+  id: string,
+): string | undefined => splitColumnAround(stops, id)?.after.find((stop) => stop.waits)?.id;
+
+/**
  * Returns the id of the card to move on to after a move on the card `id`, or
  * `undefined` when no other card in its column still waits.
  *
  * The cards after `id` come first, in page order, then the cards before it,
  * nearest first. The answer comes from the order of the page, never from what
  * lies under the pointer: while the page closes up after a move, that is a
- * moving target. Read the stops before the move, because a move can take the
- * card off the page.
+ * moving target. The keys use this one, so they always have a card to go on
+ * with; the pointer uses `decideFollowingWaitingCard`, because a card before
+ * `id` never takes its place under the pointer. Read the stops before the
+ * move, because a move can take the card off the page.
  */
 export const decideNextWaitingCard = (
   stops: readonly InboxStop[],
   id: string,
 ): string | undefined => {
-  const at = stops.findIndex((stop) => stop.id === id);
-  const from = stops[at];
-  if (from === undefined) return undefined;
-  const inColumn = stops.filter((stop) => stop.column === from.column);
-  const index = inColumn.indexOf(from);
-  const order = [...inColumn.slice(index + 1), ...inColumn.slice(0, index).reverse()];
-  return order.find((stop) => stop.waits)?.id;
+  const around = splitColumnAround(stops, id);
+  if (around === undefined) return undefined;
+  return [...around.after, ...around.before].find((stop) => stop.waits)?.id;
 };

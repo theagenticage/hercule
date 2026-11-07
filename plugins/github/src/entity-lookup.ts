@@ -27,7 +27,7 @@ import {
 import { readConnectionToken } from "./ingest";
 import { decodeGithubValue, fetchGraphql, type FeedError } from "./ingest/requests";
 import { REPO_NAME_PATTERN } from "./repo-name";
-import { buildItemPlace, buildItemRef, parseRepoRef } from "./subject";
+import { buildItemPlace, buildItemRef, parseRepoRef, splitRepoName } from "./subject";
 
 /** The most things `recognize` returns for one text. */
 const MAX_RECOGNITIONS = 20;
@@ -131,11 +131,10 @@ const readItem = (
   number: number,
 ): Effect.Effect<EntityObservation | undefined, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const [owner = "", name = ""] = repo.split("/");
     const data = yield* fetchGraphql(
       token,
       ITEM_QUERY,
-      { owner, name, number },
+      { ...splitRepoName(repo), number },
       { tolerateMissing: true },
     );
     const answer = yield* decodeGithubValue(ItemAnswer, data, "an item");
@@ -172,9 +171,14 @@ export const searchItems = (
       first: Math.min(query.limit, MAX_SEARCH_RESULTS),
     });
     const answer = yield* decodeGithubValue(SearchAnswer, data, "search results");
+    // GitHub reads two `repo:` qualifiers as "either", so a `repo:` the user typed
+    // would widen the search past the scope. Only items of the scope are kept.
     return (answer.search.nodes ?? [])
       .flatMap((node) =>
-        node === null ? [] : [buildItemObservation(node, answer.viewer.login, [])],
+        node === null ||
+        (scope !== undefined && node.repository.nameWithOwner.toLowerCase() !== scope)
+          ? []
+          : [buildItemObservation(node, answer.viewer.login, [])],
       )
       .slice(0, query.limit);
   });

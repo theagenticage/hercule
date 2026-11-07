@@ -974,3 +974,84 @@ describe("the Work screen grouped by an outside place", () => {
     expect(document.activeElement).toBe(copies[1]);
   });
 });
+
+describe("the Work screen's lanes for outside places, in their edge cases", () => {
+  const ODD_REPOSITORY = buildPlace('forge:repo:"odd"\\name', "odd-service", {
+    kind: REPOSITORY_KIND,
+    noun: "Repository",
+    caption: REPOSITORY_CAPTION,
+  });
+  const oddBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
+    ...buildBoard(...cards),
+    places: [ODD_REPOSITORY],
+    groupings: [{ kind: REPOSITORY_KIND, caption: REPOSITORY_CAPTION }],
+  });
+  const inOdd = (n: number, projectId: string | undefined): WorkCard =>
+    buildCard(buildTaskId(60 + n), {
+      title: `Odd task ${String(n)}`,
+      ...(projectId === undefined ? {} : { projectId }),
+      contextRefs: [ODD_REPOSITORY.ref],
+    });
+
+  it("folds and opens a lane whose place ref holds quotes and a backslash", async () => {
+    const user = userEvent.setup();
+    await openRepositoryWork({ board: () => oddBoard(inOdd(1, undefined), inOdd(2, undefined)) });
+    await screen.findByRole("button", { name: /^Odd task 1/ });
+    await groupBy(REPOSITORY_CAPTION);
+    await user.click(getCard("Odd task 1"));
+
+    await user.keyboard("f");
+
+    expect(screen.queryByRole("button", { name: /^Odd task 1/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^odd-service/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    await user.keyboard("f");
+    expect(getCard("Odd task 1")).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "the Project that most of its cards are in",
+      [inOdd(1, WEBSHOP.id), inOdd(2, WEBSHOP.id), inOdd(3, OPS.id), inOdd(4, undefined)],
+      WEBSHOP.id,
+    ],
+    ["no Project when two Projects tie", [inOdd(1, WEBSHOP.id), inOdd(2, OPS.id)], undefined],
+    [
+      "no Project when as many cards have none as the best Project has",
+      [inOdd(1, WEBSHOP.id), inOdd(2, undefined)],
+      undefined,
+    ],
+  ])("adds a Task from the lane's plus into %s", async (_, cards, projectId) => {
+    const user = userEvent.setup();
+    const { calls } = await openRepositoryWork({
+      board: () => oddBoard(...cards),
+      handlers: {
+        "POST /api/v1/tasks": (call) => ({
+          body: buildCreatedTask(
+            (call.body as { title: string }).title,
+            (call.body as { projectId?: string }).projectId,
+          ),
+        }),
+      },
+    });
+    await screen.findByRole("button", { name: /^Odd task 1/ });
+    await groupBy(REPOSITORY_CAPTION);
+
+    await user.click(screen.getByRole("button", { name: "Add to odd-service" }));
+    await user.type(screen.getByRole("textbox", { name: "New Task" }), "Label the crates{Enter}");
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === "POST" && call.path === "/api/v1/tasks")).toBe(
+        true,
+      );
+    });
+    const created = calls.find((call) => call.method === "POST" && call.path === "/api/v1/tasks");
+    expect(created?.body).toEqual({
+      title: "Label the crates",
+      description: "",
+      stage: "exploring",
+      ...(projectId === undefined ? {} : { projectId }),
+    });
+  });
+});

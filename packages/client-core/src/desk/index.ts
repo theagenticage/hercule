@@ -7,4 +7,5 @@
 export * from "./age";
 export * from "./entity-words";
 export * from "./filter";
+export * from "./place-facets";
 export * from "./relation-rows";

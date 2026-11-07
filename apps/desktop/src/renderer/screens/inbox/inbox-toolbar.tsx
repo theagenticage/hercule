@@ -9,8 +9,7 @@ import {
 import type { InboxGrouping } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
-import { usePopoverMenu } from "../use-popover-menu";
-import { FilterChips, FilterControl, MenuPick, Toolbar, ToolButton, ToolMenu } from "../desk";
+import { ChoiceMenu, FilterChips, FilterControl, Toolbar, ToolButton } from "../desk";
 
 /**
  * Renders the Group by button and its menu: the choices the Inbox offers
@@ -27,36 +26,24 @@ function GroupByControl({
   readonly grouping: string;
   readonly onPick: (grouping: string) => void;
 }): JSX.Element {
-  const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const current = groupings.find((each) => each.id === grouping) ?? groupings[0];
   return (
-    <>
-      <ToolButton
-        {...triggerProps}
-        caption="Group by"
-        name={current?.name ?? "Place"}
-        hasMenu
-        isFilled={false}
-      />
-      <ToolMenu menuProps={menuProps} label="Group by" edge="start">
-        {groupings.map((each) => {
-          const isOn = each.id === current?.id;
-          return (
-            <MenuPick
-              key={each.id}
-              itemProps={buildItemProps(`group:${each.id}`, { checked: isOn })}
-              kind="choice"
-              name={each.name}
-              isOn={isOn}
-              onPick={() => {
-                close();
-                onPick(each.id);
-              }}
-            />
-          );
-        })}
-      </ToolMenu>
-    </>
+    <ChoiceMenu
+      label="Group by"
+      edge="start"
+      entries={groupings}
+      chosenId={current?.id}
+      onPick={onPick}
+      renderTrigger={(triggerProps) => (
+        <ToolButton
+          {...triggerProps}
+          caption="Group by"
+          name={current?.name ?? "Place"}
+          hasMenu
+          isFilled={false}
+        />
+      )}
+    />
   );
 }
 

@@ -7,8 +7,8 @@
  */
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import { FROM_YOUR_SOURCES_HEADING, type FilterFacet, type FilterValue } from "../desk/filter";
+import { buildPlaceFacets } from "../desk/place-facets";
 import { namePlugin, type PluginName } from "../intake";
-import { listBoardGroupings, readPlaceName } from "./context-lanes";
 import { chooseLaneId, type WorkLane } from "./lanes";
 
 /** The id of the State facet, whose values are Has a question, Failed and With an agent. */
@@ -87,25 +87,21 @@ const buildSourceFacet = (
 };
 
 /**
- * Returns one facet for each kind of outside place the board can group by. Its
- * id is the kind, its caption the kind's words ("Linear project"), and its
- * values the places of that kind. A card has a place when the place is in its
+ * Returns one facet for each kind of outside place the board can group by
+ * (see `buildPlaceFacets`). A card has a place when the place is in its
  * `contextRefs`. Filtering only narrows the cards: it never changes a Task's
  * Project or Initiative.
  */
 const buildContextFacets = (
   board: Pick<WorkBoard, "places" | "groupings">,
-): readonly FilterFacet<WorkCard>[] =>
-  listBoardGroupings(board).map((grouping) => ({
-    id: grouping.kind,
-    caption: grouping.caption,
-    heading: FROM_YOUR_SOURCES_HEADING,
-    values: board.places
-      .filter((place) => place.kind === grouping.kind)
-      .map((place) => ({ id: place.ref, name: readPlaceName(place) }))
-      .toSorted((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)),
-    hasValue: (card, valueId) => card.contextRefs.includes(valueId),
-  }));
+): readonly FilterFacet<WorkCard>[] => {
+  const kinds = new Set(board.groupings.map((grouping) => grouping.kind));
+  return buildPlaceFacets(
+    board.places.filter((place) => kinds.has(place.kind)),
+    (card: WorkCard) => card.contextRefs,
+    FROM_YOUR_SOURCES_HEADING,
+  );
+};
 
 /**
  * Returns the facets of the Filter menu, in menu order: State, Project, then

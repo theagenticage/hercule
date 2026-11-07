@@ -6,8 +6,9 @@
  * result is stored on the row, so a card draws from its row with no plugin
  * running and no kind in the catalog.
  */
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import {
+  ENTITY_CONCERNS,
   EntityFact,
   EntityPerson,
   EntityReason,
@@ -30,7 +31,7 @@ import {
 /**
  * A status as it is stored: what a card draws, plus the Task stage the kind's
  * status table declares for it. The stage is internal. It is stored so a Task
- * can start at the right stage with no catalog lookup, and `readStoredStatus`
+ * can start at the right stage with no catalog lookup, and `parseStoredStatus`
  * strips it before a status reaches the public API.
  */
 export const StoredEntityStatus = Schema.Struct({
@@ -57,6 +58,12 @@ const WorkEntitySlots = Schema.Struct({
   status: Schema.optionalKey(StoredEntityStatus),
   facts: atMost(EntityFact, MAX_ENTITY_FACTS),
   reason: Schema.optionalKey(EntityReason),
+  /**
+   * The sentence the kind declares for each concern it has a reason for, by
+   * concern word. A card says one of these when the source names no reason
+   * of its own.
+   */
+  concernReasons: Schema.optionalKey(Schema.Record(Schema.String, EntityReason)),
 });
 
 /** The slots of a kind that is a place, such as a repository: no card, no clock, no facts. */
@@ -90,6 +97,8 @@ const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
  *
  * - A kind with cards gets noun, card (`rich` when the declaration leaves it
  *   out), pace, patience, identifier, person, owner, status, facts and reason.
+ *   It also gets `concernReasons`: each reason of the declaration that is named
+ *   like a concern, filled in, unless a field it needs is missing.
  * - A kind with cards or a place also gets the `home` and `section` its
  *   declaration names, as qualified kinds.
  * - A status keeps its `norm` flag, and a kind with cards also keeps the
@@ -193,9 +202,6 @@ export const renderEntitySlots = (
             return { form: "delta" as const, added: Number(match[1]), removed: Number(match[2]) };
           }
           case "count": {
-            if (fact.unit === undefined) {
-              return yield* refuse(`the count fact "${fact.field}" declares no unit.`);
-            }
             if (!/^\d+$/.test(text)) return yield* unreadable();
             return { form: "count" as const, value: Number(text), unit: fact.unit };
           }
@@ -230,6 +236,21 @@ export const renderEntitySlots = (
     });
 
     const reason = yield* renderReason;
+
+    // A reason named like a concern says why a thing concerns the user. One
+    // that needs a field this thing lacks (a pull request with no author has no
+    // `{person}`) is left out rather than refusing the observation.
+    const concernReasons: Record<string, EntityReason> = {};
+    for (const concern of ENTITY_CONCERNS) {
+      const declared = declaration.reasons[concern];
+      if (declared === undefined) continue;
+      const say = Option.getOrUndefined(
+        yield* Effect.option(
+          fillTemplate(declared.say, `reason "${concern}"`, { person: personName }),
+        ),
+      );
+      if (say !== undefined) concernReasons[concern] = { say, tone: declared.tone };
+    }
     const identifier = yield* fillTemplate(declaration.identifier, "identifier");
 
     return yield* decodeSlots({
@@ -245,6 +266,7 @@ export const renderEntitySlots = (
       ...(status === undefined ? {} : { status }),
       facts,
       ...(reason === undefined ? {} : { reason }),
+      ...(Object.keys(concernReasons).length === 0 ? {} : { concernReasons }),
     }).pipe(Effect.catch(refuseDecode(refuse)));
   });
 

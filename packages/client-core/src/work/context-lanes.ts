@@ -8,6 +8,7 @@
  * with the same code. Their `outside` field is what tells them apart.
  */
 import type { EntityGrouping, EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
+import { describeLockedRow, lowerFirst } from "../desk/relation-rows";
 import { parsePluginId } from "../plugin-id";
 import { buildLane, type CardPlaces, type WorkLane } from "./lanes";
 
@@ -30,10 +31,6 @@ export const listBoardGroupings = (board: Pick<WorkBoard, "groupings">): readonl
     .map((grouping) => ({ ...grouping, pluginId: parsePluginId(grouping.kind) }))
     .toSorted((a, b) => a.caption.localeCompare(b.caption) || compareText(a.kind, b.kind));
 
-/** Returns `word` with its first letter in lower case, unless the word starts with an acronym ("PR"). */
-const lowerFirst = (word: string): string =>
-  /^[A-Z]{2}/.test(word) ? word : word.charAt(0).toLowerCase() + word.slice(1);
-
 const PLACE_LANE_PREFIX = "place:";
 
 /** Returns the id of the lane for the place `ref`. */
@@ -48,7 +45,7 @@ export const readPlaceLaneRef = (laneId: string): string | undefined =>
 
 /** Returns the name of a place: its title, or a plain sentence for a place the user cannot read. */
 export const readPlaceName = (place: EntityPlace): string =>
-  place.title ?? `A ${lowerFirst(place.noun)} you cannot open`;
+  place.title ?? describeLockedRow(place);
 
 /** Returns the plural of a noun of the kind table, such as "Project" or "Repository". */
 const pluralizeNoun = (noun: string): string => {

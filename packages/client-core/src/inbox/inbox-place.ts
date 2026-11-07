@@ -9,10 +9,12 @@ import type { EntityPlace, EntityStatus, Inbox, InboxCard } from "@hercule/contr
 import { readEntityPluginId } from "../desk/entity-words";
 import {
   buildPlaceRow,
+  indexRelationGraph,
+  readAncestorRows,
   type AncestorRow,
   type OpenPlaceRow,
   type PlaceRow,
-  readAncestorRows,
+  type RelationIndex,
 } from "../desk/relation-rows";
 
 /** The grouping id for the usual place of each kind. */
@@ -48,24 +50,10 @@ export type SurfaceHead =
       readonly tone?: EntityStatus["tone"];
     };
 
-/** Where one card lies. */
-export type InboxPlace =
-  | {
-      readonly _tag: "surfaces";
-      /** The card is drawn in full on the first and as a plain pointer on each other. Never empty. */
-      readonly heads: readonly SurfaceHead[];
-    }
-  | {
-      readonly _tag: "request";
-      /** The title of the card's first home that has one, or `undefined`. */
-      readonly homeName: string | undefined;
-    };
-
 /** What every placement of one Inbox reads, built once. */
 export interface PlaceContext {
-  readonly placeByRef: ReadonlyMap<string, EntityPlace>;
-  /** The refs a ref is directly part of, in the order of the edges. */
-  readonly parentsOf: ReadonlyMap<string, readonly string[]>;
+  /** The places of the reply by ref, and the refs each ref is directly part of in the order of the edges. */
+  readonly index: RelationIndex;
   /** The caption of each kind of place that has one. */
   readonly captionOfKind: ReadonlyMap<string, string>;
   readonly inbox: Inbox;
@@ -73,18 +61,14 @@ export interface PlaceContext {
   readonly headByRef: Map<string, SurfaceHead>;
 }
 
+/** Returns what every placement of `inbox` reads, so a place that many cards lie on is read once. */
 export const buildPlaceContext = (inbox: Inbox): PlaceContext => {
-  const parentsOf = new Map<string, string[]>();
-  for (const edge of inbox.edges) {
-    parentsOf.set(edge.fromRef, [...(parentsOf.get(edge.fromRef) ?? []), edge.toRef]);
-  }
   const captionOfKind = new Map<string, string>();
   for (const place of inbox.places) {
     if (place.caption !== undefined) captionOfKind.set(place.kind, place.caption);
   }
   return {
-    placeByRef: new Map(inbox.places.map((place) => [place.ref, place])),
-    parentsOf,
+    index: indexRelationGraph(inbox),
     captionOfKind,
     inbox,
     headByRef: new Map(),
@@ -92,8 +76,8 @@ export const buildPlaceContext = (inbox: Inbox): PlaceContext => {
 };
 
 /** Returns the places above `card` that the reply holds, nearest first. */
-export const listAncestorPlaces = (card: InboxCard, context: PlaceContext): EntityPlace[] =>
-  card.ancestors.flatMap((ref) => context.placeByRef.get(ref) ?? []);
+const listAncestorPlaces = (card: InboxCard, context: PlaceContext): EntityPlace[] =>
+  card.ancestors.flatMap((ref) => context.index.placeByRef.get(ref) ?? []);
 
 const readPlaceHead = (place: EntityPlace, context: PlaceContext): SurfaceHead => {
   const known = context.headByRef.get(place.ref);
@@ -102,14 +86,26 @@ const readPlaceHead = (place: EntityPlace, context: PlaceContext): SurfaceHead =
     _tag: "place",
     id: place.ref,
     row: buildPlaceRow(place),
-    above: readAncestorRows(place.ref, context.inbox),
+    above: readAncestorRows(place.ref, context.inbox, context.index),
   };
   context.headByRef.set(place.ref, head);
   return head;
 };
 
+/**
+ * Returns `head` as `context` describes it now. A place head is read again, so
+ * a surface held for the visit still shows the place's current status and
+ * progress. A head the reply no longer holds, and a head that is not a place,
+ * come back as they were.
+ */
+export const refreshSurfaceHead = (head: SurfaceHead, context: PlaceContext): SurfaceHead => {
+  if (head._tag !== "place") return head;
+  const place = context.index.placeByRef.get(head.id);
+  return place === undefined ? head : readPlaceHead(place, context);
+};
+
 /** Returns the places above `card` of the kind its record names as `home`. */
-export const listHomes = (card: InboxCard, context: PlaceContext): EntityPlace[] => {
+const listHomes = (card: InboxCard, context: PlaceContext): EntityPlace[] => {
   return listAncestorPlaces(card, context).filter((place) => place.kind === card.home);
 };
 
@@ -173,33 +169,14 @@ export const listNearPlaces = (
   context: PlaceContext,
 ): readonly OpenPlaceRow[] => {
   const near: OpenPlaceRow[] = [];
-  for (const ref of context.parentsOf.get(card.ref) ?? []) {
-    const place = context.placeByRef.get(ref);
+  for (const ref of context.index.parents.get(card.ref) ?? []) {
+    const place = context.index.placeByRef.get(ref);
     if (place === undefined || ref === surfaceId) continue;
     if (place.kind !== card.home && place.kind !== card.section) continue;
     const row = buildPlaceRow(place);
     if (!row.isLocked) near.push(row);
   }
   return near;
-};
-
-/**
- * Decides where `card` lies. A rich card lies on the surface of each of its
- * homes, the first in full and the others as a plain pointer, so it is counted
- * once. With no home it lies on a surface named for its plugin. A compact card
- * lies in Requests, under its home's name. `grouping` is what the page is
- * grouped by: `HOME_GROUPING` (the default), `STATUS_GROUPING`, or the word of a
- * kind of place.
- */
-export const decideInboxPlace = (
-  card: InboxCard,
-  inbox: Inbox,
-  grouping: string = HOME_GROUPING,
-): InboxPlace => {
-  const context = buildPlaceContext(inbox);
-  return card.card === "compact"
-    ? { _tag: "request", homeName: findHomeName(card, context) }
-    : { _tag: "surfaces", heads: findSurfaceHeads(card, context, grouping) };
 };
 
 const TONE_ORDER: Readonly<Record<EntityStatus["tone"], number>> = {

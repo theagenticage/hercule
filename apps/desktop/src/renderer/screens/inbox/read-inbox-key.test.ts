@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { readInboxKey, type InboxKeyPress } from "./read-inbox-key";
+import type { DeskKeyPress } from "../desk/desk-keys";
+import { readInboxKey } from "./read-inbox-key";
 
 const NO_MODIFIERS = { shiftKey: false, altKey: false, metaKey: false, ctrlKey: false };
 
 /** Returns a key press of `key`, with the modifiers in `held` pressed. */
-const press = (key: string, held: Partial<InboxKeyPress> = {}): InboxKeyPress => ({
+const press = (key: string, held: Partial<DeskKeyPress> = {}): DeskKeyPress => ({
   key,
   ...NO_MODIFIERS,
   ...held,

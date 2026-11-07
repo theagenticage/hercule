@@ -29,9 +29,15 @@ const buildFailureKey = (runId: string): string => `failure:${runId}`;
 const readFailureKey = (card: WorkCard): string | undefined =>
   card.failure === undefined ? undefined : buildFailureKey(card.failure.runId);
 
-/** Returns whether two cards show the same facts. Cards from one read share their objects, so most pairs end at the first check. */
-const isSameCard = (a: WorkCard, b: WorkCard): boolean =>
+/** Returns whether two values from a board read are equal. Values from one read share their objects, so most pairs end at the first check. */
+const isSameValue = (a: unknown, b: unknown): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/** Returns whether every field of the two boards other than `cards` is equal. */
+const isSameBoardExceptCards = (a: WorkBoard, b: WorkBoard): boolean =>
+  Object.entries(b).every(
+    ([field, value]) => field === "cards" || isSameValue(value, a[field as keyof WorkBoard]),
+  );
 
 /**
  * Returns `card` with the failure that `before` shows, or none when `before`
@@ -50,8 +56,10 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
 /**
  * Returns the board to draw, given the board `shown` now and the `latest`
  * board, and the changes of `latest` that it holds back. Everything else in
- * `latest` is shown at once. This is the one place that decides what waits
- * for a still hand, so `arrangeCell` stays pure.
+ * `latest` is shown at once, including every field that is not a card (the
+ * places, edges, groupings and `contextComplete`): only cards wait. This is
+ * the one place that decides what waits for a still hand, so `arrangeCell`
+ * stays pure.
  *
  * - A card that is new to `shown` is left out until its `arrival` key is in
  *   `released`.
@@ -61,8 +69,8 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
  *   yet. Its stage, project and order are the latest: a card the user moved
  *   stays where the user put it.
  *
- * Returns `shown` itself when nothing differs, so the caller can tell that
- * nothing changed by comparing references.
+ * Returns `shown` itself when nothing differs in any field, so the caller can
+ * tell that nothing changed by comparing references.
  */
 export const holdBackBoardChanges = (
   shown: WorkBoard,
@@ -92,8 +100,8 @@ export const holdBackBoardChanges = (
     cards.push(card);
   }
   const isUnchanged =
-    latest.truncated === shown.truncated &&
     cards.length === shown.cards.length &&
-    cards.every((card, index) => isSameCard(card, shown.cards[index]!));
+    cards.every((card, index) => isSameValue(card, shown.cards[index])) &&
+    isSameBoardExceptCards(shown, latest);
   return { board: isUnchanged ? shown : { ...latest, cards }, held };
 };

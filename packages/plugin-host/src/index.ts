@@ -41,7 +41,7 @@ export {
 } from "./connections";
 
 export {
-  ENTITY_FACT_FORMS,
+  ENTITY_CONCERNS,
   ENTITY_REASON_TONES,
   ENTITY_STATUS_SHAPES,
   ENTITY_STATUS_STAGES,
@@ -55,6 +55,7 @@ export {
   EntityRepository,
   EntityStatusDeclaration,
   EntityTemplate,
+  MAX_ENTITY_FACTS,
   MAX_ENTITY_FIELDS,
   MAX_ENTITY_FIELD_NAME_LENGTH,
   MAX_ENTITY_FIELD_TEXT_LENGTH,
@@ -65,6 +66,7 @@ export {
   type EntityLookup,
   type EntityLookupContext,
   type EntityRecognition,
+  type EntityMissing,
   type EntityResolution,
   type IngestEntities,
 } from "./entities";

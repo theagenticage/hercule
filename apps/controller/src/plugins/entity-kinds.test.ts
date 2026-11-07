@@ -174,6 +174,12 @@ describe("decodeEntityKinds", () => {
       taken: NOTHING_TAKEN,
       message: "is invalid",
     },
+    {
+      name: "a count fact with no unit",
+      declarations: [buildKind("ticket", { facts: [{ field: "files", form: "count" as never }] })],
+      taken: NOTHING_TAKEN,
+      message: "facts",
+    },
   ])("refuses $name", async ({ declarations, taken, message }) => {
     expect(await decode(declarations, taken)).toContain(message);
   });

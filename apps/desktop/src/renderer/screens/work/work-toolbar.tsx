@@ -19,19 +19,19 @@ import { PlusIcon } from "../../icons/plus";
 import { SlidersIcon } from "../../icons/sliders";
 import { PluginMark } from "../../marks";
 import {
+  ChoiceMenu,
   FilterChips,
   FilterControl,
   FindBox,
   IconPill,
   MenuAction,
-  MenuHeading,
   MenuLine,
-  MenuPick,
   MenuSegment,
   MenuSwitch,
   Toolbar,
   ToolButton,
   ToolMenu,
+  type ChoiceMenuEntry,
   type FindMatch,
 } from "../desk";
 import { usePopoverMenu } from "../use-popover-menu";
@@ -104,36 +104,27 @@ function GroupByControl({
   readonly marks: Readonly<Record<string, ReactNode>>;
   readonly onChange: (groupBy: string) => void;
 }): JSX.Element {
-  const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const name = groupings.find((grouping) => grouping.kind === groupBy)?.caption ?? "Project";
-  const renderChoice = (id: string, label: string, mark: ReactNode): JSX.Element => {
-    const isOn = id === groupBy;
-    return (
-      <MenuPick
-        key={id}
-        itemProps={buildItemProps(`group:${id}`, { checked: isOn })}
-        kind="choice"
-        name={label}
-        isOn={isOn}
-        mark={mark}
-        onPick={() => {
-          close();
-          onChange(id);
-        }}
-      />
-    );
-  };
+  const entries: readonly ChoiceMenuEntry<string>[] = [
+    { id: PROJECT_FACET_ID, name: "Project", mark: MARKS[PROJECT_FACET_ID] },
+    ...(groupings.length > 0 ? [{ heading: FROM_YOUR_SOURCES_HEADING }] : []),
+    ...groupings.map((grouping) => ({
+      id: grouping.kind,
+      name: grouping.caption,
+      mark: marks[grouping.kind],
+    })),
+  ];
   return (
-    <>
-      <ToolButton {...triggerProps} caption="Group by" name={name} hasMenu isFilled={false} />
-      <ToolMenu menuProps={menuProps} label="Group by" edge="start">
-        {renderChoice(PROJECT_FACET_ID, "Project", MARKS[PROJECT_FACET_ID])}
-        {groupings.length > 0 && <MenuHeading>{FROM_YOUR_SOURCES_HEADING}</MenuHeading>}
-        {groupings.map((grouping) =>
-          renderChoice(grouping.kind, grouping.caption, marks[grouping.kind]),
-        )}
-      </ToolMenu>
-    </>
+    <ChoiceMenu
+      label="Group by"
+      edge="start"
+      entries={entries}
+      chosenId={groupBy}
+      onPick={onChange}
+      renderTrigger={(triggerProps) => (
+        <ToolButton {...triggerProps} caption="Group by" name={name} hasMenu isFilled={false} />
+      )}
+    />
   );
 }
 

@@ -4,15 +4,8 @@
  * shaped the slots when the entity was observed, so a new plugin draws with no
  * code here.
  */
-import type { EntityFact, EntityReason, EntityStatus, InboxCard } from "@hercule/contract";
+import type { EntityFact, EntityReason, EntityRecord, EntityStatus } from "@hercule/contract";
 import { readEntityPluginId, formatTargetDate } from "../desk/entity-words";
-
-/**
- * What every read of an entity holds: an Inbox card without its side. A card
- * and the open entity both are one, so what a card draws is worked out from
- * this alone.
- */
-export type CardRecord = Omit<InboxCard, "side">;
 
 /** A fact in words. A client makes the plural of a count and the sign of a delta, with a real minus sign. */
 export type CardFact =
@@ -73,7 +66,7 @@ const describeFact = (fact: EntityFact): CardFact => {
  * what requests are. Anything with a tone, or with no person to name, keeps
  * its full sentence.
  */
-const decideSentence = (card: CardRecord): CardFace["sentence"] => {
+const decideSentence = (card: EntityRecord): CardFace["sentence"] => {
   const { reason } = card;
   if (reason === undefined) return undefined;
   if (card.card === "compact" && reason.tone === "plain" && card.person !== undefined) {
@@ -82,13 +75,13 @@ const decideSentence = (card: CardRecord): CardFace["sentence"] => {
   return { text: reason.say, tone: reason.tone };
 };
 
-const decideWhose = (card: CardRecord): string | undefined => {
+const decideWhose = (card: EntityRecord): string | undefined => {
   if (card.card === "compact") return card.yours ? "yours" : undefined;
   return card.person === undefined || card.yours ? undefined : `${card.person.name}'s`;
 };
 
 /** Returns what the generic card draws for `card`. */
-export const decideCardFace = (card: CardRecord): CardFace => {
+export const decideCardFace = (card: EntityRecord): CardFace => {
   const status =
     card.status !== undefined && (card.card === "rich" || card.status.norm !== true)
       ? card.status

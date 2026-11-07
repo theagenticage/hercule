@@ -149,6 +149,16 @@ describe("groupBoardByContext", () => {
     expect(groupBoardByContext(board, "acme/project")[0]?.name).toBe("A project you cannot open");
   });
 
+  it("starts the plain name with an for a noun that starts with a vowel", () => {
+    const board = buildContextBoard(
+      [buildCard("a", { contextRefs: ["acme:project:secret"] })],
+      [{ ref: "acme:project:secret", kind: "acme/project", noun: "Initiative", restricted: true }],
+    );
+    expect(groupBoardByContext(board, "acme/project")[0]?.name).toBe(
+      "An initiative you cannot open",
+    );
+  });
+
   it("makes no lane for a kind the board cannot group by", () => {
     const board = buildContextBoard([buildCard("a")], PLACES, []);
     expect(groupBoardByContext(board, "acme/project")).toEqual([]);

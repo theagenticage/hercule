@@ -16,6 +16,8 @@ const FULL = {
   sourceUpdatedAt: "2026-11-01T09:00:00Z",
 };
 
+const PARTIAL = { kind: "issue", ref: "acme:issue:acme/shop/3", title: "Parent", partial: true };
+
 /** Returns the full observation without the named fields. */
 const without = (...names: ReadonlyArray<string>) =>
   Object.fromEntries(Object.entries(FULL).filter(([name]) => !names.includes(name)));
@@ -45,5 +47,21 @@ describe("EntityObservation", () => {
     const long = "x".repeat(MAX_ENTITY_FIELD_TEXT_LENGTH + 1);
     expect(isAccepted({ ...FULL, fields: { author: long } })).toBe(false);
     expect(isAccepted({ ...FULL, ref: "not a ref" })).toBe(false);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "file:///etc/passwd",
+    "data:text/html,x",
+    "//example.test/a",
+    "not a link",
+  ])("refuses the url %s, in a full and in a partial observation", (url) => {
+    expect(isAccepted({ ...FULL, url })).toBe(false);
+    expect(isAccepted({ ...PARTIAL, url })).toBe(false);
+  });
+
+  it("accepts an http and an https url", () => {
+    expect(isAccepted({ ...FULL, url: "http://example.test/a" })).toBe(true);
+    expect(isAccepted({ ...PARTIAL, url: "https://example.test/a" })).toBe(true);
   });
 });

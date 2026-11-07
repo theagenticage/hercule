@@ -112,13 +112,9 @@ describe("the Work board's key", () => {
     }
   });
 
-  it("is read again, with the Inbox's reads only, by a derived task push, which leaves Tracking and Your work alone", () => {
+  it("is the only read of a derived task push, which leaves the Inbox, Tracking and Your work alone", () => {
     for (const ids of [[], ["t1"]]) {
-      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [
-        queryKeys.workBoard(),
-        queryKeys.inbox(),
-        queryKeys.inboxCount(),
-      ]);
+      assert.deepStrictEqual(buildQueryKeys("task", ids, undefined, true), [queryKeys.workBoard()]);
     }
   });
 });
@@ -189,14 +185,14 @@ describe("the Inbox's and the entities' keys", () => {
       ],
     },
     {
-      name: "a derived task push reads the board and the Inbox only, which a busy agent causes every second",
+      name: "a derived task push reads the board only, which a busy agent causes every second",
       topic: "task",
       derived: true,
       ids: ["t1"],
-      keys: [queryKeys.workBoard(), ...inboxKeys],
+      keys: [queryKeys.workBoard()],
     },
     {
-      name: "a connection push naming ids reads the entity panes and the board",
+      name: "a connection push naming ids reads the entity panes, the board and the suggestions",
       topic: "connection",
       ids: ["c1"],
       keys: [
@@ -207,6 +203,7 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
       ],
     },
     {
@@ -221,10 +218,11 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
       ],
     },
     {
-      name: "a plugin push reads the entity panes and the board",
+      name: "a plugin push reads the entity panes, the board and the suggestions",
       topic: "plugin",
       ids: ["github"],
       keys: [
@@ -235,6 +233,7 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.workBoard(),
+        queryKeys.entitySuggestions(),
       ],
     },
   ];

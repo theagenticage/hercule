@@ -9,34 +9,26 @@ import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { filterItems, type Filter } from "../desk/filter";
 import type { OpenPlaceRow } from "../desk/relation-rows";
 import { buildInboxFacets } from "./facets";
-import { listInboxGroupings } from "./groupings";
 import {
   buildPlaceContext,
   compareSurfaceHeads,
   findHomeName,
-  findSurfaceHeads,
-  HOME_GROUPING,
   listNearPlaces,
+  refreshSurfaceHead,
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
+import {
+  compareOldestFirst,
+  placeInboxCards,
+  type PlacementChoice,
+  type RequestsOrder,
+  type VisitPlacement,
+} from "./visit-placement";
 
-/** How the Requests column is ordered. */
-export type RequestsOrder = "oldest" | "mine" | "place";
-
-/** What the user chose on the toolbar, and what the visit holds in place. */
-export interface InboxView {
-  /** `HOME_GROUPING`, `STATUS_GROUPING`, or the word of a kind of place. See `listInboxGroupings`. */
-  readonly grouping: string;
+/** What the user chose on the toolbar. Where cards lie is held apart, by `placeInboxCards`. */
+export interface InboxView extends PlacementChoice {
   readonly filter: Filter;
-  readonly requestsOrder: RequestsOrder;
-  /**
-   * The side each card was first seen on during this visit, by card id, from
-   * `holdInboxSides`. A card that gets a Task keeps its place until the next
-   * visit: the server already puts it under "With someone else", the page does
-   * not.
-   */
-  readonly heldSides: ReadonlyMap<string, InboxSide>;
 }
 
 /** A card on a surface. */
@@ -80,83 +72,71 @@ export interface ColumnState {
 
 /** The whole page, ready to map over. */
 export interface InboxLayout {
+  /** What the visit holds after this read. Pass it as `held` to the layout of the next read. */
+  readonly placement: VisitPlacement;
   /** The grouping in use. It is `HOME_GROUPING` when the one asked for has no place left to offer. */
   readonly grouping: string;
   readonly ongoing: ColumnState & { readonly surfaces: readonly InboxSurface[] };
   readonly requests: ColumnState & {
     readonly groups: readonly RequestGroup[];
     /**
-     * How many of the shown requests wait on the user: those with no live
-     * Task. A card just taken keeps its place for the visit, but no longer
-     * counts. It is the small number beside the heading.
+     * How many requests wait on the user, as the controller counts them: all
+     * of them, not only the cards the page holds, and not those a filter
+     * leaves. A card just taken keeps its place for the visit, but the
+     * controller no longer counts it. It is the small number beside the heading.
      */
     readonly awaitingCount: number;
   };
   readonly withSomeoneElse: { readonly rows: readonly ColumnRow[] };
 }
 
-/**
- * Returns `held` with the side of each card it does not hold yet, taken from
- * the read. The screen calls it on every read of a visit and keeps the result,
- * so a card that gets a Task after the page drew it stays on its side.
- */
-export const holdInboxSides = (
-  held: ReadonlyMap<string, InboxSide>,
-  inbox: Inbox,
-): ReadonlyMap<string, InboxSide> => {
-  const next = new Map(held);
-  for (const card of inbox.cards) {
-    if (!next.has(card.id)) next.set(card.id, card.side);
-  }
-  return next;
-};
-
-/** Sorts oldest first by when the card was first observed, then by id, so the order never depends on activity. */
-const compareOldestFirst = (a: InboxCard, b: InboxCard): number =>
-  Date.parse(a.firstObservedAt) - Date.parse(b.firstObservedAt) || a.id.localeCompare(b.id, "en");
-
 const buildColumnRow = (card: InboxCard, context: PlaceContext): ColumnRow => ({
   card,
   homeName: findHomeName(card, context),
 });
 
-const ELSEWHERE = "Elsewhere";
-
-/** Returns the Requests groups. Cards come oldest first. */
+/** Returns the Requests groups. Cards come oldest first; a group lies where `placement` ranks its key. */
 const groupRequests = (
   cards: readonly InboxCard[],
   order: RequestsOrder,
   context: PlaceContext,
+  placement: VisitPlacement,
 ): readonly RequestGroup[] => {
-  if (cards.length === 0) return [];
-  const rows = cards.map((card) => buildColumnRow(card, context));
-  if (order === "oldest") return [{ rows }];
-  if (order === "mine") {
-    return [
-      { rows: [...rows.filter((row) => row.card.yours), ...rows.filter((row) => !row.card.yours)] },
-    ];
+  const byKey = new Map<string, ColumnRow[]>();
+  for (const card of cards) {
+    const key = placement.groupOfCard.get(card.id) ?? "";
+    const rows = byKey.get(key);
+    const row = buildColumnRow(card, context);
+    if (rows === undefined) byKey.set(key, [row]);
+    else rows.push(row);
   }
-  const byPlace = new Map<string, ColumnRow[]>();
-  for (const row of rows) {
-    const label = row.homeName ?? ELSEWHERE;
-    byPlace.set(label, [...(byPlace.get(label) ?? []), row]);
-  }
-  return [...byPlace]
-    .sort(([a], [b]) => (a === ELSEWHERE ? 1 : b === ELSEWHERE ? -1 : a.localeCompare(b, "en")))
-    .map(([label, grouped]) => ({ label, rows: grouped }));
+  const groups = [...byKey]
+    .sort(
+      ([a], [b]) =>
+        (placement.groupRank.get(a) ?? Infinity) - (placement.groupRank.get(b) ?? Infinity) ||
+        a.localeCompare(b, "en"),
+    )
+    .map(([key, rows]) => ({ key, rows }));
+  // Only "by place" draws a label for each group; the other orders draw one list.
+  return order === "place"
+    ? groups.map(({ key, rows }) => ({ label: key, rows }))
+    : groups.length === 0
+      ? []
+      : [{ rows: groups.flatMap((group) => group.rows) }];
 };
 
 const buildSurfaces = (
   cards: readonly InboxCard[],
-  grouping: string,
   context: PlaceContext,
+  placement: VisitPlacement,
 ): readonly InboxSurface[] => {
   const surfaces = new Map<
     string,
     { head: SurfaceHead; full: OngoingRow[]; pointers: OngoingRow[] }
   >();
   for (const card of cards) {
-    const [first, ...others] = findSurfaceHeads(card, context, grouping);
+    const heads = placement.headsOfCard.get(card.id) ?? [];
+    const [first, ...others] = heads.map((head) => refreshSurfaceHead(head, context));
     if (first === undefined) continue;
     for (const [index, head] of [first, ...others].entries()) {
       const surface = surfaces.get(head.id) ?? { head, full: [], pointers: [] };
@@ -166,7 +146,11 @@ const buildSurfaces = (
     }
   }
   return [...surfaces.values()]
-    .sort((a, b) => compareSurfaceHeads(a.head, b.head))
+    .sort(
+      (a, b) =>
+        (placement.surfaceRank.get(a.head.id) ?? Infinity) -
+          (placement.surfaceRank.get(b.head.id) ?? Infinity) || compareSurfaceHeads(a.head, b.head),
+    )
     .map(({ head, full, pointers }) => ({ head, rows: [...full, ...pointers] }));
 };
 
@@ -176,45 +160,49 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
 });
 
 /**
- * Lays out the page for one read of the Inbox.
+ * Lays out the page for one read of the Inbox. `held` is what the visit has
+ * held from the reads before this one (`NO_PLACEMENT` at the start of a visit).
+ * It says which column, surface and group each card lies in, and in what
+ * order the surfaces and groups come. The read decides what is written in
+ * them, and where a card that is new to the visit lies (`placeInboxCards`).
+ * The layout returns what the visit holds now, as `placement`, to pass as `held`
+ * with the next read.
  *
- * - A card lies in the column of its held side (`view.heldSides`), else of the
- *   side the server put it on.
- * - Ongoing: a surface for each place, grouped as `view.grouping` says. Places
- *   in trouble come first, then by `targetDate`, then by name. On a surface the
- *   cards come oldest first, then the pointers to cards drawn in full elsewhere.
+ * - A card lies in the column of its held side.
+ * - Ongoing: a surface for each place, grouped as the held grouping says.
+ *   The surfaces keep the order they joined the visit in, and so does each
+ *   card's surface. On a surface the cards come oldest first, then the
+ *   pointers to cards drawn in full elsewhere.
  * - Requests: oldest first, or yours first (still oldest first within each
- *   half), or by place with a label for each place, ordered by name.
+ *   half), or by place with a label for each place. Each request keeps its group.
  * - With someone else: oldest first, at the foot of the column.
  * - The filter narrows all three. It changes no number the sidebar shows.
- *
- * A grouping that `listInboxGroupings` no longer offers falls back
- * to `HOME_GROUPING`, and the layout says so in `grouping`.
  */
-export const layOutInbox = (inbox: Inbox, view: InboxView): InboxLayout => {
-  const grouping = listInboxGroupings(inbox).some((offered) => offered.id === view.grouping)
-    ? view.grouping
-    : HOME_GROUPING;
+export const layOutInbox = (inbox: Inbox, view: InboxView, held: VisitPlacement): InboxLayout => {
   const context = buildPlaceContext(inbox);
-  const sideOf = (card: InboxCard): InboxSide => view.heldSides.get(card.id) ?? card.side;
+  const placement = placeInboxCards(inbox, view, held, context);
   const oldestFirst = [...inbox.cards].sort(compareOldestFirst);
   const shown = new Set(
     filterItems(oldestFirst, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
   );
   const cardsOn = (side: InboxSide, onlyShown: boolean): InboxCard[] =>
-    oldestFirst.filter((card) => sideOf(card) === side && (!onlyShown || shown.has(card.id)));
+    oldestFirst.filter(
+      (card) =>
+        (placement.sides.get(card.id) ?? card.side) === side && (!onlyShown || shown.has(card.id)),
+    );
 
   const ongoing = cardsOn("ongoing", true);
   const requests = cardsOn("requests", true);
   return {
-    grouping,
+    placement,
+    grouping: placement.grouping,
     ongoing: {
-      surfaces: buildSurfaces(ongoing, grouping, context),
+      surfaces: buildSurfaces(ongoing, context, placement),
       ...decideColumnState(ongoing.length, cardsOn("ongoing", false).length),
     },
     requests: {
-      groups: groupRequests(requests, view.requestsOrder, context),
-      awaitingCount: requests.filter((card) => card.taskId === undefined).length,
+      groups: groupRequests(requests, view.requestsOrder, context, placement),
+      awaitingCount: inbox.counts.requests,
       ...decideColumnState(requests.length, cardsOn("requests", false).length),
     },
     withSomeoneElse: {

@@ -17,7 +17,7 @@
  * concerns the user, and whether each account can read it, is worked out on
  * read from the observations of every Connection (see `entity-records.ts`).
  */
-import * as Data from "effect/Data";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -41,7 +41,7 @@ import {
   type TaskStage,
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
-import { connectionRepository } from "../connections";
+import { connectionRepository, INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { LIVE_TASK_LINKS_SQL, taskRepository } from "../tasks";
 import {
@@ -53,7 +53,7 @@ import {
   deriveYours,
   isReadableNow,
   isWorkRecord,
-  readStoredStatus,
+  parseStoredStatus,
   SHARED_COLUMNS,
   unionConcerns,
   VISIBLE_COLUMNS,
@@ -64,7 +64,14 @@ import {
   type SharedColumn,
   type SharedValues,
 } from "./entity-records";
-import { relationClaimRepository, WALK_STATE_ROOM, type AncestorWalk } from "./relation-claims";
+import {
+  CURRENT_PART_OF_SQL,
+  relationClaimRepository,
+  WALK_DOWN_SQL,
+  WALK_STATE_ROOM,
+  WALK_UP_SQL,
+  type AncestorWalk,
+} from "./relation-claims";
 import type { EntitySlots } from "./slots";
 
 export type { EntityEnvironment } from "./entity-records";
@@ -99,11 +106,6 @@ export const buildIncompleteWarning = (kind: string): string =>
 export const buildConflictWarning = (kind: string): string =>
   `The Inbox ignored a relationship of ${kind} that would make a thing part of itself.`;
 
-/** The inventory a plugin reported is not valid, for a reason only the repository can see. */
-export class InvalidInventory extends Data.TaggedError("InvalidInventory")<{
-  readonly message: string;
-}> {}
-
 /**
  * One thing a Connection read, ready to store. `kind` is the qualified kind.
  * `slots` come from `renderEntitySlots` for a full observation. For a partial
@@ -120,10 +122,12 @@ export interface ObservedEntity {
 
 /** What a write changed, so the service can announce it after the commit. All lists are sorted, each ref once. */
 export interface EntityWriteChanges {
-  /** Refs whose card or place now shows something different, access and concerns included. A freshness change alone is not here. */
+  /**
+   * Refs whose card or place now shows something different, access and
+   * concerns included, and refs whose current or refused claims changed. A
+   * freshness change alone is not here.
+   */
   readonly changedRefs: ReadonlyArray<string>;
-  /** Refs whose current claims or refused claims changed. */
-  readonly relationChangedRefs: ReadonlyArray<string>;
   /** Live Tasks that link a changed ref or anything below one, before or after the write. */
   readonly affectedTaskIds: ReadonlyArray<string>;
   /** Every claim of the reported refs that the graph refused, such as a loop. */
@@ -253,6 +257,7 @@ const buildIncomingValues = ({
     facts: work === undefined ? null : JSON.stringify(work.facts),
     repository: toJson(observation.repository),
     reason: toJson(work?.reason),
+    concern_reasons: toJson(work?.concernReasons),
     progress: toJson(observation.progress),
     target_date: observation.targetDate ?? null,
     waiting_since: observation.waitingSince ?? null,
@@ -345,6 +350,7 @@ const decideSharedWrite = (input: {
 /** What the observation row of one Connection and ref should hold after a read. */
 interface ObservationValues {
   readonly concerns: string;
+  readonly listed: number;
   readonly ownedByYou: number;
   readonly lastRefreshedAt: string | null;
 }
@@ -353,10 +359,10 @@ interface ObservationValues {
  * Works out what a successful read of a ref sets on the Connection's own
  * observation row, or returns undefined when the row already holds it.
  *
- * - A full observation of an inventory sets the concerns it reports and the
- *   ownership (`false` when it does not say). A refresh and a partial
- *   observation never change the concerns, and keep the ownership unless a
- *   full refresh says.
+ * - A full observation of an inventory sets the concerns it reports, marks the
+ *   ref as listed by the Connection, and sets the ownership (`false` when it
+ *   does not say). A refresh and a partial observation never change the
+ *   concerns or the listing, and keep the ownership unless a full refresh says.
  * - Every successful read sets `access` to `ok` and clears the retry state.
  * - The time of the read is stamped unless the read is part of a complete
  *   inventory, whose one scan row dates all of its members.
@@ -370,11 +376,13 @@ const planObservationWrite = (input: {
 }): ObservationValues | undefined => {
   const { existing, observation, isInventory } = input;
   const keptConcerns = existing?.concerns ?? "[]";
+  const keptListed = existing?.listed ?? 0;
   const keptOwnership = existing?.owned_by_you ?? 0;
   const values: ObservationValues =
     observation.partial === true
       ? {
           concerns: keptConcerns,
+          listed: keptListed,
           ownedByYou: keptOwnership,
           lastRefreshedAt: existing?.last_refreshed_at ?? null,
         }
@@ -382,6 +390,7 @@ const planObservationWrite = (input: {
           concerns: isInventory
             ? JSON.stringify([...new Set(observation.concerns)].sort())
             : keptConcerns,
+          listed: isInventory ? 1 : keptListed,
           ownedByYou:
             observation.ownedByYou === undefined && !isInventory
               ? keptOwnership
@@ -394,6 +403,7 @@ const planObservationWrite = (input: {
   const unchanged =
     existing !== undefined &&
     existing.concerns === stamped.concerns &&
+    existing.listed === stamped.listed &&
     existing.owned_by_you === stamped.ownedByYou &&
     existing.last_refreshed_at === stamped.lastRefreshedAt &&
     existing.access === "ok" &&
@@ -443,14 +453,54 @@ const buildVisibleStateProjector = (environment: EntityEnvironment) => {
     ]);
 };
 
-const sorted = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
+/** The most refs one statement lists as bound values, well under SQLite's limit on bound values. */
+const MAX_REFS_PER_STATEMENT = 1000;
+
+/** Returns the refs sorted, each once. */
+const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
+
+/**
+ * The refs that concern the user: some Connection's inventory reports a
+ * concern for them. The Inbox, the Add sheet's suggestions, the refs Hercule
+ * wants read and the daily sweep all start from this one query, so a thing
+ * that is on the Inbox is also kept, read and suggested.
+ *
+ * Open signals join here: a ref with an open signal also concerns the user,
+ * and adding it with one more `UNION` puts it on all four.
+ */
+const CONCERNED_REFS_SQL = `SELECT ref FROM external_entity_observations WHERE concerns <> '[]'`;
+
+/**
+ * The one definition of what is on the Inbox, as common table expressions.
+ * An entity is eligible when it is a full record of a work kind, is not
+ * dismissed, and concerns the user or has a live Task. Access, lifecycle,
+ * stale and whether the kind is still declared do not matter: a card keeps
+ * its last known facts.
+ *
+ * `eligible` carries the active Task (`task_id`), the `side` the server puts
+ * the card on, and whether a live Task follows the ref. The Inbox, its counts
+ * and the Add sheet's suggestions all read it, so they cannot disagree.
+ */
+const ELIGIBLE_ENTITIES_SQL = `
+  live_links AS MATERIALIZED (${LIVE_TASK_LINKS_SQL}),
+  eligible AS (
+    SELECT e.*, l.task_id AS task_id,
+      CASE WHEN l.task_id IS NOT NULL THEN 'with-someone-else'
+           WHEN e.card = 'compact' THEN 'requests'
+           ELSE 'ongoing' END AS side,
+      EXISTS (SELECT 1 FROM live_links f WHERE f.ref = e.ref AND f.following = 1) AS following
+    FROM external_entities e
+    LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
+    WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
+      AND (e.ref IN (${CONCERNED_REFS_SQL}) OR l.task_id IS NOT NULL)
+  )`;
 
 /**
  * The SQL that finds the refs Hercule wants a Connection to read, as a list of
  * common table expressions. `wanted` holds:
  *
- * - the roots: refs some Connection reports a concern for, and refs a live
- *   Task links;
+ * - the roots: refs that concern the user (`CONCERNED_REFS_SQL`), and refs a
+ *   live Task links;
  * - everything above the roots, up to `MAX_CONTEXT_DEPTH` levels of
  *   `part-of`, even where no record exists. A thing contributes its first
  *   `MAX_CONTEXT_PARENTS` parents (by ref), and the walk stops after
@@ -460,16 +510,14 @@ const sorted = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sor
  *   peer gets one read for its title and access, and its own links and parents
  *   are never followed.
  *
- * Slice 5 adds the refs with an open signal to the roots, at the marked spot.
  * The sweep that prunes observations asks this same question, so what is
  * wanted is decided once.
  */
 const WANTED_REFS_SQL = `
   wanted_roots(ref) AS (
-    SELECT ref FROM external_entity_observations WHERE concerns <> '[]'
+    ${CONCERNED_REFS_SQL}
     UNION
     SELECT ref FROM (${LIVE_TASK_LINKS_SQL})
-    -- Slice 5: UNION the refs with an open signal here.
   ),
   wanted_context(ref, depth) AS (
     SELECT ref, 0 FROM wanted_roots
@@ -479,17 +527,19 @@ const WANTED_REFS_SQL = `
       json_each((
         SELECT json_group_array(to_ref) FROM (
           SELECT DISTINCT c.to_ref FROM external_entity_relation_claims c
-          WHERE c.from_ref = w.ref AND c.relation = 'part-of' AND c.state = 'current'
+          WHERE c.from_ref = w.ref AND ${CURRENT_PART_OF_SQL}
           ORDER BY c.to_ref LIMIT ${MAX_CONTEXT_PARENTS})
       )) parent
     WHERE w.depth < ${MAX_CONTEXT_DEPTH}
     LIMIT (SELECT COUNT(*) FROM wanted_roots) + ${WALK_STATE_ROOM}
   ),
   wanted_peers(ref) AS (
-    SELECT c.to_ref FROM wanted_roots r JOIN external_entity_relation_claims c
+    -- CROSS JOIN pins the order, so each root seeks its claims by index
+    -- instead of SQLite scanning every current claim.
+    SELECT c.to_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
       ON c.from_ref = r.ref AND c.relation = 'linked' AND c.state = 'current'
     UNION
-    SELECT c.from_ref FROM wanted_roots r JOIN external_entity_relation_claims c
+    SELECT c.from_ref FROM wanted_roots r CROSS JOIN external_entity_relation_claims c
       ON c.to_ref = r.ref AND c.relation = 'linked' AND c.state = 'current'
   ),
   wanted(ref) AS (
@@ -530,7 +580,8 @@ const make = Effect.gen(function* () {
             SELECT e.*, EXISTS (
               SELECT 1 FROM connections c JOIN external_entity_observations o
                 ON o.connection_id = c.id AND o.ref = e.ref
-              WHERE c.id = e.presented_by AND c.status IN ('connected', 'error')
+              WHERE c.id = e.presented_by
+                AND c.status IN (SELECT value FROM json_each(${refsJson(INGESTING_STATUSES)}))
                 AND c.plugin_id IN (SELECT value FROM json_each(${refsJson(environment.activePluginIds)}))
                 AND o.access = 'ok') AS presenter_usable
             FROM external_entities e
@@ -563,7 +614,7 @@ const make = Effect.gen(function* () {
       ? Effect.succeed(new Map())
       : Effect.map(
           sql<ObservationRow>`
-            SELECT o.ref, o.connection_id, o.concerns, o.owned_by_you, o.access,
+            SELECT o.ref, o.connection_id, o.concerns, o.listed, o.owned_by_you, o.access,
                    o.last_refreshed_at, o.next_attempt_at, o.attempt_count,
                    c.status AS connection_status, c.plugin_id, s.last_complete_at
             FROM external_entity_observations o
@@ -584,18 +635,24 @@ const make = Effect.gen(function* () {
       return { entities, observations };
     });
 
-  /** Returns the ids of the live Tasks that link any of `refs`. */
+  /**
+   * Returns the ids of the live Tasks that link any of `refs`, sorted. The
+   * refs go in as a plain `IN` list, in chunks, because SQLite then seeks the
+   * Task links by ref instead of numbering every live link.
+   */
   const listTaskIdsLinkedTo = (
     refs: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed([])
-      : Effect.map(
+    Effect.map(
+      Effect.forEach(
+        Arr.chunksOf(refs, MAX_REFS_PER_STATEMENT),
+        (chunk) =>
           sql<{ readonly task_id: Uint8Array }>`
-            SELECT DISTINCT task_id FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
-            WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          (rows) => rows.map((row) => uuidToString(row.task_id)),
-        );
+          SELECT DISTINCT task_id FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
+          WHERE ref IN ${sql.in(chunk)}`,
+      ),
+      (chunks) => sortUnique(chunks.flat().map((row) => uuidToString(row.task_id))),
+    );
 
   // -------------------------------------------------------------------------
   // Writing observations and entities
@@ -608,11 +665,12 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.asVoid(sql`
       INSERT INTO external_entity_observations
-        (ref, connection_id, concerns, owned_by_you, access, last_refreshed_at, attempt_count, next_attempt_at)
-      VALUES (${ref}, ${connectionId}, ${values.concerns}, ${values.ownedByYou}, 'ok',
+        (ref, connection_id, concerns, listed, owned_by_you, access, last_refreshed_at, attempt_count, next_attempt_at)
+      VALUES (${ref}, ${connectionId}, ${values.concerns}, ${values.listed}, ${values.ownedByYou}, 'ok',
               ${values.lastRefreshedAt}, 0, NULL)
       ON CONFLICT (ref, connection_id) DO UPDATE SET
-        concerns = excluded.concerns, owned_by_you = excluded.owned_by_you, access = 'ok',
+        concerns = excluded.concerns, listed = excluded.listed,
+        owned_by_you = excluded.owned_by_you, access = 'ok',
         last_refreshed_at = excluded.last_refreshed_at, attempt_count = 0, next_attempt_at = NULL`);
 
   const insertEntity = (
@@ -677,20 +735,14 @@ const make = Effect.gen(function* () {
       const observed = [...input.observed].sort((a, b) =>
         a.observation.ref.localeCompare(b.observation.ref),
       );
-      const touched = sorted([...observed.map((entry) => entry.observation.ref), ...input.leaving]);
+      const touched = sortUnique([
+        ...observed.map((entry) => entry.observation.ref),
+        ...input.leaving,
+      ]);
 
       const before = yield* readRefStates(touched, environment);
       const activeTasks = yield* tasks.listActiveTasksForRefs(touched);
       const refsWithTask = new Set(activeTasks.map((task) => task.ref));
-
-      // The Tasks below a ref this call may move, found before the write
-      // takes an edge away.
-      const reparentable = observed.flatMap((entry) =>
-        entry.observation.relations === undefined ? [] : [entry.observation.ref],
-      );
-      const tasksBelowBefore = yield* Effect.flatMap(claims.listRefsBelow(reparentable), (below) =>
-        listTaskIdsLinkedTo(below),
-      );
 
       for (const entry of observed) {
         const ref = entry.observation.ref;
@@ -708,7 +760,7 @@ const make = Effect.gen(function* () {
       }
       for (const ref of input.leaving) {
         yield* sql`
-          UPDATE external_entity_observations SET concerns = '[]'
+          UPDATE external_entity_observations SET concerns = '[]', listed = 0
           WHERE ref = ${ref} AND connection_id = ${connection}`;
       }
 
@@ -726,7 +778,7 @@ const make = Effect.gen(function* () {
 
       const relationChanged = new Set<string>();
       const conflicts: Array<EntityConflict> = [];
-      const written = yield* claims.applySourceRelations({
+      const { writes, refsBelowBefore } = yield* claims.applySourceRelations({
         connectionId: input.connectionId,
         entries: observed.flatMap(({ observation }) =>
           observation.relations === undefined
@@ -741,7 +793,7 @@ const make = Effect.gen(function* () {
         ),
         now,
       });
-      for (const [ref, relationWrite] of written) {
+      for (const [ref, relationWrite] of writes) {
         if (relationWrite.changed) relationChanged.add(ref);
         conflicts.push(...relationWrite.conflicts);
       }
@@ -770,7 +822,7 @@ const make = Effect.gen(function* () {
       }
 
       const projectVisibleState = buildVisibleStateProjector(environment);
-      const changedRefs = sorted([
+      const changedRefs = sortUnique([
         ...touched.filter(
           (ref) =>
             projectVisibleState(before.entities.get(ref), before.observations.get(ref) ?? []) !==
@@ -781,14 +833,14 @@ const make = Effect.gen(function* () {
         ),
         ...relationChanged,
       ]);
-      const relationChangedRefs = sorted(relationChanged);
+      // The Tasks below a ref whose claims changed are found with the walk
+      // from before the claims were removed, as well as the walk from now.
       const affectedTaskIds = yield* listAffectedTaskIds({
         changedRefs,
-        tasksBelowBefore: relationChangedRefs.length > 0 ? tasksBelowBefore : [],
+        refsBelowBefore,
       });
       return {
         changedRefs,
-        relationChangedRefs,
         affectedTaskIds,
         conflicts: conflicts.sort(
           (a, b) =>
@@ -801,34 +853,18 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the live Tasks that link a changed ref or anything below one,
-   * together with `tasksBelowBefore`, the ones found before the write took
-   * a claim away. One walk down, never cut.
+   * and the live Tasks that linked anything in `refsBelowBefore`, the refs
+   * found below the changed claims before a claim was removed. One walk down,
+   * never cut.
    */
   const listAffectedTaskIds = (input: {
     readonly changedRefs: ReadonlyArray<string>;
-    readonly tasksBelowBefore: ReadonlyArray<string>;
+    readonly refsBelowBefore: ReadonlyArray<string>;
   }): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
-      if (input.changedRefs.length === 0) return sorted(input.tasksBelowBefore);
       const below = yield* claims.listRefsBelow(input.changedRefs);
-      const after = yield* listTaskIdsLinkedTo(below);
-      return sorted([...input.tasksBelowBefore, ...after]);
+      return yield* listTaskIdsLinkedTo([...input.refsBelowBefore, ...below]);
     });
-
-  /** Rejects an inventory that names a ref twice, because the write reads each ref's state once. */
-  const assertRefsAreUnique = (
-    observed: ReadonlyArray<ObservedEntity>,
-  ): Effect.Effect<void, InvalidInventory> => {
-    const refs = observed.map((entry) => entry.observation.ref);
-    const duplicate = refs.find((ref, index) => refs.indexOf(ref) !== index);
-    return duplicate === undefined
-      ? Effect.void
-      : Effect.fail(
-          new InvalidInventory({
-            message: `The observations name ${duplicate} more than once. Report each thing once.`,
-          }),
-        );
-  };
 
   // -------------------------------------------------------------------------
   // The Connection's warning
@@ -898,35 +934,6 @@ const make = Effect.gen(function* () {
   // The Inbox
   // -------------------------------------------------------------------------
 
-  /**
-   * The one definition of what is on the Inbox, as common table expressions.
-   * An entity is eligible when it is a full record of a work kind, is not
-   * dismissed, and has a current concern, a live Task or (slice 5) an open
-   * signal. Access, lifecycle, stale and whether the kind is still declared
-   * do not matter: a card keeps its last known facts.
-   *
-   * `eligible` carries the active Task (`task_id`), the `side` the server puts
-   * the card on, and whether a live Task follows the ref. `queryInbox` and
-   * `countInbox` both read it, so the numbers and the cards cannot disagree.
-   */
-  const buildEligibleEntities = sql`
-    live_links AS MATERIALIZED (${sql.literal(LIVE_TASK_LINKS_SQL)}),
-    eligible AS (
-      SELECT e.*, l.task_id AS task_id,
-        CASE WHEN l.task_id IS NOT NULL THEN 'with-someone-else'
-             WHEN e.card = 'compact' THEN 'requests'
-             ELSE 'ongoing' END AS side,
-        EXISTS (SELECT 1 FROM live_links f WHERE f.ref = e.ref AND f.following = 1) AS following
-      FROM external_entities e
-      LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
-      WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
-        AND (EXISTS (SELECT 1 FROM external_entity_observations o
-                     WHERE o.ref = e.ref AND o.concerns <> '[]')
-             OR l.task_id IS NOT NULL
-             -- Slice 5: OR the ref has an open signal.
-             )
-    )`;
-
   /** Counts the eligible entities. Reads every one, so the counts include cards past `MAX_INBOX_CARDS`. */
   const readInboxCounts: Effect.Effect<InboxCounts, SqlError> = Effect.map(
     sql<{
@@ -935,7 +942,7 @@ const make = Effect.gen(function* () {
       readonly with_someone_else: number;
       readonly newest_arrival: number;
     }>`
-      WITH ${buildEligibleEntities}
+      WITH ${sql.literal(ELIGIBLE_ENTITIES_SQL)}
       SELECT
         COUNT(*) FILTER (WHERE task_id IS NULL AND pace = 'fast') AS on_the_clock,
         COUNT(*) FILTER (WHERE side = 'requests') AS requests,
@@ -951,11 +958,7 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  /**
-   * Reads the entities above `refs` that a reply carries as places, and
-   * everything needed to draw them. The records and the observations of the
-   * refs themselves come in the same two statements.
-   */
+  /** Reads the record and the observations of each of `refs`, in two statements. */
   const readRecords = (refs: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const records = yield* readEntities(refs);
@@ -965,6 +968,38 @@ const make = Effect.gen(function* () {
 
   const sortPlaces = (places: ReadonlyArray<EntityPlace>) =>
     [...places].sort((a, b) => a.ref.localeCompare(b.ref));
+
+  /**
+   * Sets an entity aside or brings it back, and stamps `actor` as the one who
+   * did. Returns none when there is no such entity, else its ref and whether
+   * the call changed it (asking for the state it already has changes nothing).
+   */
+  const setDismissal = (
+    id: string,
+    change: { readonly dismissed: boolean; readonly actor: string; readonly now: string },
+  ): Effect.Effect<Option.Option<{ readonly ref: string; readonly changed: boolean }>, SqlError> =>
+    Effect.gen(function* () {
+      const key = uuidFromString(id);
+      const found = yield* sql<{ readonly ref: string; readonly dismissed_at: string | null }>`
+        SELECT ref, dismissed_at FROM external_entities WHERE id = ${key}`;
+      const row = found[0];
+      if (row === undefined) return Option.none();
+      if ((row.dismissed_at !== null) === change.dismissed) {
+        return Option.some({ ref: row.ref, changed: false });
+      }
+      const { actor, now } = change;
+      yield* change.dismissed
+        ? sql`
+            UPDATE external_entities
+            SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
+            WHERE id = ${key}`
+        : sql`
+            UPDATE external_entities
+            SET dismissed_at = NULL, dismissed_by = NULL, restored_at = ${now},
+                restored_by = ${actor}, updated_at = ${now}
+            WHERE id = ${key}`;
+      return Option.some({ ref: row.ref, changed: true });
+    });
 
   return {
     /**
@@ -983,9 +1018,8 @@ const make = Effect.gen(function* () {
      * - A thing that unchanged data reports again writes nothing but the scan
      *   row.
      *
-     * Fails with `InvalidInventory` when a ref appears twice, before writing
-     * anything. The caller has validated the rest and runs this in a
-     * transaction.
+     * The caller has validated the observations (each ref appears once) and
+     * runs this in a transaction.
      */
     reconcile: (input: {
       readonly connectionId: string;
@@ -995,9 +1029,8 @@ const make = Effect.gen(function* () {
       /** The actor of the plugin, `plugin:<id>`, stamped on the scan row. */
       readonly actor: string;
       readonly environment: EntityEnvironment;
-    }): Effect.Effect<EntityWriteChanges, SqlError | InvalidInventory> =>
+    }): Effect.Effect<EntityWriteChanges, SqlError> =>
       Effect.gen(function* () {
-        yield* assertRefsAreUnique(input.observed);
         const { now } = input.environment;
         const reported = new Set(input.observed.map((entry) => entry.observation.ref));
         const listed = input.complete
@@ -1005,7 +1038,7 @@ const make = Effect.gen(function* () {
               SELECT o.ref FROM external_entity_observations o
               JOIN external_entities e ON e.ref = o.ref
               WHERE o.connection_id = ${uuidFromString(input.connectionId)}
-                AND e.kind = ${input.kind} AND o.concerns <> '[]'`
+                AND e.kind = ${input.kind} AND o.listed = 1`
           : [];
         const written = yield* writeObservedEntities({
           connectionId: input.connectionId,
@@ -1044,15 +1077,14 @@ const make = Effect.gen(function* () {
      * ownership. Nothing is emptied, no scan row is written, and no arrival
      * number is taken, because the concerns do not change.
      *
-     * Fails with `InvalidInventory` when a ref appears twice.
+     * The caller has validated the observations (each ref appears once).
      */
     refresh: (input: {
       readonly connectionId: string;
       readonly observed: ReadonlyArray<ObservedEntity>;
       readonly environment: EntityEnvironment;
-    }): Effect.Effect<EntityWriteChanges, SqlError | InvalidInventory> =>
+    }): Effect.Effect<EntityWriteChanges, SqlError> =>
       Effect.gen(function* () {
-        yield* assertRefsAreUnique(input.observed);
         const written = yield* writeObservedEntities({
           ...input,
           isInventory: false,
@@ -1102,8 +1134,7 @@ const make = Effect.gen(function* () {
         const changedRefs = changed ? [ref] : [];
         return {
           changedRefs,
-          relationChangedRefs: [],
-          affectedTaskIds: yield* listAffectedTaskIds({ changedRefs, tasksBelowBefore: [] }),
+          affectedTaskIds: yield* listAffectedTaskIds({ changedRefs, refsBelowBefore: [] }),
           conflicts: [],
           warning: undefined,
           warningChanged: false,
@@ -1115,8 +1146,8 @@ const make = Effect.gen(function* () {
      * Connection should read now, and marks them as tried.
      *
      * Wanted refs are what is described by `WANTED_REFS_SQL`, without the
-     * ones this Connection already lists in its inventory (its next complete
-     * scan reads those). A ref backing off after a failure waits. Order: refs
+     * ones this Connection's inventory already lists, places included (its
+     * next scan reads those). A ref backing off after a failure waits. Order: refs
      * never tried first, then the oldest attempt, then the ref, so every
      * wanted ref gets its turn however many there are.
      *
@@ -1139,7 +1170,7 @@ const make = Effect.gen(function* () {
           LEFT JOIN external_entity_observations o
             ON o.ref = w.ref AND o.connection_id = ${connection}
           WHERE substr(w.ref, 1, ${input.refPrefix.length}) = ${input.refPrefix}
-            AND (o.concerns IS NULL OR o.concerns = '[]')
+            AND (o.listed IS NULL OR o.listed = 0)
             AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= ${input.now})
           ORDER BY o.last_attempted_at IS NOT NULL, o.last_attempted_at, w.ref
           LIMIT ${input.limit}`;
@@ -1168,7 +1199,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const counts = yield* readInboxCounts;
         const found = yield* sql<EligibleRow>`
-          WITH ${buildEligibleEntities}
+          WITH ${sql.literal(ELIGIBLE_ENTITIES_SQL)}
           SELECT * FROM eligible ORDER BY first_observed_at, id LIMIT ${MAX_INBOX_CARDS + 1}`;
         const truncated = found.length > MAX_INBOX_CARDS;
         const rows = truncated ? found.slice(0, MAX_INBOX_CARDS) : found;
@@ -1192,7 +1223,7 @@ const make = Effect.gen(function* () {
             else leftOutRefs.add(ref);
           }
         }
-        const placeRefs = sorted(keptPlaceRefs);
+        const placeRefs = sortUnique(keptPlaceRefs);
         const { records: placeRecords, observations } = yield* readRecords([
           ...rows.map((row) => row.ref),
           ...placeRefs,
@@ -1279,8 +1310,8 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const { walk, environment } = input;
-        const aboveRefs = sorted([...walk.ancestors.values()].flat());
-        const wantedRefs = sorted([...input.linkedRefs, ...aboveRefs]);
+        const aboveRefs = sortUnique([...walk.ancestors.values()].flat());
+        const wantedRefs = sortUnique([...input.linkedRefs, ...aboveRefs]);
         const placeRefs = wantedRefs.slice(0, MAX_BOARD_PLACES);
         const { records, observations } = yield* readRecords(placeRefs);
         return {
@@ -1334,7 +1365,7 @@ const make = Effect.gen(function* () {
         const linkedRefs = related.links
           .slice(0, MAX_ENTITY_LINKS)
           .map((link) => (link.fromRef === row.ref ? link.toRef : link.fromRef));
-        const placeRefs = sorted([...ancestors, ...linkedRefs]);
+        const placeRefs = sortUnique([...ancestors, ...linkedRefs]);
         const { records, observations } = yield* readRecords([row.ref, ...placeRefs]);
         const activePluginIds = new Set(environment.activePluginIds);
 
@@ -1390,7 +1421,7 @@ const make = Effect.gen(function* () {
         const row = found[0];
         if (row === undefined) return Option.none();
         const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
-        const { status, stage } = readStoredStatus(row.status as string | null);
+        const { status, stage } = parseStoredStatus(row.status as string | null);
         const repository =
           row.repository === null
             ? undefined
@@ -1411,9 +1442,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the things that concern the user and have no live Task, for the
-     * sheet that lists suggestions: full records of a work kind, not
-     * dismissed, with a current concern from some Connection. Oldest first by
+     * Returns the things on the Inbox that have no live Task, for the sheet
+     * that lists suggestions: the eligible entities of `ELIGIBLE_ENTITIES_SQL`
+     * that no live Task links. Oldest first by
      * `(firstObservedAt, id)`, at most `limit`. When `contextRef` is given,
      * only the things below it are considered, at any depth of current
      * `part-of` claims. The walk down and the limit run in the same statement,
@@ -1434,22 +1465,16 @@ const make = Effect.gen(function* () {
           readonly url: string;
           readonly status: string | null;
         }>`
-          WITH RECURSIVE live_links AS MATERIALIZED (${sql.literal(LIVE_TASK_LINKS_SQL)}),
-          below(ref) AS (
+          WITH RECURSIVE ${sql.literal(ELIGIBLE_ENTITIES_SQL)},
+          walk_start(ref) AS (
             SELECT value FROM json_each(${refsJson(input.contextRef === undefined ? [] : [input.contextRef])})
-            UNION
-            SELECT c.from_ref
-            FROM external_entity_relation_claims c JOIN below b ON c.to_ref = b.ref
-            WHERE c.relation = 'part-of' AND c.state = 'current'
-          )
+          ),
+          ${sql.literal(WALK_DOWN_SQL)}
           SELECT e.ref, e.kind, e.noun, e.identifier, e.title, e.url, e.status
-          FROM external_entities e
-          WHERE e.completeness = 'full' AND e.pace IN ('fast', 'slow') AND e.dismissed_at IS NULL
-            AND EXISTS (SELECT 1 FROM external_entity_observations o
-                        WHERE o.ref = e.ref AND o.concerns <> '[]')
-            AND NOT EXISTS (SELECT 1 FROM live_links l WHERE l.ref = e.ref)
+          FROM eligible e
+          WHERE e.task_id IS NULL
             AND (${input.contextRef === undefined ? 1 : 0} = 1
-                 OR e.ref IN (SELECT ref FROM below))
+                 OR e.ref IN (SELECT ref FROM walk_down))
           ORDER BY e.first_observed_at, e.id
           LIMIT ${input.limit}`,
         (rows) =>
@@ -1460,7 +1485,7 @@ const make = Effect.gen(function* () {
             identifier: row.identifier,
             title: row.title,
             url: row.url,
-            status: readStoredStatus(row.status).status,
+            status: parseStoredStatus(row.status).status,
           })),
       ),
 
@@ -1497,42 +1522,20 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<
       Option.Option<{ readonly ref: string; readonly changed: boolean }>,
       SqlError
-    > =>
-      Effect.gen(function* () {
-        const key = uuidFromString(id);
-        const found = yield* sql<{ readonly ref: string; readonly dismissed_at: string | null }>`
-          SELECT ref, dismissed_at FROM external_entities WHERE id = ${key}`;
-        const row = found[0];
-        if (row === undefined) return Option.none();
-        if (row.dismissed_at !== null) return Option.some({ ref: row.ref, changed: false });
-        yield* sql`
-          UPDATE external_entities
-          SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
-          WHERE id = ${key}`;
-        return Option.some({ ref: row.ref, changed: true });
-      }),
+    > => setDismissal(id, { dismissed: true, actor, now }),
 
-    /** Undoes `dismiss`. Returns none when there is no such entity, else its ref and whether this call changed it. */
+    /**
+     * Undoes `dismiss`, and records who did. Returns none when there is no such
+     * entity, else its ref and whether this call changed it.
+     */
     restore: (
       id: string,
+      actor: string,
       now: string,
     ): Effect.Effect<
       Option.Option<{ readonly ref: string; readonly changed: boolean }>,
       SqlError
-    > =>
-      Effect.gen(function* () {
-        const key = uuidFromString(id);
-        const found = yield* sql<{ readonly ref: string; readonly dismissed_at: string | null }>`
-          SELECT ref, dismissed_at FROM external_entities WHERE id = ${key}`;
-        const row = found[0];
-        if (row === undefined) return Option.none();
-        if (row.dismissed_at === null) return Option.some({ ref: row.ref, changed: false });
-        yield* sql`
-          UPDATE external_entities
-          SET dismissed_at = NULL, dismissed_by = NULL, updated_at = ${now}
-          WHERE id = ${key}`;
-        return Option.some({ ref: row.ref, changed: true });
-      }),
+    > => setDismissal(id, { dismissed: false, actor, now }),
 
     /**
      * Deletes the records nothing needs, and returns how many it deleted. The
@@ -1553,20 +1556,17 @@ const make = Effect.gen(function* () {
         const entities = yield* sql`
           WITH RECURSIVE
           roots(ref) AS (
-            SELECT ref FROM external_entity_observations WHERE concerns <> '[]'
+            ${sql.literal(CONCERNED_REFS_SQL)}
             UNION
+            -- Every Task link, finished Tasks too: a finished Task still names
+            -- its things. (Wanted refs count only live Tasks.)
             SELECT ref FROM task_entity_links
-            -- Slice 5: UNION the refs with an open signal here.
           ),
-          reached(ref) AS (
-            SELECT ref FROM roots
-            UNION
-            SELECT c.to_ref FROM reached r JOIN external_entity_relation_claims c
-              ON c.from_ref = r.ref AND c.relation = 'part-of' AND c.state = 'current'
-          )
+          walk_start(ref) AS (SELECT ref FROM roots),
+          ${sql.literal(WALK_UP_SQL)}
           DELETE FROM external_entities
           WHERE updated_at < ${cutoff} AND dismissed_at IS NULL
-            AND ref NOT IN (SELECT ref FROM reached)
+            AND ref NOT IN (SELECT ref FROM walk_up)
           RETURNING id`;
         const observations = yield* sql`
           WITH RECURSIVE ${sql.literal(WANTED_REFS_SQL)}

@@ -10,11 +10,12 @@
 import type {
   EntityConcern,
   EntityPlace,
+  EntityRecord,
   EntityStatus,
-  InboxCard,
   TaskStage,
 } from "@hercule/contract";
 import { ENTITY_CONCERNS } from "@hercule/contract";
+import { INGESTING_STATUSES } from "../connections";
 import { uuidToString } from "../db";
 
 /**
@@ -42,6 +43,7 @@ export const SHARED_COLUMNS = [
   "facts",
   "repository",
   "reason",
+  "concern_reasons",
   "progress",
   "target_date",
   "waiting_since",
@@ -90,6 +92,8 @@ export interface ObservationRow {
   readonly ref: string;
   readonly connection_id: Uint8Array;
   readonly concerns: string;
+  /** 1 when the latest inventory of this Connection lists the ref, whether or not it concerns the user. */
+  readonly listed: number;
   readonly owned_by_you: number;
   readonly access: EntityAccess;
   readonly last_refreshed_at: string | null;
@@ -108,19 +112,16 @@ export interface EntityEnvironment {
   readonly activePluginIds: ReadonlyArray<string>;
 }
 
-/** The statuses of a Connection that can poll. */
-const POLLING_STATUSES: ReadonlyArray<string> = ["connected", "error"];
-
 /** Checks that the Connection of an observation can poll now. */
 export const canPoll = (
   observation: ObservationRow,
   activePluginIds: ReadonlySet<string>,
 ): boolean =>
-  POLLING_STATUSES.includes(observation.connection_status) &&
+  INGESTING_STATUSES.some((status) => status === observation.connection_status) &&
   activePluginIds.has(observation.plugin_id);
 
-/** Returns the concerns the Connection of one observation reports. */
-export const readConcerns = (observation: ObservationRow): ReadonlyArray<EntityConcern> =>
+/** Parses the concerns the Connection of one observation reports. */
+export const parseConcerns = (observation: ObservationRow): ReadonlyArray<EntityConcern> =>
   JSON.parse(observation.concerns) as ReadonlyArray<EntityConcern>;
 
 /**
@@ -131,7 +132,7 @@ export const readConcerns = (observation: ObservationRow): ReadonlyArray<EntityC
 export const unionConcerns = (
   observations: ReadonlyArray<ObservationRow>,
 ): ReadonlyArray<EntityConcern> => {
-  const reported = new Set(observations.flatMap(readConcerns));
+  const reported = new Set(observations.flatMap(parseConcerns));
   return ENTITY_CONCERNS.filter((concern) => reported.has(concern));
 };
 
@@ -171,7 +172,7 @@ export const deriveObservedAt = (
 ): string => {
   const times = observations.flatMap((observation) => [
     ...(observation.last_refreshed_at === null ? [] : [observation.last_refreshed_at]),
-    ...(observation.last_complete_at !== null && readConcerns(observation).length > 0
+    ...(observation.last_complete_at !== null && parseConcerns(observation).length > 0
       ? [observation.last_complete_at]
       : []),
   ]);
@@ -220,7 +221,7 @@ const readJson = <T>(text: string | number | null): T | undefined =>
  * and the Task stage that was stored beside it, which the API never shows.
  * Both are undefined for a row with no status.
  */
-export const readStoredStatus = (
+export const parseStoredStatus = (
   text: string | null,
 ): { readonly status: EntityStatus | undefined; readonly stage: TaskStage | undefined } => {
   const stored = readJson<EntityStatus & { readonly stage?: TaskStage }>(text);
@@ -239,7 +240,7 @@ export const buildPlace = (
   observations: ReadonlyArray<ObservationRow>,
 ): EntityPlace => {
   const restricted = deriveAccess(observations) !== "ok";
-  const status = restricted ? undefined : readStoredStatus(row.status as string | null).status;
+  const status = restricted ? undefined : parseStoredStatus(row.status as string | null).status;
   const progress = restricted
     ? undefined
     : readJson<NonNullable<EntityPlace["progress"]>>(row.progress);
@@ -279,13 +280,20 @@ export interface EntityReadInputs {
  * an identifier, a URL and a lifecycle: the service refuses an observation of
  * a work kind that lacks one, so the casts below only name what is stored.
  */
-export const buildEntityFields = (input: EntityReadInputs): Omit<InboxCard, "side"> => {
+export const buildEntityFields = (input: EntityReadInputs): EntityRecord => {
   const { row, observations } = input;
   const concerns = unionConcerns(observations);
-  const status = readStoredStatus(row.status as string | null).status;
-  const person = readJson<NonNullable<InboxCard["person"]>>(row.person);
-  const repository = readJson<NonNullable<InboxCard["repository"]>>(row.repository);
-  const reason = readJson<NonNullable<InboxCard["reason"]>>(row.reason);
+  const status = parseStoredStatus(row.status as string | null).status;
+  const person = readJson<NonNullable<EntityRecord["person"]>>(row.person);
+  const repository = readJson<NonNullable<EntityRecord["repository"]>>(row.repository);
+  // The sentence the source named, else the one the kind declares for the
+  // first concern that has one.
+  const concernReasons = readJson<Record<string, NonNullable<EntityRecord["reason"]>>>(
+    row.concern_reasons,
+  );
+  const reason =
+    readJson<NonNullable<EntityRecord["reason"]>>(row.reason) ??
+    concerns.map((concern) => concernReasons?.[concern]).find((found) => found !== undefined);
   const waitingSince = (row.waiting_since as string | null) ?? row.concerned_since;
   return {
     id: uuidToString(row.id),
@@ -304,7 +312,7 @@ export const buildEntityFields = (input: EntityReadInputs): Omit<InboxCard, "sid
     lifecycle: row.lifecycle as "open" | "completed" | "abandoned",
     ...(person === undefined ? {} : { person }),
     yours: deriveYours(observations),
-    facts: readJson<InboxCard["facts"]>(row.facts) ?? [],
+    facts: readJson<EntityRecord["facts"]>(row.facts) ?? [],
     ...(repository === undefined ? {} : { repository }),
     concerns: input.following ? [...concerns, "following"] : concerns,
     access: deriveAccess(observations),

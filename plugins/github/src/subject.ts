@@ -78,6 +78,15 @@ export const parseItemRef = (
   };
 };
 
+/**
+ * Splits `owner/repo` into its owner and its repository name. A string with
+ * no slash has an empty name.
+ */
+export const splitRepoName = (repo: string): { readonly owner: string; readonly name: string } => {
+  const [owner = "", name = ""] = repo.split("/");
+  return { owner, name };
+};
+
 /** The External Ref of a repository, with the `owner/repo` captured. */
 const REPO_REF_PATTERN = new RegExp(`^github:repo:(${REPO_NAME_PATTERN})$`);
 

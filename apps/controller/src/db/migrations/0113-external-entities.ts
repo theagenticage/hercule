@@ -13,12 +13,18 @@
  *   `home` and `section` are copies of the kind's qualified words of the same
  *   names. `concerned_since` is when the entity last went from having no
  *   concern to having one: the start of the wait a card shows when the source
- *   does not report `waitingSince`.
+ *   does not report `waitingSince`. `concern_reasons` holds the sentence the
+ *   kind declares for each concern it has a reason for, rendered for this
+ *   thing, so a card can say why it concerns the user when the source names no
+ *   reason of its own. `restored_at` and `restored_by` record who last brought
+ *   a dismissed card back, as `dismissed_by` records who set it aside.
  * - `external_entity_observations` has one row per ref and Connection: the
- *   concerns that Connection reported and whether it can read the ref. It
- *   keys on the ref, not on the entity, so a Connection can hold state for a
- *   ref that has no entity yet. Deleting a Connection deletes its rows, and
- *   sets `presented_by` to NULL on the entities it presented.
+ *   concerns that Connection reported, whether its latest inventory lists the
+ *   ref (`listed`, true also for a place that concerns no one), and whether it
+ *   can read the ref. It keys on the ref, not on the entity, so a Connection
+ *   can hold state for a ref that has no entity yet. Deleting a Connection
+ *   deletes its rows, and sets `presented_by` to NULL on the entities it
+ *   presented.
  * - `external_entity_scans` has one row per Connection and kind: when its
  *   inventory was last read completely.
  * - `external_entity_ingest_warnings` has one row per Connection and kind
@@ -73,6 +79,7 @@ export default Effect.gen(function* () {
       facts TEXT CHECK (facts IS NULL OR json_valid(facts)),
       repository TEXT CHECK (repository IS NULL OR json_valid(repository)),
       reason TEXT CHECK (reason IS NULL OR json_valid(reason)),
+      concern_reasons TEXT CHECK (concern_reasons IS NULL OR json_valid(concern_reasons)),
       progress TEXT CHECK (progress IS NULL OR json_valid(progress)),
       target_date TEXT,
       waiting_since TEXT,
@@ -84,6 +91,8 @@ export default Effect.gen(function* () {
       presented_by BLOB REFERENCES connections (id) ON DELETE SET NULL,
       dismissed_at TEXT,
       dismissed_by TEXT,
+      restored_at TEXT,
+      restored_by TEXT,
       arrival_sequence INTEGER
     )
   `;
@@ -101,6 +110,7 @@ export default Effect.gen(function* () {
       ref TEXT NOT NULL,
       connection_id BLOB NOT NULL REFERENCES connections (id) ON DELETE CASCADE,
       concerns TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(concerns)),
+      listed INTEGER NOT NULL DEFAULT 0,
       owned_by_you INTEGER NOT NULL DEFAULT 0,
       access TEXT NOT NULL DEFAULT 'ok' CHECK (access IN ('ok', 'inaccessible', 'deleted')),
       last_attempted_at TEXT,
@@ -114,7 +124,13 @@ export default Effect.gen(function* () {
   // complete inventory then leaves out.
   yield* sql`
     CREATE INDEX external_entity_observations_listed
-      ON external_entity_observations (connection_id, ref) WHERE concerns <> '[]'
+      ON external_entity_observations (connection_id, ref) WHERE listed = 1
+  `;
+  // Serves the question "which refs concern the user", asked by the Inbox,
+  // the wanted refs and the prune.
+  yield* sql`
+    CREATE INDEX external_entity_observations_concerned
+      ON external_entity_observations (ref) WHERE concerns <> '[]'
   `;
   // Serves the durable rotation of `listWanted`: never tried first, then the
   // oldest attempt.

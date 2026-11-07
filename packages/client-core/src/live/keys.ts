@@ -477,7 +477,7 @@ const INBOX_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.inbox(), queryKeys.in
  * created, finished, deleted or linked from anywhere, the CLI included,
  * changes both and writes no entity row, so no `externalEntity` push comes.
  * A `derived` push never changes a Task's links or liveness, so it does not
- * read these.
+ * read these, nor the Inbox's.
  */
 const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
   queryKeys.externalEntity(),
@@ -486,14 +486,16 @@ const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
 
 /**
  * The entity reads a `connection` or `plugin` push makes stale: every entity
- * pane (`kindAvailable`, `stale`, the context's completeness) and the Work
- * board (the same facts on its cards, and the claims a deleted Connection
- * takes with it). These changes write no entity row, so no `externalEntity`
- * push comes.
+ * pane (`kindAvailable`, `stale`, the context's completeness), the Work board
+ * (the same facts on its cards, and the claims a deleted Connection takes
+ * with it) and the Add sheet's suggestions (a deleted Connection takes the
+ * claims that made a thing concern the user, so it stops qualifying). These
+ * changes write no entity row, so no `externalEntity` push comes.
  */
 const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
   queryKeys.externalEntity(),
   queryKeys.workBoard(),
+  queryKeys.entitySuggestions(),
 ];
 
 /**
@@ -506,14 +508,15 @@ const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
  *
  * `derived` is the push's flag of the same name, which only a `task` push can
  * carry. It means a Task's card changed because of its sessions or runs, and
- * no field of the Task record changed. Only the Work board draws that, and
- * the Inbox, which sorts a card by whether its Task is live, so the push
- * reads those and the Inbox's count. Tracking already follows `run` pushes,
- * and the list, the Task's record and Your work read fields of the Task
- * itself, so reading them again would fetch the same data. A busy agent
- * causes this push every second, and the shell keeps Tracking, Your work and
- * the Inbox's count active on every screen, which is why the count is a small
- * read.
+ * no field of the Task record changed. Only the Work board draws that, so
+ * the push reads the board and nothing else. The Inbox sorts a card by
+ * whether its Task is live and has it, which only a plain `task` push (a
+ * Task created, edited, finished or deleted) or an `externalEntity` push can
+ * change. Tracking already follows `run` pushes, and the list, the Task's
+ * record and Your work read fields of the Task itself, so reading them again
+ * would fetch the same data. A busy agent causes this push every second, and
+ * the shell keeps the Inbox's count active on every screen, so reading it here
+ * would cost a request a second for nothing.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
@@ -524,7 +527,7 @@ export const buildQueryKeys = (
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
   if (topic === "task") {
-    if (derived === true) return [queryKeys.workBoard(), ...INBOX_KEYS];
+    if (derived === true) return [queryKeys.workBoard()];
     return ids.length === 0
       ? [
           queryKeys.tasks(),

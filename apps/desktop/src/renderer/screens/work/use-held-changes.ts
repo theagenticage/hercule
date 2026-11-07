@@ -17,7 +17,9 @@ const findChangeTarget = (
   if (change.kind === "failure") return scroller.querySelector(`[data-card-id="${change.cardId}"]`);
   if (card === undefined) return null;
   const laneId = chooseLaneId(card, new Set(projects.map((project) => project.id)));
-  return scroller.querySelector(`[data-lane-id="${laneId}"][data-stage="${card.stage}"]`);
+  return scroller.querySelector(
+    `[data-lane-id="${CSS.escape(laneId)}"][data-stage="${card.stage}"]`,
+  );
 };
 
 /** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */

@@ -42,7 +42,9 @@ const SWAP_RISE = 6;
  * again turns it round with its speed; Reduce motion keeps it at its
  * destination and fades it. The moves in it take no pointer for the first
  * 420ms, and focus goes to the sheet, not to a move. It writes `--sheet-progress`
- * (0 to 1) on itself for the caller's stylesheet.
+ * (0 to 1) on itself for the caller's stylesheet. The value is reset to 0 on
+ * the clip: the paper and `head` can use it, but the words inside the sheet
+ * cannot, because passing it down would restyle them on every frame.
  *
  * The sheet is drawn in a portal on the page, so it lies over the sidebar
  * too.

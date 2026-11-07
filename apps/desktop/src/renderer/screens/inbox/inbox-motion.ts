@@ -6,6 +6,7 @@
  * motion the kernel turns it into a short fade.
  */
 import {
+  ensureOverlayLayer,
   findBody,
   flipByKey,
   ghostElement,
@@ -81,17 +82,9 @@ export const flipInboxPage = (
  * page and under the toolbar, with the page's own edges, so a copy is
  * clipped where the page is.
  */
-const findCopyLayer = (scroller: HTMLElement): HTMLElement | null => {
+const ensureCopyLayer = (scroller: HTMLElement): HTMLElement | null => {
   const desk = scroller.closest<HTMLElement>(".inbox-desk");
-  if (desk === null) return null;
-  let layer = desk.querySelector<HTMLElement>(":scope > .inbox-copies");
-  if (layer === null) {
-    layer = document.createElement("div");
-    layer.className = "inbox-copies";
-    layer.setAttribute("aria-hidden", "true");
-    desk.append(layer);
-  }
-  return layer;
+  return desk === null ? null : ensureOverlayLayer(desk, "inbox-copies");
 };
 
 /**
@@ -104,7 +97,7 @@ export const copyCardToStepAside = (
   scroller: HTMLElement,
   element: HTMLElement,
 ): HTMLElement | null => {
-  const layer = findCopyLayer(scroller);
+  const layer = ensureCopyLayer(scroller);
   if (layer === null) return null;
   const copy = ghostElement(element, layer);
   // The copy is not a card: keys, the pointer and the motion key must never find it.

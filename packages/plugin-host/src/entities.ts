@@ -15,17 +15,14 @@ import type { ConnectionUnavailable } from "./connections";
 import type { AuthError, IngestConnection } from "./contributions";
 import { ContributionWord, QualifiedContributionId } from "./contributions";
 import {
-  EXTERNAL_REF_PATTERN,
+  buildBoundedString,
+  ExternalRef,
   ISO_TIMESTAMP_PATTERN,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
   MAX_EXTERNAL_REF_LENGTH,
 } from "./limits";
 import type { PluginError } from "./plugin";
-
-/** A string of at least `min` and at most `max` characters. */
-const bounded = (min: number, max: number) =>
-  Schema.String.check(Schema.isMinLength(min), Schema.isMaxLength(max));
 
 /** An array of at most `max` items. */
 const atMost = <S extends Schema.Top>(item: S, max: number) =>
@@ -63,8 +60,8 @@ export const ENTITY_STATUS_SHAPES = [
  */
 export const ENTITY_STATUS_TONES = ["quiet", "active", "attention", "good", "bad"] as const;
 
-/** The forms a fact is shown in. */
-export const ENTITY_FACT_FORMS = ["delta", "count", "word", "date", "money", "bars"] as const;
+/** The forms a fact is shown in that need no unit. The other form, `count`, names its unit. */
+const UNITLESS_FACT_FORMS = ["delta", "word", "date", "money", "bars"] as const;
 
 /** The tones of the sentence a card shows for a reason. */
 export const ENTITY_REASON_TONES = ["plain", "attention", "good", "bad"] as const;
@@ -90,6 +87,9 @@ const MAX_DECLARED_TEXT_LENGTH = 120;
 /** The longest name of a field or a status key in a declaration. */
 const MAX_DECLARED_NAME_LENGTH = 64;
 
+/** The most facts a card shows. */
+export const MAX_ENTITY_FACTS = 3;
+
 /** The most statuses, and the most reasons, one kind declares. */
 const MAX_DECLARED_ENTRIES = 32;
 
@@ -104,7 +104,7 @@ const TEMPLATE_PLACEHOLDER_SOURCE = "\\{[A-Za-z0-9_-]+\\}";
  * `#{number}` or `{messages} messages`. It holds at least one `{field}`
  * placeholder, so it names something, and every brace is part of a placeholder.
  */
-export const EntityTemplate = bounded(1, MAX_DECLARED_NAME_LENGTH).check(
+export const EntityTemplate = buildBoundedString(1, MAX_DECLARED_NAME_LENGTH).check(
   Schema.isPattern(new RegExp(TEMPLATE_PLACEHOLDER_SOURCE), {
     message: "A template needs at least one {field} placeholder, such as #{number}.",
   }),
@@ -122,19 +122,28 @@ export const EntityTemplate = bounded(1, MAX_DECLARED_NAME_LENGTH).check(
 export const EntityStatusDeclaration = Schema.Struct({
   shape: Schema.Literals(ENTITY_STATUS_SHAPES),
   tone: Schema.Literals(ENTITY_STATUS_TONES),
-  word: bounded(1, MAX_DECLARED_TEXT_LENGTH),
+  word: buildBoundedString(1, MAX_DECLARED_TEXT_LENGTH),
   norm: Schema.optionalKey(Schema.Boolean),
   stage: Schema.optionalKey(Schema.Literals(ENTITY_STATUS_STAGES)),
 });
 
 export type EntityStatusDeclaration = Schema.Schema.Type<typeof EntityStatusDeclaration>;
 
-/** One fact a card shows, read from the observation's field named `field`. */
-export const EntityFactDeclaration = Schema.Struct({
-  field: bounded(1, MAX_DECLARED_NAME_LENGTH),
-  form: Schema.Literals(ENTITY_FACT_FORMS),
-  unit: Schema.optionalKey(bounded(1, 20)),
-});
+/**
+ * One fact a card shows, read from the observation's field named `field`. A
+ * `count` fact names its `unit`, such as "file"; the other forms have none.
+ */
+export const EntityFactDeclaration = Schema.Union([
+  Schema.Struct({
+    field: buildBoundedString(1, MAX_DECLARED_NAME_LENGTH),
+    form: Schema.Literal("count"),
+    unit: buildBoundedString(1, 20),
+  }),
+  Schema.Struct({
+    field: buildBoundedString(1, MAX_DECLARED_NAME_LENGTH),
+    form: Schema.Literals(UNITLESS_FACT_FORMS),
+  }),
+]);
 
 export type EntityFactDeclaration = Schema.Schema.Type<typeof EntityFactDeclaration>;
 
@@ -143,7 +152,7 @@ export type EntityFactDeclaration = Schema.Schema.Type<typeof EntityFactDeclarat
  * `{value}`, which the core fills in.
  */
 export const EntityReasonDeclaration = Schema.Struct({
-  say: bounded(1, MAX_DECLARED_TEXT_LENGTH),
+  say: buildBoundedString(1, MAX_DECLARED_TEXT_LENGTH),
   tone: Schema.Literals(ENTITY_REASON_TONES),
 });
 
@@ -154,37 +163,36 @@ const kindFields = {
   /** How much room it deserves. Left out means rich. A context kind has no card. */
   card: Schema.optionalKey(Schema.Literals(["rich", "compact"])),
   /** The word the UI uses for one, such as "Pull request". */
-  noun: bounded(1, 40),
+  noun: buildBoundedString(1, 40),
   /** Every ref of this kind starts with it, such as `github:pr:`. */
-  refPrefix: bounded(1, 64),
+  refPrefix: buildBoundedString(1, 64),
   /** `fast` has a clock, `slow` has none, and `context` is a place with no card. */
   pace: Schema.Literals(["fast", "slow", "context"]),
   /** Hours before a wait counts as due. */
   patience: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   /** The identifier a card shows, built from the observation's fields: `#{number}`. */
   identifier: EntityTemplate,
-  /** The field that names it, for a line that points at it when the identifier is not a name. */
-  reference: Schema.optionalKey(bounded(1, MAX_DECLARED_NAME_LENGTH)),
   /** The field holding the person it is about. Null for a kind with no person. */
-  person: Schema.NullOr(bounded(1, MAX_DECLARED_NAME_LENGTH)),
+  person: Schema.NullOr(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
   /** The field that says it is yours. Null for a kind that is never yours. */
-  owner: Schema.NullOr(bounded(1, MAX_DECLARED_NAME_LENGTH)),
+  owner: Schema.NullOr(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
   /** What first run says this kind brings. */
-  connect: Schema.optionalKey(bounded(1, MAX_DECLARED_TEXT_LENGTH)),
+  connect: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_TEXT_LENGTH)),
   /** Present when this kind can be a lane or a filter, with the words for it: "Linear project". */
-  groupable: Schema.optionalKey(Schema.Struct({ caption: bounded(1, 60) })),
+  groupable: Schema.optionalKey(Schema.Struct({ caption: buildBoundedString(1, 60) })),
   /** Each status a thing of this kind can have, by key. Null for a kind with no status. */
   status: Schema.NullOr(
-    Schema.Record(bounded(1, MAX_DECLARED_NAME_LENGTH), EntityStatusDeclaration).check(
+    Schema.Record(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH), EntityStatusDeclaration).check(
       Schema.isMaxProperties(MAX_DECLARED_ENTRIES),
     ),
   ),
-  /** At most three facts a card shows. */
-  facts: atMost(EntityFactDeclaration, 3),
+  /** At most `MAX_ENTITY_FACTS` facts a card shows. */
+  facts: atMost(EntityFactDeclaration, MAX_ENTITY_FACTS),
   /** The sentence a card shows for each reason it is here, by reason key. */
-  reasons: Schema.Record(bounded(1, MAX_DECLARED_NAME_LENGTH), EntityReasonDeclaration).check(
-    Schema.isMaxProperties(MAX_DECLARED_ENTRIES),
-  ),
+  reasons: Schema.Record(
+    buildBoundedString(1, MAX_DECLARED_NAME_LENGTH),
+    EntityReasonDeclaration,
+  ).check(Schema.isMaxProperties(MAX_DECLARED_ENTRIES)),
 };
 
 /**
@@ -248,11 +256,11 @@ export const MAX_ENTITY_FIELD_TEXT_LENGTH = 512;
 export const MAX_ENTITY_RELATIONS = 64;
 
 /**
- * The concerns of the public API. A plugin may not report `following`, because
+ * Why a thing concerns the user, as the public API spells it. A plugin may not report `following`, because
  * only the core sets it. The schema lists it anyway: the core refuses it with a
  * message that explains why, which a schema error could not.
  */
-const ENTITY_CONCERN_WORDS = [
+export const ENTITY_CONCERNS = [
   "assigned",
   "opened",
   "review-requested",
@@ -260,20 +268,15 @@ const ENTITY_CONCERN_WORDS = [
   "following",
 ] as const;
 
-const ExternalRef = Schema.String.check(
-  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  Schema.isPattern(EXTERNAL_REF_PATTERN),
-);
-
 const Timestamp = Schema.String.check(Schema.isPattern(ISO_TIMESTAMP_PATTERN));
 
 /** Where the work lands, and where it comes from. `head` differs from `target` for a fork. */
 export const EntityRepository = Schema.Struct({
-  target: Schema.Struct({ remote: bounded(1, MAX_EXTERNAL_REF_LENGTH) }),
+  target: Schema.Struct({ remote: buildBoundedString(1, MAX_EXTERNAL_REF_LENGTH) }),
   head: Schema.optionalKey(
     Schema.Struct({
-      remote: bounded(1, MAX_EXTERNAL_REF_LENGTH),
-      branch: bounded(1, MAX_EXTERNAL_REF_LENGTH),
+      remote: buildBoundedString(1, MAX_EXTERNAL_REF_LENGTH),
+      branch: buildBoundedString(1, MAX_EXTERNAL_REF_LENGTH),
     }),
   ),
 });
@@ -302,16 +305,27 @@ const observationFields = {
   /** The unqualified word of a kind this source declared, such as `pull-request`. */
   kind: ContributionWord,
   ref: ExternalRef,
-  title: bounded(1, MAX_EVENT_TITLE_LENGTH),
+  title: buildBoundedString(1, MAX_EVENT_TITLE_LENGTH),
 };
+
+/**
+ * A link a person opens, at most `MAX_EVENT_URL_LENGTH` characters. Only
+ * `http` and `https` are accepted: a `javascript:` or `file:` link written by
+ * a plugin would otherwise travel to every client as it is.
+ */
+const HttpUrl = buildBoundedString(1, MAX_EVENT_URL_LENGTH).check(
+  Schema.isPattern(/^https?:\/\/\S+$/i, {
+    message: "A url must start with http:// or https:// and hold no spaces.",
+  }),
+);
 
 /** The fields of an observation that are all optional, whatever its kind of completeness. */
 const optionalObservationFields = {
-  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
+  url: Schema.optionalKey(HttpUrl),
   /** Needed except on a context kind or a partial observation. The core checks that. */
   lifecycle: Schema.optionalKey(Schema.Literals(["open", "completed", "abandoned"])),
   /** A key of the kind's `status` table. */
-  status: Schema.optionalKey(bounded(1, MAX_DECLARED_NAME_LENGTH)),
+  status: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
   repository: Schema.optionalKey(EntityRepository),
   progress: Schema.optionalKey(EntityProgress),
   targetDate: Schema.optionalKey(Timestamp),
@@ -321,13 +335,13 @@ const optionalObservationFields = {
    * shared facts of the thing are unchanged. It does not mean nothing
    * changed: concerns, access and freshness are still applied.
    */
-  sourceRevision: Schema.optionalKey(bounded(1, 256)),
+  sourceRevision: Schema.optionalKey(buildBoundedString(1, 256)),
 };
 
 /** Raw facts by name: the kind's templates and facts read from these. */
 const ObservationFieldValues = Schema.Record(
-  bounded(1, MAX_ENTITY_FIELD_NAME_LENGTH),
-  Schema.NullOr(Schema.Union([bounded(0, MAX_ENTITY_FIELD_TEXT_LENGTH), Schema.Finite])),
+  buildBoundedString(1, MAX_ENTITY_FIELD_NAME_LENGTH),
+  Schema.NullOr(Schema.Union([buildBoundedString(0, MAX_ENTITY_FIELD_TEXT_LENGTH), Schema.Finite])),
 ).check(Schema.isMaxProperties(MAX_ENTITY_FIELDS));
 
 /**
@@ -346,11 +360,11 @@ const FullEntityObservation = Schema.Struct({
   /** Raw values, by field name. The kind's `identifier`, `person`, `owner` and `facts` read these. */
   fields: ObservationFieldValues,
   /** Why the thing concerns the user. Empty for a context thing. */
-  concerns: atMost(Schema.Literals(ENTITY_CONCERN_WORDS), ENTITY_CONCERN_WORDS.length),
+  concerns: atMost(Schema.Literals(ENTITY_CONCERNS), ENTITY_CONCERNS.length),
   /** True when the thing is the user's own, as the source says. */
   ownedByYou: Schema.optionalKey(Schema.Boolean),
   /** A key of the kind's `reasons`: what a card says when no signal gives a line. */
-  reason: Schema.optionalKey(bounded(1, MAX_DECLARED_NAME_LENGTH)),
+  reason: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
   /** When the wait began, when the source knows. */
   waitingSince: Schema.optionalKey(Timestamp),
   sourceUpdatedAt: Timestamp,
@@ -462,6 +476,9 @@ export interface EntityLookupContext {
   readonly credentials: () => Effect.Effect<Record<string, string>, ConnectionUnavailable>;
 }
 
+/** Why a source found nothing, from firmest to weakest: it refused, it is sure nothing is there, or it cannot tell. */
+export type EntityMissing = "inaccessible" | "not-found" | "unknown";
+
 /**
  * What `resolve` found. `missing` says what the source can honestly say:
  * `inaccessible` when it refused, `not-found` when it is sure nothing is
@@ -470,7 +487,7 @@ export interface EntityLookupContext {
  */
 export type EntityResolution =
   | { readonly found: EntityObservation }
-  | { readonly missing: "inaccessible" | "not-found" | "unknown" }
+  | { readonly missing: EntityMissing }
   | { readonly outOfScope: true };
 
 /**

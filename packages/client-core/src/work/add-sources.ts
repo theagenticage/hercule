@@ -47,10 +47,22 @@ export interface ScopeOption {
 }
 
 /**
+ * Returns the places of all `lists` with one place per ref, in the order each
+ * ref first appears. When a ref is in several lists, the place of the last
+ * list wins, so put the freshest list last.
+ */
+export const mergePlaces = (
+  ...lists: ReadonlyArray<ReadonlyArray<EntityPlace>>
+): readonly EntityPlace[] => [
+  ...new Map(lists.flatMap((list) => list.map((place) => [place.ref, place] as const))).values(),
+];
+
+/**
  * Returns the contexts of `sourceId` that can narrow a search, ordered by
  * title: the stored places of that plugin whose kind can group things
- * (a Linear team, a GitHub repository). `places` are the ones the Work board
- * already holds, so the select needs no read of its own. A place the user
+ * (a Linear team, a GitHub repository). `places` are the ones the sheet already
+ * holds (the Work board's, the suggestions' and the Inbox's), so the select
+ * needs no read of its own. A place the user
  * cannot read has no title and cannot be named, so it is left out.
  */
 export const listScopeOptions = (

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
+  decideFollowingWaitingCard,
   decideNextWaitingCard,
   describeMoveRefusal,
   walkInbox,
@@ -8,19 +9,12 @@ import {
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
+import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CARD_SELECTOR, findCardElement, readCardElement, readInboxStops } from "./inbox-page-dom";
 import { readInboxKey, type InboxKeyCommand } from "./read-inbox-key";
 import type { CurrentCard } from "./use-current-card";
-
-/**
- * What a key press can land on without being the page's: a menu or popover, a
- * dialog, and a side sheet. They keep their own keys.
- */
-const OVERLAY_SELECTOR = "[popover], dialog, [role='menu'], .side-sheet";
-
-/** Matches a popover or a dialog that is open right now, which closes itself on Esc. */
-const OPEN_OVERLAY_SELECTOR = 'dialog[open], [popover="auto"]:popover-open';
+import type { OpenCard } from "./use-open-card";
 
 /** How near, in pixels, and how soon after a dismissal, a click counts as the same click again. */
 const SAME_SPOT_PX = 4;
@@ -30,16 +24,10 @@ const SAME_SPOT_MS = 1_500;
 const DOUBLE_CLICK_MS = 400;
 
 /** The sheet that opens a card, as the page uses it. */
-export interface OpenCardControls {
-  /** The id of the open card, or `null` when none is open. */
-  readonly openId: string | null;
-  /** Opens the card `id` from the element it lies in. */
-  readonly open: (id: string, origin: HTMLElement) => void;
-  /** Folds the open card back. */
-  readonly close: () => void;
-  /** Moves the open sheet to another card, while it stays where it stands. */
-  readonly walk: (id: string) => void;
-}
+export type OpenCardControls = Pick<
+  OpenCard,
+  "isOpen" | "origin" | "shown" | "open" | "close" | "walk"
+>;
 
 /** What `useInboxPage` needs from the Inbox screen. */
 export interface InboxPageInput {
@@ -76,7 +64,7 @@ export interface InboxPage {
  * - A key is the page's only when focus is on the page itself or on something
  *   inside it, and never in a text field, a menu or a sheet. So focus in the
  *   toolbar acts on no card. Undo and Esc also work from the toolbar. A held
- *   key never repeats a move.
+ *   key never runs through the page: not a move, and not a walk.
  * - The current card (`useCurrentCard`) is the card every key acts on. After
  *   a Take or a Dismiss the current card moves on to the next that waits,
  *   chosen by the order of the page and never by what lies under the pointer.
@@ -84,8 +72,12 @@ export interface InboxPage {
  *   a dismissal by the pointer, a click at the same spot dismisses the next
  *   card, the way closing a tab brings the next under the pointer.
  * - While a card is open, the sheet holds the focus: J and K walk it through
- *   the page, T and E act on the open card and walk it on, and G closes it
- *   and goes to the Task.
+ *   the page, T and E act on the card the sheet shows and walk it on, and G
+ *   closes it and goes to the Task. A sheet that shows a place has no moves,
+ *   and says so.
+ * - When the screen opens, the page takes the keyboard focus, so the keys
+ *   act at once, even after a click on the sidebar. Focus in a text field
+ *   stays there.
  * - A roving tab stop gives the Tab key one card to land on.
  */
 export const useInboxPage = (input: InboxPageInput): InboxPage => {
@@ -119,11 +111,12 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
       return true;
     }
     // The next card is chosen before the move, because a dismissal takes the card off the page.
-    const next =
-      scroller === null ? undefined : decideNextWaitingCard(readInboxStops(scroller), card.id);
+    // The pointer only goes to a card that moves up into the card's place; the keys go back when nothing follows.
+    const decideNext = by === "pointer" ? decideFollowingWaitingCard : decideNextWaitingCard;
+    const next = scroller === null ? undefined : decideNext(readInboxStops(scroller), card.id);
     if (move === "take") input.moves.take(card);
     else input.moves.dismiss(card);
-    if (open.openId === null) moveOn(next, by);
+    if (!open.isOpen) moveOn(next, by);
     else if (next === undefined) open.close();
     else {
       open.walk(next);
@@ -135,7 +128,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
   const stepBack = (event: KeyboardEvent): void => {
     if (document.querySelector(OPEN_OVERLAY_SELECTOR) !== null) return;
     if (isKeysSheetOpen) setKeysSheetOpen(false);
-    else if (open.openId !== null) open.close();
+    else if (open.isOpen) open.close();
     else if (current.read() !== null) current.set(null, "keys");
     else return;
     event.preventDefault();
@@ -144,8 +137,10 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
   /** Walks the open sheet to the card before or after it. */
   const walkSheet = (walk: "next" | "previous"): void => {
     const scroller = scrollRef.current;
-    if (scroller === null || open.openId === null) return;
-    const to = walkInbox(readInboxStops(scroller), open.openId, walk);
+    if (scroller === null || open.origin === null) return;
+    // A sheet that opened on a place has no card to step from: the walk lands on the first card.
+    const from = open.origin.kind === "card" ? open.origin.id : undefined;
+    const to = walkInbox(readInboxStops(scroller), from, walk);
     if (to === undefined) return;
     open.walk(to);
     current.set(to, "keys", false);
@@ -155,19 +150,23 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     if (command.kind === "walk") {
       if (command.walk !== "next" && command.walk !== "previous") return;
       event.preventDefault();
-      walkSheet(command.walk);
+      if (!event.repeat) walkSheet(command.walk);
       return;
     }
-    // A place is open when its id is not a card's: it has no moves at all.
-    const card = open.openId === null ? undefined : input.findCard(open.openId);
-    if (card === undefined) return;
-    if (command.kind === "take" || command.kind === "dismiss") {
-      event.preventDefault();
-      perform(command.kind, card, "keys");
-    } else if (command.kind === "see-task") {
-      event.preventDefault();
-      if (perform("see-task", card, "keys")) open.close();
+    if (command.kind !== "take" && command.kind !== "dismiss" && command.kind !== "see-task") {
+      return;
     }
+    // The moves act on what the sheet shows, which is not always the card it opened from.
+    const { shown } = open;
+    if (shown === null) return;
+    event.preventDefault();
+    if (shown.kind === "place") {
+      input.moves.say("A place has no moves. Open one of its cards to act on it.");
+      return;
+    }
+    const card = input.findCard(shown.id);
+    if (card === undefined) return;
+    if (perform(command.kind, card, "keys") && command.kind === "see-task") open.close();
   };
 
   const handleKey = (event: KeyboardEvent): void => {
@@ -185,7 +184,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
       input.moves.undoLastMove();
       return;
     }
-    if (open.openId !== null) {
+    if (open.isOpen) {
       handleOpenCardKey(command, event);
       return;
     }
@@ -198,6 +197,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     switch (command.kind) {
       case "walk": {
         event.preventDefault();
+        if (event.repeat) return;
         const to = walkInbox(readInboxStops(scroller), here?.id, command.walk, cameFrom.current);
         if (to === undefined) return;
         current.set(to, "keys");
@@ -211,7 +211,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
         const element = here === null ? null : findCardElement(scroller, here.id);
         if (here === null || element === null) return;
         event.preventDefault();
-        open.open(here.id, element);
+        open.open({ kind: "card", id: here.id }, element);
         return;
       }
       case "take":
@@ -268,19 +268,21 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
       return;
     }
     if (element !== null && cardId !== undefined) {
-      open.open(cardId, element);
+      open.open({ kind: "card", id: cardId }, element);
       return;
     }
     // A place's head opens the place, and a pointer ("Also in ...") opens the card it points to.
     const placeHead = target.closest<HTMLElement>("[data-place-ref]");
     const placeRef = placeHead?.dataset["placeRef"];
     if (placeHead !== null && placeRef !== undefined) {
-      open.open(placeRef, placeHead);
+      open.open({ kind: "place", ref: placeRef }, placeHead);
       return;
     }
     const pointer = target.closest<HTMLElement>("[data-pointer-to]");
     const pointedTo = pointer?.dataset["pointerTo"];
-    if (pointer !== null && pointedTo !== undefined) open.open(pointedTo, pointer);
+    if (pointer !== null && pointedTo !== undefined) {
+      open.open({ kind: "card", id: pointedTo }, pointer);
+    }
   };
 
   // A card that takes the focus by the Tab key becomes the current card.
@@ -291,6 +293,13 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     if (!element.matches(":focus-visible") || current.read()?.id === id) return;
     current.set(id, "keys", false);
   };
+
+  // The page takes the keyboard focus as the screen opens: a click on the
+  // sidebar leaves focus on its row, which is not the page, and the keys would
+  // never reach it. A text field that has focus keeps it.
+  useEffect(() => {
+    if (!isTextField(document.activeElement)) scrollRef.current?.focus({ preventScroll: true });
+  }, [scrollRef]);
 
   // The listeners are added once and call the newest handlers, which read the newest state and props.
   const handlers = useRef({ handleKey, handleClick, handleFocusIn });

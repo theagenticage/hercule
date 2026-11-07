@@ -1,7 +1,12 @@
 /** Tests the rows of the outside graph, with an invented purchase order that sits in two delivery rounds. */
 import type { EntityEdge, EntityPlace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { buildPlaceRow, describeLockedRow, readAncestorRows } from "./relation-rows";
+import {
+  buildPlaceRow,
+  describeLockedRow,
+  indexRelationGraph,
+  readAncestorRows,
+} from "./relation-rows";
 
 const place = (ref: string, title: string, overrides: Partial<EntityPlace> = {}): EntityPlace => ({
   ref,
@@ -123,8 +128,20 @@ describe("describeLockedRow", () => {
   it.each([
     ["Sentry", "Error", "A Sentry error you cannot open"],
     ["Asana", "Task", "An Asana task you cannot open"],
-  ])("names a %s %s without a title", (pluginName, noun, words) => {
+    ["GitHub", "PR", "A GitHub PR you cannot open"],
+    [undefined, "Project", "A project you cannot open"],
+    [undefined, "Issue", "An issue you cannot open"],
+    [undefined, "PR", "A PR you cannot open"],
+  ])("words a %s %s with the right article and no title", (pluginName, noun, words) => {
     const row = buildPlaceRow(place(SITE, "x", { noun, restricted: true }));
     expect(row.isLocked && describeLockedRow(row, pluginName)).toBe(words);
+  });
+});
+
+describe("readAncestorRows with an index", () => {
+  it("returns the rows it returns without one, so a caller can index a graph once for many walks", () => {
+    const index = indexRelationGraph(DIAMOND);
+    expect(readAncestorRows(ORDER, DIAMOND, index)).toEqual(readAncestorRows(ORDER, DIAMOND));
+    expect(readAncestorRows(ROUND_A, DIAMOND, index)).toEqual(readAncestorRows(ROUND_A, DIAMOND));
   });
 });

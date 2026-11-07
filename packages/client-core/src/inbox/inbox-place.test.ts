@@ -1,9 +1,8 @@
-/** Tests where a single card lies, through `decideInboxPlace`, and the Group by and Filter menus. */
+/** Tests the Group by and Filter menus. */
 import { describe, expect, it } from "vitest";
 import { buildInbox, buildInboxCard, buildInboxPlace, buildRequestCard } from "./cards.testing";
 import { buildInboxFacets } from "./facets";
 import { listInboxGroupings } from "./groupings";
-import { decideInboxPlace, HOME_GROUPING } from "./inbox-place";
 
 const PRICING = buildInboxPlace("acme:project:pricing", "Pricing rules");
 const CHECKOUT = buildInboxPlace("acme:project:checkout", "Checkout");
@@ -18,46 +17,6 @@ const SHOP_WEB = buildInboxPlace("acme:repository:shop-web", "shop-web", {
   caption: "Acme repository",
 });
 
-describe("decideInboxPlace", () => {
-  it("puts a rich card on the surface of each home, in the order of its ancestors", () => {
-    const card = buildInboxCard("1", { ancestors: [CHECKOUT.ref, TEAM.ref, PRICING.ref] });
-    const inbox = buildInbox([card], { places: [PRICING, CHECKOUT, TEAM] });
-    const place = decideInboxPlace(card, inbox);
-    expect(place).toMatchObject({ _tag: "surfaces" });
-    expect(place._tag === "surfaces" && place.heads.map((head) => head.id)).toEqual([
-      CHECKOUT.ref,
-      PRICING.ref,
-    ]);
-  });
-
-  it("puts a rich card with no home on a surface named for its plugin", () => {
-    const card = buildInboxCard("1", { ancestors: [TEAM.ref] });
-    const inbox = buildInbox([card], { places: [TEAM] });
-    expect(decideInboxPlace(card, inbox, HOME_GROUPING)).toEqual({
-      _tag: "surfaces",
-      heads: [{ _tag: "source", id: "source:acme", pluginId: "acme" }],
-    });
-  });
-
-  it("puts a compact card in Requests under its home's name", () => {
-    const card = buildRequestCard("1", { ancestors: [SHOP_WEB.ref] });
-    const inbox = buildInbox([card], { places: [SHOP_WEB] });
-    expect(decideInboxPlace(card, inbox)).toEqual({ _tag: "request", homeName: "shop-web" });
-  });
-
-  it("names no home for a request with none, or whose home is locked", () => {
-    const locked = {
-      ref: SHOP_WEB.ref,
-      kind: SHOP_WEB.kind,
-      noun: SHOP_WEB.noun,
-      restricted: true,
-    };
-    const card = buildRequestCard("1", { ancestors: [locked.ref] });
-    const inbox = buildInbox([card], { places: [locked] });
-    expect(decideInboxPlace(card, inbox)).toEqual({ _tag: "request", homeName: undefined });
-  });
-});
-
 describe("listInboxGroupings", () => {
   const two = [
     buildInboxCard("1", { ancestors: [PRICING.ref, TEAM.ref] }),
@@ -65,7 +24,7 @@ describe("listInboxGroupings", () => {
     buildInboxCard("3", { ancestors: [PRICING.ref, TEAM.ref] }),
   ];
 
-  it("offers Place, each kind of place most rows lie under by its caption, then Status", () => {
+  it("offers Place, each kind of place a row lies under by its caption, then Status", () => {
     const inbox = buildInbox(two, { places: [PRICING, CHECKOUT, TEAM] });
     expect(listInboxGroupings(inbox)).toEqual([
       { id: "home", name: "Place" },
@@ -75,14 +34,39 @@ describe("listInboxGroupings", () => {
     ]);
   });
 
-  it("leaves out a kind that half the rows or fewer lie under", () => {
+  it("offers a kind that only some of the rows lie under, even when most rows lie under none", () => {
     const inbox = buildInbox([...two, buildInboxCard("4"), buildInboxCard("5")], {
       places: [PRICING, CHECKOUT, TEAM],
     });
     expect(listInboxGroupings(inbox).map((grouping) => grouping.id)).toEqual([
       "home",
       "acme/project",
+      "acme/team",
       "status",
+    ]);
+  });
+
+  it("offers each of two kinds that one row lies under, and orders them by caption", () => {
+    const linearProject = buildInboxPlace("linear:project:a", "Payments", {
+      kind: "linear/project",
+      caption: "Linear project",
+    });
+    const repository = buildInboxPlace("github:repository:a", "shop-web", {
+      kind: "github/repository",
+      caption: "GitHub repository",
+    });
+    const inbox = buildInbox(
+      [
+        buildInboxCard("1", { ancestors: [linearProject.ref] }),
+        buildInboxCard("2", { ancestors: [repository.ref] }),
+      ],
+      { places: [linearProject, repository] },
+    );
+    expect(listInboxGroupings(inbox).map((grouping) => grouping.name)).toEqual([
+      "Place",
+      "GitHub repository",
+      "Linear project",
+      "Status",
     ]);
   });
 

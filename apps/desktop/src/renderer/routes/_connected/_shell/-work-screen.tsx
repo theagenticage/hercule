@@ -7,6 +7,7 @@ import {
   arrangeLanes,
   buildLanes,
   chooseAddOpening,
+  chooseLaneProject,
   buildWorkFacets,
   countCardsByStage,
   findCardsByTitle,
@@ -24,14 +25,15 @@ import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
 import { pluginsQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
+import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
-import { UndoLine } from "../../../screens/desk";
+import { ReadFailure, UndoLine } from "../../../screens/desk";
 import { DRAFT_MESSAGE_ID } from "../../../screens/new-thread/draft-composer";
 import { OverviewPill } from "../../../screens/overview/overview-pill";
 import { AddFromSource } from "../../../screens/work/add-from-source";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
-import { DeskClear, FirstRun, NoMatch, ReadFailure } from "../../../screens/work/board-empty";
+import { DeskClear, FirstRun, NoMatch } from "../../../screens/work/board-empty";
 import { BoardLane } from "../../../screens/work/board-lane";
 import { BoardLoading } from "../../../screens/work/board-loading";
 import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-lane";
@@ -50,9 +52,6 @@ import { hasAnyTaskQuery, useWorkBoard } from "./-work-board";
 
 /** Below this window width, lanes are bands: side labels would cost the cards 210px. */
 const SIDE_LABELS_FROM_PX = 1320;
-
-/** How long the first board's words take to fade in, which is when the screen stops marking it as arriving. */
-const ARRIVAL_MS = 1_200;
 
 /** How many lanes the loading state draws, before the board says which there are. */
 const LOADING_LANES = 3;
@@ -171,18 +170,8 @@ export function WorkScreen({
   const hasAnyTask = hasAnyTaskRead.data;
 
   // The first board fades its words in from the top left, once.
-  const [startedLoading] = useState(board.data === undefined);
-  const [arrivalOver, setArrivalOver] = useState(false);
   const hasBoard = shownBoard !== undefined;
-  useEffect(() => {
-    if (!startedLoading || !hasBoard) return;
-    const timer = setTimeout(() => {
-      setArrivalOver(true);
-    }, ARRIVAL_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [startedLoading, hasBoard]);
+  const isArriving = useFirstArrival(board.data === undefined, hasBoard);
 
   // A Task the URL names is shown once the board is on screen, and then forgotten.
   const showTaskOnce = useRef<string | undefined>(undefined);
@@ -245,9 +234,14 @@ export function WorkScreen({
   const toAddLane = (laneId: string): AddTaskLane => {
     const lane =
       lanes.find((each) => each.id === laneId) ?? allLanes.find((each) => each.id === laneId);
-    return lane === undefined
-      ? { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null }
-      : { id: lane.id, name: lane.name, projectId: lane.projectId };
+    if (lane === undefined) {
+      return { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null };
+    }
+    // A lane for an outside place has no Project of its own: a Task added
+    // there joins the Project most of its cards are in, and the sheet names it.
+    const projectId = chooseLaneProject(lane, new Set(projects.map((project) => project.id)));
+    const project = projects.find((each) => each.id === projectId);
+    return { id: lane.id, name: project?.name ?? lane.name, projectId };
   };
   /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
   const chooseAddLane = (): AddTaskLane =>
@@ -428,13 +422,14 @@ export function WorkScreen({
                   opening={addOpening}
                   projectId={addProjectId}
                   isOffline={offlineSince !== null}
-                  onAdded={({ taskId, line, gesture }) => {
-                    if (gesture === undefined) {
+                  reserveGesture={moves.reserveGesture}
+                  onAdded={({ taskId, line, wasCreated }) => {
+                    if (!wasCreated) {
                       moves.sayWithoutUndo(line);
                       return;
                     }
                     reads.noteAddedTask(taskId);
-                    moves.recordGesture(gesture, line);
+                    moves.sayWithUndo(line);
                   }}
                   onFailed={moves.sayWithoutUndo}
                   onOpenTask={(taskId) => {
@@ -460,7 +455,7 @@ export function WorkScreen({
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
       hasSheet={addLane !== null}
-      isArriving={startedLoading && hasBoard && !arrivalOver}
+      isArriving={isArriving}
       state={state}
       scrollRef={scrollRef}
     >

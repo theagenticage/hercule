@@ -251,7 +251,8 @@ export type AddListView =
       readonly lockedHint: string | undefined;
     };
 
-const message = (
+/** Returns the view that shows `text` in place of a list. */
+const buildMessageView = (
   text: string,
   extra: { readonly widenLabel?: string; readonly lockedHint?: string } = {},
 ): AddListView => ({
@@ -268,8 +269,8 @@ const describeNothingFound = (
   scope: ScopeOption | undefined,
 ): AddListView =>
   scope === undefined
-    ? message(`${sourceName} has nothing that matches "${text}".`)
-    : message(`Nothing in ${scope.title} matches "${text}".`, {
+    ? buildMessageView(`${sourceName} has nothing that matches "${text}".`)
+    : buildMessageView(`Nothing in ${scope.title} matches "${text}".`, {
         widenLabel: `Search all of ${sourceName}`,
       });
 
@@ -302,37 +303,37 @@ const decideAnsweredView = (
         };
       }
       return reply.outcome === "incomplete"
-        ? message(shortNote)
+        ? buildMessageView(shortNote)
         : describeNothingFound(sourceName, text, scope);
     case "no-match":
       return describeNothingFound(sourceName, text, scope);
     case "inaccessible": {
       const noun = reply.results[0]?.noun.toLowerCase() ?? "thing";
-      return message(`You cannot open this ${sourceName} ${noun}.`, {
+      return buildMessageView(`You cannot open this ${sourceName} ${noun}.`, {
         lockedHint: `It exists, but your connection to ${sourceName} has no access to it. Ask for access, then ${isLink ? "paste the link" : "search"} again.`,
       });
     }
     case "not-found":
     case "unknown":
       return isLink
-        ? message(
+        ? buildMessageView(
             `${sourceName} found nothing at this link. It may be wrong, or the thing may be gone.`,
           )
         : describeNothingFound(sourceName, text, scope);
     case "ambiguous":
-      return message(
+      return buildMessageView(
         `"${text}" names different things in different workspaces of ${sourceName}. Paste its link instead.`,
       );
     case "unknown-link": {
       const readable = reply.linkSources.map((id) => input.names.get(id) ?? id).join(", ");
-      return message(
+      return buildMessageView(
         readable === ""
           ? "This link is not from a connected source."
           : `This link is not from a connected source. Hercule can read links from ${readable}.`,
       );
     }
     case "source-unavailable":
-      return message(`${sourceName} has no connection to search. Add one in Connections.`);
+      return buildMessageView(`${sourceName} has no connection to search. Add one in Connections.`);
   }
 };
 
@@ -382,7 +383,7 @@ export const decideAddList = ({
         text: isLink ? "Reading this link…" : `Searching ${sourceName}…`,
       };
     case "failed":
-      return message(`Could not search ${sourceName}. ${search.reason}`);
+      return buildMessageView(`Could not search ${sourceName}. ${search.reason}`);
     case "answered":
       return decideAnsweredView(search.reply, { sourceName, names, text, isLink, scope });
   }

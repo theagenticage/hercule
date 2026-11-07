@@ -7,7 +7,7 @@
  * Inbox and a controller that cannot be reached.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
 import {
@@ -19,6 +19,7 @@ import {
   buildSourcePlugin,
 } from "@hercule/client-core/inbox/testing";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
+import { readAcknowledgedInboxArrival } from "../../../app/inbox-arrival";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -380,6 +381,40 @@ const dismissPath = (card: InboxCard): string =>
 const restorePath = (card: InboxCard): string =>
   `POST /api/v1/external-entities/${card.id}/restore`;
 
+/**
+ * Returns a stubbed controller that answers the Inbox with `cards` and changes
+ * them as the real controller does when a move is answered. The page reads the
+ * Inbox again after each answered move, so a stub that kept answering with the
+ * old cards would put a dismissed card back.
+ */
+const holdServerCards = (cards: readonly InboxCard[] = CARDS) => {
+  let current = cards;
+  return {
+    inbox: (): Inbox => buildPageInbox(current),
+    dismisses:
+      (card: InboxCard): Handler =>
+      () => {
+        current = current.filter((each) => each.id !== card.id);
+        return { body: {} };
+      },
+    takes:
+      (card: InboxCard, created = true): Handler =>
+      () => {
+        current = current.map((each) =>
+          each.id === card.id ? { ...each, side: "with-someone-else", taskId: TASK_ID } : each,
+        );
+        return { body: { taskId: TASK_ID, created } };
+      },
+    releases:
+      (card: InboxCard): Handler =>
+      () => {
+        // The card as it was before the Take, which had no Task.
+        current = current.map((each) => (each.id === card.id ? card : each));
+        return { body: { undone: true } };
+      },
+  };
+};
+
 /** Lists the calls in `calls` to the operation `path`, written `METHOD /path`. */
 const listCallsTo = (calls: readonly Call[], path: string): readonly Call[] =>
   calls.filter((call) => `${call.method} ${call.path}` === path);
@@ -404,10 +439,12 @@ const pressMove = async (
 describe("the Inbox's moves", () => {
   it("takes a card on: its monogram stands where the wait was, the card keeps its place, and Undo takes the Task back", async () => {
     const user = userEvent.setup();
+    const server = holdServerCards();
     const { calls } = await openInbox({
+      inbox: server.inbox,
       handlers: {
-        [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } },
-        [undoTakeOnPath(SLOTS)]: { body: { undone: true } },
+        [takeOnPath(SLOTS)]: server.takes(SLOTS),
+        [undoTakeOnPath(SLOTS)]: server.releases(SLOTS),
       },
     });
     const requests = await screen.findByRole("complementary", { name: "Requests" });
@@ -436,9 +473,11 @@ describe("the Inbox's moves", () => {
 
   it("says a Task that was touched since stays, with the reason, and keeps the monogram", async () => {
     const user = userEvent.setup();
+    const server = holdServerCards();
     await openInbox({
+      inbox: server.inbox,
       handlers: {
-        [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } },
+        [takeOnPath(SLOTS)]: server.takes(SLOTS),
         [undoTakeOnPath(SLOTS)]: {
           body: { undone: false, reason: "A Thread was started on it." },
         },
@@ -461,8 +500,10 @@ describe("the Inbox's moves", () => {
 
   it("says a card already had a Task when Take finds one, and offers no Undo", async () => {
     const user = userEvent.setup();
+    const server = holdServerCards();
     await openInbox({
-      handlers: { [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: false } } },
+      inbox: server.inbox,
+      handlers: { [takeOnPath(SLOTS)]: server.takes(SLOTS, false) },
     });
     await pressMove(
       user,
@@ -560,9 +601,10 @@ describe("the Inbox's moves", () => {
   it("dismisses with E and makes the next card that waits current, chosen by the order of the page", async () => {
     const user = userEvent.setup();
     const third = review(5, "Pin the checkout copy");
+    const server = holdServerCards([ROUNDING, SLOTS, LOYALTY, third]);
     await openInbox({
-      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY, third]),
-      handlers: { [dismissPath(SLOTS)]: { body: {} } },
+      inbox: server.inbox,
+      handlers: { [dismissPath(SLOTS)]: server.dismisses(SLOTS) },
     });
     await screen.findByText("Fix the basket rounding");
 
@@ -581,9 +623,10 @@ describe("the Inbox's moves", () => {
 
   it("takes on with T and moves on, and refuses T on a card that has a Task, saying why", async () => {
     const user = userEvent.setup();
+    const server = holdServerCards([ROUNDING, SLOTS, LOYALTY]);
     const { calls } = await openInbox({
-      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY]),
-      handlers: { [takeOnPath(SLOTS)]: { body: { taskId: TASK_ID, created: true } } },
+      inbox: server.inbox,
+      handlers: { [takeOnPath(SLOTS)]: server.takes(SLOTS) },
     });
     await screen.findByText("Fix the basket rounding");
     await user.keyboard("{ArrowDown}{ArrowRight}t");
@@ -714,10 +757,41 @@ describe("the Inbox's moves", () => {
       await screen.findByRole("listitem", { name: /Cache delivery slot lookups/ }),
     ).toBeTruthy();
   });
+  it("undoes a dismissal with the Undo key from a screen with no gestures of its own, and says so in the toast", async () => {
+    const user = userEvent.setup();
+    const { calls, router } = await openInbox({
+      handlers: { [dismissPath(SLOTS)]: { body: {} }, [restorePath(SLOTS)]: { body: {} } },
+    });
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Cache delivery/ }),
+      "Dismiss",
+    );
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(1);
+    });
+
+    await router.navigate({ to: "/settings" });
+    await waitFor(() => {
+      expect(document.querySelector(".inbox-scroll")).toBeNull();
+    });
+    await user.keyboard("{Meta>}z{/Meta}");
+
+    await waitFor(() => {
+      expect(listCallsTo(calls, restorePath(SLOTS))).toHaveLength(1);
+    });
+    expect(await screen.findByText("Put back: Dismissed Review #3.")).toBeTruthy();
+  });
+
   it("hands the pointer's card to the next that waits, so the same click at the same spot dismisses it too", async () => {
     const user = userEvent.setup();
+    const server = holdServerCards();
     const { calls } = await openInbox({
-      handlers: { [dismissPath(SLOTS)]: { body: {} }, [dismissPath(LOYALTY)]: { body: {} } },
+      inbox: server.inbox,
+      handlers: {
+        [dismissPath(SLOTS)]: server.dismisses(SLOTS),
+        [dismissPath(LOYALTY)]: server.dismisses(LOYALTY),
+      },
     });
     await pressMove(
       user,
@@ -733,6 +807,27 @@ describe("the Inbox's moves", () => {
       expect(listCallsTo(calls, dismissPath(LOYALTY))).toHaveLength(1);
     });
     expect(screen.queryByRole("listitem", { name: /Round loyalty points down/ })).toBeNull();
+  });
+
+  it("ends the repeated dismissal at the foot of the column, where no card takes the place of the one dismissed", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: { [dismissPath(SLOTS)]: { body: {} }, [dismissPath(LOYALTY)]: { body: {} } },
+    });
+    // LOYALTY is the last request: the card before it never moves into its place.
+    await pressMove(
+      user,
+      await screen.findByRole("listitem", { name: /Round loyalty points/ }),
+      "Dismiss",
+    );
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(LOYALTY))).toHaveLength(1);
+    });
+
+    await user.click(document.querySelector(".inbox-scroll")!);
+
+    expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(0);
+    expect(screen.getByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeTruthy();
   });
 
   it("opens a card with a click and with Return, and Esc folds it back", async () => {
@@ -793,5 +888,309 @@ describe("the Inbox's moves", () => {
     const arrived = await screen.findByRole("listitem", { name: /Round loyalty points down/ });
     expect(screen.getByRole("listitem", { name: /Cache delivery/ })).toBe(slots);
     expect(arrived.compareDocumentPosition(slots) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+});
+
+// ---------- Held keys, focus on arrival, and the moves of an open sheet ----------
+
+/** Returns what `externalEntity.read` answers for `card`, which lies in the place `SHOP_WEB`. */
+const buildDetailHandler = (card: InboxCard): Record<string, Handler> => ({
+  [`GET /api/v1/external-entities/${card.id}`]: {
+    body: {
+      ...card,
+      kindAvailable: true,
+      places: [SHOP_WEB],
+      edges: [{ fromRef: card.ref, toRef: SHOP_WEB.ref }],
+      links: [],
+      conflicts: [],
+    },
+  },
+});
+
+/** Returns the title of the card that carries the page's mark, or `null` when none does. */
+const readCurrentTitle = (): string | null =>
+  document.querySelector("[data-current] .row-title, [data-current] .request-title")?.textContent ??
+  null;
+
+describe("the Inbox's held keys and focus", () => {
+  it("walks one card for a held key, and not again until the key is pressed anew", async () => {
+    const user = userEvent.setup();
+    await openInbox({ inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY]) });
+    await screen.findByText("Fix the basket rounding");
+    await user.keyboard("{ArrowDown}");
+    expect(readCurrentTitle()).toBe("Fix the basket rounding");
+
+    // The browser sends the first press, then repeats of the same press while the key stays down.
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    expect(readCurrentTitle()).toBe("Cache delivery slot lookups");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown", repeat: true });
+    fireEvent.keyDown(document.activeElement!, { key: "j", repeat: true });
+    expect(readCurrentTitle()).toBe("Cache delivery slot lookups");
+
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(readCurrentTitle()).toBe("Round loyalty points down");
+  });
+
+  it("does not walk the open sheet through the page for a held J", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY]),
+      handlers: { ...buildDetailHandler(SLOTS), ...buildDetailHandler(LOYALTY) },
+    });
+    await user.click(await screen.findByText("Cache delivery slot lookups"));
+    await screen.findByRole("dialog", { name: "Cache delivery slot lookups" });
+
+    fireEvent.keyDown(document.activeElement!, { key: "j", repeat: true });
+    expect(screen.getByRole("dialog", { name: "Cache delivery slot lookups" })).toBeTruthy();
+
+    fireEvent.keyDown(document.activeElement!, { key: "j" });
+    expect(await screen.findByRole("dialog", { name: "Round loyalty points down" })).toBeTruthy();
+  });
+
+  it("takes the keyboard focus when the Inbox opens from the sidebar, so the keys act at once", async () => {
+    const user = userEvent.setup();
+    await openInbox({
+      handlers: {
+        "GET /api/v1/tasks/board": {
+          body: buildBoard(buildCard(buildCardId(901), { title: "Order the depot labels" })),
+        },
+        "GET /api/v1/tasks": { body: { items: [] } },
+      },
+    });
+    await screen.findByText("Fix the basket rounding");
+    await user.click(screen.getByRole("link", { name: "Overview" }));
+    await screen.findByRole("button", { name: /^Order the depot labels/ });
+
+    // The click leaves focus on the sidebar row, which is not the page.
+    await user.click(getSidebarInboxRow());
+    await screen.findByText("Fix the basket rounding");
+    expect(document.activeElement).toBe(document.querySelector(".inbox-scroll"));
+    await user.keyboard("{ArrowDown}");
+
+    expect(readCurrentTitle()).not.toBeNull();
+  });
+});
+
+/** Opens the card titled `title` with a click and waits until the moves in its sheet take a pointer, which they do not for the first moment. */
+const openSheetOf = async (
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByText(title));
+  const sheet = await screen.findByRole("dialog", { name: title });
+  await waitFor(() => {
+    expect(sheet.hasAttribute("data-arming")).toBe(false);
+  });
+  return sheet;
+};
+
+describe("the Inbox's open card", () => {
+  it("does not act on the card the sheet opened from while it shows a place", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      handlers: { ...buildDetailHandler(SLOTS), [dismissPath(SLOTS)]: { body: {} } },
+    });
+    const sheet = await openSheetOf(user, "Cache delivery slot lookups");
+    await user.click(within(sheet).getByRole("button", { name: /shop-web/ }));
+    await screen.findByRole("dialog", { name: "shop-web" });
+
+    await user.keyboard("et");
+
+    expect(await screen.findByText(/^A place has no moves\./)).toBeTruthy();
+    expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(0);
+    expect(listCallsTo(calls, takeOnPath(SLOTS))).toHaveLength(0);
+  });
+
+  it("acts on the card it walked to inside the sheet and on no other", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      inbox: () => buildPageInbox([ROUNDING, SLOTS, LOYALTY]),
+      handlers: {
+        ...buildDetailHandler(SLOTS),
+        ...buildDetailHandler(LOYALTY),
+        [dismissPath(SLOTS)]: { body: {} },
+        [dismissPath(LOYALTY)]: { body: {} },
+      },
+    });
+    const sheet = await openSheetOf(user, "Cache delivery slot lookups");
+    await user.click(within(sheet).getByRole("button", { name: /shop-web/ }));
+    const place = await screen.findByRole("dialog", { name: "shop-web" });
+    await user.click(within(place).getByRole("button", { name: /Round loyalty points down/ }));
+    await screen.findByRole("dialog", { name: "Round loyalty points down" });
+
+    await user.keyboard("e");
+
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(LOYALTY))).toHaveLength(1);
+    });
+    expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(0);
+  });
+
+  it("plays a move chosen in the sheet only once the sheet has landed", async () => {
+    const user = userEvent.setup();
+    let wasSheetOpenAtMove = true;
+    const { calls } = await openInbox({
+      handlers: {
+        ...buildDetailHandler(SLOTS),
+        [dismissPath(SLOTS)]: () => {
+          wasSheetOpenAtMove = screen.queryByRole("dialog") !== null;
+          return { body: {} };
+        },
+      },
+    });
+    const sheet = await openSheetOf(user, "Cache delivery slot lookups");
+
+    await user.click(within(sheet).getByRole("button", { name: /^Dismiss/ }));
+
+    // The move waits for the sheet to land, and then runs, however long that takes.
+    await waitFor(() => {
+      expect(listCallsTo(calls, dismissPath(SLOTS))).toHaveLength(1);
+    });
+    expect(wasSheetOpenAtMove).toBe(false);
+  });
+});
+
+// ---------- What a visit holds in place ----------
+
+/** Returns the ref of each surface of the wide side, in the order the page draws them. */
+const listSurfaceOrder = (): (string | null)[] =>
+  [...document.querySelectorAll(".inbox-place")].map((surface) =>
+    surface.getAttribute("data-place"),
+  );
+
+/** Returns the newest arrival the sidebar's new mark has been told the user has seen. */
+const readAcknowledgedArrival = (): number =>
+  readAcknowledgedInboxArrival(CONTROLLER_URL, "rogier");
+
+describe("the Inbox keeps the page in place during a visit", () => {
+  it("leaves the surfaces where they are when a read turns a place bad, and orders them anew on the next visit", async () => {
+    let pricing: EntityPlace = PRICING;
+    const { live } = await openInbox({
+      inbox: () => ({
+        ...buildPageInbox([ROUNDING, RETRIES]),
+        places: [pricing, CHECKOUT],
+      }),
+    });
+    await screen.findByText("Fix the basket rounding");
+    await live.waitForFirstPushes();
+    expect(listSurfaceOrder()).toEqual([CHECKOUT.ref, PRICING.ref]);
+
+    pricing = { ...PRICING, status: { shape: "alert", tone: "bad", label: "Off track" } };
+    live.pushInvalidation("externalEntity");
+
+    // The words arrive in place; nothing moves.
+    await waitFor(() => {
+      expect(getSurface("Pricing rules").textContent).toContain("Off track");
+    });
+    expect(listSurfaceOrder()).toEqual([CHECKOUT.ref, PRICING.ref]);
+
+    cleanup();
+    await openInbox({
+      inbox: () => ({ ...buildPageInbox([ROUNDING, RETRIES]), places: [pricing, CHECKOUT] }),
+    });
+    await screen.findByText("Fix the basket rounding");
+    expect(listSurfaceOrder()).toEqual([PRICING.ref, CHECKOUT.ref]);
+  });
+
+  it("places a card where this visit's own read puts it, not where the last visit's copy had it", async () => {
+    const user = userEvent.setup();
+    let inbox = buildPageInbox([ROUNDING, SLOTS]);
+    const { live } = await openInbox({
+      inbox: () => inbox,
+      handlers: {
+        "GET /api/v1/tasks/board": {
+          body: buildBoard(buildCard(buildCardId(901), { title: "Order the depot labels" })),
+        },
+        "GET /api/v1/tasks": { body: { items: [] } },
+      },
+    });
+    await screen.findByRole("listitem", { name: /Cache delivery slot lookups/ });
+    await live.waitForFirstPushes();
+    await user.click(screen.getByRole("link", { name: "Overview" }));
+    await screen.findByRole("button", { name: /^Order the depot labels/ });
+
+    // Someone takes the request on while the Inbox is not open: the copy the cache keeps is out of date.
+    inbox = buildPageInbox([ROUNDING, { ...SLOTS, side: "with-someone-else", taskId: TASK_ID }]);
+    live.pushInvalidation("externalEntity");
+    await user.click(getSidebarInboxRow());
+
+    const toggle = await screen.findByRole("button", { name: /With someone else/ });
+    const requests = screen.getByRole("complementary", { name: "Requests" });
+    expect(
+      within(requests).queryByRole("listitem", { name: /Cache delivery slot lookups/ }),
+    ).toBeNull();
+    await user.click(toggle);
+    expect(screen.getByRole("listitem", { name: /Cache delivery slot lookups/ })).toBeTruthy();
+  });
+
+  it("counts the new mark as seen only once the card that brought it is on the page", async () => {
+    const user = userEvent.setup();
+    let inbox = buildPageInbox([ROUNDING, SLOTS]);
+    const { live } = await openInbox({ inbox: () => inbox });
+    await user.hover(await screen.findByRole("listitem", { name: /Cache delivery slot lookups/ }));
+    await live.waitForFirstPushes();
+    await waitFor(() => {
+      expect(readAcknowledgedArrival()).toBe(5);
+    });
+
+    // A new card arrives while the pointer rests on a card: it waits for the pointer to move on.
+    inbox = buildPageInbox([ROUNDING, SLOTS, LOYALTY], {
+      counts: { ...COUNTS, newestArrival: 6 },
+    });
+    live.pushInvalidation("externalEntity");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(screen.queryByRole("listitem", { name: /Round loyalty points down/ })).toBeNull();
+    expect(readAcknowledgedArrival()).toBe(5);
+
+    fireEvent(window, new MouseEvent("pointermove", { clientX: 2000, clientY: 2000 }));
+
+    await screen.findByRole("listitem", { name: /Round loyalty points down/ });
+    await waitFor(() => {
+      expect(readAcknowledgedArrival()).toBe(6);
+    });
+  });
+
+  it("names the number of requests the controller counts in the heading, beyond the cards the page holds", async () => {
+    await openInbox({
+      inbox: () => buildPageInbox(CARDS, { counts: { ...COUNTS, requests: 1200 } }),
+    });
+    await screen.findByText("Fix the basket rounding");
+
+    const heading = within(screen.getByRole("complementary", { name: "Requests" })).getByRole(
+      "heading",
+      { name: /^Requests/ },
+    );
+    expect(heading.textContent).toContain("1200");
+  });
+
+  it("keeps the cards and says so, with a way to try again, when a later read fails", async () => {
+    let isFailing = false;
+    const user = userEvent.setup();
+    const { live } = await openInbox({
+      retryFailedReads: false,
+      handlers: {
+        [INBOX_PATH]: () => {
+          if (isFailing) throw new Error("connection refused");
+          return { body: buildPageInbox(CARDS) };
+        },
+      },
+    });
+    await screen.findByText("Fix the basket rounding");
+    await live.waitForFirstPushes();
+
+    isFailing = true;
+    live.pushInvalidation("externalEntity");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("The Inbox could not be read");
+    expect(screen.getByText("Fix the basket rounding")).toBeTruthy();
+
+    isFailing = false;
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(screen.getByText("Fix the basket rounding")).toBeTruthy();
   });
 });

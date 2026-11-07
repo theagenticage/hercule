@@ -50,15 +50,15 @@ const findHidingPlace = (scroller: HTMLElement, carry: EndedCarry): Element | nu
   if (place === null) return null;
   if (place.kind === "cell") {
     return scroller.querySelector(
-      `[data-more-cell-id="${buildCellId(place.laneId, place.stage)}"]`,
+      `[data-more-cell-id="${CSS.escape(buildCellId(place.laneId, place.stage))}"]`,
     );
   }
-  const foldRow = scroller.querySelector(`[data-fold-row="${place.laneId}"]`);
+  const foldRow = scroller.querySelector(`[data-fold-row="${CSS.escape(place.laneId)}"]`);
   const stage = place.stage ?? carry.card.stage;
   return (
     [...(foldRow?.children ?? [])].find(
       (cell) => cell instanceof HTMLElement && cell.dataset["stage"] === stage,
-    ) ?? scroller.querySelector(`[data-lane-head="${place.laneId}"]`)
+    ) ?? scroller.querySelector(`[data-lane-head="${CSS.escape(place.laneId)}"]`)
   );
 };
 

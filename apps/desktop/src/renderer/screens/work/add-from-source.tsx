@@ -10,14 +10,26 @@ import {
   isPastedLink,
   listAddSources,
   listScopeOptions,
+  mergePlaces,
   nameTaskStage,
   type AddOpening,
   type AddRow,
   type AddSource,
   type SearchState,
 } from "@hercule/client-core/work";
-import type { EntityPlace, EntitySearchReply, PluginDetail } from "@hercule/contract";
-import { entitySearchQuery, entitySuggestionsQuery, pluginsQuery } from "../../app/queries";
+import type {
+  EntityPlace,
+  EntitySearchReply,
+  EntitySuggestions,
+  PluginDetail,
+} from "@hercule/contract";
+import {
+  entitySearchQuery,
+  entitySuggestionsQuery,
+  inboxQuery,
+  pluginsQuery,
+} from "../../app/queries";
+import { undoAddedTask } from "../../app/undo-added-task";
 import type { Gesture } from "../../app/undo-stack";
 import { AddSourcePanel, type SuggestionsView } from "./add-source-panel";
 
@@ -30,15 +42,27 @@ export interface AddedThing {
   readonly taskId: string;
   /** The line for the foot of the page, such as "Added to Exploring. Hercule now follows WEB-301." */
   readonly line: string;
-  /** How to take the add back. Absent when the thing already had a Task, so nothing was added. */
-  readonly gesture: Gesture<unknown> | undefined;
+  /** Whether the add made the Task. False when the thing already had one, so nothing was added. */
+  readonly wasCreated: boolean;
 }
+
+/**
+ * Puts a gesture on the undo stack the moment the user adds something, before
+ * the controller answers (see `UndoStack.reserve` for `willHold`).
+ */
+export type ReserveGesture = (gesture: Gesture<unknown>, willHold: Promise<boolean>) => void;
 
 /** A row that was added since the sheet opened: its stage once known, and the list it was added from. */
 interface AddedRow {
   readonly stage: string | undefined;
-  /** The scope of the suggestions it was added from, which stop being read while it stays added. */
+  /** The scope of the suggestions it was added from. */
   readonly scopeRef: string;
+  /**
+   * The suggestions of that scope as they were shown when the first row was
+   * added from them. They are shown unchanged, and not read again, while a row
+   * from them stays added. Absent when they were not read yet.
+   */
+  readonly suggestions: EntitySuggestions | undefined;
 }
 
 /**
@@ -52,15 +76,17 @@ interface AddedRow {
  *   searches at once instead.
  * - A pasted link changes the tab to the source that answered it.
  * - An add turns its row into a check at once. The row stays where it is,
- *   and the suggestions are not read again while a row from them stays added,
- *   so nothing slides under the pointer. A failed add puts the row back and
- *   `onFailed` says why. Offline, an add fails and says so: nothing is kept
+ *   and the suggestions are shown as they were, and not read again, while a
+ *   row from them stays added, so nothing slides under the pointer. Taking
+ *   the add back, or a failed add, puts the row back and the live list returns.
+ *   A failed add also calls `onFailed` to say why. Offline, an add fails and says so: nothing is kept
  *   to send later.
  * - Esc clears what is typed. With nothing typed it does nothing here, and
  *   the sheet closes.
  *
- * `places` are the stored places the Work board holds, which are the
- * contexts the select offers. `opening` says which source and context the
+ * `places` are the stored places the Work board holds. The contexts the
+ * select offers are these, plus the places of the suggestions and of the
+ * Inbox when it was read. `opening` says which source and context the
  * sheet starts on. `projectId` is the Project that every Task added here joins,
  * or `null` for none. A change of `opening` needs a new component (a `key`),
  * because the sheet then starts again. Draws nothing when no plugin is a
@@ -72,6 +98,7 @@ export function AddFromSource({
   opening,
   projectId,
   isOffline,
+  reserveGesture,
   onAdded,
   onFailed,
   onOpenTask,
@@ -81,6 +108,7 @@ export function AddFromSource({
   readonly opening: AddOpening;
   readonly projectId: string | null;
   readonly isOffline: boolean;
+  readonly reserveGesture: ReserveGesture;
   readonly onAdded: (added: AddedThing) => void;
   readonly onFailed: (message: string) => void;
   readonly onOpenTask: (taskId: string) => void;
@@ -100,6 +128,7 @@ export function AddFromSource({
       initialScopeRef={openingSource.id === opening.sourceId ? (opening.scopeRef ?? "") : ""}
       projectId={projectId}
       isOffline={isOffline}
+      reserveGesture={reserveGesture}
       onAdded={onAdded}
       onFailed={onFailed}
       onOpenTask={onOpenTask}
@@ -134,6 +163,7 @@ function SourceSearch({
   initialScopeRef,
   projectId,
   isOffline,
+  reserveGesture,
   onAdded,
   onFailed,
   onOpenTask,
@@ -146,6 +176,7 @@ function SourceSearch({
   readonly initialScopeRef: string;
   readonly projectId: string | null;
   readonly isOffline: boolean;
+  readonly reserveGesture: ReserveGesture;
   readonly onAdded: (added: AddedThing) => void;
   readonly onFailed: (message: string) => void;
   readonly onOpenTask: (taskId: string) => void;
@@ -161,7 +192,31 @@ function SourceSearch({
 
   const names = new Map(plugins.map((plugin) => [plugin.id, plugin.displayName]));
   const sourceName = (id: string): string => names.get(id) ?? id;
-  const scopeOptions = listScopeOptions(places, tab);
+
+  // Once something is added from a list, that list stays as it was shown and
+  // is not read again: a read would drop the thing, and the rows below it
+  // would slide up. A read that was already on its way is ignored too, because
+  // the list shown is this snapshot and not the cache. Undoing the add, or a
+  // failed add, removes the row, and then the live list shows again.
+  const frozenSuggestions = [...added.values()].find(
+    (row) => row.scopeRef === chosenScopeRef && row.suggestions !== undefined,
+  )?.suggestions;
+  const suggestionsRead = useQuery({
+    ...entitySuggestionsQuery(client, chosenScopeRef === "" ? undefined : chosenScopeRef),
+    enabled: frozenSuggestions === undefined,
+  });
+  const shownSuggestions = frozenSuggestions ?? suggestionsRead.data;
+
+  // The contexts the select offers: those of the Work board, those the
+  // suggestions mention, and those the Inbox holds if it was read. The Inbox is
+  // only looked at here, never read, so the sheet makes no read of its own for them.
+  const cachedInbox = useQuery({ ...inboxQuery(client), enabled: false });
+  const knownPlaces = mergePlaces(
+    places,
+    cachedInbox.data?.places ?? [],
+    shownSuggestions?.places ?? [],
+  );
+  const scopeOptions = listScopeOptions(knownPlaces, tab);
   const scope = scopeOptions.find((option) => option.ref === chosenScopeRef);
   const scopeRef = scope?.ref ?? "";
 
@@ -197,14 +252,6 @@ function SourceSearch({
     }
   }
 
-  const isSuggestionsFrozen = [...added.values()].some((row) => row.scopeRef === scopeRef);
-  const suggestionsRead = useQuery({
-    ...entitySuggestionsQuery(client, scopeRef === "" ? undefined : scopeRef),
-    // Once something is added from this list, the list is not read again: a
-    // read would drop the thing, and the row below the pointer would slide up.
-    enabled: !isSuggestionsFrozen,
-  });
-
   const isLink = search !== null && isPastedLink(search.text);
   const searchState: SearchState =
     search === null || isOffline
@@ -224,12 +271,12 @@ function SourceSearch({
     search: searchState,
   });
   const suggestions: SuggestionsView =
-    suggestionsRead.data !== undefined
+    shownSuggestions !== undefined
       ? {
           status: "ready",
           groups: buildSuggestionGroups({
-            reply: suggestionsRead.data,
-            places,
+            reply: shownSuggestions,
+            places: knownPlaces,
             sourceId: tab,
             scopeRef: scope?.ref,
             // Offline, typing is all that can be done with the list.
@@ -262,27 +309,7 @@ function SourceSearch({
           followed: result.followed,
           created: result.created,
         }),
-        gesture:
-          result.created && entityId !== undefined
-            ? {
-                words: `Added ${row.identifier} to Work`,
-                undo: async () => {
-                  const outcome = await client.externalEntity.undoTakeOn({
-                    params: { id: entityId },
-                    payload: { taskId: result.taskId },
-                  });
-                  if (!outcome.undone) {
-                    throw new Error(outcome.reason ?? "The Task has changed since it was added.");
-                  }
-                  setAdded((before) => {
-                    const rest = new Map(before);
-                    rest.delete(row.ref);
-                    return rest;
-                  });
-                  return undefined;
-                },
-              }
-            : undefined,
+        wasCreated: result.created && entityId !== undefined,
       });
     },
     onError: (error, row) => {
@@ -300,8 +327,40 @@ function SourceSearch({
   });
 
   const add = (row: AddRow): void => {
-    setAdded((before) => new Map(before).set(row.ref, { stage: undefined, scopeRef }));
-    addToWork.mutate(row);
+    setAdded((before) =>
+      new Map(before).set(row.ref, {
+        stage: undefined,
+        scopeRef: chosenScopeRef,
+        suggestions: shownSuggestions,
+      }),
+    );
+    // What the add made, or `undefined` when it failed or the thing already had a Task: nothing to take back.
+    const made = addToWork.mutateAsync(row).then(
+      (result) =>
+        result.created && result.id !== undefined
+          ? { entityId: result.id, taskId: result.taskId }
+          : undefined,
+      () => undefined,
+    );
+    reserveGesture(
+      {
+        words: `Added ${row.identifier} to Work`,
+        undo: async () => {
+          const task = await made;
+          if (task === undefined) {
+            throw new Error("That add changed nothing, so there is nothing to take back.");
+          }
+          await undoAddedTask(client, task.entityId, task.taskId);
+          setAdded((before) => {
+            const rest = new Map(before);
+            rest.delete(row.ref);
+            return rest;
+          });
+          return undefined;
+        },
+      },
+      made.then((task) => task !== undefined),
+    );
     // The row went quiet, so the keys go back to the search, ready for the next one.
     searchRef.current?.focus({ preventScroll: true });
   };

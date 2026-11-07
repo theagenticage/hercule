@@ -11,24 +11,27 @@
  * - When the controller answers, the edit is written into the cached Inbox and
  *   leaves the pending list in the same draw. A move it refuses leaves the
  *   pending list alone, so the card goes back, and the undo line says why.
- * - Each move the user makes is one gesture on the shared undo stack. A
- *   gesture outlives the screen that made it, so it is undone through the
- *   screen that is open when Undo is pressed (`CardMover`).
+ * - Each move the user makes is one gesture on the shared undo stack. The
+ *   gesture takes its place when the user acts, before the controller answers,
+ *   and its undo waits for the answer itself. A move that fails, or a Take that
+ *   makes no Task, takes its gesture off again. A gesture outlives the screen
+ *   that made it, so it is undone through the screen that is open when Undo is
+ *   pressed (`CardMover`).
  */
 import { useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
-import {
-  applyInboxEdit,
-  nameCard,
-  reapplyInboxEdits,
-  type InboxEdit,
-} from "@hercule/client-core/inbox";
+import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import { nameCard, reapplyInboxEdits, type InboxEdit } from "@hercule/client-core/inbox";
 import type { Inbox, InboxCard } from "@hercule/contract";
-import { buildCachedCardMover, type CardMover } from "../../../app/card-mover";
+import {
+  buildCachedCardMover,
+  buildCachedInboxWriter,
+  type CardMover,
+} from "../../../app/card-mover";
 import type { SpringName } from "../../../app/motion";
-import type { Gesture, UndoStack } from "../../../app/undo-stack";
+import type { UndoStack } from "../../../app/undo-stack";
+import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
 import {
@@ -50,7 +53,7 @@ interface PendingEdit {
 
 const NO_EDITS: readonly PendingEdit[] = [];
 
-const NOT_SAVED_MESSAGE = "That move did not save, so there is nothing to put back.";
+const NOTHING_TO_PUT_BACK = "That move changed nothing, so there is nothing to put back.";
 
 /** Removes the full stops at the end of an error's words, so a sentence can go on after them. */
 const readReason = (error: unknown): string => readErrorMessage(error).replace(/\.+$/, "");
@@ -103,7 +106,7 @@ export const useInboxMoves = ({
     setPendingEdits(pendingRef.current);
   };
   const nextId = useRef(1);
-  const { line, say, undo } = useUndoLine(undoStack);
+  const writeCachedInbox = buildCachedInboxWriter(queryClient);
 
   /**
    * Makes `change` and glides every part of the page that moves because of it
@@ -133,16 +136,29 @@ export const useInboxMoves = ({
 
   /** Writes an edit the controller answered into the cached Inbox, and drops it from the pending list in the same draw. */
   const settleEdit = async (shown: PendingEdit): Promise<void> => {
-    // A read that started before this answer could end after the edit and put the card back.
-    // Cancelling reverts it, and the push that follows starts a read that began after the answer.
-    if (queryClient.getQueryData(queryKeys.inbox()) !== undefined) {
-      await queryClient.cancelQueries({ queryKey: queryKeys.inbox() });
-    }
-    queryClient.setQueryData<Inbox>(queryKeys.inbox(), (cached) =>
-      cached === undefined ? undefined : applyInboxEdit(cached, shown.edit),
-    );
+    await writeCachedInbox(shown.edit);
     changePending((edits) => edits.filter((each) => each.id !== shown.id));
   };
+
+  /**
+   * Shows an edit made by Undo on the page that is open, and writes it into
+   * the cached Inbox. A card put back parts the page on `hand` and comes from
+   * 14px aside on `travel`.
+   */
+  const writeInboxEdit = async (edit: InboxEdit): Promise<void> => {
+    const { shown, born } = showEdit(edit, "hand");
+    if (edit.kind === "put-back") {
+      for (const card of born) {
+        if (card.dataset["cardId"] === edit.card.id) comeBackFromAside(card);
+      }
+    }
+    await settleEdit(shown);
+  };
+
+  const { line, say, undo } = useUndoLine(undoStack, () => ({
+    putCardBack: buildCachedCardMover(client, queryClient),
+    writeInboxEdit,
+  }));
 
   const takeOn = useMutation({
     mutationKey: INBOX_MOVES_KEY,
@@ -157,7 +173,27 @@ export const useInboxMoves = ({
 
   const take = (card: InboxCard): void => {
     const name = nameCard(card);
-    takeOn.mutateAsync(card).then(
+    const request = takeOn.mutateAsync(card);
+    // A Take that made no Task (it failed, or the card already had one) has nothing to put back.
+    const wasCreated = request.then(
+      ({ created }) => created,
+      () => false,
+    );
+    undoStack.reserve(
+      {
+        words: `Took on ${name}`,
+        undo: async (page) => {
+          if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
+          const { taskId } = await request;
+          // The Task was touched since, so it stays and the line says why.
+          await undoAddedTask(client, card.id, taskId);
+          await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
+          return undefined;
+        },
+      },
+      wasCreated,
+    );
+    request.then(
       async ({ taskId, created }) => {
         const { shown } = showEdit({ kind: "set-task", id: card.id, taskId }, "hand");
         const scroller = scrollRef.current;
@@ -168,22 +204,6 @@ export const useInboxMoves = ({
           say(`${name} already had a Task, so no new one was made.`, false);
           return;
         }
-        const gesture: Gesture<CardMover> = {
-          words: `Took on ${name}`,
-          undo: async (page) => {
-            const outcome = await client.externalEntity.undoTakeOn({
-              params: { id: card.id },
-              payload: { taskId },
-            });
-            // The Task was touched since, so it stays. The line says why.
-            if (!outcome.undone) {
-              throw new Error(outcome.reason ?? "The Task has changed since you took it on.");
-            }
-            await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
-            return undefined;
-          },
-        };
-        undoStack.push(gesture);
         say(`Took on ${name}. A Task is on Work.`, true);
       },
       (error: unknown) => {
@@ -215,41 +235,19 @@ export const useInboxMoves = ({
         return false;
       },
     );
-    const gesture: Gesture<CardMover> = {
-      words: `Dismissed ${name}`,
-      undo: async (page) => {
-        if (!(await wasSaved)) throw new Error(NOT_SAVED_MESSAGE);
-        await client.externalEntity.restore({ params: { id: card.id } });
-        await page.writeInboxEdit({ kind: "put-back", card });
-        return undefined;
+    undoStack.reserve(
+      {
+        words: `Dismissed ${name}`,
+        undo: async (page) => {
+          if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
+          await client.externalEntity.restore({ params: { id: card.id } });
+          await page.writeInboxEdit({ kind: "put-back", card });
+          return undefined;
+        },
       },
-    };
-    undoStack.push(gesture);
+      wasSaved,
+    );
     say(`Dismissed ${name}.`, true);
-    // A move that failed has nothing to undo. Taking its gesture off the stack
-    // keeps the next Undo for the move before it.
-    void wasSaved.then((saved) => {
-      if (!saved) undoStack.remove(gesture);
-    });
-  };
-
-  /**
-   * Shows an edit made by Undo on the page that is open, and writes it into
-   * the cached Inbox. A card put back parts the page on `hand` and comes from
-   * 14px aside on `travel`.
-   */
-  const writeInboxEdit = async (edit: InboxEdit): Promise<void> => {
-    const { shown, born } = showEdit(edit, "hand");
-    if (edit.kind === "put-back") {
-      for (const card of born) {
-        if (card.dataset["cardId"] === edit.card.id) comeBackFromAside(card);
-      }
-    }
-    await settleEdit(shown);
-  };
-
-  const undoLastMove = (): void => {
-    undo({ putCardBack: buildCachedCardMover(client, queryClient), writeInboxEdit });
   };
 
   // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
@@ -268,7 +266,7 @@ export const useInboxMoves = ({
     inbox,
     take,
     dismiss,
-    undoLastMove,
+    undoLastMove: undo,
     line,
     sayWithoutUndo: (text) => {
       say(text, false);

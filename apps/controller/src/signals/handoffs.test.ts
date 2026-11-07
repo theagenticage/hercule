@@ -18,7 +18,7 @@ import { inTransaction, TestDatabase } from "../db/testing";
 import { RunService } from "../runs";
 import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
-import { findTaskToContinue, readThreadRef, SignalHandoffs, SignalHandoffsLayer } from "./handoffs";
+import { readThreadRef, SignalHandoffs, SignalHandoffsLayer } from "./handoffs";
 import { signalRepository } from "./repository";
 
 const REF = "github:issue:acme/api#7";
@@ -40,7 +40,7 @@ describe("readThreadRef", () => {
   });
 });
 
-describe("findTaskToContinue", () => {
+describe("finding the Task a handoff continues", () => {
   // The describe line runs this lookup for every distinct thread on every
   // read of To do, so it must start from the few link rows of the ref.
   // Without statistics SQLite otherwise starts from the status index and scans
@@ -52,7 +52,7 @@ describe("findTaskToContinue", () => {
         const tasks = yield* taskRepository;
         // The statements the repository runs, as SQLite receives them.
         const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
-        yield* findTaskToContinue(tasks, REF).pipe(
+        yield* tasks.findActiveTaskForRef(REF).pipe(
           Effect.provideService(Statement.CurrentTransformer, (statement) => {
             statements.push(statement.compile());
             return Effect.succeed(statement);

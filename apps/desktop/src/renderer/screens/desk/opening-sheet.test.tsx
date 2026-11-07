@@ -5,7 +5,7 @@
  */
 import { useState, type JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OpeningSheet, type SheetPlaces } from "./index";
 
@@ -112,23 +112,31 @@ describe("OpeningSheet", () => {
 
   it("turns round when opened again on its way home, and then does not report closing", async () => {
     allowMotion();
-    const user = userEvent.setup();
-    const { words, readPlaces } = buildCard();
-    const onClosed = vi.fn();
-    render(<Harness readPlaces={readPlaces} onClosed={onClosed} />);
-    await waitFor(() => {
+    vi.useFakeTimers();
+    try {
+      const { words, readPlaces } = buildCard();
+      const onClosed = vi.fn();
+      render(<Harness readPlaces={readPlaces} onClosed={onClosed} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
       expect(words.style.opacity).toBe("0");
-    });
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(screen.getByRole("button", { name: "Open" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    // Long enough for a close that was not turned round to have finished.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 900));
-    });
-    expect(onClosed).not.toHaveBeenCalled();
-    expect(Number.parseFloat(screen.getByRole("dialog").style.width)).toBe(520);
+      // Long enough for a close that was not turned round to have finished.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(onClosed).not.toHaveBeenCalled();
+      expect(Number.parseFloat(screen.getByRole("dialog").style.width)).toBe(520);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fades in place under Reduce motion, and still reports that it has closed", async () => {

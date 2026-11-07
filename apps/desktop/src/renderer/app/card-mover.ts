@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import { applyInboxEdit, type InboxEdit } from "@hercule/client-core/inbox";
 import { applyCardMove, buildRestoreMove, type CardPlacement } from "@hercule/client-core/work";
@@ -38,20 +38,45 @@ export interface CardMover {
 }
 
 /**
- * Returns the way a screen that does not draw the Inbox writes an Inbox edit:
- * into the cached Inbox alone. The Inbox reads the cache when it opens. A read
- * of the Inbox that is running is cancelled first, because it could end after
- * the edit and put the card back.
+ * Writes a change the controller has answered into the read cached under
+ * `queryKey`, then marks that read out of date so that it is read again.
+ * Does nothing when no read is cached.
+ *
+ * - A read that is running is cancelled first, because it started before the
+ *   answer and could end after the change, putting back what the change took
+ *   away.
+ * - Cancelling also drops the one read that may have seen the answer: the
+ *   controller pushes its change before the reply arrives, and that push
+ *   starts a read. The read made after the change is written is the only one
+ *   that is sure to be authoritative, so it is asked for here and does not
+ *   depend on a push that may already have come.
+ */
+export const writeAnsweredChange = async <Read>(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  change: (cached: Read) => Read,
+): Promise<void> => {
+  if (queryClient.getQueryData(queryKey) === undefined) return;
+  await queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData<Read>(queryKey, (cached) =>
+    cached === undefined ? undefined : change(cached),
+  );
+  // Not awaited: the read can be slow, and the caller only needs the change written.
+  void queryClient.invalidateQueries({ queryKey });
+};
+
+/**
+ * Returns the way to write an Inbox edit into the cached Inbox alone, which a
+ * screen that does not draw the Inbox uses, and which the Inbox uses to settle
+ * an edit the controller answered. The Inbox reads the cache when it opens.
+ * See `writeAnsweredChange` for how the cache is written.
  */
 export const buildCachedInboxWriter =
   (queryClient: QueryClient): CardMover["writeInboxEdit"] =>
-  async (edit) => {
-    if (queryClient.getQueryData(queryKeys.inbox()) === undefined) return;
-    await queryClient.cancelQueries({ queryKey: queryKeys.inbox() });
-    queryClient.setQueryData<Inbox>(queryKeys.inbox(), (cached) =>
-      cached === undefined ? undefined : applyInboxEdit(cached, edit),
+  (edit) =>
+    writeAnsweredChange<Inbox>(queryClient, queryKeys.inbox(), (cached) =>
+      applyInboxEdit(cached, edit),
     );
-  };
 
 /**
  * Returns the way a screen that does not draw the Work board puts a card
@@ -70,9 +95,8 @@ export const buildCachedCardMover =
       // A gesture that was refused changed nothing, so there is nothing to put back.
       if (!(await isUndoWanted)) return;
       await client.task.move({ params: { id: taskId }, payload: target });
-      await queryClient.cancelQueries({ queryKey: queryKeys.workBoard() });
-      queryClient.setQueryData<WorkBoard>(queryKeys.workBoard(), (cached) =>
-        cached === undefined ? undefined : applyCardMove(cached, restore.move),
+      await writeAnsweredChange<WorkBoard>(queryClient, queryKeys.workBoard(), (cached) =>
+        applyCardMove(cached, restore.move),
       );
     })();
     return { isExact: restore.exact, request };

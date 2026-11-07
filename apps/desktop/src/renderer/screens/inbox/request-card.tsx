@@ -1,19 +1,13 @@
 import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import {
-  decideCardFace,
-  describeCardAloud,
-  describeCardTrust,
-  describeCardWait,
-  isCardTimeDependent,
-} from "@hercule/client-core/inbox";
+import { decideCardFace, describeCardAloud } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import "../desk/card.css";
 import { CardMonogram, CardMoves } from "./card-moves";
 import { CardWaitFigure } from "./card-parts";
-import { useMinuteClock } from "./use-minute-clock";
+import { useCardTime } from "./use-card-time";
 
 /**
  * Renders a small request as a card of its own, in the narrow column: the
@@ -52,10 +46,8 @@ export const RequestCard = memo(function RequestCard({
   readonly monogram: string;
   readonly step: number;
 }): JSX.Element {
-  const now = useMinuteClock(isCardTimeDependent(card));
+  const { wait, trust } = useCardTime(card);
   const face = decideCardFace(card);
-  const wait = describeCardWait(card, now);
-  const trust = describeCardTrust(card, now);
   const where = [homeName, card.card === "compact" ? face.whose : undefined]
     .filter((part) => part !== undefined)
     .join(" · ");

@@ -272,7 +272,7 @@ A card is a **full record of a work kind**, not dismissed, with at least one of:
 
 Context and partial records have no card. Membership is **one SQL predicate in the external-entities repository**, used by both `queryInbox` and `countInbox`, so the cards and the counts cannot disagree. The predicate does not filter on `lifecycle`, `access`, the Connection's state, the kind being active or `stale`: a card survives a lost token and keeps its last known facts. Slice 5 adds the open-signal condition at one marked place and imports nothing of the signals domain in this slice.
 
-The client's `decideInboxPlace` does not decide membership. It decides where a card lies on the page: which of its places surfaces, the first one in full, the others as a pointer, counted once ([./17-desktop-app.md](./17-desktop-app.md#inbox)).
+The client's `layOutInbox` does not decide membership. It decides where a card lies on the page: which of its places surfaces, the first one in full, the others as a pointer, counted once ([./17-desktop-app.md](./17-desktop-app.md#inbox)).
 
 ### 8.2 Sides
 

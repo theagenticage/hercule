@@ -1033,7 +1033,7 @@ const make = Effect.gen(function* () {
         : Effect.map(
             sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
               SELECT task_id, ref FROM task_entity_links
-              WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+              WHERE task_id IN ${sql.in(taskIds.map(uuidFromString))}
               ORDER BY linked_at, ref`,
             (rows) => {
               const links = new Map<string, Array<string>>();
@@ -1216,6 +1216,12 @@ const make = Effect.gen(function* () {
      * its work follows the tasks that carry the refs, not the tasks or the
      * provenance entries there are. The unary `+` on the status keeps SQLite
      * from starting at the status index and scanning every open task.
+     *
+     * This is not the active Task of a ref (`findActiveTaskForRef`), on
+     * purpose. A handoff continues one Task per thread, the oldest linked.
+     * Your work lists every open Task that carries the thread, so a second
+     * Task made from the same thread still shows. Both rules count a Task as
+     * open exactly while its stage is not finished.
      */
     listOpenOnRefs: (
       refs: ReadonlyArray<ExternalRef>,

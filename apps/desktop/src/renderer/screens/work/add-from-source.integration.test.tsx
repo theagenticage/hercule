@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createClient } from "@hercule/client-core";
+import { createClient, queryKeys } from "@hercule/client-core";
 import { buildPlace } from "@hercule/client-core/work/testing";
 import type {
   EntitySearchReply,
@@ -26,6 +26,7 @@ import {
   type Call,
   type Handler,
 } from "../../app/testing";
+import { createUndoStack } from "../../app/undo-stack";
 import { AddFromSource, type AddedThing } from "./add-from-source";
 import { AddTaskSheet } from "./add-task-sheet";
 
@@ -149,6 +150,7 @@ const listSearches = (calls: readonly Call[]): readonly Call[] =>
 interface Rendered {
   readonly calls: readonly Call[];
   readonly added: AddedThing[];
+  readonly undoStack: ReturnType<typeof createUndoStack<unknown>>;
   readonly onFailed: ReturnType<typeof vi.fn<(message: string) => void>>;
   readonly onOpenTask: ReturnType<typeof vi.fn<(taskId: string) => void>>;
   readonly onClose: ReturnType<typeof vi.fn<() => void>>;
@@ -161,12 +163,15 @@ const renderSheet = ({
   isOffline = false,
   projectId = null,
   places = [BASKET, PRICING],
+  queryClient = createQueryClient(),
 }: {
   readonly handlers?: Readonly<Record<string, Handler>>;
   readonly opening?: { readonly sourceId?: string; readonly scopeRef?: string };
   readonly isOffline?: boolean;
   readonly projectId?: string | null;
   readonly places?: readonly (typeof BASKET)[];
+  /** The cache the sheet reads through, when a test needs to fill or invalidate it. */
+  readonly queryClient?: ReturnType<typeof createQueryClient>;
 } = {}): Rendered => {
   const calls = stubApi({
     "GET /api/v1/plugins": { body: PLUGINS },
@@ -178,11 +183,12 @@ const renderSheet = ({
   });
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
   const added: AddedThing[] = [];
+  const undoStack = createUndoStack<unknown>();
   const onFailed = vi.fn<(message: string) => void>();
   const onOpenTask = vi.fn<(taskId: string) => void>();
   const onClose = vi.fn<() => void>();
   const sheet = (): JSX.Element => (
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <Suspense fallback={null}>
         <AddTaskSheet
           lane={{ id: "no-project", name: "No project", projectId: null }}
@@ -196,6 +202,7 @@ const renderSheet = ({
               opening={opening}
               projectId={projectId}
               isOffline={isOffline}
+              reserveGesture={undoStack.reserve}
               onAdded={(thing) => {
                 added.push(thing);
               }}
@@ -208,7 +215,7 @@ const renderSheet = ({
     </QueryClientProvider>
   );
   render(sheet());
-  return { calls, added, onFailed, onOpenTask, onClose };
+  return { calls, added, undoStack, onFailed, onOpenTask, onClose };
 };
 
 /** Returns the search field, once the sheet has read the plugins. */
@@ -678,7 +685,7 @@ describe("From a source: adding", () => {
   });
 
   it("undoes the add, and the row can be added again", async () => {
-    const { added, calls } = renderSheet({
+    const { added, calls, undoStack } = renderSheet({
       handlers: {
         [ADD_PATH]: { body: ADDED },
         [`POST /api/v1/external-entities/${ENTITY_ID}/take-on/undo`]: {
@@ -692,7 +699,10 @@ describe("From a source: adding", () => {
       expect(added).toHaveLength(1);
     });
 
-    await added[0]!.gesture!.undo(undefined);
+    expect(await undoStack.undo(undefined)).toEqual({
+      kind: "reversed",
+      words: "Added WEB-301 to Work",
+    });
 
     await waitFor(() => {
       expect((getRow("WEB-301") as HTMLButtonElement).disabled).toBe(false);
@@ -701,8 +711,31 @@ describe("From a source: adding", () => {
     expect(undo?.body).toEqual({ taskId: TASK_ID });
   });
 
+  it("waits for an add that has not answered when Undo is pressed, then undoes it", async () => {
+    const held = holdAnswer();
+    const { undoStack, calls } = renderSheet({
+      handlers: {
+        [ADD_PATH]: held.handler,
+        [`POST /api/v1/external-entities/${ENTITY_ID}/take-on/undo`]: {
+          body: { undone: true },
+        },
+      },
+    });
+    const user = await searchFor();
+    await user.click(getRow("WEB-301"));
+
+    const undone = undoStack.undo(undefined);
+    expect(calls.some((call) => call.path.endsWith("/take-on/undo"))).toBe(false);
+    held.answer({ body: ADDED });
+
+    expect(await undone).toEqual({ kind: "reversed", words: "Added WEB-301 to Work" });
+    expect(calls.find((call) => call.path.endsWith("/take-on/undo"))?.body).toEqual({
+      taskId: TASK_ID,
+    });
+  });
+
   it("says why the undo was refused, and keeps the row added", async () => {
-    const { added } = renderSheet({
+    const { added, undoStack } = renderSheet({
       handlers: {
         [ADD_PATH]: { body: ADDED },
         [`POST /api/v1/external-entities/${ENTITY_ID}/take-on/undo`]: {
@@ -716,15 +749,17 @@ describe("From a source: adding", () => {
       expect(added).toHaveLength(1);
     });
 
-    await expect(added[0]!.gesture!.undo(undefined)).rejects.toThrow(
-      "A Thread has started on this Task.",
-    );
+    expect(await undoStack.undo(undefined)).toEqual({
+      kind: "failed",
+      words: "Added WEB-301 to Work",
+      reason: "A Thread has started on this Task.",
+    });
 
     expect((getRow("WEB-301") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("says a thing that already had a Task is on Work, with nothing to undo", async () => {
-    const { added } = renderSheet({
+    const { added, undoStack } = renderSheet({
       handlers: {
         [ADD_PATH]: { body: { ...ADDED, created: false, stage: "building", followed: false } },
       },
@@ -737,7 +772,93 @@ describe("From a source: adding", () => {
       expect(added).toHaveLength(1);
     });
     expect(added[0]).toMatchObject({ line: "WEB-301 is already on Work, in Building." });
-    expect(added[0]?.gesture).toBeUndefined();
+    expect(added[0]?.wasCreated).toBe(false);
+    // The add reserved a place on the stack, and gave it up once it made no Task.
+    expect(await undoStack.undo(undefined)).toEqual({ kind: "empty" });
+  });
+});
+
+describe("From a source: the suggestions and the contexts", () => {
+  it("keeps the suggestions as shown, with the check in place, when a read that was on its way returns without the added thing", async () => {
+    const queryClient = createQueryClient();
+    const later = holdAnswer();
+    let reads = 0;
+    renderSheet({
+      queryClient,
+      handlers: {
+        [SUGGESTIONS_PATH]: () => (++reads === 1 ? { body: SUGGESTIONS } : later.handler()),
+        [ADD_PATH]: { body: ADDED },
+      },
+    });
+    const user = userEvent.setup();
+    await screen.findByText("WEB-268");
+    // A live push starts a read, and it is still on its way when the user adds.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.entitySuggestions() });
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    await user.click(getRow("WEB-268"));
+    later.answer({ body: { ...SUGGESTIONS, suggestions: [SUGGESTIONS.suggestions[1]!] } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(within(getRow("WEB-268")).getByText("Exploring")).toBeTruthy();
+    expect(screen.getByText("WEB-279")).toBeTruthy();
+  });
+
+  it("shows the live suggestions again when the add fails", async () => {
+    const queryClient = createQueryClient();
+    const later = holdAnswer();
+    let reads = 0;
+    renderSheet({
+      queryClient,
+      handlers: {
+        [SUGGESTIONS_PATH]: () => (++reads === 1 ? { body: SUGGESTIONS } : later.handler()),
+        [ADD_PATH]: { status: 500, body: buildErrorBody("internal", "The source did not answer.") },
+      },
+    });
+    const user = userEvent.setup();
+    await screen.findByText("WEB-268");
+    void queryClient.invalidateQueries({ queryKey: queryKeys.entitySuggestions() });
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    await user.click(getRow("WEB-268"));
+    later.answer({ body: { ...SUGGESTIONS, suggestions: [SUGGESTIONS.suggestions[1]!] } });
+
+    await waitFor(() => {
+      expect(screen.queryByText("WEB-268")).toBeNull();
+    });
+    expect(screen.getByText("WEB-279")).toBeTruthy();
+  });
+
+  it("offers the contexts the suggestions and the cached Inbox mention, as well as the board's", async () => {
+    const queryClient = createQueryClient();
+    const LEDGER = buildPlace("relay:project:ledger", "Ledger tidy-up", {
+      kind: "relay/project",
+      caption: "Relay project",
+    });
+    queryClient.setQueryData(queryKeys.inbox(), {
+      cards: [],
+      places: [LEDGER],
+      edges: [],
+      counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
+      truncated: false,
+    });
+    renderSheet({ queryClient, places: [BASKET] });
+
+    await screen.findByText("WEB-268");
+
+    const options = within(
+      screen.getByRole("combobox", { name: "Narrow the search" }),
+    ).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "all of Relay",
+      "Basket rebuild (project)",
+      "Ledger tidy-up (project)",
+      "Pricing rules (project)",
+    ]);
   });
 });
 

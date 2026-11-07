@@ -2,8 +2,7 @@ import { Fragment, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { InboxLayout, RequestsOrder } from "@hercule/client-core/inbox";
 import { ChevronDownIcon } from "../../icons/chevron-down";
-import { MenuPick, SectionHeading, Sunrise, ToolMenu } from "../desk";
-import { usePopoverMenu } from "../use-popover-menu";
+import { ChoiceMenu, SectionHeading, Sunrise } from "../desk";
 import { RequestCard } from "./request-card";
 import { WithSomeoneElse } from "./with-someone-else";
 
@@ -26,33 +25,21 @@ function RequestsOrderControl({
   readonly order: RequestsOrder;
   readonly onChange: (order: RequestsOrder) => void;
 }): JSX.Element {
-  const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const current = ORDERS.find((each) => each.id === order) ?? ORDERS[0];
   return (
-    <>
-      <button {...triggerProps} type="button" className="inbox-order" title="Order requests">
-        <span>{current?.name}</span>
-        <ChevronDownIcon size={16} />
-      </button>
-      <ToolMenu menuProps={menuProps} label="Order requests" edge="button-end">
-        {ORDERS.map((each) => {
-          const isOn = each.id === order;
-          return (
-            <MenuPick
-              key={each.id}
-              itemProps={buildItemProps(`order:${each.id}`, { checked: isOn })}
-              kind="choice"
-              name={each.name}
-              isOn={isOn}
-              onPick={() => {
-                close();
-                onChange(each.id);
-              }}
-            />
-          );
-        })}
-      </ToolMenu>
-    </>
+    <ChoiceMenu
+      label="Order requests"
+      edge="button-end"
+      entries={ORDERS}
+      chosenId={current?.id}
+      onPick={onChange}
+      renderTrigger={(triggerProps) => (
+        <button {...triggerProps} type="button" className="inbox-order" title="Order requests">
+          <span>{current?.name}</span>
+          <ChevronDownIcon size={16} />
+        </button>
+      )}
+    />
   );
 }
 

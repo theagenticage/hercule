@@ -2,8 +2,8 @@
  * The wait a card shows and the words about how old its facts are. Both take
  * `now` as a parameter, so a test can fix it.
  */
-import { describeDeskAge } from "../desk/age";
-import type { CardRecord } from "./card-face";
+import type { EntityRecord } from "@hercule/contract";
+import { describeDeskAge, findNextDeskAgeChange } from "../desk/age";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -42,7 +42,7 @@ const decideLevel = (hours: number, patience: number): WaitLevel => {
  * first observation when the card has none. Hours are rounded down, and a wait
  * under an hour reads "1h".
  */
-export const describeCardWait = (card: CardRecord, now: Date): CardWait | null => {
+export const describeCardWait = (card: EntityRecord, now: Date): CardWait | null => {
   if (card.pace !== "fast" || card.taskId !== undefined) return null;
   const since = Date.parse(card.waitingSince ?? card.firstObservedAt);
   const hours = Math.max(0, now.getTime() - since) / HOUR_MS;
@@ -63,17 +63,69 @@ export const describeCardWait = (card: CardRecord, now: Date): CardWait | null =
  * - `inaccessible`: no account can read it now, and the facts are the last known;
  * - `stale`: no account can poll now, so the age of the facts shows.
  */
-export const describeCardTrust = (card: CardRecord, now: Date): string | undefined => {
+export const describeCardTrust = (card: EntityRecord, now: Date): string | undefined => {
   if (card.access === "deleted") return "Deleted at the source";
   const age = `Last read ${describeDeskAge(card.observedAt, now)}`;
   if (card.access === "inaccessible") return `No account can read this now. ${age}`;
   return card.stale ? age : undefined;
 };
 
+/** Checks whether the card's trust line counts the age of its facts. A deleted card says only that it is gone. */
+const showsAgeOfFacts = (card: EntityRecord): boolean =>
+  card.access !== "deleted" && (card.stale || card.access === "inaccessible");
+
+/** Checks whether the card counts a wait: a fast kind that no live Task holds. */
+const countsWait = (card: EntityRecord): boolean =>
+  card.pace === "fast" && card.taskId === undefined;
+
 /**
  * Checks whether anything a card shows depends on the time, so that a screen
  * draws it again as time passes: a wait that counts hours and days, or the age
  * of facts that may be old. A card that shows neither never changes by itself.
  */
-export const isCardTimeDependent = (card: CardRecord): boolean =>
-  (card.pace === "fast" && card.taskId === undefined) || card.stale || card.access !== "ok";
+export const isCardTimeDependent = (card: EntityRecord): boolean =>
+  countsWait(card) || showsAgeOfFacts(card);
+
+/** Everything a card shows that depends on the time. */
+export interface CardTime {
+  readonly wait: CardWait | null;
+  readonly trust: string | undefined;
+}
+
+/** Returns the wait and the trust line of `card` at `now`. */
+export const describeCardTime = (card: EntityRecord, now: Date): CardTime => ({
+  wait: describeCardWait(card, now),
+  trust: describeCardTrust(card, now),
+});
+
+/** A moment so far off that no timer reaches it: the next change of a card that never changes by itself. */
+const NEVER = new Date(8.64e15);
+
+/**
+ * Returns the first moment after `now` at which `describeCardTime` returns
+ * something different for `card`, so a screen sets one timer for it and draws
+ * the card only then. It is `NEVER` for a card that is not time dependent.
+ *
+ * A wait changes in three ways, and the earliest counts:
+ *
+ * - its text: the hour figure goes up each whole hour from the second hour
+ *   (a wait under two hours reads "1h"), and once past a day, each whole day;
+ * - its level, at a quarter of the kind's patience, at the patience, and at
+ *   three times it;
+ * - the age of the facts in the trust line, which changes by the day or week.
+ */
+export const findNextCardTimeChange = (card: EntityRecord, now: Date): Date => {
+  const changes: number[] = [];
+  if (countsWait(card)) {
+    const since = Date.parse(card.waitingSince ?? card.firstObservedAt);
+    const hours = Math.max(0, now.getTime() - since) / HOUR_MS;
+    const nextText =
+      hours < 2 ? 2 : hours < 24 ? Math.floor(hours) + 1 : (Math.floor(hours / 24) + 1) * 24;
+    const patience = Math.max(1, card.patience);
+    const nextLevel = [0.25, 1, 3].map((share) => share * patience).find((at) => at > hours);
+    // Rounded up, so the card is drawn at a moment the new text has certainly started.
+    changes.push(Math.ceil(since + Math.min(nextText, nextLevel ?? Infinity) * HOUR_MS));
+  }
+  if (showsAgeOfFacts(card)) changes.push(findNextDeskAgeChange(card.observedAt, now).getTime());
+  return changes.length === 0 ? NEVER : new Date(Math.min(...changes));
+};

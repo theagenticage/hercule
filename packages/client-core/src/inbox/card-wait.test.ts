@@ -1,7 +1,13 @@
 /** Tests the wait of a card and the line that says its facts may be old. */
 import { describe, expect, it } from "vitest";
 import { buildInboxCard, buildRequestCard } from "./cards.testing";
-import { describeCardTrust, describeCardWait, isCardTimeDependent } from "./card-wait";
+import {
+  describeCardTime,
+  describeCardTrust,
+  describeCardWait,
+  findNextCardTimeChange,
+  isCardTimeDependent,
+} from "./card-wait";
 
 const NOW = new Date("2026-11-07T12:00:00.000Z");
 const hoursAgo = (hours: number): string =>
@@ -90,5 +96,68 @@ describe("isCardTimeDependent", () => {
   it("is false for a card whose wait ended with a Task, and for one with no clock", () => {
     expect(isCardTimeDependent(buildRequestCard("1", { taskId: "task-1" }))).toBe(false);
     expect(isCardTimeDependent(buildInboxCard("2"))).toBe(false);
+  });
+
+  it("is false for a deleted card, whose line has no time in it", () => {
+    expect(isCardTimeDependent(buildInboxCard("1", { access: "deleted", stale: true }))).toBe(
+      false,
+    );
+  });
+});
+
+describe("findNextCardTimeChange", () => {
+  const waiting = (hours: number, patience: number) =>
+    buildRequestCard("1", { patience, waitingSince: hoursAgo(hours) });
+  const hoursUntil = (card: ReturnType<typeof waiting>) =>
+    (findNextCardTimeChange(card, NOW).getTime() - NOW.getTime()) / 3_600_000;
+
+  it.each([
+    // [hours waited, patience, hours until the text or the level changes]
+    [0.5, 1000, 1.5],
+    [1.5, 1000, 0.5],
+    [2, 1000, 1],
+    [5.5, 1000, 0.5],
+    [23.5, 1000, 0.5],
+    [24, 1000, 24],
+    [50, 1000, 22],
+    // The level changes before the text: a quarter of 6 hours is 1.5, and 75 is three times 25.
+    [1.2, 6, 0.3],
+    [73, 25, 2],
+  ])(
+    "after a wait of %s hours on a patience of %s hours, changes in %s hours",
+    (hours, patience, until) => {
+      expect(hoursUntil(waiting(hours, patience))).toBeCloseTo(until, 5);
+    },
+  );
+
+  it("describes something different at the moment it names, and the same just before it", () => {
+    for (const [hours, patience] of [
+      [0.5, 1000],
+      [3.3, 7],
+      [23.9, 24],
+      [30, 24],
+      [100, 24],
+    ] as const) {
+      const card = waiting(hours, patience);
+      const change = findNextCardTimeChange(card, NOW);
+      const before = describeCardTime(card, new Date(change.getTime() - 1));
+      expect(describeCardTime(card, NOW)).toEqual(before);
+      expect(describeCardTime(card, change)).not.toEqual(before);
+    }
+  });
+
+  it("waits for the second hour when a wait that has not started shows one hour", () => {
+    const card = buildRequestCard("1", { patience: 1000, waitingSince: hoursAgo(-3) });
+    expect(hoursUntil(card)).toBeCloseTo(5, 5);
+  });
+
+  it("changes when the age of the facts does, if that comes first", () => {
+    const card = buildInboxCard("1", { stale: true, observedAt: hoursAgo(47.5) });
+    expect(hoursUntil(card as ReturnType<typeof waiting>)).toBeCloseTo(0.5, 5);
+  });
+
+  it("is never for a card that does not depend on the time", () => {
+    const change = findNextCardTimeChange(buildInboxCard("1"), NOW);
+    expect(change.getTime()).toBeGreaterThan(NOW.getTime() + 1e12);
   });
 });

@@ -25,6 +25,10 @@
   overscroll-behavior: contain;
   overflow-anchor: none;
 }
+/* The page takes the keyboard focus when the Inbox opens, so its keys act at once. It is not a control, so it draws no ring. */
+.inbox-scroll:focus {
+  outline: none;
+}
 /* A classic scroll bar takes room at the right edge, and the toolbar keeps 14px from it. */
 .inbox-desk.has-scrollbar .desk-toolbar {
   right: calc(14px + var(--scrollbar-width));
@@ -75,16 +79,12 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-/* A line under the work: the Inbox cut short, or a read that failed. */
-.inbox-note {
+/* A line under the work: the Inbox cut short, or a read that failed (the shared `.desk-note`). */
+.inbox-note,
+.inbox-desk .desk-note {
   margin: 12px 2px 0;
   color: var(--muted);
   font: var(--type-summary);
-}
-.inbox-note button {
-  margin-left: 8px;
-  color: var(--ink);
-  text-decoration: underline;
 }
 
 /* ---------- The order of Requests ---------- */

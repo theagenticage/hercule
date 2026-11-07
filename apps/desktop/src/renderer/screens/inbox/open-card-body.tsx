@@ -1,6 +1,11 @@
 import type { JSX, ReactNode } from "react";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
-import { formatTargetDate, readEntityPluginId, type PlaceRow } from "@hercule/client-core/desk";
+import {
+  describeLockedRow,
+  formatTargetDate,
+  readEntityPluginId,
+  type PlaceRow,
+} from "@hercule/client-core/desk";
 import type { OpenCardWords, PlaceView } from "@hercule/client-core/inbox";
 import type { EntityStatus } from "@hercule/contract";
 import { CloseIcon } from "../../icons/close";
@@ -290,7 +295,7 @@ export function OpenPlaceBody({
       <OpenCardHead
         pluginId={pluginId}
         plugins={plugins}
-        title={`A ${pluginName} ${row.noun.toLowerCase()} you cannot open`}
+        title={describeLockedRow(row, pluginName)}
         meta={[row.noun]}
         onClose={onClose}
       />

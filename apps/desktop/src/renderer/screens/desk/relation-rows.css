@@ -65,31 +65,6 @@ button.relation-go:hover {
   color: var(--faint);
 }
 
-/* Who claims a link stays quiet until the row is reached for. It lies over the
-   end of the row, so no height changes, and the words it covers fade out. */
-.relation-claim {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 0 6px;
-  border-radius: var(--r-xs);
-  background: var(--stock);
-  color: var(--faint);
-  font: var(--type-meta);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--m-quick);
-}
-.relation-row:hover .relation-claim,
-.relation-row:focus-within .relation-claim {
-  opacity: 1;
-}
-.relation-row[data-claimed]:hover .relation-end,
-.relation-row[data-claimed]:focus-within .relation-end {
-  opacity: 0;
-}
-
 /* The source's own report of how far along something is. */
 .relation-progress {
   display: inline-flex;

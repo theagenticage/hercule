@@ -1,6 +1,6 @@
 import type { BoardWalk } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
-import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
+import { isUndoKey, type DeskKeyPress } from "../desk/desk-keys";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 
 /** What a key press asks of the Work board. */
@@ -17,15 +17,6 @@ export type BoardKeyCommand =
   | { readonly kind: "undo" }
   | { readonly kind: "toggle-keys-sheet" }
   | { readonly kind: "step-back" };
-
-/** The parts of a keyboard event that decide which command a key is. */
-export interface BoardKeyPress {
-  readonly key: string;
-  readonly shiftKey: boolean;
-  readonly altKey: boolean;
-  readonly metaKey: boolean;
-  readonly ctrlKey: boolean;
-}
 
 const ARROW_WALKS: Readonly<Record<string, BoardWalk>> = {
   ArrowUp: "up",
@@ -56,19 +47,12 @@ const LETTER_WALKS: Readonly<Record<string, BoardWalk>> = {
  * `platform` decides which of ⌘ and Ctrl undoes.
  */
 export const readBoardKey = (
-  press: BoardKeyPress,
+  press: DeskKeyPress,
   hasSingleKeys: boolean,
   platform: DesktopPlatform,
 ): BoardKeyCommand | null => {
   if (press.altKey) return null;
-  if (press.metaKey || press.ctrlKey) {
-    const isUndo =
-      press.key.toLowerCase() === "z" &&
-      !press.shiftKey &&
-      isPrimaryModifierHeld(press, platform) &&
-      !isOtherModifierHeld(press, platform);
-    return isUndo ? { kind: "undo" } : null;
-  }
+  if (press.metaKey || press.ctrlKey) return isUndoKey(press, platform) ? { kind: "undo" } : null;
 
   const { key, shiftKey } = press;
   if (key === "Escape") return { kind: "step-back" };

@@ -5,7 +5,7 @@
  * touches a network. The database, the host and the Connections are real.
  */
 import { describe, expect, it } from "vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import {
@@ -42,6 +42,8 @@ interface FakeLookup {
   /** The context of every `resolve` call, in order. */
   readonly contexts: Array<EntityLookupContext>;
   recognitions: ReadonlyArray<EntityRecognition>;
+  /** Makes `recognize` throw, as a broken plugin does. */
+  recognizeThrows: boolean;
   search: Behavior<ReadonlyArray<EntityObservation>>;
   resolve: Behavior<EntityResolution>;
 }
@@ -63,10 +65,14 @@ const buildFakeLookup = (): FakeLookup => {
     targets: [],
     contexts: [],
     recognitions: [],
+    recognizeThrows: false,
     search: () => Effect.succeed([]),
     resolve: () => Effect.succeed({ missing: "unknown" }),
     lookup: {
-      recognize: () => fake.recognitions,
+      recognize: () => {
+        if (fake.recognizeThrows) throw new Error("boom");
+        return fake.recognitions;
+      },
       search: (connection: IngestConnection) =>
         Effect.suspend(() => {
           fake.calls.push(connection.accountId);
@@ -215,6 +221,26 @@ describe("recognize", () => {
     );
   });
 
+  it("recognizes nothing for a lookup that throws, and logs a warning that names the plugin", async () => {
+    const logged: Array<string> = [];
+    await runWith(["a"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.recognizeThrows = true;
+        expect(yield* lookups.recognize("see SHOP-1")).toEqual([]);
+      }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make<unknown, void>(({ message }) => {
+              logged.push(String(message));
+            }),
+          ]),
+        ),
+      ),
+    );
+    expect(logged.join("\n")).toContain("tracker");
+    expect(logged.join("\n")).toContain("boom");
+  });
+
   it("lists the plugins that can read links, and skips one with no lookup", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -340,6 +366,23 @@ describe("resolve", () => {
     expect(answer).toEqual({ incomplete: true });
     expect(calls).toHaveLength(8);
     expect(calls).not.toContain("c8");
+  });
+
+  it("asks no further Connection once 8 seconds have passed, and answers incomplete", async () => {
+    const { answer, calls } = await runWith(["a", "b", "c"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.resolve = (account) =>
+          account === "a"
+            ? Effect.sleep("7 seconds").pipe(Effect.as({ missing: "not-found" } as const))
+            : Effect.sleep("2 seconds").pipe(Effect.as({ missing: "not-found" } as const));
+        const fiber = yield* Effect.forkChild(lookups.resolve("tracker", byRef));
+        yield* TestClock.adjust("20 seconds");
+        return { answer: yield* Fiber.join(fiber), calls: [...fake.calls] };
+      }),
+    );
+    // a takes 7 s, b starts at 7 s and ends at 9 s, and c would start after the 8 s are gone.
+    expect(calls).toEqual(["a", "b"]);
+    expect(answer).toEqual({ incomplete: true });
   });
 
   it("asks only eligible Connections of the target plugin", async () => {

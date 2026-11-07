@@ -24,21 +24,29 @@ const addIds = (before: ReadonlySet<string>, more: readonly string[]): ReadonlyS
  * - Then the card comes down 20px and fades in on `self`, because nobody here
  *   caused it, and the cards that make room glide on `hand`.
  *
- * `inbox` is the Inbox with the user's pending edits applied. Returns the
- * Inbox to draw, or `undefined` until the first read ends.
+ * `inbox` is the Inbox with the user's pending edits applied. `isFresh` is
+ * false while `inbox` is a copy kept from an earlier visit, which stands in
+ * until this visit's own read ends: that copy is passed through, and the
+ * visit's first reply is drawn whole, whatever it adds to it.
+ *
+ * Returns the Inbox to draw, or `undefined` until the first read ends, and
+ * whether a card of the read is still held back. The page must not count the
+ * read as shown while one is: its `counts.newestArrival` covers that card too.
  */
 export const useInboxArrivals = ({
   inbox,
+  isFresh,
   scrollRef,
 }: {
   readonly inbox: Inbox | undefined;
+  readonly isFresh: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
-}): Inbox | undefined => {
+}): { readonly inbox: Inbox | undefined; readonly hasHeldArrivals: boolean } => {
   const [drawnIds, setDrawnIds] = useState<ReadonlySet<string> | undefined>(undefined);
   const [released, setReleased] = useState(NOTHING);
 
   const arrivals =
-    inbox === undefined || drawnIds === undefined
+    inbox === undefined || drawnIds === undefined || !isFresh
       ? []
       : inbox.cards
           .filter((card) => !drawnIds.has(card.id) && !released.has(card.id))
@@ -54,7 +62,7 @@ export const useInboxArrivals = ({
   }, [inbox, arrivalKey]);
 
   // What the page has drawn this visit, set while drawing so the draw that shows a card already counts it.
-  if (drawn !== undefined) {
+  if (drawn !== undefined && isFresh) {
     const ids = drawn.cards.map((card) => card.id);
     const known = addIds(drawnIds ?? NOTHING, ids);
     if (known !== drawnIds) setDrawnIds(known);
@@ -94,5 +102,5 @@ export const useInboxArrivals = ({
     };
   }, [arrivalKey, scrollRef]);
 
-  return drawn;
+  return { inbox: drawn, hasHeldArrivals: arrivalKey !== "" };
 };
