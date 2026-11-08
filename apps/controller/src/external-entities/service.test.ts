@@ -365,8 +365,8 @@ describe("takeOn", () => {
     expect(error).toMatchObject({ error: { code: "forbidden" } });
   });
 
-  it("refuses the Inbox and the detail to a session that lacks a grant the offers need", async () => {
-    const ALL = ["task.read", "signal.read", "workflow.read", "connection.read"];
+  it("refuses the Inbox and the detail to a session that lacks a grant they need, and the detail does not need the run grant", async () => {
+    const ALL = ["task.read", "signal.read", "workflow.read", "connection.read", "run.read"];
     const refused = await run(({ service, report, connectionId, entityId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1")]);
@@ -378,14 +378,21 @@ describe("takeOn", () => {
           } as unknown as Actor;
           return Effect.all([
             Effect.flip(Effect.provideService(service.queryInbox(), CurrentActor, actor)),
-            Effect.flip(Effect.provideService(service.read(id), CurrentActor, actor)),
-          ]).pipe(Effect.map((errors) => ({ missing, errors })));
+            Effect.exit(Effect.provideService(service.read(id), CurrentActor, actor)),
+          ]).pipe(Effect.map(([inbox, detail]) => ({ missing, inbox, detail })));
         });
       }),
     );
-    for (const { missing, errors } of refused) {
-      for (const error of errors) {
-        expect(error).toMatchObject({ error: { code: "forbidden", details: { grant: missing } } });
+    for (const { missing, inbox, detail } of refused) {
+      expect(inbox).toMatchObject({ error: { code: "forbidden", details: { grant: missing } } });
+      if (missing === "run.read") {
+        expect(detail._tag).toBe("Success");
+      } else {
+        expect(detail).toMatchObject({
+          cause: {
+            reasons: [{ error: { error: { code: "forbidden", details: { grant: missing } } } }],
+          },
+        });
       }
     }
   });

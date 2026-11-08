@@ -457,7 +457,7 @@ The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule
 
 | Operation | Route | Grant | What it does |
 |---|---|---|---|
-| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read`, `signal.query`, `workflow.query` and `connection.query` | The Inbox ([section 8.3](#83-reading)), with the offers ([section 8.8](#88-what-a-card-can-be-handed-to)) |
+| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query` | The Inbox ([section 8.3](#83-reading)), with the offers ([section 8.8](#88-what-a-card-can-be-handed-to)) |
 | `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` and `signal.query` | `InboxCounts`, for the sidebar |
 | `externalEntity.read` | `GET /external-entities/:id` | `task.read`, `signal.query`, `workflow.query` and `connection.query` | One full record of a work kind, with its offers. `NotFound` for a partial or context record |
 | `externalEntity.takeOn` | `POST /external-entities/:id/take-on` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |

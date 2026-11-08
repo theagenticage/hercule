@@ -1,6 +1,6 @@
 /**
  * The motion of handing a card to a colleague, and of Undo, which plays it
- * backwards. `playHandOffChange` is the one way in. One click is one chain,
+ * backwards (`createHandOffChains`). One click is one chain,
  * cause before effect:
  *
  * - At once, the wait fades away over 120ms (a copy of it, as the wait is no
@@ -11,7 +11,7 @@
  *   knock, the sentence rolls back, and the colleague sinks away on `travel`.
  *
  * The chain animates a card that React has already drawn in its new state,
- * like `riseMonogram` does, so `playHandOffChange` looks at the card before the
+ * like `riseMonogram` does, so `play` looks at the card before the
  * change and plays the chain in the same frame it commits the change. Nothing
  * here uses a timer: the chain is delays on Web Animations and on bodies, so
  * cancelling stops all of it and a late callback cannot play a hand-off that
@@ -229,40 +229,60 @@ const playCardHandOffBack = (card: HTMLElement, held: HeldHandOff): (() => void)
   };
 };
 
-/** The chains that are playing, by the element of the card they play on, and the function that cuts each short. */
-const runningChains = new Map<HTMLElement, () => void>();
+/** The hand-off chains one page has playing, and the way to play and stop them. Make one with `createHandOffChains`. */
+export interface HandOffChains {
+  /**
+   * Makes `commit`, a change that hands the card `cardId` on (`forwards`) or
+   * takes the hand-off back (`backwards`), and plays the hand-off chain on the
+   * card in the same frame. The change is committed at once (`flushSync`),
+   * because the card is drawn in its new state right after it. With no such
+   * card under `page`, only commits.
+   *
+   * A chain still playing on the card is cut short first. A chain has no end
+   * to wait for, so one is let go once its card has left the page.
+   */
+  readonly play: (
+    page: ParentNode | null,
+    cardId: string,
+    direction: "forwards" | "backwards",
+    commit: () => void,
+  ) => void;
+  /** Cuts every chain short and lets go of their cards. Call it when the page that owns the chains goes away. */
+  readonly stopAll: () => void;
+}
 
 /**
- * Makes `commit`, a change that hands the card `cardId` on (`forwards`) or
- * takes the hand-off back (`backwards`), and plays the hand-off chain on the
- * card in the same frame. The change is committed at once (`flushSync`),
- * because the card is drawn in its new state right after it. With no such card
- * under `page`, only commits.
- *
- * A chain still playing on the card is cut short first. A chain has no end to
- * wait for, so one is let go once its card has left the page.
+ * Returns the chains of one page. They belong to the page that plays them, so
+ * the page stops them all when it goes away (`stopAll`): a chain left running
+ * would keep its detached card alive and could still fly a mark to the
+ * sidebar after the user has left.
  */
-export const playHandOffChange = (
-  page: ParentNode | null,
-  cardId: string,
-  direction: "forwards" | "backwards",
-  commit: () => void,
-): void => {
-  for (const [card, stop] of runningChains) {
-    if (card.isConnected) continue;
-    stop();
-    runningChains.delete(card);
-  }
-  const card = page === null ? null : findCardElement(page, cardId);
-  if (card === null) {
-    commit();
-    return;
-  }
-  runningChains.get(card)?.();
-  const held = holdHandOff(card);
-  flushSync(commit);
-  runningChains.set(
-    card,
-    direction === "forwards" ? playCardHandOff(card, held) : playCardHandOffBack(card, held),
-  );
+export const createHandOffChains = (): HandOffChains => {
+  // The chains that are playing, by the element of the card they play on, and the function that cuts each short.
+  const running = new Map<HTMLElement, () => void>();
+  return {
+    play: (page, cardId, direction, commit) => {
+      for (const [card, stop] of running) {
+        if (card.isConnected) continue;
+        stop();
+        running.delete(card);
+      }
+      const card = page === null ? null : findCardElement(page, cardId);
+      if (card === null) {
+        commit();
+        return;
+      }
+      running.get(card)?.();
+      const held = holdHandOff(card);
+      flushSync(commit);
+      running.set(
+        card,
+        direction === "forwards" ? playCardHandOff(card, held) : playCardHandOffBack(card, held),
+      );
+    },
+    stopAll: () => {
+      for (const stop of running.values()) stop();
+      running.clear();
+    },
+  };
 };

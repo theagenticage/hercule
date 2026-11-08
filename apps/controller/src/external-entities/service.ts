@@ -577,7 +577,8 @@ const make = Effect.gen(function* () {
     /**
      * Returns the Inbox: the cards, the places above them, the edges between
      * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text,
-     * and `workflow.query` and `connection.query`, because the offers name workflows and accounts.
+     * `workflow.query` and `connection.query`, because the offers name workflows and accounts,
+     * and `run.query`, because a card names the workflows running on its Task.
      */
     queryInbox: (): Effect.Effect<Inbox, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
@@ -585,6 +586,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("signal.query");
         yield* requireGrant("workflow.query");
         yield* requireGrant("connection.query");
+        yield* requireGrant("run.query");
         return yield* entities.queryInbox(yield* readEnvironment);
       }),
 

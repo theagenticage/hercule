@@ -12,9 +12,10 @@ import {
   removeFakeAnimations,
   type FakeAnimation,
 } from "../../app/motion/testing-animations";
-import { playHandOffChange } from "./hand-off-motion";
+import { createHandOffChains, type HandOffChains } from "./hand-off-motion";
 
 let played: FakeAnimation[];
+let chains: HandOffChains;
 
 const setReduced = (reduced: boolean): void => {
   document.documentElement.style.setProperty("--dur-2", reduced ? "0s" : "200ms");
@@ -118,7 +119,7 @@ const change = (
   sentence: string,
   handed: boolean,
 ): void => {
-  playHandOffChange(document.body, CARD_ID, direction, () => {
+  chains.play(document.body, CARD_ID, direction, () => {
     fillCard(card, sentence, handed);
     if (card.closest(".inbox-place") !== null) card.querySelector("[data-hand-off-mark]")?.remove();
   });
@@ -129,6 +130,7 @@ const listRunning = (): FakeAnimation[] => played.filter((animation) => !animati
 
 beforeEach(() => {
   played = installFakeAnimations();
+  chains = createHandOffChains();
   setReduced(false);
 });
 
@@ -196,7 +198,7 @@ describe("handing a card on", () => {
 
   it("only commits when the page has no such card", () => {
     let committed = false;
-    playHandOffChange(document.body, "missing", "forwards", () => {
+    chains.play(document.body, "missing", "forwards", () => {
       committed = true;
     });
 
@@ -265,5 +267,19 @@ describe("a second change on the same card", () => {
     // Everything the first chain started is stopped. What is running was started by the second.
     expect(listRunning().every((animation) => played.indexOf(animation) >= before)).toBe(true);
     expect(played.some((animation) => animation.element === icon)).toBe(false);
+  });
+
+  it("stops every chain and lets go of the card when the page that owns them goes away", () => {
+    const icon = drawOverview();
+    const { card } = drawCard("Opened by Sam", false);
+    change(card, "forwards", "Agent review has it", true);
+    const copyFlight = played.find((animation) => animation.element.closest(".motion-flights"));
+
+    chains.stopAll();
+    copyFlight?.finish();
+
+    expect(listRunning()).toEqual([]);
+    expect(played.some((animation) => animation.element === icon)).toBe(false);
+    expect(document.querySelector(".motion-flights")).toBeNull();
   });
 });

@@ -268,6 +268,8 @@ const TABLE = {
   // The Inbox and the detail show the text of signals, so `queryInbox`,
   // `countInbox` and `read` also need `signal.query`, which the service checks
   // beside the `task.read` that this table checks.
+  // `queryInbox` also needs `workflow.query`, `connection.query` and
+  // `run.query`, for the offers and the workflows running on a card's Task.
   "externalEntity.queryInbox": {
     requires: "task.read",
     method: "GET",

@@ -42,7 +42,7 @@
  *   one asks `isCurrent()` of the account scope when it starts and after every
  *   wait, before it calls the controller, writes the cache or says anything.
  */
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -84,7 +84,7 @@ import type { SpringName } from "../../../app/motion";
 import type { Gesture, UndoAnswer } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
-import { playHandOffChange } from "../../../screens/inbox/hand-off-motion";
+import { createHandOffChains } from "../../../screens/inbox/hand-off-motion";
 import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
 import type { HandOffTarget } from "../../../screens/inbox/use-hand-off";
 import type { VisitHistoryHandle } from "../../../screens/inbox/use-inbox-visit";
@@ -257,6 +257,9 @@ export const useInboxMoves = ({
   const nextId = useRef(1);
   // The cards whose hand-off the controller has not answered, so a second click waits for the first.
   const handingOff = useRef(new Set<string>());
+  // The hand-off chains playing on this screen: they stop with it.
+  const [handOffChains] = useState(createHandOffChains);
+  useEffect(() => handOffChains.stopAll, [handOffChains]);
   const writeCachedInbox = buildCachedInboxWriter(queryClient);
 
   // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
@@ -319,7 +322,7 @@ export const useInboxMoves = ({
     direction: "forwards" | "backwards",
   ): PendingEdit => {
     const shown: PendingEdit = { id: nextId.current++, edit };
-    playHandOffChange(scrollRef.current, edit.id, direction, () => {
+    handOffChains.play(scrollRef.current, edit.id, direction, () => {
       changePending((edits) => [...edits, shown]);
     });
     return shown;
@@ -330,7 +333,7 @@ export const useInboxMoves = ({
    * refused, off the page again, with the hand-off chain playing backwards.
    */
   const takeHandOffEditBack = (shown: PendingEdit, cardId: string): void => {
-    playHandOffChange(scrollRef.current, cardId, "backwards", () => {
+    handOffChains.play(scrollRef.current, cardId, "backwards", () => {
       changePending((edits) => edits.filter((each) => each.id !== shown.id));
     });
   };

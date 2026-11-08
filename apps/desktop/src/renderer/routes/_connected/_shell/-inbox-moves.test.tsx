@@ -21,6 +21,10 @@ import {
 import type { HandOffUndo, Inbox, InboxCard } from "@hercule/contract";
 import { useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
 import { inboxQuery } from "../../../app/queries";
+import {
+  installFakeAnimations,
+  removeFakeAnimations,
+} from "../../../app/motion/testing-animations";
 import { openTestAccountScope } from "../../../app/testing-account-scope";
 import { useInboxMoves } from "./-inbox-moves";
 
@@ -52,6 +56,7 @@ function holdCalls<Answer>() {
 const setUp = (
   readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX),
   cachedInbox: Inbox = INBOX,
+  page: HTMLElement | null = null,
 ) => {
   let token: string | null = "bearer";
   const takes = holdCalls<{ taskId: string; created: boolean }>();
@@ -125,7 +130,7 @@ const setUp = (
         scope,
         serverInbox: data,
         visit,
-        scrollRef: { current: null },
+        scrollRef: { current: page },
         isCarrying: () => false,
         openTask: () => undefined,
       });
@@ -348,6 +353,42 @@ describe("a hand-off", () => {
       queryClient.getQueryData<Inbox>(queryKeys.inbox())?.cards.find((card) => card.id === "a")
         ?.taskId,
     ).toBeUndefined();
+  });
+
+  it("stops the chain that is playing when the screen goes away, so no mark flies after the user left", () => {
+    const played = installFakeAnimations();
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+    try {
+      const overview = document.body.appendChild(document.createElement("a"));
+      overview.dataset["motionTarget"] = "overview";
+      overview.getBoundingClientRect = () => new DOMRect(8, 96, 200, 30);
+      const icon = overview.appendChild(
+        document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+      );
+      icon.getBoundingClientRect = () => new DOMRect(20, 100, 16, 16);
+      const page = document.body.appendChild(document.createElement("div"));
+      const card = page.appendChild(document.createElement("div"));
+      card.dataset["cardId"] = A.id;
+      const mark = card.appendChild(document.createElement("span"));
+      mark.dataset["handOffMark"] = "";
+      mark.getBoundingClientRect = () => new DOMRect(320, 210, 15, 15);
+      const { result, unmount } = setUp(() => Promise.resolve(INBOX), INBOX, page);
+
+      act(() => {
+        result.current.handOff(aim(A), REVIEW, undefined);
+      });
+      const flight = played.find((animation) => animation.element.closest(".motion-flights"));
+      expect(flight).toBeDefined();
+      unmount();
+      flight?.finish();
+
+      expect(played.filter((animation) => !animation.isCancelled)).toEqual([]);
+      expect(document.querySelector(".motion-flights")).toBeNull();
+    } finally {
+      removeFakeAnimations();
+      document.documentElement.style.removeProperty("--dur-2");
+      document.body.replaceChildren();
+    }
   });
 
   it("keeps the Task of a card the hand-off continued when Undo takes back only the stage", async () => {
