@@ -72,6 +72,19 @@ export const queryKeys = {
    */
   taskDetail: (id: string): LiveQueryKey => [...queryKeys.task(id), "detail"],
   /**
+   * What `task.checkMerge` answers for one pair: whether the Task `sourceId`
+   * could be merged into the Task `intoTaskId`. Without ids, the prefix of
+   * every pair. Every `task` push, derived ones too, marks it out of date
+   * (see `buildQueryKeys`): a blocker removed or added anywhere changes the
+   * answer, and the push does not say which pair. The reads are made by
+   * pointing at a card and have no screen watching them, so marking them
+   * costs no request: the pair is asked again when it is next pointed at.
+   */
+  mergeCheck: (sourceId?: string, intoTaskId?: string): LiveQueryKey =>
+    sourceId === undefined || intoTaskId === undefined
+      ? ["mergeCheck"]
+      : ["mergeCheck", sourceId, intoTaskId],
+  /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
    * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
@@ -129,6 +142,11 @@ export const queryKeys = {
    * here: a poll cannot change what the source answers.
    */
   entitySuggestions: (): LiveQueryKey => ["entity-suggestions"],
+  /**
+   * The open Initiatives, every page (`initiative.query`). Live topic:
+   * `initiative`. Work reads it beside the board; it is not shell data.
+   */
+  initiatives: (): LiveQueryKey => ["initiatives"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * One project read by its id. It sits under the `projects` prefix, so
@@ -564,6 +582,9 @@ const WORKFLOW_ENTITY_KEYS: ReadonlyArray<LiveQueryKey> = [
  * the Inbox's count active on every screen, so reading them here would cost a
  * request a second for nothing. Only the open pane has a detail mounted, so
  * the details of the other Tasks are marked out of date and cost no read.
+ * Both kinds of `task` push mark every merge check out of date: a blocker
+ * edge is announced as a derived push, and it decides the check. Those reads
+ * have no screen watching them, so this costs no request.
  *
  * On a `workflow` push it means a trigger's counts, next fire time or health
  * changed, and no field of the definition did. Only the workflow screens draw
@@ -581,8 +602,13 @@ export const buildQueryKeys = (
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
   if (topic === "task") {
-    if (derived === true)
-      return [queryKeys.workBoard(), ...ids.map((id) => queryKeys.taskDetail(id))];
+    if (derived === true) {
+      return [
+        queryKeys.workBoard(),
+        ...ids.map((id) => queryKeys.taskDetail(id)),
+        queryKeys.mergeCheck(),
+      ];
+    }
     return ids.length === 0
       ? [
           queryKeys.tasks(),
@@ -592,6 +618,7 @@ export const buildQueryKeys = (
           queryKeys.yourWork(),
           ...INBOX_KEYS,
           ...TASK_LINK_KEYS,
+          queryKeys.mergeCheck(),
         ]
       : [
           queryKeys.tasks(),
@@ -601,8 +628,14 @@ export const buildQueryKeys = (
           queryKeys.yourWork(),
           ...INBOX_KEYS,
           ...TASK_LINK_KEYS,
+          queryKeys.mergeCheck(),
         ];
   }
+  // Work reads Initiatives as one small list, so the whole list is read
+  // again whichever Initiative changed. The board is not read again: it
+  // carries only each card's `initiativeId`, and a deletion that clears Tasks
+  // announces each Task on the `task` topic.
+  if (topic === "initiative") return [queryKeys.initiatives()];
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.
   //

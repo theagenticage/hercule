@@ -6,16 +6,22 @@ import { FolderIcon } from "../../icons/folder";
 import { PlusIcon } from "../../icons/plus";
 import type { WorkCard } from "@hercule/contract";
 import {
+  NO_INITIATIVE_LANE_ID,
   STAGE_NAMES,
   type ArrangedLane,
   type ArrangedLaneCell,
   type CardInLane,
+  type HeldInitiative,
   type OutsideLane,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import { PluginMark } from "../../marks";
-import { ProgressBar } from "../desk";
+import { HueFlag, ProgressBar } from "../desk";
 import { BoardCell } from "./board-cell";
 import type { PressedKeys } from "./work-card";
+
+/** The Initiatives a lane holds when the caller passes none. */
+const HOLDS_NONE: readonly HeldInitiative[] = [];
 
 /**
  * Returns what the line of counts of a folded lane says to a screen reader,
@@ -24,7 +30,7 @@ import type { PressedKeys } from "./work-card";
  */
 const describeFoldedCounts = (cells: readonly ArrangedLaneCell[]): string => {
   const words = cells
-    .filter((cell) => cell.cardCount > 0)
+    .filter((cell) => cell.cardCountWithRows > 0)
     .map((cell) => {
       const dot =
         cell.dot === "failed"
@@ -32,7 +38,7 @@ const describeFoldedCounts = (cells: readonly ArrangedLaneCell[]): string => {
           : cell.dot === "question"
             ? " with a question"
             : "";
-      return `${STAGE_NAMES[cell.stage]} ${String(cell.cardCount)}${dot}`;
+      return `${STAGE_NAMES[cell.stage]} ${String(cell.cardCountWithRows)}${dot}`;
     });
   return words.length === 0 ? "No cards" : words.join(", ");
 };
@@ -71,13 +77,22 @@ function OutsideFacts({ outside }: { readonly outside: OutsideLane }): JSX.Eleme
  * - The head is a button that folds or opens the lane, with a chevron, a
  *   folder, the Project's name, how many cards the lane holds, and "1 failed"
  *   in ink when a card failed, whether the lane is folded or not. The `+`
- *   beside it adds a Task to this lane.
+ *   beside it adds a Task to this lane. The count, the failures, the counts
+ *   of a folded lane and its dots stand for every Task of the Project: the
+ *   cards of the rows drawn under the lane (In lanes) are in them, though the
+ *   rows draw those cards themselves.
  * - The lane of an outside place, such as a repository, has the source's
  *   mark in place of the folder and says what the place says about itself
  *   under its name (`OutsideFacts`). The lane that collects what has no such
- *   place has a ring in place of the folder and no `+`.
+ *   place, and the lane "Not in an initiative", have a ring in place of the
+ *   folder and no `+`.
  * - A folded lane shows a 6px dot under a stage that holds a card with a
  *   question (marigold) or a failure (tomato).
+ * - The lane of an Initiative (Group by Initiative) has the Initiative's flag
+ *   in its colour in place of the folder.
+ * - A folded Project lane keeps a small flag for each Initiative it holds
+ *   (`heldInitiatives`, from `listLaneInitiatives`), so that the rows it hides
+ *   leave a trace. An open lane shows none, because the rows are under it.
  *
  * The section carries `data-lane-id`, the head `data-lane-head`, and the line
  * of counts `data-fold-row`, which motion and keyboard code find them by.
@@ -85,10 +100,12 @@ function OutsideFacts({ outside }: { readonly outside: OutsideLane }): JSX.Eleme
 export function BoardLane({
   arrangedLane,
   plugins,
+  initiativeFlags,
   tabStop,
   isStill,
   canWriteSummaries,
   selectedIds,
+  heldInitiatives,
   onToggleLane,
   onToggleCell,
   onToggleStack,
@@ -98,11 +115,18 @@ export function BoardLane({
 }: {
   readonly arrangedLane: ArrangedLane;
   readonly plugins: readonly PluginIdentity[];
+  /**
+   * The Initiatives whose small flag a card of the Initiative draws, by id.
+   * Absent under a grouping where cards draw no flag (Group by Project).
+   */
+  readonly initiativeFlags?: ReadonlyMap<string, WorkInitiative> | undefined;
   readonly tabStop: CardInLane | null;
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
   /** The ids of the selected cards, which draw selected. */
   readonly selectedIds: ReadonlySet<string>;
+  /** The Initiatives whose rows stand under this lane, in order. Drawn as flags while the lane is folded. */
+  readonly heldInitiatives?: readonly HeldInitiative[];
   readonly onToggleLane: (laneId: string) => void;
   readonly onToggleCell: (cellId: string) => void;
   readonly onToggleStack: (stackId: string) => void;
@@ -111,11 +135,20 @@ export function BoardLane({
   readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (at: CardInLane) => void;
 }): JSX.Element {
-  const { lane, isFolded, failedCount, cells } = arrangedLane;
-  const { outside } = lane;
-  const total = cells.reduce((sum, cell) => sum + cell.cardCount, 0);
+  const { lane, isFolded, failedCount, cardCountWithRows, cells } = arrangedLane;
+  const { outside, initiative } = lane;
+  const held = heldInitiatives ?? HOLDS_NONE;
+  const isNoPlace = outside?.pluginId === null || lane.id === NO_INITIATIVE_LANE_ID;
   return (
-    <section className={isFolded ? "board-lane is-folded" : "board-lane"} data-lane-id={lane.id}>
+    <section
+      className={isFolded ? "board-lane is-folded" : "board-lane"}
+      data-lane-id={lane.id}
+      // The stylesheet spaces a lane by what it draws and by the rows that follow it.
+      data-has-cards={
+        isFolded || !cells.some((cell) => cell.shownCards.length > 0) ? undefined : ""
+      }
+      data-rows-follow={isFolded || held.length === 0 ? undefined : ""}
+    >
       <h3 className="board-lane-head" data-lane-head={lane.id}>
         <button
           type="button"
@@ -128,13 +161,17 @@ export function BoardLane({
           <span className="board-chevron">
             <ChevronRightIcon size={12} />
           </span>
-          {outside === undefined ? (
-            <span className="board-lane-folder">
-              <FolderIcon size={14} />
+          {initiative !== undefined ? (
+            <span className="board-lane-folder is-flag">
+              <HueFlag hue={initiative.hue} />
             </span>
-          ) : outside.pluginId === null ? (
+          ) : isNoPlace ? (
             <span className="board-lane-folder is-brand">
               <i className="board-lane-none" />
+            </span>
+          ) : outside === undefined ? (
+            <span className="board-lane-folder">
+              <FolderIcon size={14} />
             </span>
           ) : (
             <span className="board-lane-folder is-brand">
@@ -144,13 +181,22 @@ export function BoardLane({
           <span className="board-lane-words">
             <span className="board-lane-line">
               <span className="board-lane-name">{lane.name}</span>
-              <span className="board-lane-total">{total}</span>
+              <span className="board-lane-total">{cardCountWithRows}</span>
+              {isFolded &&
+                held.map((each) => (
+                  <HueFlag
+                    key={each.id}
+                    hue={each.hue}
+                    title={each.name}
+                    label={`Initiative ${each.name}`}
+                  />
+                ))}
             </span>
             {outside !== undefined && <OutsideFacts outside={outside} />}
             {failedCount > 0 && <span className="board-failed-count">{failedCount} failed</span>}
           </span>
         </button>
-        {outside?.pluginId !== null && (
+        {!isNoPlace && (
           <button
             type="button"
             className="board-lane-add"
@@ -178,7 +224,7 @@ export function BoardLane({
                   className={cell.dot === "failed" ? "board-fold-dot is-failed" : "board-fold-dot"}
                 />
               )}
-              {cell.cardCount > 0 && <span>{cell.cardCount}</span>}
+              {cell.cardCountWithRows > 0 && <span>{cell.cardCountWithRows}</span>}
             </span>
           ))}
         </div>
@@ -192,6 +238,7 @@ export function BoardLane({
               cell={cell}
               plugins={plugins}
               cardPlaces={outside?.cardPlaces}
+              initiativeFlags={initiativeFlags}
               tabStop={tabStop}
               isStill={isStill}
               canWriteSummaries={canWriteSummaries}

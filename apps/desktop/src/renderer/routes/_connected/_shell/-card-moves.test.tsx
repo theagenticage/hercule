@@ -279,6 +279,98 @@ describe("useCardMoves", () => {
     expect(result.current.line.isShown).toBe(false);
   });
 
+  it("shows a card joining an Initiative at once, and sends the Initiative with the move", async () => {
+    const { result, held } = setUp();
+    const findInitiative = (id: string) =>
+      result.current.board?.cards.find((card) => card.id === id)?.initiativeId;
+
+    act(() => {
+      result.current.moveCard({ taskId: "a", initiativeId: "checkout-rework" }, "Moved a");
+    });
+
+    expect(findInitiative("a")).toBe("checkout-rework");
+    await waitForRequests(held, 1);
+    expect(held[0]).toMatchObject({ taskId: "a", payload: { initiativeId: "checkout-rework" } });
+  });
+
+  it("treats a move onto the Initiative the card is on as no move", () => {
+    const { result } = setUp();
+    act(() => {
+      result.current.moveCard({ taskId: "a", initiativeId: "checkout-rework" }, "Moved a");
+    });
+    act(() => {
+      result.current.moveCard({ taskId: "a", initiativeId: "checkout-rework" }, "Moved a again");
+    });
+
+    // Only the first changed anything: the second names the Initiative the card is on now.
+    expect(result.current.line.text).toBe("Moved a.");
+  });
+
+  it("takes a card off an Initiative again with Undo, naming no Initiative for a card that had none", async () => {
+    const { result, findStage, held } = setUp();
+    act(() => {
+      result.current.moveCard(
+        { taskId: "a", stage: "in-review", initiativeId: "checkout-rework" },
+        "Moved a",
+      );
+    });
+    act(() => {
+      result.current.undoLastMove();
+    });
+    expect(findStage("a")).toBe("building");
+    expect(
+      result.current.board?.cards.find((card) => card.id === "a")?.initiativeId,
+    ).toBeUndefined();
+    await waitForRequests(held, 1);
+    await act(() => {
+      held[0]!.accept();
+      return Promise.resolve();
+    });
+
+    await waitForRequests(held, 2);
+    expect(held[1]).toMatchObject({
+      taskId: "a",
+      payload: { stage: "building", initiativeId: null, afterTaskId: null },
+    });
+  });
+
+  it("offers no Undo for a move made with canUndo false, and still says why when it is refused", async () => {
+    const { result, held } = setUp();
+    act(() => {
+      result.current.moveCard(
+        { taskId: "a", initiativeId: "checkout-rework" },
+        "Put a on it",
+        undefined,
+        {
+          canUndo: false,
+        },
+      );
+    });
+
+    expect(result.current.line).toMatchObject({
+      text: "Put a on it.",
+      canUndo: false,
+      isShown: true,
+    });
+    await waitForRequests(held, 1);
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(result.current.line.text).toBe("Nothing to undo.");
+    });
+
+    await act(() => {
+      held[0]!.refuse("the Task is gone.");
+      return Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.line.text).toBe(
+        "The move did not save, so the card went back: the Task is gone. Try the move again.",
+      );
+    });
+  });
+
   it("puts the card back at once after its move, queued right behind it", async () => {
     const { result, findStage, held } = setUp();
     act(() => {

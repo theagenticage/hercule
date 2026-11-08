@@ -6,6 +6,7 @@ import {
   type ArrangedLaneCell,
   type CardInLane,
   type CardPlaces,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import { ChevronDownIcon } from "../../icons/chevron-down";
@@ -44,7 +45,8 @@ const describeFoot = (cell: ArrangedLaneCell): string => {
  * Tab leads onto. `cardPlaces` holds, by Task id, what a card says when its
  * Task also stands in other lanes of the grouping. `selectedIds` are the
  * selected cards, which draw selected, and `onPressCard` is called when a card
- * is clicked.
+ * is clicked. `initiativeFlags` holds, by id, the Initiatives whose small flag
+ * a card of the Initiative draws; it is absent where no card draws one.
  */
 export function BoardCell({
   laneId,
@@ -52,6 +54,7 @@ export function BoardCell({
   cell,
   plugins,
   cardPlaces,
+  initiativeFlags,
   tabStop,
   isStill,
   canWriteSummaries,
@@ -67,6 +70,7 @@ export function BoardCell({
   readonly cell: ArrangedLaneCell;
   readonly plugins: readonly PluginIdentity[];
   readonly cardPlaces: Readonly<Record<string, CardPlaces>> | undefined;
+  readonly initiativeFlags?: ReadonlyMap<string, WorkInitiative> | undefined;
   readonly tabStop: CardInLane | null;
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
@@ -87,6 +91,9 @@ export function BoardCell({
       plugins={plugins}
       alsoWords={cardPlaces?.[card.id]?.summary}
       alsoNames={cardPlaces?.[card.id]?.names.join(", ")}
+      initiative={
+        card.initiativeId === undefined ? undefined : initiativeFlags?.get(card.initiativeId)
+      }
       isTabStop={tabStop?.laneId === laneId && tabStop.cardId === card.id}
       isStill={isStill}
       canWriteSummaries={canWriteSummaries}

@@ -9,6 +9,9 @@ import {
   type CardInLane,
   type CardMove,
   type DropPlace,
+  type MergeCheckResult,
+  type MergeDecision,
+  type WorkInitiative,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
@@ -37,7 +40,8 @@ import {
   moveFollowers,
   readFollowerPose,
 } from "./board-drag-followers";
-import { createMergeGesture, type MergeChoice } from "./board-drag-merge";
+import { createMergeGesture } from "./board-drag-merge";
+import { createMergeIntent } from "./merge-intent";
 import { copyCardForMotion } from "../desk";
 import { playMergeIn } from "./board-flights";
 import { findCardElement, readCardInLane } from "./card-in-lane";
@@ -68,6 +72,12 @@ export interface BoardDragOptions {
    */
   readonly cards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
+  /**
+   * The open Initiatives, which the board lists. A drop on a Project lane
+   * takes a card off its Initiative only when the Initiative is in here,
+   * because only then was the card drawn on it.
+   */
+  readonly initiatives: readonly WorkInitiative[];
   /** The lanes the board draws: which are folded, and which cards a cell hides. */
   readonly arrangedLanes: readonly ArrangedLane[];
   /**
@@ -93,13 +103,26 @@ export interface BoardDragOptions {
   /** Shows `text` on the undo line, with no Undo, for a drop that sent nothing. */
   readonly say: (text: string) => void;
   /**
-   * Merges the card `sourceCardId` into the card `targetCardId`: holds the
-   * merge for the undo line and shows it done, so the source card leaves the
-   * board. Called inside the drag's committed change (`flushSync`), so the
-   * board is measured after it. Returns `false`, and holds nothing, when
-   * either card is no longer on the board.
+   * Settles the merge of the card `sourceCardId` into the card
+   * `targetCardId` as `decision` says (see `MergeCards.settleMerge`): holds
+   * the merge for the undo line and shows it done, so the source card leaves
+   * the board, or says on the undo line why nothing is merged. Called inside
+   * the drag's committed change (`flushSync`), so the board is measured
+   * after it. Returns `true` when the merge is held, and `false` when
+   * nothing was merged: the card goes home.
    */
-  readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
+  readonly settleMerge: (
+    sourceCardId: string,
+    targetCardId: string,
+    decision: MergeDecision,
+  ) => boolean;
+  /**
+   * Asks whether the card `sourceCardId` could be merged into the card
+   * `targetCardId`, which the carry does when it chooses a card to merge
+   * into. It never rejects: a question that could not be asked answers
+   * `unchecked` (see `MergeCheckResult`).
+   */
+  readonly checkMerge: (sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>;
   /**
    * Called with `true` when a card enters the hand and with `false` when it
    * leaves it. The screen keeps the value and draws it as the desk's
@@ -156,6 +179,14 @@ const createBoardDrag = (
   scroller: HTMLElement,
   readOptions: () => BoardDragOptions,
 ): { readonly destroy: () => void } => {
+  /**
+   * The carry that was dropped on a card to merge into and whose merge is not
+   * settled yet (it waits for the merge check), or `null`. The drag still
+   * owns the carry, so no other card can be pressed meanwhile. The merge
+   * intent of the carry decides when the wait ends or is cancelled.
+   */
+  let waitingCarry: Carry | null = null;
+
   /**
    * Measures the board again after the page changed. `places` are the card
    * places a flip just measured, which spares measuring the cards twice.
@@ -382,14 +413,8 @@ const createBoardDrag = (
     });
   };
 
-  /**
-   * Lets go of the card over the card it is drawn into. The merge is held for
-   * the undo line, and the copy in the hand slides in under the card it
-   * merged into and fades. When either card has left the board meanwhile,
-   * nothing is merged: the card goes home and the undo line says so.
-   */
-  const mergeCarry = (c: Carry, target: MergeChoice): void => {
-    swallowNextClick(true);
+  /** Ends the drop over the card `targetCardId` once the merge is decided: the merge is held, or the card goes home. */
+  const finishMergeCarry = (c: Carry, targetCardId: string, decision: MergeDecision): void => {
     const pose = readReleasePose(c);
     endCarry(c);
     const options = readOptions();
@@ -400,15 +425,42 @@ const createBoardDrag = (
       clearMarks(c);
       flushSync(() => {
         options.onCarryingChange(false);
-        isHeld = options.holdMerge(c.card.id, target.cardId);
+        isHeld = options.settleMerge(c.card.id, targetCardId, decision);
       });
     });
     if (isHeld) {
-      playMergeIn(scroller, c.ghost, target.cardId);
+      playMergeIn(scroller, c.ghost, targetCardId);
       return;
     }
     landCard(scroller, c, pose, "travel", undefined, 0);
-    options.say("A card left the board, so nothing was merged.");
+  };
+
+  /**
+   * Lets go of the card over the card it is drawn into, if it is drawn into
+   * one. Returns `false` when it is not and the drop is no merge.
+   *
+   * The merge intent decides when the merge may go ahead. A check that has not
+   * answered is waited for, with the copy still docked on the target: the
+   * card is never shown as merged before the controller allowed it. The
+   * merge is then held for the undo line and the copy slides in under the
+   * card it merged into and fades. A refusal, or a card that left the board
+   * meanwhile, sends the card home. Esc and a window that loses the focus or
+   * is hidden during the wait send it home too, and merge nothing.
+   */
+  const mergeCarry = (c: Carry): boolean => {
+    waitingCarry = c;
+    const isMerge = c.merge.commit({
+      onDecision: (decision, pair) => {
+        waitingCarry = null;
+        finishMergeCarry(c, pair.targetId, decision);
+      },
+      onCancel: () => {
+        waitingCarry = null;
+        releaseCarry(c, "travel", undefined);
+      },
+    });
+    if (!isMerge) waitingCarry = null;
+    return isMerge;
   };
 
   /**
@@ -419,12 +471,8 @@ const createBoardDrag = (
    * gone nothing is sent and the line says why.
    */
   const dropCard = (c: Carry): void => {
-    const target = c.merge.commit();
-    if (target !== null) {
-      mergeCarry(c, target);
-      return;
-    }
     swallowNextClick(true);
+    if (mergeCarry(c)) return;
     const options = readOptions();
     const { place } = c;
     const lane = options.arrangedLanes.find((each) => each.lane.id === place?.laneId);
@@ -439,6 +487,7 @@ const createBoardDrag = (
       stage: place.stage,
       beforeCardId: place.kind === "cell" ? place.beforeCardId : null,
       followerIds: followers.map((card) => card.id),
+      listedInitiativeIds: new Set(options.initiatives.map((initiative) => initiative.id)),
     });
     const settled = settleGroupDrop({ cards: options.cards }, options.projects, drop, followers);
     if (settled.kind === "refuse") {
@@ -455,8 +504,13 @@ const createBoardDrag = (
           : (options.cards.find((each) => each.id === only.taskId) ??
             [c.card, ...followers].find((each) => each.id === only.taskId));
       return only !== undefined && moves.length === 1 && card !== undefined
-        ? describeCardMove(card, only, options.projects)
-        : describeCardsMove(moves, place.stage ?? c.card.stage, options.projects);
+        ? describeCardMove(card, only, options.projects, options.initiatives)
+        : describeCardsMove(
+            moves,
+            place.stage ?? c.card.stage,
+            options.projects,
+            options.initiatives,
+          );
     };
     releaseCarry(c, "hand", { moves: settled.moves, describe, note: settled.note });
   };
@@ -545,7 +599,13 @@ const createBoardDrag = (
       markedLane: null,
       merge: createMergeGesture({
         scroller,
-        readCards: () => readOptions().cards,
+        sourceId: card.id,
+        intent: createMergeIntent({
+          readCards: () => readOptions().cards,
+          readInitiatives: () => readOptions().initiatives,
+          askCheck: (sourceId, targetId) => readOptions().checkMerge(sourceId, targetId),
+          askAfterMs: 0,
+        }),
         slot,
         body,
         home,
@@ -595,6 +655,8 @@ const createBoardDrag = (
     liftDistance: LIFT_DISTANCE,
     lean: { perSpeed: LEAN_PER_SPEED, most: MOST_LEAN },
     readPressed: (event) => {
+      // A card waiting for its merge check is still in the hand: no other card is lifted meanwhile.
+      if (waitingCarry !== null) return null;
       const element =
         event.target instanceof Element
           ? event.target.closest<HTMLElement>("[data-card-id]")
@@ -622,6 +684,9 @@ const createBoardDrag = (
     destroy: () => {
       const held = gesture.destroy();
       if (held !== null) abandonCarry(held);
+      const waiting = waitingCarry;
+      waitingCarry = null;
+      if (waiting !== null) abandonCarry(waiting);
     },
   };
 };
@@ -652,7 +717,7 @@ const createBoardDrag = (
  *   hand docks on its corner, and the target takes a ring and two labels
  *   (whom it is merged into, and what stays). Moving more than 6px starts
  *   the wait again, and moving off the middle undoes it at once. Letting go
- *   calls `holdMerge`, and the copy slides in under the target.
+ *   calls `settleMerge`, and the copy slides in under the target.
  * - The page is scrolled at the top and bottom edges. The board is measured
  *   when a carry starts and when the page or the slot changes, never when the
  *   pointer moves or the board scrolls.

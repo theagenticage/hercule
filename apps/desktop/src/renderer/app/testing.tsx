@@ -1740,6 +1740,8 @@ export const buildConversationHandlers = (
  * - The sidebar's reads answer from `NO_SIDEBAR_RECORDS`.
  * - `GET /api/v1/runner-metrics` answers an empty page, because both Fleet
  *   pages read their graphs' history as they open.
+ * - `GET /api/v1/initiatives` answers an empty page, because Work reads the
+ *   open Initiatives as it opens and draws no board without them.
  *
  * Any other unstubbed path returns 404, so a test that forgot a route notices.
  */
@@ -1748,6 +1750,7 @@ export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): reado
     "GET /api/v1/setup": { body: { complete: true } },
     "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
     "GET /api/v1/runner-metrics": { body: { items: [] } },
+    "GET /api/v1/initiatives": { body: { items: [] } },
     ...buildSidebarHandlers(NO_SIDEBAR_RECORDS),
     ...handlers,
   });

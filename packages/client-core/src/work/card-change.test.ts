@@ -31,11 +31,11 @@ const readDepotCell = (board: WorkBoard): readonly string[] =>
 
 describe("applyCardEnd", () => {
   it("leaves the card off the board and keeps the others in order", () => {
-    expect(listIds(applyCardEnd(BOARD, "b").cards)).toEqual(["a", "c", "e"]);
+    expect(listIds(applyCardEnd(BOARD, "b", "done").cards)).toEqual(["a", "c", "e"]);
   });
 
   it("returns the board itself when the card is not on it", () => {
-    expect(applyCardEnd(BOARD, "gone")).toBe(BOARD);
+    expect(applyCardEnd(BOARD, "gone", "done")).toBe(BOARD);
   });
 });
 
@@ -47,24 +47,24 @@ describe("applyCardReturn", () => {
   ])("puts a card that ended %s back where it stood", (_, id) => {
     const card = BOARD.cards.find((each) => each.id === id)!;
     const placement = readPlacement(BOARD, id)!;
-    const ended = applyCardEnd(BOARD, id);
+    const ended = applyCardEnd(BOARD, id, "done");
     const { move } = buildMoveToPlacement(ended, placement);
-    expect(readDepotCell(applyCardReturn(ended, card, move))).toEqual(["a", "b", "c"]);
+    expect(readDepotCell(applyCardReturn(ended, card, "done", move))).toEqual(["a", "b", "c"]);
   });
 
   it("puts the card last in its cell when the card it followed is gone, and says it is not exact", () => {
     const card = BOARD.cards.find((each) => each.id === "c")!;
     const placement = readPlacement(BOARD, "c")!;
-    const ended = applyCardEnd(applyCardEnd(BOARD, "c"), "b");
+    const ended = applyCardEnd(applyCardEnd(BOARD, "c", "done"), "b", "done");
     const restore = buildMoveToPlacement(ended, placement);
     expect(restore.exact).toBe(false);
     expect(restore.move.afterTaskId).toBe("a");
-    expect(readDepotCell(applyCardReturn(ended, card, restore.move))).toEqual(["a", "c"]);
+    expect(readDepotCell(applyCardReturn(ended, card, "done", restore.move))).toEqual(["a", "c"]);
   });
 
   it("returns the board itself when a read already brought the card back", () => {
     const card = BOARD.cards[0]!;
-    expect(applyCardReturn(BOARD, card, { taskId: "a", afterTaskId: null })).toBe(BOARD);
+    expect(applyCardReturn(BOARD, card, "done", { taskId: "a", afterTaskId: null })).toBe(BOARD);
   });
 });
 
@@ -74,7 +74,12 @@ describe("reapplyCardChanges", () => {
     const result = reapplyCardChanges(BOARD, [
       { kind: "end", card: b, stage: "done" },
       { kind: "move", move: { taskId: "a", afterTaskId: "c" } },
-      { kind: "return", card: b, move: { taskId: "b", stage: "exploring", afterTaskId: "c" } },
+      {
+        kind: "return",
+        card: b,
+        endedAs: "done",
+        move: { taskId: "b", stage: "exploring", afterTaskId: "c" },
+      },
     ]);
     expect(listIds(result.cards)).toEqual(["c", "b", "a", "e"]);
   });
@@ -117,5 +122,58 @@ describe("the words of an end", () => {
     ],
   ] as const)("says why ending at %s failed, once", (stage, reason, words) => {
     expect(describeCardEndFailure(card, stage, reason)).toBe(words);
+  });
+});
+
+describe("the Done count of an Initiative", () => {
+  const withInitiatives = {
+    ...buildBoard(
+      buildCard("on", { initiativeId: "platform", projectId: "depots" }),
+      buildCard("off", { projectId: "depots" }),
+    ),
+    initiativeDoneCounts: { platform: 2 },
+  };
+  const on = withInitiatives.cards[0]!;
+
+  it("goes up by one when a card on the Initiative ends as Done, so progress does not shrink", () => {
+    expect(applyCardEnd(withInitiatives, "on", "done").initiativeDoneCounts).toEqual({
+      platform: 3,
+    });
+  });
+
+  it("starts the count for an Initiative that had none", () => {
+    const none = { ...withInitiatives, initiativeDoneCounts: {} };
+    expect(applyCardEnd(none, "on", "done").initiativeDoneCounts).toEqual({ platform: 1 });
+  });
+
+  it.each([
+    ["a card that is Dropped", "on", "dropped"],
+    ["a card on no Initiative", "off", "done"],
+  ] as const)("is left alone for %s", (_, id, stage) => {
+    expect(applyCardEnd(withInitiatives, id, stage).initiativeDoneCounts).toEqual({ platform: 2 });
+  });
+
+  it("goes down by one when a Done card returns, and leaves no entry at 0", () => {
+    const ended = { ...withInitiatives, cards: [withInitiatives.cards[1]!] };
+    const move = { taskId: "on", afterTaskId: null };
+    expect(applyCardReturn(ended, on, "done", move).initiativeDoneCounts).toEqual({ platform: 1 });
+    const last = { ...ended, initiativeDoneCounts: { platform: 1 } };
+    expect(applyCardReturn(last, on, "done", move).initiativeDoneCounts).toEqual({});
+  });
+
+  it("is left alone when a Dropped card returns", () => {
+    const ended = { ...withInitiatives, cards: [withInitiatives.cards[1]!] };
+    expect(
+      applyCardReturn(ended, on, "dropped", { taskId: "on", afterTaskId: null })
+        .initiativeDoneCounts,
+    ).toEqual({ platform: 2 });
+  });
+
+  it("nets out when an end and its return are both pending", () => {
+    const board = reapplyCardChanges(withInitiatives, [
+      { kind: "end", card: on, stage: "done" },
+      { kind: "return", card: on, endedAs: "done", move: { taskId: "on", afterTaskId: null } },
+    ]);
+    expect(board.initiativeDoneCounts).toEqual({ platform: 2 });
   });
 });

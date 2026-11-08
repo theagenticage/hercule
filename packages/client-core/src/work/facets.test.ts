@@ -5,6 +5,8 @@ import { buildCard, buildBoard, buildPlace, FAILURE, listIds, QUESTION } from ".
 import { buildWorkFacets, FAILED_FILTER } from "./facets";
 import { buildLanes } from "./lanes";
 
+const BLOCKER = { id: "b", title: "Add a refund button", stage: "building" as const };
+
 const PROJECTS = [
   { id: "depots", name: "Depot returns" },
   { id: "pricing", name: "Pricing rules" },
@@ -19,7 +21,7 @@ const BOARD = buildBoard(
   buildCard("loose"),
 );
 
-const FACETS = buildWorkFacets(buildLanes(BOARD, PROJECTS), BOARD, []);
+const FACETS = buildWorkFacets(buildLanes(BOARD, PROJECTS), BOARD, [], []);
 const [STATE, PROJECT] = FACETS;
 
 describe("buildWorkFacets", () => {
@@ -28,6 +30,7 @@ describe("buildWorkFacets", () => {
       "Has a question",
       "Failed",
       "With an agent",
+      "Blocked",
     ]);
     expect(STATE?.caption).toBe("");
     expect(PROJECT?.caption).toBe("Project");
@@ -39,7 +42,12 @@ describe("buildWorkFacets", () => {
   });
 
   it("lifts Has a question and Failed by themselves, and With an agent never", () => {
-    expect(STATE?.values.map((value) => value.liftsItself)).toEqual([true, true, undefined]);
+    expect(STATE?.values.map((value) => value.liftsItself)).toEqual([
+      true,
+      true,
+      undefined,
+      undefined,
+    ]);
     const filter = toggleFilterValue(toggleFilterValue({}, "state", "agent"), "state", "failed");
     expect(dropEmptyValues(filter, FACETS, [buildCard("quiet")])).toEqual({ state: ["agent"] });
   });
@@ -72,6 +80,7 @@ describe("buildWorkFacets", () => {
       question: 0,
       failed: 0,
       agent: 1,
+      blocked: 0,
     });
   });
 
@@ -84,6 +93,7 @@ describe("buildWorkFacets", () => {
     const facets = buildWorkFacets(
       buildLanes(buildBoard(failedAndBusy), PROJECTS),
       buildBoard(failedAndBusy),
+      [],
       [],
     );
     expect(listIds(filterItems([failedAndBusy], { state: ["agent"] }, facets))).toEqual(["both"]);
@@ -116,7 +126,7 @@ describe("the facets of outside places", () => {
     { id: "acme", displayName: "Acme Tracker" },
     { id: "relay", displayName: "Relay" },
   ];
-  const facets = buildWorkFacets(buildLanes(board, PROJECTS), board, plugins);
+  const facets = buildWorkFacets(buildLanes(board, PROJECTS), board, [], plugins);
 
   it("lists Source and then each groupable kind, after State and Project", () => {
     expect(facets.map((facet) => [facet.id, facet.caption])).toEqual([
@@ -139,7 +149,7 @@ describe("the facets of outside places", () => {
   it("has no Source facet when no card links anything outside", () => {
     const plain = buildBoard(buildCard("plain"));
     expect(
-      buildWorkFacets(buildLanes(plain, PROJECTS), plain, []).map((facet) => facet.id),
+      buildWorkFacets(buildLanes(plain, PROJECTS), plain, [], []).map((facet) => facet.id),
     ).toEqual(["state", "project"]);
   });
 
@@ -172,5 +182,89 @@ describe("the facets of outside places", () => {
       "acme:project:returns": 0,
       "acme:project:pricing": 1,
     });
+  });
+});
+
+describe("Blocked and Initiative", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const };
+  const LAUNCH = { id: "launch", name: "Spring launch", hue: 150 as const };
+  const board = buildBoard(
+    buildCard("waits", { blockedBy: [BLOCKER], blockedByCount: 1 }),
+    buildCard("waits-and-broke", { blockedBy: [BLOCKER], blockedByCount: 1, failure: FAILURE }),
+    buildCard("free", { initiativeId: "platform" }),
+    buildCard("closed", { initiativeId: "closed-one" }),
+  );
+  const facets = buildWorkFacets(buildLanes(board, PROJECTS), board, [PLATFORM, LAUNCH], []);
+
+  it("has a Blocked state row that every card with a blocker has, failed or not", () => {
+    expect(listIds(filterItems(board.cards, { state: ["blocked"] }, facets))).toEqual([
+      "waits",
+      "waits-and-broke",
+    ]);
+  });
+
+  it("asks the fact, not the look: a card at Landed or with a question that still waits is Blocked", () => {
+    const looks = buildBoard(
+      buildCard("landed", { stage: "landed", blockedBy: [BLOCKER], blockedByCount: 1 }),
+      buildCard("asks", { openQuestion: QUESTION, blockedBy: [BLOCKER], blockedByCount: 1 }),
+      buildCard("free"),
+    );
+    const lookFacets = buildWorkFacets(buildLanes(looks, PROJECTS), looks, [], []);
+
+    expect(listIds(filterItems(looks.cards, { state: ["blocked"] }, lookFacets))).toEqual([
+      "landed",
+      "asks",
+    ]);
+  });
+
+  it("lists the open Initiatives in list order with their hue, between Project and the rest", () => {
+    expect(facets.map((facet) => facet.id)).toEqual(["state", "project", "initiative"]);
+    expect(facets[2]).toMatchObject({
+      caption: "Initiative",
+      values: [
+        { id: "platform", name: "Platform", hue: 245 },
+        { id: "launch", name: "Spring launch", hue: 150 },
+      ],
+    });
+  });
+
+  it("filters by an Initiative, and a card on a closed one has no value", () => {
+    expect(listIds(filterItems(board.cards, { initiative: ["platform"] }, facets))).toEqual([
+      "free",
+    ]);
+    expect(listIds(filterItems(board.cards, { initiative: ["closed-one"] }, facets))).toEqual([
+      "closed",
+    ]);
+  });
+
+  it("has no Initiative facet when there is no open Initiative", () => {
+    expect(buildWorkFacets(buildLanes(board, PROJECTS), board, [], []).map((f) => f.id)).toEqual([
+      "state",
+      "project",
+    ]);
+  });
+
+  it("keeps an outside initiative under its own caption and id", () => {
+    const outside = {
+      ...buildBoard(buildCard("c", { contextRefs: ["linear:init:1"] })),
+      places: [
+        buildPlace("linear:init:1", "Returns at the depots", {
+          kind: "linear/initiative",
+          noun: "Initiative",
+          caption: "Linear initiative",
+        }),
+      ],
+      groupings: [{ kind: "linear/initiative", caption: "Linear initiative" }],
+    };
+    const both = buildWorkFacets(buildLanes(outside, PROJECTS), outside, [PLATFORM], []);
+    expect(both.map((facet) => [facet.id, facet.caption])).toEqual([
+      ["state", ""],
+      ["project", "Project"],
+      ["initiative", "Initiative"],
+      ["linear/initiative", "Linear initiative"],
+    ]);
+    expect(
+      listIds(filterItems(outside.cards, { "linear/initiative": ["linear:init:1"] }, both)),
+    ).toEqual(["c"]);
   });
 });

@@ -49,7 +49,7 @@ import {
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskEntityLinkInput,
-  type TaskEntityLinkResult,
+  type TaskChangeResult,
   TaskFilter,
   TaskMoveInput,
   TaskUpdateInput,
@@ -57,18 +57,19 @@ import {
   refuseFinishedCheckWithoutStageFact,
   refuseStageFactWithoutStage,
   refuseStageWithStatus,
+  InvalidState,
   NotFound,
   Validation,
   type ExternalRef,
   type Forbidden,
   type HandOffUndo,
-  type InvalidState,
   type ProvenanceEntry,
   type Task,
   type TaskAttention,
   type TaskPriority,
   type TaskStage,
   type TaskStatus,
+  type TaskMergeCheck,
   type TaskMergeInput,
   type TaskUpdatedEventPayload,
   type TryAgainUndo,
@@ -88,6 +89,13 @@ import {
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
+import {
+  blockerRepository,
+  buildEdgeWrite,
+  describeBlockerLoop,
+  describeMergeLoop,
+  type EdgeWrite,
+} from "./blockers";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
 import { LinkedEntities } from "./linked-entities";
@@ -157,6 +165,11 @@ interface TaskPatch {
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
   /**
+   * The Initiative the Task belongs to after the patch; `null` takes it off.
+   * `updateTask` does not check it: the caller has (`ensureInitiativeAcceptsTask`).
+   */
+  readonly initiativeId?: string | null;
+  /**
    * The rank the Task takes in its cell, chosen by the caller (`task.move`).
    * When it is absent and the patch moves the Task to another cell, the Task
    * goes last in the new cell.
@@ -165,6 +178,15 @@ interface TaskPatch {
   readonly addLabels?: ReadonlyArray<string>;
   readonly removeLabels?: ReadonlyArray<string>;
   readonly provenance?: ReadonlyArray<ProvenanceInput>;
+  /**
+   * The blockers the Task gained and lost, which the caller has written
+   * already (a merge moves the edges). `updateTask` writes nothing for it and
+   * only reports it in the `task.updated` event, so the Task has one event.
+   */
+  readonly blockedBy?: {
+    readonly added: ReadonlyArray<string>;
+    readonly removed: ReadonlyArray<string>;
+  };
   /** The fact this stage write comes from. See `updateTask`. */
   readonly stageFactId?: number;
   /** With `stageFactId`: write the stage only if the Task's linked work is finished now. */
@@ -267,6 +289,10 @@ export type FailureRestoration =
 const ONLY_THE_USER_MERGES =
   "only the user may merge Tasks: merging is the user's correction of how work is grouped, so a session or a workflow step may not; ask the user instead";
 
+/** The refusal of `clearInitiative` for a caller who is not the user. */
+const ONLY_THE_USER_CLEARS_INITIATIVE =
+  "only the user may take every Task off an Initiative: deleting an Initiative is the user's own act, so a session or a workflow step may not; ask the user instead";
+
 /** The refusal of `recordHandoff` for a caller who is not the user. */
 const ONLY_THE_USER_RECORDS_HANDOFF =
   "only the user may record a handoff: handing work off is the user's act, so a session or a workflow step may not; ask the user instead";
@@ -318,7 +344,16 @@ const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<TaskSortField>> = 
 ];
 
 const NO_SUCH_TASK = "no such task";
+
+/** The refusal of a blocker that does not exist or is deleted. */
+const NO_SUCH_BLOCKER = "no such task to wait on";
 const NO_SUCH_PROJECT = "no such project";
+const NO_SUCH_INITIATIVE = "no such initiative";
+
+/** The refusal of a write that would put a Task on a closed Initiative. */
+const INITIATIVE_IS_CLOSED =
+  "the initiative is closed, so no Task can be put on it; " +
+  "ask the user to reopen it, or name another initiative";
 
 /**
  * The title of the Task made for a Thread whose title is blank. A Task's title
@@ -439,17 +474,74 @@ const make = Effect.gen(function* () {
   const linked = yield* makeLinkedFacts;
   const stageDecisions = yield* makeStageDecisions(linked.countLinkedWork);
   const facts = yield* entityFactRepository;
+  const blockers = yield* blockerRepository;
 
   /**
    * Reads the live Task `id` stands for. When `id` was merged into another
    * Task (`resolveTaskId`), that is the survivor, whose `id` differs. Fails
-   * with `NotFound` when the Task does not exist or is deleted.
+   * with `NotFound`, carrying `notFoundMessage`, when the Task does not exist
+   * or is deleted.
    */
-  const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
+  const readLiveTaskOrFail = (
+    id: string,
+    notFoundMessage = NO_SUCH_TASK,
+  ): Effect.Effect<Task, NotFound | SqlError> =>
     Effect.gen(function* () {
       const found = yield* tasks.readLiveOrSurvivor(id);
-      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_TASK));
+      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(notFoundMessage));
       return found.value;
+    });
+
+  /**
+   * Reads the live Task `id`, taken as it is and never followed to a
+   * survivor. Fails with `NotFound` when it does not exist, is deleted, or was
+   * merged into another Task.
+   */
+  const readLiveTaskExactlyOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
+    Effect.flatMap(tasks.live(id), (found) =>
+      Option.isNone(found)
+        ? Effect.fail(createNotFoundError(NO_SUCH_TASK))
+        : Effect.succeed(found.value),
+    );
+
+  /**
+   * Records, for the transaction it runs in, what a write of blocker edges
+   * changed: a `task.updated` event with `changes.blockedBy` for each Task
+   * whose blockers changed, and a `task` announcement for every Task at
+   * either end of a changed edge.
+   *
+   * The announcement is a derived push (it reads the board and the pane of
+   * each Task named, not the Task lists, Tracking or Your work). An edge is
+   * not a field of the Task record, so no list of Tasks goes stale, and no
+   * edge changes a Task's links or its liveness. The board draws the lock and
+   * the words of a card from its edges, and the pane lists them.
+   */
+  const recordEdgeWrite = (
+    write: EdgeWrite,
+    actor: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      for (const change of write.changes) {
+        yield* platformEvents.emit({
+          kind: "task.updated",
+          actor,
+          payload: {
+            taskId: change.taskId,
+            changes: { blockedBy: { added: change.added, removed: change.removed } },
+          },
+          at,
+        });
+      }
+      for (const taskId of write.touchedTaskIds) {
+        yield* announce({
+          _tag: "record",
+          topic: "task",
+          id: taskId,
+          kind: "updated",
+          derived: true,
+        });
+      }
     });
 
   /**
@@ -488,6 +580,108 @@ const make = Effect.gen(function* () {
         );
       }
       return state.value;
+    });
+
+  /**
+   * Runs every check that `merge` makes before it writes anything, and
+   * returns what the merge builds on. `merge` and `checkMerge` both call it,
+   * so the pre-check can never disagree with the merge. Both ids are taken as
+   * they are, never followed to a survivor: merging into or from a merged
+   * Task would hide the redirect.
+   *
+   * It fails with:
+   * - `Validation` when the Tasks are the same, one is already merged, or the
+   *   result would hold more labels or a longer description than a Task may;
+   * - `NotFound` when either Task does not exist or is deleted;
+   * - `InvalidState` when either Task is at `done` or `dropped`, and when the
+   *   moved blocker edges would make a Task wait on itself, through other
+   *   Tasks (`details.reason` is `blocker-cycle`; the message names the path).
+   *   The edge between the two Tasks themselves is no loop: it is dropped.
+   */
+  const checkMergeable = (sourceId: string, targetId: string) =>
+    Effect.gen(function* () {
+      if (sourceId === targetId) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["intoTaskId"],
+              message: "a task cannot be merged into itself; name another task to merge it into",
+            },
+          ]),
+        );
+      }
+      const sourceState = yield* requireMergeableTask(sourceId);
+      const targetState = yield* requireMergeableTask(targetId);
+      // The state reads above and these reads are separate statements, and a
+      // caller that runs no transaction (`checkMerge`) can see a Task deleted
+      // or merged in between: that is a refusal like any other.
+      const source = yield* readLiveTaskExactlyOrFail(sourceId);
+      const target = yield* readLiveTaskExactlyOrFail(targetId);
+
+      const addedLabels = source.labels.filter((label) => !target.labels.includes(label));
+      if (target.labels.length + addedLabels.length > MAX_TASK_LABELS) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["intoTaskId"],
+              message:
+                `merging would give the task ${String(target.labels.length + addedLabels.length)} labels, ` +
+                `and a task carries at most ${String(MAX_TASK_LABELS)}; ` +
+                "remove some labels from either task, then merge again",
+            },
+          ]),
+        );
+      }
+      const description = joinMergedDescriptions(target, source);
+      if (description.length > MAX_TASK_DESCRIPTION_LENGTH) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["intoTaskId"],
+              message:
+                `merging would make the description ${String(description.length)} characters long, ` +
+                `and a task holds at most ${String(MAX_TASK_DESCRIPTION_LENGTH)}; ` +
+                "shorten the description of either task, then merge again",
+            },
+          ]),
+        );
+      }
+
+      const path = yield* blockers.findMergeLoop(sourceId, targetId);
+      if (path.length > 0) {
+        return yield* Effect.fail(
+          createInvalidStateError(describeMergeLoop(target.title, path), {
+            reason: "blocker-cycle",
+          }),
+        );
+      }
+      return { source, target, sourceState, targetState, addedLabels, description };
+    });
+
+  /**
+   * Reads the two live Tasks of a blocker edge, each followed from a merged
+   * id to its survivor: `waiting` for `taskId` and `blocker` for
+   * `blockedByTaskId`. Fails with `NotFound` when either does not exist or is
+   * deleted, and with `Validation` when both ids stand for one Task, which
+   * cannot wait on itself.
+   */
+  const readTasksOfBlocker = (taskId: string, blockedByTaskId: string) =>
+    Effect.gen(function* () {
+      const waiting = yield* readLiveTaskOrFail(taskId);
+      const blocker = yield* readLiveTaskOrFail(blockedByTaskId, NO_SUCH_BLOCKER);
+      if (waiting.id === blocker.id) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["blockedByTaskId"],
+              message:
+                "a task cannot wait on itself (these ids stand for the same task, " +
+                "since a merged id stands for the task it was merged into); name another task",
+            },
+          ]),
+        );
+      }
+      return { waiting, blocker };
     });
 
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
@@ -538,6 +732,28 @@ const make = Effect.gen(function* () {
       : Effect.flatMap(tasks.projectExists(id), (exists) =>
           exists ? Effect.void : Effect.fail(createNotFoundError(NO_SUCH_PROJECT)),
         );
+
+  /**
+   * Checks that a write may put a Task on the Initiative `next`. Does nothing
+   * for an absent or null `next`. Fails with `NotFound` when the Initiative
+   * does not exist or is deleted, and with `InvalidState` when it is closed
+   * and the Task is not on it already (`held`). A Task that stays on its
+   * closed Initiative is never refused, so an unrelated edit of it works.
+   */
+  const ensureInitiativeAcceptsTask = (
+    next: string | null | undefined,
+    held: string | undefined,
+  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      if (next === undefined || next === null) return;
+      const initiative = yield* tasks.readInitiative(next);
+      if (Option.isNone(initiative)) {
+        return yield* Effect.fail(createNotFoundError(NO_SUCH_INITIATIVE));
+      }
+      if (initiative.value.closed && next !== held) {
+        return yield* Effect.fail(createInvalidStateError(INITIATIVE_IS_CLOSED));
+      }
+    });
 
   /**
    * Applies `patch` to the task `id` (or to the Task it was merged into) in
@@ -606,6 +822,11 @@ const make = Effect.gen(function* () {
           changes.projectId = { old: project, new: patch.projectId };
           edit.projectId = patch.projectId;
         }
+        const initiative = before.initiativeId ?? null;
+        if (isNewValue(patch.initiativeId, initiative)) {
+          changes.initiativeId = { old: initiative, new: patch.initiativeId };
+          edit.initiativeId = patch.initiativeId;
+        }
         if (patch.boardRank !== undefined) {
           // The caller chose the rank, so it is kept even when the Task also
           // changes cell. It is a change of its own only when it differs.
@@ -652,6 +873,8 @@ const make = Effect.gen(function* () {
           edit.labels = [...kept, ...added];
         }
 
+        if (patch.blockedBy !== undefined) changes.blockedBy = patch.blockedBy;
+
         const appended = patch.provenance ?? [];
         if (appended.length > 0) {
           const entries: ReadonlyArray<ProvenanceEntry> = appended.map((entry) => ({
@@ -697,6 +920,21 @@ const make = Effect.gen(function* () {
           at,
         });
         yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
+        // The pane of a Task lists the title and the stage of the Tasks on the
+        // other end of its blocker edges, and the card draws them, so those
+        // Tasks have a stale read now. A derived push is enough: it re-reads
+        // the board and the pane, and nothing else changed for them.
+        if (changes.title !== undefined || changes.stage !== undefined) {
+          for (const neighbourId of yield* blockers.readNeighbourIds(id)) {
+            yield* announce({
+              _tag: "record",
+              topic: "task",
+              id: neighbourId,
+              kind: "updated",
+              derived: true,
+            });
+          }
+        }
         yield* linked.recordLinkFacts(id, newRefs);
         // Read back rather than merged in memory, so the caller gets the
         // row that was written, whatever the edit changed.
@@ -775,7 +1013,7 @@ const make = Effect.gen(function* () {
     requestedId: string,
     placement: Omit<MoveInput, "id">,
     actor: string,
-  ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
+  ): Effect.Effect<Task, NotFound | Validation | InvalidState | SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -791,6 +1029,7 @@ const make = Effect.gen(function* () {
         // survivor, and the comparisons and the rank below are about it.
         const id = before.id;
         yield* ensureProjectExists(placement.projectId);
+        yield* ensureInitiativeAcceptsTask(placement.initiativeId, before.initiativeId);
         const afterTaskId =
           placement.afterTaskId === undefined || placement.afterTaskId === null
             ? placement.afterTaskId
@@ -837,6 +1076,9 @@ const make = Effect.gen(function* () {
           {
             ...(placement.stage === undefined ? {} : { stage: placement.stage }),
             ...(placement.projectId === undefined ? {} : { projectId: placement.projectId }),
+            ...(placement.initiativeId === undefined
+              ? {}
+              : { initiativeId: placement.initiativeId }),
             boardRank,
           },
           actor,
@@ -861,6 +1103,7 @@ const make = Effect.gen(function* () {
       | "priority"
       | "labels"
       | "projectId"
+      | "initiativeId"
       | "provenance"
       | "following"
     >,
@@ -1004,9 +1247,10 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Soft-deletes a task, clears its pending summary and withdraws the open
-   * decisions about it. The row stays, so the log and the runs that reference
-   * the task still point at something. Fails with `NotFound` if the task does
+   * Soft-deletes a task, removes its blocker edges in both directions
+   * (reported in `changes.blockedBy` of the Tasks that waited), clears its
+   * pending summary and withdraws the open decisions about it. The row stays,
+   * so the log and the runs that reference the task still point at something. Fails with `NotFound` if the task does
    * not exist or is already deleted. It checks no grant and opens no
    * transaction: the caller does both.
    */
@@ -1015,6 +1259,9 @@ const make = Effect.gen(function* () {
       const at = yield* nowIso;
       const actor = yield* currentStamp;
       const task = yield* readLiveTaskOrFail(id);
+      // A card is never held by a Task nobody can see, so the edges go with
+      // the Task, and each Task that waited on it is told.
+      yield* recordEdgeWrite(yield* blockers.deleteEdgesOf(id), actor, at);
       yield* tasks.softDelete(id, at);
       // A deleted Task waits for no summary.
       yield* tasks.clearSummaryDirty(id);
@@ -1129,7 +1376,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates a task and returns it, at the stage the input names or at
-     * `planned`. Fails with `NotFound` if the project does not exist.
+     * `planned`. Fails with `NotFound` if the project or the Initiative does
+     * not exist, and with `InvalidState` if the Initiative is closed.
      *
      * A task that a run's step creates gets one more provenance entry, `{
      * runId }`, after the ones the step's params give, unless one of those
@@ -1139,7 +1387,10 @@ const make = Effect.gen(function* () {
      */
     create: (
       input: TaskCreateInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("task.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
@@ -1153,6 +1404,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             yield* ensureProjectExists(decoded.projectId);
+            yield* ensureInitiativeAcceptsTask(decoded.initiativeId, undefined);
             return yield* insertTask(
               {
                 title: decoded.title,
@@ -1161,6 +1413,9 @@ const make = Effect.gen(function* () {
                 priority: decoded.priority ?? "normal",
                 labels: Arr.dedupe(decoded.labels ?? []),
                 projectId: decoded.projectId,
+                ...(decoded.initiativeId === undefined
+                  ? {}
+                  : { initiativeId: decoded.initiativeId }),
                 provenance,
               },
               actor,
@@ -1471,17 +1726,37 @@ const make = Effect.gen(function* () {
      * written without one overrules every fact recorded so far. See
      * `updateTask` for the rules. It fails with `Validation` when the fact is
      * not a fact of this Task; every other refusal returns the Task as it is.
+     *
+     * `initiativeId` puts the Task on an Initiative, and `null` takes it off.
+     * It fails with `NotFound` for an Initiative that does not exist or is
+     * deleted, and with `InvalidState` when the write changes the Task to a
+     * closed Initiative. A Task that stays on its closed Initiative is never
+     * refused for it, whatever else the update changes. The event lists
+     * `changes.initiativeId` as `{ old, new }`.
      */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ...patch } = yield* Effect.mapError(
           decodeUpdate(input),
           createDecodeValidationError,
         );
-        return yield* updateTask(id, patch, yield* currentStamp);
+        const stamp = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            if (typeof patch.initiativeId === "string") {
+              const held = (yield* readLiveTaskOrFail(id)).initiativeId;
+              yield* ensureInitiativeAcceptsTask(patch.initiativeId, held);
+            }
+            return yield* updateTask(id, patch, stamp);
+          }),
+        );
       }),
 
     /**
@@ -1504,7 +1779,7 @@ const make = Effect.gen(function* () {
     linkEntity: (
       input: LinkEntityInput,
     ): Effect.Effect<
-      TaskEntityLinkResult,
+      TaskChangeResult,
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
@@ -1553,7 +1828,7 @@ const make = Effect.gen(function* () {
     unlinkEntity: (
       input: LinkEntityInput,
     ): Effect.Effect<
-      TaskEntityLinkResult,
+      TaskChangeResult,
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
@@ -1634,6 +1909,10 @@ const make = Effect.gen(function* () {
      *   `done` or `dropped` fails to decode: the board has no such stage.
      * - A Task whose project was deleted is in the "No project" cell, as every
      *   client shows it.
+     * - `initiativeId` puts the Task on an Initiative in the same write
+     *   (`null` takes it off), so one drop between Initiative lanes is one
+     *   write. It fails as `update` does: `NotFound` for an Initiative that
+     *   does not exist, `InvalidState` for a closed one the Task is not on.
      * - A move that changes nothing writes nothing, like `update`. Naming a
      *   `stage` is a stage decision, so it raises the stage revision even when
      *   the Task is at that stage already, and it overrules every fact
@@ -1647,7 +1926,10 @@ const make = Effect.gen(function* () {
      */
     move: (
       input: MoveInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ...placement } = yield* Effect.mapError(
@@ -1663,7 +1945,10 @@ const make = Effect.gen(function* () {
      * a session or a workflow step is refused with `Forbidden`.
      *
      * The survivor keeps its title, stage, project, priority and board rank.
-     * Labels are united, and a non-empty source description is appended under
+     * It keeps its own Initiative too. When it has none, it takes the
+     * source's, even when that Initiative is closed: the membership is
+     * carried over, not newly added, so the closed check of `update` does not
+     * apply. The source leaves its Initiative. Labels are united, and a non-empty source description is appended under
      * a line naming the source's title. In one transaction the source's
      * sessions, runs, workspace links and provenance move to the survivor, the
      * survivor gains a provenance entry naming the source, and a failure the
@@ -1674,10 +1959,21 @@ const make = Effect.gen(function* () {
      * stage. A read of the source's id then returns the survivor
      * (`resolveTaskId`).
      *
+     * The blocker edges of the source move to the survivor, in both
+     * directions: what waited on the source waits on the survivor, and what
+     * the source waited on, the survivor waits on. The edge between the two
+     * Tasks and any edge the survivor has already are dropped. Each Task whose
+     * blockers changed gets a `task.updated` with `changes.blockedBy` (the
+     * source reports all its blockers as removed, the survivor reports the
+     * ones it gained), and every Task at the end of a moved edge is announced.
+     *
      * Fails with `NotFound` when either Task does not exist or is deleted, with
-     * `InvalidState` when either is at `done` or `dropped`, and with
-     * `Validation` when the Tasks are the same, one is already merged, or the
-     * result would hold more labels or a longer description than a Task may.
+     * `InvalidState` when either is at `done` or `dropped` and when the moved
+     * edges would make the survivor wait on itself through other Tasks
+     * (`details.reason` is `blocker-cycle`, and the message names the path;
+     * nothing is written), and with `Validation` when the Tasks are the same,
+     * one is already merged, or the result would hold more labels or a longer
+     * description than a Task may.
      */
     merge: (
       id: Id,
@@ -1689,56 +1985,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireUserActor("task.merge", ONLY_THE_USER_MERGES);
         const stamp = yield* currentStamp;
-        if (id === input.intoTaskId) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["intoTaskId"],
-                message: "a task cannot be merged into itself; name another task to merge it into",
-              },
-            ]),
-          );
-        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Both ids are taken as they are, never followed to a survivor:
-            // merging into or from a merged Task would hide the redirect.
             const sourceId = id;
             const targetId = input.intoTaskId;
-            const sourceState = yield* requireMergeableTask(sourceId);
-            const targetState = yield* requireMergeableTask(targetId);
-            const source = Option.getOrThrow(yield* tasks.live(sourceId));
-            const target = Option.getOrThrow(yield* tasks.live(targetId));
-
-            const addedLabels = source.labels.filter((label) => !target.labels.includes(label));
-            if (target.labels.length + addedLabels.length > MAX_TASK_LABELS) {
-              return yield* Effect.fail(
-                createValidationError([
-                  {
-                    path: ["intoTaskId"],
-                    message:
-                      `merging would give the task ${String(target.labels.length + addedLabels.length)} labels, ` +
-                      `and a task carries at most ${String(MAX_TASK_LABELS)}; ` +
-                      "remove some labels from either task, then merge again",
-                  },
-                ]),
-              );
-            }
-            const description = joinMergedDescriptions(target, source);
-            if (description.length > MAX_TASK_DESCRIPTION_LENGTH) {
-              return yield* Effect.fail(
-                createValidationError([
-                  {
-                    path: ["intoTaskId"],
-                    message:
-                      `merging would make the description ${String(description.length)} characters long, ` +
-                      `and a task holds at most ${String(MAX_TASK_DESCRIPTION_LENGTH)}; ` +
-                      "shorten the description of either task, then merge again",
-                  },
-                ]),
-              );
-            }
+            const { source, target, sourceState, targetState, addedLabels, description } =
+              yield* checkMergeable(sourceId, targetId);
 
             yield* tasks.markMerged(sourceId, targetId);
             yield* tasks.moveEntityLinks(sourceId, targetId);
@@ -1753,6 +2006,21 @@ const make = Effect.gen(function* () {
             // The entries move before the survivor gains its own, and unedited:
             // Tracking joins them to the runs, which moved just above.
             yield* tasks.moveProvenance(sourceId, targetId);
+            // The checks have found no loop, so the moved edges keep the
+            // stored relation a DAG. The survivor reports what it gained in
+            // its own `task.updated` below; every other Task whose blockers
+            // changed gets one here, and every Task at the end of a moved
+            // edge is announced.
+            const movedEdges = yield* blockers.moveEdges(sourceId, targetId);
+            yield* recordEdgeWrite(
+              {
+                changes: movedEdges.changes.filter((change) => change.taskId !== targetId),
+                touchedTaskIds: movedEdges.touchedTaskIds,
+              },
+              stamp,
+              yield* nowIso,
+            );
+            const gainedBlockers = movedEdges.changes.find((change) => change.taskId === targetId);
 
             // The failure the survivor shows is the newer of the two, and a
             // merge always raises the revision, so a recovery from before it
@@ -1764,13 +2032,22 @@ const make = Effect.gen(function* () {
             yield* tasks.recordMergedFailure(targetId, failedRunId);
 
             // Through `updateTask`, so the survivor gets its `task.updated`
-            // event, with the merge entry and what the labels and the
-            // description gained.
+            // event, with the merge entry and what the labels, the
+            // description and the Initiative gained. `updateTask` does not
+            // check the Initiative, which is why a closed one can be taken.
             const survivor = yield* updateTask(
               targetId,
               {
                 ...(description === target.description ? {} : { description }),
+                ...(target.initiativeId === undefined && source.initiativeId !== undefined
+                  ? { initiativeId: source.initiativeId }
+                  : {}),
                 ...(addedLabels.length === 0 ? {} : { addLabels: addedLabels }),
+                ...(gainedBlockers === undefined
+                  ? {}
+                  : {
+                      blockedBy: { added: gainedBlockers.added, removed: gainedBlockers.removed },
+                    }),
                 provenance: [{ mergedTaskId: sourceId }],
               },
               stamp,
@@ -1788,6 +2065,186 @@ const make = Effect.gen(function* () {
               at: survivor.updatedAt,
             });
             return survivor;
+          }),
+        );
+      }),
+
+    /**
+     * Checks whether `merge` would accept merging the Task `id` into the Task
+     * `intoTaskId`, and writes nothing. Returns `{}` when it would, and
+     * `{ refusal }` when it would not, holding the message `merge` would fail
+     * with. It runs every check `merge` runs before it writes (`checkMergeable`):
+     * the same Task twice, a Task that is unknown, deleted, merged or finished,
+     * too many labels or too long a description, and a loop of blockers (the
+     * message names the path). It does not ask who the caller is, so a session
+     * may check a merge it may not make. Needs the grant `task.read`.
+     *
+     * It is a pre-check, so a client can show the refusal before a drop. The
+     * Tasks may change before the merge, and the merge decides.
+     */
+    checkMerge: (
+      id: Id,
+      intoTaskId: Id,
+    ): Effect.Effect<TaskMergeCheck, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        return yield* checkMergeable(id, intoTaskId).pipe(
+          Effect.as({}),
+          Effect.catchIf(
+            (error): error is NotFound | Validation | InvalidState =>
+              error instanceof NotFound ||
+              error instanceof Validation ||
+              error instanceof InvalidState,
+            (error) =>
+              Effect.succeed({
+                refusal:
+                  error instanceof Validation
+                    ? (error.error.details.issues[0]?.message ?? error.error.message)
+                    : error.error.message,
+              }),
+          ),
+        );
+      }),
+
+    /**
+     * Makes the Task `taskId` wait on the Task `blockedByTaskId`, and returns
+     * the waiting Task and whether the call changed anything (`changed`).
+     * Either id may be one that was merged into another Task: both are
+     * followed to their survivors first. In one transaction it checks that
+     * the two are not the same Task, checks that the blocker does not wait on
+     * the Task already (directly or through other Tasks, whatever their
+     * stage), writes the edge stamped with the caller, and reports
+     * `changes.blockedBy` in a `task.updated` of the waiting Task. Both Tasks
+     * are announced. The stored edges never form a loop: the writer is
+     * single, so of two calls that would close a loop together, the second
+     * runs after the first committed and is refused.
+     *
+     * An edge that is there already changes nothing and writes nothing, and
+     * `changed` is false. A blocker at `landed`, `done` or `dropped` is
+     * stored like any other and just does not count on the card.
+     *
+     * Fails with `NotFound` when either Task does not exist or is deleted, with
+     * `Validation` when both ids stand for one Task, and with `InvalidState`
+     * (`details.reason` is `blocker-cycle`) when the blocker waits on the Task
+     * already; the message names the path. Needs the grant `task.update`.
+     */
+    addBlocker: (
+      taskId: Id,
+      blockedByTaskId: Id,
+    ): Effect.Effect<
+      TaskChangeResult,
+      Unauthenticated | Forbidden | NotFound | Validation | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.update");
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { waiting, blocker } = yield* readTasksOfBlocker(taskId, blockedByTaskId);
+            const loop = yield* blockers.findBlockerLoop(waiting.id, blocker.id);
+            if (loop.length > 0) {
+              return yield* Effect.fail(
+                createInvalidStateError(describeBlockerLoop(loop), { reason: "blocker-cycle" }),
+              );
+            }
+            const at = yield* nowIso;
+            if (!(yield* blockers.insertEdge(waiting.id, blocker.id, at, actor))) {
+              return { task: waiting, changed: false };
+            }
+            yield* recordEdgeWrite(
+              buildEdgeWrite([{ taskId: waiting.id, blockedById: blocker.id }], []),
+              actor,
+              at,
+            );
+            return { task: waiting, changed: true };
+          }),
+        );
+      }),
+
+    /**
+     * Makes the Task `taskId` stop waiting on the Task `blockedByTaskId`, and
+     * returns the waiting Task and whether the call changed anything
+     * (`changed`). Ids that were merged into another Task are followed, as in
+     * `addBlocker`, and a blocker at any stage can be removed. Reports
+     * `changes.blockedBy` in a `task.updated` of the waiting Task and
+     * announces both Tasks.
+     *
+     * An edge that is not there changes nothing and writes nothing, and
+     * `changed` is false. Fails with `NotFound` when either Task does not
+     * exist or is deleted, and with `Validation` when both ids stand for one
+     * Task. Needs the grant `task.update`.
+     */
+    removeBlocker: (
+      taskId: Id,
+      blockedByTaskId: Id,
+    ): Effect.Effect<
+      TaskChangeResult,
+      Unauthenticated | Forbidden | NotFound | Validation | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.update");
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { waiting, blocker } = yield* readTasksOfBlocker(taskId, blockedByTaskId);
+            if (!(yield* blockers.deleteEdge(waiting.id, blocker.id))) {
+              return { task: waiting, changed: false };
+            }
+            yield* recordEdgeWrite(
+              buildEdgeWrite([], [{ taskId: waiting.id, blockedById: blocker.id }]),
+              actor,
+              yield* nowIso,
+            );
+            return { task: waiting, changed: true };
+          }),
+        );
+      }),
+
+    /**
+     * Takes every live Task (not deleted, not merged into another Task, at
+     * any stage) off the Initiative `initiativeId`, and returns the ids of the
+     * Tasks it took off, in id order. Each Task gets one `task.updated` with
+     * `changes.initiativeId` of `{ old: initiativeId, new: null }`, and one
+     * `task` announcement. Does nothing for an Initiative with no Tasks.
+     *
+     * The caller deletes the Initiative, in the same transaction: this joins
+     * the caller's transaction or opens one, so the Tasks and the Initiative
+     * change together. It does not check that the Initiative exists, because
+     * the caller owns that record.
+     *
+     * Permission: the user only, with the grant `task.update`. It fails with
+     * `Forbidden` for any other caller.
+     *
+     * The announcement is a plain `task` push, like every edit of a field of
+     * the Task record: the list and the record of a Task carry `initiativeId`,
+     * and a derived push leaves those stale. Deleting an Initiative is rare.
+     */
+    clearInitiative: (
+      initiativeId: string,
+    ): Effect.Effect<ReadonlyArray<string>, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_CLEARS_INITIATIVE);
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const cleared = yield* tasks.clearInitiative(initiativeId, at);
+            for (const taskId of cleared) {
+              yield* platformEvents.emit({
+                kind: "task.updated",
+                actor,
+                payload: {
+                  taskId,
+                  changes: { initiativeId: { old: initiativeId, new: null } },
+                },
+                at,
+              });
+              yield* announce({ _tag: "record", topic: "task", id: taskId, kind: "updated" });
+            }
+            return cleared;
           }),
         );
       }),

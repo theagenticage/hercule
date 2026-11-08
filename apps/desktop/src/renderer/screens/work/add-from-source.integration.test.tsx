@@ -196,6 +196,7 @@ const renderSheet = ({
           result={null}
           onCreate={() => Promise.resolve()}
           onClose={onClose}
+          onNewInitiative={() => {}}
           fromSource={
             <AddFromSource
               client={client}

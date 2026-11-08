@@ -46,6 +46,7 @@ import {
   type BoardCardFacts,
   type BoardSessionFact,
 } from "./board";
+import { NOT_BLOCKED } from "./blockers";
 import { externalEntityRepository, type ObservedEntity } from "../external-entities";
 import { PluginHost, Plugins } from "../plugins";
 import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../plugins/testing";
@@ -61,6 +62,7 @@ const TASK: BoardTask = {
   stage: "building",
   priority: "normal",
   projectId: "0199e0e7-0008-7000-8000-000000000001",
+  initiativeId: undefined,
   boardRank: "V",
   createdAt: AT,
   stageChangedAt: AT,
@@ -127,7 +129,7 @@ const FAILURE = {
 
 describe("buildWorkCard", () => {
   it("copies the place of the Task and leaves out every fact a Task without sessions or runs lacks", () => {
-    const card = buildWorkCard(TASK, NO_FACTS);
+    const card = buildWorkCard(TASK, NO_FACTS, NOT_BLOCKED);
 
     expect(card).toEqual({
       id: TASK.id,
@@ -142,13 +144,15 @@ describe("buildWorkCard", () => {
       lastActivityAt: AT,
       entityMarks: [],
       contextRefs: [],
+      blockedBy: [],
+      blockedByCount: 0,
     });
   });
 
   it("leaves out the project of a Task that has none", () => {
-    expect(buildWorkCard({ ...TASK, projectId: undefined }, NO_FACTS)).not.toHaveProperty(
-      "projectId",
-    );
+    expect(
+      buildWorkCard({ ...TASK, projectId: undefined }, NO_FACTS, NOT_BLOCKED),
+    ).not.toHaveProperty("projectId");
   });
 
   describe("the open question", () => {
@@ -185,7 +189,7 @@ describe("buildWorkCard", () => {
         "Which refund window?",
       ],
     ])("is set by %s", (_name, thread, text) => {
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] });
+      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] }, NOT_BLOCKED);
 
       expect(card.openQuestion).toEqual({
         sessionId: thread.id,
@@ -207,9 +211,9 @@ describe("buildWorkCard", () => {
       ],
       ["a Thread with nothing open", buildSession()],
     ])("is left unset by %s", (_name, session) => {
-      expect(buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] })).not.toHaveProperty(
-        "openQuestion",
-      );
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] }, NOT_BLOCKED),
+      ).not.toHaveProperty("openQuestion");
     });
 
     it("picks the Thread opened first when several have a question, and its first question", () => {
@@ -222,7 +226,7 @@ describe("buildWorkCard", () => {
         openRequests: [askQuestion("q3", "Third")],
       });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [later, first] });
+      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [later, first] }, NOT_BLOCKED);
 
       expect(card.openQuestion).toMatchObject({ sessionId: first.id, requestId: "q1" });
     });
@@ -235,7 +239,7 @@ describe("buildWorkCard", () => {
     ])("stays on the card, and decodes, when the question is %s", (_name, text) => {
       const thread = buildSession({ openRequests: [askQuestion("q1", text)] });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] });
+      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] }, NOT_BLOCKED);
 
       expect(card.openQuestion).toEqual({ sessionId: thread.id, requestId: "q1", text });
       expect(Schema.is(WorkCard)(card)).toBe(true);
@@ -246,7 +250,8 @@ describe("buildWorkCard", () => {
         openRequests: [askQuestion("q1", "Should the refund window be longer? ".repeat(30))],
       });
 
-      const text = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] }).openQuestion!.text;
+      const text = buildWorkCard(TASK, { ...NO_FACTS, sessions: [thread] }, NOT_BLOCKED)
+        .openQuestion!.text;
 
       expect(text.length).toBeLessThanOrEqual(MAX_CARD_QUESTION);
       expect(text.endsWith("…")).toBe(true);
@@ -259,7 +264,11 @@ describe("buildWorkCard", () => {
       });
       const newer = buildSession({ createdAt: "2026-10-20T11:00:00.000Z" });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [asking, newer], threadCount: 2 });
+      const card = buildWorkCard(
+        TASK,
+        { ...NO_FACTS, sessions: [asking, newer], threadCount: 2 },
+        NOT_BLOCKED,
+      );
 
       expect(card.openSessionId).toBe(asking.id);
     });
@@ -268,7 +277,11 @@ describe("buildWorkCard", () => {
       const older = buildSession({ createdAt: "2026-10-20T09:00:00.000Z" });
       const newer = buildSession({ createdAt: "2026-10-20T11:00:00.000Z" });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [newer, older], threadCount: 2 });
+      const card = buildWorkCard(
+        TASK,
+        { ...NO_FACTS, sessions: [newer, older], threadCount: 2 },
+        NOT_BLOCKED,
+      );
 
       expect(card.openSessionId).toBe(newer.id);
       expect(card.threadCount).toBe(2);
@@ -286,17 +299,21 @@ describe("buildWorkCard", () => {
         createdAt: "2026-10-20T11:00:00.000Z",
       });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [newer, older] });
+      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [newer, older] }, NOT_BLOCKED);
 
       expect(card.openSessionId).toBe(newer.id);
-      expect(buildWorkCard(TASK, NO_FACTS)).not.toHaveProperty("openSessionId");
+      expect(buildWorkCard(TASK, NO_FACTS, NOT_BLOCKED)).not.toHaveProperty("openSessionId");
     });
 
     it("prefers a Thread to a newer session of another kind", () => {
       const thread = buildSession({ createdAt: "2026-10-20T09:00:00.000Z" });
       const step = buildSession({ kind: "run", createdAt: "2026-10-20T11:00:00.000Z" });
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, sessions: [step, thread], threadCount: 1 });
+      const card = buildWorkCard(
+        TASK,
+        { ...NO_FACTS, sessions: [step, thread], threadCount: 1 },
+        NOT_BLOCKED,
+      );
 
       expect(card.openSessionId).toBe(thread.id);
     });
@@ -304,7 +321,7 @@ describe("buildWorkCard", () => {
 
   describe("the failure", () => {
     it("shows the failed run with the workflow's name and the cause in words", () => {
-      const card = buildWorkCard(TASK, { ...NO_FACTS, failure: FAILURE });
+      const card = buildWorkCard(TASK, { ...NO_FACTS, failure: FAILURE }, NOT_BLOCKED);
 
       expect(card.failure).toEqual({
         runId: FAILURE.runId,
@@ -314,14 +331,22 @@ describe("buildWorkCard", () => {
     });
 
     it("explains a failure that recorded no message by its reason, and cuts a long message", () => {
-      const withoutMessage = buildWorkCard(TASK, {
-        ...NO_FACTS,
-        failure: { ...FAILURE, reason: "workspace-failed", message: undefined },
-      });
-      const longMessage = buildWorkCard(TASK, {
-        ...NO_FACTS,
-        failure: { ...FAILURE, message: "denied ".repeat(100) },
-      });
+      const withoutMessage = buildWorkCard(
+        TASK,
+        {
+          ...NO_FACTS,
+          failure: { ...FAILURE, reason: "workspace-failed", message: undefined },
+        },
+        NOT_BLOCKED,
+      );
+      const longMessage = buildWorkCard(
+        TASK,
+        {
+          ...NO_FACTS,
+          failure: { ...FAILURE, message: "denied ".repeat(100) },
+        },
+        NOT_BLOCKED,
+      );
 
       expect(withoutMessage.failure?.cause).toBe("workspace failed");
       expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_TRACKING_FAILURE_CAUSE);
@@ -335,12 +360,16 @@ describe("buildWorkCard", () => {
         openRequests: [askQuestion("q1", "Which refund window?")],
       });
 
-      const card = buildWorkCard(TASK, {
-        ...NO_FACTS,
-        sessions: [thread],
-        threadCount: 1,
-        failure: FAILURE,
-      });
+      const card = buildWorkCard(
+        TASK,
+        {
+          ...NO_FACTS,
+          sessions: [thread],
+          threadCount: 1,
+          failure: FAILURE,
+        },
+        NOT_BLOCKED,
+      );
 
       expect(card.failure).toMatchObject({ runId: FAILURE.runId });
       expect(card.openQuestion).toMatchObject({ sessionId: thread.id });
@@ -348,9 +377,9 @@ describe("buildWorkCard", () => {
     });
 
     it("shows nothing for a Task whose runs finished, because only a stored failure shows", () => {
-      expect(buildWorkCard(TASK, { ...NO_FACTS, lastRunEndedAt: RUN_ENDED })).not.toHaveProperty(
-        "failure",
-      );
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, lastRunEndedAt: RUN_ENDED }, NOT_BLOCKED),
+      ).not.toHaveProperty("failure");
     });
   });
 
@@ -358,27 +387,29 @@ describe("buildWorkCard", () => {
     it.each(["queued", "starting", "busy"] as const)("is a session that is %s", (status) => {
       const session = buildSession({ status });
 
-      expect(buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] }).workingSessionId).toBe(
-        session.id,
-      );
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] }, NOT_BLOCKED).workingSessionId,
+      ).toBe(session.id);
     });
 
     it.each(["idle", "exited"] as const)("is not a session that is %s", (status) => {
       const session = buildSession({ status });
 
-      expect(buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] })).not.toHaveProperty(
-        "workingSessionId",
-      );
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, sessions: [session] }, NOT_BLOCKED),
+      ).not.toHaveProperty("workingSessionId");
     });
 
     it("counts a session of any kind, so a run step draws the same head as a Thread", () => {
       const step = buildSession({ kind: "run", status: "busy" });
       const agent = buildSession({ kind: "agent", status: "starting" });
 
-      expect(buildWorkCard(TASK, { ...NO_FACTS, sessions: [step] }).workingSessionId).toBe(step.id);
-      expect(buildWorkCard(TASK, { ...NO_FACTS, sessions: [agent] }).workingSessionId).toBe(
-        agent.id,
-      );
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, sessions: [step] }, NOT_BLOCKED).workingSessionId,
+      ).toBe(step.id);
+      expect(
+        buildWorkCard(TASK, { ...NO_FACTS, sessions: [agent] }, NOT_BLOCKED).workingSessionId,
+      ).toBe(agent.id);
     });
   });
 
@@ -390,7 +421,11 @@ describe("buildWorkCard", () => {
         (_, n) => `acme:thing:${String(n)}`,
       );
 
-      const card = buildWorkCard(TASK, { ...NO_FACTS, entityMarks: marks, contextRefs: refs });
+      const card = buildWorkCard(
+        TASK,
+        { ...NO_FACTS, entityMarks: marks, contextRefs: refs },
+        NOT_BLOCKED,
+      );
 
       expect(card.entityMarks).toEqual(marks.slice(0, MAX_ENTITY_MARKS));
       expect(card.contextRefs).toEqual(refs.slice(0, MAX_CARD_CONTEXTS));
@@ -406,7 +441,11 @@ describe("buildWorkCard", () => {
       ["the later of the two, when a turn ended last", RUN_ENDED, TURN_ENDED, RUN_ENDED],
       ["the later of the two, when a run ended last", TURN_ENDED, RUN_ENDED, RUN_ENDED],
     ])("is %s", (_name, lastTurnEndedAt, lastRunEndedAt, expected) => {
-      const card = buildWorkCard(TASK, { ...NO_FACTS, lastTurnEndedAt, lastRunEndedAt });
+      const card = buildWorkCard(
+        TASK,
+        { ...NO_FACTS, lastTurnEndedAt, lastRunEndedAt },
+        NOT_BLOCKED,
+      );
 
       expect(card.lastActivityAt).toBe(expected);
     });

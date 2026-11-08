@@ -78,7 +78,7 @@ import {
   type SignalResolution,
   type SignalSnoozeResult,
   type SignalUnsnoozeResult,
-  type TaskEntityLinkResult,
+  type TaskChangeResult,
   type Skill,
   type SkillDetail,
   type SkillFileChange,
@@ -1138,7 +1138,7 @@ const renderDiscussionCreated = ({ discussion }: DiscussionCreated): ReadonlyArr
  * succeeds and the person should know it did nothing.
  */
 const renderTaskEntityLinked = (
-  { task, changed }: TaskEntityLinkResult,
+  { task, changed }: TaskChangeResult,
   words: { readonly done: string; readonly nothing: string },
 ): ReadonlyArray<string> => [`task ${toIdTail(task.id)}: ${changed ? words.done : words.nothing}`];
 
@@ -1454,12 +1454,12 @@ const VALUE_RENDERERS: Partial<
   "discussion.create": (value) => renderDiscussionCreated(value as DiscussionCreated),
   "discussion.post": (value) => renderPosted(value as Post),
   "task.linkEntity": (value) =>
-    renderTaskEntityLinked(value as TaskEntityLinkResult, {
+    renderTaskEntityLinked(value as TaskChangeResult, {
       done: "linked",
       nothing: "already links it, nothing changed",
     }),
   "task.unlinkEntity": (value) =>
-    renderTaskEntityLinked(value as TaskEntityLinkResult, {
+    renderTaskEntityLinked(value as TaskChangeResult, {
       done: "taken away and kept away",
       nothing: "does not link it, nothing changed",
     }),

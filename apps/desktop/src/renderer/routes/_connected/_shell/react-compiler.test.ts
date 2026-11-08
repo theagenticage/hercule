@@ -20,7 +20,7 @@ const SCREENS = join(HERE, "../../../screens");
 /**
  * The folders and single files whose sources are compiled: the route folders
  * of the three pages, of a run's page and of Fleet, the screens they draw, the folders
- * they share, the desk's parts that Work and the Inbox draw, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, the Work board's screen, its parts, its read and its moves (link changes included) with their undo line and offline time, the Inbox's screen, its parts, its read and its moves, and the Done moves' queue and toast. A folder is compiled
+ * they share, the desk's parts that Work and the Inbox draw, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, the Work board's screen, its parts, its read and its moves (link, blocker and Initiative changes included, the details pane's sheet and its buttons, and the Initiative sheet) with their undo line and offline time, the Inbox's screen, its parts, its read and its moves, and the Done moves' queue and toast. A folder is compiled
  * without its tests.
  */
 const PATHS = [
@@ -70,6 +70,11 @@ const PATHS = [
   join(HERE, "-merge-cards.ts"),
   join(HERE, "-stop-run.ts"),
   join(HERE, "-task-links.ts"),
+  join(HERE, "-task-blockers.ts"),
+  join(HERE, "-initiative-sheet.tsx"),
+  join(HERE, "-pane-changes.ts"),
+  join(HERE, "-undoable-task-change.ts"),
+  join(HERE, "-work-pane.tsx"),
   join(HERE, "../../../app/use-undo-line.ts"),
   join(HERE, "../../../app/use-offline-since.ts"),
 ];

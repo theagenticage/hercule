@@ -12,6 +12,7 @@ import {
   BOARD_STAGES,
   type BoardStage,
   type EntityPlace,
+  type Initiative,
   type WorkBoard,
   type WorkCard,
 } from "@hercule/contract";
@@ -21,6 +22,9 @@ export interface WorkProject {
   readonly id: string;
   readonly name: string;
 }
+
+/** The part of an Initiative that a lane needs. The list a screen passes holds the open Initiatives only. */
+export type WorkInitiative = Pick<Initiative, "id" | "name" | "hue" | "projectId">;
 
 /** The id of the lane for Tasks that have no Project. */
 export const NO_PROJECT_LANE_ID = "no-project";
@@ -60,17 +64,93 @@ export interface OutsideLane {
   readonly cardPlaces: Readonly<Record<string, CardPlaces>>;
 }
 
+/** What every lane for an Initiative has: which Initiative it is and how it is coloured. */
+interface InitiativeLaneBase {
+  readonly initiativeId: string;
+  /** The hue of the Initiative's flag, line and beads, from `INITIATIVE_HUES`. */
+  readonly hue: number;
+}
+
+/**
+ * An Initiative row of Group by Project. It is folded to a line of beads
+ * unless the user opens it.
+ */
+export interface InitiativeRowLane extends InitiativeLaneBase {
+  readonly isRow: true;
+  /** Only for a row On top: the name of the Initiative's Project, which no lane above the row says. */
+  readonly projectName?: string;
+  /**
+   * How many Done Tasks the row draws as rings at the end of Landed. Done
+   * Tasks have no card, so the rings are all the board can show of them. It is
+   * 0 while a filter is on, because a filter matches cards.
+   */
+  readonly doneRingCount: number;
+}
+
+/** A lane of Group by Initiative, which is an ordinary lane. */
+export interface InitiativeGroupLane extends InitiativeLaneBase {
+  readonly isRow: false;
+}
+
+/**
+ * What a lane for an Initiative adds to a lane (see `initiative-lanes.ts`):
+ * a row, or a lane of Group by Initiative. A drop there puts a card on the
+ * Initiative and never changes its Project.
+ */
+export type InitiativeLane = InitiativeRowLane | InitiativeGroupLane;
+
+/** What a folded Project lane shows of an Initiative it holds: its small flag. */
+export interface HeldInitiative {
+  readonly id: string;
+  readonly hue: number;
+  readonly name: string;
+}
+
 /** One lane of the board: a Project (or an outside place) and its five cells, in `BOARD_STAGES` order. */
 export interface WorkLane {
-  /** The Project's id, `NO_PROJECT_LANE_ID`, or the id of an outside lane. */
+  /** The Project's id, `NO_PROJECT_LANE_ID`, or the id of an outside lane or an Initiative lane. */
   readonly id: string;
   readonly name: string;
-  /** The Project a card dropped or added in this lane gets: `null` for no Project. Always `null` for an outside lane. */
+  /** The Project a card dropped or added in this lane gets: `null` for no Project. Always `null` for an outside lane and for an Initiative lane. */
   readonly projectId: string | null;
   readonly cells: readonly LaneCell[];
   /** Set on a lane for an outside place, and on the "No <caption>" lane that goes with them. */
   readonly outside?: OutsideLane;
+  /** Set on a lane for an Initiative: an Initiative row, or a lane of Group by Initiative. */
+  readonly initiative?: InitiativeLane;
 }
+
+/**
+ * A lane and the Initiative rows drawn under it (Group by Project, In lanes).
+ * The rows are the lane's own: they are not lanes of the board beside it.
+ */
+export interface LaneGroup {
+  readonly lane: WorkLane;
+  readonly rows: readonly WorkLane[];
+}
+
+/**
+ * The lanes of a grouping as the board nests them. There are two nestings and
+ * no more: the Initiative rows On top, above all lanes, and the rows under a
+ * lane. Every grouping but Group by Project has only `groups` with no rows.
+ */
+export interface GroupedLanes {
+  /** The Initiative rows drawn above all lanes (On top), in drawing order. */
+  readonly topRows: readonly WorkLane[];
+  /** The lanes in drawing order, each with the rows drawn under it. */
+  readonly groups: readonly LaneGroup[];
+}
+
+/**
+ * Returns the id of the lane for `projectId`: the id itself when `projectIds`
+ * holds it, else the "No project" lane. An Initiative draws in the lane of its
+ * Project by the same rule as a card.
+ */
+export const chooseProjectLaneId = (
+  projectId: string | undefined,
+  projectIds: ReadonlySet<string>,
+): string =>
+  projectId !== undefined && projectIds.has(projectId) ? projectId : NO_PROJECT_LANE_ID;
 
 /**
  * Returns the id of the lane a card stands in: its Project's id when
@@ -79,9 +159,7 @@ export interface WorkLane {
  * Project that no longer exists; it is shown under "No project".
  */
 export const chooseLaneId = (card: WorkCard, projectIds: ReadonlySet<string>): string =>
-  card.projectId !== undefined && projectIds.has(card.projectId)
-    ? card.projectId
-    : NO_PROJECT_LANE_ID;
+  chooseProjectLaneId(card.projectId, projectIds);
 
 /** Returns a lane of these cards, with one cell per board stage. */
 export const buildLane = (
@@ -89,12 +167,13 @@ export const buildLane = (
   name: string,
   projectId: string | null,
   cards: readonly WorkCard[],
-  outside?: OutsideLane,
+  { outside, initiative }: { outside?: OutsideLane; initiative?: InitiativeLane } = {},
 ): WorkLane => ({
   id,
   name,
   projectId,
   ...(outside === undefined ? {} : { outside }),
+  ...(initiative === undefined ? {} : { initiative }),
   cells: BOARD_STAGES.map((stage) => ({
     stage,
     cards: cards.filter((card) => card.stage === stage),
@@ -108,7 +187,8 @@ const compareProjects = (a: WorkProject, b: WorkProject): number =>
 /**
  * Returns the lanes of the board, in the order they are drawn: Projects
  * sorted by name, then "No project" last. The sidebar's order of recent
- * activity never reaches here. A lane that would hold no card is left out.
+ * activity never reaches here. A lane that would hold no card is left out,
+ * unless its id is in `keptLaneIds` (a lane that holds Initiative rows).
  *
  * A card whose Project is missing from `projects` (a deleted Project) goes
  * under "No project". Call it with the cards the filter leaves, to draw the
@@ -117,6 +197,7 @@ const compareProjects = (a: WorkProject, b: WorkProject): number =>
 export const buildLanes = (
   board: Pick<WorkBoard, "cards">,
   projects: readonly WorkProject[],
+  keptLaneIds: ReadonlySet<string> = new Set(),
 ): readonly WorkLane[] => {
   const projectIds = new Set(projects.map((project) => project.id));
   const cardsByLane = new Map<string, WorkCard[]>();
@@ -127,11 +208,13 @@ export const buildLanes = (
     else cards.push(card);
   }
   const lanes = [...projects].sort(compareProjects).flatMap((project) => {
-    const cards = cardsByLane.get(project.id);
-    return cards === undefined ? [] : [buildLane(project.id, project.name, project.id, cards)];
+    const cards = cardsByLane.get(project.id) ?? [];
+    return cards.length === 0 && !keptLaneIds.has(project.id)
+      ? []
+      : [buildLane(project.id, project.name, project.id, cards)];
   });
-  const unassigned = cardsByLane.get(NO_PROJECT_LANE_ID);
-  return unassigned === undefined
+  const unassigned = cardsByLane.get(NO_PROJECT_LANE_ID) ?? [];
+  return unassigned.length === 0 && !keptLaneIds.has(NO_PROJECT_LANE_ID)
     ? lanes
     : [...lanes, buildLane(NO_PROJECT_LANE_ID, NO_PROJECT_LANE_NAME, null, unassigned)];
 };

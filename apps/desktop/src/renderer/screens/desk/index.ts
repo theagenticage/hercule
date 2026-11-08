@@ -15,6 +15,8 @@
  *   and its menus.
  * - `ChoiceMenu`: a "pick one" menu with its button, for how a list is grouped
  *   or ordered.
+ * - `HueFlag`, `buildHueStyle`: a small flag in a hue's colour, such as an
+ *   Initiative's, and the style that gives an element a hue.
  * - `FilterControl`, `FilterChips`: the Filter button with its menu, and the
  *   chips of what is chosen, for any list of items.
  * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
@@ -52,6 +54,7 @@ export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";
 export { openDent } from "./dent";
 export { FilterChips, FilterControl } from "./filter-control";
+export { buildHueStyle, HueFlag } from "./hue-flag";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
 export { LinkSearch, type LinkSearchSize } from "./link-search";
 export { LedgerAnswer } from "./ledger-answer";

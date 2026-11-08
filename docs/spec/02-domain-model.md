@@ -24,6 +24,9 @@ These rules hold for every entity below.
 erDiagram
   PROJECT |o--o{ TASK : "projectId (optional)"
   PROJECT }o--o{ RESOURCE : "spans"
+  INITIATIVE |o--o{ TASK : "initiativeId (optional, at most one)"
+  TASK }o--o{ TASK : "waits on (task_blockers, a DAG)"
+  PROJECT |o--o{ INITIATIVE : "projectId (its lane, optional)"
   CONNECTION |o--o{ RESOURCE : "reached via (optional)"
   RESOURCE ||--o{ CHECKOUT : "working copy of"
   WORKSPACE ||--o{ CHECKOUT : "contains 0..N"
@@ -128,19 +131,20 @@ Fields (pinned):
 | `priority` | enum | `urgent` / `high` / `normal` / `low`; optional, default `normal`; user and agents write the same field through the same op |
 | `labels` | string[] | Bare strings, flat namespace, implicit creation |
 | `projectId` | Hercule id, optional | At most one project |
+| `initiativeId` | Hercule id, optional | *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* At most one [Initiative](#initiative). A Task may also wait on other Tasks; that is the `task_blockers` relation below, not a field of the row |
 | `provenance` | Provenance entry[] | Entries are never edited or removed; a merge can move them to another Task ([09-tasks.md](./09-tasks.md#merging-tasks)) |
 | `createdAt`, `updatedAt`, `stageChangedAt`, `statusChangedAt` | timestamps | `stageChangedAt` moves only when `stage` changes, and `statusChangedAt` only when `status` changes |
 | `deletedAt` | timestamp, optional | soft delete: set by `task.delete`, the row stays (Deletion rules, below) |
 
-Not present in v1: assignee, subtasks, task-to-task dependencies, comments, a suggested-priority shadow field (the actor-stamped event log serves that need).
+Not present in v1: assignee, subtasks, comments, a suggested-priority shadow field (the actor-stamped event log serves that need).
 
 Stage axis *(added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md))*: `exploring`, `planned`, `building`, `in-review`, `landed`, `done`, `dropped`, a fixed list. Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`, a coarse reading of the stage (`exploring` and `planned` are `open`, `building`, `in-review` and `landed` are `in-progress`, `done` is `done`, `dropped` is `cancelled`). `task.update { status }` still works and picks a stage; sending `stage` and `status` together is refused. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. A stage, and so a status, changes only via an explicit `task.update`; the one thing the core does by itself is create a Task, at `exploring`, for a Thread that has none to join. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; delete (soft, `deletedAt`) means it should never have existed: the row stays for history, `task.read` answers `not_found`, and the event log keeps the audit (Deletion rules, below).
 
-Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. *(Amended 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* Every Thread has a Task: the core picks one when it writes the Thread, or makes one ([09-tasks.md](./09-tasks.md#threads-and-their-tasks)). A Task is joined to an ephemeral workspace by an explicit row, `task_workspaces`, so that later Threads in the same folder land on the same Task. ~~Proposal (a Task labelled `proposed` plus its pending decision Notification) and~~ Topic (a label) ~~are~~ is vocabulary over this row, not a field. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Proposal is a `proposal` Signal (below), not a Task: no Task exists until the user presses Accept.
+Relationships: `projectId` and `initiativeId` optional. *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* **Blockers:** a Task waits on other Tasks through `task_blockers (task_id, blocked_by_task_id, created_at, created_by)`, one stored direction owned by the tasks domain, with "blocks" as the inverse read. The edges are always a DAG, a finished blocker stops blocking while its edge stays, and the core gates nothing on them ([09-tasks.md](./09-tasks.md#blockers)). Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. *(Amended 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* Every Thread has a Task: the core picks one when it writes the Thread, or makes one ([09-tasks.md](./09-tasks.md#threads-and-their-tasks)). A Task is joined to an ephemeral workspace by an explicit row, `task_workspaces`, so that later Threads in the same folder land on the same Task. ~~Proposal (a Task labelled `proposed` plus its pending decision Notification) and~~ Topic (a label) ~~are~~ is vocabulary over this row, not a field. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Proposal is a `proposal` Signal (below), not a Task: no Task exists until the user presses Accept.
 
 Identity: Hercule id only. External refs live in provenance and are never unique across tasks.
 
-Platform events: `task.created` carries a full snapshot (it fires for the Task the core makes for a Thread too); `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field (`changes.status` whenever the coarse status changes, `changes.stage` for every stage change) and `{added, removed}` per changed array field; one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
+Platform events: `task.created` carries a full snapshot (it fires for the Task the core makes for a Thread too); `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field (`changes.status` whenever the coarse status changes, `changes.stage` for every stage change, and, *(added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036))* `changes.initiativeId`) and `{added, removed}` per changed array field (`changes.blockedBy` lists blocker Task ids); one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
 
 ### Provenance entry
 
@@ -153,6 +157,29 @@ External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, fo
 Relationships: `eventId` points into the event log (the referenced event may be TTL-pruned; the entry survives), `runId` into Runs.
 
 An entry MUST carry at least one of `ref`, `eventId`, `runId` (`validation` otherwise; resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `{at, actor}` alone says nothing the actor-stamped `task.updated` event does not. A hand-made task simply has an empty provenance list.
+
+### Initiative
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* Purpose: the user's own lasting intent, such as "Gift card refunds", that several Tasks serve. A Task belongs to at most one. It is a grouping and a colour on Work, with a target and a close; it carries no behaviour and gates nothing ([ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)). It is not a Project, which groups materials and is the lane a card sits in, and it is not an outside initiative, which is an External Entity ([External Entity](#external-entity)) and only ever a lane or a filter.
+
+Fields (pinned):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Hercule id | |
+| `name` | string | 1 to 200 characters |
+| `intent` | string | What this is for. 0 to 2000 characters |
+| `target` | string, optional | What finished looks like, when it is a goal. 1 to 200 characters |
+| `targetDate` | timestamp, optional | |
+| `hue` | one of `INITIATIVE_HUES` | The hue of its flag, line and beads: 245, 150, 300, 200, 345, 118, 270, 175, 325, 222, 135, 100 (oklch). The list keeps away from marigold and tomato, which mean things. Create with no hue takes the one used by the fewest open Initiatives, ties in list order |
+| `projectId` | Hercule id, optional | The lane it draws in under "In lanes". Absent, or a project no longer listed: the No project lane |
+| `closedAt` | timestamp, optional | Set when the user closes it. Its Tasks keep their `initiativeId` |
+| `createdAt`, `updatedAt` | timestamps | |
+| `deletedAt` | timestamp, optional | Soft delete, like a Task |
+
+Relationships: a Task names at most one Initiative, and an Initiative may hold Tasks from several projects. A project's soft-delete does not touch its Initiatives. Created, changed, closed, reopened and deleted only by the user, even when a session holds the grant. The operations and the rules for a Task's `initiativeId` are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#initiative) and [09-tasks.md](./09-tasks.md#initiatives).
+
+Status axis: none; `closedAt` is a flag, not a state machine. Identity: Hercule id only. Platform events: none. An Initiative announces on the `initiative` live topic only ([14-web-app.md](./14-web-app.md)); a change to a Task's `initiativeId` is a `task.updated`.
 
 ### External Entity
 
@@ -871,7 +898,8 @@ Fields: `id`, `owner {kind: connection | plugin | runner | core | provider-accou
 
 Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46).
 
-- **Task and Project soft-delete.** `task.delete` / `project.delete` set `deletedAt`; `read` answers `not_found`, `query` excludes the row (no include-deleted option in v1), provenance and links stay, and `task.deleted { taskId, snapshot }` is emitted. The core withdraws open Notifications whose subject is the deleted task; Runs, Sessions and Tasks keep their `taskId` / `projectId`. A soft-deleted task no longer protects its events from pruning ([04-state-store.md](./04-state-store.md) Retention). These are the two entities whose history the user reads back (Intake, provenance, "why did this exist"), hence soft. Pruning them outright, with their runs and events, after something like a year, is post-v1 fog on the map.
+- **Initiative soft-delete.** *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* `initiative.delete` sets `deletedAt`; `read` answers `not_found` and `query` never lists it. In the same transaction it clears `initiativeId` on each of its Tasks. Closing is not deleting: a closed Initiative stays listed on request and keeps its Tasks.
+- **Task and Project soft-delete.** `task.delete` / `project.delete` set `deletedAt`; `read` answers `not_found`, `query` excludes the row (no include-deleted option in v1), provenance and links stay (*amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036): a Task's blocker edges are removed with it*), and `task.deleted { taskId, snapshot }` is emitted. The core withdraws open Notifications whose subject is the deleted task; Runs, Sessions and Tasks keep their `taskId` / `projectId`. A soft-deleted task no longer protects its events from pruning ([04-state-store.md](./04-state-store.md) Retention). These are the two entities whose history the user reads back (Intake, provenance, "why did this exist"), hence soft. Pruning them outright, with their runs and events, after something like a year, is post-v1 fog on the map.
 - **Everything else hard-deletes**, refused with `invalid_state` while something live references the row; historical references keep the id and render as "deleted <entity>". Resource: while a Workspace referencing it is not `deleted | lost`. Workflow: while a Run is non-terminal; runs keep `workflowId` (enforced since [#79](https://github.com/theagenticage/hercule/issues/79): `workflow.delete` is refused while a run of the workflow is `pending` or `running`, and a run that has ended keeps the id and its own plan). Agent: while a Session is not `exited`. Connection: while a Resource, Channel Binding or enabled trigger names it. Assistant: the confirmed cascade of memory, bindings and conversations ([12-assistants.md](./12-assistants.md)); its sessions survive. Runner: never deleted, retired.
 
 *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Provider Account joins that list: deleting one is refused with `invalid_state` while an Agent, an Assistant, the Text Generation setting, the thread defaults, or a `queued`, `starting`, `idle` or `busy` session names it; the message lists them. Model Profiles do not block it: the account leaves every profile that holds it. Exited sessions keep the id, and continuing one says the account was deleted. A Model Profile hard-deletes, except the last one, which is refused with `invalid_state`; a Project that named it falls back to the thread defaults ([06-providers.md](./06-providers.md)).
@@ -915,7 +943,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, ~~Provider instance~~ Provider Account, Model Profile *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Initiative, Resource, Checkout, ~~Provider instance~~ Provider Account, Model Profile *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
 
 ## Identity rules at a glance
 
@@ -926,6 +954,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Harness-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `harnessRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
+- **A blocker edge is unique on its pair.** *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* `(task_id, blocked_by_task_id)` is the key of `task_blockers`, and a Task is never its own blocker.
 - **An External Entity is unique on its ref.** *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* One row per canonical ref, so two Connections that see one thing share one record. This is about entities only: the same ref is still carried by many Tasks. Observations, claims and Task links key on the ref, not on the entity's id.
 - ~~**`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **`providerAccountId` with `harnessId`** routes sessions; a Capability Snapshot is keyed by (Provider Account, harness, runner). Harness and provider ids are qualified ids `<pluginId>/<word>` ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
@@ -1019,6 +1048,7 @@ ADRs:
 - [ADR 0016 Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
 - [ADR 0017 The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0019 The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
+- [ADR 0056 Initiatives and blockers are thin structure over Tasks](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)
 - [ADR 0020 Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0030 Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)
 - [ADR 0032 Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)

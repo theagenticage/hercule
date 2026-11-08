@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApiError,
   ConnectionError,
+  isBlockerCycle,
   isInvalidState,
   isNotFound,
   isRequestClosed,
@@ -74,6 +75,34 @@ describe("isRequestClosed", () => {
     ).toBe(false);
     expect(isRequestClosed(new ApiError("conflict", "Changed."))).toBe(false);
     expect(isRequestClosed(new Error("cannot reach"))).toBe(false);
+  });
+
+  it("is false for the refusal of a blocker loop, which is not a closed Request", () => {
+    expect(
+      isRequestClosed(
+        new ApiError("invalid_state", "Print depot pick lists already waits on this Task.", {
+          reason: "blocker-cycle",
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isBlockerCycle", () => {
+  it("is true only for an invalid_state that names a blocker loop", () => {
+    expect(
+      isBlockerCycle(
+        new ApiError("invalid_state", "Pack the crates already waits on this Task.", {
+          reason: "blocker-cycle",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isBlockerCycle(new ApiError("invalid_state", "Not open.", { reason: "request-closed" })),
+    ).toBe(false);
+    expect(isBlockerCycle(new ApiError("invalid_state", "The runner is away."))).toBe(false);
+    expect(isBlockerCycle(new ApiError("not_found", "No such Task."))).toBe(false);
+    expect(isBlockerCycle(new Error("cannot reach"))).toBe(false);
   });
 });
 

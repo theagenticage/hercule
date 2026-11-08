@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes, buildStackId } from "./arrange-lanes";
-import { buildBoard, buildCard, buildPlace } from "./cards.testing";
+import { buildBoardFolds } from "./board-folds";
+import { arrangeTestBoard, buildBoard, buildCard, buildPlace } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
 import { buildLanes } from "./lanes";
 import { walkBoard, type BoardWalk, type WalkStop } from "./walk";
@@ -50,11 +51,10 @@ const LANES = arrangeLanes(
     PROJECTS,
   ),
   {
-    foldedLaneIds: new Set(["delivery"]),
+    folds: buildBoardFolds({ saved: { foldedLaneIds: ["delivery"] } }),
     openedCellIds: new Set<string>(),
     openedStackIds: new Set<string>(),
     stackCandidates: [],
-    isFiltering: false,
   },
 );
 
@@ -79,14 +79,13 @@ describe("walkBoard over stacks", () => {
   ];
   const view = (isOpen: boolean) =>
     arrangeLanes(buildLanes(buildBoard(...cards), PROJECTS), {
-      foldedLaneIds: new Set<string>(),
+      folds: buildBoardFolds(),
       openedCellIds: new Set<string>(),
       openedStackIds: new Set(isOpen ? [buildStackId("cart", "ticket")] : []),
       stackCandidates: [
         { leadTaskId: "ticket", memberTaskId: "pr1", noun: "pull request" },
         { leadTaskId: "ticket", memberTaskId: "pr2", noun: "pull request" },
       ],
-      isFiltering: false,
     });
   const stop = (cardId: string): WalkStop => ({ kind: "card", laneId: "cart", cardId });
 
@@ -187,11 +186,10 @@ describe("walkBoard", () => {
       groupings: [{ kind: "acme/project", caption: "Acme project" }],
     };
     const shown = arrangeLanes(groupBoardByContext(board, "acme/project"), {
-      foldedLaneIds: new Set<string>(),
+      folds: buildBoardFolds(),
       openedCellIds: new Set<string>(),
       openedStackIds: new Set<string>(),
       stackCandidates: [],
-      isFiltering: false,
     });
     const inLane = (laneId: string, cardId: string): WalkStop => ({ kind: "card", laneId, cardId });
 
@@ -208,6 +206,47 @@ describe("walkBoard", () => {
       expect(walkBoard(shown, inLane("place:acme:b", "t1"), "up")).toEqual(
         inLane("place:acme:a", "t1"),
       );
+    });
+  });
+});
+
+describe("walkBoard over Initiative rows", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const };
+  const board = {
+    ...buildBoard(
+      buildCard("p1", { initiativeId: "platform" }),
+      buildCard("p2", { initiativeId: "platform" }),
+      buildCard("loose"),
+    ),
+    initiativeDoneCounts: {},
+  };
+  const rows = (opened: readonly string[]) =>
+    arrangeTestBoard(board, {
+      projects: PROJECTS,
+      initiatives: [PLATFORM],
+      folds: buildBoardFolds({ saved: { openedInitiativeIds: opened } }),
+    }).drawnLanes;
+
+  it("walks into an open row like into a lane, down to the lane below", () => {
+    const lanes = rows(["platform"]);
+    const row = lanes[0]!.lane.id;
+    expect(walkBoard(lanes, undefined, "down")).toEqual({
+      kind: "card",
+      laneId: row,
+      cardId: "p1",
+    });
+    expect(walkBoard(lanes, { kind: "card", laneId: row, cardId: "p2" }, "down")).toEqual({
+      kind: "card",
+      laneId: "no-project",
+      cardId: "loose",
+    });
+  });
+
+  it("stops on the head of a folded row, which shows no card", () => {
+    const lanes = rows([]);
+    expect(walkBoard(lanes, undefined, "nextLane")).toEqual({
+      kind: "lane",
+      laneId: lanes[0]!.lane.id,
     });
   });
 });

@@ -44,6 +44,14 @@ _Avoid_: description (the Task's own markdown, written by people and agents), st
 The user's act of making two Tasks one (`task.merge`). The Task they name survives, keeping its title, stage, project, priority and place on the board; the other, the merged Task, gives its labels, description, Threads, runs, workspaces, provenance and any failure to the survivor, and its old id then reads as the survivor. A merge is the user's correction of how work is grouped; a session or a workflow never merges. Moving one Thread to another Task is a different act (`session.moveToTask`).
 _Avoid_: combine, join (a Thread joins a Task), dedupe, close as duplicate
 
+**Initiative**:
+A lasting intent of the user's own, such as "Gift card refunds": a name, what it is for, an optional target and target date, a colour, and an optional project whose lane it draws in. Only the user creates, changes, closes, reopens or deletes one; a session may put a Task on one that exists. A Task belongs to at most one Initiative, and an Initiative may hold Tasks from several projects. Closing keeps its Tasks; deleting clears them. Its Tasks are the whole count of its progress ("2 of 8 landed"; Done counts as landed, Dropped leaves the total). It decides nothing and gates nothing ([ADR 0056](./docs/adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)). An initiative that lives in an outside tool, such as a Linear initiative, is an **External Entity**: it is only ever a lane or a filter on Work, under its own caption, and filtering by one never sets a Task's Initiative.
+_Avoid_: plan (as the name of a record; the design drawings drew Initiatives under "Plans"), epic, project (a **Project** groups materials and is the lane a card sits in), goal, objective
+
+**Blocker**:
+A Task that another Task waits on. One stored direction: the edge says "this Task waits on that one", and **blocks** is the inverse read of the same rows, never a second relation. The edges always form a DAG, checked in one writer transaction, and a refusal names the path. A Blocker at `landed`, `done` or `dropped` no longer blocks, and the edge stays as history. A blocked card goes quiet and says why; the core gates nothing on a blocker, so a blocked Task can still be moved, started and finished. A Blocker may be in another project. A Follow-up relation between Tasks ("do this after") is not a Blocker, and is not built.
+_Avoid_: dependency, subtask, parent, gate
+
 **External Ref**:
 A fully-qualified canonical identifier for a thing outside Hercule (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
 _Avoid_: link, URL (a ref is an identity, not a location)

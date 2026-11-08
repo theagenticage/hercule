@@ -194,12 +194,57 @@ const TABLE = {
   // Merging and undoing a Try again are the user's own corrections: a session
   // token is refused whatever its profile holds.
   "task.merge": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },
+  // Adding and removing a blocker are `task.update` writes, so a session may
+  // set one. The merge check only reads.
+  "task.addBlocker": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/blockers",
+  },
+  "task.removeBlocker": {
+    requires: "task.update",
+    method: "DELETE",
+    path: "/api/v1/tasks/:id/blockers/:blockedByTaskId",
+  },
+  "task.checkMerge": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/:id/merge-check",
+  },
   "task.undoTryAgain": {
     requires: "task.update",
     method: "POST",
     path: "/api/v1/tasks/:id/try-again/undo",
   },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
+
+  // An Initiative has no grant family of its own: it reuses `task.read` and
+  // `task.update`, as an External Entity does. Every write is the user's
+  // only, which the service checks, so a session is refused whatever its
+  // profile holds.
+  "initiative.query": { requires: "task.read", method: "GET", path: "/api/v1/initiatives" },
+  "initiative.read": { requires: "task.read", method: "GET", path: "/api/v1/initiatives/:id" },
+  "initiative.create": { requires: "task.update", method: "POST", path: "/api/v1/initiatives" },
+  "initiative.update": {
+    requires: "task.update",
+    method: "PATCH",
+    path: "/api/v1/initiatives/:id",
+  },
+  "initiative.close": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/initiatives/:id/close",
+  },
+  "initiative.reopen": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/initiatives/:id/reopen",
+  },
+  "initiative.delete": {
+    requires: "task.update",
+    method: "DELETE",
+    path: "/api/v1/initiatives/:id",
+  },
 
   "notification.query": {
     requires: "notification.read",

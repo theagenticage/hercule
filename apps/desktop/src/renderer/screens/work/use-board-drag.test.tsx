@@ -12,12 +12,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   arrangeLanes,
+  buildBoardFolds,
   buildLanes,
   buildStackId,
   CARD_NOT_EXACT_NOTE,
   groupBoardByContext,
   STAGE_NAMES,
   type CardMove,
+  type MergeCheckResult,
+  type MergeDecision,
 } from "@hercule/client-core/work";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
 import {
@@ -179,9 +182,14 @@ interface Harness {
     >
   >;
   readonly selectedIds: ReadonlySet<string>;
+  /** Called with every value the drag gives `onCarryingChange`. */
+  readonly onCarryingChange: ReturnType<typeof vi.fn<(isCarrying: boolean) => void>>;
   readonly say: ReturnType<typeof vi.fn<(text: string) => void>>;
-  readonly holdMerge: ReturnType<
-    typeof vi.fn<(sourceCardId: string, targetCardId: string) => boolean>
+  readonly settleMerge: ReturnType<
+    typeof vi.fn<(sourceCardId: string, targetCardId: string, decision: MergeDecision) => boolean>
+  >;
+  readonly checkMerge: ReturnType<
+    typeof vi.fn<(sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>>
   >;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
   /** The stacks the board draws: the pairs that may stack, and the ids (`buildStackId`) of the open ones. */
@@ -221,24 +229,28 @@ function Board({
           "acme/project",
         );
   const arrangedLanes = arrangeLanes(lanes, {
-    foldedLaneIds,
+    folds: buildBoardFolds({ saved: { foldedLaneIds } }),
     openedCellIds: new Set(),
     openedStackIds: harness.stack?.openedIds ?? new Set(),
     stackCandidates: harness.stack?.candidates ?? [],
-    isFiltering: false,
   });
   const [isCarrying, setIsCarrying] = useState(false);
   useBoardDrag({
     scrollRef,
     cards,
     projects: PROJECTS,
+    initiatives: [],
     arrangedLanes,
     selectedIds: harness.selectedIds,
     moveCard: harness.moveCard,
     moveCards: harness.moveCards,
     say: harness.say,
-    holdMerge: harness.holdMerge,
-    onCarryingChange: setIsCarrying,
+    settleMerge: harness.settleMerge,
+    checkMerge: harness.checkMerge,
+    onCarryingChange: (isCarryingNow) => {
+      harness.onCarryingChange(isCarryingNow);
+      setIsCarrying(isCarryingNow);
+    },
   });
   return (
     <BoardDesk
@@ -287,10 +299,13 @@ const renderBoard = (
   const harness: Harness = {
     ...(stack === undefined ? {} : { stack }),
     selectedIds,
+    onCarryingChange: vi.fn(),
     moveCard: vi.fn(),
     moveCards: vi.fn(),
     say: vi.fn(),
-    holdMerge: vi.fn(() => true),
+    // A merge is held unless the decision refuses it.
+    settleMerge: vi.fn((_sourceCardId, _targetCardId, decision) => decision.kind !== "refused"),
+    checkMerge: vi.fn(() => Promise.resolve({ kind: "allowed" } as const)),
     onOpenCard: vi.fn(),
   };
   const view = render(
@@ -307,8 +322,10 @@ const renderBoard = (
     moveCard: harness.moveCard,
     moveCards: harness.moveCards,
     say: harness.say,
-    holdMerge: harness.holdMerge,
+    settleMerge: harness.settleMerge,
+    checkMerge: harness.checkMerge,
     onOpenCard: harness.onOpenCard,
+    onCarryingChange: harness.onCarryingChange,
     /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
     isCarrying: (): boolean =>
       view.container.querySelector(".work-desk")?.hasAttribute("data-carrying") === true,
@@ -903,13 +920,6 @@ describe("merging by holding a carried card over another", () => {
     });
   };
 
-  /** Lifts the first card and brings it over the middle of the second, where the wait for a merge starts. */
-  const carryOverDeliverySlots = (board: ReturnType<typeof renderBoard>): void => {
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
-  };
-
   /** Moves the pointer with Option held. */
   const moveWithOption = (scroller: Element, x: number, y: number): void => {
     fireEvent.pointerMove(scroller, {
@@ -924,10 +934,56 @@ describe("merging by holding a carried card over another", () => {
   /** Returns whether the card is drawn as the one to merge into. */
   const isTarget = (card: HTMLElement): boolean => card.hasAttribute("data-merge-target");
 
-  it("makes the card the target once the pointer has rested over its middle for one second", () => {
+  /** Lets the answers of the merge check, which arrive as promises, reach the board. */
+  const settleChecks = (): Promise<void> => act(() => Promise.resolve());
+
+  /** Brings the card in the hand to rest over Delivery slots with Option, which chooses at once. */
+  const chooseDeliverySlots = (board: ReturnType<typeof renderBoard>): void => {
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+  };
+
+  /** Lets go of the card over Delivery slots. */
+  const dropOnDeliverySlots = (board: ReturnType<typeof renderBoard>): void => {
+    release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+  };
+
+  /** An answer of the merge check that the test gives when it chooses. */
+  const deferAnswer = (): {
+    readonly promise: Promise<MergeCheckResult>;
+    readonly answer: (result: MergeCheckResult) => void;
+  } => {
+    let answer: (result: MergeCheckResult) => void = () => undefined;
+    const promise = new Promise<MergeCheckResult>((resolve) => {
+      answer = resolve;
+    });
+    return { promise, answer };
+  };
+
+  /** What the settled merge of Refund emails into Delivery slots is called with, for `decision`. */
+  const settledWith = (decision: MergeDecision) =>
+    ["refund-emails", "delivery-slots", decision] as const;
+
+  const REFUSAL = "Plan the launch already waits on this Task.";
+  const REFUSED: MergeDecision = {
+    kind: "refused",
+    words: `"Refund emails" was not merged: ${REFUSAL}`,
+  };
+
+  /** Asserts the card in the hand went home: nothing is carried, and the card shows again. */
+  const expectCardHome = (board: ReturnType<typeof renderBoard>): void => {
+    expect(board.isCarrying()).toBe(false);
+    expect(board.ghost()).toBeNull();
+    expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+  };
+
+  it("makes the card the target once the pointer has rested over its middle for one second, and docks the hand", async () => {
     useFakeClock();
     const board = renderBoard();
-    carryOverDeliverySlots(board);
+    press(board.card("refund-emails"), 220, 70);
+    moveTo(board.scroller, 220, 76);
+    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
     const target = board.card("delivery-slots");
 
     vi.advanceTimersByTime(999);
@@ -935,8 +991,9 @@ describe("merging by holding a carried card over another", () => {
     vi.advanceTimersByTime(1);
 
     expect(isTarget(target)).toBe(true);
+    expect(board.checkMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    await settleChecks();
     expect(target.dataset["mergeLabel"]).toBe("Merge into Delivery slots");
-    expect(target.dataset["mergeKeeps"]).toBe("Keeps its title, stage and place");
     // The slot closes but keeps its room, so nothing jumps.
     expect(board.slot()?.classList.contains("is-shut")).toBe(true);
 
@@ -950,49 +1007,6 @@ describe("merging by holding a carried card over another", () => {
     expect(hand.x).toBeLessThan(13);
     expect(hand.y).toBeGreaterThan(115);
     expect(hand.y).toBeLessThan(122);
-  });
-
-  it("starts the wait again when the pointer moves more than 6px, and keeps it for 6px or less", () => {
-    useFakeClock();
-    const board = renderBoard();
-    carryOverDeliverySlots(board);
-    const target = board.card("delivery-slots");
-
-    vi.advanceTimersByTime(600);
-    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x + 6, MIDDLE_OF_DELIVERY_SLOTS.y);
-    vi.advanceTimersByTime(400);
-    expect(isTarget(target)).toBe(true);
-  });
-
-  it("does not choose a card for a pointer that moved more than 6px since it began to rest", () => {
-    useFakeClock();
-    const board = renderBoard();
-    carryOverDeliverySlots(board);
-    const target = board.card("delivery-slots");
-
-    vi.advanceTimersByTime(600);
-    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x + 7, MIDDLE_OF_DELIVERY_SLOTS.y);
-    vi.advanceTimersByTime(600);
-    expect(isTarget(target)).toBe(false);
-    vi.advanceTimersByTime(400);
-    expect(isTarget(target)).toBe(true);
-  });
-
-  it("chooses the card at once when Option is held, and when Option goes down over a resting pointer", () => {
-    useFakeClock();
-    const board = renderBoard();
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
-    expect(isTarget(board.card("delivery-slots"))).toBe(true);
-
-    // Away from every card, and back with the pointer still and Option pressed afterwards.
-    moveTo(board.scroller, 220, 76);
-    expect(isTarget(board.card("delivery-slots"))).toBe(false);
-    moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
-    expect(isTarget(board.card("delivery-slots"))).toBe(false);
-    fireEvent.keyDown(window, { key: "Alt", altKey: true });
-    expect(isTarget(board.card("delivery-slots"))).toBe(true);
   });
 
   it("starts no wait over the top or the bottom of a card, only over its middle 40%", () => {
@@ -1012,9 +1026,7 @@ describe("merging by holding a carried card over another", () => {
   it("undoes it all at once when the pointer leaves the middle of the target", () => {
     useFakeClock();
     const board = renderBoard();
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    chooseDeliverySlots(board);
     vi.advanceTimersByTime(500);
 
     moveTo(board.scroller, 270, 225);
@@ -1030,17 +1042,16 @@ describe("merging by holding a carried card over another", () => {
     expect(hand.x).toBeCloseTo(270 - 20 - 200 + 0, -1);
   });
 
-  it("holds the merge when the card is let go over the target, and moves nothing", () => {
+  it("settles the merge as accepted when the card is let go over the target, and moves nothing", async () => {
     useFakeClock();
     const board = renderBoard();
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    chooseDeliverySlots(board);
     vi.advanceTimersByTime(300);
+    await settleChecks();
 
-    release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    dropOnDeliverySlots(board);
 
-    expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(...settledWith({ kind: "accepted" }));
     expect(board.moveCard).not.toHaveBeenCalled();
     expect(board.isCarrying()).toBe(false);
     expect(board.slot()).toBeNull();
@@ -1055,21 +1066,183 @@ describe("merging by holding a carried card over another", () => {
     expect(board.scroller.querySelector(".board-merge-under")).toBeNull();
   });
 
-  it("says nothing was merged, and sends the card home, when a card left the board meanwhile", () => {
+  describe("the check before the drop", () => {
+    it("sends the card home, with the refusal, when the check refused before the drop", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockResolvedValue({ kind: "refused", refusal: REFUSAL });
+      chooseDeliverySlots(board);
+      await settleChecks();
+
+      dropOnDeliverySlots(board);
+
+      expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(...settledWith(REFUSED));
+      expect(board.moveCard).not.toHaveBeenCalled();
+      expectCardHome(board);
+      expect(isTarget(board.card("delivery-slots"))).toBe(false);
+    });
+
+    it("lets the merge decide when the question could not be asked", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockResolvedValue({ kind: "unchecked" });
+      chooseDeliverySlots(board);
+      await settleChecks();
+
+      dropOnDeliverySlots(board);
+
+      expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(
+        ...settledWith({ kind: "unchecked" }),
+      );
+    });
+
+    it("waits for a check that has not answered when the card is let go, then settles as the answer says", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+      chooseDeliverySlots(board);
+
+      dropOnDeliverySlots(board);
+
+      // Nothing is shown as merged yet: the card is still docked in the hand.
+      expect(board.settleMerge).not.toHaveBeenCalled();
+      expect(board.ghost()).not.toBeNull();
+      expect(board.card("delivery-slots").dataset["mergeCheck"]).toBe("checking");
+
+      check.answer({ kind: "allowed" });
+      await act(() => check.promise.then(() => undefined));
+      expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(
+        ...settledWith({ kind: "accepted" }),
+      );
+    });
+
+    it("sends the card home when the check, awaited after the drop, refuses", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+      chooseDeliverySlots(board);
+      dropOnDeliverySlots(board);
+
+      check.answer({ kind: "refused", refusal: REFUSAL });
+      await act(() => check.promise.then(() => undefined));
+
+      expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(...settledWith(REFUSED));
+      expectCardHome(board);
+    });
+
+    it("settles unchecked, never accepted, when the check does not answer within 2 seconds", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockReturnValue(deferAnswer().promise);
+      chooseDeliverySlots(board);
+      dropOnDeliverySlots(board);
+      vi.advanceTimersByTime(1900);
+      expect(board.settleMerge).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(200);
+
+      await act(() => Promise.resolve());
+      expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(
+        ...settledWith({ kind: "unchecked" }),
+      );
+    });
+
+    describe("a card that waits for the check after the drop", () => {
+      /** Lets go of the card over Delivery slots while the check has not answered, so the card waits. */
+      const dropWhileChecking = (board: ReturnType<typeof renderBoard>) => {
+        const check = deferAnswer();
+        board.checkMerge.mockReturnValue(check.promise);
+        chooseDeliverySlots(board);
+        dropOnDeliverySlots(board);
+        return check;
+      };
+
+      it("sends the card home on Esc, merges nothing, and ignores the answer that comes late", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+        expect(board.isCarrying()).toBe(true);
+
+        const escape = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        window.dispatchEvent(escape);
+
+        expect(escape.defaultPrevented).toBe(true);
+        expectCardHome(board);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        vi.advanceTimersByTime(3000);
+        expect(board.settleMerge).not.toHaveBeenCalled();
+        expect(board.say).not.toHaveBeenCalled();
+      });
+
+      it("sends the card home when the window loses the focus, and not again when the time runs out", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        dropWhileChecking(board);
+
+        fireEvent.blur(window);
+
+        expect(board.isCarrying()).toBe(false);
+        vi.advanceTimersByTime(3000);
+        await act(() => Promise.resolve());
+        expect(board.settleMerge).not.toHaveBeenCalled();
+      });
+
+      it("lifts no other card meanwhile, and the card in the wait still merges when it is allowed", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+
+        press(board.card("gift-wrap"), columnX("exploring"), rowY(2));
+        moveTo(board.scroller, columnX("exploring"), rowY(2) + 14);
+        moveTo(board.scroller, columnX("exploring") + 10, rowY(2) + 30);
+
+        expect(board.ghost()?.textContent).toContain("Refund emails");
+        expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(false);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        expect(board.settleMerge).toHaveBeenCalledExactlyOnceWith(
+          ...settledWith({ kind: "accepted" }),
+        );
+        expect(board.isCarrying()).toBe(false);
+      });
+
+      it("tells the screen that nothing is carried exactly once, however the wait ends", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+        );
+        fireEvent.blur(window);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        vi.advanceTimersByTime(3000);
+
+        expect(board.onCarryingChange.mock.calls.map(([value]) => value)).toEqual([true, false]);
+      });
+    });
+  });
+
+  it("sends the card home when the merge was not held because a card left the board meanwhile", async () => {
     useFakeClock();
     const board = renderBoard();
-    board.holdMerge.mockReturnValue(false);
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    board.settleMerge.mockReturnValue(false);
+    chooseDeliverySlots(board);
+    await settleChecks();
 
-    release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    dropOnDeliverySlots(board);
 
-    expect(board.say).toHaveBeenCalledExactlyOnceWith(
-      "A card left the board, so nothing was merged.",
-    );
     expect(board.moveCard).not.toHaveBeenCalled();
     expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+    expect(board.isCarrying()).toBe(false);
   });
 
   it("merges nothing when the card is let go before the wait is over", () => {
@@ -1083,16 +1256,14 @@ describe("merging by holding a carried card over another", () => {
 
     release(board.scroller, columnX("building"), 85);
 
-    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.settleMerge).not.toHaveBeenCalled();
     expect(board.moveCard).toHaveBeenCalledOnce();
   });
 
   it("sends the card home on Esc, and merges nothing", () => {
     useFakeClock();
     const board = renderBoard();
-    press(board.card("refund-emails"), 220, 70);
-    moveTo(board.scroller, 220, 76);
-    moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    chooseDeliverySlots(board);
     expect(isTarget(board.card("delivery-slots"))).toBe(true);
 
     window.dispatchEvent(
@@ -1100,7 +1271,7 @@ describe("merging by holding a carried card over another", () => {
     );
 
     expect(isTarget(board.card("delivery-slots"))).toBe(false);
-    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.settleMerge).not.toHaveBeenCalled();
     expect(board.ghost()).toBeNull();
     expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
   });
@@ -1326,7 +1497,7 @@ describe("carrying several selected cards", () => {
     expect(board.card("delivery-slots").hasAttribute("data-merge-target")).toBe(false);
 
     release(board.scroller, 270, 195);
-    expect(board.holdMerge).not.toHaveBeenCalled();
+    expect(board.settleMerge).not.toHaveBeenCalled();
     expect(board.moveCards).toHaveBeenCalledOnce();
   });
 });

@@ -223,6 +223,12 @@ export const Task = Schema.Struct({
   labels: atMost(Label, MAX_TASK_LABELS),
   /** At most one project, and it survives that project's deletion. */
   projectId: Schema.optionalKey(Id),
+  /**
+   * The Initiative the Task belongs to, when it does. At most one. A closed
+   * Initiative keeps its Tasks, so this can name a closed one. Deleting the
+   * Initiative clears it.
+   */
+  initiativeId: Schema.optionalKey(Id),
   provenance: Schema.Array(ProvenanceEntry),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -258,6 +264,9 @@ const buildValueChange = <Value extends Schema.Top>(value: Value) =>
  * - A field that holds one value reports `{ old, new }`. `boardRank` is one
  *   of them: the string that orders the cards of a cell.
  * - `labels` reports the labels `added` and `removed`.
+ * - `blockedBy` reports the ids of the Tasks that were `added` and `removed`
+ *   as this Task's blockers. A Task that is deleted or merged away reports
+ *   its edges as `removed` (a merge reports them as `added` on the survivor).
  * - `provenance` reports the entries `added`. Provenance is only ever
  *   appended to, so `removed` is always empty.
  *
@@ -273,6 +282,8 @@ export const TaskUpdatedEventPayload = Schema.Struct({
     priority: Schema.optionalKey(buildValueChange(TaskPriority)),
     /** `null` when the task had, or now has, no project. */
     projectId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
+    /** `null` when the task had, or now has, no Initiative. */
+    initiativeId: Schema.optionalKey(buildValueChange(Schema.NullOr(Id))),
     /**
      * The Task's place in its cell of the board. A move inside a cell reports
      * only this, so a trigger on `changes.stage` or `changes.status` does not
@@ -281,6 +292,9 @@ export const TaskUpdatedEventPayload = Schema.Struct({
     boardRank: Schema.optionalKey(buildValueChange(Schema.String)),
     labels: Schema.optionalKey(
       Schema.Struct({ added: Schema.Array(Label), removed: Schema.Array(Label) }),
+    ),
+    blockedBy: Schema.optionalKey(
+      Schema.Struct({ added: Schema.Array(Id), removed: Schema.Array(Id) }),
     ),
     provenance: Schema.optionalKey(
       Schema.Struct({ added: Schema.Array(ProvenanceEntry), removed: Schema.Tuple([]) }),
@@ -345,6 +359,8 @@ export const TaskFilter = Schema.Struct({
   status: Schema.optionalKey(atMost(TaskStatus, MAX_FILTER_VALUES)),
   stage: Schema.optionalKey(atMost(TaskStage, MAX_FILTER_VALUES)),
   projectId: Schema.optionalKey(Id),
+  /** Lists only the Tasks that belong to this Initiative. */
+  initiativeId: Schema.optionalKey(Id),
   /**
    * `true` lists only the tasks with a handoff entry in their provenance: an
    * entry that names a signal the user handed to an agent. `false` lists only
@@ -371,6 +387,8 @@ export const TaskCreateInput = Schema.Struct({
   priority: Schema.optionalKey(TaskPriority),
   labels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   projectId: Schema.optionalKey(Id),
+  /** An Initiative to start on. Fails `not_found` for an unknown or deleted one, and `invalid_state` for a closed one. */
+  initiativeId: Schema.optionalKey(Id),
   provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
 });
 
@@ -393,6 +411,13 @@ const TASK_UPDATE_FIELDS = {
   priority: Schema.optionalKey(TaskPriority),
   /** `null` detaches the task from its project. */
   projectId: Schema.optionalKey(Schema.NullOr(Id)),
+  /**
+   * Puts the Task on this Initiative; `null` takes it off its Initiative.
+   * Fails `not_found` for an unknown or deleted Initiative, and
+   * `invalid_state` when the write changes the Task to a closed one. An
+   * update that leaves a Task on its closed Initiative never fails for it.
+   */
+  initiativeId: Schema.optionalKey(Schema.NullOr(Id)),
   /**
    * Labels are added and removed one at a time. The user and a triage agent
    * write the same task, and replacing the whole array would silently undo
@@ -516,6 +541,12 @@ export const TaskMoveInput = Schema.Struct({
   stage: Schema.optionalKey(BoardStage),
   /** `null` moves the Task to the "No project" lane. */
   projectId: Schema.optionalKey(Schema.NullOr(Id)),
+  /**
+   * `null` takes the Task off its Initiative. Another id puts it on that
+   * Initiative, with the same refusals as `task.update`. It is here so that
+   * one drop between Initiative lanes is one write and one Undo.
+   */
+  initiativeId: Schema.optionalKey(Schema.NullOr(Id)),
   /** The card this one now follows in its cell. `null` puts it first. Absent keeps it last in the new cell. */
   afterTaskId: Schema.optionalKey(Schema.NullOr(Id)),
   /**
@@ -877,6 +908,25 @@ export type TaskSummary = Schema.Schema.Type<typeof TaskSummary>;
  */
 export const MAX_STAGE_CAUSE_TEXT = 160;
 
+/** The most blockers a card lists. `WorkCard.blockedByCount` says how many there are. */
+export const MAX_CARD_BLOCKERS = 8;
+
+/** The most blockers, or blocked Tasks, a `TaskDetail` lists. The count fields say how many there are. */
+export const MAX_DETAIL_BLOCKERS = 50;
+
+/**
+ * A Task that another Task waits on, or a Task that waits on another, with
+ * what a row needs to draw it: the title and the stage, so a client can tell
+ * whether it still blocks without reading the Task.
+ */
+export const WorkCardBlocker = Schema.Struct({
+  id: Id,
+  title: TaskTitle,
+  stage: TaskStage,
+});
+
+export type WorkCardBlocker = Schema.Schema.Type<typeof WorkCardBlocker>;
+
 /**
  * One Task as a card on Work: the Task's place and the three facts a card
  * shows, each worked out on the controller from real rows. The facts are
@@ -889,6 +939,8 @@ export const WorkCard = Schema.Struct({
   stage: BoardStage,
   priority: TaskPriority,
   projectId: Schema.optionalKey(Id),
+  /** The Initiative the Task belongs to. Absent when it belongs to none. */
+  initiativeId: Schema.optionalKey(Id),
   /** Orders the cards of one cell. Compare as a string. Never shown. */
   boardRank: Schema.String,
   /**
@@ -962,6 +1014,16 @@ export const WorkCard = Schema.Struct({
     }),
   ),
   /**
+   * The Tasks this card waits on and that still block it, at most
+   * `MAX_CARD_BLOCKERS`, in the order they were added. A blocker stops
+   * blocking when it reaches `landed`, `done` or `dropped`, or is deleted or
+   * merged away: the stored edge stays as history but is not listed here. A
+   * blocker may be on another project, or not on the board at all.
+   */
+  blockedBy: atMost(WorkCardBlocker, MAX_CARD_BLOCKERS),
+  /** How many Tasks still block this card, which may be more than `blockedBy` lists. */
+  blockedByCount: Schema.Int,
+  /**
    * The refs the Task links and everything above them by `part of`, for
    * Group by and Filter. A peer's ancestors are never included: a `linked`
    * claim adds nothing here. The records are in the board's `places`.
@@ -1018,6 +1080,13 @@ export const WorkBoard = Schema.Struct({
   stackCandidates: atMost(WorkStackCandidate, MAX_BOARD_STACK_CANDIDATES),
   /** True when more candidates exist than `MAX_BOARD_STACK_CANDIDATES`. What was left out draws as cards. */
   stackCandidatesTruncated: Schema.Boolean,
+  /**
+   * For each open Initiative that has Tasks at `done`, how many of its live
+   * Tasks are Done. Done Tasks have no card, so a client adds these to the
+   * cards of the Initiative to count its progress. An Initiative with none,
+   * and a closed Initiative, is absent.
+   */
+  initiativeDoneCounts: Schema.Record(Id, Schema.Int),
 });
 
 export type WorkBoard = Schema.Schema.Type<typeof WorkBoard>;
@@ -1065,6 +1134,18 @@ export const TaskDetail = Schema.Struct({
   /** How many runs the Task has, with a link to `run.query` by `taskIds`, the same way. */
   runCount: Schema.Int,
   /**
+   * The Tasks this Task waits on, at most `MAX_DETAIL_BLOCKERS`, in the order
+   * they were added. Unlike the card, it lists every stored edge whatever the
+   * blocker's stage, so the pane can show a finished blocker and remove it.
+   */
+  blockers: atMost(WorkCardBlocker, MAX_DETAIL_BLOCKERS),
+  /** How many Tasks this Task waits on. The pane says "and 12 more" past `blockers`. */
+  blockerCount: Schema.Int,
+  /** The Tasks that wait on this Task, at most `MAX_DETAIL_BLOCKERS`, listed like `blockers`. */
+  blocks: atMost(WorkCardBlocker, MAX_DETAIL_BLOCKERS),
+  /** How many Tasks wait on this Task. */
+  blockCount: Schema.Int,
+  /**
    * The outside things the Task links, in the order they were linked, each as
    * the place it is: the pane draws them as rows. A linked thing no
    * Connection can read is `restricted`. At most `MAX_CARD_CONTEXTS`, the
@@ -1099,18 +1180,57 @@ export const TaskEntityLinkInput = Schema.Struct({
 export type TaskEntityLinkInput = Schema.Schema.Type<typeof TaskEntityLinkInput>;
 
 /**
- * What `task.linkEntity` and `task.unlinkEntity` return: the Task as stored,
- * and whether the call changed anything. `changed` is false when there was
- * nothing to do (the Task linked the thing already, or did not link it), so a
- * client can tell a call that did something from one that did not, and offer
- * an Undo only for the first.
+ * The query of `task.checkMerge`, beside the source Task's id in the path.
+ * It names the survivor the same way `TaskMergeInput` does.
  */
-export const TaskEntityLinkResult = Schema.Struct({
+export const TaskMergeCheckQuery = Schema.Struct({
+  /** The Task the source would be merged into. */
+  intoTaskId: Id,
+});
+
+export type TaskMergeCheckQuery = Schema.Schema.Type<typeof TaskMergeCheckQuery>;
+
+/**
+ * What `task.checkMerge` returns. `refusal` is present when `task.merge` would
+ * refuse the same merge, and holds the message that merge would fail with:
+ * the Tasks are the same, one is unknown, deleted, merged or finished, the
+ * result would hold too many labels or too long a description, or the blockers
+ * would close a loop (the message then names the path). Absent when the merge
+ * would go ahead. It runs every check the merge runs before it writes, and
+ * writes nothing, so a client can show the refusal before a drop: the merge
+ * itself still decides.
+ */
+export const TaskMergeCheck = Schema.Struct({
+  refusal: Schema.optionalKey(Schema.String),
+});
+
+export type TaskMergeCheck = Schema.Schema.Type<typeof TaskMergeCheck>;
+
+/**
+ * The input of `task.addBlocker` and `task.removeBlocker`. The Task that waits
+ * is in the path.
+ */
+export const TaskBlockerInput = Schema.Struct({
+  /** The Task that must land first. */
+  blockedByTaskId: Id,
+});
+
+export type TaskBlockerInput = Schema.Schema.Type<typeof TaskBlockerInput>;
+
+/**
+ * What `task.linkEntity`, `task.unlinkEntity`, `task.addBlocker` and
+ * `task.removeBlocker` return: the Task as stored, and whether the call
+ * changed anything. `changed` is false when there was nothing to do (the Task
+ * linked the thing already, or did not link it; the blocker was there already,
+ * or was not there), so a client can tell a call that did something from one
+ * that did not, and offer an Undo only for the first.
+ */
+export const TaskChangeResult = Schema.Struct({
   task: Task,
   changed: Schema.Boolean,
 });
 
-export type TaskEntityLinkResult = Schema.Schema.Type<typeof TaskEntityLinkResult>;
+export type TaskChangeResult = Schema.Schema.Type<typeof TaskChangeResult>;
 
 /** The input of `task.undoTryAgain`, beside the Task's id in the path. */
 export const TaskUndoTryAgainInput = Schema.Struct({
@@ -1233,13 +1353,13 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.post("create", "/tasks", {
       payload: TaskCreateInput,
       success: Task,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.patch("update", "/tasks/:id", {
       params: { id: Id },
       payload: TaskUpdateInput,
       success: Task,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
      * Moves a Task to a place on the board: another stage, another project, or
@@ -1252,18 +1372,58 @@ export const task = HttpApiGroup.make("task")
       params: { id: Id },
       payload: TaskMoveInput,
       success: Task,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
      * Merges a Task into another: the Task in the path is the source, and
      * `intoTaskId` is the survivor. Returns the survivor. Only the user merges.
-     * Fails `InvalidState` when either Task is `done` or `dropped`.
+     * Fails `InvalidState` when either Task is `done` or `dropped`, and with
+     * reason `blocker-cycle` when the merged blockers would wait on each other
+     * in a loop.
      */
     HttpApiEndpoint.post("merge", "/tasks/:id/merge", {
       params: { id: Id },
       payload: TaskMergeInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Says whether `task.merge` would refuse a merge, and why, without
+     * writing anything. See `TaskMergeCheck`.
+     */
+    // `/tasks/:id/merge-check` has one more segment than `/tasks/:id`, so the
+    // router never takes it for that route.
+    HttpApiEndpoint.get("checkMerge", "/tasks/:id/merge-check", {
+      params: { id: Id },
+      query: TaskMergeCheckQuery,
+      success: TaskMergeCheck,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    /**
+     * Makes a Task wait on another: `blockedByTaskId` must land first. Returns
+     * the Task and whether anything changed (an edge that exists already
+     * changes nothing). Either id may be a merged Task's old id. Fails
+     * `InvalidState` with reason `blocker-cycle` when the other Task already
+     * waits on this one, directly or through others, and the message names the
+     * path. A blocker gates no operation: a blocked card can still be moved.
+     */
+    // `/tasks/:id/blockers` has one more segment than `/tasks/:id`, so the
+    // router never takes it for that route.
+    HttpApiEndpoint.post("addBlocker", "/tasks/:id/blockers", {
+      params: { id: Id },
+      payload: TaskBlockerInput,
+      success: TaskChangeResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Takes a blocker away from a Task, whatever stage the blocker is at.
+     * Returns the Task and whether anything changed (an edge that does not
+     * exist changes nothing).
+     */
+    HttpApiEndpoint.delete("removeBlocker", "/tasks/:id/blockers/:blockedByTaskId", {
+      params: { id: Id, blockedByTaskId: Id },
+      success: TaskChangeResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
      * Links an outside thing to a Task by hand. Returns the Task and whether
@@ -1276,7 +1436,7 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.post("linkEntity", "/tasks/:id/entities/link", {
       params: { id: Id },
       payload: TaskEntityLinkInput,
-      success: TaskEntityLinkResult,
+      success: TaskChangeResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
@@ -1288,7 +1448,7 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.post("unlinkEntity", "/tasks/:id/entities/unlink", {
       params: { id: Id },
       payload: TaskEntityLinkInput,
-      success: TaskEntityLinkResult,
+      success: TaskChangeResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**

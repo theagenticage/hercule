@@ -237,6 +237,7 @@ const describeProvenance = (
 const describeNewTaskFields = (
   input: AnswerOperationInput<"task.create">,
   projectName: string | undefined,
+  initiativeName: string | undefined,
 ): DescribeLine =>
   joinParts(
     [
@@ -251,6 +252,9 @@ const describeNewTaskFields = (
       ...(projectName === undefined
         ? []
         : [[buildTextPart("in project "), buildMarkedPart(projectName)]]),
+      ...(initiativeName === undefined
+        ? []
+        : [[buildTextPart("in initiative "), buildMarkedPart(initiativeName)]]),
       ...(input.provenance === undefined || input.provenance.length === 0
         ? []
         : [
@@ -360,6 +364,14 @@ export const buildDescribe: Effect.Effect<
       Effect.map(
         projects.live(id),
         Option.match({ onNone: () => id, onSome: (project) => project.name }),
+      ),
+    );
+
+    /** Returns an Initiative's name, or its id once it is deleted. */
+    const readInitiativeName = readOncePerId((id) =>
+      Effect.map(
+        tasks.readInitiative(id),
+        Option.match({ onNone: () => id, onSome: (initiative) => initiative.name }),
       ),
     );
 
@@ -531,6 +543,15 @@ export const buildDescribe: Effect.Effect<
             buildMarkedPart(yield* readProjectName(changes.projectId)),
           ]);
         }
+        if (changes.initiativeId === null) {
+          described.push([buildTextPart("remove from its initiative")]);
+        }
+        if (typeof changes.initiativeId === "string") {
+          described.push([
+            buildTextPart("put on initiative "),
+            buildMarkedPart(yield* readInitiativeName(changes.initiativeId)),
+          ]);
+        }
         if (changes.addLabels !== undefined && changes.addLabels.length > 0) {
           described.push([buildTextPart(`add ${formatLabels(changes.addLabels)}`)]);
         }
@@ -627,7 +648,11 @@ export const buildDescribe: Effect.Effect<
         Effect.gen(function* () {
           const projectName =
             input.projectId === undefined ? undefined : yield* readProjectName(input.projectId);
-          const fields = describeNewTaskFields(input, projectName);
+          const initiativeName =
+            input.initiativeId === undefined
+              ? undefined
+              : yield* readInitiativeName(input.initiativeId);
+          const fields = describeNewTaskFields(input, projectName, initiativeName);
           return [
             buildTextPart("Create task "),
             buildMarkedPart(input.title),

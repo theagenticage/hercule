@@ -236,6 +236,17 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
+    name: "work-initiatives",
+    path: "work.html?initiatives",
+    contentSelector: ".initiative-block .initiative-row",
+    nonTextParts: [
+      // Only the open beads, which are filled with the Initiative's colour: a landed ring is too
+      // thin for the mark rule, a blocked ring is faint on purpose, and the marigold of a question
+      // is light on the light themes.
+      { selector: '.initiative-bead[data-kind="open"]', kind: "mark" },
+    ],
+  },
+  {
     name: "inbox",
     path: "inbox.html",
     contentSelector: ".inbox-place .inbox-row",

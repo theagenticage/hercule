@@ -8,12 +8,19 @@
  *   the card once the board shows the failure gone (`useTryAgain`).
  * - Link and Unlink on Linked send `task.linkEntity` and `task.unlinkEntity`
  *   for the Task the pane shows, with an Undo (`useTaskLinks`).
+ * - Add a blocker and the remove button of Blocked by send `task.addBlocker`
+ *   and `task.removeBlocker`, with an Undo (`useTaskBlockers`).
+ * - The Initiative menu moves the card to the Initiative (`moves.moveCard`),
+ *   as a drop on an Initiative lane does: the pane and the board show the pick
+ *   at once, the move is sent in order, and Undo puts the card back where it
+ *   stood. Taking a Task off a closed Initiative has no Undo.
  */
 import { useEffect, useRef, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { nameLinkedThing } from "@hercule/client-core/desk";
 import {
   describeEndWhileTryingAgain,
+  describeInitiativeGesture,
   type EndStage,
   type TaskPaneContent,
 } from "@hercule/client-core/work";
@@ -28,6 +35,7 @@ import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import type { CardMoves } from "./-card-moves";
 import { answerFromPane } from "./-pane-answers";
 import { useSettleUnsentAnswers } from "./-settle-unsent-answers";
+import { useTaskBlockers } from "./-task-blockers";
 import { useTaskLinks } from "./-task-links";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
@@ -48,6 +56,9 @@ export type PaneChanges = Pick<
   | "onReturn"
   | "onLinkEntity"
   | "onUnlinkEntity"
+  | "onAddBlocker"
+  | "onRemoveBlocker"
+  | "onSetInitiative"
 >;
 
 /** What `usePaneChanges` returns. */
@@ -113,7 +124,7 @@ export const usePaneChanges = ({
   readonly boardReadAt: number;
   readonly moves: Pick<
     CardMoves,
-    "sayWithUndo" | "sayWithoutUndo" | "reserveGesture" | "sayWithReservedUndo"
+    "sayWithUndo" | "sayWithoutUndo" | "reserveGesture" | "sayWithReservedUndo" | "moveCard"
   >;
   readonly openTaskId: string | null;
   readonly scrollRef: RefObject<HTMLElement | null>;
@@ -151,6 +162,7 @@ export const usePaneChanges = ({
   });
 
   const taskLinks = useTaskLinks({ client, scope, moves });
+  const taskBlockers = useTaskBlockers({ client, scope, moves });
 
   // When the pane started to show this Task, for the Return key's quiet moment.
   const shownAt = useRef(0);
@@ -250,6 +262,37 @@ export const usePaneChanges = ({
           ref: row.ref,
           thingName: nameLinkedThing(row),
         });
+      },
+      onAddBlocker: async (blocker) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return null;
+        return taskBlockers.add({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          blockerId: blocker.id,
+          blockerTitle: blocker.title,
+        });
+      },
+      onRemoveBlocker: (blocker) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        taskBlockers.remove({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          blockerId: blocker.id,
+          blockerTitle: blocker.title,
+        });
+      },
+      onSetInitiative: (initiative, canPutBack) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        // `pane.card` is the card of the logical board, so a second pick starts from the first one.
+        moves.moveCard(
+          { taskId: pane.taskId, initiativeId: initiative?.id ?? null },
+          describeInitiativeGesture(pane.card.title, initiative?.name ?? null, !canPutBack),
+          undefined,
+          { canUndo: canPutBack },
+        );
       },
     },
   };

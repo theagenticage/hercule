@@ -75,6 +75,8 @@ export interface TaskFilter {
   readonly status?: ReadonlyArray<TaskStatus>;
   readonly stage?: ReadonlyArray<TaskStage>;
   readonly projectId?: string;
+  /** Keeps only the Tasks that belong to this Initiative. */
+  readonly initiativeId?: string;
   /** `true` keeps the tasks with a handoff entry, `false` the tasks without one. */
   readonly handedOff?: boolean;
 }
@@ -184,6 +186,8 @@ export interface BoardTask {
   readonly priority: TaskPriority;
   /** The Task's project, or `undefined` for the "No project" lane, which a deleted project is. */
   readonly projectId: string | undefined;
+  /** The Initiative the Task belongs to, or `undefined` when it belongs to none. */
+  readonly initiativeId: string | undefined;
   readonly boardRank: string;
   readonly createdAt: string;
   readonly stageChangedAt: string;
@@ -207,6 +211,8 @@ export interface NewTask {
   readonly priority: TaskPriority;
   readonly labels: ReadonlyArray<string>;
   readonly projectId: string | undefined;
+  /** The Initiative the Task starts on. The caller has checked that it exists and is open. */
+  readonly initiativeId?: string;
   readonly provenance: ReadonlyArray<ProvenanceInput>;
   /**
    * True when the Task is linked to its refs only because the user added them
@@ -287,6 +293,8 @@ export interface TaskEdit {
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
+  /** The Initiative the Task belongs to after the edit; `null` takes it off its Initiative. */
+  readonly initiativeId?: string | null;
   readonly labels?: ReadonlyArray<string>;
   /** The rank in the Task's cell after the edit; see `chooseLastRankOfCell`. */
   readonly boardRank?: string;
@@ -301,6 +309,7 @@ interface TaskRow {
   readonly priority: string;
   readonly labels: string;
   readonly project_id: Uint8Array | null;
+  readonly initiative_id: Uint8Array | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly status_changed_at: string;
@@ -321,7 +330,7 @@ interface ProvenanceRow {
 
 const COLUMNS =
   "tasks.id, tasks.title, tasks.description, tasks.status, tasks.stage, tasks.priority, tasks.labels, " +
-  "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
+  "tasks.project_id, tasks.initiative_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
   "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
@@ -420,6 +429,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
         filter.status ?? null,
         filter.stage ?? null,
         filter.projectId ?? null,
+        filter.initiativeId ?? null,
         filter.handedOff ?? null,
       ])}`,
       direction: "asc",
@@ -437,6 +447,16 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
  * history.
  */
 const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+
+/**
+ * Returns the text of the condition that a Task is live: not deleted and not
+ * merged into another Task. `table` is the name or alias the query gives the
+ * `tasks` table. The partial index `tasks_board_rank` carries the same two
+ * conditions, and SQLite matches them by their text, so this text must stay
+ * as it is.
+ */
+export const buildLiveTaskCondition = (table: "t" | "tasks"): string =>
+  `${table}.deleted_at IS NULL AND ${table}.merged_into_id IS NULL`;
 
 /**
  * Reads the stored answer to an Undo of Try again from a recovery row, or
@@ -496,7 +516,7 @@ const readBoardSummary = (row: BoardSummaryColumns): TaskSummary | undefined =>
  * turns the row into a `BoardTask`.
  */
 const BOARD_TASK_COLUMNS =
-  "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank, " +
+  "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.initiative_id, t.board_rank, " +
   "t.created_at, t.stage_changed_at, t.failed_run_id, t.stage_cause_fact_id, " +
   BOARD_SUMMARY_COLUMNS;
 
@@ -506,6 +526,7 @@ interface BoardTaskRow extends BoardSummaryColumns {
   readonly stage: BoardStage;
   readonly priority: TaskPriority;
   readonly project_id: Uint8Array | null;
+  readonly initiative_id: Uint8Array | null;
   readonly board_rank: string;
   readonly created_at: string;
   readonly stage_changed_at: string;
@@ -536,6 +557,7 @@ const readBoardTaskRow = (row: BoardTaskRow): BoardTask => ({
   stage: row.stage,
   priority: row.priority,
   projectId: row.project_id === null ? undefined : uuidToString(row.project_id),
+  initiativeId: row.initiative_id === null ? undefined : uuidToString(row.initiative_id),
   boardRank: row.board_rank,
   createdAt: row.created_at,
   stageChangedAt: row.stage_changed_at,
@@ -578,8 +600,7 @@ const make = Effect.gen(function* () {
    * The partial index `tasks_board_rank` carries the same two conditions, and
    * SQLite matches them by their text, so this text must stay as it is.
    */
-  const buildLiveTaskSql = (table: "t" | "tasks") =>
-    sql.literal(`${table}.deleted_at IS NULL AND ${table}.merged_into_id IS NULL`);
+  const buildLiveTaskSql = (table: "t" | "tasks") => sql.literal(buildLiveTaskCondition(table));
 
   /**
    * The condition a Task meets to hold a summary: it is live and not
@@ -625,6 +646,9 @@ const make = Effect.gen(function* () {
     }
     if (filter.projectId !== undefined) {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
+    }
+    if (filter.initiativeId !== undefined) {
+      clauses.push(sql`tasks.initiative_id = ${uuidFromString(filter.initiativeId)}`);
     }
     if (filter.handedOff !== undefined) {
       // `task_provenance_handoff` and `task_provenance_handoff_run` hold exactly
@@ -702,6 +726,9 @@ const make = Effect.gen(function* () {
                 priority: row.priority as TaskPriority,
                 labels: JSON.parse(row.labels) as ReadonlyArray<string>,
                 ...(row.project_id === null ? {} : { projectId: uuidToString(row.project_id) }),
+                ...(row.initiative_id === null
+                  ? {}
+                  : { initiativeId: uuidToString(row.initiative_id) }),
                 provenance: byTask.get(id) ?? [],
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
@@ -1316,6 +1343,7 @@ const make = Effect.gen(function* () {
             priority: row.priority,
             labels: row.labels,
             project_id: row.task_project_id,
+            initiative_id: row.initiative_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
             status_changed_at: row.status_changed_at,
@@ -1720,6 +1748,72 @@ const make = Effect.gen(function* () {
     /** Returns true if a project exists and has not been deleted. */
     projectExists: isLiveProject,
 
+    /**
+     * Reads an Initiative's name and whether it is closed, or returns none
+     * when there is no such Initiative or it was deleted. The tasks domain
+     * reads this one table it does not own, as `projectExists` reads
+     * `projects`, because the initiatives domain imports this one and not the
+     * other way round.
+     */
+    readInitiative: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly name: string; readonly closed: boolean }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly name: string; readonly closed_at: string | null }>`
+          SELECT name, closed_at FROM initiatives
+          WHERE id = ${uuidFromString(id)} AND deleted_at IS NULL`,
+        (rows) =>
+          rows[0] === undefined
+            ? Option.none()
+            : Option.some({ name: rows[0].name, closed: rows[0].closed_at !== null }),
+      ),
+
+    /**
+     * Takes every live Task (not deleted, not merged into another Task, at
+     * any stage) off the Initiative, and returns the ids of those Tasks in id
+     * order. Raises each Task's revision and sets its `updated_at` to `at`, as
+     * an edit does. It reads the partial index `tasks_initiative`, which holds
+     * only live Tasks that are on an Initiative, so its cost follows the
+     * Initiative's Tasks and not the number of Tasks ever made.
+     */
+    clearInitiative: (
+      initiativeId: string,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE tasks SET initiative_id = NULL, updated_at = ${at}, revision = revision + 1
+          WHERE initiative_id = ${uuidFromString(initiativeId)}
+            AND deleted_at IS NULL AND merged_into_id IS NULL
+          RETURNING id`,
+        (rows) => rows.map((row) => uuidToString(row.id)).toSorted(),
+      ),
+
+    /**
+     * Counts, for each open Initiative (not closed, not deleted), its live
+     * Tasks at the stage `done`. An Initiative with none, and a closed one,
+     * has no entry. One statement: it reads the open Initiatives, then
+     * counts each one's Tasks from the partial index `tasks_initiative_done`
+     * alone. Each condition on a Task repeats the index's own, because
+     * SQLite uses a partial index only for a query that implies it.
+     */
+    countDoneTasksByInitiative: (): Effect.Effect<Readonly<Record<string, number>>, SqlError> =>
+      Effect.map(
+        sql<{ readonly initiative_id: Uint8Array; readonly done: number }>`
+          SELECT t.initiative_id, COUNT(*) AS done
+          FROM initiatives i
+            CROSS JOIN tasks t INDEXED BY tasks_initiative_done ON t.initiative_id = i.id
+          WHERE i.deleted_at IS NULL AND i.closed_at IS NULL
+            AND t.deleted_at IS NULL AND t.merged_into_id IS NULL
+            AND t.initiative_id IS NOT NULL AND t.stage = 'done'
+          GROUP BY t.initiative_id`,
+        (rows) =>
+          Object.fromEntries(rows.map((row) => [uuidToString(row.initiative_id), row.done])),
+      ),
+
     /** Writes a new task and its first provenance entries. */
     insert: (task: NewTask): Effect.Effect<Task, SqlError> =>
       Effect.gen(function* () {
@@ -1731,12 +1825,13 @@ const make = Effect.gen(function* () {
         });
         yield* sql`
           INSERT INTO tasks
-            (id, title, description, status, stage, priority, labels, project_id,
+            (id, title, description, status, stage, priority, labels, project_id, initiative_id,
              created_at, updated_at, status_changed_at, stage_changed_at, board_rank)
           VALUES
             (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.stage}, ${task.priority},
              ${JSON.stringify(task.labels)},
              ${task.projectId === undefined ? null : uuidFromString(task.projectId)},
+             ${task.initiativeId === undefined ? null : uuidFromString(task.initiativeId)},
              ${task.at}, ${task.at}, ${task.at}, ${task.at}, ${boardRank})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
@@ -1754,6 +1849,7 @@ const make = Effect.gen(function* () {
           priority: task.priority,
           labels: task.labels,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+          ...(task.initiativeId === undefined ? {} : { initiativeId: task.initiativeId }),
           provenance: task.provenance.map((entry) => ({
             ...entry,
             at: task.at,
@@ -1793,6 +1889,7 @@ const make = Effect.gen(function* () {
           edit.priority !== undefined ||
           edit.labels !== undefined ||
           edit.projectId !== undefined ||
+          edit.initiativeId !== undefined ||
           provenance.length > 0;
         const decision = edit.stageDecision;
         const sets = [sql`updated_at = ${at}`];
@@ -1806,6 +1903,11 @@ const make = Effect.gen(function* () {
         if (edit.projectId !== undefined) {
           sets.push(
             sql`project_id = ${edit.projectId === null ? null : uuidFromString(edit.projectId)}`,
+          );
+        }
+        if (edit.initiativeId !== undefined) {
+          sets.push(
+            sql`initiative_id = ${edit.initiativeId === null ? null : uuidFromString(edit.initiativeId)}`,
           );
         }
         if (edit.status !== undefined) {
@@ -2029,7 +2131,7 @@ const make = Effect.gen(function* () {
      * Task that was merged into the source, so that `resolveTaskId` stays one
      * hop. The repoint reads `tasks_merged_into`, which holds only Tasks that
      * are not deleted: a merged Task is never deleted, because a delete of its
-     * id is refused.
+     * id is refused. The source also leaves its Initiative.
      */
     markMerged: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -2037,7 +2139,10 @@ const make = Effect.gen(function* () {
         const target = uuidFromString(targetId);
         yield* sql`UPDATE tasks SET merged_into_id = ${target}
                    WHERE merged_into_id = ${source} AND deleted_at IS NULL`;
-        yield* sql`UPDATE tasks SET merged_into_id = ${target} WHERE id = ${source}`;
+        // A merged Task leaves its Initiative, so it leaves the partial index
+        // `tasks_initiative` too. The survivor takes over the membership.
+        yield* sql`UPDATE tasks SET merged_into_id = ${target}, initiative_id = NULL
+                   WHERE id = ${source}`;
       }),
 
     /**

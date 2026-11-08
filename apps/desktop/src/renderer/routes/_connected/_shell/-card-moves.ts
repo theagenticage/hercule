@@ -46,6 +46,7 @@ import {
   describeCardsEnd,
   describeCardsLeftAsTheyAre,
   describeMoveFailure,
+  isSamePlacement,
   readPlacement,
   type CardChange,
   type CardMove,
@@ -79,8 +80,18 @@ export interface CardMoves {
    * the line, such as why the card landed somewhere else than the user aimed.
    * A move that changes nothing does nothing. The board jumps to the new place: the caller plays the movement, as the
    * drag does when its card lands.
+   *
+   * `options.canUndo` is `true` unless the caller says otherwise. With
+   * `false`, the line says `words` with no Undo and nothing goes on the undo
+   * stack, for a move that nothing could reverse, such as taking a Task off
+   * a closed Initiative (the controller refuses to put it back).
    */
-  readonly moveCard: (move: CardMove, words: string, note?: string) => void;
+  readonly moveCard: (
+    move: CardMove,
+    words: string,
+    note?: string,
+    options?: { readonly canUndo: boolean },
+  ) => void;
   /** Does what `moveCard` does, and glides the cards to their new places on `hand`. For a move by key. */
   readonly moveCardWithMotion: (move: CardMove, words: string, note?: string) => void;
   /**
@@ -198,12 +209,14 @@ const runInEndGroup = (
   }
 };
 
-/** Returns whether the two places are the same: same cell, same card before it. */
-const isSamePlace = (a: CardPlacement, b: CardPlacement | undefined): boolean =>
-  b !== undefined &&
-  a.stage === b.stage &&
-  a.projectId === b.projectId &&
-  a.afterTaskId === b.afterTaskId;
+/**
+ * Returns whether `move`, applied to `board`, leaves the card at `stands`
+ * where it is: the same cell, the same card before it, the same Initiative.
+ */
+const leavesCardInPlace = (board: WorkBoard, move: CardMove, stands: CardPlacement): boolean => {
+  const after = readPlacement(applyCardMove(board, move), move.taskId);
+  return after !== undefined && isSamePlacement(stands, after);
+};
 
 /**
  * Returns the id of the card that sits next to `card` in its cell, after it
@@ -434,7 +447,11 @@ export const useCardMoves = ({
     onCardReturning(card.id, stage);
     return {
       isExact: restore.exact,
-      request: sendChange({ kind: "return", card, move: restore.move }, true, isUndoWanted),
+      request: sendChange(
+        { kind: "return", card, endedAs: stage, move: restore.move },
+        true,
+        isUndoWanted,
+      ),
     };
   };
 
@@ -569,13 +586,20 @@ export const useCardMoves = ({
     words: string,
     note: string | undefined,
     isPlayed: boolean,
+    canUndo: boolean,
   ): void => {
     const board = readBoard();
     if (board === undefined) return;
     const from = readPlacement(board, move.taskId);
     if (from === undefined) return;
-    if (isSamePlace(from, readPlacement(applyCardMove(board, move), move.taskId))) return;
+    if (leavesCardInPlace(board, move, from)) return;
 
+    if (!canUndo) {
+      // A refusal says why on the line through the mutation's `onError`.
+      void sendMove(move, isPlayed).catch(() => undefined);
+      say(note === undefined ? `${words}.` : `${words}. ${note}`);
+      return;
+    }
     const wasSaved = sendMove(move, isPlayed).then(
       () => true,
       () => false,
@@ -588,8 +612,13 @@ export const useCardMoves = ({
     );
   };
 
-  const moveCard = (move: CardMove, words: string, note?: string): void => {
-    makeMove(move, words, note, false);
+  const moveCard = (
+    move: CardMove,
+    words: string,
+    note?: string,
+    options?: { readonly canUndo: boolean },
+  ): void => {
+    makeMove(move, words, note, false, options?.canUndo ?? true);
   };
 
   const moveCards = (
@@ -609,7 +638,7 @@ export const useCardMoves = ({
       if (from === undefined || board === undefined) continue;
       const stands = readPlacement(board, move.taskId);
       if (stands === undefined) continue;
-      if (isSamePlace(stands, readPlacement(applyCardMove(board, move), move.taskId))) continue;
+      if (leavesCardInPlace(board, move, stands)) continue;
       const wasSaved = sendMove(move, false).then(
         () => true,
         () => false,
@@ -632,7 +661,7 @@ export const useCardMoves = ({
   };
 
   const moveCardWithMotion = (move: CardMove, words: string, note?: string): void => {
-    makeMove(move, words, note, true);
+    makeMove(move, words, note, true, true);
   };
 
   return {

@@ -4,15 +4,18 @@ import {
   chooseCardColleaguePose,
   chooseCardSecondLine,
   type CardInLane,
+  decideCardState,
+  describeCardBlockers,
   describeCardForReader,
   isLoudCard,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import { findNextDeskAgeChange } from "@hercule/client-core/desk";
 import type { WorkCard } from "@hercule/contract";
 import { useClockValue } from "../../app/age-clock";
 import { buildLook } from "../../faces";
 import { PluginMark } from "../../marks";
-import { Card, useDeskAgeLabel, type CardColleague } from "../desk";
+import { Card, HueFlag, useDeskAgeLabel, type CardColleague } from "../desk";
 
 /** The keys held while a card was clicked, which is how the screen tells a selecting click from an opening one. */
 export interface PressedKeys {
@@ -55,6 +58,15 @@ const listSourcePluginIds = (card: WorkCard): readonly string[] => [
  *   (hidden until selected). With no card selected, no card has a check.
  * - Beside the age, the card shows a mark for each source its Task links
  *   outside (`entityMarks`), drawn by the plugin's own mark in `plugins`.
+ * - `initiative` is the Initiative whose small flag the card draws beside the
+ *   age, in the Initiative's colour, and whose name the flag's hover and the
+ *   card's reading carry. It is undefined where the card draws no flag: under
+ *   Group by Project, and when its Initiative is closed.
+ * - A card that waits on other Tasks (`decideCardState`) is drawn quiet, with
+ *   a lock before "Waits on <title>." on its second line. A failure or a
+ *   question outranks that: such a card draws as itself. The element carries
+ *   `data-blocked-by`, the id of the first Task it waits on, which the line
+ *   to that Task's card is found by.
  * - `laneId` is the lane the card stands in. A Task under two outside places
  *   has a card in each lane, and `alsoWords` ("In 2 repositories") and
  *   `alsoNames` (their names, for the hover) say so on each of those cards.
@@ -78,6 +90,7 @@ export const WorkCardView = memo(function WorkCardView({
   plugins,
   alsoWords,
   alsoNames,
+  initiative,
   isTabStop,
   isStill,
   canWriteSummaries,
@@ -91,6 +104,7 @@ export const WorkCardView = memo(function WorkCardView({
   readonly plugins: readonly PluginIdentity[];
   readonly alsoWords: string | undefined;
   readonly alsoNames: string | undefined;
+  readonly initiative: WorkInitiative | undefined;
   readonly isTabStop: boolean;
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
@@ -103,8 +117,15 @@ export const WorkCardView = memo(function WorkCardView({
   const reading = useClockValue(card.lastActivityAt, true, findNextDeskAgeChange, (now) =>
     describeCardForReader(card, now, canWriteSummaries),
   );
-  const label = alsoWords === undefined ? reading : `${reading} ${alsoWords}.`;
+  const label = [
+    reading,
+    alsoWords === undefined ? undefined : `${alsoWords}.`,
+    initiative === undefined ? undefined : `Initiative ${initiative.name}.`,
+  ]
+    .filter((part) => part !== undefined)
+    .join(" ");
   const secondLine = chooseCardSecondLine(card, canWriteSummaries);
+  const isBlocked = decideCardState(card) === "blocked";
   return (
     <Card
       role="button"
@@ -113,17 +134,22 @@ export const WorkCardView = memo(function WorkCardView({
       aria-pressed={isSelecting ? isSelected : undefined}
       data-card-id={card.id}
       data-stage={card.stage}
+      data-blocked-by={isBlocked ? describeCardBlockers(card)?.firstBlockerId : undefined}
       title={card.title}
       now={secondLine?.text}
       nowTone={secondLine?.tone}
       colleague={buildColleague(card, isStill)}
       landed={card.stage === "landed" && !isLoudCard(card)}
+      blocked={isBlocked}
       selected={isSelecting ? isSelected : undefined}
       {...(alsoWords === undefined || alsoNames === undefined
         ? {}
         : { also: { words: alsoWords, names: alsoNames } })}
       meta={
         <>
+          {initiative !== undefined && (
+            <HueFlag hue={initiative.hue} size={11} title={initiative.name} />
+          )}
           {listSourcePluginIds(card).map((pluginId) => (
             <span key={pluginId} className="card-src" title={namePlugin(pluginId, plugins)}>
               <PluginMark pluginId={pluginId} plugins={plugins} size={13} />

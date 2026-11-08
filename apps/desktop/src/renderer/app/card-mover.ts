@@ -132,7 +132,7 @@ export const buildCachedCardMover =
  */
 export const buildCachedEndedCardMover =
   (client: HerculeClient, queryClient: QueryClient): CardMover["putEndedCardBack"] =>
-  (card, place, _stage, isUndoWanted) => {
+  (card, place, stage, isUndoWanted) => {
     const board = queryClient.getQueryData<WorkBoard>(queryKeys.workBoard());
     if (board === undefined || board.cards.some((each) => each.id === card.id)) return undefined;
     const restore = buildMoveToPlacement(board, place);
@@ -144,7 +144,7 @@ export const buildCachedEndedCardMover =
         payload: { ...target, refuseIfMerged: true },
       });
       await writeAnsweredChange<WorkBoard>(queryClient, queryKeys.workBoard(), (cached) =>
-        applyCardReturn(cached, card, restore.move),
+        applyCardReturn(cached, card, stage, restore.move),
       );
     })();
     return { isExact: restore.exact, request };

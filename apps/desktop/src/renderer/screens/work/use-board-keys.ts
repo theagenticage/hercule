@@ -18,6 +18,7 @@ import {
   type CardMove,
   type EndStage,
   type WalkStop,
+  type WorkInitiative,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { BoardStage, WorkCard } from "@hercule/contract";
@@ -33,6 +34,12 @@ import type { WorkView } from "./use-work-view";
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
 const POINTER_MOVE_MIN = 4;
 
+/** Returns the selector of the button in the head of a lane, or of an Initiative row, that folds it. */
+const buildHeadButtonSelector = (laneId: string): string => {
+  const head = `[data-lane-head="${CSS.escape(laneId)}"]`;
+  return `${head} .board-lane-button, ${head} .initiative-toggle`;
+};
+
 /** What `useBoardKeys` needs from the Work screen. */
 export interface BoardKeysInput {
   readonly view: WorkView;
@@ -40,9 +47,13 @@ export interface BoardKeysInput {
   readonly cards: readonly WorkCard[];
   /** The lanes as the board draws them, which decide what the arrows can reach. */
   readonly arrangedLanes: readonly ArrangedLane[];
+  /** Folds every lane and row of the board, hidden or not, or opens them when all are folded (`⇧F`). The toolbar's Fold everything is this same function. */
+  readonly onFoldEverything: () => void;
   /** The cards the Find list offers, in the order it lists them. */
   readonly findMatches: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
+  /** The open Initiatives, which name the Initiative a move changes. */
+  readonly initiatives: readonly WorkInitiative[];
   readonly moves: {
     /** Moves a card on screen at once, gliding the cards, and sends the move. */
     readonly moveCardWithMotion: (move: CardMove, words: string) => void;
@@ -77,6 +88,8 @@ export interface BoardKeysInput {
   readonly onAdd: (laneId: string | undefined) => void;
   /** The Add to Work sheet: whether it is open, and a way to close it. */
   readonly addSheet: { readonly isOpen: boolean; readonly close: () => void };
+  /** The Initiative sheet: whether it is open, and a way to close it. */
+  readonly initiativeSheet: { readonly isOpen: boolean; readonly close: () => void };
   /**
    * The Task's details sheet: whether it is open, a way to close it, and what
    * Return does on the card it is open for. `pressReturn` does what the sheet's
@@ -120,7 +133,17 @@ export interface BoardKeys {
  * - While a card is in the hand of a drag, no key does anything here.
  */
 export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
-  const { view, cards, arrangedLanes, findMatches, projects, moves, scrollRef, findRef } = input;
+  const {
+    view,
+    cards,
+    arrangedLanes,
+    findMatches,
+    projects,
+    initiatives,
+    moves,
+    scrollRef,
+    findRef,
+  } = input;
   const [isKeysSheetOpen, setKeysSheetOpen] = useState(false);
   const [chosenMatch, setChosenMatch] = useState<{ text: string; id: string } | null>(null);
   const hoveredCard = useRef<CardInLane | null>(null);
@@ -172,9 +195,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
 
   /** Moves focus to the head button of the lane, which has no card to take it, and hands the keys over from the pointer. Returns whether the lane is on screen. */
   const focusLaneHead = (laneId: string): boolean => {
-    const button = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-lane-head="${CSS.escape(laneId)}"] .board-lane-button`,
-    );
+    const button = scrollRef.current?.querySelector<HTMLElement>(buildHeadButtonSelector(laneId));
     if (button === null || button === undefined) return false;
     hoveredCard.current = null;
     button.focus();
@@ -189,9 +210,9 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     if (!hadFocusInBoard || laneId === undefined || document.activeElement !== document.body) {
       return;
     }
-    scroller
-      ?.querySelector<HTMLElement>(`[data-lane-head="${CSS.escape(laneId)}"] .board-lane-button`)
-      ?.focus({ preventScroll: true });
+    scroller?.querySelector<HTMLElement>(buildHeadButtonSelector(laneId))?.focus({
+      preventScroll: true,
+    });
   };
 
   /** Moves the card to the end of the cell of `stage` in the lane it is in, and keeps focus on it when it had focus. */
@@ -203,7 +224,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
     const move: CardMove = { taskId: card.id, stage };
     // The move is committed before it returns: the card is a new element in
     // its new cell, and focus can only go to it once it is there.
-    moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
+    moves.moveCardWithMotion(move, describeCardMove(card, move, projects, initiatives));
     if (!hadFocus || focusCard(at)) return;
     // The cell shows only some of its cards, and the moved one is behind its
     // line ("3 landed", "13 more"). Focus goes to that line.
@@ -222,6 +243,8 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       setKeysSheetOpen(false);
     } else if (input.addSheet.isOpen) {
       input.addSheet.close();
+    } else if (input.initiativeSheet.isOpen) {
+      input.initiativeSheet.close();
     } else if (input.taskPane.isOpen) {
       input.taskPane.close();
     } else if (view.findText !== "") {
@@ -332,15 +355,14 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         if (currentLaneId === undefined) return;
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
-          view.toggleLane(currentLaneId);
+          const lane = arrangedLanes.find((each) => each.lane.id === currentLaneId)?.lane;
+          if (lane !== undefined) view.toggleFold(lane);
         }, currentLaneId);
         return;
       }
       case "fold-all-lanes":
         event.preventDefault();
-        changeFoldsKeepingFocus(() => {
-          view.foldEverything(arrangedLanes.map((each) => each.lane.id));
-        }, currentLaneId);
+        changeFoldsKeepingFocus(input.onFoldEverything, currentLaneId);
         return;
       case "find":
         event.preventDefault();

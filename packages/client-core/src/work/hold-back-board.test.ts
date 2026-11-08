@@ -248,6 +248,27 @@ describe("holdBackBoardChanges", () => {
       });
     });
 
+    it("shows a change of the card's Initiative at once, while its stage waits", () => {
+      const shown = buildBoard(
+        buildCard("b", { stage: "in-review", stageCause: OPENED, initiativeId: "old" }),
+      );
+      const latest = buildBoard(
+        buildCard("b", {
+          stage: "landed",
+          stageCause: MERGED,
+          stageChangedAt: AT_NOON,
+          initiativeId: "new",
+        }),
+      );
+
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
+
+      expect(result.board.cards[0]).toMatchObject({ stage: "in-review", initiativeId: "new" });
+    });
+
     it("keeps the card in the cell it was shown in when others of the cell moved too", () => {
       const shown = buildBoard(
         buildCard("x", { stage: "building" }),

@@ -3,7 +3,9 @@ import type { PluginIdentity } from "@hercule/client-core";
 import type { PlaceRow } from "@hercule/client-core/desk";
 import {
   chooseCardColleaguePose,
+  findCardInitiative,
   STAGE_NAMES,
+  type WorkInitiative,
   type AddRow,
   type PaneAnswer,
   type SummaryStanding,
@@ -13,9 +15,11 @@ import {
 import { BOARD_STAGES, type BoardStage, type TaskDetail, type WorkCard } from "@hercule/contract";
 import { buildLook } from "../../faces";
 import { Colleague } from "../desk";
+import { BlockerSections } from "./task-pane-blockers";
 import { ContextSections } from "./task-pane-context";
 import { FailureSection } from "./task-pane-failure";
 import { Foot } from "./task-pane-foot";
+import { InitiativeSection } from "./task-pane-initiative";
 import { QuestionSection, UnsentAnswerSection } from "./task-pane-question";
 import { RunsSection } from "./task-pane-runs";
 import { ThreadsSection } from "./task-pane-threads";
@@ -59,6 +63,31 @@ export interface TaskPaneChanges {
   readonly onLinkEntity: (row: AddRow) => void;
   /** Removes the link from the Task to the thing a row of Linked draws. */
   readonly onUnlinkEntity: (row: PlaceRow) => void;
+  /**
+   * Makes the Task wait on `blocker`, the card the user chose in "Add a
+   * blocker". Resolves to the controller's message when it refused because
+   * the blocker would close a loop (the pane shows it under Blocked by), and
+   * to `null` otherwise. Other refusals go to the undo line.
+   */
+  readonly onAddBlocker: (blocker: TaskPaneBlocker) => Promise<string | null>;
+  /** Takes `blocker` off what the Task waits on, from the remove button of a Blocked by row. */
+  readonly onRemoveBlocker: (blocker: TaskPaneBlocker) => void;
+  /**
+   * Puts the Task on `initiative`, or takes it off its Initiative when it is
+   * `null`. The caller has checked that this changes something.
+   * `canPutBack` is false when the Initiative the Task leaves is closed, so
+   * the change has no Undo (`decideInitiativePick`).
+   */
+  readonly onSetInitiative: (
+    initiative: Pick<WorkInitiative, "id" | "name"> | null,
+    canPutBack: boolean,
+  ) => void;
+}
+
+/** A Task as the blocker changes name it: its id, and its title for the undo line. */
+export interface TaskPaneBlocker {
+  readonly id: string;
+  readonly title: string;
 }
 
 /** Everything the pane's buttons do: the changes above, and where the others lead. */
@@ -72,6 +101,14 @@ export interface TaskPaneActions extends TaskPaneChanges {
   readonly onRetryRead: () => void;
   /** Shows only the Tasks that are part of an outside place, from a row of Part of. */
   readonly onFilterByPlace: (placeRef: string) => void;
+  /** Opens the Task `taskId` in the pane, from a row of Blocked by or Blocks. */
+  readonly onOpenTask: (taskId: string) => void;
+  /**
+   * Handles a pick in the Initiative menu: `choiceId` is an Initiative's id,
+   * `NO_INITIATIVE_CHOICE_ID` or `NEW_INITIATIVE_CHOICE_ID`. The caller works
+   * out what it means for the Task (`decideInitiativePick`).
+   */
+  readonly onPickInitiative: (choiceId: string) => void;
   /** Esc: goes back, or closes. */
   readonly onStepBack: () => void;
 }
@@ -151,7 +188,10 @@ export function TaskPaneColleague({
  *   the stage and the failure, which show before the read arrives), the
  *   question, the actions, and the answers the user gave. Every button acts on
  *   this value.
- * - `projectName` is the crumb.
+ * - `projectName` and the Initiative the Task is on (from `initiatives`, the
+ *   open ones) are the crumbs. The Initiative is the one of `pane.card`, the
+ *   board's card with every move not yet answered applied, so a pick shows at
+ *   once.
  * - `read` is what the details read gives: quiet bars while it is on its
  *   way, a line and a retry after it failed, a line when the Task is gone.
  *   The pane has its final size at once, so nothing moves when the words
@@ -163,11 +203,12 @@ export function TaskPaneColleague({
  *   line). `null` leaves the foot as it is.
  * - `linkSearch` is the "Link something" search that stands at the foot of
  *   Linked, which the caller builds because it reads. `null` leaves it out.
+ * - `boardCards` are the cards "Add a blocker" searches.
  * - `actions` is what its buttons do.
  *
- * From the top: the crumb, the title, the stage path, where it stands with
- * the quiet line under it, a failure, a question, What is left, Threads, Part
- * of, Linked, Runs, and the foot. Esc steps back. Return does what the first button of the section
+ * From the top: the crumbs, the title, the stage path, where it stands with
+ * the quiet line under it, a failure, a question, What is left, Blocked by and
+ * Blocks, Threads, Initiative, Part of, Linked, Runs, and the foot. Esc steps back. Return does what the first button of the section
  * above says, unless the focus is on a button or a field: it tries again
  * after a failure, and sends the suggested answer of a question.
  *
@@ -177,6 +218,9 @@ export function TaskPaneColleague({
 export function TaskPane({
   pane,
   projectName,
+  initiatives,
+  boardCards,
+  isMoving,
   read,
   plugins,
   threadPromptWords,
@@ -185,6 +229,10 @@ export function TaskPane({
 }: {
   readonly pane: TaskPaneContent;
   readonly projectName: string | null;
+  readonly initiatives: readonly WorkInitiative[];
+  readonly boardCards: readonly WorkCard[];
+  /** True while a move of this Task is on its way to the controller. The Initiative menu waits, so an Undo never starts from a pick that may be refused. */
+  readonly isMoving: boolean;
   readonly read: TaskPaneRead;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /** The words the line that asks what a new Thread should do starts with, or `null` when the foot is not that line. */
@@ -194,6 +242,7 @@ export function TaskPane({
 }): JSX.Element {
   const { card, question, actions: taskActions } = pane;
   const isGone = read.status === "gone";
+  const initiative = findCardInitiative(card, initiatives);
   const act = (id: TaskActionId): void => {
     switch (id) {
       case "try-again":
@@ -239,7 +288,11 @@ export function TaskPane({
       <div className="task-pane-scroll">
         <header className="task-pane-head">
           <p className="task-pane-crumb">
-            <span className="task-pane-crumb-text">{projectName}</span>
+            <span className="task-pane-crumb-text">
+              {[projectName, initiative?.name]
+                .filter((name): name is string => name !== null && name !== undefined)
+                .join(" · ")}
+            </span>
           </p>
           {card !== undefined ? (
             <h2 className="task-pane-title" tabIndex={-1} data-sheet-focus>
@@ -323,11 +376,30 @@ export function TaskPane({
                   <p className="task-pane-left">{read.detail.card.summary.left}</p>
                 </section>
               )}
+            <BlockerSections
+              key={pane.taskId}
+              blockers={read.detail}
+              taskId={pane.taskId}
+              cards={boardCards}
+              onOpenTask={actions.onOpenTask}
+              onAdd={actions.onAddBlocker}
+              onRemove={actions.onRemoveBlocker}
+            />
             <ThreadsSection
               detail={read.detail}
               taskTitle={read.detail.card.title}
               onOpenThread={actions.onOpenThread}
               onMoveThreadToNewTask={actions.onMoveThreadToNewTask}
+            />
+            <InitiativeSection
+              current={initiative}
+              initiatives={initiatives}
+              isDisabled={
+                isMoving ||
+                card === undefined ||
+                !boardCards.some((each) => each.id === pane.taskId)
+              }
+              onPick={actions.onPickInitiative}
             />
             <ContextSections
               detail={read.detail}

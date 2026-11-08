@@ -34,6 +34,20 @@ const chooseProjectId = (moving: WorkCard, move: CardMove): string | undefined =
   move.projectId === undefined ? moving.projectId : (move.projectId ?? undefined);
 
 /**
+ * Returns the Initiative a move leaves the card on: the move's (`null` for
+ * none), or the current one when the move names none.
+ */
+const chooseInitiativeId = (moving: WorkCard, move: CardMove): string | undefined =>
+  move.initiativeId === undefined ? moving.initiativeId : (move.initiativeId ?? undefined);
+
+/** Returns `card` on the Initiative `initiativeId`, or on none for `undefined`. */
+const withInitiativeId = (card: WorkCard, initiativeId: string | undefined): WorkCard => {
+  const { initiativeId: oldInitiativeId, ...rest } = card;
+  void oldInitiativeId;
+  return initiativeId === undefined ? rest : { ...rest, initiativeId };
+};
+
+/**
  * Returns the index in `others` (the cards without the moving one) at which
  * the moving card goes, or `undefined` when the move names a card that is not
  * in the target cell.
@@ -62,14 +76,16 @@ const findInsertIndex = (
  * snapshot, and a rolled back move is simply left out of the list that is
  * applied again.
  *
- * - The moved card changes `stage` and `projectId` as the move says, and goes
- *   after `afterTaskId` in the target cell, first for `null`, last when
+ * - The moved card changes `stage`, `projectId` and `initiativeId` as the move
+ *   says (`null` takes it off its Project or Initiative), and goes after
+ *   `afterTaskId` in the target cell, first for `null`, last when
  *   `afterTaskId` is absent. Its `boardRank` is left as it was (see the top of
  *   this file).
  * - A move that names a `stage` drops the card's `stageCause`, as the
  *   controller does: the user's stage decision replaces the fact's.
- * - Absent `afterTaskId` in the card's own cell, with no other change, does
- *   nothing, as in `task.move`.
+ * - Absent `afterTaskId` in the card's own cell keeps the card where it is, as
+ *   in `task.move`: with no other change it does nothing, and a change of
+ *   Initiative alone only changes the Initiative.
  * - A move whose card is gone, or whose `afterTaskId` is gone or not in the
  *   target cell, returns the board itself. A pending move can be applied
  *   again over a newer board without ever failing.
@@ -79,7 +95,17 @@ export const applyCardMove = (board: WorkBoard, move: CardMove): WorkBoard => {
   if (moving === undefined) return board;
   const stage = move.stage ?? moving.stage;
   const projectId = chooseProjectId(moving, move);
-  if (move.afterTaskId === undefined && isInCell(moving, stage, projectId)) return board;
+  const initiativeId = chooseInitiativeId(moving, move);
+  if (move.afterTaskId === undefined && isInCell(moving, stage, projectId)) {
+    return initiativeId === moving.initiativeId
+      ? board
+      : {
+          ...board,
+          cards: board.cards.map((card) =>
+            card.id === moving.id ? withInitiativeId(card, initiativeId) : card,
+          ),
+        };
+  }
 
   const others = board.cards.filter((card) => card.id !== moving.id);
   const insertAt = findInsertIndex(others, move.afterTaskId, (card) =>
@@ -93,10 +119,12 @@ export const applyCardMove = (board: WorkBoard, move: CardMove): WorkBoard => {
   const { projectId: oldProjectId, stageCause, ...withoutProject } = moving;
   void oldProjectId;
   const keptCause = move.stage === undefined && stageCause !== undefined ? { stageCause } : {};
-  const moved: WorkCard =
+  const moved: WorkCard = withInitiativeId(
     projectId === undefined
       ? { ...withoutProject, ...keptCause, stage }
-      : { ...withoutProject, ...keptCause, stage, projectId };
+      : { ...withoutProject, ...keptCause, stage, projectId },
+    initiativeId,
+  );
   return { ...board, cards: [...others.slice(0, insertAt), moved, ...others.slice(insertAt)] };
 };
 
@@ -116,18 +144,27 @@ export const reapplyCardMoves = (board: WorkBoard, moves: readonly CardMove[]): 
   moves.reduce(applyCardMove, board);
 
 /**
- * Where a card stood: its cell and the card it followed in stored order. A
- * gesture records it before it moves a card, so that Undo can move the card
- * back.
+ * Where a card stood: its cell, the card it followed in stored order, and its
+ * Initiative. A gesture records it before it moves a card, so that Undo can
+ * move the card back.
  */
 export interface CardPlacement {
   readonly taskId: string;
   readonly stage: BoardStage;
   /** `null` for no Project. */
   readonly projectId: string | null;
+  /** `null` for no Initiative. */
+  readonly initiativeId: string | null;
   /** The card before it in its cell, in stored order. `null` when it was first. */
   readonly afterTaskId: string | null;
 }
+
+/** Returns whether the two places are the same: the same cell, the same card before it, the same Initiative. */
+export const isSamePlacement = (a: CardPlacement, b: CardPlacement): boolean =>
+  a.stage === b.stage &&
+  a.projectId === b.projectId &&
+  a.initiativeId === b.initiativeId &&
+  a.afterTaskId === b.afterTaskId;
 
 /** Returns where a card stands now, or `undefined` when the board has no such card. */
 export const readPlacement = (board: WorkBoard, taskId: string): CardPlacement | undefined => {
@@ -139,6 +176,7 @@ export const readPlacement = (board: WorkBoard, taskId: string): CardPlacement |
     taskId,
     stage: card.stage,
     projectId: card.projectId ?? null,
+    initiativeId: card.initiativeId ?? null,
     afterTaskId: cell[index - 1]?.id ?? null,
   };
 };
@@ -163,7 +201,9 @@ export interface MoveToPlacement {
  * was marked Done comes back.
  *
  * The move always names `afterTaskId`: with the card's own cell unchanged, an
- * absent one would do nothing.
+ * absent one would do nothing. It names the Initiative only when the card is
+ * on the board and on another one now: a card that ended keeps its Initiative,
+ * and putting back an Initiative that is closed since would be refused.
  */
 export const buildMoveToPlacement = (
   board: WorkBoard,
@@ -176,13 +216,17 @@ export const buildMoveToPlacement = (
   );
   const exact =
     placement.afterTaskId === null || cell.some((card) => card.id === placement.afterTaskId);
-  const { taskId, stage, projectId } = placement;
+  const { taskId, stage, projectId, initiativeId } = placement;
+  const current = board.cards.find((card) => card.id === taskId);
+  const changesInitiative =
+    current !== undefined && (current.initiativeId ?? null) !== initiativeId;
   return {
     exact,
     move: {
       taskId,
       stage,
       projectId,
+      ...(changesInitiative ? { initiativeId } : {}),
       afterTaskId: exact ? placement.afterTaskId : (cell.at(-1)?.id ?? null),
     },
   };
@@ -223,6 +267,21 @@ export interface DropMove {
    * the drop changes the stage only, for every card carried.
    */
   readonly targetProjectId?: string | null;
+  /**
+   * What the drop does to the Initiative of every card carried, or absent when
+   * it does nothing to it (a lane of an outside place, which belongs to the
+   * source):
+   *
+   * - `join`: the cards go on this Initiative (a drop on a row, or on a lane of
+   *   Group by Initiative).
+   * - `leave`: the cards go off their Initiative (a drop on a Project lane, or
+   *   on "Not in an initiative"). Only a card on an Initiative in
+   *   `listedInitiativeIds` leaves it: a card on a closed Initiative is drawn
+   *   in its lane, and moving it there must not take it off the Initiative.
+   */
+  readonly initiativeChange?:
+    | { readonly kind: "join"; readonly initiativeId: string }
+    | { readonly kind: "leave"; readonly listedInitiativeIds: ReadonlySet<string> };
 }
 
 /**

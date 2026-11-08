@@ -1,16 +1,16 @@
 /** Tests the lanes as the board draws them: what each cell shows, the failed count, the dots, and the counts over the stages. */
 import { describe, expect, it } from "vitest";
 import { arrangeLanes, buildCellId, buildStackId, countCardsByStage } from "./arrange-lanes";
+import { buildBoardFolds } from "./board-folds";
 import { buildBoard, buildCard, FAILURE, QUESTION } from "./cards.testing";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
 const CLOSED: Parameters<typeof arrangeLanes>[1] = {
-  foldedLaneIds: new Set<string>(),
+  folds: buildBoardFolds(),
   openedCellIds: new Set<string>(),
   openedStackIds: new Set<string>(),
   stackCandidates: [],
-  isFiltering: false,
 };
 
 const manyCards = Array.from({ length: 8 }, (_, index) =>
@@ -42,7 +42,10 @@ describe("arrangeLanes", () => {
   });
 
   it("marks the lanes the user folded", () => {
-    const folded = arrangeLanes(lanes, { ...CLOSED, foldedLaneIds: new Set(["storefront"]) });
+    const folded = arrangeLanes(lanes, {
+      ...CLOSED,
+      folds: buildBoardFolds({ saved: { foldedLaneIds: ["storefront"] } }),
+    });
 
     expect(folded[0]!.isFolded).toBe(true);
     expect(arrangeLanes(lanes, CLOSED)[0]!.isFolded).toBe(false);

@@ -928,6 +928,10 @@ const buildDetail = (card: WorkCard, overrides: Partial<TaskDetail> = {}): TaskD
   sessionCount: 0,
   runs: [],
   runCount: 0,
+  blockers: [],
+  blockerCount: 0,
+  blocks: [],
+  blockCount: 0,
   entities: [],
   places: [],
   edges: [],
@@ -2324,11 +2328,20 @@ describe("merging two cards", () => {
     vi.restoreAllMocks();
   });
 
-  /** Opens Work with three Tasks in one cell on a controller that merges the Task in the path into `intoTaskId`, or refuses with `refusal`. */
-  const openMergeable = async ({ refusal }: { readonly refusal?: string } = {}) => {
+  /**
+   * Opens Work with three Tasks in one cell on a controller that merges the Task in the path into `intoTaskId`, or refuses with `refusal`.
+   * Its merge check answers with `checkRefusal` when there is one, and says the merge would go ahead otherwise.
+   */
+  const openMergeable = async ({
+    refusal,
+    checkRefusal,
+  }: { readonly refusal?: string; readonly checkRefusal?: string } = {}) => {
     let cards: readonly WorkCard[] = IN_ONE_CELL;
     const handlers: Record<string, Handler> = {};
     for (const card of IN_ONE_CELL) {
+      handlers[`GET /api/v1/tasks/${card.id}/merge-check`] = {
+        body: checkRefusal === undefined ? {} : { refusal: checkRefusal },
+      };
       handlers[`POST /api/v1/tasks/${card.id}/merge`] = (call) => {
         if (refusal !== undefined) {
           return { status: 409, body: buildErrorBody("invalid_state", refusal) };
@@ -2364,8 +2377,12 @@ describe("merging two cards", () => {
     expect(screen.getByText(/^Pick the card to merge this into/)).toBeTruthy();
     expect(getCard("Label the pallets").hasAttribute("data-merge-source")).toBe(true);
     await user.keyboard("{ArrowDown}");
-    // The card the walk reached says whom it is merged into, and what stays.
-    expect(getCard("Weigh the parcels").dataset["mergeLabel"]).toBe("Merge into Weigh the parcels");
+    // Once the controller has checked the merge, the card the walk reached says whom it is merged into, and what stays.
+    await waitFor(() => {
+      expect(getCard("Weigh the parcels").dataset["mergeLabel"]).toBe(
+        "Merge into Weigh the parcels",
+      );
+    });
     expect(getCard("Weigh the parcels").dataset["mergeKeeps"]).toBe(
       "Keeps its title, stage and place",
     );
@@ -2407,6 +2424,52 @@ describe("merging two cards", () => {
       screen.getByText('Put back: Merged "Label the pallets" into "Weigh the parcels".'),
     ).toBeTruthy();
     expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toHaveLength(0);
+  });
+
+  it("shows the refusal on the card the walk reached, and Return merges nothing and says why", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openMergeable({
+      checkRefusal: "Pack already waits on this Task.",
+    });
+    await screen.findByRole("button", { name: /^Label the pallets/ });
+    focusCard("Label the pallets");
+    shortenUndoWindow();
+
+    await user.keyboard("m");
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(getCard("Weigh the parcels").dataset["mergeLabel"]).toBe(
+        "Cannot merge: Pack already waits on this Task",
+      );
+    });
+    await user.keyboard("{Enter}");
+
+    expect(
+      screen.getByText('"Label the pallets" was not merged: Pack already waits on this Task.'),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Label the pallets/ })).toBeTruthy();
+    expect(document.querySelector(".work-desk")?.hasAttribute("data-merge-picking")).toBe(false);
+    await waitOutUndoWindow();
+    expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toHaveLength(0);
+  });
+
+  it("asks the controller once for a pair, however often the walk comes back to it", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { calls } = await openMergeable();
+    await screen.findByRole("button", { name: /^Label the pallets/ });
+    focusCard("Label the pallets");
+
+    await user.keyboard("m");
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(getCard("Weigh the parcels").dataset["mergeCheck"]).toBe("allowed");
+    });
+    await user.keyboard("{ArrowUp}{ArrowDown}");
+    await waitFor(() => {
+      expect(getCard("Weigh the parcels").dataset["mergeCheck"]).toBe("allowed");
+    });
+
+    expect(listCalls(calls, `GET /api/v1/tasks/${LABEL.id}/merge-check`)).toHaveLength(1);
   });
 
   it("brings the card back and shows the controller's words when task.merge is refused", async () => {

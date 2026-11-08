@@ -11,6 +11,7 @@ import { Colleague, type ColleaguePose } from "./colleague";
 import { joinClassNames } from "../../app/join-class-names";
 import type { Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
+import { LockIcon } from "../../icons/lock";
 import { FailedMark } from "./status-shape";
 import "./card.css";
 
@@ -25,10 +26,10 @@ export interface CardColleague {
 /**
  * How the second line of a card reads: `summary` is the Task's summary in
  * `--muted`, `pending` is "Writing a summary" in `--faint`, `question` is what
- * a Thread asks, in `--you-ink`, and `failed` is what a run broke, in ink
- * after the failed mark.
+ * a Thread asks, in `--you-ink`, `failed` is what a run broke, in ink after
+ * the failed mark, and `blocked` is what the Task waits on, after a small lock.
  */
-export type CardNowTone = "summary" | "pending" | "question" | "failed";
+export type CardNowTone = "summary" | "pending" | "question" | "failed" | "blocked";
 
 /** What each watched title calls with whether it takes two lines. */
 const titleListeners = new Map<Element, (isLong: boolean) => void>();
@@ -102,12 +103,18 @@ function useIsTitleLong(hasSecondLine: boolean): {
  *   `names` shows on hover.
  * - `colleague` stands behind the top edge. Only a live Thread has one.
  * - `landed` draws the card as only words, with no sheet.
+ * - `blocked` draws the card quiet, on a flat sheet with a hairline and its
+ *   words stepped back, because another Task holds it back. It does not
+ *   change how the card is touched. A `landed` card is never drawn blocked.
  * - `selected` is for a page where cards can be selected: `true` draws the
  *   card with a 1.5px ink ring and a check in its top left corner that grows
  *   in, and `false` keeps the check ready, hidden, so it can grow in when the
  *   card is selected. Leave it out where cards cannot be selected, and while
  *   no card is: the card then draws no check at all. The caller names the
  *   selected state for assistive technology (`aria-pressed`).
+ *
+ * `data-state` is `landed` or `blocked` while the card is drawn so, for the
+ * stylesheet and for code that finds cards by state.
  *
  * `data-now` holds the second line's tone while there is one, so the
  * stylesheet can shorten the title of a card that asks or failed without a
@@ -125,6 +132,7 @@ export function Card({
   also,
   colleague,
   landed,
+  blocked,
   selected,
   className,
   ref,
@@ -137,6 +145,7 @@ export function Card({
   readonly also?: { readonly words: string; readonly names: string };
   readonly colleague?: CardColleague | null;
   readonly landed: boolean;
+  readonly blocked?: boolean | undefined;
   readonly selected?: boolean | undefined;
   readonly ref?: Ref<HTMLDivElement>;
 }): JSX.Element {
@@ -154,7 +163,7 @@ export function Card({
       {...rest}
       ref={ref}
       className={classes}
-      data-state={landed ? "landed" : undefined}
+      data-state={landed ? "landed" : blocked === true ? "blocked" : undefined}
       data-now={hasSecondLine ? nowTone : undefined}
     >
       <i className="card-stock" />
@@ -172,6 +181,11 @@ export function Card({
           {hasSecondLine && (
             <p className={nowTone === "summary" ? "card-now" : `card-now card-${nowTone}`}>
               {nowTone === "failed" && <FailedMark />}
+              {nowTone === "blocked" && (
+                <span className="card-lock">
+                  <LockIcon size={11} />
+                </span>
+              )}
               {now}
             </p>
           )}

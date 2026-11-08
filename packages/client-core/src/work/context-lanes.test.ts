@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkBoard } from "@hercule/contract";
+import { buildBoardFolds } from "./board-folds";
 import { buildBoard, buildCard, buildPlace, listIds } from "./cards.testing";
 import { groupBoardByContext, listBoardGroupings, listContextLaneIds } from "./context-lanes";
 import { countCardsByStage, arrangeLanes } from "./arrange-lanes";
@@ -121,11 +122,10 @@ describe("groupBoardByContext", () => {
 
     it("is counted once in the stage headers", () => {
       const arranged = arrangeLanes(lanes, {
-        foldedLaneIds: new Set(),
+        folds: buildBoardFolds(),
         openedCellIds: new Set(),
         openedStackIds: new Set(),
         stackCandidates: [],
-        isFiltering: false,
       });
       expect(countCardsByStage(arranged)).toMatchObject({ exploring: 2, building: 1 });
     });

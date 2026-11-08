@@ -390,6 +390,95 @@ button.task-pane-note:hover {
   font: var(--type-meta);
 }
 
+/* ---------- Blocked by, Blocks and Initiative ---------- */
+/* A row of Blocked by or Blocks is a Thread's row (32px, the mark in a 20px place, the stage small and faint at the end). */
+.task-pane-blockers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-pane-blocker > .task-pane-row-open > svg {
+  flex: none;
+  margin: 0 3px;
+  color: var(--muted);
+}
+.task-pane-blocker.is-quiet .task-pane-row-text {
+  color: var(--muted);
+}
+.task-pane-blocker.is-quiet > .task-pane-row-open > svg {
+  color: var(--faint);
+}
+/* A Task that is Done or Dropped is history, not a button: no hover. */
+.task-pane-blocker.is-plain:not(.has-remove):hover {
+  background: none;
+}
+.task-pane-row-open:focus-visible,
+.task-pane-initiative-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
+/* The button that takes a blocker off stands over the stage while the row is reached for, and the stage gives way to it. */
+.task-pane-row-remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--m-quick);
+}
+.task-pane-row:hover .task-pane-row-remove,
+.task-pane-row-remove:focus-visible {
+  opacity: 1;
+}
+.task-pane-row-remove:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.task-pane-blocker.has-remove small {
+  transition: opacity var(--m-quick);
+}
+.task-pane-blocker.has-remove:hover small,
+.task-pane-blocker.has-remove:focus-within small {
+  opacity: 0;
+}
+/* A blocker the controller refused because it would close a loop. Its message names the path, so it is given room under the button. */
+.task-pane-refusal {
+  margin: 6px 0 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+/* The Initiative row is one button: the flag, the name, and a chevron that says it opens a menu. */
+/* Its values are on the 4px grid: a 13px flag with 4px beside it and an 8px gap put the words where a Thread's row puts them (37px from the edge). */
+.task-pane-initiative-row {
+  gap: 8px;
+  color: var(--ink);
+  text-align: left;
+}
+.task-pane-initiative-row:not(:disabled):hover {
+  background: var(--hover);
+}
+.task-pane-initiative-row > svg {
+  flex: none;
+  margin: 0 4px;
+  color: var(--faint);
+}
+.task-pane-initiative-mark {
+  flex: none;
+  margin: 0 4px;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
 /* ---------- Loading, a failed read, a Task that is gone ---------- */
 /* The sections' places while the read is on its way: quiet bars, no spinner, and nothing moves when the words arrive. */
 .task-pane-bars {

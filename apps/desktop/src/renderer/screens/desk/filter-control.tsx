@@ -12,6 +12,7 @@ import {
 import { FilterIcon } from "../../icons/filter";
 import { FOCUSABLE_MENU_ITEM_SELECTOR } from "../move-menu-focus";
 import { usePopoverMenu } from "../use-popover-menu";
+import { HueFlag } from "./hue-flag";
 import { MenuBack, MenuHeading, MenuLine, MenuPick, ToolMenu } from "./tool-menu";
 import { ClearChipsButton, FilterChip, ToolButton } from "./toolbar";
 
@@ -42,6 +43,7 @@ const focusInMenu = (menu: HTMLElement | null, selector: string): void => {
  *
  * `marks` puts a mark in front of a facet's row and of its values, by facet
  * id. The values of the facet with no caption read well alone and take none.
+ * A value with a `hue` has a flag in that colour in place of the facet's mark.
  * A change of filter goes to `onFilterChange`.
  *
  * Closing the menu, by Esc or a click outside it, returns it to the first view.
@@ -103,7 +105,13 @@ export function FilterControl<Item>({
           kind="toggle"
           name={value.name}
           isOn={isOn}
-          mark={facet === firstFacet ? undefined : marks[facet.id]}
+          mark={
+            value.hue !== undefined ? (
+              <HueFlag hue={value.hue} />
+            ) : facet === firstFacet ? undefined : (
+              marks[facet.id]
+            )
+          }
           count={counts[value.id] ?? 0}
           onPick={() => {
             onFilterChange(toggleFilterValue(filter, facet.id, value.id));

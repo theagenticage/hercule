@@ -5,6 +5,7 @@ import {
   type SpringName,
 } from "../../app/motion";
 import { findStack, findStackLead } from "./dragged-card";
+import { glideBeads, measureBeads, type BeadPlaces } from "./flip-beads";
 
 /**
  * What moves when the board changes: cards, lane heads, the counts of folded
@@ -68,8 +69,9 @@ const buildMotionKeyReader =
  * and moves every part of the board that the change moved from where it was to
  * where it is now, on `spring`. The parts are matched by Task, lane and cell,
  * not by element, because React makes a new element for a card that changes
- * cell (`flipByKey`). Returns the places of the parts after the change, and
- * the parts that are new.
+ * cell (`flipByKey`). The beads on the folded lines of Initiative rows glide
+ * too, within their line (`glideBeads`). Returns the places of the parts after
+ * the change, and the parts that are new.
  */
 export const flipBoard = (
   scroller: HTMLElement,
@@ -80,15 +82,24 @@ export const flipBoard = (
   // The card keys are worked out once for the page as it is before `mutate`,
   // and once for the page after it.
   let cardKeys: ReadonlyMap<Element, string> | undefined;
-  return flipByKey({
+  let beadsBefore: BeadPlaces | undefined;
+  let beadsAfter: BeadPlaces | undefined;
+  const result = flipByKey({
     root: scroller,
     selector: MOVABLE_SELECTOR,
     readKey: buildMotionKeyReader(() => (cardKeys ??= buildCardKeys(scroller))),
     spring,
     mutate: () => {
+      beadsBefore = measureBeads(scroller, false);
       mutate();
       cardKeys = undefined;
+      // Measured before the board's own glide starts, which moves the lines they stand in.
+      beadsAfter = measureBeads(scroller, true);
     },
     ...(stagger === undefined ? {} : { stagger }),
   });
+  if (beadsBefore !== undefined && beadsAfter !== undefined) {
+    glideBeads(beadsBefore, beadsAfter, spring);
+  }
+  return result;
 };

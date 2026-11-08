@@ -6,7 +6,7 @@
 import type { TrackingDetailRun } from "@hercule/contract";
 import { isRunLive } from "../run-display";
 import { dropClosingFullStops } from "../text";
-import { shortenTitle } from "./describe-card-move";
+import { shortenTitle } from "./card-title";
 
 /**
  * The shape and tone of a run's mark. The names are those of the desktop's

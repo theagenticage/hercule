@@ -1,5 +1,8 @@
 /** Test cards for the Work board, in the invented Northwind Market world. */
 import type { EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
+import { arrangeBoard, type ArrangeBoardInput, type ArrangedBoard } from "./board-arrangement";
+import { buildBoardFolds } from "./board-folds";
+import { PROJECT_FACET_ID } from "./facets";
 
 /**
  * Returns a card of the given id and title at Exploring, in no Project, with
@@ -17,6 +20,8 @@ export const buildCard = (id: string, overrides: Partial<WorkCard> = {}): WorkCa
   lastActivityAt: "2026-11-01T09:00:00.000Z",
   entityMarks: [],
   contextRefs: [],
+  blockedBy: [],
+  blockedByCount: 0,
   ...overrides,
 });
 
@@ -30,6 +35,7 @@ export const buildBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   contextComplete: true,
   stackCandidates: [],
   stackCandidatesTruncated: false,
+  initiativeDoneCounts: {},
 });
 
 /**
@@ -83,3 +89,27 @@ export const buildSummary = (
 /** Returns the ids of these cards, for a short comparison. */
 export const listIds = (cards: readonly WorkCard[]): readonly string[] =>
   cards.map((card) => card.id);
+
+/**
+ * Returns `board` arranged as the screen would arrange it with nothing folded,
+ * nothing opened and no filter: grouped by Project, with the Initiative rows
+ * On top, every card visible, and no Project or Initiative listed.
+ * `overrides` change any input.
+ */
+export const arrangeTestBoard = (
+  board: WorkBoard,
+  overrides: Partial<ArrangeBoardInput> = {},
+): ArrangedBoard =>
+  arrangeBoard({
+    logicalBoard: board,
+    drawnBoard: board,
+    visibleCards: board.cards,
+    projects: [],
+    initiatives: [],
+    requestedGroupBy: PROJECT_FACET_ID,
+    place: "top",
+    folds: buildBoardFolds(),
+    openedCellIds: new Set(),
+    openedStackIds: new Set(),
+    ...overrides,
+  });

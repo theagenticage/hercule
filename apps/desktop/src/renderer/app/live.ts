@@ -258,6 +258,13 @@ export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
 /** The topic the Wiki pages hold. */
 export const WIKI_TOPICS: readonly MutableLiveTopic[] = ["wikiPage"];
 
+/**
+ * The topic the Work screen holds: the open Initiatives, which draw the
+ * board's rows, lanes and flags. Only Work reads them, so the shell does not
+ * hold the topic.
+ */
+export const INITIATIVE_TOPICS: readonly MutableLiveTopic[] = ["initiative"];
+
 /** The topic Settings > Skills holds, on its list and on a skill's page. */
 export const SKILL_TOPICS: readonly MutableLiveTopic[] = ["skill"];
 

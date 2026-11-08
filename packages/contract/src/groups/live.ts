@@ -56,6 +56,9 @@ export const LIVE_PROTOCOL_VERSION = 1;
  */
 export const MUTABLE_LIVE_TOPICS = [
   "task",
+  // An Initiative is created, changed, closed, reopened or deleted. Only Work
+  // reads the list, so only Work subscribes.
+  "initiative",
   "run",
   "session",
   "workflow",

@@ -1,26 +1,32 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from "react";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import { dropEmptyValues, filterItems } from "@hercule/client-core/desk";
 import {
-  arrangeLanes,
+  arrangeBoard,
   buildLanes,
   buildWorkFacets,
   chooseAddOpening,
+  chooseLaneId,
   chooseLaneProject,
-  countCardsByStage,
   describeCardMove,
   type EndStage,
   findCards,
-  groupBoardByContext,
-  listBoardGroupings,
-  listShownCards,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
   PROJECT_FACET_ID,
   STAGE_NAMES,
   type AddOpening,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import {
   BOARD_STAGES,
@@ -29,10 +35,10 @@ import {
   type ControllerInfo,
   type EntityPlace,
   type WorkCard,
-  type WorkStackCandidate,
 } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
+import { INITIATIVE_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { controllerQuery, pluginsQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey, isPrimaryModifierHeld } from "../../../app/primary-modifier";
 import { useFirstArrival } from "../../../app/use-first-arrival";
@@ -44,12 +50,13 @@ import { AddFromSource } from "../../../screens/work/add-from-source";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch } from "../../../screens/work/board-empty";
-import { BoardLane } from "../../../screens/work/board-lane";
+import { BoardBody } from "../../../screens/work/board-body";
 import { BoardLoading } from "../../../screens/work/board-loading";
 import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-lane";
 import { keepCardInView } from "../../../screens/work/keep-in-view";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { SelectionBar } from "../../../screens/work/selection-bar";
+import { useBeadSlide } from "../../../screens/work/use-bead-slide";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
 import { useCardSelection } from "../../../screens/work/use-card-selection";
@@ -65,13 +72,14 @@ import { SinceLine } from "../../../screens/work/since-line";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
+import { useInitiativeSheet } from "./-initiative-sheet";
 import { useLogicalBoard } from "./-logical-board";
 import { useMergeCards } from "./-merge-cards";
 import { useStopRun } from "./-stop-run";
 import { usePaneChanges } from "./-pane-changes";
 import { useTaskThreads } from "./-task-threads";
 import { WorkPane } from "./-work-pane";
-import { hasAnyTaskQuery, useWorkBoard } from "./-work-board";
+import { hasAnyTaskQuery, useWorkBoard, useWorkInitiatives } from "./-work-board";
 
 /** Below this window width, lanes are bands: side labels would cost the cards 210px. */
 const SIDE_LABELS_FROM_PX = 1320;
@@ -81,7 +89,7 @@ const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
 const EMPTY_PLACES: readonly EntityPlace[] = [];
-const EMPTY_STACK_CANDIDATES: readonly WorkStackCandidate[] = [];
+const EMPTY_INITIATIVES: readonly WorkInitiative[] = [];
 
 /** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
 const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
@@ -134,6 +142,11 @@ export function WorkScreen({
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
+  // The Initiatives are read with the board, kept current by their own topic, held only while Work is open.
+  const queryClient = useQueryClient();
+  useScreenTopicsLive(live, queryClient, INITIATIVE_TOPICS);
+  const initiativesRead = useWorkInitiatives(client);
+  const initiatives = initiativesRead.data ?? EMPTY_INITIATIVES;
   // Until the controller's record is read, nothing says a summary is coming, so no card promises one.
   const canWriteSummaries =
     useQuery({ ...controllerQuery(client), select: canTextGenerationRun }).data === true;
@@ -159,7 +172,18 @@ export function WorkScreen({
     },
     isCarrying,
   });
-  const savedView = useWorkView(buildWorkViewKey(url, username));
+  // The sheet that makes or changes an Initiative. It shares the right-hand side with Add to
+  // Work and the details, so each of the three closes the other two when it opens.
+  const initiativeSheet = useInitiativeSheet({
+    client,
+    scope,
+    sayWithUndo: moves.sayWithUndo,
+    sayWithoutUndo: moves.sayWithoutUndo,
+  });
+  const savedView = useWorkView(
+    buildWorkViewKey(url, username),
+    initiativesRead.data?.map((initiative) => initiative.id),
+  );
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
   const offlineSince = useOfflineSince(live);
   const findRef = useRef<HTMLInputElement>(null);
@@ -182,18 +206,12 @@ export function WorkScreen({
   useLayoutEffect(() => {
     noteReturnedTask.current = reads.noteReturnedTask;
   });
-  const view = useViewMotion(savedView, scrollRef);
   usePausePawsOffScreen(scrollRef);
-  const drawnBoard = reads.drawnBoard;
+  // The board is not drawn until the Initiatives are in: cards of an Initiative would
+  // first show in their lanes, and then jump onto their rows.
+  const drawnBoard = initiativesRead.data === undefined ? undefined : reads.drawnBoard;
   const drawnCards = drawnBoard?.cards ?? EMPTY_CARDS;
   const places = drawnBoard?.places ?? EMPTY_PLACES;
-  const groupings = listBoardGroupings({ groupings: drawnBoard?.groupings ?? [] });
-  // A saved grouping whose kind the board no longer has (its plugin was
-  // removed, or none of its places is on the board) is drawn as Project, and
-  // stays saved in case the kind comes back.
-  const groupBy = groupings.some((grouping) => grouping.kind === view.groupBy)
-    ? view.groupBy
-    : PROJECT_FACET_ID;
   // The answers the user gave from the pane and the app still holds show on
   // their cards as answered; the pane's answer and Try again buttons act here.
   const pane = usePaneChanges({
@@ -211,6 +229,7 @@ export function WorkScreen({
   });
   // A merge held for the undo line hides the card that merges away.
   const merging = useMergeCards({
+    client,
     scope,
     readBoard: logical.readBoardNow,
     isBoardRead: logical.board !== undefined,
@@ -228,6 +247,7 @@ export function WorkScreen({
   const facets = buildWorkFacets(
     allLanes,
     { cards: drawnCards, places, groupings: drawnBoard?.groupings ?? [] },
+    initiatives,
     plugins,
   );
 
@@ -242,29 +262,44 @@ export function WorkScreen({
     if (next !== filter) setFilter(next);
   }, [drawnBoard, drawnCards, facets, filter, setFilter]);
 
-  const found = findCards(drawnCards, view.findText);
-  const visibleCards = filterItems(found.matches, view.filter, facets);
-  const lanes =
-    groupBy === PROJECT_FACET_ID
-      ? buildLanes({ cards: visibleCards }, projects)
-      : groupBoardByContext(
-          { cards: visibleCards, places, groupings: drawnBoard?.groupings ?? [] },
-          groupBy,
-        );
-  const arrangedLanes = arrangeLanes(lanes, {
-    foldedLaneIds: view.foldedLaneIds,
-    openedCellIds: view.openedCellIds,
-    openedStackIds: view.openedStackIds,
-    stackCandidates: drawnBoard?.stackCandidates ?? EMPTY_STACK_CANDIDATES,
-    isFiltering: view.isFiltering,
+  const found = findCards(drawnCards, savedView.findText);
+  const visibleCards = filterItems(found.matches, savedView.filter, facets);
+  // Everything the board draws, worked out once: the lanes and rows under the folds, what is on
+  // screen, the counts over the stages and the words under each row. The facts are counted from
+  // the logical board and the lanes from the drawn one, so a held-back arrival still counts.
+  const arrangement = arrangeBoard({
+    logicalBoard: logical.board,
+    drawnBoard,
+    visibleCards,
+    projects,
+    initiatives,
+    requestedGroupBy: savedView.groupBy,
+    place: savedView.display.initiativePlace,
+    folds: savedView.folds,
+    openedCellIds: savedView.openedCellIds,
+    openedStackIds: savedView.openedStackIds,
   });
-  const shownCards = listShownCards(arrangedLanes);
+  // What the user does to the view plays as motion, and a fold reads the rows it moves from the arrangement.
+  const view = useViewMotion(savedView, scrollRef, arrangement);
+  const { groupBy, groupings } = arrangement;
+  // A card under any grouping but Project draws the small flag of its Initiative. The map keeps
+  // its identity until the Initiatives or the grouping change, so the cards stay as drawn.
+  const initiativeFlags = useMemo(
+    () =>
+      groupBy === PROJECT_FACET_ID
+        ? undefined
+        : new Map(initiatives.map((initiative) => [initiative.id, initiative])),
+    [initiatives, groupBy],
+  );
+  // The rows a fold hides are not on screen, so nothing that walks, selects or drops sees them.
+  const arrangedLanes = arrangement.drawnLanes;
+  const { shownCards } = arrangement;
   // Which cards are selected. A card the board stops drawing leaves the selection.
   const selection = useCardSelection(shownCards.map((card) => card.cardId));
   const tabStop =
     shownCards.find((card) => isSameCardInLane(card, view.currentCard)) ?? shownCards[0] ?? null;
 
-  const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0;
+  const isBoardEmpty = arrangement.isEmpty;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
   const hasAnyTask = hasAnyTaskRead.data;
 
@@ -307,7 +342,9 @@ export function WorkScreen({
   const mergePick = useMergePick({
     scrollRef,
     cards: logicalCards,
+    initiatives,
     merge: merging.mergeCard,
+    checkMerge: merging.checkMerge,
     say: moves.sayWithoutUndo,
     onStart: () => {
       onChangeOpenTask(null);
@@ -322,7 +359,10 @@ export function WorkScreen({
       mergePick.confirm(card.id);
       return;
     }
-    if (card.id !== openTaskId) onChangeOpenTask(card.id);
+    if (card.id === openTaskId) return;
+    // Two sheets would cover each other at the right.
+    if (initiativeSheet.isOpen) initiativeSheet.close();
+    onChangeOpenTask(card.id);
   };
 
   const stopRun = useStopRun({ client, scope, say: moves.sayWithoutUndo });
@@ -369,7 +409,7 @@ export function WorkScreen({
   /** Moves a card to a stage from the details' stage path, as the number keys do. */
   const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
     const move = { taskId: card.id, stage };
-    moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
+    moves.moveCardWithMotion(move, describeCardMove(card, move, projects, initiatives));
   };
 
   /**
@@ -401,6 +441,9 @@ export function WorkScreen({
    * the context the filter is on.
    */
   const openAddSheet = (lane: AddTaskLane, fromLaneId?: string): void => {
+    // Closing the Initiative sheet first gives the focus back to what it came from, which is
+    // then where this sheet gives it back to.
+    if (initiativeSheet.isOpen) initiativeSheet.close();
     addOpener.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddResult(null);
@@ -408,7 +451,7 @@ export function WorkScreen({
       chooseAddOpening({
         places,
         filter: view.filter,
-        lane: fromLaneId === undefined ? undefined : lanes.find((each) => each.id === fromLaneId),
+        lane: fromLaneId === undefined ? undefined : arrangement.findLane(fromLaneId)?.lane,
       }),
     );
     setAddProjectId(fromLaneId === undefined ? null : lane.projectId);
@@ -421,10 +464,22 @@ export function WorkScreen({
     addOpener.current?.focus({ preventScroll: true });
   };
   const toAddLane = (laneId: string): AddTaskLane => {
-    const lane =
-      lanes.find((each) => each.id === laneId) ?? allLanes.find((each) => each.id === laneId);
+    const lane = arrangement.findLane(laneId)?.lane ?? allLanes.find((each) => each.id === laneId);
     if (lane === undefined) {
       return { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null };
+    }
+    // A Task added on an Initiative joins it, and the Initiative's Project, as a card dropped there would.
+    if (lane.initiative !== undefined) {
+      const { initiativeId } = lane.initiative;
+      const projectId = initiatives.find((each) => each.id === initiativeId)?.projectId;
+      return {
+        id: lane.id,
+        name: lane.name,
+        projectId: projects.some((project) => project.id === projectId)
+          ? (projectId ?? null)
+          : null,
+        initiativeId,
+      };
     }
     // A lane for an outside place has no Project of its own: a Task added
     // there joins the Project most of its cards are in, and the sheet names it.
@@ -432,9 +487,23 @@ export function WorkScreen({
     const project = projects.find((each) => each.id === projectId);
     return { id: lane.id, name: project?.name ?? lane.name, projectId };
   };
-  /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
-  const chooseAddLane = (): AddTaskLane =>
-    toAddLane(tabStop?.laneId ?? lanes[0]?.id ?? NO_PROJECT_LANE_ID);
+  /**
+   * Returns the lane the toolbar's Add opens in: the current card's, else the
+   * first on screen, else No project. A card on an Initiative row stands in
+   * no Project lane, so its own Project's lane is the one: the toolbar's Add
+   * does not put a Task on an Initiative, only a key or a lane's `+` that
+   * names one does.
+   */
+  const chooseAddLane = (): AddTaskLane => {
+    const stopLane = arrangement.findLane(tabStop?.laneId ?? "")?.lane;
+    if (stopLane?.initiative?.isRow === true) {
+      const card = logicalCards.find((each) => each.id === tabStop?.cardId);
+      const projectIds = new Set(projects.map((project) => project.id));
+      return toAddLane(card === undefined ? NO_PROJECT_LANE_ID : chooseLaneId(card, projectIds));
+    }
+    const firstLane = arrangement.lanes[0];
+    return toAddLane(tabStop?.laneId ?? firstLane?.lane.id ?? NO_PROJECT_LANE_ID);
+  };
   const { mutateAsync: createTask } = useMutation({
     mutationFn: ({ title, lane }: { readonly title: string; readonly lane: AddTaskLane }) =>
       client.task.create({
@@ -445,12 +514,14 @@ export function WorkScreen({
           // controller would file it as Planned.
           stage: "exploring",
           ...(lane.projectId === null ? {} : { projectId: lane.projectId }),
+          ...(lane.initiativeId === undefined ? {} : { initiativeId: lane.initiativeId }),
         },
       }),
     onSuccess: (task, { lane }) => {
       const stage = BOARD_STAGES.find((each) => each === task.stage);
       const where = stage === undefined ? task.stage : STAGE_NAMES[stage];
-      setAddResult(`Added to ${where}${lane.projectId === null ? "" : ` in ${lane.name}`}.`);
+      const isInNamedLane = lane.projectId !== null || lane.initiativeId !== undefined;
+      setAddResult(`Added to ${where}${isInNamedLane ? ` in ${lane.name}` : ""}.`);
       reads.noteAddedTask(task.id);
     },
     onError: (error) => {
@@ -460,10 +531,17 @@ export function WorkScreen({
   });
 
   // ---------- Dragging ----------
+  // A card in the hand of a drag and a bead in the hand of a slide are the same to the screen.
+  const onCarryingChange = (isCarryingNow: boolean): void => {
+    setIsCarrying(isCarryingNow);
+    // Something in the hand ends the key flow of a merge.
+    if (isCarryingNow) mergePick.cancel();
+  };
   useBoardDrag({
     scrollRef,
     cards: logicalCards,
     projects,
+    initiatives,
     arrangedLanes,
     selectedIds: selection.selectedIds,
     moveCard: moves.moveCard,
@@ -473,13 +551,66 @@ export function WorkScreen({
       selection.clear();
     },
     say: moves.sayWithoutUndo,
-    holdMerge: merging.holdMerge,
-    onCarryingChange: (isCarryingNow) => {
-      setIsCarrying(isCarryingNow);
-      // A card in the hand ends the key flow of a merge.
-      if (isCarryingNow) mergePick.cancel();
-    },
+    settleMerge: merging.settleMerge,
+    checkMerge: merging.checkMerge,
+    onCarryingChange,
   });
+
+  // Sliding a bead along a folded Initiative line, or moving it a stage by key, moves its Task.
+  useBeadSlide({
+    scrollRef,
+    cards: logicalCards,
+    projects,
+    initiatives,
+    moveCard: moves.moveCardWithMotion,
+    onCarryingChange,
+    isCarrying,
+  });
+
+  /** Closes the details and Add to Work, which would cover the Initiative sheet at the right. */
+  const clearRightSide = (): void => {
+    if (addLane !== null) closeAddSheet();
+    if (openTaskId !== null) onChangeOpenTask(null);
+  };
+
+  /**
+   * Opens the sheet that edits the Initiative `initiativeId`, from the edit
+   * button in a row's head.
+   */
+  const editInitiative = (initiativeId: string): void => {
+    clearRightSide();
+    initiativeSheet.openEdit(initiativeId);
+  };
+
+  /**
+   * Opens the sheet that makes a new Initiative, from "New initiative" in Add
+   * to Work, which starts it in `fromProjectId`'s lane.
+   */
+  const createInitiativeFromAddSheet = (fromProjectId: string | null): void => {
+    clearRightSide();
+    initiativeSheet.openNew(fromProjectId);
+  };
+
+  /**
+   * Opens the sheet that makes a new Initiative, from "New initiative…" in the
+   * details of a Task, which starts it in the Task's Project. The Task's card
+   * takes the focus first: the details close, and the sheet gives the focus
+   * back to what had it when it opened.
+   */
+  const createInitiativeFromPane = (): void => {
+    const card = logicalCards.find((each) => each.id === openTaskId);
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(openTaskId ?? "")}"]`)
+      ?.focus({ preventScroll: true });
+    clearRightSide();
+    initiativeSheet.openNew(card?.projectId ?? null);
+  };
+
+  /** Opens the Task of a bead on an Initiative's line, as a click on its card does. */
+  const pressBead = (taskId: string): void => {
+    const card = logicalCards.find((each) => each.id === taskId);
+    if (card !== undefined) openCard(card);
+  };
 
   // ---------- Keys ----------
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
@@ -504,12 +635,17 @@ export function WorkScreen({
   const pressCard = useCallback((card: WorkCard, keys: PressedKeys): void => {
     latestPressCard.current(card, keys);
   }, []);
+  const foldEverything = (): void => {
+    view.foldEverything(arrangement.everyLane.map((each) => each.lane));
+  };
   const keys = useBoardKeys({
     view,
     cards: logicalCards,
     arrangedLanes,
+    onFoldEverything: foldEverything,
     findMatches: found.topMatches,
     projects,
+    initiatives,
     moves,
     isCarrying,
     scrollRef,
@@ -531,6 +667,7 @@ export function WorkScreen({
       openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId), laneId);
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
+    initiativeSheet: { isOpen: initiativeSheet.isOpen, close: initiativeSheet.close },
     taskPane: {
       isOpen: openTaskId !== null,
       close: () => {
@@ -541,6 +678,10 @@ export function WorkScreen({
   });
 
   // ---------- What the screen draws ----------
+  const toggleFold = (laneId: string): void => {
+    const lane = arrangement.findLane(laneId)?.lane;
+    if (lane !== undefined) view.toggleFold(lane);
+  };
   let state: DeskState = "board";
   let body: JSX.Element | null;
   if (drawnBoard === undefined) {
@@ -551,6 +692,14 @@ export function WorkScreen({
         reason={readErrorMessage(board.error)}
         onRetry={() => {
           void board.refetch();
+        }}
+      />
+    ) : initiativesRead.isError ? (
+      <ReadFailure
+        what="The initiatives"
+        reason={readErrorMessage(initiativesRead.error)}
+        onRetry={() => {
+          void initiativesRead.refetch();
         }}
       />
     ) : (
@@ -577,31 +726,30 @@ export function WorkScreen({
     ) : hasAnyTask === true ? (
       <DeskClear />
     ) : null;
-  } else if (arrangedLanes.length === 0) {
+  } else if (arrangement.everyLane.length === 0) {
     body = <NoMatch />;
   } else {
     body = (
-      <div className="board-lanes">
-        {arrangedLanes.map((each) => (
-          <BoardLane
-            key={each.lane.id}
-            arrangedLane={each}
-            plugins={plugins}
-            tabStop={tabStop}
-            isStill={view.display.isStill}
-            canWriteSummaries={canWriteSummaries}
-            selectedIds={selection.selectedIds}
-            onToggleLane={view.toggleLane}
-            onToggleCell={view.toggleCell}
-            onToggleStack={view.toggleStack}
-            onAddTask={(laneId) => {
-              openAddSheet(toAddLane(laneId), laneId);
-            }}
-            onPressCard={pressCard}
-            onFocusCard={view.setCurrentCard}
-          />
-        ))}
-      </div>
+      <BoardBody
+        arrangement={arrangement}
+        plugins={plugins}
+        initiativeFlags={initiativeFlags}
+        tabStop={tabStop}
+        isStill={view.display.isStill}
+        canWriteSummaries={canWriteSummaries}
+        selectedIds={selection.selectedIds}
+        onToggleBlock={view.toggleInitiativeBlock}
+        onToggleFold={toggleFold}
+        onEditInitiative={editInitiative}
+        onPressBead={pressBead}
+        onToggleCell={view.toggleCell}
+        onToggleStack={view.toggleStack}
+        onAddTask={(laneId) => {
+          openAddSheet(toAddLane(laneId), laneId);
+        }}
+        onPressCard={pressCard}
+        onFocusCard={view.setCurrentCard}
+      />
     );
   }
 
@@ -610,6 +758,7 @@ export function WorkScreen({
       toolbar={
         <WorkToolbar
           pill={<OverviewPill />}
+          hasInitiatives={initiatives.length > 0}
           groupings={groupings}
           groupBy={groupBy}
           onGroupByChange={(next) => {
@@ -635,9 +784,7 @@ export function WorkScreen({
           }}
           display={view.display}
           onDisplayChange={view.setDisplay}
-          onFoldEverything={() => {
-            view.foldEverything(lanes.map((lane) => lane.id));
-          }}
+          onFoldEverything={foldEverything}
           onShowKeys={keys.showKeysSheet}
           onAdd={() => {
             openAddSheet(chooseAddLane());
@@ -659,6 +806,9 @@ export function WorkScreen({
               lane={addLane}
               result={addResult}
               onClose={closeAddSheet}
+              onNewInitiative={() => {
+                createInitiativeFromAddSheet(addLane.projectId);
+              }}
               onCreate={async (title) => {
                 await createTask({ title, lane: addLane });
               }}
@@ -703,6 +853,7 @@ export function WorkScreen({
             drawnLanes={arrangedLanes}
             isStill={view.display.isStill}
             intents={pane.intents}
+            hasPendingMove={logical.hasPendingMove}
             threadPromptWords={threads.threadPromptWords}
             changes={{
               ...pane.changes,
@@ -723,9 +874,11 @@ export function WorkScreen({
             }}
             moveToStage={moveCardToStage}
             onFilterByPlace={filterByPlace}
+            onCreateInitiative={createInitiativeFromPane}
             onShown={pane.onPaneShown}
             onChangeTask={onChangeOpenTask}
           />
+          {initiativeSheet.sheet}
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
           <SelectionBar
             count={selection.selectedIds.size}
@@ -746,11 +899,11 @@ export function WorkScreen({
           />
         </>
       }
-      stageCounts={drawnBoard === undefined ? null : countCardsByStage(arrangedLanes)}
+      stageCounts={arrangement.stageCounts}
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
-      hasSheet={addLane !== null || openTaskId !== null}
+      hasSheet={addLane !== null || openTaskId !== null || initiativeSheet.isOpen}
       isArriving={isArriving}
       state={state}
       scrollRef={scrollRef}

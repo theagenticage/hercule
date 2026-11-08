@@ -443,7 +443,7 @@ describe("createLive", () => {
     );
   });
 
-  it("invalidates only the Work board and the pushed Task's detail for a derived task push", async () => {
+  it("invalidates only the Work board, the pushed Task's detail and the merge checks for a derived task push", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
 
@@ -462,6 +462,7 @@ describe("createLive", () => {
     assert.deepStrictEqual(invalidations[1], [
       queryKeys.workBoard(),
       queryKeys.taskDetail("task-1"),
+      queryKeys.mergeCheck(),
     ]);
   });
 
@@ -1012,6 +1013,7 @@ describe("buildQueryKeys", () => {
       ["inbox-count"],
       ["external-entity"],
       ["entity-suggestions"],
+      ["mergeCheck"],
     ]);
 
     // The same key builders the task queries use.
@@ -1025,6 +1027,7 @@ describe("buildQueryKeys", () => {
       queryKeys.inboxCount(),
       queryKeys.externalEntity(),
       queryKeys.entitySuggestions(),
+      queryKeys.mergeCheck(),
     ]);
   });
 
@@ -1039,6 +1042,7 @@ describe("buildQueryKeys", () => {
       ["inbox-count"],
       ["external-entity"],
       ["entity-suggestions"],
+      ["mergeCheck"],
     ]);
   });
 

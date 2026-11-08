@@ -1,0 +1,33 @@
+/* The line from a blocked card to what holds it, while the pointer rests on the
+   card. Its SVG is only as large as the line (the box is set on the element),
+   above the cards and under the stage headers, and never takes the pointer. It fades in, which is the most the
+   motion rule lets a keyframe do (it may not animate a stroke); under Reduce
+   motion it appears whole. */
+.blocker-line {
+  position: absolute;
+  z-index: 5;
+  overflow: visible;
+  pointer-events: none;
+}
+.blocker-line path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+.blocker-line circle {
+  fill: var(--muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .blocker-line {
+    animation: blocker-line-in var(--m-base) var(--m-ease) both;
+  }
+}
+@keyframes blocker-line-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

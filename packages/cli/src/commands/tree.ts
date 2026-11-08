@@ -32,6 +32,7 @@ import {
   type Method,
   type OperationId,
   type Requirement,
+  type ResolvingQuery,
 } from "@hercule/contract";
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -104,11 +105,12 @@ export interface Field {
    */
   readonly resolves: OperationId | undefined;
   /**
-   * The query sent to the list operation in `resolves`, such as `{ view:
-   * "later" }` to match a tail among the snoozed signals; empty when the
-   * listing's default holds the ids this field takes.
+   * The queries sent to the list operation in `resolves`, whose answers are
+   * read together to match a tail. One query such as `{ view: "later" }`
+   * matches among the snoozed signals; `[{}]`, the default, is the listing
+   * as it comes, which holds the ids this field takes.
    */
-  readonly resolvesQuery: Readonly<Record<string, string>>;
+  readonly resolvesQueries: ReadonlyArray<ResolvingQuery>;
   /**
    * The key under which each word of a list positional is sent as an object,
    * for a list of objects; absent when the list holds the words themselves.
@@ -317,6 +319,15 @@ const readItemKeyType = (name: string, element: Ast | undefined, itemKey: string
 };
 
 /**
+ * Returns the queries a field's row sends to its list operation: the row's
+ * `resolvesQuery` as a list, or `[{}]` (the listing as it comes) when the row
+ * names none.
+ */
+const listResolvingQueries = (
+  query: ResolvingQuery | ReadonlyArray<ResolvingQuery> | undefined,
+): ReadonlyArray<ResolvingQuery> => (query === undefined ? [{}] : [query].flat());
+
+/**
  * Builds one field from its schema type and its CLI row.
  *
  * `schema` is the field's own schema, when the operation declares one; the
@@ -365,7 +376,7 @@ const buildField = (
     uploads: "upload" in row && row.upload === true,
     readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
-    resolvesQuery: ("resolvesQuery" in row ? row.resolvesQuery : undefined) ?? {},
+    resolvesQueries: listResolvingQueries("resolvesQuery" in row ? row.resolvesQuery : undefined),
     itemKey,
     help: row.help,
   };

@@ -223,8 +223,9 @@ import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
 import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
 import {
   buildWorkViewKey,
-  DEFAULT_WORK_DISPLAY,
+  EMPTY_WORK_VIEW,
   writeSavedWorkView,
+  type SavedWorkView,
 } from "../screens/work/work-view-storage";
 import { Shell } from "../shell";
 import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
@@ -896,6 +897,7 @@ const seedQueryCache = (
   }
   if (work !== undefined) {
     queryClient.setQueryData(queryKeys.workBoard(), work.board);
+    queryClient.setQueryData(queryKeys.initiatives(), work.initiatives ?? []);
     for (const detail of work.details ?? []) {
       queryClient.setQueryData(queryKeys.taskDetail(detail.task.id), detail);
     }
@@ -1857,8 +1859,10 @@ export async function mountWorkflowsSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Work board open: the main pane shows the app's real Work screen,
  * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
- * folded, as if the user had folded them, and the details of `openTaskId` open
- * beside it when one is given (`work.details` holds what they read). Returns
+ * folded and the Initiative rows of `work.openedInitiativeIds` opened, as if
+ * the user had done both, and the details of `openTaskId` open
+ * beside it when one is given (`work.details` holds what they read), and the
+ * choices of `view` laid over the default view. Returns
  * once a card is in the document. Fails when the page has no `#root`, draws no sidebar row and no
  * card, or tries to read a record the cache does not hold.
  */
@@ -1866,11 +1870,13 @@ export async function mountWorkSpecimen(
   records: SidebarRecords,
   work: WorkRecords,
   openTaskId?: string,
+  view?: Partial<SavedWorkView>,
 ): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
-    groupBy: "project",
+    ...EMPTY_WORK_VIEW,
     foldedLaneIds: work.foldedLaneIds,
-    display: DEFAULT_WORK_DISPLAY,
+    openedInitiativeIds: work.openedInitiativeIds ?? [],
+    ...view,
   });
   await mountShellSpecimen(
     records,

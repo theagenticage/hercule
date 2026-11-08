@@ -1,8 +1,9 @@
-import type { JSX, ReactNode, RefObject } from "react";
+import { useRef, type JSX, type ReactNode, type RefObject } from "react";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { STAGE_NAMES } from "@hercule/client-core/work";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { SectionHeading, Sunrise } from "../desk";
+import { BlockerLine } from "./blocker-line";
 import type { LaneLabels } from "./use-work-view";
 import "./work.css";
 
@@ -30,6 +31,9 @@ export type DeskState = "loading" | "board" | "first-run" | "clear";
  *   hairline and hides the stage names.
  * - `scrollRef` is the element that scrolls, which drag and keyboard code
  *   scroll and measure.
+ *
+ * The canvas holds the line that a blocked card draws to its blocker while
+ * the pointer rests on it (`BlockerLine`).
  *
  * The root carries `data-lanes`, `data-state` and, while a card is in the hand, `data-carrying`. The element that scrolls is
  * `.board-scroll`, and the headers are `[data-stage]` children of `.board-rule`.
@@ -62,6 +66,7 @@ export function BoardDesk({
   readonly scrollRef: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
   const hasScrollbar = useShowsClassicScrollbar(scrollRef);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const classes = [
     "work-desk",
     isOffline ? "is-offline" : null,
@@ -80,7 +85,7 @@ export function BoardDesk({
     >
       {toolbar}
       <div ref={scrollRef} className="board-scroll" tabIndex={-1}>
-        <div className="board-canvas">
+        <div ref={canvasRef} className="board-canvas">
           <div className="board-rule-wrap">
             <div className="board-rule">
               {BOARD_STAGES.map((stage) => (
@@ -92,6 +97,7 @@ export function BoardDesk({
             {state === "clear" && <Sunrise />}
           </div>
           {children}
+          <BlockerLine canvasRef={canvasRef} />
         </div>
       </div>
       {overlays}

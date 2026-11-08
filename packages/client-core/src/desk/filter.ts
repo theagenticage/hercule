@@ -24,6 +24,8 @@ export interface FilterValue {
    * turns them off.
    */
   readonly liftsItself?: true;
+  /** The hue of the flag the menu draws before the name, for a value that has a colour of its own. */
+  readonly hue?: number;
 }
 
 /** The heading over the outside places a source reports, in the Group by and the Filter menus. */

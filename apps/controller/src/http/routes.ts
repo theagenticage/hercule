@@ -119,6 +119,7 @@ import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
+import { InitiativeService, InitiativeServiceLayer } from "../initiatives";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -287,6 +288,22 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   }),
 );
 
+const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
+  Effect.gen(function* () {
+    const initiatives = yield* InitiativeService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(initiatives.query(query)))
+      .handle("read", ({ params }) => withApiErrors(initiatives.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(initiatives.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(initiatives.update(params.id, payload)),
+      )
+      .handle("close", ({ params }) => withApiErrors(initiatives.close(params.id)))
+      .handle("reopen", ({ params }) => withApiErrors(initiatives.reopen(params.id)))
+      .handle("delete", ({ params }) => withApiErrors(initiatives.delete(params.id)));
+  }),
+);
+
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
@@ -317,6 +334,15 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
         withApiErrors(tasks.unlinkEntity({ id: params.id, ...payload })),
       )
       .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
+      .handle("checkMerge", ({ params, query }) =>
+        withApiErrors(tasks.checkMerge(params.id, query.intoTaskId)),
+      )
+      .handle("addBlocker", ({ params, payload }) =>
+        withApiErrors(tasks.addBlocker(params.id, payload.blockedByTaskId)),
+      )
+      .handle("removeBlocker", ({ params }) =>
+        withApiErrors(tasks.removeBlocker(params.id, params.blockedByTaskId)),
+      )
       .handle("undoTryAgain", ({ params, payload }) =>
         withApiErrors(runs.undoTryAgain(params.id, payload)),
       )
@@ -1038,6 +1064,8 @@ const operationServices = Layer.mergeAll(
   // Deleting a Model Profile clears it from the projects that name it, so the
   // project service is provided to it rather than merged next to it.
   ModelProfileServiceLayer.pipe(Layer.provideMerge(ProjectServiceLayer)),
+  // Deleting an Initiative clears it from its Tasks through the task service.
+  InitiativeServiceLayer.pipe(Layer.provide(TaskServiceWithPortsLayer)),
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
@@ -1208,6 +1236,7 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  initiativeRoutes,
   externalEntityRoutes,
   notificationRoutes,
   signalRoutes,

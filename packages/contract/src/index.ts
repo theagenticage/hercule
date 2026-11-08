@@ -69,7 +69,15 @@ export {
 // name.
 export { DescribeLinePart } from "@hercule/plugin-host";
 
-export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
+export {
+  CLI,
+  NOUNS,
+  type CliExample,
+  type CliRow,
+  type FieldRow,
+  type NounRow,
+  type ResolvingQuery,
+} from "./cli";
 
 export {
   CapExceeded,
@@ -555,8 +563,11 @@ export {
   TaskDetailSession,
   TaskEntityChangedEventPayload,
   TaskEntityLinkInput,
-  TaskEntityLinkResult,
+  TaskChangeResult,
+  TaskBlockerInput,
   TaskFilter,
+  TaskMergeCheck,
+  TaskMergeCheckQuery,
   TaskMergeInput,
   TaskMoveInput,
   TaskPriority,
@@ -590,6 +601,9 @@ export {
   TryAgainUndo,
   WorkBoard,
   WorkCard,
+  WorkCardBlocker,
+  MAX_CARD_BLOCKERS,
+  MAX_DETAIL_BLOCKERS,
   WorkStackCandidate,
   refuseEmptyTaskUpdate,
   refuseFinishedCheckWithoutStageFact,
@@ -818,6 +832,18 @@ export {
   PostText,
   SharedFile,
 } from "./groups/discussion";
+export {
+  INITIATIVE_HUES,
+  Initiative,
+  InitiativeCreateInput,
+  InitiativeHue,
+  InitiativeQuery,
+  InitiativeUpdateInput,
+  MAX_INITIATIVE_INTENT_LENGTH,
+  MAX_INITIATIVE_NAME_LENGTH,
+  MAX_INITIATIVE_TARGET_LENGTH,
+  refuseEmptyInitiativeUpdate,
+} from "./groups/initiative";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
   MAX_PROJECT_NAME_LENGTH,

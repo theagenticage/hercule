@@ -163,9 +163,10 @@ describe("a command's fields against the schema", () => {
 
   it("gives every paged command a non-empty sort field list, except a list with one fixed order", () => {
     // `signal list` reads each view in the one order the view is defined by,
-    // and `runner metrics` reads points by runner and then oldest first, so
-    // they page with --limit and --cursor but take no --sort.
-    const FIXED_ORDER = ["signal list", "runner metrics"];
+    // `runner metrics` reads points by runner and then oldest first, and
+    // `initiative list` reads in creation order, so they page with --limit
+    // and --cursor but take no --sort.
+    const FIXED_ORDER = ["signal list", "runner metrics", "initiative list"];
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {
@@ -388,6 +389,7 @@ describe("the placeholders a usage line shows", () => {
     "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",
+    "task unblock": "<task-id> <blocker-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

@@ -15,7 +15,10 @@
  *   there;
  * - ⌘1 and ⌘2 (Ctrl on Linux) switch between the Office and Work;
  * - a Thread started from a card with the T key joins that card's Task, and
- *   D on the card marks the Task Done and takes it off the board.
+ *   D on the card marks the Task Done and takes it off the board;
+ * - an Initiative made from Add's sheet gets a row of its own, a card put on
+ *   it from the details leaves its lane, a card blocked by another says what
+ *   it waits on, and it comes back when that other card lands.
  *
  * The Thread comes from a scripted runner. The Tasks that fill the other
  * stages are created through the API, like the Thread's Project and its
@@ -30,7 +33,7 @@
 import type { Locator, Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { readSettings, RUNS_ON_MAC } from "../../apps/desktop/scripts/packaged-app";
-import type { BoardStage, WorkCard } from "../../packages/contract/src/index";
+import { INITIATIVE_HUES, type BoardStage, type WorkCard } from "../../packages/contract/src/index";
 import { findCompiledBinary, runCli } from "../../scripts/controller-process";
 import {
   arrangeFleet,
@@ -231,6 +234,34 @@ async function openWork(page: Page): Promise<void> {
   await page.locator(".work-desk .board-lane").first().waitFor();
 }
 
+/**
+ * Opens the details of the card `id` by clicking it, and returns them. Waits
+ * until they are on the page.
+ */
+async function openDetails(page: Page, id: string, title: string): Promise<Locator> {
+  await findCard(page, id).click();
+  const details = page.getByRole("dialog", { name: title });
+  await details.waitFor();
+  return details;
+}
+
+/**
+ * Closes the details with Esc and waits until they are gone. Esc is pressed
+ * again on each try: the focus can be on the card or the page rather than in
+ * the details when it is pressed, and an Esc that nothing takes is harmless.
+ */
+async function closeDetails(page: Page, details: Locator): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.keyboard.press("Escape");
+        return details.count();
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+}
+
 describe("Work", () => {
   it("shows a started Thread as a card, keeps a dragged card where it was dropped across a restart, moves it live from the terminal, and shares ⌘1 and ⌘2 with the Office", async () => {
     const { arranged, startStorefrontThread, laneNames } = await arrangeBoard();
@@ -380,5 +411,82 @@ describe("Work", () => {
         "Storefront: building": ["Rewrite the returns page"],
         "Storefront: in-review": ["Refresh the sale banner"],
       });
+  }, 180_000);
+
+  it("draws a new Initiative as a row, takes a card off its lane when the card joins it, shows what a blocked card waits on, and brings the card back when its blocker lands", async () => {
+    const arranged = await arrangeFleet();
+    const { client, fleet } = arranged;
+    const storefront = await fleet.createProject(STOREFRONT);
+    const createTask = (title: string, stage: BoardStage) =>
+      client.task.create({ payload: { title, description: "", stage, projectId: storefront.id } });
+    const refundButton = await createTask("Add a refund button", "planned");
+    const refundEmails = await createTask("Ship refund emails", "exploring");
+    const readCard = async (id: string): Promise<WorkCard> =>
+      (await readBoardCards(arranged)).find((card) => card.id === id)!;
+
+    const { app, page } = await openSignedIn(arranged.url);
+    await keepWindowOnTop(app);
+    await openWork(page);
+    await findCard(page, refundButton.id).waitFor();
+    // With no Initiative, the board draws no row.
+    expect(await page.locator(".initiative-row").count()).toBe(0);
+
+    // Add's sheet makes the Initiative: it takes a colour of its own, and its
+    // row stands on top of the lanes.
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "New initiative", exact: true }).click();
+    await page.getByRole("textbox", { name: "Name" }).fill("Gift card refunds");
+    await page
+      .getByRole("textbox", { name: "Target", exact: true })
+      .fill("Live by the spring sale");
+    await page.getByRole("button", { name: "Create initiative" }).click();
+    await page.getByRole("heading", { name: "New initiative" }).waitFor({ state: "detached" });
+    const head = page.getByRole("button", { name: /^Gift card refunds/ });
+    await head.waitFor();
+    const [initiative] = (await client.initiative.query({ query: { limit: 10 } })).items;
+    expect(initiative).toMatchObject({
+      name: "Gift card refunds",
+      target: "Live by the spring sale",
+    });
+    expect(INITIATIVE_HUES).toContain(initiative!.hue);
+
+    // The details of "Add a refund button" put it on the Initiative. Its card
+    // leaves the lane and the Initiative's folded line holds it as a bead.
+    const refundDetails = await openDetails(page, refundButton.id, "Add a refund button");
+    await refundDetails.getByRole("button", { name: "Initiative: none" }).click();
+    await page.getByRole("menuitemradio", { name: "Gift card refunds" }).click();
+    await expect
+      .poll(async () => (await readCard(refundButton.id)).initiativeId)
+      .toBe(initiative!.id);
+    await page.locator(`[data-bead-task-id="${refundButton.id}"]`).waitFor();
+    await findCard(page, refundButton.id).waitFor({ state: "detached" });
+    await closeDetails(page, refundDetails);
+
+    // "Ship refund emails" waits on "Add a refund button", which is on the
+    // Initiative: the card says so, and stays in its lane.
+    const emailsDetails = await openDetails(page, refundEmails.id, "Ship refund emails");
+    const blockedBy = emailsDetails.getByRole("region", { name: "Blocked by" });
+    await blockedBy.getByRole("button", { name: "Add a blocker" }).click();
+    await blockedBy.getByRole("textbox", { name: "Add a blocker" }).fill("refund button");
+    await blockedBy.getByRole("button", { name: /^Add a refund button/ }).click();
+    await blockedBy.getByRole("button", { name: /^Add a refund button/ }).waitFor();
+    await closeDetails(page, emailsDetails);
+    const blockedCard = findCard(page, refundEmails.id);
+    await expect.poll(() => blockedCard.getAttribute("data-blocked-by")).toBe(refundButton.id);
+    expect(await blockedCard.textContent()).toContain("Waits on Add a refund button");
+    expect((await readCard(refundEmails.id)).blockedByCount).toBe(1);
+
+    // Open in place, the Initiative shows its card. Moved to Landed, the
+    // card lets go of the one that waited on it, and the row's words follow.
+    // The key is pressed once: the card leaves the row when it lands, so a
+    // second try would wait for a card that is no longer there.
+    await head.click();
+    await findCard(page, refundButton.id).focus();
+    await page.keyboard.press("5");
+    await expect.poll(async () => (await readCard(refundButton.id)).stage).toBe("landed");
+    await expect.poll(() => blockedCard.getAttribute("data-blocked-by")).toBeNull();
+    expect(await blockedCard.textContent()).not.toContain("Waits on");
+    expect((await readCard(refundEmails.id)).blockedByCount).toBe(0);
+    await expect.poll(() => head.textContent()).toMatch(/1 of 1 landed/);
   }, 180_000);
 });

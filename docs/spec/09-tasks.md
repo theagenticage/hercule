@@ -1,6 +1,6 @@
 # Tasks
 
-A Task is a unit of human intent: a described piece of work someone wants done. It is a thin row - title, markdown description, one fixed stage axis with a coarse status read from it, a priority, bare-string labels, an optional project, and a provenance list whose entries are never edited or removed. The core stores tasks, emits `task.created` / `task.updated` platform events, and answers exact-identity and full-text queries. It creates a Task for every Thread that has none to join (see [Threads and their Tasks](#threads-and-their-tasks)). A Text Generation describes each Task in a [Task Summary](#task-summaries), and the user can [merge](#merging-tasks) two Tasks. It records a [Fact](#facts-and-the-fence) when a linked outside thing changes state, and two shipped workflows turn Facts into stage moves, with a fence so that a drag wins until a newer Fact arrives ([ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md)). Beyond that it never decides when a task is in progress or done; every task semantic beyond the row (what "done" means, when to close, what a label signifies) belongs to workflows and their shipped defaults ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), amended by [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)). Tasks are the buffer between triage and work: triage workflows create and update them, work workflows trigger on their platform events ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [./10](./10-triage-intake-and-notifications.md)).
+A Task is a unit of human intent: a described piece of work someone wants done. It is a thin row - title, markdown description, one fixed stage axis with a coarse status read from it, a priority, bare-string labels, an optional project, and a provenance list whose entries are never edited or removed. The core stores tasks, emits `task.created` / `task.updated` platform events, and answers exact-identity and full-text queries. It creates a Task for every Thread that has none to join (see [Threads and their Tasks](#threads-and-their-tasks)). A Text Generation describes each Task in a [Task Summary](#task-summaries), and the user can [merge](#merging-tasks) two Tasks. It records a [Fact](#facts-and-the-fence) when a linked outside thing changes state, and two shipped workflows turn Facts into stage moves, with a fence so that a drag wins until a newer Fact arrives ([ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md)). *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* A Task may belong to one [Initiative](#initiatives), the user's own lasting intent, and may wait on other Tasks through [blockers](#blockers). Both are facts a card draws, and neither gates anything ([ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)). Beyond that it never decides when a task is in progress or done; every task semantic beyond the row (what "done" means, when to close, what a label signifies) belongs to workflows and their shipped defaults ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), amended by [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)). Tasks are the buffer between triage and work: triage workflows create and update them, work workflows trigger on their platform events ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [./10](./10-triage-intake-and-notifications.md)).
 
 ## The Task row
 
@@ -28,6 +28,7 @@ interface Task {
   priority: TaskPriority;     // default "normal"
   labels: string[];
   projectId?: string;         // at most one Project (./02)
+  initiativeId?: string;      // at most one Initiative (./02), Initiatives below
   provenance: ProvenanceEntry[];  // entries are never edited or removed; a merge can move them between Tasks
   createdAt: string;
   updatedAt: string;
@@ -47,13 +48,14 @@ interface Task {
 | `priority` | enum | `urgent`, `high`, `normal`, `low`. Defaults to `normal`. |
 | `labels` | string[] | Bare strings, flat namespace. See [Labels](#labels). |
 | `projectId` | id? | Optional link to one Project. |
+| `initiativeId` | id? | *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* Optional link to one [Initiative](#initiatives). A Task has at most one. |
 | `provenance` | ProvenanceEntry[] | Entries are never edited or removed. See [Provenance](#provenance-and-external-refs). |
 | `createdAt`, `updatedAt` | timestamp | Maintained by the core. |
 | `stageChangedAt` | timestamp | Maintained by the core. Set on create and updated only when `stage` changes. |
 | `statusChangedAt` | timestamp | Maintained by the core. Consolidated reading (ticket 29 names the field only): set on create and updated only when `status` changes. A stage change inside one status (`building` to `in-review`) does not move it. |
 | `deletedAt` | timestamp? | Set by `task.delete`. A deleted task answers `not_found` on `task.read` and is excluded from `task.query` and search. See [Delete](#delete). |
 
-There is no assignee, no subtask, no task-to-task dependency, and no comment thread (see [Not in v1](#not-in-v1)).
+There is no assignee, no subtask, and no comment thread (see [Not in v1](#not-in-v1)). *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* A Task may wait on other Tasks, but that is not a field of the row: it is the stored edges of [Blockers](#blockers).
 
 Ids are UUIDv7 like every Hercule-owned entity; format, storage and the short form are owned by [./04](./04-state-store.md).
 
@@ -517,7 +519,7 @@ The migration that adds `taskId` to sessions gives the Threads that are neither 
 - `task.move` is the one operation that picks a place. It writes the stage, the project and the rank in one `task.updated`, so `changes.boardRank` is reported beside `changes.stage` and `changes.projectId`. A move inside a column reports `changes.boardRank` alone, so a trigger on `changes.stage` or `changes.status` does not see it.
 - The board reads in order of project, then stage, then `boardRank`. Nothing on Work sorts by recent activity, and a card stays where the user left it.
 
-**What a card shows.** Three facts, each worked out on the controller from real rows. They are independent: a card can hold all three, there is no precedence between them, and no field combines them.
+**What a card shows.** Three facts, each worked out on the controller from real rows. *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* A card also carries `initiativeId` and the blockers that still block it ([Initiatives](#initiatives), [Blockers](#blockers)); those are not part of the three below and have no precedence with them. They are independent: a card can hold all three, there is no precedence between them, and no field combines them.
 
 - **`openQuestion`, the one meaning of "wants you".** A session of the Task with kind `thread` has an open Request of kind `question`, asked by the Thread's own agent or by a subagent inside the Thread, parked or async. With several, the session opened first wins, then the first question in its open Requests. The card holds the session, the Request and the first question's text, cut to `MAX_CARD_QUESTION` (300 characters).
 - **`failure`.** The Task's stored failed run is set. It stays until it ends and is never hidden by an open question or a live session.
@@ -530,6 +532,42 @@ Nothing else sets `openQuestion`. An approval, a Permission Request, a signal, a
 Reads and moves: `task.queryBoard` and `task.move` ([./11](./11-public-api-and-agent-surface.md#task)).
 
 *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A card also carries the Task's `summary` once one is written ([Task Summaries](#task-summaries)). The summary never sets `openQuestion`, `failure` or `workingSessionId`, and it is not drawn beside a failure or a question. The details of one card are read with `task.readDetail` ([./11](./11-public-api-and-agent-surface.md#task)).
+
+## Initiatives
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* An Initiative is the user's own lasting intent, such as "Gift card refunds". Its record, fields and operations are in [./02](./02-domain-model.md#initiative) and [./11](./11-public-api-and-agent-surface.md#initiative). An outside initiative, such as a Linear initiative, is an External Entity ([./20](./20-external-entities.md)). It is only ever a lane or a filter on Work, and filtering by one never sets `initiativeId`.
+
+**The link.** `Task.initiativeId` names at most one Initiative. An Initiative may hold Tasks from several projects, so a Task's project and its Initiative are independent.
+
+- **Writes.** `task.create`, `task.update` and `task.move` take `initiativeId`, and `null` clears it. A move takes it so that one drop between Initiative lanes is one write and one Undo. `not_found` for an Initiative that does not exist or is deleted.
+- **A closed Initiative.** A write that changes a Task's `initiativeId` to a closed Initiative fails `invalid_state`, telling the caller to reopen it first. A write that leaves `initiativeId` as it is never fails for this, so a Task already on a closed Initiative can still be edited.
+- **Who may.** Only the user creates, changes, closes, reopens or deletes an Initiative. A session or workflow step with `task.update` may also put a Task on an Initiative that exists, take a Task off its Initiative, or move it to another one: that is an ordinary `task.update` of the Task, not a change to the Initiative.
+- **`task.updated`** reports `changes.initiativeId` as `{ old, new }`, beside any other change of the same write.
+- **Closing** sets the Initiative's `closedAt` and leaves every Task's `initiativeId` alone. **Reopening** clears it. Neither writes to a Task.
+- **Deleting an Initiative** is soft. In the same transaction it clears `initiativeId` on each of its Tasks, with one `task.updated` each (`changes.initiativeId` from the id to nothing), and announces each Task and the Initiative on their live topics. The tasks domain owns that write (`TaskService.clearInitiative`), so every Task write stays in tasks.
+- **Progress is the Initiative's own truth.** An Initiative is the user's, so its Tasks are the whole count, unlike an outside project, whose progress is only what its source reports. A Task at `landed` or `done` counts as landed, and the total leaves out `dropped`. A Task at `done` has no card, so the board reply carries the number of Done Tasks of each Initiative (`initiativeDoneCounts`, [./11](./11-public-api-and-agent-surface.md#task)), and a client works out landed and total from the cards it holds plus that number. The count and the Initiative's beads then always agree.
+
+## Blockers
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* A Task can wait on another Task. The one that waits is the **blocked** Task and the one it waits on is its **blocker**. A blocker is a fact a card draws. It stops no operation: a blocked card can be dragged, started and marked Done, because the core gates nothing ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)).
+
+**The relation.** `task_blockers (task_id, blocked_by_task_id, created_at, created_by)`, with the primary key `(task_id, blocked_by_task_id)`, a check that the two ids differ, and an index on `blocked_by_task_id`. It is owned by the tasks domain. There is one stored direction: `task_id` waits on `blocked_by_task_id`. "Blocks" is the inverse read of the same rows and never a second relation.
+
+**Always a DAG.** The stored edges never form a cycle, finished blockers included.
+
+- **The check.** `task.addBlocker` resolves both ids through the merge redirect, refuses a Task as its own blocker, and asks whether the proposed blocker already waits, directly or through other edges, on the Task. It is a recursive query over every stored edge. If there is such a path, nothing is written. Otherwise the edge is inserted. Both steps run in one transaction on the single writer connection, so two requests cannot each pass the check and together close a loop: the second runs after the first has committed.
+- **The refusal names the path** and is `invalid_state` with `details.reason` set to `blocker-cycle`, so no client matches message text. The words are "*Add a refund button* already waits on this Task, through *Plan the rollout*." For a direct edge: "*Add a refund button* already waits on this Task." The path is one ordered witness, not every path.
+- **Adding what exists changes nothing.** `task.addBlocker` for an edge that is stored, and `task.removeBlocker` for one that is not, return `changed: false` and write nothing.
+
+**What "blocked" means.** A Task is blocked while at least one of its blockers is live and at a stage other than `landed`, `done` and `dropped`. A blocker at one of those three stages no longer blocks, and a card whose blockers have all reached them comes back by itself. The edge stays as history: it is still listed on both Tasks' details and can be removed, and it counts again if the blocker moves back to an earlier stage. A merged Task is never a blocker, since the merge moved its edges. The board's card carries only blockers that still block ([./11](./11-public-api-and-agent-surface.md#task)).
+
+**Across projects.** A blocker may be in another project or Initiative. The read gives both ends, so a project filter or a folded lane never hides why a card is blocked.
+
+**Events.** `task.addBlocker` and `task.removeBlocker` each emit one `task.updated` on the blocked Task, stamped with the actor, reporting `changes.blockedBy` as `{ added: string[], removed: string[] }` of blocker ids. Both ends are announced on the `task` live topic: a blocker's own title and stage reach its dependents because the board is one read that any `task` push re-reads.
+
+**Delete.** `task.delete` removes every edge of the Task, in both directions, in the same transaction, and reports the ones it removed in `changes.blockedBy.removed` on the Task and announces the Tasks at their other ends, so a card is never held by a Task nobody can see. The hand-off Undo deletes through the same write and cleans the same way. Edges of a Task at `done` or `dropped` are kept: finishing is not deleting.
+
+**Merge.** [Merging Tasks](#merging-tasks) moves the edges and refuses a merge that would close a loop.
 
 ## Task Summaries
 
@@ -659,10 +697,13 @@ The answer is `HandOffUndo`. `undone` is returned only when the Task was actuall
 4. The source's sessions and runs get the survivor's `taskId`, and its `task_workspaces` rows move. A live run on the source stays live, on the survivor.
 5. **The source's links to outside things move to the survivor** (`task_entity_links`). A ref both Tasks link keeps one link: the older `linked_at` with the `linked_by` that came with it, and `following` if either link had it ([Links between Tasks and outside things](#entity-links)).
    *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The source's Facts and suppressions move too, the survivor's fence becomes the highest Fact id in the table, and its cause is cleared ([Merging with Facts](#merging-with-facts)).
-6. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
-7. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
+6. *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* **The source's blocker edges move to the survivor.** Every edge of the source is remapped onto the survivor, in both directions. An edge that becomes a self edge, and one the survivor already has, is removed. Then the merge checks the remapped edges for a cycle. A cycle refuses the whole merge with `invalid_state` and `details.reason` `blocker-cycle`, naming the path, and nothing is written. Merging two Tasks where one reaches the other through a third closes a loop, so it is refused. Both ends of every moved edge are announced. **The Initiative:** the survivor keeps its own. With none, it takes the source's, even when that Initiative is closed, because the membership already existed and the merge adds none. When the two differ, the merge goes ahead with the survivor's.
+7. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
+8. The survivor gets one `task.updated` event (its description, labels, the new entry and, when it changed, its `initiativeId` and `blockedBy`), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
 
 The merge returns the survivor.
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* **The pre-check.** `task.checkMerge` answers whether a merge would be refused, and writes nothing. It runs every check `task.merge` runs before it writes (the same Task twice, a Task that is unknown, deleted, merged or finished, too many labels or too long a description, and the blocker cycle of step 6) from the one function the merge calls, so its refusal is the message the merge would fail with. A client calls it when a merge target is picked, so it can say so before the drop. It answers `refusal`, or nothing when the merge would go ahead. It does not ask who the caller is, so a session may check a merge only the user may make. The merge's refusal is decisive: a Task can change between the check and the merge.
 
 **The redirect.** After a merge, the source's id still works, once. `resolveTaskId(id)` returns the survivor of a merged id, and the id itself otherwise. It follows one hop.
 
@@ -702,12 +743,13 @@ interface TaskCreatedPayload {
 interface TaskUpdatedPayload {
   taskId: string;
   changes: {
-    // scalar fields: title, description, stage, status, priority, projectId, boardRank
+    // scalar fields: title, description, stage, status, priority, projectId, initiativeId, boardRank
     [field: string]: { old: unknown; new: unknown };
   } & {
-    // array fields: labels, provenance
+    // array fields: labels, provenance, blockedBy
     labels?: { added: string[]; removed: string[] };
     provenance?: { added: ProvenanceEntry[]; removed: [] };
+    blockedBy?: { added: string[]; removed: string[] };  // blocker Task ids
   };
 }
 ```
@@ -718,6 +760,7 @@ Rules:
 - Scalar fields report `{old, new}`; array fields report `{added, removed}`. An entry is never removed, so provenance's `removed` is always empty. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* The entries a merge moves to the survivor are not reported: its `task.updated` lists only the new `mergedTaskId` entry in `added`.
 - A provenance-only append fires `task.updated` too. Shipped workflow defaults MUST filter on the fields they care about (for example `has(event.payload.changes.status)`) rather than on the bare event kind, and thereby demonstrate field-filtering.
 - *(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* `changes.stage` appears for every stage change, and `changes.status` whenever the coarse status changes ([Status axis and lifecycle](#status-axis-and-lifecycle)). A change of stage inside one status reports `changes.stage` alone.
+- *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* `changes.initiativeId` appears when a write changes the Task's Initiative, and `changes.blockedBy` when a blocker edge is added or removed, including the edges a delete or a merge removes. A move to another Initiative lane reports `changes.initiativeId` beside `changes.boardRank`.
 - Example CEL filters: `event.payload.changes.status.new == "done"`, `has(event.payload.changes.status)`, `event.payload.changes.stage.new == "in-review"`, ~~`"proposed" in event.changes.labels.removed`~~ `"ready-for-agent" in event.payload.changes.labels.added` *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): `proposed` is retired.)*. The payload sits under `event.payload` in the CEL context, so a change to a Task is read at `event.payload.changes` ([./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md)).
 
 *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* **`task.entityChanged`** carries a [Fact](#facts-and-the-fence): `taskId`, `ref`, `entityKind`, `lifecycle`, `previousLifecycle` (null at a link or a first observation), `factId`, `openLinks`, `completedLinks` and `observedAt`. [./08](./08-events-and-connections.md#55-platform-events-core) owns the payload table. A bare trigger on it fires for every Fact, so a workflow that listens must filter.
@@ -755,7 +798,7 @@ No vector search and no embeddings. The semantic part of triage - grouping heter
 
 ## Delete
 
-Delete is **soft** (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46), amending ticket 29's hard delete): `task.delete` sets `deletedAt`; the row and its provenance stay. A deleted task answers `not_found` on `task.read`, is excluded from `task.query` (no include-deleted option in v1) and from search, and emits `task.deleted { taskId, snapshot }` with the final row, since nothing can read it afterwards. The core withdraws open Notifications whose subject is the task ([./10](./10-triage-intake-and-notifications.md)); Runs and Sessions keep their `taskId`. A deleted Task is never joined again: the join rules skip it ([Threads and their Tasks](#threads-and-their-tasks)). *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* Deleting the id of a Task that was merged into another fails `not_found` and names the survivor, because an old id must never delete the Task that took over ([Merging Tasks](#merging-tasks)). Deleting a Task clears its summary's `dirty_at` ([Task Summaries](#task-summaries)). The event log keeps the audit trail of everything that happened before deletion (the event log is the audit log, [./13](./13-security.md)); the events the task referenced stop being protected from pruning ([./04](./04-state-store.md) Retention). Use `cancelled` for work that was decided against; delete only what should never have existed. Pruning deleted tasks outright, with their runs, is post-v1.
+Delete is **soft** (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46), amending ticket 29's hard delete): `task.delete` sets `deletedAt`; the row and its provenance stay. A deleted task answers `not_found` on `task.read`, is excluded from `task.query` (no include-deleted option in v1) and from search, and emits `task.deleted { taskId, snapshot }` with the final row, since nothing can read it afterwards. The core withdraws open Notifications whose subject is the task ([./10](./10-triage-intake-and-notifications.md)); Runs and Sessions keep their `taskId`. A deleted Task is never joined again: the join rules skip it ([Threads and their Tasks](#threads-and-their-tasks)). *(Added 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* Deleting the id of a Task that was merged into another fails `not_found` and names the survivor, because an old id must never delete the Task that took over ([Merging Tasks](#merging-tasks)). Deleting a Task clears its summary's `dirty_at` ([Task Summaries](#task-summaries)). *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* It also removes the Task's blocker edges ([Blockers](#blockers)). The event log keeps the audit trail of everything that happened before deletion (the event log is the audit log, [./13](./13-security.md)); the events the task referenced stop being protected from pruning ([./04](./04-state-store.md) Retention). Use `cancelled` for work that was decided against; delete only what should never have existed. Pruning deleted tasks outright, with their runs, is post-v1.
 
 Delete is a public-API operation ([./11](./11-public-api-and-agent-surface.md)). The shipped `worker` profile grants task read/create/update and not delete (ticket 18; verb split in [./13](./13-security.md)).
 
@@ -775,6 +818,9 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hercule task link <id> --ref <ref>` | links an outside thing to a Task by hand, and clears a suppression of it ([Links by hand and suppressions](#links-by-hand-and-suppressions)); grant `task.update` |
 | `hercule task unlink <id> --ref <ref>` | takes a link away and keeps it away: voids the pair's Facts and suppresses the ref; grant `task.update` |
 | `hercule task merge <id> --into <id>` | merges the first Task into the second, as the user ([Merging Tasks](#merging-tasks)); grant `task.update`; refused for a session |
+| `hercule task check-merge <id> --into <id>` | says whether that merge would be refused, and why, and writes nothing ([Merging Tasks](#merging-tasks)); grant `task.read` |
+| `hercule task block <id> --by <id>` | makes the first Task wait on the second ([Blockers](#blockers)); refused with the path when it would close a loop; grant `task.update` |
+| `hercule task unblock <id> --by <id>` | removes that blocker edge; grant `task.update` |
 | `hercule session move-to-task <id> [--task <id>]` | moves a Thread to a Task, or to a new one ([Moving a Thread to another Task](#moving-a-thread-to-another-task)); grant `session.steer`; refused for a session |
 | `hercule task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
 
@@ -796,14 +842,17 @@ Kanban-style groupings, columns, swimlanes~~, and the Intake tiers~~ *(Amended 2
 
 ## Not in v1
 
-- **Subtasks** and **task-to-task dependencies** - grouping is expressed by shared labels, a shared project, or provenance refs pointing at another task's ~~signals~~ events *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*.
+- **Subtasks.** Grouping is expressed by shared labels, a shared project, or provenance refs pointing at another task's ~~signals~~ events *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, or by an [Initiative](#initiatives) *(amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md))*.
+- ~~**Task-to-task dependencies.**~~ *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* Dependencies exist as [Blockers](#blockers): a fact a card draws, which gates nothing.
+- **Follow-up relations between Tasks.** A Follow-up ("do this after") is not a Blocker ("this waits"), and is not built.
+- **Gating on a blocker or an Initiative.** No operation is refused because a Task is blocked or sits in an Initiative.
 - **Comments** - enrichment edits the description or appends provenance.
 - **Assignee** - who works a task is visible from the runs and sessions that reference it and from the actor stamps; there is no assignment field.
 - **Suggested-priority shadow field** - the actor-stamped event log covers it.
 
 ## Post-v1
 
-- Subtasks / dependencies / comments / assignee: additive fields or side tables; nothing in v1 assumes their absence beyond the thin row.
+- Subtasks / comments / assignee: additive fields or side tables; nothing in v1 assumes their absence beyond the thin row. *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036): dependencies are built, as [Blockers](#blockers).)*
 - Webhook event sources make `task.query` guards earn their keep at volume; v1 polling sources are modest-volume ([./08](./08-events-and-connections.md)).
 - Multi-user widens `actor` on provenance entries; the field is a string from day one so it widens without restructuring.
 
@@ -822,4 +871,5 @@ Kanban-style groupings, columns, swimlanes~~, and the Intake tiers~~ *(Amended 2
 - [ADR 0052 - Tasks have a stage, and Threads join them](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)
 - [ADR 0053 - A Text Generation describes a Task; it never moves one](../adr/0053-a-text-generation-describes-a-task-it-never-moves-one.md)
 - [ADR 0055 - Facts move cards through editable workflows](../adr/0055-facts-move-cards-through-editable-workflows.md)
+- [ADR 0056 - Initiatives and blockers are thin structure over Tasks](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)
 - [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)

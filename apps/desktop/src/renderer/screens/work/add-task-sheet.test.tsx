@@ -18,11 +18,13 @@ const renderSheet = (
     onCreate = vi.fn().mockResolvedValue(undefined),
     result = null as string | null,
     fromSource = null as ReactNode,
+    onNewInitiative = vi.fn(),
   } = {},
 ): {
   readonly field: HTMLInputElement;
   readonly onCreate: typeof onCreate;
   readonly onClose: () => void;
+  readonly onNewInitiative: () => void;
 } => {
   const onClose = vi.fn();
   render(
@@ -30,11 +32,17 @@ const renderSheet = (
       lane={lane}
       onCreate={onCreate}
       onClose={onClose}
+      onNewInitiative={onNewInitiative}
       result={result}
       fromSource={fromSource}
     />,
   );
-  return { field: screen.getByRole("textbox", { name: "New Task" }), onCreate, onClose };
+  return {
+    field: screen.getByRole("textbox", { name: "New Task" }),
+    onCreate,
+    onClose,
+    onNewInitiative,
+  };
 };
 
 describe("AddTaskSheet", () => {
@@ -49,6 +57,26 @@ describe("AddTaskSheet", () => {
     renderSheet(NO_PROJECT);
 
     expect(screen.getByText("Starts in Exploring, with no project.")).toBeTruthy();
+  });
+
+  it("says a Task made from an Initiative starts in it", () => {
+    renderSheet({
+      id: "initiative:checkout",
+      name: "Checkout rework",
+      projectId: null,
+      initiativeId: "i1",
+    });
+
+    expect(screen.getByText("Starts in Exploring, in Checkout rework.")).toBeTruthy();
+  });
+
+  it("opens the sheet that makes an Initiative from the quiet row at the foot", async () => {
+    const user = userEvent.setup();
+    const { onNewInitiative } = renderSheet(STOREFRONT);
+
+    await user.click(screen.getByRole("button", { name: "New initiative" }));
+
+    expect(onNewInitiative).toHaveBeenCalledOnce();
   });
 
   it("creates the Task with the trimmed title on Return, then clears the field", async () => {

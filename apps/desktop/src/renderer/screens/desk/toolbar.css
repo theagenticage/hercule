@@ -211,6 +211,17 @@
 .menu-mark:empty {
   display: none;
 }
+.hue-flag {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--plan-ink);
+  line-height: 0;
+}
+/* The icon takes the flag's colour. Without this, the rule that tones every icon in a menu row down (`.menu-pick .ic`) would grey it. */
+.hue-flag .ic {
+  color: inherit;
+}
 .menu-box {
   flex: none;
   display: grid;

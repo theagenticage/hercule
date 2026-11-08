@@ -4,7 +4,7 @@
  */
 import type { SessionSpawnInput, Workspace, WorkCard } from "@hercule/contract";
 import { dropClosingFullStops } from "../text";
-import { shortenTitle } from "./describe-card-move";
+import { shortenTitle } from "./card-title";
 
 /** The Task a Thread is started on: what the request needs of its card. */
 export type StartTarget = Pick<WorkCard, "id" | "title" | "projectId">;

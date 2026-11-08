@@ -4,7 +4,7 @@ import { isId } from "@hercule/contract";
 import { controllerQuery, projectsQuery, readOnOpen } from "../../../app/queries";
 import { isWindowVisible } from "../../../app/window-visibility";
 import { WorkScreen } from "./-work-screen";
-import { workBoardQuery } from "./-work-board";
+import { initiativesQuery, workBoardQuery } from "./-work-board";
 
 /**
  * The search params of Work:
@@ -40,8 +40,9 @@ const validateWorkSearch = (search: Record<string, unknown>): WorkSearch => ({
  * The route is a chunk of its own. Its loader starts the board's read without
  * waiting for it, so the screen shows its loading state, with the stage names
  * and lanes already in place, instead of holding the whole app on the
- * previous screen. A hidden window starts no read: the board is read when the
- * window shows (see `useWorkBoard`). The Projects name the lanes. The shell
+ * previous screen. The open Initiatives are read the same way, and the board
+ * is not drawn until they are in (see `useWorkInitiatives`). A hidden window
+ * starts no read: the board is read when the window shows (see `useWorkBoard`). The Projects name the lanes. The shell
  * has read them already and keeps them current, so this read is from the
  * cache. The controller's record, which says whether summaries can be
  * written, is also read without waiting.
@@ -55,7 +56,10 @@ export const Route = createFileRoute("/_connected/_shell/work")({
   validateSearch: validateWorkSearch,
   loader: ({ context: { controller, queryClient } }) => {
     const { client } = controller;
-    if (isWindowVisible()) void queryClient.prefetchQuery(workBoardQuery(client));
+    if (isWindowVisible()) {
+      void queryClient.prefetchQuery(workBoardQuery(client));
+      void queryClient.prefetchQuery(initiativesQuery(client));
+    }
     // Whether Text Generation can run decides if a card promises a summary. The read does not
     // block the screen, and a failed one leaves the cards without that promise.
     void readOnOpen(queryClient, controllerQuery(client)).catch(() => undefined);

@@ -122,7 +122,7 @@ const isLeftOfStages = (stageEdges: readonly StageEdge[], x: number): boolean =>
 };
 
 /** Returns the stage at `x`: the last stage that starts at or left of it, and the first for a pointer left of all. */
-const pickStage = (stageEdges: readonly StageEdge[], x: number): BoardStage | undefined => {
+export const pickStage = (stageEdges: readonly StageEdge[], x: number): BoardStage | undefined => {
   let picked = stageEdges[0];
   for (const edge of stageEdges) {
     if (x >= edge.left - HALF_STAGE_GAP) picked = edge;

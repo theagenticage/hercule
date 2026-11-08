@@ -210,6 +210,47 @@ describe("a positional whose row resolves tails", () => {
     });
   });
 
+  it("resolves an initiative tail among the open and the closed initiatives, for every command that takes one", async () => {
+    const buildInitiative = (tail: string) => ({
+      id: buildId(tail),
+      name: "Gift card refunds",
+      intent: "",
+      hue: 150,
+      createdAt: "2026-10-10T09:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+    });
+    const open = buildInitiative("1111111a");
+    const closed = { ...buildInitiative("2222222b"), closedAt: "2026-10-11T09:00:00.000Z" };
+    for (const [verb, extra, method] of [
+      ["read", [], "GET"],
+      ["update", ["--name", "Renamed"], "PATCH"],
+      ["close", [], "POST"],
+      ["reopen", [], "POST"],
+      ["delete", [], "DELETE"],
+    ] as const) {
+      for (const initiative of [open, closed]) {
+        const { fetch, client } = stubClient((request) =>
+          request.path === "/api/v1/initiatives" && request.method === "GET"
+            ? { items: [request.query.get("closed") === "true" ? closed : open] }
+            : initiative,
+        );
+        const command = lookUpCommand("initiative", verb);
+        const args = await parseArguments(
+          command,
+          [initiative.id.slice(-8), ...extra],
+          refuseStdinRead,
+        );
+
+        await execute(client, command, args);
+
+        const listed = fetch.calls.filter((call) => call.path === "/api/v1/initiatives");
+        expect(listed.map((call) => call.query.get("closed"))).toEqual([null, "true"]);
+        expect(fetch.calls.at(-1), `${verb} ${initiative.id}`).toMatchObject({ method });
+        expect(fetch.calls.at(-1)!.path).toContain(initiative.id);
+      }
+    }
+  });
+
   it("resolves each tail of the sessions that session done and session reopen take", async () => {
     const sessions = [buildSession("ccccccc3"), buildSession("ddddddd4")];
     for (const verb of ["done", "reopen"]) {

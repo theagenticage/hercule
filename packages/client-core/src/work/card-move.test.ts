@@ -9,7 +9,9 @@ import type { WorkBoard } from "@hercule/contract";
 import {
   type CardMove,
   applyCardMove,
+  buildMoveToPlacement,
   buildRestoreMove,
+  isSamePlacement,
   chooseAfterTaskId,
   CARD_NOT_EXACT_NOTE,
   chooseTargetStage,
@@ -157,6 +159,7 @@ describe("readPlacement and buildRestoreMove", () => {
       taskId: "b",
       stage: "exploring",
       projectId: "depots",
+      initiativeId: null,
       afterTaskId: "a",
     });
     expect(readPlacement(BOARD, "a")).toMatchObject({ afterTaskId: null });
@@ -422,5 +425,88 @@ describe("withoutStageCause", () => {
     expect(cleared).not.toHaveProperty("stageCause");
     expect(cleared).toMatchObject({ id: "a", stage: "landed" });
     expect(withoutStageCause(buildCard("b"))).toEqual(buildCard("b"));
+  });
+});
+
+describe("moving a card between Initiatives", () => {
+  const onPlatform = buildBoard(
+    buildCard("a", { projectId: "depots", initiativeId: "platform" }),
+    buildCard("b", { projectId: "depots" }),
+    buildCard("c", { projectId: "depots" }),
+  );
+  const find = (board: WorkBoard, id: string) => board.cards.find((card) => card.id === id)!;
+
+  it.each([
+    ["puts a card on an Initiative", "b", { initiativeId: "launch" }, "launch"],
+    ["takes a card off its Initiative with null", "a", { initiativeId: null }, undefined],
+    ["moves a card between Initiatives", "a", { initiativeId: "launch" }, "launch"],
+    [
+      "keeps the Initiative when the move names none",
+      "a",
+      { stage: "building" as const },
+      "platform",
+    ],
+  ])("%s", (_, id, move, expected) => {
+    expect(find(applyCardMove(onPlatform, { taskId: id, ...move }), id).initiativeId).toBe(
+      expected,
+    );
+  });
+
+  it("changes only the Initiative, in place, when the card stays in its cell with no afterTaskId", () => {
+    const moved = applyCardMove(onPlatform, { taskId: "a", initiativeId: "launch" });
+    expect(listIds(moved.cards)).toEqual(["a", "b", "c"]);
+    expect(moved).not.toBe(onPlatform);
+  });
+
+  it("returns the board itself for a move that names the Initiative the card is on", () => {
+    expect(applyCardMove(onPlatform, { taskId: "a", initiativeId: "platform" })).toBe(onPlatform);
+  });
+
+  it("puts the card last in the new cell when the stage changes with the Initiative", () => {
+    const moved = applyCardMove(onPlatform, {
+      taskId: "a",
+      stage: "building",
+      initiativeId: "launch",
+    });
+    expect(find(moved, "a")).toMatchObject({ stage: "building", initiativeId: "launch" });
+  });
+
+  describe("Undo", () => {
+    it("reads the Initiative a card stood on", () => {
+      expect(readPlacement(onPlatform, "a")?.initiativeId).toBe("platform");
+    });
+
+    it("puts a card back on the Initiative it left, and off the one it joined", () => {
+      const placement = readPlacement(onPlatform, "a")!;
+      const moved = applyCardMove(onPlatform, { taskId: "a", initiativeId: "launch" });
+      const restore = buildRestoreMove(moved, placement)!;
+      expect(restore.move).toMatchObject({ initiativeId: "platform" });
+      expect(find(applyCardMove(moved, restore.move), "a").initiativeId).toBe("platform");
+
+      const bPlacement = readPlacement(onPlatform, "b")!;
+      const bMoved = applyCardMove(onPlatform, { taskId: "b", initiativeId: "launch" });
+      const bRestore = buildRestoreMove(bMoved, bPlacement)!;
+      expect(bRestore.move).toMatchObject({ initiativeId: null });
+      expect(find(applyCardMove(bMoved, bRestore.move), "b").initiativeId).toBeUndefined();
+    });
+
+    it("names no Initiative when the card is on the one it stood on, so a closed one is not asked for again", () => {
+      const placement = readPlacement(onPlatform, "a")!;
+      const moved = applyCardMove(onPlatform, { taskId: "a", stage: "building" });
+      expect(buildRestoreMove(moved, placement)?.move).not.toHaveProperty("initiativeId");
+    });
+
+    it("names no Initiative for a card that ended, which keeps its own", () => {
+      const placement = readPlacement(onPlatform, "a")!;
+      const ended = buildBoard(...onPlatform.cards.filter((card) => card.id !== "a"));
+      expect(buildMoveToPlacement(ended, placement).move).not.toHaveProperty("initiativeId");
+    });
+  });
+
+  it("tells two places apart by Initiative", () => {
+    const place = readPlacement(onPlatform, "a")!;
+    expect(isSamePlacement(place, { ...place })).toBe(true);
+    expect(isSamePlacement(place, { ...place, initiativeId: null })).toBe(false);
+    expect(isSamePlacement(place, { ...place, afterTaskId: "z" })).toBe(false);
   });
 });

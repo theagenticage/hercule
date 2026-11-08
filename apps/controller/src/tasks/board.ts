@@ -49,6 +49,7 @@ import {
   WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
+import { blockerRepository, NOT_BLOCKED, type CardBlocking } from "./blockers";
 import { taskRepository, type BoardTask } from "./repository";
 import { cutText } from "../text";
 
@@ -208,12 +209,20 @@ const findOpenQuestion = (
  *   session of it ended a turn and the last time a run of it ended.
  * - `summary`: the Task's summary, once it has one. It is only a description,
  *   so it never decides `openQuestion`, `failure` or any other fact above.
+ * - `initiativeId`: copied from the Task. The card carries only the id; the
+ *   screen reads the Initiatives apart.
+ * - `blockedBy` and `blockedByCount`: copied from `blocking`, the Tasks that
+ *   still block this one (see `blockerRepository`).
  * - `stageCause`: copied from the facts. Set only while the stage is the one
  *   a fact placed; any other write of the stage clears it.
  * - `entityMarks` and `contextRefs`: copied from the facts, cut to what a
  *   card can hold (`MAX_ENTITY_MARKS`, `MAX_CARD_CONTEXTS`).
  */
-export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard => {
+export const buildWorkCard = (
+  task: BoardTask,
+  facts: BoardCardFacts,
+  blocking: CardBlocking,
+): WorkCard => {
   const threads = facts.sessions
     .filter((session) => session.kind === "thread")
     .toSorted(compareOpenedFirst);
@@ -240,6 +249,7 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     stage: task.stage,
     priority: task.priority,
     ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+    ...(task.initiativeId === undefined ? {} : { initiativeId: task.initiativeId }),
     boardRank: task.boardRank,
     ...(asked === undefined ? {} : { openQuestion: asked }),
     ...(facts.failure === undefined
@@ -267,11 +277,14 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     ...(facts.stageCause === undefined ? {} : { stageCause: facts.stageCause }),
     entityMarks: facts.entityMarks.slice(0, MAX_ENTITY_MARKS),
     contextRefs: facts.contextRefs.slice(0, MAX_CARD_CONTEXTS),
+    blockedBy: blocking.blockedBy,
+    blockedByCount: blocking.blockedByCount,
   };
 };
 
 const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
+  const blockers = yield* blockerRepository;
   const facts = yield* TaskBoardFacts;
 
   return {
@@ -297,6 +310,15 @@ const make = Effect.gen(function* () {
      * a card's `MAX_CARD_CONTEXTS`, cuts anything, or the walk up was cut,
      * `contextComplete` is false.
      *
+     * Each card lists the Tasks that still block it (`blockedBy`, at most
+     * `MAX_CARD_BLOCKERS`, with `blockedByCount` before the cut), titles
+     * included even for a blocker that is not on the board. One statement
+     * reads them for every card.
+     *
+     * `initiativeDoneCounts` counts, for each open Initiative, its live Tasks
+     * at `done`, which have no card. A client adds them to the Initiative's
+     * cards to say how much has landed. A closed Initiative has no entry.
+     *
      * The number of statements is fixed, whatever the number of cards.
      */
     query: (): Effect.Effect<WorkBoard, Unauthenticated | Forbidden | SqlError> =>
@@ -307,8 +329,11 @@ const make = Effect.gen(function* () {
         const { tasks: listed, truncated } = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
         const { cards, context } = yield* facts.readFacts(listed);
         const stackRead = yield* facts.readStackCandidates(listed.map((task) => task.id));
+        const blocking = yield* blockers.readCardBlockers(listed.map((task) => task.id));
         return {
-          cards: listed.map((task, index) => buildWorkCard(task, cards[index]!)),
+          cards: listed.map((task, index) =>
+            buildWorkCard(task, cards[index]!, blocking.get(task.id) ?? NOT_BLOCKED),
+          ),
           truncated,
           places: context.places,
           edges: context.edges,
@@ -318,6 +343,7 @@ const make = Effect.gen(function* () {
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
           stackCandidates: stackRead.candidates,
           stackCandidatesTruncated: stackRead.truncated,
+          initiativeDoneCounts: yield* tasks.countDoneTasksByInitiative(),
         };
       }),
   };
