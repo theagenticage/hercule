@@ -614,8 +614,12 @@ describe("a probe that checks a sign-in", () => {
       index < count ? Effect.as(Effect.orDie(advance), SIGNED_IN) : Effect.succeed(SIGNED_IN);
   };
 
-  it("probes once more when the first answer is superseded, and answers with the second snapshot", async () => {
+  it("probes once more when the first answer is superseded, answers with the second snapshot, and reads the catalog with a third probe", async () => {
     const sent: Array<Sent> = [];
+    // Completes when the runner is asked for the third probe, the catalog read
+    // that the check forks without waiting for. The check returns before that
+    // probe is sent, so the test waits for it here instead of guessing a delay.
+    const catalogReadAsked = Effect.runSync(Deferred.make<void>());
 
     const outcome = await run(
       sent,
@@ -632,12 +636,19 @@ describe("a probe that checks a sign-in", () => {
             ALPHA_HARNESS_ID,
           ),
         );
-        return yield* probing.probeToCheckSignIn(runner, account.id, ALPHA_HARNESS_ID);
+        const answerSignInProbes = probeResult.current;
+        probeResult.current = (index) =>
+          index === 2
+            ? Effect.as(Deferred.succeed(catalogReadAsked, undefined), SIGNED_IN)
+            : answerSignInProbes(index);
+        const snapshot = yield* probing.probeToCheckSignIn(runner, account.id, ALPHA_HARNESS_ID);
+        yield* Deferred.await(catalogReadAsked);
+        return snapshot;
       }),
     );
 
     expect(Option.getOrThrow(outcome).auth.status).toBe("ok");
-    expect(sent.filter((one) => one.request._tag === "probeRequest")).toHaveLength(2);
+    expect(probeRequestsIn(sent)).toBe(3);
   });
 
   it("fails InvalidState, and stores no snapshot, when the account changes during both probes", async () => {
