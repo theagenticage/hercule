@@ -61,6 +61,7 @@ const TASK: BoardTask = {
   stage: "building",
   priority: "normal",
   projectId: "0199e0e7-0008-7000-8000-000000000001",
+  initiativeId: undefined,
   boardRank: "V",
   createdAt: AT,
   stageChangedAt: AT,

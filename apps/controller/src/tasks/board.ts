@@ -208,6 +208,8 @@ const findOpenQuestion = (
  *   session of it ended a turn and the last time a run of it ended.
  * - `summary`: the Task's summary, once it has one. It is only a description,
  *   so it never decides `openQuestion`, `failure` or any other fact above.
+ * - `initiativeId`: copied from the Task. The card carries only the id; the
+ *   screen reads the Initiatives apart.
  * - `stageCause`: copied from the facts. Set only while the stage is the one
  *   a fact placed; any other write of the stage clears it.
  * - `entityMarks` and `contextRefs`: copied from the facts, cut to what a
@@ -240,6 +242,7 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     stage: task.stage,
     priority: task.priority,
     ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+    ...(task.initiativeId === undefined ? {} : { initiativeId: task.initiativeId }),
     boardRank: task.boardRank,
     ...(asked === undefined ? {} : { openQuestion: asked }),
     ...(facts.failure === undefined
@@ -300,6 +303,10 @@ const make = Effect.gen(function* () {
      * a card's `MAX_CARD_CONTEXTS`, cuts anything, or the walk up was cut,
      * `contextComplete` is false.
      *
+     * `initiativeDoneCounts` counts, for each Initiative, its live Tasks at
+     * `done`, which have no card. A client adds them to the Initiative's
+     * cards to say how much has landed.
+     *
      * The number of statements is fixed, whatever the number of cards.
      */
     query: (): Effect.Effect<WorkBoard, Unauthenticated | Forbidden | SqlError> =>
@@ -321,8 +328,7 @@ const make = Effect.gen(function* () {
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
           stackCandidates: stackRead.candidates,
           stackCandidatesTruncated: stackRead.truncated,
-          // TODO(#1036): count each initiative's Done Tasks in one statement.
-          initiativeDoneCounts: {},
+          initiativeDoneCounts: yield* tasks.countDoneTasksByInitiative(),
         };
       }),
   };

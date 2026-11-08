@@ -119,6 +119,7 @@ import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
+import { InitiativeService, InitiativeServiceLayer } from "../initiatives";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -287,22 +288,24 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   }),
 );
 
-// TODO(#1036): remove with the placeholder handlers below, once InitiativeService
-// and the blocker methods of TaskService exist.
+// TODO(#1036): remove with the placeholder handlers of `task`, once the blocker
+// methods of TaskService exist.
 const NOT_IMPLEMENTED_1036 = "this operation is not implemented yet";
 
-// TODO(#1036): bind InitiativeService.
 const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
-  Effect.succeed(
-    handlers
-      .handle("query", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("read", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("create", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("update", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("close", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("reopen", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
-      .handle("delete", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036))),
-  ),
+  Effect.gen(function* () {
+    const initiatives = yield* InitiativeService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(initiatives.query(query)))
+      .handle("read", ({ params }) => withApiErrors(initiatives.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(initiatives.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(initiatives.update(params.id, payload)),
+      )
+      .handle("close", ({ params }) => withApiErrors(initiatives.close(params.id)))
+      .handle("reopen", ({ params }) => withApiErrors(initiatives.reopen(params.id)))
+      .handle("delete", ({ params }) => withApiErrors(initiatives.delete(params.id)));
+  }),
 );
 
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
@@ -1062,6 +1065,8 @@ const operationServices = Layer.mergeAll(
   // Deleting a Model Profile clears it from the projects that name it, so the
   // project service is provided to it rather than merged next to it.
   ModelProfileServiceLayer.pipe(Layer.provideMerge(ProjectServiceLayer)),
+  // Deleting an Initiative clears it from its Tasks through the task service.
+  InitiativeServiceLayer.pipe(Layer.provide(TaskServiceWithPortsLayer)),
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),

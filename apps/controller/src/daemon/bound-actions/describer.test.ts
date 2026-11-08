@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import type {
   AnswerOperation,
@@ -17,7 +18,7 @@ import type {
   WorkflowDefinition,
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
-import { mintUuid, uuidToString } from "../../db";
+import { mintUuid, uuidFromString, uuidToString } from "../../db";
 import {
   permissionRequestRepository,
   PermissionProfiles,
@@ -373,6 +374,68 @@ describe("task.update stage", () => {
       text("stage → dropped"),
       text(", "),
       text("priority → low"),
+    ]);
+  });
+});
+
+describe("the initiative of a task", () => {
+  it("names the initiative a task is created on, put on, or taken off", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const initiativeId = mintId();
+        yield* inTransaction(
+          sql`INSERT INTO initiatives (id, name, intent, hue, created_at, updated_at, created_by, updated_by)
+              VALUES (${uuidFromString(initiativeId)}, 'Platform', '', 245, ${AT}, ${AT}, 'user', 'user')`,
+        );
+        const taskId = yield* insertTask("Fix the login page");
+        return {
+          created: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "", initiativeId },
+          }),
+          put: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId },
+          }),
+          taken: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId: null },
+          }),
+          missing: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId: MISSING_ID },
+          }),
+        };
+      }),
+    );
+
+    expect(lines.created).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("in initiative "),
+      marked("Platform"),
+    ]);
+    expect(lines.put).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("put on initiative "),
+      marked("Platform"),
+    ]);
+    expect(lines.taken).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("remove from its initiative"),
+    ]);
+    expect(lines.missing).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("put on initiative "),
+      marked(MISSING_ID),
     ]);
   });
 });

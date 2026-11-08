@@ -157,6 +157,11 @@ interface TaskPatch {
   readonly priority?: TaskPriority;
   readonly projectId?: string | null;
   /**
+   * The Initiative the Task belongs to after the patch; `null` takes it off.
+   * `updateTask` does not check it: the caller has (`ensureInitiativeAcceptsTask`).
+   */
+  readonly initiativeId?: string | null;
+  /**
    * The rank the Task takes in its cell, chosen by the caller (`task.move`).
    * When it is absent and the patch moves the Task to another cell, the Task
    * goes last in the new cell.
@@ -267,6 +272,10 @@ export type FailureRestoration =
 const ONLY_THE_USER_MERGES =
   "only the user may merge Tasks: merging is the user's correction of how work is grouped, so a session or a workflow step may not; ask the user instead";
 
+/** The refusal of `clearInitiative` for a caller who is not the user. */
+const ONLY_THE_USER_CLEARS_INITIATIVE =
+  "only the user may take every Task off an Initiative: deleting an Initiative is the user's own act, so a session or a workflow step may not; ask the user instead";
+
 /** The refusal of `recordHandoff` for a caller who is not the user. */
 const ONLY_THE_USER_RECORDS_HANDOFF =
   "only the user may record a handoff: handing work off is the user's act, so a session or a workflow step may not; ask the user instead";
@@ -319,6 +328,12 @@ const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<TaskSortField>> = 
 
 const NO_SUCH_TASK = "no such task";
 const NO_SUCH_PROJECT = "no such project";
+const NO_SUCH_INITIATIVE = "no such initiative";
+
+/** The refusal of a write that would put a Task on a closed Initiative. */
+const INITIATIVE_IS_CLOSED =
+  "the initiative is closed, so no Task can be put on it; " +
+  "ask the user to reopen it, or name another initiative";
 
 /**
  * The title of the Task made for a Thread whose title is blank. A Task's title
@@ -540,6 +555,28 @@ const make = Effect.gen(function* () {
         );
 
   /**
+   * Checks that a write may put a Task on the Initiative `next`. Does nothing
+   * for an absent or null `next`. Fails with `NotFound` when the Initiative
+   * does not exist or is deleted, and with `InvalidState` when it is closed
+   * and the Task is not on it already (`held`). A Task that stays on its
+   * closed Initiative is never refused, so an unrelated edit of it works.
+   */
+  const ensureInitiativeAcceptsTask = (
+    next: string | null | undefined,
+    held: string | undefined,
+  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      if (next === undefined || next === null) return;
+      const initiative = yield* tasks.readInitiative(next);
+      if (Option.isNone(initiative)) {
+        return yield* Effect.fail(createNotFoundError(NO_SUCH_INITIATIVE));
+      }
+      if (initiative.value.closed && next !== held) {
+        return yield* Effect.fail(createInvalidStateError(INITIATIVE_IS_CLOSED));
+      }
+    });
+
+  /**
    * Applies `patch` to the task `id` (or to the Task it was merged into) in
    * the caller's transaction, and returns the task as stored. The `task.updated` event lists what changed. See
    * `update` for the rules; the patch is already decoded. The `actor` stamps
@@ -605,6 +642,11 @@ const make = Effect.gen(function* () {
         if (isNewValue(patch.projectId, project)) {
           changes.projectId = { old: project, new: patch.projectId };
           edit.projectId = patch.projectId;
+        }
+        const initiative = before.initiativeId ?? null;
+        if (isNewValue(patch.initiativeId, initiative)) {
+          changes.initiativeId = { old: initiative, new: patch.initiativeId };
+          edit.initiativeId = patch.initiativeId;
         }
         if (patch.boardRank !== undefined) {
           // The caller chose the rank, so it is kept even when the Task also
@@ -775,7 +817,7 @@ const make = Effect.gen(function* () {
     requestedId: string,
     placement: Omit<MoveInput, "id">,
     actor: string,
-  ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
+  ): Effect.Effect<Task, NotFound | Validation | InvalidState | SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -791,6 +833,7 @@ const make = Effect.gen(function* () {
         // survivor, and the comparisons and the rank below are about it.
         const id = before.id;
         yield* ensureProjectExists(placement.projectId);
+        yield* ensureInitiativeAcceptsTask(placement.initiativeId, before.initiativeId);
         const afterTaskId =
           placement.afterTaskId === undefined || placement.afterTaskId === null
             ? placement.afterTaskId
@@ -837,6 +880,9 @@ const make = Effect.gen(function* () {
           {
             ...(placement.stage === undefined ? {} : { stage: placement.stage }),
             ...(placement.projectId === undefined ? {} : { projectId: placement.projectId }),
+            ...(placement.initiativeId === undefined
+              ? {}
+              : { initiativeId: placement.initiativeId }),
             boardRank,
           },
           actor,
@@ -861,6 +907,7 @@ const make = Effect.gen(function* () {
       | "priority"
       | "labels"
       | "projectId"
+      | "initiativeId"
       | "provenance"
       | "following"
     >,
@@ -1129,7 +1176,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates a task and returns it, at the stage the input names or at
-     * `planned`. Fails with `NotFound` if the project does not exist.
+     * `planned`. Fails with `NotFound` if the project or the Initiative does
+     * not exist, and with `InvalidState` if the Initiative is closed.
      *
      * A task that a run's step creates gets one more provenance entry, `{
      * runId }`, after the ones the step's params give, unless one of those
@@ -1139,7 +1187,10 @@ const make = Effect.gen(function* () {
      */
     create: (
       input: TaskCreateInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("task.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
@@ -1153,6 +1204,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             yield* ensureProjectExists(decoded.projectId);
+            yield* ensureInitiativeAcceptsTask(decoded.initiativeId, undefined);
             return yield* insertTask(
               {
                 title: decoded.title,
@@ -1161,6 +1213,9 @@ const make = Effect.gen(function* () {
                 priority: decoded.priority ?? "normal",
                 labels: Arr.dedupe(decoded.labels ?? []),
                 projectId: decoded.projectId,
+                ...(decoded.initiativeId === undefined
+                  ? {}
+                  : { initiativeId: decoded.initiativeId }),
                 provenance,
               },
               actor,
@@ -1471,17 +1526,37 @@ const make = Effect.gen(function* () {
      * written without one overrules every fact recorded so far. See
      * `updateTask` for the rules. It fails with `Validation` when the fact is
      * not a fact of this Task; every other refusal returns the Task as it is.
+     *
+     * `initiativeId` puts the Task on an Initiative, and `null` takes it off.
+     * It fails with `NotFound` for an Initiative that does not exist or is
+     * deleted, and with `InvalidState` when the write changes the Task to a
+     * closed Initiative. A Task that stays on its closed Initiative is never
+     * refused for it, whatever else the update changes. The event lists
+     * `changes.initiativeId` as `{ old, new }`.
      */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ...patch } = yield* Effect.mapError(
           decodeUpdate(input),
           createDecodeValidationError,
         );
-        return yield* updateTask(id, patch, yield* currentStamp);
+        const stamp = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            if (typeof patch.initiativeId === "string") {
+              const held = (yield* readLiveTaskOrFail(id)).initiativeId;
+              yield* ensureInitiativeAcceptsTask(patch.initiativeId, held);
+            }
+            return yield* updateTask(id, patch, stamp);
+          }),
+        );
       }),
 
     /**
@@ -1634,6 +1709,10 @@ const make = Effect.gen(function* () {
      *   `done` or `dropped` fails to decode: the board has no such stage.
      * - A Task whose project was deleted is in the "No project" cell, as every
      *   client shows it.
+     * - `initiativeId` puts the Task on an Initiative in the same write
+     *   (`null` takes it off), so one drop between Initiative lanes is one
+     *   write. It fails as `update` does: `NotFound` for an Initiative that
+     *   does not exist, `InvalidState` for a closed one the Task is not on.
      * - A move that changes nothing writes nothing, like `update`. Naming a
      *   `stage` is a stage decision, so it raises the stage revision even when
      *   the Task is at that stage already, and it overrules every fact
@@ -1647,7 +1726,10 @@ const make = Effect.gen(function* () {
      */
     move: (
       input: MoveInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      Task,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ...placement } = yield* Effect.mapError(
@@ -1663,7 +1745,10 @@ const make = Effect.gen(function* () {
      * a session or a workflow step is refused with `Forbidden`.
      *
      * The survivor keeps its title, stage, project, priority and board rank.
-     * Labels are united, and a non-empty source description is appended under
+     * It keeps its own Initiative too. When it has none, it takes the
+     * source's, even when that Initiative is closed: the membership is
+     * carried over, not newly added, so the closed check of `update` does not
+     * apply. The source leaves its Initiative. Labels are united, and a non-empty source description is appended under
      * a line naming the source's title. In one transaction the source's
      * sessions, runs, workspace links and provenance move to the survivor, the
      * survivor gains a provenance entry naming the source, and a failure the
@@ -1764,12 +1849,16 @@ const make = Effect.gen(function* () {
             yield* tasks.recordMergedFailure(targetId, failedRunId);
 
             // Through `updateTask`, so the survivor gets its `task.updated`
-            // event, with the merge entry and what the labels and the
-            // description gained.
+            // event, with the merge entry and what the labels, the
+            // description and the Initiative gained. `updateTask` does not
+            // check the Initiative, which is why a closed one can be taken.
             const survivor = yield* updateTask(
               targetId,
               {
                 ...(description === target.description ? {} : { description }),
+                ...(target.initiativeId === undefined && source.initiativeId !== undefined
+                  ? { initiativeId: source.initiativeId }
+                  : {}),
                 ...(addedLabels.length === 0 ? {} : { addLabels: addedLabels }),
                 provenance: [{ mergedTaskId: sourceId }],
               },
@@ -1788,6 +1877,53 @@ const make = Effect.gen(function* () {
               at: survivor.updatedAt,
             });
             return survivor;
+          }),
+        );
+      }),
+
+    /**
+     * Takes every live Task (not deleted, not merged into another Task, at
+     * any stage) off the Initiative `initiativeId`, and returns the ids of the
+     * Tasks it took off, in id order. Each Task gets one `task.updated` with
+     * `changes.initiativeId` of `{ old: initiativeId, new: null }`, and one
+     * `task` announcement. Does nothing for an Initiative with no Tasks.
+     *
+     * The caller deletes the Initiative, in the same transaction: this joins
+     * the caller's transaction or opens one, so the Tasks and the Initiative
+     * change together. It does not check that the Initiative exists, because
+     * the caller owns that record.
+     *
+     * Permission: the user only, with the grant `task.update`. It fails with
+     * `Forbidden` for any other caller.
+     *
+     * The announcement is a plain `task` push, like every edit of a field of
+     * the Task record: the list and the record of a Task carry `initiativeId`,
+     * and a derived push leaves those stale. Deleting an Initiative is rare.
+     */
+    clearInitiative: (
+      initiativeId: string,
+    ): Effect.Effect<ReadonlyArray<string>, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_CLEARS_INITIATIVE);
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const cleared = yield* tasks.clearInitiative(initiativeId, at);
+            for (const taskId of cleared) {
+              yield* platformEvents.emit({
+                kind: "task.updated",
+                actor,
+                payload: {
+                  taskId,
+                  changes: { initiativeId: { old: initiativeId, new: null } },
+                },
+                at,
+              });
+              yield* announce({ _tag: "record", topic: "task", id: taskId, kind: "updated" });
+            }
+            return cleared;
           }),
         );
       }),
