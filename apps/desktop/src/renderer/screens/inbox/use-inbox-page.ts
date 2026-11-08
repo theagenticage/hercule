@@ -3,11 +3,13 @@ import {
   decideCardRisingIntoPlace,
   decideNextWaitingCard,
   describeMoveRefusal,
+  findActingConnection,
   walkInbox,
+  type CardOffers,
   type InboxMove,
   type WalkedFrom,
 } from "@hercule/client-core/inbox";
-import type { InboxCard } from "@hercule/contract";
+import type { InboxCard, WorkflowOffer } from "@hercule/contract";
 import { isTextField } from "../../app/text-field";
 import { useFocusPageOnArrival } from "../desk";
 import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
@@ -45,6 +47,19 @@ export interface InboxPageInput {
     readonly link: (fromRef: string, toRef: string) => void;
     /** Says `text` on the undo line, with no Undo. */
     readonly say: (text: string) => void;
+    /** Returns the workflows the card can be handed to now, and the ones it could be if something changed. */
+    readonly readOffers: (card: InboxCard) => CardOffers;
+    /** Hands the card to the workflow of `offer`, acting as the Connection `connectionId` (none when no account is needed). */
+    readonly hand: (
+      card: InboxCard,
+      offer: WorkflowOffer,
+      connectionId: string | undefined,
+    ) => void;
+    /**
+     * Opens the Hand to menu for the card, under `anchor`. `by` is how the
+     * user asked, which decides how the page moves on once a workflow is picked.
+     */
+    readonly openHandMenu: (card: InboxCard, anchor: HTMLElement, by: "keys" | "pointer") => void;
   };
 }
 
@@ -53,6 +68,18 @@ export interface InboxPage {
   readonly isKeysSheetOpen: boolean;
   /** Toggles the sheet of keys, as the `?` key does. */
   readonly toggleKeysSheet: () => void;
+  /**
+   * Hands `card` to the workflow `workflowId`, as picking it from a menu, from
+   * the open sheet or from the rail does. `chosenConnectionId` is the account the
+   * user chose; without one the first account that can act is used. The page then moves on as it does after a Take (`by` says how the
+   * user asked). A workflow the card is not offered says why on the undo line.
+   */
+  readonly handCard: (
+    card: InboxCard,
+    workflowId: string,
+    chosenConnectionId: string | undefined,
+    by: "keys" | "pointer",
+  ) => void;
 }
 
 /**
@@ -67,6 +94,9 @@ export interface InboxPage {
  * - The current card (`useCurrentCard`) is the card every key acts on. After
  *   a Take or a Dismiss the current card moves on to the next that waits,
  *   chosen by the order of the page and never by what lies under the pointer.
+ * - H hands the current card to its one workflow, opens the Hand to menu
+ *   when several can take it, and says why when none can. The number keys
+ *   belong to that menu and to the open sheet, so the page ignores them.
  * - A click on a move button runs the move. A click on a card, or on a part
  *   that asks, opens it. A click on a quiet part, or on a line that says what a
  *   request is linked to, opens the thing it names. A click on `Link them`
@@ -98,11 +128,17 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
 
   /**
    * Runs `move` on `card` unless it is refused, which is said on the undo
-   * line. Take and Dismiss then hand the current card to the next that waits,
-   * or walk the open sheet to it. Returns whether it ran.
+   * line. Take, Dismiss and Hand to then hand the current card to the next
+   * that waits, or walk the open sheet to it. `handTo` is the workflow and
+   * the account of a Hand to. Returns whether it ran.
    */
-  const perform = (move: InboxMove, card: InboxCard, by: "keys" | "pointer"): boolean => {
-    const reason = describeMoveRefusal(card, move);
+  const perform = (
+    move: InboxMove,
+    card: InboxCard,
+    by: "keys" | "pointer",
+    handTo?: { readonly offer: WorkflowOffer; readonly connectionId: string | undefined },
+  ): boolean => {
+    const reason = describeMoveRefusal(card, move, input.moves.readOffers(card));
     if (reason !== undefined) {
       input.moves.say(reason);
       return false;
@@ -117,7 +153,9 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     const decideNext = by === "pointer" ? decideCardRisingIntoPlace : decideNextWaitingCard;
     const next = scroller === null ? undefined : decideNext(readInboxStops(scroller), card.id);
     if (move === "take") input.moves.take(card);
-    else input.moves.dismiss(card);
+    else if (move === "hand" && handTo !== undefined) {
+      input.moves.hand(card, handTo.offer, handTo.connectionId);
+    } else input.moves.dismiss(card);
     if (!open.isOpen) moveOn(next, by);
     else if (next === undefined) open.close();
     else {
@@ -125,6 +163,41 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
       current.set(next, "keys", false);
     }
     return true;
+  };
+
+  const handCard = (
+    card: InboxCard,
+    workflowId: string,
+    chosenConnectionId: string | undefined,
+    by: "keys" | "pointer",
+  ): void => {
+    const offers = input.moves.readOffers(card);
+    const offer = offers.available.find((each) => each.workflowId === workflowId);
+    if (offer === undefined) {
+      input.moves.say(
+        describeMoveRefusal(card, "hand", offers) ?? "That workflow can no longer take it.",
+      );
+      return;
+    }
+    // The account the user chose, else the first that can act.
+    const connectionId = findActingConnection(card.actingConnections, chosenConnectionId)?.id;
+    perform("hand", card, by, { offer, connectionId });
+  };
+
+  /**
+   * Starts a Hand to on `card`: at once when one workflow can take it, the
+   * menu under `anchor` when several can, and a line saying why when none can.
+   */
+  const startHand = (card: InboxCard, anchor: HTMLElement, by: "keys" | "pointer"): void => {
+    const offers = input.moves.readOffers(card);
+    const [first] = offers.available;
+    if (first !== undefined && offers.available.length === 1) {
+      handCard(card, first.workflowId, undefined, by);
+      return;
+    }
+    const reason = describeMoveRefusal(card, "hand", offers);
+    if (reason === undefined) input.moves.openHandMenu(card, anchor, by);
+    else input.moves.say(reason);
   };
 
   const stepBack = (event: KeyboardEvent): void => {
@@ -220,6 +293,14 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
         perform(command.kind, card, "keys");
         return;
       }
+      case "hand": {
+        const card = here === null ? undefined : input.findCard(here.id);
+        const element = here === null ? null : findCardElement(scroller, here.id);
+        if (card === undefined || element === null) return;
+        event.preventDefault();
+        startHand(card, element, "keys");
+        return;
+      }
       case "toggle-keys-sheet":
         setKeysSheetOpen(!isKeysSheetOpen);
         return;
@@ -261,6 +342,10 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
         perform("dismiss", card, "pointer");
       } else if (move === "see-task" && now - lastTakeAt.current >= DOUBLE_CLICK_MS) {
         perform("see-task", card, "pointer");
+      } else if (move === "hand") {
+        const workflowId = button.dataset["workflowId"];
+        if (workflowId === undefined) startHand(card, button, "pointer");
+        else handCard(card, workflowId, undefined, "pointer");
       }
       return;
     }
@@ -348,5 +433,5 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     tabStop.current = stop;
   });
 
-  return { isKeysSheetOpen, toggleKeysSheet: () => setKeysSheetOpen(!isKeysSheetOpen) };
+  return { isKeysSheetOpen, toggleKeysSheet: () => setKeysSheetOpen(!isKeysSheetOpen), handCard };
 };

@@ -107,6 +107,8 @@ const setUp = (
         serverInbox: data,
         visit,
         scrollRef: { current: null },
+        isCarrying: () => false,
+        openTask: () => undefined,
       });
       // The visit draws the page as the screen does, so the test can ask where each card rides.
       const drawn = advanceInboxVisit(visit.history, {

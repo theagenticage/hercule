@@ -1,13 +1,19 @@
 import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
+import {
+  decideCardFace,
+  decideHandedFace,
+  describeCardAloud,
+  listCardOffers,
+  type CardBundle,
+} from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import "../desk/card.css";
-import { CardMonogram, CardMoves } from "./card-moves";
+import { CardColleague, CardMonogram, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
-import { buildCardPropsComparer } from "./card-props";
+import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
 import { LinkLines } from "./link-lines";
 import { useCardTime } from "./use-card-time";
 
@@ -17,6 +23,7 @@ interface RequestCardProps {
   readonly bundle: CardBundle;
   /** The cards a signal just landed on. The request shows the new mark when its id is in it. */
   readonly freshIds: ReadonlySet<string>;
+  readonly handOffs: CardHandOffs;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly step: number;
@@ -36,7 +43,10 @@ const arePropsEqual = buildCardPropsComparer<RequestCardProps>();
  *   its kind (`decideCardFace` leaves it out otherwise). `yours` shows beside
  *   the place.
  * - `monogram` is the user's, which takes the place of the wait once a Task
- *   holds the card.
+ *   holds the card. A card the user handed off in this visit shows the
+ *   colleague who has it there instead, and its sentence reads "Agent review
+ *   has it" (`handOffs.handed`). `handOffs.offerSets` are the workflows its
+ *   Hand to move offers.
  * - `bundle` holds the lines under the card: a reference found in text that
  *   the user can link ("Mentions OPS-47"), and what it is linked to ("Linked to
  *   #6263"). They stand under the card in one `.inbox-bundle`, and are not part
@@ -58,12 +68,15 @@ function RequestCardView({
   homeName,
   bundle,
   freshIds,
+  handOffs,
   plugins,
   monogram,
   step,
 }: RequestCardProps): JSX.Element {
   const { wait, trust } = useCardTime(card);
-  const face = decideCardFace(card);
+  const handed = handOffs.handed.get(card.id);
+  const face =
+    handed === undefined ? decideCardFace(card) : decideHandedFace(decideCardFace(card), handed);
   const where = [homeName, card.card === "compact" ? face.whose : undefined]
     .filter((part) => part !== undefined)
     .join(" · ");
@@ -74,20 +87,24 @@ function RequestCardView({
         role="listitem"
         data-card-id={card.id}
         data-access={card.access === "ok" ? undefined : card.access}
-        data-has-task={card.taskId === undefined ? undefined : ""}
+        data-has-task={card.taskId === undefined && handed === undefined ? undefined : ""}
         tabIndex={-1}
-        aria-label={describeCardAloud(face, wait, 0)}
+        aria-label={describeCardAloud(face, handed === undefined ? wait : null, 0)}
       >
         <i className="card-stock" />
         <span className="card-body">
-          <span className="request-mark">
+          <span className="request-mark" data-hand-off-mark>
             <PluginMark pluginId={face.pluginId} plugins={plugins} size={16} />
           </span>
           <p className="request-title" title={face.title}>
             {face.title}
           </p>
-          {wait !== null && <CardWaitFigure wait={wait} />}
-          {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
+          {wait !== null && handed === undefined && <CardWaitFigure wait={wait} />}
+          {handed !== undefined ? (
+            <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
+          ) : (
+            card.taskId !== undefined && <CardMonogram monogram={monogram} />
+          )}
           <span className="request-under" data-landing-line>
             {freshIds.has(card.id) && <NewMark />}
             {face.status !== undefined && (
@@ -103,7 +120,7 @@ function RequestCardView({
             {where !== "" && <span className="request-where">{where}</span>}
           </span>
           {trust !== undefined && <span className="request-trust">{trust}</span>}
-          <CardMoves card={card} />
+          <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
         </span>
       </div>
       <LinkLines

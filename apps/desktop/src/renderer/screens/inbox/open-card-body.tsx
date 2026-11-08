@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
   describeLockedRow,
@@ -111,9 +111,36 @@ function WalkRow({
   );
 }
 
-/** Renders the move rows of a card: Take it and Dismiss, or the one move to its Task, or why there are none. */
+/** How long the moves of a new sheet take no pointer, in milliseconds. */
+const ARMING_MS = 420;
+
+/**
+ * Returns whether the moves of a sheet that has just opened still take no
+ * pointer: true from the moment the sheet draws them until `ARMING_MS` later,
+ * so that the second click of a double click, which lands on the move that
+ * opened under the first, never starts anything. Keys are not held back.
+ */
+const useArming = (): boolean => {
+  const [isArming, setIsArming] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsArming(false);
+    }, ARMING_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return isArming;
+};
+
+/**
+ * Renders the move rows of a card: `hand` (the Hand to rows, or nothing), then Take it and Dismiss, or the
+ * move to its Task, or why there are none.
+ * The rows carry `data-arming` and take no pointer while the sheet is new (`useArming`).
+ */
 function OpenCardMoves({
   words,
+  hand,
   pluginName,
   userMonogram,
   onTake,
@@ -121,6 +148,7 @@ function OpenCardMoves({
   onSeeTask,
 }: {
   readonly words: OpenCardWords;
+  readonly hand: ReactNode;
   readonly pluginName: string;
   readonly userMonogram: string;
   readonly onTake: () => void;
@@ -128,10 +156,12 @@ function OpenCardMoves({
   readonly onSeeTask: (taskId: string) => void;
 }): JSX.Element {
   const { moves } = words;
+  const isArming = useArming();
   if (moves._tag === "task") {
     const { taskId } = moves;
     return (
-      <div className="open-card-ledger">
+      <div className="open-card-ledger" data-arming={isArming ? "" : undefined}>
+        {hand}
         <button
           type="button"
           className="open-card-row"
@@ -148,8 +178,9 @@ function OpenCardMoves({
   }
   const isOff = moves._tag === "off";
   return (
-    <div className="open-card-ledger">
+    <div className="open-card-ledger" data-arming={isArming ? "" : undefined}>
       {isOff && <p className="open-card-why">{moves.reason}</p>}
+      {hand}
       <button type="button" className="open-card-row" disabled={isOff} onClick={onTake}>
         <span className="open-card-label">
           <span className="open-card-you" aria-hidden="true">
@@ -183,6 +214,8 @@ function OpenCardMoves({
  *   places. A card with no timeline says why it is here in one line instead.
  * - `linked` is the section of the things linked to the card, drawn after
  *   the places, or `null` before the card's read has answered.
+ * - `hand` is the Hand to rows (`OpenCardHandRows`), drawn first among the
+ *   moves, or `null` when the card cannot be handed to a workflow.
  */
 export function OpenCardBody({
   url,
@@ -196,6 +229,7 @@ export function OpenCardBody({
   onSeeTask,
   timeline,
   linked,
+  hand,
 }: {
   readonly url: string;
   readonly words: OpenCardWords;
@@ -203,6 +237,7 @@ export function OpenCardBody({
   readonly userMonogram: string;
   readonly timeline: ReactNode;
   readonly linked: ReactNode;
+  readonly hand: ReactNode;
   readonly onClose: () => void;
   readonly onWalk: (ref: string) => void;
   readonly onTake: () => void;
@@ -252,6 +287,7 @@ export function OpenCardBody({
       {linked}
       <OpenCardMoves
         words={words}
+        hand={hand}
         pluginName={pluginName}
         userMonogram={userMonogram}
         onTake={onTake}

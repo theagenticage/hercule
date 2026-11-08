@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildInitials,
@@ -19,7 +19,12 @@ import {
   buildWalkableIds,
   decideOpenCard,
   describeTimelineOverflow,
+  findActingConnection,
   findFirstOpenLine,
+  listCardOffers,
+  listOpenSignalKinds,
+  NO_OFFERS,
+  partitionOffers,
   readPlaceView,
   type EntityLinkMove,
   type PlaceView,
@@ -28,14 +33,17 @@ import type { AddRow } from "@hercule/client-core/work";
 import type { EntityRecord, Inbox } from "@hercule/contract";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { entityQuery, userQuery } from "../../app/queries";
+import { isTextField } from "../../app/text-field";
 import { ArrowIcon } from "../../icons/arrow";
 import { OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
 import { OpenCardBody, OpenPlaceBody } from "./open-card-body";
+import { focusFirstHandRow, OpenCardHandRows } from "./open-card-hand";
 import { OpenCardLine } from "./open-card-line";
 import { OpenCardLinked } from "./open-card-linked";
 import { OpenCardLinkSearch } from "./open-card-link-search";
 import { readOpenCardPlaces } from "./open-card-places";
 import { OpenCardTimeline } from "./open-card-timeline";
+import { readInboxKey } from "./read-inbox-key";
 import type { OpenCard, OpenTarget } from "./use-open-card";
 import { useOpenCardClock } from "./use-open-card-clock";
 
@@ -45,6 +53,19 @@ export interface OpenCardMoveHandlers {
   readonly onTake: (cardId: string) => void;
   /** Dismisses the card. The page folds the sheet and plays the move on the card. */
   readonly onDismiss: (cardId: string) => void;
+  /**
+   * Hands the card to the workflow `workflowId`. `connectionId` is the account
+   * the hand-off acts as, or `undefined` when no account can act. `by` is how
+   * the user asked: by pointer, the page folds the sheet and plays the move on
+   * the card where it lies; by keys, the sheet walks on to the next card and
+   * the move plays behind it.
+   */
+  readonly onHand: (
+    cardId: string,
+    workflowId: string,
+    connectionId: string | undefined,
+    by: "keys" | "pointer",
+  ) => void;
   /** Goes to the card's Task on Work. Called with the Task's id. */
   readonly onSeeTask: (taskId: string) => void;
   /** Links two things as the user's own claim. The page plays the move and offers Undo. */
@@ -112,6 +133,57 @@ function OpenCardContents({
   const cards = inbox?.cards ?? [];
   const lines = source === undefined ? [] : buildOpenTimeline(source, cards);
   const now = useOpenCardClock(record, lines);
+
+  // What the card can be handed to: the read of the card once it has answered, else the Inbox's own sets.
+  const isKindAvailable = detail.data?.kindAvailable ?? true;
+  const offers =
+    !isKindAvailable || inbox === undefined
+      ? NO_OFFERS
+      : detail.data !== undefined
+        ? partitionOffers(detail.data.offers)
+        : listed === undefined
+          ? NO_OFFERS
+          : listCardOffers(listed, inbox.offerSets);
+  const actingConnections = detail.data?.actingConnections ?? listed?.actingConnections ?? [];
+  const openKinds =
+    detail.data === undefined
+      ? (listed?.signals.kinds ?? [])
+      : listOpenSignalKinds(detail.data.signals);
+  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
+  const { available } = offers;
+  const connectionId = findActingConnection(actingConnections, chosenConnectionId)?.id;
+  const { onHand } = moves;
+  const handTo = (workflowId: string, by: "keys" | "pointer"): void => {
+    onHand(id, workflowId, connectionId, by);
+  };
+
+  // H hands the card to its one workflow, or moves to the Hand to rows when there are several. 1 to 3 pick one.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.repeat || isTextField(event.target)) return;
+      if (event.target instanceof Element && event.target.closest("[popover], [role='menu']")) {
+        return;
+      }
+      const command = readInboxKey(event);
+      const picked =
+        command?.kind === "pick-workflow"
+          ? available[command.position - 1]
+          : command?.kind === "hand" && available.length === 1
+            ? available[0]
+            : undefined;
+      if (picked !== undefined) {
+        event.preventDefault();
+        onHand(id, picked.workflowId, connectionId, "keys");
+      } else if (command?.kind === "hand" && available.length > 1) {
+        event.preventDefault();
+        focusFirstHandRow(document);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [available, connectionId, id, onHand]);
 
   // The card opens one line by itself, the first time it has one to open.
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
@@ -200,6 +272,18 @@ function OpenCardContents({
       userMonogram={userMonogram}
       timeline={timeline}
       linked={linked}
+      hand={
+        available.length + offers.unavailable.length === 0 ? null : (
+          <OpenCardHandRows
+            offers={offers}
+            openKinds={openKinds}
+            actingConnections={actingConnections}
+            chosenConnectionId={chosenConnectionId}
+            onChooseConnection={setChosenConnectionId}
+            onHand={handTo}
+          />
+        )
+      }
       onClose={onClose}
       onWalk={onWalk}
       onTake={() => {
@@ -244,6 +328,7 @@ export function InboxOpenCard({
   platform,
   onTake,
   onDismiss,
+  onHand,
   onSeeTask,
   onLink,
   onUnlink,
@@ -323,7 +408,7 @@ export function InboxOpenCard({
             onClose={openCard.close}
             onWalk={walkToPlace}
             onWalkCard={walkToCard}
-            moves={{ onTake, onDismiss, onSeeTask, onLink, onUnlink, onSeeInIntake }}
+            moves={{ onTake, onDismiss, onHand, onSeeTask, onLink, onUnlink, onSeeInIntake }}
           />
         ) : placeView === undefined ? (
           <p className="open-card-trust">This place is not on the Inbox now.</p>

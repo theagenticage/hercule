@@ -303,8 +303,25 @@ describe("the Inbox's and the entities' keys", () => {
     assert.isFalse(keys.some((read) => isPrefixOf(read, queryKeys.signals({ view: "to-do" }))));
   });
 
+  it("reads the Inbox and the entity panes again on a push that names a workflow, because their offers come from the workflows, and not the count or the suggestions", () => {
+    const keys = buildQueryKeys("workflow", ["w1"]);
+    for (const key of [queryKeys.inbox(), queryKeys.externalEntity()]) {
+      assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    }
+    for (const key of [queryKeys.inboxCount(), queryKeys.entitySuggestions()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("leaves the Inbox alone on a workflow push that names no workflow, which is the first push of every subscription", () => {
+    const keys = buildQueryKeys("workflow", []);
+    for (const key of [...inboxKeys, queryKeys.externalEntity()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
   it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
-    for (const topic of ["run", "session", "workflow", "wikiPage"] as const) {
+    for (const topic of ["run", "session", "wikiPage"] as const) {
       for (const ids of [[], ["x"]]) {
         const keys = buildQueryKeys(topic, ids);
         for (const key of [

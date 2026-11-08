@@ -151,7 +151,7 @@
   opacity: 0;
 }
 .inbox-part[data-current] .part-ask {
-  margin-right: 92px;
+  margin-right: var(--moves-width, 92px);
 }
 .inbox-part[data-access] .part-title {
   color: var(--muted);

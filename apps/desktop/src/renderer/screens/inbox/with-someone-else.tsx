@@ -1,6 +1,7 @@
 import { useId, useState, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { ColumnRow } from "@hercule/client-core/inbox";
+import type { CardHandOffs } from "./card-props";
 import { RequestCard } from "./request-card";
 
 /**
@@ -10,6 +11,7 @@ import { RequestCard } from "./request-card";
  * for no cards.
  *
  * `freshIds` are the cards a signal just landed on, which show the new mark.
+ * `handOffs` are what the cards need to draw a hand-off (`CardHandOffs`).
  *
  * The disclosure is a button that says whether it is open. Whether it is open
  * is this component's own client state: it closes when the user leaves the
@@ -20,11 +22,13 @@ export function WithSomeoneElse({
   plugins,
   monogram,
   freshIds,
+  handOffs,
 }: {
   readonly rows: readonly ColumnRow[];
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly freshIds: ReadonlySet<string>;
+  readonly handOffs: CardHandOffs;
 }): JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false);
   const listId = useId();
@@ -53,6 +57,7 @@ export function WithSomeoneElse({
               homeName={row.homeName}
               bundle={row.bundle}
               freshIds={freshIds}
+              handOffs={handOffs}
               plugins={plugins}
               monogram={monogram}
               step={index}

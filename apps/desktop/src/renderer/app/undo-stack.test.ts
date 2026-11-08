@@ -72,6 +72,21 @@ describe("createUndoStack", () => {
     expect(await stack.undo()).toEqual({ kind: "empty" });
   });
 
+  it("reports an undo's own answer in place of the default sentence, with its action, and drops that gesture", async () => {
+    const reports: UndoReport[] = [];
+    const stack = createUndoStack<string>();
+    stack.registerFallback(buildAdapter(PAGE, reports));
+    const action = { label: "See its Task", act: () => undefined };
+    stack.reserve(
+      { words: "Handed A", undo: () => Promise.resolve({ text: "Asked A to stop.", action }) },
+      SAVED,
+    );
+
+    expect(await stack.undo()).toEqual({ kind: "answered", text: "Asked A to stop.", action });
+    expect(reports).toEqual([{ text: "Asked A to stop.", isFailure: false, action }]);
+    expect(await stack.undo()).toEqual({ kind: "empty" });
+  });
+
   it("ignores an undo while another runs", async () => {
     const log: string[] = [];
     const stack = createStack();

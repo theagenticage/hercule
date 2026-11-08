@@ -630,9 +630,11 @@
 .inbox-row[data-current] .row-end {
   opacity: 0;
 }
-/* The request's second line ends before the moves, with an ellipsis, and gives up its place. */
+/* The request's second line ends before the moves, with an ellipsis, and gives up its place. The page measures the
+   moves when the card becomes the current one (`--moves-width`), because the hand-off's name is as long as the
+   workflow's. */
 .inbox-request[data-current] .request-under {
-  margin-right: 92px;
+  margin-right: var(--moves-width, 92px);
 }
 .inbox-request[data-current] .request-where {
   display: none;
@@ -668,6 +670,18 @@
 }
 .card-move--go {
   padding: 0 8px;
+}
+/* The hand-off names the workflow, or says "Hand to…" over the faces of the first two, which overlap by 6px. */
+.card-move--hand {
+  color: var(--ink);
+}
+.card-move--hand .cr + .cr {
+  margin-left: -12px;
+}
+.card-move-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card-move:focus-visible {
   outline: 2px solid var(--focus);
@@ -706,6 +720,28 @@
   font-weight: var(--w-bold);
   letter-spacing: 0.01em;
   line-height: 1;
+}
+
+/* The colleague who has a card stands in the same place: a 22px face in a box that clips it, so it rises into its
+   place from below and sinks out of it. The box is 2px taller than the wait's, so on a request it gives back
+   2px above and below, and no line changes height. */
+.card-colleague {
+  flex: none;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+}
+.inbox-request .card-colleague {
+  grid-column: 3;
+  grid-row: 1;
+  margin: -2px 0;
+}
+.card-colleague-in {
+  display: block;
+  width: 100%;
+  height: 100%;
+  line-height: 0;
 }
 
 /* ---------- Copies that step aside ---------- */

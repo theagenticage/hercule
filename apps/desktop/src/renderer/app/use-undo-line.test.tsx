@@ -60,7 +60,13 @@ describe("useUndoLine", () => {
   it("does not undo while it is paused", async () => {
     const stack = createUndoStack<string>();
     stack.reserve(reversing("Moved A"), SAVED);
-    const { result } = renderHook(() => useUndoLine(stack, () => "page", true));
+    const { result } = renderHook(() =>
+      useUndoLine(
+        stack,
+        () => "page",
+        () => true,
+      ),
+    );
 
     await act(async () => {
       expect(await stack.undo()).toEqual({ kind: "busy" });
@@ -87,6 +93,44 @@ describe("useUndoLine", () => {
     await waitFor(() => {
       expect(result.current.line.text).toBe("Put back: Moved A.");
     });
+  });
+
+  it("shows an undo's own answer with its action, and clears the action on the next line", async () => {
+    const stack = createUndoStack<string>();
+    const seeTask = vi.fn();
+    stack.reserve(
+      {
+        words: "Handed A",
+        undo: () =>
+          Promise.resolve({
+            text: "Asked A to stop.",
+            action: { label: "See its Task", act: seeTask },
+          }),
+      },
+      SAVED,
+    );
+    const { result } = renderHook(() => useUndoLine(stack, () => "page"));
+
+    act(() => {
+      result.current.undo();
+    });
+
+    await waitFor(() => {
+      expect(result.current.line).toMatchObject({
+        text: "Asked A to stop.",
+        canUndo: false,
+        isShown: true,
+      });
+    });
+    act(() => {
+      result.current.line.action?.act();
+    });
+    expect(seeTask).toHaveBeenCalledOnce();
+
+    act(() => {
+      result.current.say("Moved B.");
+    });
+    expect(result.current.line.action).toBeNull();
   });
 
   it("says why a gesture could not be put back", async () => {

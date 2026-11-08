@@ -4,6 +4,7 @@ import { describeClaim, describeLockedRow } from "@hercule/client-core/desk";
 import {
   decideAskingSentence,
   decideCardFace,
+  listCardOffers,
   type AskingPart,
   type LockedPart,
   type QuietPart,
@@ -12,8 +13,9 @@ import {
 import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
-import { CardMoves } from "./card-moves";
+import { CardColleague, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
+import type { CardHandOffs } from "./card-props";
 import { useCardTime } from "./use-card-time";
 
 /**
@@ -22,24 +24,32 @@ import { useCardTime } from "./use-card-time";
  * ("Ines asked for your review") with its wait at the end, and under that what
  * it is: its status shape when that is not the usual one, its title, and its
  * identifier with the title of its first home. It is a card of its own
- * (`data-card-id`), so it has Take it and Dismiss like any card, a click opens
- * it, and the keys stop on it. The words of the link are its tooltip.
+ * (`data-card-id`), so it has Take it, Dismiss and Hand to like any card, a
+ * click opens it, and the keys stop on it. The words of the link are its
+ * tooltip. Once the user hands it off, the colleague who has it stands where
+ * its wait was, and what it asks reads "Agent review has it".
  */
 function AskingPartRow({
   part,
   leadId,
   plugins,
   isFresh,
+  handOffs,
 }: {
   readonly part: AskingPart;
   readonly leadId: string;
   readonly plugins: readonly PluginIdentity[];
   readonly isFresh: boolean;
+  readonly handOffs: CardHandOffs;
 }): JSX.Element {
   const { card } = part;
   const { wait } = useCardTime(card);
+  const handed = handOffs.handed.get(card.id);
   const face = decideCardFace(card);
-  const sentence = decideAskingSentence(card);
+  const sentence =
+    handed === undefined
+      ? decideAskingSentence(card)
+      : ({ text: `${handed.name} has it`, tone: "plain" } as const);
   const claimWords = part.claim === undefined ? undefined : describeClaim(part.claim, plugins);
   const where = [face.identifier, part.homeName].filter((each) => each !== undefined).join(" ");
   return (
@@ -51,10 +61,11 @@ function AskingPartRow({
       data-card-id={card.id}
       data-lead-id={leadId}
       data-access={card.access === "ok" ? undefined : card.access}
+      data-has-task={handed === undefined ? undefined : ""}
       title={claimWords}
       aria-description={claimWords}
     >
-      <span className="part-mark">
+      <span className="part-mark" data-hand-off-mark>
         <PluginMark pluginId={face.pluginId} plugins={plugins} size={14} />
       </span>
       <span className="part-ask">
@@ -65,7 +76,11 @@ function AskingPartRow({
           </span>
         )}
       </span>
-      {wait !== null && <CardWaitFigure wait={wait} />}
+      {handed !== undefined ? (
+        <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
+      ) : (
+        wait !== null && <CardWaitFigure wait={wait} />
+      )}
       <span className="part-line" data-landing-line>
         {face.status !== undefined && (
           <StatusShape shape={face.status.shape} tone={face.status.tone} size={12} />
@@ -78,7 +93,7 @@ function AskingPartRow({
           {card.yours ? " · yours" : ""}
         </span>
       </span>
-      <CardMoves card={card} />
+      <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
     </div>
   );
 }
@@ -169,6 +184,7 @@ function LockedPartRow({
  * - `leadId` is the id of the lead's card, which the parts carry so the page's
  *   motion can tell one lead's parts from another's.
  * - `freshIds` are the cards a signal just landed on, which show the new mark.
+ * - `handOffs` are what the parts that ask need to draw a hand-off.
  */
 export function TuckedParts({
   leadId,
@@ -176,12 +192,14 @@ export function TuckedParts({
   parts,
   plugins,
   freshIds,
+  handOffs,
 }: {
   readonly leadId: string;
   readonly leadTitle: string;
   readonly parts: readonly TuckedPart[];
   readonly plugins: readonly PluginIdentity[];
   readonly freshIds: ReadonlySet<string>;
+  readonly handOffs: CardHandOffs;
 }): JSX.Element {
   return (
     <div className="inbox-tucked" role="group" aria-label={`Riding on ${leadTitle}`}>
@@ -195,6 +213,7 @@ export function TuckedParts({
                 leadId={leadId}
                 plugins={plugins}
                 isFresh={freshIds.has(part.card.id)}
+                handOffs={handOffs}
               />
             );
           case "quiet":

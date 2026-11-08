@@ -8,7 +8,13 @@
  * Task a hand-off makes has no id until the controller answers. The reply's
  * Task id goes into the Inbox as a `set-task` edit like any other.
  */
-import type { HandOffUndo, InboxCard, WorkflowOffer } from "@hercule/contract";
+import type {
+  ActingConnection,
+  EntitySignalLine,
+  HandOffUndo,
+  InboxCard,
+  WorkflowOffer,
+} from "@hercule/contract";
 import { nameSignalKind } from "../intake";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
@@ -81,6 +87,30 @@ export const describeHandOffEnds = (
     ? ends
     : `${ends} ${listKindLabels(left)} ${left.length === 1 ? "stays" : "stay"} open.`;
 };
+
+/**
+ * Returns the account a hand-off acts as: the one in `connections` with id
+ * `chosenId`, else the first, which is the default. Returns `undefined` when
+ * `connections` is empty, as for a workflow that takes no account.
+ */
+export const findActingConnection = (
+  connections: readonly ActingConnection[],
+  chosenId: string | undefined,
+): ActingConnection | undefined =>
+  connections.find((connection) => connection.id === chosenId) ?? connections[0];
+
+/**
+ * Returns the distinct kinds of the open signals among `lines`, snoozed ones
+ * included, in the order they first appear. These are the `openKinds` of
+ * `describeHandOffEnds` for an open card, which reads its signals as lines
+ * (`ExternalEntityDetail.signals`) where a card in the list has them as
+ * `signals.kinds`.
+ */
+export const listOpenSignalKinds = (
+  lines: readonly Pick<EntitySignalLine, "kind" | "status">[],
+): readonly string[] => [
+  ...new Set(lines.filter((line) => line.status === "open").map((line) => line.kind)),
+];
 
 /** The colleague who has a card the user handed off: the workflow, named as the menu names it. */
 export interface HandedWorkflow {

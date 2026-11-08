@@ -22,7 +22,12 @@ import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { TaskLinkOwnersLayer } from "../daemon/tasks";
 import { taskRepository } from "./repository";
-import { TaskService, TaskServiceLayer, type EntityHandoffRecorded } from "./index";
+import {
+  TaskService,
+  TaskServiceLayer,
+  type EntityHandoffRecorded,
+  type EntityHandoffReversal,
+} from "./index";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
@@ -106,6 +111,12 @@ const readStageRevision = (taskId: string) =>
     const repository = yield* taskRepository;
     return Option.getOrThrow(yield* repository.readRevisions(taskId)).stageRevision;
   });
+
+/** Checks that an Undo of the Task left it alone, and that the reason names `word`. */
+const expectStays = (reversal: EntityHandoffReversal, word: string) => {
+  expect(reversal.reversed).toBe(false);
+  expect(reversal.reversed ? "" : reversal.reason).toContain(word);
+};
 
 const createTask = (stage: TaskStage, refs: ReadonlyArray<ExternalRef> = [REF]) =>
   Effect.flatMap(TaskService, (tasks) =>
@@ -411,10 +422,7 @@ describe("reverseEntityHandoff", () => {
         return { reversal: yield* reverse(handoff), gone: yield* isGone(handoff.taskId) };
       }),
     );
-    expect(result.reversal).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining(reason),
-    });
+    expectStays(result.reversal, reason);
     expect(result.gone).toBe(false);
   });
 
@@ -432,10 +440,7 @@ describe("reverseEntityHandoff", () => {
         };
       }),
     );
-    expect(result.reversal).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining("merged"),
-    });
+    expectStays(result.reversal, "merged");
     expect(result.survivor.id).toBe(result.survivorId);
   });
 
@@ -450,10 +455,8 @@ describe("reverseEntityHandoff", () => {
         return [yield* reverse(deleted), yield* reverse(finished)];
       }),
     );
-    expect(reasons).toMatchObject([
-      { reversed: false, reason: expect.stringContaining("deleted") },
-      { reversed: false, reason: expect.stringContaining("finished") },
-    ]);
+    expectStays(reasons[0]!, "deleted");
+    expectStays(reasons[1]!, "finished");
   });
 
   it.each([["exploring"], ["planned"], ["in-review"]] as const)(
@@ -499,10 +502,7 @@ describe("reverseEntityHandoff", () => {
       }),
     );
     expect(result.kept).toMatchObject({ reversed: true, stageRestored: true });
-    expect(result.refused).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining("joined"),
-    });
+    expectStays(result.refused, "joined");
   });
 
   it("keeps a continued Task that a Thread was moved onto since, or another Task was merged into", async () => {
@@ -528,14 +528,8 @@ describe("reverseEntityHandoff", () => {
         return { moved: yield* reverse(moved), merged: yield* reverse(merged) };
       }),
     );
-    expect(result.moved).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining("joined"),
-    });
-    expect(result.merged).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining("joined"),
-    });
+    expectStays(result.moved, "joined");
+    expectStays(result.merged, "joined");
   });
 
   it("keeps a continued Task when a Thread joined and another was moved away, so the number of Threads is the same", async () => {
@@ -569,10 +563,7 @@ describe("reverseEntityHandoff", () => {
       }),
     );
     expect(result.sessions).toBe(1);
-    expect(result.reversal).toMatchObject({
-      reversed: false,
-      reason: expect.stringContaining("joined"),
-    });
+    expectStays(result.reversal, "joined");
     expect(result.task.stage).toBe("building");
   });
 

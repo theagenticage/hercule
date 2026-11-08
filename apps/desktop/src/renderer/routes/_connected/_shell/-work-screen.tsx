@@ -728,6 +728,7 @@ export function WorkScreen({
           <UndoLine
             text={moves.line.text}
             onUndo={moves.line.canUndo ? moves.undoLastMove : null}
+            action={moves.line.action}
             undoKey={describeUndoKey(bridge.platform)}
             isShown={moves.line.isShown}
           />

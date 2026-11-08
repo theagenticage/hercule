@@ -1,0 +1,25 @@
+/* The account a hand-off acts as, when there are several to choose from. */
+.hand-account {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.hand-account select {
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+.hand-account select:hover {
+  background: var(--hover);
+}
+.hand-account select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}

@@ -8,7 +8,9 @@ import {
   describeHandMove,
   describeHandOffEnds,
   describeHandOffUndo,
+  findActingConnection,
   isHandOffTakenBack,
+  listOpenSignalKinds,
   listCardOffers,
   NO_OFFERS,
   partitionOffers,
@@ -135,5 +137,32 @@ describe("describeHandOffUndo", () => {
     expect(isHandOffTakenBack(base)).toBe(true);
     expect(isHandOffTakenBack({ ...base, outcome: "stopped" })).toBe(false);
     expect(isHandOffTakenBack({ ...base, outcome: "too-late" })).toBe(false);
+  });
+});
+
+describe("listOpenSignalKinds", () => {
+  it("lists each kind that has an open line once, and none that only has resolved lines", () => {
+    expect(
+      listOpenSignalKinds([
+        { kind: "github/review-requested", status: "open" },
+        { kind: "github/mention", status: "resolved" },
+        { kind: "github/review-requested", status: "open" },
+        { kind: "github/checks-failed", status: "open" },
+      ]),
+    ).toEqual(["github/review-requested", "github/checks-failed"]);
+  });
+});
+
+describe("findActingConnection", () => {
+  const bot = { id: "conn-bot", label: "northwind-bot" };
+  const ava = { id: "conn-ava", label: "ava-northwind" };
+
+  it.each([
+    ["the chosen account", [bot, ava], "conn-ava", ava],
+    ["the first when none is chosen", [bot, ava], undefined, bot],
+    ["the first when the chosen one is gone", [bot, ava], "conn-old", bot],
+    ["nothing when there is no account", [], "conn-bot", undefined],
+  ])("returns %s", (_name, connections, chosenId, expected) => {
+    expect(findActingConnection(connections, chosenId)).toEqual(expected);
   });
 });

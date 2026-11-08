@@ -14,8 +14,11 @@ import {
 import type { WorkCard } from "@hercule/contract";
 import {
   ghostElement,
+  HAND_STILL_AFTER_MS,
+  HandTracker,
   isMotionReduced,
   measureLayoutRect,
+  swallowNextClick,
   trackBody,
   type LayoutRect,
   type SpringName,
@@ -52,21 +55,6 @@ const MOST_LEAN = 1.2;
 
 /** Degrees of lean for each pixel per millisecond of smoothed sideways speed. */
 const LEAN_PER_SPEED = 0.9;
-
-/** How much of the old smoothed speed is kept at each pointer move: a shaky hand does not make the card shiver. */
-const SPEED_KEPT = 0.7;
-
-/** The shortest time one pointer move is taken to last, in milliseconds, so a burst of events gives no huge speed. */
-const SHORTEST_MOVE_MS = 8;
-
-/** How long the pointer must be still, in milliseconds, before the card stands straight and the hand has no speed. */
-const STILL_AFTER_MS = 60;
-
-/** The fastest a hand is taken to throw a card, in pixels a second, so a flick does not fling the landing across the page. */
-const FASTEST_THROW = 2500;
-
-/** How long, in milliseconds, a click right after a carry is swallowed. */
-const CLICK_GUARD_MS = 50;
 
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
@@ -162,35 +150,6 @@ const findCellFoot = (cell: Element): HTMLElement | null =>
     (child): child is HTMLElement =>
       child instanceof HTMLElement && child.classList.contains("board-more"),
   ) ?? null;
-
-/**
- * Swallows the click that follows a carry, which would otherwise open the card
- * that was dropped. `isPointerUp` is whether the button is already up. When
- * it is not (Esc was pressed with the button held), the click comes when the
- * user lets go, so the guard waits for that. A new press ends the guard, so a
- * release that never arrives cannot swallow a later click.
- */
-const swallowNextClick = (isPointerUp: boolean): void => {
-  let timer: number | undefined;
-  const stop = (event: Event): void => {
-    event.stopPropagation();
-    event.preventDefault();
-    clear();
-  };
-  const startTimer = (): void => {
-    timer = window.setTimeout(clear, CLICK_GUARD_MS);
-  };
-  function clear(): void {
-    window.removeEventListener("click", stop, true);
-    window.removeEventListener("pointerup", startTimer, true);
-    window.removeEventListener("pointerdown", clear, true);
-    window.clearTimeout(timer);
-  }
-  window.addEventListener("click", stop, true);
-  window.addEventListener("pointerdown", clear, true);
-  if (isPointerUp) startTimer();
-  else window.addEventListener("pointerup", startTimer, { capture: true, once: true });
-};
 
 /**
  * Handles the pointer on `scroller` for as long as it lives. Everything a
@@ -321,14 +280,8 @@ const createBoardDrag = (
 
   /** Follows the pointer: the copy goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
   const followHand = (c: Carry, x: number, y: number): void => {
-    const now = performance.now();
-    const elapsed = Math.max(SHORTEST_MOVE_MS, now - c.hand.movedAt);
     const { hand } = c;
-    hand.vx = hand.vx * SPEED_KEPT + ((x - hand.x) / elapsed) * (1 - SPEED_KEPT);
-    hand.vy = hand.vy * SPEED_KEPT + ((y - hand.y) / elapsed) * (1 - SPEED_KEPT);
-    hand.x = x;
-    hand.y = y;
-    hand.movedAt = now;
+    hand.moveTo(x, y);
     // Drawn into a card, the card in the hand stays docked until the pointer
     // leaves the card. It is docked when the card is chosen, and again when the
     // card moves (`onScroll`, `onPageChanged`), not when the pointer does.
@@ -349,7 +302,7 @@ const createBoardDrag = (
       window.clearTimeout(c.uprightTimer);
       c.uprightTimer = window.setTimeout(() => {
         if (c.merge.handMotion() !== "docked") c.body.to({ r: 0 }, "hand", { reduced: false });
-      }, STILL_AFTER_MS);
+      }, HAND_STILL_AFTER_MS);
     }
     moveFollowers(c);
     choosePlace(c);
@@ -359,16 +312,13 @@ const createBoardDrag = (
   /** Reads how the copy looks now, and how fast the hand moves, for the landing to start from. */
   const readReleasePose = (c: Carry): ReleasePose => {
     const shown = c.body.values;
-    const isStill = performance.now() - c.hand.movedAt > STILL_AFTER_MS;
-    const toPixelsASecond = (speed: number): number =>
-      isStill ? 0 : limitSymmetric(speed * 1000, FASTEST_THROW);
     return {
       centerX: c.home.left + c.home.width / 2 + shown.x,
       centerY: c.home.top + c.home.height / 2 + shown.y,
       scale: shown.s,
       tilt: shown.r,
       lift: shown.l,
-      velocity: { x: toPixelsASecond(c.hand.vx), y: toPixelsASecond(c.hand.vy) },
+      velocity: c.hand.readThrow(),
     };
   };
 
@@ -623,7 +573,7 @@ const createBoardDrag = (
       grab,
       reduced,
       watcher,
-      hand: { x: event.clientX, y: event.clientY, vx: 0, vy: 0, movedAt: performance.now() },
+      hand: new HandTracker(event.clientX, event.clientY),
       geometry: measured.geometry,
       view: measured.view,
       place: null,

@@ -14,11 +14,12 @@ import {
   type FlipByKeyResult,
   type SpringName,
 } from "../../app/motion";
+import { copyCardForMotion } from "../desk";
 
 /** How far a dismissed card steps aside, and a restored card comes back from, in pixels. */
 const STEP_ASIDE = 14;
 
-/** How far a monogram sits below its place before it rises into it, in pixels. */
+/** How far a holder (a monogram or a colleague) sits below its place before it rises into it, in pixels. */
 const HOLDER_DEPTH = 22;
 
 /** How far above its place a card that arrived by itself starts, in pixels. */
@@ -113,12 +114,7 @@ export const copyCardToStepAside = (
 ): HTMLElement | null => {
   const layer = ensureCopyLayer(scroller);
   if (layer === null) return null;
-  const copy = ghostElement(element, layer);
-  // The copy is not a card: keys, the pointer and the motion key must never find it.
-  copy.removeAttribute("data-card-id");
-  copy.removeAttribute("role");
-  copy.removeAttribute("data-current");
-  return copy;
+  return ghostElement(element, layer, copyCardForMotion(element));
 };
 
 /** Moves the copy 14px to the right while it fades, on `travel`, then removes it and its layer when it is the last. */
@@ -147,11 +143,15 @@ export const comeDownIntoPlace = (card: HTMLElement): void => {
   body.to({ y: 0, o: 1 }, "self");
 };
 
-/** Lifts the monogram of `card` into the wait's place: it rises 22px on `hand`, clipped by its box. */
-export const riseMonogram = (card: HTMLElement): void => {
-  const monogram = card.querySelector<HTMLElement>(".card-taken-in");
-  if (monogram === null) return;
-  const body = trackBody(monogram);
+/** Lifts `holder`, whoever has taken a card, into its place in the wait's slot: it rises 22px on `hand`, clipped by the slot's box. */
+export const riseHolder = (holder: HTMLElement): void => {
+  const body = trackBody(holder);
   body.set({ y: HOLDER_DEPTH });
   body.to({ y: 0 }, "hand");
+};
+
+/** Lifts the monogram of `card` into the wait's place (`riseHolder`). */
+export const riseMonogram = (card: HTMLElement): void => {
+  const monogram = card.querySelector<HTMLElement>(".card-taken-in");
+  if (monogram !== null) riseHolder(monogram);
 };

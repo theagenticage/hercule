@@ -12,6 +12,7 @@ import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
 import { ProgressBar } from "../desk";
 import { CardRow } from "./card-row";
+import type { CardHandOffs } from "./card-props";
 import { CardStatus } from "./card-parts";
 import { PointerRow } from "./pointer-row";
 import "../desk/card.css";
@@ -116,6 +117,8 @@ function PlaceHead({
  *   it already.
  * - `monogram` is the user's, for the rows that a Task holds.
  * - `freshIds` are the cards a signal just landed on, which show the new mark.
+ * - `handOffs` are what the rows need to draw their Hand to move and the
+ *   colleague who has a card the user handed off.
  * - `block` is the surface's place on the page, which sets when its words
  *   arrive after the first read.
  *
@@ -128,6 +131,7 @@ export function PlaceSurface({
   showStatus,
   monogram,
   freshIds,
+  handOffs,
   block,
 }: {
   readonly surface: InboxSurface;
@@ -135,6 +139,7 @@ export function PlaceSurface({
   readonly showStatus: boolean;
   readonly monogram: string;
   readonly freshIds: ReadonlySet<string>;
+  readonly handOffs: CardHandOffs;
   readonly block: number;
 }): JSX.Element {
   const headingId = useId();
@@ -158,6 +163,7 @@ export function PlaceSurface({
               near={row.near}
               bundle={row.bundle}
               freshIds={freshIds}
+              handOffs={handOffs}
               plugins={plugins}
               showMark={!isMarkShownByHead(head, readEntityPluginId(row.card.kind))}
               showStatus={showStatus}

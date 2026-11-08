@@ -519,6 +519,24 @@ const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
 ];
 
 /**
+ * The entity reads a push that names a changed workflow makes stale: the
+ * Inbox, whose cards hold the workflows they can be handed to, and every
+ * entity pane, which holds the same offers. The Inbox's count does not depend
+ * on a workflow, so it is left out: the shell holds it active, and a cron fire
+ * is a workflow push.
+ *
+ * A push that names no workflow (the controller's first push on every
+ * subscription) leaves them alone. Opening the Inbox reads it afresh already,
+ * and reading it again at once would double the cost of every visit. An edit
+ * missed while the connection was down shows when the next workflow push
+ * comes, and the controller checks the offer again when a card is handed off.
+ */
+const WORKFLOW_ENTITY_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.inbox(),
+  queryKeys.externalEntity(),
+];
+
+/**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
  * with no ids means every record of the topic may have changed (the
  * controller sends one first on every subscription), so it returns the list
@@ -652,7 +670,9 @@ export const buildQueryKeys = (
   // triggers too, so the `triggers` prefix covers both it and the one
   // workflow's list. A workflow's own page is refetched only when the push
   // lists its id, or when the push lists no ids. Every signal read is
-  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`, and so are the Inbox and the
+  // entity panes when a push names a workflow, because the workflows a card
+  // can be handed to are read from the workflows (see `WORKFLOW_ENTITY_KEYS`).
   if (topic === "workflow") {
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers(), ...SIGNAL_DESCRIBE_KEYS]
@@ -661,6 +681,7 @@ export const buildQueryKeys = (
           ...ids.map((id) => queryKeys.workflow(id)),
           queryKeys.triggers(),
           ...SIGNAL_DESCRIBE_KEYS,
+          ...WORKFLOW_ENTITY_KEYS,
         ];
   }
   // Any run change refetches the run list, whatever its filter. A run's own

@@ -57,6 +57,8 @@ const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y
  *   which names whatever lies under the pointer, even a card that is moving
  *   away.
  *
+ * A card that becomes current is also measured for the width of its moves.
+ *
  * `onReach` is called with the id of each card that becomes the current one, by
  * the pointer or the keys: reaching a card is what takes its new mark away.
  *
@@ -84,6 +86,10 @@ export const useCurrentCard = (
     if (element === null) return;
     current.current = { id, by };
     element.setAttribute("data-current", by);
+    // The hand-off is named for the workflow, so the moves are as wide as that name. The line they cover ends
+    // before them by this width (`--moves-width`), 6px for the gap to the edge.
+    const moves = element.querySelector<HTMLElement>(".card-moves");
+    if (moves !== null) element.style.setProperty("--moves-width", `${moves.offsetWidth + 6}px`);
     onReach(id);
     if (by === "pointer") {
       // The ring and the pointer's mark must not both stand: the pointer took over.

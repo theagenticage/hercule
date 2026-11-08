@@ -4,7 +4,7 @@
  * share the undo stack (`undo-stack.ts`).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Gesture, UndoStack } from "./undo-stack";
+import type { Gesture, UndoAction, UndoStack } from "./undo-stack";
 
 /** How long the undo line stays after a move, and after a failure, which takes longer to read. */
 const MOVE_LINE_MS = 5_200;
@@ -20,6 +20,8 @@ export interface UndoLineState {
    * reverse an older gesture that has nothing to do with the line.
    */
   readonly canUndo: boolean;
+  /** A second button beside Undo, such as "See its Task", or `null` for none. */
+  readonly action: UndoAction | null;
   readonly isShown: boolean;
   /** Rises on every new line, so the timer that hides the line starts again. */
   readonly serial: number;
@@ -29,6 +31,7 @@ export interface UndoLineState {
 interface HeldLine<Page> {
   readonly text: string;
   readonly offered: Gesture<Page> | null;
+  readonly action: UndoAction | null;
   readonly isShown: boolean;
   readonly serial: number;
   /** How long the line stays, fixed when it is said: a withdrawn gesture does not restart the timer. */
@@ -41,9 +44,9 @@ export interface UndoLineControls<Page> {
   /**
    * Shows `text` on the line and starts its timer again. With `offered`, the
    * line shows Undo for as long as that gesture is on the undo stack. Without
-   * it, the line has no Undo.
+   * it, the line has no Undo. With `action`, the line shows that button too.
    */
-  readonly say: (text: string, offered?: Gesture<Page>) => void;
+  readonly say: (text: string, offered?: Gesture<Page>, action?: UndoAction) => void;
   /**
    * Takes `gesture` off the undo stack, for a gesture that cannot be undone
    * any more. When the line offers it, Undo goes from the line at once.
@@ -68,17 +71,18 @@ export interface UndoLineControls<Page> {
  *
  * `buildPage` returns what this page lends to a gesture when it is undone (see
  * `Gesture.undo`). It is called when Undo is pressed, so it may use the
- * newest state of the page. `isPaused` tells whether Undo must wait, such as
+ * newest state of the page. `isPaused` returns whether Undo must wait, such as
  * while a card is in the hand of a drag (see `UndoAdapter.isPaused`).
  */
 export function useUndoLine<Page>(
   undoStack: UndoStack<Page>,
   buildPage: () => Page,
-  isPaused = false,
+  isPaused: () => boolean = () => false,
 ): UndoLineControls<Page> {
   const [held, setHeld] = useState<HeldLine<Page>>({
     text: "",
     offered: null,
+    action: null,
     isShown: false,
     serial: 0,
     staysMs: FAILURE_LINE_MS,
@@ -86,14 +90,16 @@ export function useUndoLine<Page>(
   const line: UndoLineState = {
     text: held.text,
     canUndo: held.offered !== null,
+    action: held.action,
     isShown: held.isShown,
     serial: held.serial,
   };
 
-  const say = (text: string, offeredGesture?: Gesture<Page>): void => {
+  const say = (text: string, offeredGesture?: Gesture<Page>, action?: UndoAction): void => {
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,
+      action: action ?? null,
       isShown: true,
       serial: before.serial + 1,
       staysMs: offeredGesture === undefined ? FAILURE_LINE_MS : MOVE_LINE_MS,
@@ -130,9 +136,9 @@ export function useUndoLine<Page>(
     () =>
       undoStack.registerPage({
         buildPage: () => latest.current.buildPage(),
-        isPaused: () => latest.current.isPaused,
+        isPaused: () => latest.current.isPaused(),
         report: (report) => {
-          latest.current.say(report.text);
+          latest.current.say(report.text, undefined, report.action);
         },
       }),
     [undoStack],

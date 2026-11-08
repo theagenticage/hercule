@@ -2,12 +2,18 @@ import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
-import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
+import {
+  decideCardFace,
+  decideHandedFace,
+  describeCardAloud,
+  listCardOffers,
+  type CardBundle,
+} from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
-import { CardMonogram, CardMoves } from "./card-moves";
+import { CardColleague, CardMonogram, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
-import { buildCardPropsComparer } from "./card-props";
+import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
 import { LinkLines } from "./link-lines";
 import { TuckedParts } from "./tucked-parts";
 import { useCardTime } from "./use-card-time";
@@ -18,6 +24,7 @@ interface CardRowProps {
   readonly bundle: CardBundle;
   /** The cards a signal just landed on. The row and the cards that ride on it show the new mark. */
   readonly freshIds: ReadonlySet<string>;
+  readonly handOffs: CardHandOffs;
   readonly plugins: readonly PluginIdentity[];
   readonly showMark: boolean;
   readonly showStatus: boolean;
@@ -54,7 +61,10 @@ const arePropsEqual = buildCardPropsComparer<CardRowProps>({
  *   `showStatus` is false when the surface is a status, whose head already
  *   says it, so the column closes up.
  * - `monogram` is the user's, which takes the place of the wait once a Task
- *   holds the card.
+ *   holds the card. A card the user handed off in this visit shows the
+ *   colleague who has it there instead, and its sentence reads "Agent review
+ *   has it" (`handOffs.handed`). `handOffs.offerSets` are the workflows its
+ *   Hand to move offers.
  * - `bundle` is what rides on the card and the hints under it. Parts and hints
  *   stand as siblings of the row inside one `.inbox-bundle`, under the row's
  *   title, so what the row says and where it lies never depend on them. The
@@ -77,6 +87,7 @@ function CardRowView({
   near,
   bundle,
   freshIds,
+  handOffs,
   plugins,
   showMark,
   showStatus,
@@ -84,7 +95,9 @@ function CardRowView({
   step,
 }: CardRowProps): JSX.Element {
   const { wait, trust, signalAge } = useCardTime(card);
-  const face = decideCardFace(card);
+  const handed = handOffs.handed.get(card.id);
+  const face =
+    handed === undefined ? decideCardFace(card) : decideHandedFace(decideCardFace(card), handed);
   return (
     <div className="inbox-bundle" style={{ "--arrive-step": step }}>
       <div
@@ -92,14 +105,18 @@ function CardRowView({
         role="listitem"
         data-card-id={card.id}
         data-access={card.access === "ok" ? undefined : card.access}
-        data-has-task={card.taskId === undefined ? undefined : ""}
+        data-has-task={card.taskId === undefined && handed === undefined ? undefined : ""}
         tabIndex={-1}
-        aria-label={describeCardAloud(face, wait, bundle.riders.length)}
+        aria-label={describeCardAloud(
+          face,
+          handed === undefined ? wait : null,
+          bundle.riders.length,
+        )}
       >
         <span className="card-body">
           <span className="row-rail">
             {showMark && (
-              <span className="row-mark">
+              <span className="row-mark" data-hand-off-mark>
                 <PluginMark pluginId={face.pluginId} plugins={plugins} size={15} />
               </span>
             )}
@@ -127,7 +144,7 @@ function CardRowView({
               {face.sentence !== undefined && (
                 <span className="row-news" data-landing-sentence data-tone={face.sentence.tone}>
                   {face.sentence.text}
-                  {signalAge !== undefined && (
+                  {signalAge !== undefined && handed === undefined && (
                     <>
                       {" "}
                       <small>{signalAge}</small>
@@ -140,10 +157,14 @@ function CardRowView({
           </span>
           <span className="row-end">
             <span className="row-id">{face.identifier}</span>
-            {wait !== null && <CardWaitFigure wait={wait} />}
-            {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
+            {wait !== null && handed === undefined && <CardWaitFigure wait={wait} />}
+            {handed !== undefined ? (
+              <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
+            ) : (
+              card.taskId !== undefined && <CardMonogram monogram={monogram} />
+            )}
           </span>
-          <CardMoves card={card} />
+          <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
         </span>
       </div>
       {bundle.parts.length > 0 && (
@@ -153,6 +174,7 @@ function CardRowView({
           parts={bundle.parts}
           plugins={plugins}
           freshIds={freshIds}
+          handOffs={handOffs}
         />
       )}
       <LinkLines

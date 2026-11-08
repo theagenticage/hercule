@@ -97,16 +97,19 @@ export const useVisitHistory = (): VisitHistoryHandle => {
  * `step` is the read as `VisitStep` describes it, without the ids released so
  * far, which this hook keeps, and without the Reduce motion question, which it
  * asks. `visit` is the history this hook advances. `scrollRef` is the element
- * that scrolls the page.
+ * that scrolls the page. `isCarrying` tells whether the user holds a card in
+ * the hand: a card that arrives waits for as long as it is true.
  */
 export const useInboxVisit = ({
   step,
   visit: { history, setHistory, advanceLanding: advanceLandingStep },
   scrollRef,
+  isCarrying,
 }: {
   readonly step: Omit<VisitStep, "released" | "isMotionReduced">;
   readonly visit: VisitHistoryHandle;
   readonly scrollRef: RefObject<HTMLElement | null>;
+  readonly isCarrying: () => boolean;
 }): Omit<InboxVisit, "landing"> & {
   readonly isWaitingForSunrise: boolean;
   readonly clearFresh: (id: string) => void;
@@ -141,8 +144,10 @@ export const useInboxVisit = ({
   );
 
   const latestArrivals = useRef(visit.heldArrivals);
+  const latestIsCarrying = useRef(isCarrying);
   useEffect(() => {
     latestArrivals.current = visit.heldArrivals;
+    latestIsCarrying.current = isCarrying;
   });
   // The effect below starts again only when the set of waiting cards changes.
   const arrivalKey = visit.heldArrivals.join(" ");
@@ -152,7 +157,7 @@ export const useInboxVisit = ({
     void waitForStillHand({
       // The card the pointer rests on is the one that must not move.
       targets: () => [...(scrollRef.current?.querySelectorAll('[data-current="pointer"]') ?? [])],
-      isDragging: () => false,
+      isDragging: () => latestIsCarrying.current(),
       signal: wait.signal,
     }).then((isStill) => {
       if (!isStill) return;

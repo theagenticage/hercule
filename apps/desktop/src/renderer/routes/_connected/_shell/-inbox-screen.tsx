@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { buildInitials, readErrorMessage } from "@hercule/client-core";
 import {
@@ -7,18 +7,22 @@ import {
   decideEmptyInbox,
   describeFailingSources,
   describeTruncatedInbox,
+  listCardOffers,
   listRiders,
   nameLinkEnd,
+  NO_OFFERS,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
+import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../app/live";
 import { connectionsQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { useWindowVisible } from "../../../app/window-visibility";
 import { IconPill, KeysSheet, ReadFailure, UndoLine, type KeyRow } from "../../../screens/desk";
+import { HandToMenu } from "../../../screens/inbox/hand-to-menu";
 import { InboxDesk, type InboxDeskState } from "../../../screens/inbox/inbox-desk";
 import { InboxLoading } from "../../../screens/inbox/inbox-loading";
 import { InboxPill } from "../../../screens/inbox/inbox-pill";
@@ -27,8 +31,10 @@ import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
 import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
 import { OngoingSide } from "../../../screens/inbox/ongoing-side";
 import { InboxOpenCard } from "../../../screens/inbox/open-card";
+import { Rail, type RailTarget } from "../../../screens/inbox/rail";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
+import { useInboxCarry } from "../../../screens/inbox/use-inbox-carry";
 import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
 import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
@@ -41,10 +47,21 @@ const KEY_ROWS: readonly KeyRow[] = [
   ["↑ ↓ ← →", "Move through the page"],
   ["J K", "Next, previous"],
   ["Space Return", "Open the card"],
+  ["H", "Hand to an agent"],
   ["T", "Take it"],
   ["E", "Dismiss"],
   ["G", "See its Task on Work"],
 ];
+
+/** The offers of an Inbox that has none, so the cards have the same object to compare each time. */
+const NO_OFFER_SETS = {};
+
+/** The Hand to menu while it is open: the card it is for, what it opens under, and how the user asked. */
+interface HandMenuTarget {
+  readonly cardId: string;
+  readonly anchor: HTMLElement;
+  readonly by: "keys" | "pointer";
+}
 
 /** Returns the line that says since when the controller cannot be reached, and what that means for moves. */
 const describeOffline = (since: Date): string =>
@@ -67,19 +84,31 @@ const describeOffline = (since: Date): string =>
  *   which takes the sidebar's new mark away.
  * - Offline, or with a source that cannot be read, one line in the bar says
  *   what that means. A read that fails says why, with a Try again button.
- * - The user's moves are here: Take it, Dismiss and Undo (`useInboxMoves`),
- *   the pointer and the keys that drive them (`useCurrentCard`,
- *   `useInboxPage`), the open card, and See its Task, which goes to Work.
+ * - The user's moves are here: Take it, Hand to, Dismiss and Undo
+ *   (`useInboxMoves`), the pointer and the keys that drive them
+ *   (`useCurrentCard`, `useInboxPage`), the open card, and See its Task, which
+ *   goes to Work. Hand to hands a card to the one workflow that can take it,
+ *   or opens a menu of them; the offers follow the workflows, so the screen
+ *   holds the `workflow` topic.
+ * - Carrying a card with the pointer raises the rail, whose targets are the
+ *   workflows that can take it, Take it and Dismiss. Letting go on another
+ *   card links the two, as `Link them` does. A card that arrives meanwhile
+ *   waits until the card is let go.
  */
 export function InboxScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
   const { client, url, live } = controller;
   const { undoStack } = controller.accountScopes.read();
   const navigate = useNavigate();
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
+  const queryClient = useQueryClient();
+  // The offers of every card depend on the workflows, which the shell does not hold.
+  useScreenTopicsLive(live, queryClient, WORKFLOW_TOPICS);
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: connections } = useSuspenseQuery(connectionsQuery(client));
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Whether a card is in the hand, for the visit to read when a card arrives (set below, once the carry runs).
+  const isCarryingRef = useRef(false);
   const read = useInbox(client);
   const visitHistory = useVisitHistory();
   const moves = useInboxMoves({
@@ -88,6 +117,10 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     serverInbox: read.data,
     visit: visitHistory,
     scrollRef,
+    isCarrying: () => isCarryingRef.current,
+    openTask: (taskId) => {
+      void navigate({ to: "/work", search: { task: taskId } });
+    },
   });
   const isVisible = useWindowVisible();
   const offlineSince = useOfflineSince(live);
@@ -121,6 +154,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     },
     visit: visitHistory,
     scrollRef,
+    isCarrying: () => isCarryingRef.current,
   });
   const hasWords = inbox !== undefined && !isHolding;
   const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
@@ -148,14 +182,29 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   }, [openedId, clearFresh]);
   const findCard = (id: string): InboxCard | undefined =>
     inbox?.cards.find((card) => card.id === id);
+  const readOffers = (card: InboxCard) =>
+    inbox === undefined ? NO_OFFERS : listCardOffers(card, inbox.offerSets);
+  const handOffs = { offerSets: inbox?.offerSets ?? NO_OFFER_SETS, handed: moves.handed };
   const seeTask = (card: InboxCard): void => {
     if (card.taskId === undefined) return;
     void navigate({ to: "/work", search: { task: card.taskId } });
   };
   // Dismissing a card lets what rides on it stand alone, and the undo line says so.
-  const dismissWithRiders = (card: InboxCard): void => {
-    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id));
+  const dismissWithRiders = (card: InboxCard, stepsAside = true): void => {
+    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id), stepsAside);
   };
+  const linkCards = (fromRef: string, toRef: string): void => {
+    if (inbox === undefined) return;
+    moves.link({
+      fromRef,
+      toRef,
+      fromName: nameLinkEnd(inbox, fromRef),
+      toName: nameLinkEnd(inbox, toRef),
+    });
+  };
+  const [handMenu, setHandMenu] = useState<HandMenuTarget | null>(null);
+  // The account the user picked in the menu. A menu that opens starts from the default again.
+  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
   const page = useInboxPage({
     scrollRef,
     current,
@@ -165,18 +214,51 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       take: moves.take,
       dismiss: dismissWithRiders,
       seeTask,
-      link: (fromRef, toRef) => {
-        if (inbox === undefined) return;
-        moves.link({
-          fromRef,
-          toRef,
-          fromName: nameLinkEnd(inbox, fromRef),
-          toName: nameLinkEnd(inbox, toRef),
-        });
-      },
+      link: linkCards,
       say: moves.sayWithoutUndo,
+      readOffers,
+      hand: moves.handOff,
+      openHandMenu: (card, anchor, by) => {
+        setChosenConnectionId(undefined);
+        setHandMenu({ cardId: card.id, anchor, by });
+      },
     },
   });
+  const handMenuCard = handMenu === null ? undefined : findCard(handMenu.cardId);
+
+  // ---------- Carrying a card ----------
+  const { rail, attachRail, isCarrying } = useInboxCarry({
+    pageRef: scrollRef,
+    disabled: openCard.isOpen,
+    canCarry: (cardId) => findCard(cardId) !== undefined,
+    readRailTargets: (cardId) => {
+      const card = findCard(cardId);
+      if (card === undefined) return [];
+      const hands: RailTarget[] = readOffers(card).available.map((offer) => ({
+        kind: "hand",
+        workflowId: offer.workflowId,
+        name: offer.name,
+      }));
+      // A card a Task holds can be handed on, but not taken or dismissed.
+      const holdsTask = card.taskId !== undefined || moves.handed.has(card.id);
+      return holdsTask ? hands : [...hands, { kind: "take" }, { kind: "dismiss" }];
+    },
+    onDropOnTarget: (cardId, target) => {
+      const card = findCard(cardId);
+      if (card === undefined) return;
+      if (target.kind === "hand") page.handCard(card, target.workflowId, undefined, "pointer");
+      else if (target.kind === "take") moves.take(card);
+      else dismissWithRiders(card, false);
+    },
+    onDropOnCard: (cardId, ontoCardId) => {
+      const card = findCard(cardId);
+      const onto = findCard(ontoCardId);
+      if (card !== undefined && onto !== undefined) linkCards(card.ref, onto.ref);
+    },
+  });
+  useLayoutEffect(() => {
+    isCarryingRef.current = isCarrying;
+  }, [isCarrying]);
 
   let state: InboxDeskState = "board";
   let body: JSX.Element | null;
@@ -208,6 +290,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           plugins={plugins}
           monogram={monogram}
           freshIds={freshIds}
+          handOffs={handOffs}
           note={truncated === undefined ? null : <p className="inbox-note">{truncated}</p>}
         />
         <RequestsSide
@@ -217,6 +300,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           plugins={plugins}
           monogram={monogram}
           freshIds={freshIds}
+          handOffs={handOffs}
           isSunriseStill={!emptiedByMove.requests}
         />
       </>
@@ -307,15 +391,45 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
                 });
               }
             }}
+            onHand={(cardId, workflowId, connectionId, by) => {
+              const card = findCard(cardId);
+              if (card === undefined) return;
+              // By keys the sheet walks on to the next card and the chain plays behind it. By pointer it folds home first.
+              if (by === "keys") page.handCard(card, workflowId, connectionId, by);
+              else {
+                openCard.closeThen(() => {
+                  page.handCard(card, workflowId, connectionId, by);
+                });
+              }
+            }}
             onSeeTask={(taskId) => {
               openCard.close();
               void navigate({ to: "/work", search: { task: taskId } });
             }}
           />
+          {handMenu !== null && handMenuCard !== undefined && (
+            <HandToMenu
+              offers={readOffers(handMenuCard)}
+              openKinds={handMenuCard.signals.kinds}
+              actingConnections={handMenuCard.actingConnections}
+              chosenConnectionId={chosenConnectionId}
+              onChooseConnection={setChosenConnectionId}
+              onHand={(workflowId) => {
+                setHandMenu(null);
+                page.handCard(handMenuCard, workflowId, chosenConnectionId, handMenu.by);
+              }}
+              onClose={() => {
+                setHandMenu(null);
+              }}
+              anchor={handMenu.anchor}
+            />
+          )}
+          {rail !== null && <Rail ref={attachRail} targets={rail.targets} monogram={monogram} />}
           {page.isKeysSheetOpen && <KeysSheet rows={KEY_ROWS} platform={bridge.platform} />}
           <UndoLine
             text={moves.line.text}
             onUndo={moves.line.canUndo ? moves.undoLastMove : null}
+            action={moves.line.action}
             undoKey={describeUndoKey(bridge.platform)}
             isShown={moves.line.isShown}
           />
