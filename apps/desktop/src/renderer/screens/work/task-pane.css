@@ -30,25 +30,11 @@
   font: var(--type-summary);
 }
 .task-pane-crumb-text {
-  flex: 0 1 auto;
+  flex: 1;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-/* The Initiative the Task is on follows its Project: a dot, the Initiative's small flag in its colour, and its name. The Project gives way first when the line is short, so the Initiative is not lost. */
-.task-pane-crumb-dot {
-  flex: none;
-}
-.task-pane-crumb-plan {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-.task-pane-crumb-plan .hue-flag {
-  flex: none;
 }
 .task-pane-title {
   margin: 0 0 12px;

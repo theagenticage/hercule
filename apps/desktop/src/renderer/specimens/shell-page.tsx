@@ -225,6 +225,7 @@ import {
   buildWorkViewKey,
   EMPTY_WORK_VIEW,
   writeSavedWorkView,
+  type SavedWorkView,
 } from "../screens/work/work-view-storage";
 import { Shell } from "../shell";
 import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
@@ -1860,7 +1861,8 @@ export async function mountWorkflowsSpecimen(
  * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
  * folded and the Initiative rows of `work.openedInitiativeIds` opened, as if
  * the user had done both, and the details of `openTaskId` open
- * beside it when one is given (`work.details` holds what they read). Returns
+ * beside it when one is given (`work.details` holds what they read), and the
+ * choices of `view` laid over the default view. Returns
  * once a card is in the document. Fails when the page has no `#root`, draws no sidebar row and no
  * card, or tries to read a record the cache does not hold.
  */
@@ -1868,11 +1870,13 @@ export async function mountWorkSpecimen(
   records: SidebarRecords,
   work: WorkRecords,
   openTaskId?: string,
+  view?: Partial<SavedWorkView>,
 ): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
     ...EMPTY_WORK_VIEW,
     foldedLaneIds: work.foldedLaneIds,
     openedInitiativeIds: work.openedInitiativeIds ?? [],
+    ...view,
   });
   await mountShellSpecimen(
     records,

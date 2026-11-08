@@ -14,7 +14,7 @@ import {
 } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage, type TaskDetail, type WorkCard } from "@hercule/contract";
 import { buildLook } from "../../faces";
-import { Colleague, HueFlag } from "../desk";
+import { Colleague } from "../desk";
 import { BlockerSections } from "./task-pane-blockers";
 import { ContextSections } from "./task-pane-context";
 import { FailureSection } from "./task-pane-failure";
@@ -281,20 +281,11 @@ export function TaskPane({
       <div className="task-pane-scroll">
         <header className="task-pane-head">
           <p className="task-pane-crumb">
-            <span className="task-pane-crumb-text">{projectName}</span>
-            {initiative !== undefined && (
-              <>
-                {projectName !== null && (
-                  <span className="task-pane-crumb-dot" aria-hidden="true">
-                    ·
-                  </span>
-                )}
-                <span className="task-pane-crumb-plan" title={initiative.name}>
-                  <HueFlag hue={initiative.hue} />
-                  <span className="task-pane-crumb-text">{initiative.name}</span>
-                </span>
-              </>
-            )}
+            <span className="task-pane-crumb-text">
+              {[projectName, initiative?.name]
+                .filter((name): name is string => name !== null && name !== undefined)
+                .join(" · ")}
+            </span>
           </p>
           {card !== undefined ? (
             <h2 className="task-pane-title" tabIndex={-1} data-sheet-focus>

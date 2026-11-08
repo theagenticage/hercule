@@ -271,6 +271,10 @@
   vertical-align: -1px;
   line-height: 0;
 }
+/* A block, so the lock's bottom edge stands 1px under the line's baseline and not on the baseline plus the line's descender. */
+.card-lock > svg {
+  display: block;
+}
 .desk-card:hover .card-title,
 .desk-card:focus-visible .card-title {
   color: var(--ink);

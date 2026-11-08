@@ -11,7 +11,7 @@ import {
 import type { WorkCard } from "@hercule/contract";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { ComposeIcon } from "../../icons/compose";
-import { buildHueStyle, HueFlag, StatusShape } from "../desk";
+import { buildHueStyle, HueFlag } from "../desk";
 import { BoardCell } from "./board-cell";
 import type { PressedKeys } from "./work-card";
 import "./initiatives.css";
@@ -33,8 +33,31 @@ const describeBead = (card: WorkCard, kind: CardState): string =>
     .join(", ");
 
 /**
+ * Renders the failed mark of a bead: a ring with a cross, 13px square, drawn with a stroke of 1.8
+ * on the 16-unit grid. That is heavier than the failed mark that stands beside words (stroke
+ * 1.5), because a bead has to be read from further away. It takes the colour of the bead.
+ */
+function FailedBeadMark(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={13}
+      height={13}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="6" />
+      <path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" />
+    </svg>
+  );
+}
+
+/**
  * Renders one bead: a button that opens its Task, or, for a Done Task that has
- * no card, a ring that is no button. A failed bead is the app's failed mark at
+ * no card, a ring that is no button. A failed bead is a ring with a cross at
  * 13px; every other kind is a 9px dot drawn by `initiatives.css` from
  * `data-kind`.
  */
@@ -49,7 +72,7 @@ function Bead({
   readonly isTabStop: boolean;
   readonly onPress: (taskId: string) => void;
 }): JSX.Element {
-  const mark = bead.kind === "failed" ? <StatusShape shape="cross" tone="bad" size={13} /> : null;
+  const mark = bead.kind === "failed" ? <FailedBeadMark /> : null;
   if (bead.taskId === null || card === undefined) {
     return <i className="initiative-bead" data-kind={bead.kind} />;
   }
