@@ -339,6 +339,28 @@ describe("Initiatives on the Work board", () => {
     );
   });
 
+  it("acts the same from the keyboard and the toolbar when Fold everything runs with a filter on and the lane of a row folded", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+    await user.click(screen.getByRole("button", { name: "In lanes", hidden: true }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^Blocked/, hidden: true }));
+    await screen.findByRole("button", { name: /^Send the receipt by email/ });
+    const laneHead = within(
+      document.querySelector<HTMLElement>(`[data-lane-head="${WEBSHOP.id}"]`)!,
+    ).getByRole("button", { name: new RegExp(`^${WEBSHOP.name}`) });
+    await user.click(laneHead);
+    expect(laneHead.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: /^Checkout rework/ })).toBeNull();
+
+    // The row is hidden under its folded lane but is still part of everything.
+    // Every lane and row is not folded yet, so Fold everything folds them and
+    // does not open the lane. The key and the toolbar button must agree.
+    await user.keyboard("{Shift>}F{/Shift}");
+
+    expect(laneHead.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("creates a Task on the Initiative whose lane's plus was pressed, in its Project, and says so", async () => {
     const user = userEvent.setup();
     const { calls } = await openWork();

@@ -22,6 +22,17 @@ export interface PendingMove {
   readonly isUndoWanted: Promise<boolean> | undefined;
 }
 
+/**
+ * Returns whether any of `moves` (a move, an end, or an Undo) is for the Task
+ * `taskId`. A second change to a Task whose first change is still on its way
+ * would take its Undo from a board that may not stay true: the first may be
+ * refused.
+ */
+export const hasPendingMove = (moves: readonly PendingMove[], taskId: string): boolean =>
+  moves.some(({ change }) =>
+    change.kind === "move" ? change.move.taskId === taskId : change.card.id === taskId,
+  );
+
 export interface PendingCardMoves {
   /**
    * Returns the pending moves, oldest first. The same array comes back until

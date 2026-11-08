@@ -89,6 +89,7 @@ export function WorkPane({
   drawnLanes,
   isStill,
   intents,
+  hasPendingMove,
   threadPromptWords,
   changes,
   moveToStage,
@@ -105,6 +106,8 @@ export function WorkPane({
   readonly drawnLanes: readonly ArrangedLane[];
   readonly isStill: boolean;
   readonly intents: readonly PendingIntent[];
+  /** Whether a move of the Task `taskId` has not been answered yet. */
+  readonly hasPendingMove: (taskId: string) => boolean;
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
@@ -189,6 +192,7 @@ export function WorkPane({
       scrollRef={scrollRef}
       isStill={isStill}
       intents={intents}
+      hasPendingMove={hasPendingMove}
       threadPromptWords={threadPromptWords}
       changes={changes}
       moveToStage={moveToStage}
@@ -216,6 +220,7 @@ function PresentedTask({
   scrollRef,
   isStill,
   intents,
+  hasPendingMove,
   threadPromptWords,
   changes,
   moveToStage,
@@ -235,6 +240,8 @@ function PresentedTask({
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly isStill: boolean;
   readonly intents: readonly PendingIntent[];
+  /** Whether a move of the Task `taskId` has not been answered yet. */
+  readonly hasPendingMove: (taskId: string) => boolean;
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
@@ -401,6 +408,7 @@ function PresentedTask({
         projectName={projectName}
         initiatives={initiatives}
         boardCards={cards}
+        isMoving={hasPendingMove(presentedId)}
         read={read}
         plugins={plugins}
         threadPromptWords={threadPromptWords}

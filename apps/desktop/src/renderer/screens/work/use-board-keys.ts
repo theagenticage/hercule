@@ -47,6 +47,8 @@ export interface BoardKeysInput {
   readonly cards: readonly WorkCard[];
   /** The lanes as the board draws them, which decide what the arrows can reach. */
   readonly arrangedLanes: readonly ArrangedLane[];
+  /** Folds every lane and row of the board, hidden or not, or opens them when all are folded (`⇧F`). The toolbar's Fold everything is this same function. */
+  readonly onFoldEverything: () => void;
   /** The cards the Find list offers, in the order it lists them. */
   readonly findMatches: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
@@ -360,9 +362,7 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       }
       case "fold-all-lanes":
         event.preventDefault();
-        changeFoldsKeepingFocus(() => {
-          view.foldEverything(arrangedLanes.map((each) => each.lane));
-        }, currentLaneId);
+        changeFoldsKeepingFocus(input.onFoldEverything, currentLaneId);
         return;
       case "find":
         event.preventDefault();

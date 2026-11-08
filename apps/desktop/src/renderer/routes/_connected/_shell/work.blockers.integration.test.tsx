@@ -562,7 +562,7 @@ describe("the Initiative of a Task on the details pane", () => {
     expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
   });
 
-  it("shows a pick at once and starts the next pick from it, while the controller has not answered", async () => {
+  it("shows a pick at once and waits with the next pick until the controller has answered the first", async () => {
     const answers: (() => void)[] = [];
     const { calls, user, pane } = await openPane({
       // The Task is on none, and every answer waits until the test lets it through.
@@ -580,17 +580,19 @@ describe("the Initiative of a Task on the details pane", () => {
       within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
     );
     expect(row.textContent).toBe("Faster search");
-    expect(row.getAttribute("aria-disabled")).toBeNull();
-    await user.click(
-      within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
-    );
-    expect(row.textContent).toBe("Accessible checkout");
-
-    // The moves are sent in order, the second after the first is answered.
+    // A second pick would start its Undo from a pick that may still be refused.
+    expect((row as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => {
       expect(answers).toHaveLength(1);
     });
     answers[0]!();
+    await waitFor(() => {
+      expect((row as HTMLButtonElement).disabled).toBe(false);
+    });
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
+    );
+    expect(row.textContent).toBe("Accessible checkout");
     await waitFor(() => {
       expect(answers).toHaveLength(2);
     });
@@ -611,6 +613,57 @@ describe("the Initiative of a Task on the details pane", () => {
     });
     await waitFor(() => {
       expect(row.textContent).toBe("Faster search");
+    });
+  });
+
+  it("keeps the menu disabled while a pick is in flight, and Undo of the next pick restores the original Initiative after the first is refused", async () => {
+    const answers: (() => void)[] = [];
+    let moves = 0;
+    const { calls, user, pane } = await openPane({
+      initiativeId: CHECKOUT.id,
+      // The first pick waits and is then refused; the later moves are accepted.
+      answerMove: (call, accept) => {
+        moves += 1;
+        if (moves > 1) return Promise.resolve(accept(call));
+        return new Promise<Answer>((resolve) => {
+          answers.push(() => {
+            resolve({
+              status: 409,
+              body: buildErrorBody("invalid_state", "That initiative was closed."),
+            });
+          });
+        });
+      },
+    });
+    const row = (await within(pane).findByRole("button", {
+      name: "Initiative: Accessible checkout",
+    })) as HTMLButtonElement;
+    const menu = readInitiativeMenu(pane);
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+    );
+    expect(row.textContent).toBe("Faster search");
+    expect(row.disabled).toBe(true);
+
+    answers[0]!();
+    expect(await screen.findByText(/That initiative was closed\./)).toBeTruthy();
+    await waitFor(() => {
+      expect(row.disabled).toBe(false);
+    });
+    expect(row.textContent).toBe("Accessible checkout");
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "No initiative", hidden: true }),
+    );
+    await user.click(await screen.findByRole("button", { name: /^Undo/ }));
+
+    await waitFor(() => {
+      expect(readMovedInitiatives(calls)).toEqual([
+        SEARCH.id,
+        null,
+        // Not Faster search: the first pick was refused, so the Task stayed on Accessible checkout.
+        CHECKOUT.id,
+      ]);
     });
   });
 
@@ -671,6 +724,10 @@ describe("the Initiative of a Task on the details pane", () => {
       );
       await waitFor(() => {
         expect(row.textContent).toBe("Faster search");
+      });
+      // The menu waits until the controller has answered the first pick.
+      await waitFor(() => {
+        expect((row as HTMLButtonElement).disabled).toBe(false);
       });
       await user.click(
         within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),

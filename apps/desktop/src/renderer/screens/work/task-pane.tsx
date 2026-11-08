@@ -220,6 +220,7 @@ export function TaskPane({
   projectName,
   initiatives,
   boardCards,
+  isMoving,
   read,
   plugins,
   threadPromptWords,
@@ -230,6 +231,8 @@ export function TaskPane({
   readonly projectName: string | null;
   readonly initiatives: readonly WorkInitiative[];
   readonly boardCards: readonly WorkCard[];
+  /** True while a move of this Task is on its way to the controller. The Initiative menu waits, so an Undo never starts from a pick that may be refused. */
+  readonly isMoving: boolean;
   readonly read: TaskPaneRead;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /** The words the line that asks what a new Thread should do starts with, or `null` when the foot is not that line. */
@@ -391,7 +394,11 @@ export function TaskPane({
             <InitiativeSection
               current={initiative}
               initiatives={initiatives}
-              isDisabled={card === undefined || !boardCards.some((each) => each.id === pane.taskId)}
+              isDisabled={
+                isMoving ||
+                card === undefined ||
+                !boardCards.some((each) => each.id === pane.taskId)
+              }
               onPick={actions.onPickInitiative}
             />
             <ContextSections

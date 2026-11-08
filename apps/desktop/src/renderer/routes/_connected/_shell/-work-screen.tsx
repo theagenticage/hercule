@@ -635,10 +635,14 @@ export function WorkScreen({
   const pressCard = useCallback((card: WorkCard, keys: PressedKeys): void => {
     latestPressCard.current(card, keys);
   }, []);
+  const foldEverything = (): void => {
+    view.foldEverything(arrangement.everyLane.map((each) => each.lane));
+  };
   const keys = useBoardKeys({
     view,
     cards: logicalCards,
     arrangedLanes,
+    onFoldEverything: foldEverything,
     findMatches: found.topMatches,
     projects,
     initiatives,
@@ -780,9 +784,7 @@ export function WorkScreen({
           }}
           display={view.display}
           onDisplayChange={view.setDisplay}
-          onFoldEverything={() => {
-            view.foldEverything(arrangement.everyLane.map((each) => each.lane));
-          }}
+          onFoldEverything={foldEverything}
           onShowKeys={keys.showKeysSheet}
           onAdd={() => {
             openAddSheet(chooseAddLane());
@@ -851,6 +853,7 @@ export function WorkScreen({
             drawnLanes={arrangedLanes}
             isStill={view.display.isStill}
             intents={pane.intents}
+            hasPendingMove={logical.hasPendingMove}
             threadPromptWords={threads.threadPromptWords}
             changes={{
               ...pane.changes,
