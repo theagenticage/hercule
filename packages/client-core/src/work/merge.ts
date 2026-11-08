@@ -30,18 +30,18 @@ export const describeMergeKeeps = (
   away: Pick<WorkCard, "initiativeId">,
   initiatives: readonly Pick<WorkInitiative, "id" | "name">[],
 ): string => {
-  const nameOf = (id: string): string | undefined =>
+  const findInitiativeName = (id: string): string | undefined =>
     initiatives.find((initiative) => initiative.id === id)?.name;
   if (away.initiativeId === undefined || away.initiativeId === into.initiativeId) {
     return "Keeps its title, stage and place";
   }
   if (into.initiativeId === undefined) {
-    const name = nameOf(away.initiativeId);
+    const name = findInitiativeName(away.initiativeId);
     return name === undefined
       ? "Keeps its title, stage and place, and takes the other card's initiative"
       : `Keeps its title, stage and place, and takes the initiative ${cutWithEllipsis(name, MOST_LABEL_TITLE_CHARACTERS)}`;
   }
-  const name = nameOf(into.initiativeId);
+  const name = findInitiativeName(into.initiativeId);
   return name === undefined
     ? "Keeps its title, stage, place and initiative"
     : `Keeps its title, stage, place and initiative ${cutWithEllipsis(name, MOST_LABEL_TITLE_CHARACTERS)}`;
@@ -125,6 +125,15 @@ export const describeMergeRefused = (sourceTitle: string, refusal: string): stri
 /** Returns what the undo line says after a merge: `Merged into "Serve smaller checkout".` A long title is cut. */
 export const describeMergedInto = (targetTitle: string): string =>
   `Merged into "${shortenTitle(targetTitle)}".`;
+
+/**
+ * Returns what the undo line says after a merge that went ahead without the
+ * controller's answer to the merge check (it failed or did not come in time).
+ * The merge itself is still decided by the controller, and its refusal comes
+ * back on this line.
+ */
+export const describeMergedWithoutCheck = (targetTitle: string): string =>
+  `Merged into "${shortenTitle(targetTitle)}". It could not be checked first.`;
 
 /** Returns the words of a merge for the undo stack, in the past tense, like the words of a move: `Merged "A" into "B"`. */
 export const describeMerge = (sourceTitle: string, targetTitle: string): string =>

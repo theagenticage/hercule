@@ -20,12 +20,18 @@ import { projectsQuery } from "../../../app/queries";
 import type { Gesture } from "../../../app/undo-stack";
 import type { CardMover } from "../../../app/card-mover";
 import { InitiativeSheet } from "../../../screens/work/initiative-sheet";
-import { initiativesQuery } from "./-work-board";
+import { initiativesQuery, useWorkInitiatives } from "./-work-board";
 
-/** What the sheet is open on: a new Initiative, starting in a Project's lane, or one that exists. */
+/**
+ * What the sheet is open on: a new Initiative, starting in a Project's lane,
+ * or one that exists. An edit keeps the Initiative as it was when the sheet
+ * opened (`opened`), which is what the fields started from. A save sends the
+ * fields the user changed from it, so a change another client made to a field
+ * the user left alone is never written over.
+ */
 type Opening =
   | { readonly kind: "new"; readonly projectId: string | null }
-  | { readonly kind: "edit"; readonly initiativeId: string };
+  | { readonly kind: "edit"; readonly opened: Initiative };
 
 /** What `useInitiativeSheet` returns. */
 export interface InitiativeSheetControls {
@@ -54,6 +60,8 @@ export interface InitiativeSheetControls {
  * - Closing takes it out of that list and offers Undo on the undo line, which
  *   reopens it. Deleting does not: its Tasks have lost it, which nothing puts
  *   back, so the line says that it is gone and offers no Undo.
+ * - Saving an edit sends only the fields the user changed since the sheet
+ *   opened, whatever the Initiative looks like now.
  * - Every answer that arrives after the user signed out is dropped.
  *
  * `sayWithUndo` and `sayWithoutUndo` are the screen's undo line (see
@@ -71,7 +79,8 @@ export function useInitiativeSheet({
   readonly sayWithoutUndo: (text: string) => void;
 }): InitiativeSheetControls {
   const queryClient = useQueryClient();
-  const initiatives = useQuery(initiativesQuery(client)).data ?? [];
+  // Gated on the window being visible, like the Work screen's own read of the list.
+  const initiatives = useWorkInitiatives(client).data ?? [];
   const projects = useQuery(projectsQuery(client)).data ?? [];
   const [opening, setOpening] = useState<Opening | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -101,27 +110,28 @@ export function useInitiativeSheet({
 
   const save = useMutation({
     mutationFn: ({
-      initiative,
+      edited,
       draft,
     }: {
-      readonly initiative: Initiative | null;
+      /** The Initiative as the sheet opened on it, and as it is now; `null` for a new one. */
+      readonly edited: { readonly opened: Initiative; readonly now: Initiative } | null;
       readonly draft: InitiativeDraft;
     }): Promise<Initiative> => {
-      if (initiative === null) {
+      if (edited === null) {
         return client.initiative.create({ payload: buildInitiativeCreateInput(draft) });
       }
-      const payload = buildInitiativeUpdateInput(initiative, draft, projects);
+      const payload = buildInitiativeUpdateInput(edited.opened, draft, projects);
       // Nothing changed: there is nothing to send, and the sheet just closes.
       return payload === null
-        ? Promise.resolve(initiative)
-        : client.initiative.update({ params: { id: initiative.id }, payload });
+        ? Promise.resolve(edited.now)
+        : client.initiative.update({ params: { id: edited.opened.id }, payload });
     },
-    onSuccess: (saved, { initiative }) => {
+    onSuccess: (saved, { edited }) => {
       if (!scope.isCurrent()) return;
       writeSaved(saved);
       close();
       // A filter can hide the new row, so the line says it was added.
-      if (initiative === null) sayWithoutUndo(`Added the initiative ${saved.name}.`);
+      if (edited === null) sayWithoutUndo(`Added the initiative ${saved.name}.`);
     },
   });
 
@@ -143,13 +153,6 @@ export function useInitiativeSheet({
     },
   });
 
-  const reopen = useMutation({
-    mutationFn: reopenInitiative,
-    onSuccess: () => {
-      if (scope.isCurrent()) close();
-    },
-  });
-
   const remove = useMutation({
     mutationFn: (initiative: Initiative) =>
       client.initiative.delete({ params: { id: initiative.id } }),
@@ -163,41 +166,38 @@ export function useInitiativeSheet({
     },
   });
 
-  const editing =
+  // The Initiative as it was on opening and as it is now. `now` is missing when another client
+  // closed or deleted it meanwhile, and the sheet is then taken away.
+  const now =
     opening?.kind === "edit"
-      ? initiatives.find((each) => each.id === opening.initiativeId)
+      ? initiatives.find((each) => each.id === opening.opened.id)
       : undefined;
+  const edited =
+    opening?.kind === "edit" && now !== undefined ? { opened: opening.opened, now } : null;
   let sheet: JSX.Element | null = null;
-  if (opening?.kind === "new" || editing !== undefined) {
+  if (opening?.kind === "new" || edited !== null) {
     const initial =
-      editing === undefined
+      edited === null
         ? buildNewInitiativeDraft(
             initiatives,
             projects,
             opening?.kind === "new" ? opening.projectId : null,
           )
-        : buildInitiativeDraft(editing, projects);
+        : buildInitiativeDraft(edited.opened, projects);
     sheet = (
       <InitiativeSheet
-        key={editing?.id ?? "new"}
+        key={edited?.now.id ?? "new"}
         initial={initial}
         projects={projects}
-        subject={
-          editing === undefined
-            ? null
-            : { name: editing.name, isClosed: editing.closedAt !== undefined }
-        }
+        subject={edited === null ? null : { name: edited.now.name }}
         onSave={async (draft) => {
-          await save.mutateAsync({ initiative: editing ?? null, draft });
+          await save.mutateAsync({ edited, draft });
         }}
         onCloseInitiative={async () => {
-          if (editing !== undefined) await closeInitiative.mutateAsync(editing);
-        }}
-        onReopenInitiative={async () => {
-          if (editing !== undefined) await reopen.mutateAsync(editing.id);
+          if (edited !== null) await closeInitiative.mutateAsync(edited.now);
         }}
         onDelete={async () => {
-          if (editing !== undefined) await remove.mutateAsync(editing);
+          if (edited !== null) await remove.mutateAsync(edited.now);
         }}
         onDismiss={close}
       />
@@ -211,9 +211,8 @@ export function useInitiativeSheet({
       open({ kind: "new", projectId: fromProjectId ?? null });
     },
     openEdit: (initiativeId) => {
-      if (queryClient.getQueryData(listKey)?.some((each) => each.id === initiativeId) === true) {
-        open({ kind: "edit", initiativeId });
-      }
+      const opened = queryClient.getQueryData(listKey)?.find((each) => each.id === initiativeId);
+      if (opened !== undefined) open({ kind: "edit", opened });
     },
     close,
   };

@@ -100,10 +100,19 @@ describe("the line to a blocker", () => {
     });
     const line = findLine(canvas);
     expect(line).not.toBeNull();
-    // Down from the middle of the blocked card, along the gap, up the gutter, in at the blocker's left side.
-    expect(line?.querySelector("path")?.getAttribute("d")).toMatch(/^M100 100L100 /);
-    expect(line?.querySelector("circle")?.getAttribute("cx")).toBe("240");
-    expect(line?.querySelector("circle")?.getAttribute("cy")).toBe("170");
+    // Down from the middle of the blocked card, along the gap, up the gutter, in at the blocker's
+    // left side. The SVG is only as large as that route, so its points are counted from its corner:
+    // the route's own (100, 100) is (4, 4) in the SVG.
+    expect(line?.querySelector("path")?.getAttribute("d")).toMatch(/^M4 4L4 /);
+    expect(line?.querySelector("circle")?.getAttribute("cx")).toBe("144");
+    expect(line?.querySelector("circle")?.getAttribute("cy")).toBe("74");
+    const { left, top, width, height } = (line as SVGElement).style;
+    expect({ left, top, width, height }).toEqual({
+      left: "96px",
+      top: "96px",
+      width: "148px",
+      height: "78px",
+    });
     expect(getByTestId("holder").classList.contains("is-blocker")).toBe(true);
   });
 
@@ -171,6 +180,58 @@ describe("the line to a blocker", () => {
       resize(canvas);
     });
     expect(findLine(canvas)).toBeNull();
+  });
+
+  it("goes, and so does its ring, when a card leaves the board", async () => {
+    const { getByTestId } = render(<Board blockedBy="holder" />);
+    const canvas = getByTestId("canvas");
+    rest(getByTestId("words"));
+    expect(findLine(canvas)).not.toBeNull();
+
+    // The observer reports in a microtask, so the act waits for one.
+    await act(async () => {
+      getByTestId("free").remove();
+      await Promise.resolve();
+    });
+
+    expect(findLine(canvas)).toBeNull();
+    expect(getByTestId("holder").classList.contains("is-blocker")).toBe(false);
+  });
+
+  it("stays when only its own SVG is added to the board", async () => {
+    const { getByTestId } = render(<Board blockedBy="holder" />);
+    const canvas = getByTestId("canvas");
+    rest(getByTestId("words"));
+
+    // The SVG is committed after the observer starts; the observer must not take it for a change.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(findLine(canvas)).not.toBeNull();
+  });
+
+  it("is not drawn when the blocked card left the board while the pointer rested", () => {
+    const { getByTestId } = render(<Board blockedBy="holder" />);
+    fireEvent.pointerOver(getByTestId("words"), { pointerType: "mouse" });
+    const waiting = getByTestId("canvas").querySelector("[data-card-id=waiting]")!;
+    waiting.remove();
+    act(() => {
+      vi.advanceTimersByTime(BLOCKER_LINE_DELAY_MS);
+    });
+    expect(findLine(getByTestId("canvas"))).toBeNull();
+  });
+
+  it("finds the blocker by its id among cards whose ids look alike", () => {
+    const { getByTestId } = render(<Board blockedBy="holder" />);
+    const lookAlike = document.createElement("div");
+    lookAlike.setAttribute("data-card-id", 'holder"]');
+    getByTestId("canvas").append(lookAlike);
+
+    rest(getByTestId("words"));
+
+    expect(getByTestId("holder").classList.contains("is-blocker")).toBe(true);
+    expect(lookAlike.classList.contains("is-blocker")).toBe(false);
   });
 
   it("is not drawn for a touch, which cannot rest", () => {

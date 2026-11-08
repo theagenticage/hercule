@@ -100,9 +100,7 @@ describe("chooseLaneProject", () => {
   const PROJECTS = new Set(["webshop", "billing"]);
   const outside = (...cards: ReturnType<typeof buildCard>[]) =>
     buildLane(`place:${REPO.ref}`, "acme/storefront-web", null, cards, {
-      pluginId: "acme",
-      caption: "Acme repository",
-      cardPlaces: {},
+      outside: { pluginId: "acme", caption: "Acme repository", cardPlaces: {} },
     });
 
   it("gives a Project lane its own Project", () => {

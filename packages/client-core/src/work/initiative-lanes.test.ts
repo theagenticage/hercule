@@ -121,9 +121,9 @@ describe("groupBoardByProject", () => {
         underLaneId: "storefront",
         doneRingCount: 2,
       });
-      expect(
-        lanes.find((lane) => lane.id === "initiative-row:orphan")?.initiative?.underLaneId,
-      ).toBe(NO_PROJECT_LANE_ID);
+      expect(lanes.find((lane) => lane.id === "initiative-row:orphan")?.initiative).toMatchObject({
+        underLaneId: NO_PROJECT_LANE_ID,
+      });
     });
 
     it("still draws a Project lane that holds only a row, and a row with no Task", () => {
@@ -146,7 +146,7 @@ describe("groupBoardByProject", () => {
       const view = { place: "lanes", isFiltering: true } as const;
       const lanes = groupBoardByProject(filtered, PROJECTS, [LAUNCH, PLATFORM], view);
       expect(lanes.map((lane) => lane.id)).toEqual(["storefront", "initiative-row:platform"]);
-      expect(lanes[1]?.initiative?.doneRingCount).toBe(0);
+      expect(lanes[1]?.initiative).toMatchObject({ doneRingCount: 0 });
     });
 
     it("drops the rows on top that nothing matches", () => {
@@ -180,7 +180,7 @@ describe("groupBoardByInitiative", () => {
     const [launch, , rest] = groupBoardByInitiative(BOARD, [LAUNCH, PLATFORM], view);
     expect(launch).toMatchObject({
       projectId: null,
-      initiative: { initiativeId: "launch", hue: 150, isRow: false, doneRingCount: 0 },
+      initiative: { initiativeId: "launch", hue: 150, isRow: false },
     });
     expect(rest?.initiative).toBeUndefined();
   });

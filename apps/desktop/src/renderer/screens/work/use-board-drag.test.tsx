@@ -1044,17 +1044,22 @@ describe("merging by holding a carried card over another", () => {
     expect(hand.x).toBeCloseTo(270 - 20 - 200 + 0, -1);
   });
 
-  it("holds the merge when the card is let go over the target, and moves nothing", () => {
+  it("holds the merge when the card is let go over the target, and moves nothing", async () => {
     useFakeClock();
     const board = renderBoard();
     press(board.card("refund-emails"), 220, 70);
     moveTo(board.scroller, 220, 76);
     moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
     vi.advanceTimersByTime(300);
+    await act(() => Promise.resolve());
 
     release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
 
-    expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith(
+      "refund-emails",
+      "delivery-slots",
+      true,
+    );
     expect(board.moveCard).not.toHaveBeenCalled();
     expect(board.isCarrying()).toBe(false);
     expect(board.slot()).toBeNull();
@@ -1149,7 +1154,72 @@ describe("merging by holding a carried card over another", () => {
 
       release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
 
-      expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+      expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith(
+        "refund-emails",
+        "delivery-slots",
+        false,
+      );
+    });
+
+    it("waits for a check that has not answered when the card is let go, then merges on an allowance", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+      chooseDeliverySlots(board);
+
+      release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+      // Nothing is shown as merged yet: the card is still docked in the hand.
+      expect(board.holdMerge).not.toHaveBeenCalled();
+      expect(board.ghost()).not.toBeNull();
+      expect(board.card("delivery-slots").dataset["mergeCheck"]).toBe("checking");
+
+      check.answer({ kind: "allowed" });
+      await act(() => check.promise.then(() => undefined));
+      expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith(
+        "refund-emails",
+        "delivery-slots",
+        true,
+      );
+    });
+
+    it("sends the card home when the check, awaited after the drop, refuses", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+      chooseDeliverySlots(board);
+      release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+      check.answer({ kind: "refused", refusal: "Plan the launch already waits on this Task." });
+      await act(() => check.promise.then(() => undefined));
+
+      expect(board.holdMerge).not.toHaveBeenCalled();
+      expect(board.say).toHaveBeenCalledExactlyOnceWith(
+        '"Refund emails" was not merged: Plan the launch already waits on this Task.',
+      );
+      expect(board.isCarrying()).toBe(false);
+      expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+    });
+
+    it("merges unchecked, never as approved, when the check does not answer within 2 seconds", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockReturnValue(deferAnswer().promise);
+      chooseDeliverySlots(board);
+      release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+      vi.advanceTimersByTime(1900);
+      expect(board.holdMerge).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(200);
+
+      await act(() => Promise.resolve());
+      expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith(
+        "refund-emails",
+        "delivery-slots",
+        false,
+      );
     });
 
     it("ignores an answer that arrives after the target was left", async () => {
@@ -1172,13 +1242,14 @@ describe("merging by holding a carried card over another", () => {
     });
   });
 
-  it("says nothing was merged, and sends the card home, when a card left the board meanwhile", () => {
+  it("says nothing was merged, and sends the card home, when a card left the board meanwhile", async () => {
     useFakeClock();
     const board = renderBoard();
     board.holdMerge.mockReturnValue(false);
     press(board.card("refund-emails"), 220, 70);
     moveTo(board.scroller, 220, 76);
     moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    await act(() => Promise.resolve());
 
     release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
 

@@ -91,6 +91,12 @@ const setUp = (client: Partial<HerculeClient["initiative"]> = {}) => {
   );
   return {
     calls: initiativeCalls,
+    /** Plays another client changing the Initiative: the push reads the list again. */
+    writeList: (list: readonly Initiative[]) => {
+      act(() => {
+        queryClient.setQueryData(initiativesQuery(herculeClient).queryKey, list);
+      });
+    },
     controls: () => controls,
     lines,
     gestures,
@@ -140,6 +146,26 @@ describe("useInitiativeSheet", () => {
       expect(calls.update).toHaveBeenCalledExactlyOnceWith({
         params: { id: "refunds" },
         payload: { target: null },
+      });
+    });
+  });
+
+  it("sends only what the user changed since opening, not what another client changed meanwhile", async () => {
+    const user = userEvent.setup();
+    const { controls, calls, writeList } = setUp();
+
+    act(() => {
+      controls().openEdit("refunds");
+    });
+    await user.type(await screen.findByRole("textbox", { name: "Name" }), " v2");
+    // Another client writes an intent and the sheet's list is read again before the user saves.
+    writeList([{ ...REFUNDS, intent: "Refund to the card, or to store credit" }]);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(calls.update).toHaveBeenCalledExactlyOnceWith({
+        params: { id: "refunds" },
+        payload: { name: "Gift card refunds v2" },
       });
     });
   });

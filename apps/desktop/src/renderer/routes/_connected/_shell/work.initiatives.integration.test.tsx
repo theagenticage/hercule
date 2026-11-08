@@ -263,6 +263,62 @@ describe("Initiatives on the Work board", () => {
     expect(getRowHead("Checkout rework").getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("counts every Task of the Project in the head of its lane when the rows stand under it", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+
+    await user.click(screen.getByRole("button", { name: "In lanes", hidden: true }));
+
+    // Three Tasks are on the row and one is loose: the lane's head counts all four.
+    const head = document.querySelector(`[data-lane-head="${WEBSHOP.id}"]`)!;
+    expect(head.querySelector(".board-lane-total")?.textContent).toBe("4");
+    await user.click(
+      within(head as HTMLElement).getByRole("button", { name: new RegExp(`^${WEBSHOP.name}`) }),
+    );
+    const folded = document.querySelector(`[data-fold-row="${WEBSHOP.id}"]`)!;
+    expect(folded.getAttribute("aria-label")).toBe("Exploring 1, Planned 1, Building 1, Landed 1");
+  });
+
+  it("draws an Initiative with no Task on a desk with no card at all, in place of All clear", async () => {
+    await openWork([CHECKOUT_REWORK], []);
+
+    expect(await screen.findByRole("button", { name: /^Checkout rework/ })).toBeTruthy();
+    expect(screen.queryByText("All clear.")).toBeNull();
+  });
+
+  it("draws the lane of an Initiative with no Task under Group by Initiative on a desk with no card", async () => {
+    const user = userEvent.setup();
+    await openWork([CHECKOUT_REWORK], []);
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+
+    await user.click(screen.getByRole("menuitemradio", { name: "Initiative", hidden: true }));
+
+    expect(await screen.findByRole("button", { name: /^Not in an initiative/ })).toBeTruthy();
+    expect(screen.queryByText("All clear.")).toBeNull();
+  });
+
+  it("opens a folded block of rows while a filter is on, and folds it again when the filter goes", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    const block = await screen.findByRole("button", { name: /^Initiatives/ });
+    await user.click(block);
+    expect(screen.queryByRole("button", { name: /^Checkout rework/ })).toBeNull();
+
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^Blocked/, hidden: true }));
+
+    expect(await screen.findByRole("button", { name: /^Send the receipt by email/ })).toBeTruthy();
+
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /^Blocked/, hidden: true }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /^Checkout rework/ })).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: /^Initiatives/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("creates a Task on the Initiative whose lane's plus was pressed, in its Project, and says so", async () => {
     const user = userEvent.setup();
     const { calls } = await openWork();

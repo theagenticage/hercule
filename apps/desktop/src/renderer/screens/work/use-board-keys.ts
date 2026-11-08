@@ -29,7 +29,7 @@ import { findCardElement, isSameCardInLane, readCardInLane } from "./card-in-lan
 import { keepCardInView } from "./keep-in-view";
 import { readBoardKey } from "./read-board-key";
 import type { MergePick } from "./use-merge-pick";
-import { listFoldableLaneIds, type WorkView } from "./use-work-view";
+import { listFoldableLaneIds, toggleLaneOrRow, type WorkView } from "./use-work-view";
 
 /** How far in pixels the pointer must travel before it counts as moved. A card sliding under a resting pointer must not take over from the keys. */
 const POINTER_MOVE_MIN = 4;
@@ -353,9 +353,8 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
         if (currentLaneId === undefined) return;
         event.preventDefault();
         changeFoldsKeepingFocus(() => {
-          const row = arrangedLanes.find((each) => each.lane.id === currentLaneId)?.lane.initiative;
-          if (row?.isRow === true) view.toggleInitiativeRow(currentLaneId, row.initiativeId);
-          else view.toggleLane(currentLaneId);
+          const lane = arrangedLanes.find((each) => each.lane.id === currentLaneId)?.lane;
+          if (lane !== undefined) toggleLaneOrRow(view, lane);
         }, currentLaneId);
         return;
       }

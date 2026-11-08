@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import {
+  isTopInitiativeRow,
   listDrawnLanes,
   listLaneInitiatives,
   type ArrangedLane,
@@ -12,16 +13,17 @@ import { BoardLane } from "./board-lane";
 import { InitiativeBlock, InitiativeRow, NotInInitiativeHeading } from "./initiative-row";
 import type { PressedKeys } from "./work-card";
 
-/** Returns whether `arrangedLane` is a row drawn above all the lanes (Initiatives On top). */
-const isTopRow = ({ lane }: ArrangedLane): boolean =>
-  lane.initiative?.isRow === true && lane.initiative.underLaneId === undefined;
+/** Returns whether `arrangedLane` is a row drawn under the lane it follows. */
+const isRowUnderLane = (arrangedLane: ArrangedLane | undefined): boolean =>
+  arrangedLane?.lane.initiative?.isRow === true &&
+  arrangedLane.lane.initiative.underLaneId !== undefined;
 
 /**
  * Renders the lanes of the board, with the Initiative rows among them, in the
  * order `arrangedLanes` has them:
  *
  * - On top: the rows come first, in the block under the "Initiatives" heading
- *   (nothing but the heading while `isBlockFolded`). When lanes follow, the
+ *   (nothing but the heading while `isBlockFolded`; the heading counts all the rows). When lanes follow, the
  *   heading "Not in an initiative" goes over them.
  * - In lanes: each row follows the lane it stands under, as its next sibling,
  *   and is drawn there; under a folded lane it is not drawn.
@@ -52,7 +54,7 @@ export function BoardBody({
   onPressCard,
   onFocusCard,
 }: {
-  /** Every lane and row, including the rows under folded lanes, which this leaves undrawn. */
+  /** Every lane and row, including the rows that a fold hides, which this leaves undrawn. */
   readonly arrangedLanes: readonly ArrangedLane[];
   readonly plugins: readonly PluginIdentity[];
   /** The Initiatives whose small flag a card draws, by id. Absent where no card draws one. */
@@ -67,7 +69,7 @@ export function BoardBody({
   readonly isBlockFolded: boolean;
   readonly onToggleBlock: () => void;
   readonly onToggleLane: (laneId: string) => void;
-  /** Called with the lane id of the row whose head was pressed. */
+  /** Called with the lane id of the row whose head was pressed. It may be the function `onToggleLane` is. */
   readonly onToggleRow: (laneId: string) => void;
   readonly onEditInitiative: (initiativeId: string) => void;
   /** Called with the id of the Task whose bead was pressed. */
@@ -78,10 +80,11 @@ export function BoardBody({
   readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (at: CardInLane) => void;
 }): JSX.Element {
-  const drawRow = (each: ArrangedLane): JSX.Element => (
+  const drawRow = (each: ArrangedLane, isLastUnderLane: boolean): JSX.Element => (
     <InitiativeRow
       key={each.lane.id}
       arrangedLane={each}
+      isLastUnderLane={isLastUnderLane}
       facts={factsByInitiativeId.get(each.lane.initiative?.initiativeId ?? "") ?? null}
       plugins={plugins}
       tabStop={tabStop}
@@ -116,19 +119,26 @@ export function BoardBody({
       onFocusCard={onFocusCard}
     />
   );
-  // A folded lane hides its rows and draws a flag for each instead (`heldInitiatives`).
-  const drawnLanes = listDrawnLanes(arrangedLanes);
-  const topRows = drawnLanes.filter(isTopRow);
-  const rest = drawnLanes.filter((each) => !isTopRow(each));
+  // The same list the screen walks, selects and drops on: a folded lane hides its rows and draws
+  // a flag for each instead (`heldInitiatives`), and a folded block hides all the rows On top.
+  const drawnLanes = listDrawnLanes(arrangedLanes, isBlockFolded);
+  const topRowCount = arrangedLanes.filter(({ lane }) => isTopInitiativeRow(lane)).length;
+  const rest = drawnLanes.filter(({ lane }) => !isTopInitiativeRow(lane));
   return (
     <div className="board-lanes">
-      {topRows.length > 0 && (
-        <InitiativeBlock count={topRows.length} isFolded={isBlockFolded} onToggle={onToggleBlock}>
-          {topRows.map(drawRow)}
+      {topRowCount > 0 && (
+        <InitiativeBlock count={topRowCount} isFolded={isBlockFolded} onToggle={onToggleBlock}>
+          {drawnLanes
+            .filter(({ lane }) => isTopInitiativeRow(lane))
+            .map((each) => drawRow(each, false))}
         </InitiativeBlock>
       )}
-      {topRows.length > 0 && rest.length > 0 && <NotInInitiativeHeading />}
-      {rest.map((each) => (each.lane.initiative?.isRow === true ? drawRow(each) : drawLane(each)))}
+      {topRowCount > 0 && rest.length > 0 && <NotInInitiativeHeading />}
+      {rest.map((each, index) =>
+        each.lane.initiative?.isRow === true
+          ? drawRow(each, !isRowUnderLane(rest[index + 1]))
+          : drawLane(each),
+      )}
     </div>
   );
 }

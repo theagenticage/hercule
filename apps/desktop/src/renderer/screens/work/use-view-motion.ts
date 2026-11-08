@@ -1,6 +1,6 @@
 import { flushSync } from "react-dom";
 import type { RefObject } from "react";
-import { ROWS_BEFORE_HIDING } from "@hercule/client-core/work";
+import { buildInitiativeRowId, ROWS_BEFORE_HIDING } from "@hercule/client-core/work";
 import { isMotionReduced } from "../../app/motion";
 import {
   fadeInBeads,
@@ -110,6 +110,22 @@ const findOpenRows = (scroller: HTMLElement): HTMLElement[] => [
   ...scroller.querySelectorAll<HTMLElement>(".initiative-row.is-open[data-lane-id]"),
 ];
 
+/**
+ * Returns `lanes` and, after them, the Initiative rows drawn under any of them
+ * (In lanes). A folded lane hides its rows, so folding or opening it moves
+ * their cards too. A row that is already in `lanes` is not repeated.
+ */
+const withRowsUnder = (
+  scroller: HTMLElement,
+  lanes: readonly HTMLElement[],
+): readonly HTMLElement[] => {
+  const laneIds = new Set(lanes.map((lane) => lane.dataset["laneId"] ?? ""));
+  const rows = [
+    ...scroller.querySelectorAll<HTMLElement>(".initiative-row[data-under-lane]"),
+  ].filter((row) => laneIds.has(row.dataset["underLane"] ?? "") && !lanes.includes(row));
+  return [...lanes, ...rows];
+};
+
 /** Returns the cards under `elements`, in order. */
 const listCards = (elements: readonly Element[]): HTMLElement[] =>
   elements.flatMap((element) => [...element.querySelectorAll<HTMLElement>("[data-card-id]")]);
@@ -118,7 +134,8 @@ const listCards = (elements: readonly Element[]): HTMLElement[] =>
  * Returns a change that folds `lanes`: the lanes below glide up after a short
  * wait, and, when `hasFlights` is true, a copy of each card in view flies to
  * its count first, or to its bead on an Initiative's line, which appears as
- * the copy arrives.
+ * the copy arrives. The cards of the rows under a folded lane fly to that
+ * lane's count, because the rows go with it.
  */
 const buildFold = (
   scroller: HTMLElement,
@@ -128,12 +145,26 @@ const buildFold = (
   anchor,
   wait: LANES_BELOW_WAIT,
   prepare: () => {
-    const flights = hasFlights ? launchFlights(scroller, listCards(lanes), FOLD_GAP) : [];
+    const roots = withRowsUnder(scroller, lanes);
+    const hostIds = new Map(
+      roots.flatMap((root) =>
+        root.dataset["underLane"] === undefined
+          ? []
+          : [[root.dataset["laneId"] ?? "", root.dataset["underLane"]] as const],
+      ),
+    );
+    const flights = hasFlights ? launchFlights(scroller, listCards(roots), FOLD_GAP) : [];
     return () => {
       flyFlightsTo(
         flights,
-        (flight) =>
-          findFoldTarget(findFoldRow(scroller, flight.laneId), flight.cardId, flight.stage),
+        (flight) => {
+          // A row that went with its lane has no line of its own: its cards fly to the lane's counts.
+          const hostId = hostIds.get(flight.laneId);
+          const line =
+            findFoldRow(scroller, flight.laneId) ??
+            (hostId === undefined ? null : findFoldRow(scroller, hostId));
+          return findFoldTarget(line, flight.cardId, flight.stage);
+        },
         INTO_COUNT,
       );
       showBeadsOnArrival(scroller, flights);
@@ -142,7 +173,11 @@ const buildFold = (
   },
 });
 
-/** Returns a change that opens `lanes`: each card grows out of its count or its bead, or out of the copy still flying there. */
+/**
+ * Returns a change that opens `lanes`: each card grows out of its count or its
+ * bead, or out of the copy still flying there. The cards of the rows that come
+ * back under an opened lane grow out of that lane's counts.
+ */
 const buildUnfold = (
   scroller: HTMLElement,
   { lanes, commit, anchor }: FoldRequest,
@@ -152,7 +187,7 @@ const buildUnfold = (
   prepare: () => {
     const origins = recordGrowthOrigins(scroller, lanes);
     return () => {
-      growCardsFromOrigins(lanes, origins);
+      growCardsFromOrigins(withRowsUnder(scroller, lanes), origins);
     };
   },
 });
@@ -268,27 +303,25 @@ export const useViewMotion = (
     );
   };
 
-  const toggleInitiativeRow = (rowLaneId: string, initiativeId: string): void => {
+  const toggleInitiativeRow = (initiativeId: string): void => {
+    const rowLaneId = buildInitiativeRowId(initiativeId);
     const scroller = scrollRef.current;
     const row = scroller === null ? null : findLane(scroller, rowLaneId);
     if (scroller === null || row === null) {
-      view.toggleInitiativeRow(rowLaneId, initiativeId);
+      view.toggleInitiativeRow(initiativeId);
       return;
     }
     const request = {
       lanes: [row],
       commit: () => {
-        view.toggleInitiativeRow(rowLaneId, initiativeId);
+        view.toggleInitiativeRow(initiativeId);
       },
       anchor: row,
     };
-    // While a filter is on a row is open unless the user folded it since the filter came on.
-    const isFolded = view.isFiltering
-      ? view.foldedLaneIds.has(rowLaneId)
-      : !view.openedInitiativeIds.has(initiativeId);
+    // The page says whether the row is open: it is drawn from the arranged lane, which knows the filter and the folds.
     playChange(
       scroller,
-      isFolded
+      !row.classList.contains("is-open")
         ? buildUnfold(scroller, request)
         : buildFold(scroller, { ...request, hasFlights: !view.isFiltering }),
     );

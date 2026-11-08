@@ -31,13 +31,13 @@ describe("what a pick in the Initiative menu does", () => {
       name: "another Initiative",
       choice: "i2",
       card: { initiativeId: "i1" },
-      pick: { kind: "set", initiativeId: "i2" },
+      pick: { kind: "set", initiativeId: "i2", canPutBack: true },
     },
     {
       name: "an Initiative for a loose card",
       choice: "i1",
       card: {},
-      pick: { kind: "set", initiativeId: "i1" },
+      pick: { kind: "set", initiativeId: "i1", canPutBack: true },
     },
     {
       name: "the Initiative the card is on",
@@ -49,14 +49,21 @@ describe("what a pick in the Initiative menu does", () => {
       name: "No initiative on an Initiative",
       choice: NO_INITIATIVE_CHOICE_ID,
       card: { initiativeId: "i1" },
-      pick: { kind: "set", initiativeId: null },
+      pick: { kind: "set", initiativeId: null, canPutBack: true },
     },
-    // A card on a closed Initiative has an id the menu does not list: choosing none clears it.
+    // A card on a closed Initiative has an id the menu does not list: choosing none clears it,
+    // and nothing can put it back, because a Task cannot be put on a closed Initiative.
     {
       name: "No initiative on a closed Initiative",
       choice: NO_INITIATIVE_CHOICE_ID,
       card: { initiativeId: "gone" },
-      pick: { kind: "set", initiativeId: null },
+      pick: { kind: "set", initiativeId: null, canPutBack: false },
+    },
+    {
+      name: "an Initiative for a card on a closed Initiative",
+      choice: "i2",
+      card: { initiativeId: "gone" },
+      pick: { kind: "set", initiativeId: "i2", canPutBack: false },
     },
     {
       name: "No initiative on a loose card",
@@ -71,28 +78,37 @@ describe("what a pick in the Initiative menu does", () => {
       pick: { kind: "create" },
     },
   ] as const)("is $pick.kind for $name", ({ choice, card, pick }) => {
-    expect(decideInitiativePick(choice, card)).toEqual(pick);
+    expect(decideInitiativePick(choice, card, [CHECKOUT, SEARCH])).toEqual(pick);
   });
 });
 
 describe("the words of an Initiative change", () => {
   it("names the Task and the Initiative, or says the Task came off its Initiative", () => {
-    expect(describeInitiativeGesture("Restore a basket", "Accessible checkout")).toBe(
+    expect(describeInitiativeGesture("Restore a basket", "Accessible checkout", false)).toBe(
       "Put Restore a basket on Accessible checkout",
     );
-    expect(describeInitiativeGesture("Restore a basket", null)).toBe(
+    expect(describeInitiativeGesture("Restore a basket", null, false)).toBe(
       "Took Restore a basket off its initiative",
     );
-    expect(describeInitiativeDone("Restore a basket", "Accessible checkout")).toBe(
+    expect(describeInitiativeDone("Restore a basket", "Accessible checkout", false)).toBe(
       "Put Restore a basket on Accessible checkout.",
+    );
+  });
+
+  it("says the Initiative was closed when the Task came off one", () => {
+    expect(describeInitiativeDone("Restore a basket", null, true)).toBe(
+      "Took Restore a basket off its closed initiative.",
+    );
+    expect(describeInitiativeFailure("Restore a basket", null, true, "Offline")).toBe(
+      "Restore a basket was not taken off its closed initiative: Offline. Try again.",
     );
   });
 
   it("gives the reason of a refusal and says what to do", () => {
     expect(
-      describeInitiativeFailure("Restore a basket", "Accessible checkout", "It is closed"),
+      describeInitiativeFailure("Restore a basket", "Accessible checkout", false, "It is closed"),
     ).toBe("Restore a basket was not put on Accessible checkout: It is closed. Try again.");
-    expect(describeInitiativeFailure("Restore a basket", null, "Offline")).toBe(
+    expect(describeInitiativeFailure("Restore a basket", null, false, "Offline")).toBe(
       "Restore a basket was not taken off its initiative: Offline. Try again.",
     );
   });

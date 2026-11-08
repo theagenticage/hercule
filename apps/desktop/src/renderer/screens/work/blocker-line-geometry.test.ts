@@ -3,7 +3,7 @@
  * cards 200 wide and 100 high, in columns 240 apart and rows 120 apart.
  */
 import { describe, expect, it } from "vitest";
-import { buildRoundedPath, routeBlockerLine, type Box } from "./blocker-line-geometry";
+import { buildRoundedPath, frameRoute, routeBlockerLine, type Box } from "./blocker-line-geometry";
 
 const card = (column: number, row: number): Box => ({
   left: column * 240,
@@ -96,5 +96,27 @@ describe("a rounded path", () => {
         6,
       ),
     ).toBe("M1 2L3 4");
+  });
+});
+
+describe("the frame of a line", () => {
+  it("is the box around the route, grown by the padding", () => {
+    const frame = frameRoute(routeBlockerLine(card(0, 0), card(1, 1)), 4);
+
+    expect(frame).toMatchObject({ left: 96, top: 96, width: 148, height: 78 });
+  });
+
+  it("moves the points to the frame's own corner, so the first sits at the padding", () => {
+    const { points } = frameRoute(routeBlockerLine(card(0, 0), card(1, 1)), 4);
+
+    expect(points[0]).toEqual([4, 4]);
+    expect(points.at(-1)).toEqual([144, 74]);
+  });
+
+  it("frames a route that goes left and up of its start", () => {
+    const frame = frameRoute(routeBlockerLine(card(2, 1), card(0, 0)), 4);
+
+    expect(frame.left).toBeLessThan(card(0, 0).right);
+    expect(frame.points.every(([x, y]) => x >= 4 && y >= 4)).toBe(true);
   });
 });

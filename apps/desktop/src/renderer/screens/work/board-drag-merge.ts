@@ -13,7 +13,7 @@ import {
 import type { WorkCard } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect, type MotionBody } from "../../app/motion";
 import { CARRY_SCALE } from "./board-drag-carry";
-import { markMergeTarget, showMergeTargetWords, unmarkMergeTarget } from "./merge-target";
+import { startMergeTargetCheck, unmarkMergeTarget, type MergeTargetCheck } from "./merge-target";
 
 /** How long, in milliseconds, the hand must rest over the middle of a card before the two are drawn together. */
 const MERGE_DWELL_MS = 1000;
@@ -35,13 +35,15 @@ const UNDOCK_GLIDE_MS = 200;
 
 /**
  * The card a carry would merge into: its id, its element (which carries the
- * marks), and what the merge check found when the choice was read. A drop on
- * a `refused` choice merges nothing.
+ * marks), what the merge check found when the choice was read, and the
+ * check's final answer (`result`). A drop on a `refused` choice merges
+ * nothing, and a drop on a `checking` choice waits for `result`.
  */
 export interface MergeChoice {
   readonly cardId: string;
   readonly element: HTMLElement;
   readonly check: MergeCheckState;
+  readonly result: Promise<MergeCheckResult>;
 }
 
 /** A place in the window, in pixels. */
@@ -140,12 +142,13 @@ export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
     grab,
     reduced,
   } = carried;
-  /** The card chosen with its element, and what the check found so far. */
-  let target: {
+  /** The card chosen with its element, and its merge check. */
+  interface Chosen {
     readonly cardId: string;
     readonly element: HTMLElement;
-    check: MergeCheckState;
-  } | null = null;
+    readonly check: MergeTargetCheck;
+  }
+  let target: Chosen | null = null;
   let isOptionHeld = carried.isOptionHeld;
   let isOver = false;
   let pointer = carried.pointer;
@@ -201,26 +204,27 @@ export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
     const element = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
     const card = readCards().find((each) => each.id === cardId);
     if (element === null || card === undefined) return;
-    const chosen = { cardId, element, check: { kind: "checking" } as MergeCheckState };
-    target = chosen;
     slot.classList.add("is-shut");
-    const words = {
-      title: card.title,
-      keeps: describeMergeKeeps(
-        card,
-        readCards().find((each) => each.id === sourceId) ?? {},
-        readInitiatives(),
-      ),
+    const chosen: Chosen = {
+      cardId,
+      element,
+      // The answer counts only while this choice is the card chosen and the
+      // gesture is running: a card left or chosen again meanwhile makes it stale.
+      check: startMergeTargetCheck({
+        element,
+        title: card.title,
+        keeps: describeMergeKeeps(
+          card,
+          readCards().find((each) => each.id === sourceId) ?? {},
+          readInitiatives(),
+        ),
+        ask: () => checkMerge(sourceId, cardId),
+        askAfterMs: 0,
+        isCurrent: () => target === chosen && !isOver,
+      }),
     };
-    markMergeTarget(element, { ...words, check: chosen.check });
+    target = chosen;
     dock();
-    // The answer counts only while this choice is the card chosen: a card left
-    // or chosen again meanwhile makes it stale.
-    void checkMerge(sourceId, cardId).then((result) => {
-      if (target !== chosen || isOver) return;
-      chosen.check = result;
-      showMergeTargetWords(element, { ...words, check: result });
-    });
   };
 
   return {
@@ -265,7 +269,12 @@ export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
       window.clearTimeout(dwellTimer);
       return target === null
         ? null
-        : { cardId: target.cardId, element: target.element, check: target.check };
+        : {
+            cardId: target.cardId,
+            element: target.element,
+            check: target.check.read(),
+            result: target.check.result,
+          };
     },
     cancel: () => {
       isOver = true;

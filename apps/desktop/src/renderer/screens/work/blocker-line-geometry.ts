@@ -64,6 +64,36 @@ export const routeBlockerLine = (from: Box, to: Box): readonly Point[] => {
   ];
 };
 
+/** Where a line's SVG stands on the board, and its size: the box around the route, plus room for the stroke and the end dot. */
+export interface LineFrame {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  /** The points of the route, in the coordinates of the frame's own top left corner. */
+  readonly points: readonly Point[];
+}
+
+/**
+ * Returns the box that just holds `points`, grown by `padding` on every side,
+ * with the points moved into the box's own coordinates. The line's SVG is
+ * given this box, so it is as large as the line and no larger. Needs at least
+ * one point.
+ */
+export const frameRoute = (points: readonly Point[], padding: number): LineFrame => {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const left = Math.min(...xs) - padding;
+  const top = Math.min(...ys) - padding;
+  return {
+    left,
+    top,
+    width: Math.max(...xs) + padding - left,
+    height: Math.max(...ys) + padding - top,
+    points: points.map(([x, y]) => [x - left, y - top]),
+  };
+};
+
 /** Returns `value` rounded to two decimals, so a path stays short and a test reads it. */
 const trim = (value: number): number => Math.round(value * 100) / 100;
 

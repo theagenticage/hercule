@@ -258,9 +258,79 @@ describe("arrangeLanes with Initiative rows", () => {
     const names = (foldedLaneIds: readonly string[]) =>
       listDrawnLanes(
         arrangeLanes(underLanes, { ...CLOSED, foldedLaneIds: new Set(foldedLaneIds) }),
+        false,
       ).map((each) => each.lane.name);
 
     expect(names([])).toEqual(["Storefront", "Platform"]);
     expect(names(["storefront"])).toEqual(["Storefront"]);
+  });
+
+  it("leaves out the rows On top while their block is folded, and keeps the lanes", () => {
+    const arranged = arrangeLanes(rowLanes, CLOSED);
+
+    expect(listDrawnLanes(arranged, false).map((each) => each.lane.name)).toEqual([
+      "Platform",
+      "Storefront",
+    ]);
+    expect(listDrawnLanes(arranged, true).map((each) => each.lane.name)).toEqual(["Storefront"]);
+  });
+});
+
+describe("a Project lane with Initiative rows under it", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const, projectId: "storefront" };
+  const board = {
+    ...buildBoard(
+      buildCard("loose-q", { projectId: "storefront", stage: "planned", openQuestion: QUESTION }),
+      buildCard("row-a", { projectId: "storefront", initiativeId: "platform", stage: "building" }),
+      buildCard("row-broke", {
+        projectId: "storefront",
+        initiativeId: "platform",
+        stage: "planned",
+        failure: FAILURE,
+      }),
+      buildCard("row-b", { projectId: "storefront", initiativeId: "platform", stage: "building" }),
+    ),
+    initiativeDoneCounts: {},
+  };
+  const place = (placement: "lanes" | "top") =>
+    arrangeLanes(
+      groupBoardByProject(board, PROJECTS, [PLATFORM], { place: placement, isFiltering: false }),
+      CLOSED,
+    );
+  const findLane = (arranged: ReturnType<typeof place>, id: string) =>
+    arranged.find((each) => each.lane.id === id)!;
+
+  it("counts every Task of the Project in its head, folded counts, dots and failures, In lanes", () => {
+    const storefront = findLane(place("lanes"), "storefront");
+
+    expect(storefront.cardCountWithRows).toBe(4);
+    expect(storefront.failedCount).toBe(1);
+    expect(storefront.cells.map((cell) => cell.cardCountWithRows)).toEqual([0, 2, 2, 0, 0]);
+    expect(storefront.cells.map((cell) => cell.dot)).toEqual([null, "failed", null, null, null]);
+    expect(storefront.cells.map((cell) => cell.cardCount)).toEqual([0, 1, 0, 0, 0]);
+  });
+
+  it("draws no card twice: the lane's own cells hold only the loose cards", () => {
+    const storefront = findLane(place("lanes"), "storefront");
+
+    expect(storefront.cells.flatMap((cell) => cell.shownCards.map((card) => card.id))).toEqual([
+      "loose-q",
+    ]);
+  });
+
+  it("counts only the loose cards of a lane while the rows are On top", () => {
+    const storefront = findLane(place("top"), "storefront");
+
+    expect(storefront.cardCountWithRows).toBe(1);
+    expect(storefront.failedCount).toBe(0);
+    expect(storefront.cells.map((cell) => cell.cardCountWithRows)).toEqual([0, 1, 0, 0, 0]);
+    expect(storefront.cells[1]?.dot).toBe("question");
+  });
+
+  it("counts a row by its own cards", () => {
+    const row = findLane(place("lanes"), "initiative-row:platform");
+
+    expect(row.cardCountWithRows).toBe(3);
+    expect(row.failedCount).toBe(1);
   });
 });

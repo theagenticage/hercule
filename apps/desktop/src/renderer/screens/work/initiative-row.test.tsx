@@ -12,14 +12,14 @@ import {
   buildLane,
   buildLanes,
   type ArrangedLane,
-  type InitiativeLane,
+  type InitiativeRowLane,
 } from "@hercule/client-core/work";
 import { buildCard, FAILURE, QUESTION } from "@hercule/client-core/work/testing";
 import type { WorkCard } from "@hercule/contract";
 import { BoardLane } from "./board-lane";
 import { InitiativeBlock, InitiativeRow, NotInInitiativeHeading } from "./initiative-row";
 
-const INITIATIVE: InitiativeLane = {
+const INITIATIVE: InitiativeRowLane = {
   initiativeId: "platform",
   hue: 245,
   isRow: true,
@@ -31,17 +31,9 @@ const arrangeRow = (
   cards: readonly WorkCard[],
   { isFolded = true, doneRingCount = 0 } = {},
 ): ArrangedLane => {
-  const lane = buildLane(
-    "initiative-row:platform",
-    "Retire the scheduler",
-    null,
-    cards,
-    undefined,
-    {
-      ...INITIATIVE,
-      doneRingCount,
-    },
-  );
+  const lane = buildLane("initiative-row:platform", "Retire the scheduler", null, cards, {
+    initiative: { ...INITIATIVE, doneRingCount },
+  });
   const [arranged] = arrangeLanes([lane], {
     foldedLaneIds: new Set(),
     openedCellIds: new Set(),
@@ -313,9 +305,8 @@ describe("BoardLane and Initiatives", () => {
   });
 
   it("puts the Initiative's flag in place of the folder in the lane of Group by Initiative", () => {
-    const lane = buildLane("initiative:platform", "Platform", null, [], undefined, {
-      ...INITIATIVE,
-      isRow: false,
+    const lane = buildLane("initiative:platform", "Platform", null, [], {
+      initiative: { initiativeId: INITIATIVE.initiativeId, hue: INITIATIVE.hue, isRow: false },
     });
     const [arranged] = arrangeLanes([lane], {
       foldedLaneIds: new Set(),

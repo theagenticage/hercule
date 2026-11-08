@@ -1,14 +1,11 @@
 /* The line from a blocked card to what holds it, while the pointer rests on the
-   card. It fills the board's canvas, above the cards and under the stage
-   headers, and never takes the pointer. It fades in, which is the most the
+   card. Its SVG is only as large as the line (the box is set on the element),
+   above the cards and under the stage headers, and never takes the pointer. It fades in, which is the most the
    motion rule lets a keyframe do (it may not animate a stroke); under Reduce
    motion it appears whole. */
 .blocker-line {
   position: absolute;
-  inset: 0;
   z-index: 5;
-  width: 100%;
-  height: 100%;
   overflow: visible;
   pointer-events: none;
 }

@@ -64,20 +64,19 @@ export interface OutsideLane {
   readonly cardPlaces: Readonly<Record<string, CardPlaces>>;
 }
 
-/**
- * What a lane for an Initiative adds to a lane (see `initiative-lanes.ts`).
- * A drop there puts a card on the Initiative and never changes its Project.
- */
-export interface InitiativeLane {
+/** What every lane for an Initiative has: which Initiative it is and how it is coloured. */
+interface InitiativeLaneBase {
   readonly initiativeId: string;
   /** The hue of the Initiative's flag, line and beads, from `INITIATIVE_HUES`. */
   readonly hue: number;
-  /**
-   * True for an Initiative row of Group by Project, which is folded to a line
-   * of beads unless the user opens it. False for a lane of Group by
-   * Initiative, which is an ordinary lane.
-   */
-  readonly isRow: boolean;
+}
+
+/**
+ * An Initiative row of Group by Project. It is folded to a line of beads
+ * unless the user opens it.
+ */
+export interface InitiativeRowLane extends InitiativeLaneBase {
+  readonly isRow: true;
   /** Only for a row In lanes: the id of the Project lane the row is drawn under. */
   readonly underLaneId?: string;
   /** Only for a row On top: the name of the Initiative's Project, which no lane above the row says. */
@@ -85,10 +84,22 @@ export interface InitiativeLane {
   /**
    * How many Done Tasks the row draws as rings at the end of Landed. Done
    * Tasks have no card, so the rings are all the board can show of them. It is
-   * 0 for a lane, and while a filter is on, because a filter matches cards.
+   * 0 while a filter is on, because a filter matches cards.
    */
   readonly doneRingCount: number;
 }
+
+/** A lane of Group by Initiative, which is an ordinary lane. */
+export interface InitiativeGroupLane extends InitiativeLaneBase {
+  readonly isRow: false;
+}
+
+/**
+ * What a lane for an Initiative adds to a lane (see `initiative-lanes.ts`):
+ * a row, or a lane of Group by Initiative. A drop there puts a card on the
+ * Initiative and never changes its Project.
+ */
+export type InitiativeLane = InitiativeRowLane | InitiativeGroupLane;
 
 /** One lane of the board: a Project (or an outside place) and its five cells, in `BOARD_STAGES` order. */
 export interface WorkLane {
@@ -130,8 +141,7 @@ export const buildLane = (
   name: string,
   projectId: string | null,
   cards: readonly WorkCard[],
-  outside?: OutsideLane,
-  initiative?: InitiativeLane,
+  { outside, initiative }: { outside?: OutsideLane; initiative?: InitiativeLane } = {},
 ): WorkLane => ({
   id,
   name,

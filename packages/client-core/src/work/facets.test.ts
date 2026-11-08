@@ -203,6 +203,20 @@ describe("Blocked and Initiative", () => {
     ]);
   });
 
+  it("asks the fact, not the look: a card at Landed or with a question that still waits is Blocked", () => {
+    const looks = buildBoard(
+      buildCard("landed", { stage: "landed", blockedBy: [BLOCKER], blockedByCount: 1 }),
+      buildCard("asks", { openQuestion: QUESTION, blockedBy: [BLOCKER], blockedByCount: 1 }),
+      buildCard("free"),
+    );
+    const lookFacets = buildWorkFacets(buildLanes(looks, PROJECTS), looks, [], []);
+
+    expect(listIds(filterItems(looks.cards, { state: ["blocked"] }, lookFacets))).toEqual([
+      "landed",
+      "asks",
+    ]);
+  });
+
   it("lists the open Initiatives in list order with their hue, between Project and the rest", () => {
     expect(facets.map((facet) => facet.id)).toEqual(["state", "project", "initiative"]);
     expect(facets[2]).toMatchObject({

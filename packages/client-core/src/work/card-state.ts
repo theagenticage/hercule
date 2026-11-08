@@ -13,22 +13,30 @@ import { shortenTitle } from "./card-title";
  * - `failed`: a run on it failed, whatever else is true of it;
  * - `question`: a Thread of it has an open question;
  * - `landed`: it is finished;
- * - `blocked`: another Task that has not landed holds it back;
+ * - `blocked`: it waits (`isCardWaiting`) and none of the above is true;
  * - `open`: none of these.
  */
 export type CardState = "failed" | "question" | "landed" | "blocked" | "open";
 
 /**
+ * Returns whether `card` waits: a Task that has not finished holds it back
+ * (`blockedByCount` counts only blockers that still block). This is a fact
+ * about the card. How the card looks is `decideCardState`, where a failure, a
+ * question or a landing outranks waiting. The Blocked filter asks this.
+ */
+export const isCardWaiting = (card: WorkCard): boolean => card.blockedByCount > 0;
+
+/**
  * Returns the state of `card`. A failure outranks everything: a failed card
- * shows as a failed card even in Landed and even while blocked, because the
- * run needs the user either way. A card at Landed is never blocked, whatever it
- * waits on.
+ * shows as a failed card even in Landed and even while it waits, because the
+ * run needs the user either way. A question outranks waiting for the same
+ * reason, and a card at Landed never looks blocked, whatever it waits on.
  */
 export const decideCardState = (card: WorkCard): CardState => {
   if (card.failure !== undefined) return "failed";
   if (card.openQuestion !== undefined) return "question";
   if (card.stage === "landed") return "landed";
-  return card.blockedByCount > 0 ? "blocked" : "open";
+  return isCardWaiting(card) ? "blocked" : "open";
 };
 
 /** What a blocked card says about what it waits on. */

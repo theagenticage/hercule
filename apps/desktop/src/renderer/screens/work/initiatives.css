@@ -84,13 +84,13 @@
 /* A row In lanes sits 12px under its lane's cards, indented 14px with side
    labels. The lane's own bottom padding gives way to that gap, and the last
    row of a lane brings the padding back. */
-.board-lane:has(+ .initiative-row[data-place="lane"]) {
+.board-lane[data-rows-follow] {
   padding-bottom: 12px;
 }
-.board-lane:not(:has([data-card-id])):has(+ .initiative-row[data-place="lane"]) {
+.board-lane[data-rows-follow]:not([data-has-cards]) {
   padding-bottom: 0;
 }
-.initiative-row[data-place="lane"]:not(:has(+ .initiative-row[data-place="lane"])) {
+.initiative-row[data-last-under-lane] {
   margin-bottom: 18px;
 }
 
@@ -139,8 +139,9 @@
     transition: transform var(--m-base) var(--m-ease);
   }
 }
-/* The words take their own width, so "1 failed" stands right after them as it does in a lane's head. */
+/* The words take the width that is left, so "1 failed" stands at the far right of the head, as in the drawing. */
 .initiative-words {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -182,9 +183,19 @@
   transition: opacity var(--m-quick);
 }
 .initiative-head:hover .initiative-edit,
-.initiative-head:has(.initiative-toggle:focus-visible) .initiative-edit,
+.initiative-toggle:focus-visible + .initiative-edit,
 .initiative-edit:focus-visible {
   opacity: 1;
+}
+/* While the edit button shows it lies over the far right of the head, where "1 failed" stands, so
+   the count steps left by the button's width and the 4px gap and both read. */
+.initiative-toggle .board-failed-count {
+  transition: transform var(--m-quick);
+}
+.initiative-head:hover .board-failed-count,
+.initiative-head:has(.initiative-toggle:focus-visible) .board-failed-count,
+.initiative-head:has(.initiative-edit:focus-visible) .board-failed-count {
+  transform: translateX(-28px);
 }
 .initiative-edit:hover {
   background-image: linear-gradient(var(--hover), var(--hover));
@@ -384,6 +395,15 @@ button.initiative-bead:focus-visible {
   height: 22px;
   margin-left: -26px;
 }
+.work-desk[data-lanes="band"] .initiative-head:hover .board-failed-count,
+.work-desk[data-lanes="band"]
+  .initiative-head:has(.initiative-toggle:focus-visible)
+  .board-failed-count,
+.work-desk[data-lanes="band"]
+  .initiative-head:has(.initiative-edit:focus-visible)
+  .board-failed-count {
+  transform: translateX(-26px);
+}
 .work-desk[data-lanes="band"] .initiative-line {
   height: 18px;
 }
@@ -391,15 +411,13 @@ button.initiative-bead:focus-visible {
   margin: 6px 0 0 -12px;
 }
 /* Under a lane's band the last row leaves 22px and its own 2px, as a lane's padding does. */
-.work-desk[data-lanes="band"] .board-lane:has(+ .initiative-row[data-place="lane"]) {
+.work-desk[data-lanes="band"] .board-lane[data-rows-follow] {
   padding-bottom: 12px;
 }
-.work-desk[data-lanes="band"]
-  .board-lane:not(:has([data-card-id])):has(+ .initiative-row[data-place="lane"]) {
+.work-desk[data-lanes="band"] .board-lane[data-rows-follow]:not([data-has-cards]) {
   padding-bottom: 0;
 }
-.work-desk[data-lanes="band"]
-  .initiative-row[data-place="lane"]:not(:has(+ .initiative-row[data-place="lane"])) {
+.work-desk[data-lanes="band"] .initiative-row[data-last-under-lane] {
   margin-bottom: 24px;
 }
 .work-desk[data-lanes="band"] .initiative-row[data-place="lane"] .initiative-head {

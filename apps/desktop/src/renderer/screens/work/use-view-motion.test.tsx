@@ -3,9 +3,10 @@
  * button that was pressed where it is on screen, by scrolling the board to
  * make up for the cards that appear or leave above it.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useRef, useState, type JSX } from "react";
+import { findBody } from "../../app/motion";
 import { useViewMotion } from "./use-view-motion";
 import type { WorkView } from "./use-work-view";
 
@@ -143,8 +144,8 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
     openedInitiativeIds: new Set(isOpen ? ["platform"] : []),
     foldedLaneIds: new Set<string>(),
     isFiltering: false,
-    toggleInitiativeRow: (rowLaneId: string, initiativeId: string) => {
-      calls.push(`${rowLaneId}:${initiativeId}`);
+    toggleInitiativeRow: (initiativeId: string) => {
+      calls.push(initiativeId);
       setIsOpen((open) => !open);
     },
     toggleInitiativeBlock: () => {
@@ -160,14 +161,14 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
       {!isBlockFolded && (
         <section
           className={isOpen ? "initiative-row is-open" : "initiative-row"}
-          data-lane-id="row:platform"
+          data-lane-id="initiative-row:platform"
           data-open={isOpen}
         >
           <button
             type="button"
             className="initiative-toggle"
             onClick={() => {
-              toggleInitiativeRow("row:platform", "platform");
+              toggleInitiativeRow("platform");
             }}
           >
             Platform
@@ -179,7 +180,7 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
 }
 
 describe("useViewMotion toggleInitiativeRow", () => {
-  it("toggles the row through the view with its lane id and its Initiative, and keeps the row still", () => {
+  it("toggles the row of the Initiative through the view, and keeps the row still", () => {
     const calls: string[] = [];
     const { getByTestId, container } = render(<RowBoard calls={calls} />);
     const scroller = getByTestId("scroller");
@@ -192,7 +193,7 @@ describe("useViewMotion toggleInitiativeRow", () => {
 
     fireEvent.click(container.querySelector(".initiative-toggle")!);
 
-    expect(calls).toEqual(["row:platform:platform"]);
+    expect(calls).toEqual(["platform"]);
     expect(row.className).toContain("is-open");
     expect(row.getBoundingClientRect().top).toBe(before);
   });
@@ -206,5 +207,100 @@ describe("useViewMotion toggleInitiativeRow", () => {
 
     fireEvent.click(heading);
     expect(container.querySelector(".initiative-row")).not.toBeNull();
+  });
+});
+
+/** A board of one Project lane with an open Initiative row under it (In lanes), whose card is in the row. */
+function LaneWithRowBoard(): JSX.Element {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isFolded, setIsFolded] = useState(false);
+  const view = {
+    foldedLaneIds: new Set(isFolded ? ["core"] : []),
+    isFiltering: false,
+    toggleLane: () => {
+      setIsFolded((folded) => !folded);
+    },
+  } as unknown as WorkView;
+  const { toggleLane } = useViewMotion(view, scrollRef);
+  return (
+    <div className="work-desk">
+      <div ref={scrollRef} data-testid="scroller">
+        <section className={isFolded ? "board-lane is-folded" : "board-lane"} data-lane-id="core">
+          <button
+            type="button"
+            onClick={() => {
+              toggleLane("core");
+            }}
+          >
+            Core
+          </button>
+          {isFolded && (
+            <div data-fold-row="core">
+              <span data-stage="building" />
+            </div>
+          )}
+        </section>
+        {!isFolded && (
+          <section
+            className="initiative-row is-open"
+            data-lane-id="initiative-row:platform"
+            data-under-lane="core"
+          >
+            <div data-card-id="queue" data-stage="building" />
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+describe("useViewMotion toggleLane with an Initiative row under the lane", () => {
+  beforeEach(() => {
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+    // jsdom has no layout: every part is the same 40px strip, which is in view of the scroller.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 10, 100, 40),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.documentElement.style.removeProperty("--dur-2");
+  });
+
+  it("flies the row's cards into the folded lane's count", () => {
+    const { container } = render(<LaneWithRowBoard />);
+
+    fireEvent.click(container.querySelector("button")!);
+
+    // A flight with no target is removed at once, so a copy that stands has found the count.
+    expect(container.querySelectorAll("[data-flight-card='queue']")).toHaveLength(1);
+    expect(container.querySelector("[data-fold-row='core']")).not.toBeNull();
+  });
+
+  it("grows the row's cards out of the lane's count when the lane opens", () => {
+    const { container } = render(<LaneWithRowBoard />);
+    const toggle = container.querySelector("button")!;
+    fireEvent.click(toggle);
+    // Let the fold's copy go, so that the cards grow out of the count and not out of the copy.
+    container.querySelector("[data-flight-card='queue']")?.remove();
+
+    fireEvent.click(toggle);
+
+    const card = container.querySelector<HTMLElement>("[data-card-id='queue']")!;
+    expect(findBody(card)?.values.s).toBe(0.1);
+  });
+
+  it("starts the row's card from its copy still in flight when the lane opens again halfway", () => {
+    const { container } = render(<LaneWithRowBoard />);
+    const toggle = container.querySelector("button")!;
+    fireEvent.click(toggle);
+
+    fireEvent.click(toggle);
+
+    const card = container.querySelector<HTMLElement>("[data-card-id='queue']")!;
+    // The copy hands its place to the card: it is gone, and the card is solid where the copy was.
+    expect(container.querySelector("[data-flight-card='queue']")).toBeNull();
+    expect(findBody(card)?.values).toMatchObject({ s: 1, o: 1 });
   });
 });

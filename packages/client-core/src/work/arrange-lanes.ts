@@ -37,7 +37,17 @@ export interface ArrangedLaneCell {
   readonly shownCards: readonly WorkCard[];
   /** How many cards the cell holds, shown or not. */
   readonly cardCount: number;
-  /** The dot a folded lane shows under this stage, or `null` for none. */
+  /**
+   * How many cards the lane stands for at this stage: the cell's own, and
+   * those on the Initiative rows drawn under the lane (In lanes). A folded
+   * lane shows this count. It equals `cardCount` for any lane with no row
+   * under it, and for every row.
+   */
+  readonly cardCountWithRows: number;
+  /**
+   * The dot a folded lane shows under this stage, or `null` for none. It reads
+   * the cell's cards and the cards of the rows drawn under the lane.
+   */
   readonly dot: CellDot | null;
 }
 
@@ -45,8 +55,13 @@ export interface ArrangedLaneCell {
 export interface ArrangedLane {
   readonly lane: WorkLane;
   readonly isFolded: boolean;
-  /** How many cards of the lane failed, in any stage. The head says "1 failed" when it is above 0, folded or not. */
+  /**
+   * How many cards of the lane failed, in any stage, counting the cards of the
+   * rows drawn under it. The head says "1 failed" when it is above 0, folded or not.
+   */
   readonly failedCount: number;
+  /** How many cards the lane stands for, in any stage, counting the rows drawn under it. The head shows it next to the name. */
+  readonly cardCountWithRows: number;
   /** The five cells. A folded lane draws counts instead, and its cells show no card. */
   readonly cells: readonly ArrangedLaneCell[];
   /**
@@ -142,60 +157,102 @@ const isLaneFolded = (lane: WorkLane, view: LaneView): boolean => {
   return !view.openedInitiativeIds.has(initiative.initiativeId);
 };
 
+/** Returns the id of the Project lane `lane` is drawn under, or `undefined` for any lane that is not a row In lanes. */
+const readUnderLaneId = (lane: WorkLane): string | undefined =>
+  lane.initiative?.isRow === true ? lane.initiative.underLaneId : undefined;
+
+/** Returns the rows drawn under each Project lane (In lanes), by the id of the lane, each in drawing order. */
+const groupRowsByLane = (lanes: readonly WorkLane[]): ReadonlyMap<string, readonly WorkLane[]> => {
+  const byLane = new Map<string, WorkLane[]>();
+  for (const lane of lanes) {
+    const underLaneId = readUnderLaneId(lane);
+    if (underLaneId === undefined) continue;
+    const rows = byLane.get(underLaneId) ?? [];
+    rows.push(lane);
+    byLane.set(underLaneId, rows);
+  }
+  return byLane;
+};
+
 /** Returns each of `lanes` with what its cells show under `view`. */
 export const arrangeLanes = (
   lanes: readonly WorkLane[],
   view: LaneView,
 ): readonly ArrangedLane[] => {
   const candidatesByLead = groupCandidatesByLead(view.stackCandidates);
-  return lanes.map((lane) => ({
-    lane,
-    isFolded: isLaneFolded(lane, view),
-    ...(lane.initiative?.isRow === true
-      ? { line: buildInitiativeLine(lane.cells, lane.initiative.doneRingCount) }
-      : {}),
-    failedCount: lane.cells.reduce(
-      (total, cell) => total + cell.cards.filter((card) => card.failure !== undefined).length,
-      0,
-    ),
-    cells: lane.cells.map((cell) => {
-      const cellId = buildCellId(lane.id, cell.stage);
-      const arrangement = arrangeCell(
-        cell.cards,
-        {
+  const rowsByLane = groupRowsByLane(lanes);
+  return lanes.map((lane) => {
+    const rows = rowsByLane.get(lane.id) ?? [];
+    // The lane's head, counts and dots stand for its rows too, though the rows draw their own cards.
+    const cardsWithRows = lane.cells.map(({ stage, cards }) => [
+      ...cards,
+      ...rows.flatMap((row) => row.cells.find((cell) => cell.stage === stage)?.cards ?? []),
+    ]);
+    return {
+      lane,
+      isFolded: isLaneFolded(lane, view),
+      ...(lane.initiative?.isRow === true
+        ? { line: buildInitiativeLine(lane.cells, lane.initiative.doneRingCount) }
+        : {}),
+      failedCount: cardsWithRows.reduce(
+        (total, cards) => total + cards.filter((card) => card.failure !== undefined).length,
+        0,
+      ),
+      cardCountWithRows: cardsWithRows.reduce((total, cards) => total + cards.length, 0),
+      cells: lane.cells.map((cell, index) => {
+        const cellId = buildCellId(lane.id, cell.stage);
+        const arrangement = arrangeCell(
+          cell.cards,
+          {
+            stage: cell.stage,
+            opened: view.openedCellIds.has(cellId),
+            filtered: view.isFiltering,
+          },
+          cell.cards.flatMap((card) => candidatesByLead.get(card.id) ?? []),
+        );
+        const openStackLeadIds = listOpenStackLeadIds(lane.id, arrangement, view.openedStackIds);
+        const withRows = cardsWithRows[index] ?? cell.cards;
+        return {
           stage: cell.stage,
-          opened: view.openedCellIds.has(cellId),
-          filtered: view.isFiltering,
-        },
-        cell.cards.flatMap((card) => candidatesByLead.get(card.id) ?? []),
-      );
-      const openStackLeadIds = listOpenStackLeadIds(lane.id, arrangement, view.openedStackIds);
-      return {
-        stage: cell.stage,
-        cellId,
-        arrangement,
-        openStackLeadIds,
-        shownCards: arrangement.cards.flatMap((card) =>
-          openStackLeadIds.has(card.id)
-            ? [card, ...(arrangement.stacks.get(card.id)?.members ?? [])]
-            : [card],
-        ),
-        cardCount: cell.cards.length,
-        dot: chooseCellDot(cell.cards),
-      };
-    }),
-  }));
+          cellId,
+          arrangement,
+          openStackLeadIds,
+          shownCards: arrangement.cards.flatMap((card) =>
+            openStackLeadIds.has(card.id)
+              ? [card, ...(arrangement.stacks.get(card.id)?.members ?? [])]
+              : [card],
+          ),
+          cardCount: cell.cards.length,
+          cardCountWithRows: withRows.length,
+          dot: chooseCellDot(withRows),
+        };
+      }),
+    };
+  });
 };
+
+/** Returns whether `lane` is an Initiative row drawn On top, above all the lanes. */
+export const isTopInitiativeRow = (lane: WorkLane): boolean =>
+  lane.initiative?.isRow === true && readUnderLaneId(lane) === undefined;
 
 /**
  * Returns the lanes the board draws: `lanes` without the Initiative rows that
- * stand under a folded Project lane (In lanes). A folded lane hides its rows
- * and keeps a small flag for each instead, so nothing of them is on screen:
- * the keyboard walk, a drop and the selection must not reach them.
+ * are hidden by a fold. The rows under a folded Project lane (In lanes) are
+ * hidden, and the lane keeps a small flag for each instead. The rows On top
+ * are hidden while `isBlockFolded`, which leaves only the heading "Initiatives".
+ * Nothing hidden is on screen, so the keyboard walk, a drop and the selection
+ * must not reach it, and the board and the screen both read this list.
  */
-export const listDrawnLanes = (lanes: readonly ArrangedLane[]): readonly ArrangedLane[] => {
+export const listDrawnLanes = (
+  lanes: readonly ArrangedLane[],
+  isBlockFolded: boolean,
+): readonly ArrangedLane[] => {
   const foldedLaneIds = new Set(lanes.filter((each) => each.isFolded).map((each) => each.lane.id));
-  return lanes.filter(({ lane }) => !foldedLaneIds.has(lane.initiative?.underLaneId ?? ""));
+  return lanes.filter(
+    ({ lane }) =>
+      !(isBlockFolded && isTopInitiativeRow(lane)) &&
+      !foldedLaneIds.has(readUnderLaneId(lane) ?? ""),
+  );
 };
 
 /**

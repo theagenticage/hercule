@@ -41,6 +41,7 @@ import {
   readFollowerPose,
 } from "./board-drag-followers";
 import { createMergeGesture, type MergeChoice } from "./board-drag-merge";
+import { waitForMergeCheck } from "./merge-target";
 import { copyCardForMotion } from "../desk";
 import { playMergeIn } from "./board-flights";
 import { findCardElement, readCardInLane } from "./card-in-lane";
@@ -106,9 +107,11 @@ export interface BoardDragOptions {
    * merge for the undo line and shows it done, so the source card leaves the
    * board. Called inside the drag's committed change (`flushSync`), so the
    * board is measured after it. Returns `false`, and holds nothing, when
-   * either card is no longer on the board.
+   * either card is no longer on the board. `isChecked` is whether the merge
+   * check allowed the merge; when it is `false` the undo line says the merge
+   * could not be checked first.
    */
-  readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
+  readonly holdMerge: (sourceCardId: string, targetCardId: string, isChecked: boolean) => boolean;
   /**
    * Asks whether the card `sourceCardId` could be merged into the card
    * `targetCardId`, which the carry does when it chooses a card to merge
@@ -172,6 +175,9 @@ const createBoardDrag = (
   scroller: HTMLElement,
   readOptions: () => BoardDragOptions,
 ): { readonly destroy: () => void } => {
+  /** The carry that was dropped on a card whose merge check has not answered yet, or `null`. */
+  let waitingCarry: Carry | null = null;
+
   /**
    * Measures the board again after the page changed. `places` are the card
    * places a flip just measured, which spares measuring the cards twice.
@@ -398,19 +404,13 @@ const createBoardDrag = (
     });
   };
 
-  /**
-   * Lets go of the card over the card it is drawn into. The merge is held for
-   * the undo line, and the copy in the hand slides in under the card it
-   * merged into and fades. When either card has left the board meanwhile,
-   * nothing is merged: the card goes home and the undo line says so.
-   */
-  const mergeCarry = (c: Carry, target: MergeChoice): void => {
-    swallowNextClick(true);
+  /** Ends the drop over the card `targetCardId` once its merge check is known (`check` is never `checking`). */
+  const finishMergeCarry = (c: Carry, targetCardId: string, check: MergeCheckResult): void => {
     const pose = readReleasePose(c);
     endCarry(c);
     const options = readOptions();
     // A merge the controller said it would refuse is not sent: the card goes home.
-    const refusal = target.check.kind === "refused" ? target.check.refusal : undefined;
+    const refusal = check.kind === "refused" ? check.refusal : undefined;
     let isHeld = false;
     flipBoard(scroller, "hand", () => {
       c.slot.remove();
@@ -418,11 +418,13 @@ const createBoardDrag = (
       clearMarks(c);
       flushSync(() => {
         options.onCarryingChange(false);
-        if (refusal === undefined) isHeld = options.holdMerge(c.card.id, target.cardId);
+        if (refusal === undefined) {
+          isHeld = options.holdMerge(c.card.id, targetCardId, check.kind === "allowed");
+        }
       });
     });
     if (isHeld) {
-      playMergeIn(scroller, c.ghost, target.cardId);
+      playMergeIn(scroller, c.ghost, targetCardId);
       return;
     }
     landCard(scroller, c, pose, "travel", undefined, 0);
@@ -431,6 +433,31 @@ const createBoardDrag = (
         ? "A card left the board, so nothing was merged."
         : describeMergeRefused(c.card.title, refusal),
     );
+  };
+
+  /**
+   * Lets go of the card over the card it is drawn into. The merge is held for
+   * the undo line, and the copy in the hand slides in under the card it
+   * merged into and fades. When either card has left the board meanwhile,
+   * nothing is merged: the card goes home and the undo line says so.
+   *
+   * A check that has not answered is waited for, with the copy still docked
+   * on the target: the card is never shown as merged before the controller
+   * allowed it. A refusal sends the card home; an answer that does not come
+   * in time lets the merge go ahead unchecked, and the controller's merge decides.
+   */
+  const mergeCarry = (c: Carry, target: MergeChoice): void => {
+    swallowNextClick(true);
+    if (target.check.kind !== "checking") {
+      finishMergeCarry(c, target.cardId, target.check);
+      return;
+    }
+    waitingCarry = c;
+    void waitForMergeCheck(target.result).then((check) => {
+      if (waitingCarry !== c) return;
+      waitingCarry = null;
+      finishMergeCarry(c, target.cardId, check);
+    });
   };
 
   /**
@@ -653,6 +680,8 @@ const createBoardDrag = (
     destroy: () => {
       const held = gesture.destroy();
       if (held !== null) abandonCarry(held);
+      if (waitingCarry !== null) abandonCarry(waitingCarry);
+      waitingCarry = null;
     },
   };
 };

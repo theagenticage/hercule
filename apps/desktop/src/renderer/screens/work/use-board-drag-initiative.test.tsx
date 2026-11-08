@@ -8,7 +8,7 @@
 import { useRef, useState, type JSX } from "react";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   applyCardMove,
   arrangeLanes,
@@ -100,6 +100,7 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
       stackCandidates: [],
       isFiltering: false,
     }),
+    false,
   );
   useBoardDrag({
     scrollRef,
@@ -225,6 +226,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmounts first: a card still in the hand is put down on the page's real layout, not on the
+  // test's, and no window listener of this test's drag outlives it into the next test.
+  cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

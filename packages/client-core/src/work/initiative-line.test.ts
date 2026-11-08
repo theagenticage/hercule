@@ -124,6 +124,16 @@ describe("buildInitiativeLine", () => {
       expect(line.cells[4]?.isTally).toBe(true);
     });
 
+    it("draws only the rings that fit in the tally, and counts every Done Task", () => {
+      const cards = Array.from({ length: 18 }, (_, index) =>
+        buildCard(`l${String(index)}`, { stage: "landed" }),
+      );
+      const line = lineOf(cards, 5000);
+      expect(beadsAt(line, "landed")).toHaveLength(MOST_TALLY_MARKS);
+      expect(beadsAt(line, "landed").filter((bead) => bead.taskId === null)).toHaveLength(2);
+      expect(line.cells[4]?.beadCount).toBe(5018);
+    });
+
     it("draws no ring in another stage", () => {
       expect(beadsAt(lineOf([], 3), "building")).toEqual([]);
     });

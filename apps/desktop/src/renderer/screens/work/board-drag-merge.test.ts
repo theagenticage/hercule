@@ -124,11 +124,13 @@ describe("the merge gesture", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
 
-    expect(merge.commit()).toEqual({
+    const choice = merge.commit();
+    expect(choice).toMatchObject({
       cardId: "delivery-slots",
       element: target,
       check: { kind: "checking" },
     });
+    expect(choice?.result).toBeInstanceOf(Promise);
     expect(isMarked()).toBe(true);
     merge.cancel();
     expect(isMarked()).toBe(false);

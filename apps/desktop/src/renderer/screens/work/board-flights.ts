@@ -337,8 +337,10 @@ export const recordGrowthOrigins = (
 
 /**
  * Grows each card of `lanes` out of the origin recorded for it, 16ms apart
- * (a card following a copy in flight starts at once). Under Reduce motion the
- * cards fade in where they stand. Call it after the change.
+ * (a card following a copy in flight starts at once). A row drawn under a lane
+ * (`data-under-lane`) that has no count or bead of its own grows out of the
+ * count of that lane. Under Reduce motion the cards fade in where they stand.
+ * Call it after the change.
  */
 export const growCardsFromOrigins = (
   lanes: readonly HTMLElement[],
@@ -348,12 +350,17 @@ export const growCardsFromOrigins = (
   let index = 0;
   for (const lane of lanes) {
     const laneId = lane.dataset["laneId"] ?? "";
+    const hostLaneId = lane.dataset["underLane"];
     for (const card of lane.querySelectorAll<HTMLElement>("[data-card-id]")) {
       const cardId = card.dataset["cardId"] ?? "";
+      const stage = card.dataset["stage"] ?? "";
       const origin =
         origins.get(buildCopyGrowthKey(laneId, cardId)) ??
         origins.get(buildBeadGrowthKey(laneId, cardId)) ??
-        origins.get(buildCountGrowthKey(laneId, card.dataset["stage"] ?? ""));
+        origins.get(buildCountGrowthKey(laneId, stage)) ??
+        (hostLaneId === undefined
+          ? undefined
+          : origins.get(buildCountGrowthKey(hostLaneId, stage)));
       if (origin === undefined) continue;
       const body = trackBody(card);
       if (reduced) {

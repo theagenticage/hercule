@@ -72,12 +72,20 @@ const layOut = (element: HTMLElement): DOMRect => {
 interface Harness {
   readonly moveCard: ReturnType<typeof vi.fn<(move: CardMove, words: string) => void>>;
   readonly onPressBead: ReturnType<typeof vi.fn<(taskId: string) => void>>;
+  readonly onCarryingChange: ReturnType<typeof vi.fn<(isCarrying: boolean) => void>>;
+  /** What each render of the board drew: whether a bead was in the hand, and the stage of the Task "queue". */
+  readonly drawn: { readonly isCarrying: boolean; readonly queueStage: BoardStage }[];
 }
 
 /** Renders a folded row of an Initiative with the slide hook on its board, and applies each move the hook sends. */
 function Board({ harness }: { readonly harness: Harness }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [cards, setCards] = useState(CARDS);
+  const [isCarrying, setIsCarrying] = useState(false);
+  harness.drawn.push({
+    isCarrying,
+    queueStage: cards.find((each) => each.id === "queue")!.stage,
+  });
   const lanes = groupBoardByProject({ cards, initiativeDoneCounts: {} }, PROJECTS, INITIATIVES, {
     place: "top",
     isFiltering: false,
@@ -95,6 +103,10 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
     cards,
     projects: PROJECTS,
     initiatives: INITIATIVES,
+    onCarryingChange: (isCarryingNow) => {
+      harness.onCarryingChange(isCarryingNow);
+      setIsCarrying(isCarryingNow);
+    },
     moveCard: (move, words) => {
       harness.moveCard(move, words);
       // The screen commits the move at once, as it does for every move.
@@ -110,7 +122,7 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
       stageCounts={null}
       laneLabels="side-labels"
       isOffline={false}
-      isCarrying={false}
+      isCarrying={isCarrying}
       hasSheet={false}
       isArriving={false}
       state="board"
@@ -137,12 +149,20 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
 }
 
 const renderBoard = () => {
-  const harness: Harness = { moveCard: vi.fn(), onPressBead: vi.fn() };
+  const harness: Harness = {
+    moveCard: vi.fn(),
+    onPressBead: vi.fn(),
+    onCarryingChange: vi.fn(),
+    drawn: [],
+  };
   const view = render(<Board harness={harness} />);
   const scroller = view.container.querySelector<HTMLElement>(".board-scroll")!;
   return {
     ...harness,
     scroller,
+    unmount: view.unmount,
+    /** Whether the board is drawn with something in the hand. */
+    isCarrying: (): boolean => view.container.querySelector("[data-carrying]") !== null,
     bead: (taskId: string): HTMLElement =>
       view.container.querySelector<HTMLElement>(`[data-bead-task-id="${taskId}"]`)!,
     /** The stage whose cell of the line holds the bead of `taskId`. */
@@ -274,6 +294,67 @@ describe("sliding a bead", () => {
     expect(board.moveCard).not.toHaveBeenCalled();
     expect(queue.dataset["held"]).toBeUndefined();
     expect(board.stageOf("queue")).toBe("exploring");
+  });
+});
+
+describe("a bead in the hand", () => {
+  it("is told to the screen when it is lifted, and the board is drawn as carrying", () => {
+    const board = renderBoard();
+
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    expect(board.isCarrying()).toBe(false);
+    moveTo(board.scroller, columnLeft("exploring") + 64);
+
+    expect(board.isCarrying()).toBe(true);
+  });
+
+  it("lets go in the same draw as the move it sends, never before it", () => {
+    const board = renderBoard();
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    moveTo(board.scroller, columnLeft("building") + 20);
+    board.drawn.length = 0;
+
+    release(board.scroller, columnLeft("building") + 20);
+
+    expect(board.isCarrying()).toBe(false);
+    expect(board.drawn).toEqual([{ isCarrying: false, queueStage: "building" }]);
+  });
+
+  it("lets go when the bead is let go over its own stage, and when it is sent home with Esc", () => {
+    const board = renderBoard();
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    moveTo(board.scroller, columnLeft("exploring") + 80);
+    release(board.scroller, columnLeft("exploring") + 80);
+    expect(board.isCarrying()).toBe(false);
+
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    moveTo(board.scroller, columnLeft("building") + 20);
+    expect(board.isCarrying()).toBe(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(board.isCarrying()).toBe(false);
+  });
+
+  it("does not take the bead out of the hand when a press only clicks", () => {
+    const board = renderBoard();
+
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    moveTo(board.scroller, columnLeft("exploring") + 6);
+
+    expect(board.isCarrying()).toBe(false);
+  });
+
+  it("lets go when the screen goes away with the bead in the hand", () => {
+    const board = renderBoard();
+    press(board.bead("queue"), columnLeft("exploring") + 4);
+    moveTo(board.scroller, columnLeft("exploring") + 64);
+
+    board.unmount();
+
+    expect(board.onCarryingChange.mock.calls.map(([isCarrying]) => isCarrying)).toEqual([
+      true,
+      false,
+    ]);
   });
 });
 

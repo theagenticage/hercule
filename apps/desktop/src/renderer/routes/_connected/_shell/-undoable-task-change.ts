@@ -14,6 +14,8 @@
  *   nothing takes its gesture off the stack again, and the line says so. A
  *   reversal is sent only when the gesture it reverses changed something, so
  *   Undo never makes a change the user did not ask for.
+ * - A change with no reversal (`sendBack` is `null`) puts nothing on the stack:
+ *   the line says what was done and offers no Undo.
  * - The same change is not sent again while the first is on its way, so a
  *   double press cannot queue a second one.
  * - A refusal takes the gesture off the stack and the line says why. Nothing
@@ -42,8 +44,11 @@ export interface UndoableTaskChange {
   readonly taskId: string;
   /** Sends the change. */
   readonly send: () => Promise<TaskChangeAnswer>;
-  /** Sends the change the other way, for Undo. */
-  readonly sendBack: () => Promise<TaskChangeAnswer>;
+  /**
+   * Sends the change the other way, for Undo. `null` for a change that cannot
+   * be reversed: the line then says what happened and offers no Undo.
+   */
+  readonly sendBack: (() => Promise<TaskChangeAnswer>) | null;
   /** Reads again what the change touched. Called after an answer and after an Undo, while the user is signed in. */
   readonly readAgain: () => void;
   readonly words: {
@@ -110,16 +115,21 @@ export const useUndoableTaskChanges = ({
     void wasChanged.then(() => {
       onItsWay.current.delete(change.key);
     });
-    const gesture: Gesture<CardMover> = {
-      words: change.words.gesture,
-      undo: async () => {
-        await request.mutateAsync({ send: change.sendBack, isWanted: wasChanged });
-        if (scope.isCurrent()) change.readAgain();
-        return undefined;
-      },
-    };
-    moves.reserveGesture(gesture, wasChanged);
-    moves.sayWithReservedUndo(change.words.done, gesture);
+    const { sendBack } = change;
+    if (sendBack === null) {
+      moves.sayWithoutUndo(change.words.done);
+    } else {
+      const gesture: Gesture<CardMover> = {
+        words: change.words.gesture,
+        undo: async () => {
+          await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
+          if (scope.isCurrent()) change.readAgain();
+          return undefined;
+        },
+      };
+      moves.reserveGesture(gesture, wasChanged);
+      moves.sayWithReservedUndo(change.words.done, gesture);
+    }
     try {
       const { changed } = await answered;
       if (!scope.isCurrent()) return null;

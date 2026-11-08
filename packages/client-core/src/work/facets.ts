@@ -14,6 +14,7 @@ import {
 } from "../desk/filter";
 import { buildPlaceFacets } from "../desk/place-facets";
 import { namePlugin, type PluginName } from "../intake";
+import { isCardWaiting } from "./card-state";
 import { chooseLaneId, type WorkInitiative, type WorkLane } from "./lanes";
 
 /** The id of the State facet, whose values are Has a question, Failed, With an agent and Blocked. */
@@ -55,7 +56,7 @@ const STATE_ROWS: readonly StateRow[] = [
   },
   { id: "failed", name: "Failed", liftsItself: true, has: (card) => card.failure !== undefined },
   { id: "agent", name: "With an agent", has: (card) => card.workingSessionId !== undefined },
-  { id: "blocked", name: "Blocked", has: (card) => card.blockedByCount > 0 },
+  { id: "blocked", name: "Blocked", has: isCardWaiting },
 ];
 
 const buildStateFacet = (): FilterFacet<WorkCard> => ({

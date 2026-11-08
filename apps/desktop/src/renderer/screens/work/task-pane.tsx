@@ -75,8 +75,13 @@ export interface TaskPaneChanges {
   /**
    * Puts the Task on `initiative`, or takes it off its Initiative when it is
    * `null`. The caller has checked that this changes something.
+   * `canPutBack` is false when the Initiative the Task leaves is closed, so
+   * the change has no Undo (`decideInitiativePick`).
    */
-  readonly onSetInitiative: (initiative: Pick<WorkInitiative, "id" | "name"> | null) => void;
+  readonly onSetInitiative: (
+    initiative: Pick<WorkInitiative, "id" | "name"> | null,
+    canPutBack: boolean,
+  ) => void;
 }
 
 /** A Task as the blocker changes name it: its id, and its title for the undo line. */
@@ -197,7 +202,6 @@ export function TaskPaneColleague({
  * - `linkSearch` is the "Link something" search that stands at the foot of
  *   Linked, which the caller builds because it reads. `null` leaves it out.
  * - `boardCards` are the cards "Add a blocker" searches.
- * - `canCreateInitiative` adds "New initiative…" to the Initiative menu.
  * - `actions` is what its buttons do.
  *
  * From the top: the crumbs, the title, the stage path, where it stands with
@@ -213,7 +217,6 @@ export function TaskPane({
   pane,
   projectName,
   initiatives,
-  canCreateInitiative,
   boardCards,
   read,
   plugins,
@@ -224,7 +227,6 @@ export function TaskPane({
   readonly pane: TaskPaneContent;
   readonly projectName: string | null;
   readonly initiatives: readonly WorkInitiative[];
-  readonly canCreateInitiative: boolean;
   readonly boardCards: readonly WorkCard[];
   readonly read: TaskPaneRead;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -387,7 +389,6 @@ export function TaskPane({
             <InitiativeSection
               current={initiative}
               initiatives={initiatives}
-              canCreate={canCreateInitiative}
               isDisabled={card === undefined}
               onPick={actions.onPickInitiative}
             />

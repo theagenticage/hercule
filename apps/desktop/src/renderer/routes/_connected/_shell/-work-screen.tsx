@@ -76,7 +76,11 @@ import { useBoardReads } from "../../../screens/work/use-board-reads";
 import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
 import { useViewMotion } from "../../../screens/work/use-view-motion";
 import { useFailedArrival } from "../../../screens/work/use-failed-arrival";
-import { listFoldableLaneIds, useWorkView } from "../../../screens/work/use-work-view";
+import {
+  listFoldableLaneIds,
+  toggleLaneOrRow,
+  useWorkView,
+} from "../../../screens/work/use-work-view";
 import type { PressedKeys } from "../../../screens/work/work-card";
 import { buildBoardSnapshotKey } from "../../../screens/work/board-snapshot-storage";
 import { SinceLine } from "../../../screens/work/since-line";
@@ -193,7 +197,10 @@ export function WorkScreen({
     sayWithUndo: moves.sayWithUndo,
     sayWithoutUndo: moves.sayWithoutUndo,
   });
-  const savedView = useWorkView(buildWorkViewKey(url, username));
+  const savedView = useWorkView(
+    buildWorkViewKey(url, username),
+    initiativesRead.data?.map((initiative) => initiative.id),
+  );
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
   const offlineSince = useOfflineSince(live);
   const findRef = useRef<HTMLInputElement>(null);
@@ -319,8 +326,8 @@ export function WorkScreen({
     stackCandidates: drawnBoard?.stackCandidates ?? EMPTY_STACK_CANDIDATES,
     isFiltering: view.isFiltering,
   });
-  // The rows under a folded lane are not on screen, so nothing that walks, selects or drops sees them.
-  const arrangedLanes = listDrawnLanes(everyArrangedLane);
+  // The rows a fold hides are not on screen, so nothing that walks, selects or drops sees them.
+  const arrangedLanes = listDrawnLanes(everyArrangedLane, view.isInitiativeBlockFolded);
   const shownCards = listShownCards(arrangedLanes);
   // Which cards are selected. A card the board stops drawing leaves the selection.
   const selection = useCardSelection(shownCards.map((card) => card.cardId));
@@ -345,7 +352,11 @@ export function WorkScreen({
     ),
   );
 
-  const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0;
+  // Group by Project and Group by Initiative draw every listed Initiative, with or without a Task,
+  // so a board with no card is not empty while one is listed.
+  const drawsInitiatives =
+    initiatives.length > 0 && (groupBy === PROJECT_FACET_ID || groupBy === INITIATIVE_FACET_ID);
+  const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0 && !drawsInitiatives;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
   const hasAnyTask = hasAnyTaskRead.data;
 
@@ -578,6 +589,12 @@ export function WorkScreen({
   });
 
   // ---------- Dragging ----------
+  // A card in the hand of a drag and a bead in the hand of a slide are the same to the screen.
+  const onCarryingChange = (isCarryingNow: boolean): void => {
+    setIsCarrying(isCarryingNow);
+    // Something in the hand ends the key flow of a merge.
+    if (isCarryingNow) mergePick.cancel();
+  };
   useBoardDrag({
     scrollRef,
     cards: logicalCards,
@@ -594,11 +611,7 @@ export function WorkScreen({
     say: moves.sayWithoutUndo,
     holdMerge: merging.holdMerge,
     checkMerge: merging.checkMerge,
-    onCarryingChange: (isCarryingNow) => {
-      setIsCarrying(isCarryingNow);
-      // A card in the hand ends the key flow of a merge.
-      if (isCarryingNow) mergePick.cancel();
-    },
+    onCarryingChange,
   });
 
   // Sliding a bead along a folded Initiative line, or moving it a stage by key, moves its Task.
@@ -608,6 +621,7 @@ export function WorkScreen({
     projects,
     initiatives,
     moveCard: moves.moveCardWithMotion,
+    onCarryingChange,
   });
 
   /** Closes the details and Add to Work, which would cover the Initiative sheet at the right. */
@@ -717,6 +731,10 @@ export function WorkScreen({
   });
 
   // ---------- What the screen draws ----------
+  const toggleFold = (laneId: string): void => {
+    const lane = lanes.find((each) => each.id === laneId);
+    if (lane !== undefined) toggleLaneOrRow(view, lane);
+  };
   let state: DeskState = "board";
   let body: JSX.Element | null;
   if (drawnBoard === undefined) {
@@ -761,7 +779,7 @@ export function WorkScreen({
     ) : hasAnyTask === true ? (
       <DeskClear />
     ) : null;
-  } else if (arrangedLanes.length === 0) {
+  } else if (everyArrangedLane.length === 0) {
     body = <NoMatch />;
   } else {
     body = (
@@ -776,12 +794,8 @@ export function WorkScreen({
         selectedIds={selection.selectedIds}
         isBlockFolded={view.isInitiativeBlockFolded}
         onToggleBlock={view.toggleInitiativeBlock}
-        onToggleLane={view.toggleLane}
-        onToggleRow={(rowLaneId) => {
-          const initiativeId = lanes.find((each) => each.id === rowLaneId)?.initiative
-            ?.initiativeId;
-          if (initiativeId !== undefined) view.toggleInitiativeRow(rowLaneId, initiativeId);
-        }}
+        onToggleLane={toggleFold}
+        onToggleRow={toggleFold}
         onEditInitiative={editInitiative}
         onPressBead={pressBead}
         onToggleCell={view.toggleCell}

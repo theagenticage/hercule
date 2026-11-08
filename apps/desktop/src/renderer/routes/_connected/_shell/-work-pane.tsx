@@ -32,7 +32,7 @@ import {
   type TaskPaneChanges,
   type TaskPaneRead,
 } from "../../../screens/work/task-pane";
-import { initiativesQuery, taskDetailQuery } from "./-work-board";
+import { taskDetailQuery, useWorkInitiatives } from "./-work-board";
 
 /** How long the line "This Task no longer exists." shows before the pane closes, in milliseconds. */
 const GONE_LINE_MS = 1_600;
@@ -78,7 +78,7 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  *
  * `onCreateInitiative` opens the sheet that makes a new Initiative, from "New
  * initiative…" at the end of the Initiative menu. The Work screen wires it to
- * the Initiative sheet. Until it is given, the menu has no such row.
+ * the Initiative sheet.
  */
 export function WorkPane({
   client,
@@ -109,7 +109,7 @@ export function WorkPane({
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
   readonly onFilterByPlace: (placeRef: string) => void;
-  readonly onCreateInitiative?: (() => void) | undefined;
+  readonly onCreateInitiative: () => void;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
 }): JSX.Element | null {
@@ -239,7 +239,7 @@ function PresentedTask({
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
   readonly onFilterByPlace: (placeRef: string) => void;
-  readonly onCreateInitiative: (() => void) | undefined;
+  readonly onCreateInitiative: () => void;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
   readonly onOpenTask: (taskId: string) => void;
@@ -252,8 +252,9 @@ function PresentedTask({
   const detail = useQuery({ ...taskDetailQuery(client, presentedId), enabled: isVisible });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const controller = useQuery(controllerQuery(client));
-  // The Work screen reads the open Initiatives beside the board, so this is the cache it filled.
-  const initiatives = useQuery(initiativesQuery(client)).data ?? NO_INITIATIVES;
+  // Gated on the window being visible like the Work screen's own read of the list, so a push
+  // while the window is hidden does not read it.
+  const initiatives = useWorkInitiatives(client).data ?? NO_INITIATIVES;
   const textGeneration = controller.data?.textGeneration ?? TEXT_GENERATION_UNKNOWN;
   const summary = detail.data?.card.summary;
 
@@ -351,15 +352,15 @@ function PresentedTask({
     onOpenTask,
     onPickInitiative: (choiceId) => {
       if (card === undefined) return;
-      const pick = decideInitiativePick(choiceId, card);
+      const pick = decideInitiativePick(choiceId, card, initiatives);
       if (pick.kind === "create") {
-        onCreateInitiative?.();
+        onCreateInitiative();
       } else if (pick.kind === "set") {
         const chosen =
           pick.initiativeId === null
             ? null
             : initiatives.find((each) => each.id === pick.initiativeId);
-        if (chosen !== undefined) changes.onSetInitiative(chosen);
+        if (chosen !== undefined) changes.onSetInitiative(chosen, pick.canPutBack);
       }
     },
     onStepBack,
@@ -399,7 +400,6 @@ function PresentedTask({
         pane={pane}
         projectName={projectName}
         initiatives={initiatives}
-        canCreateInitiative={onCreateInitiative !== undefined}
         boardCards={cards}
         read={read}
         plugins={plugins}

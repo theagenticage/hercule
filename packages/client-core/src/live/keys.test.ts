@@ -103,6 +103,25 @@ describe("Your work's key", () => {
   });
 });
 
+describe("the merge checks' key", () => {
+  it("is the prefix of every pair's check", () => {
+    assert.isTrue(isPrefixOf(queryKeys.mergeCheck(), queryKeys.mergeCheck("a", "b")));
+    assert.isFalse(isPrefixOf(queryKeys.mergeCheck("a", "b"), queryKeys.mergeCheck("b", "a")));
+  });
+
+  it("is made out of date by every task push, ordinary or derived, with or without ids", () => {
+    for (const derived of [undefined, true] as const) {
+      for (const ids of [[], ["t1"]]) {
+        assert.isTrue(
+          buildQueryKeys("task", ids, undefined, derived).some((key) =>
+            isPrefixOf(key, queryKeys.mergeCheck("a", "b")),
+          ),
+        );
+      }
+    }
+  });
+});
+
 describe("the Work board's key", () => {
   it("is read again on every ordinary task push, with or without ids", () => {
     for (const ids of [[], ["t1"]]) {
@@ -113,11 +132,15 @@ describe("the Work board's key", () => {
   });
 
   it("is, with the named Tasks' details, the only read of a derived task push, which leaves Tracking and Your work alone", () => {
-    assert.deepStrictEqual(buildQueryKeys("task", [], undefined, true), [queryKeys.workBoard()]);
+    assert.deepStrictEqual(buildQueryKeys("task", [], undefined, true), [
+      queryKeys.workBoard(),
+      queryKeys.mergeCheck(),
+    ]);
     assert.deepStrictEqual(buildQueryKeys("task", ["t1", "t2"], undefined, true), [
       queryKeys.workBoard(),
       queryKeys.taskDetail("t1"),
       queryKeys.taskDetail("t2"),
+      queryKeys.mergeCheck(),
     ]);
   });
 
@@ -218,6 +241,7 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.entitySuggestions(),
+        queryKeys.mergeCheck(),
       ],
     },
     {
@@ -233,14 +257,15 @@ describe("the Inbox's and the entities' keys", () => {
         ...inboxKeys,
         queryKeys.externalEntity(),
         queryKeys.entitySuggestions(),
+        queryKeys.mergeCheck(),
       ],
     },
     {
-      name: "a derived task push reads the board and the named Task's details only, which a busy agent causes every second",
+      name: "a derived task push reads the board and the named Task's details only, which a busy agent causes every second, and marks the merge checks out of date",
       topic: "task",
       derived: true,
       ids: ["t1"],
-      keys: [queryKeys.workBoard(), queryKeys.taskDetail("t1")],
+      keys: [queryKeys.workBoard(), queryKeys.taskDetail("t1"), queryKeys.mergeCheck()],
     },
     {
       name: "a connection push naming ids reads the entity panes, the board, the Task details and the suggestions",

@@ -22,7 +22,6 @@ export interface InitiativeSheetProject {
 /** The Initiative the sheet edits: what its foot and its title need to say. */
 export interface InitiativeSheetSubject {
   readonly name: string;
-  readonly isClosed: boolean;
 }
 
 /** Returns whether the two drafts hold the same values. */
@@ -68,8 +67,7 @@ const readSwatchTarget = (key: string, at: number): number | undefined => {
  * - `onSave` gets the fields as they are, untrimmed. It resolves when saved,
  *   after which the caller takes the sheet away. When it rejects, the foot
  *   line shows the error's message and the fields stay as they are.
- *   `onCloseInitiative`, `onReopenInitiative` and `onDelete` work the same
- *   way. Deleting asks to be confirmed first, in words, in the foot: the
+ *   `onCloseInitiative` and `onDelete` work the same way. Deleting asks to be confirmed first, in words, in the foot: the
  *   Delete button gives way to a "Delete initiative" button at the other end
  *   of the foot, so a double click on Delete never confirms it. Focus goes to
  *   Cancel, so a held Return does not confirm it either.
@@ -86,7 +84,6 @@ export function InitiativeSheet({
   subject,
   onSave,
   onCloseInitiative,
-  onReopenInitiative,
   onDelete,
   onDismiss,
 }: {
@@ -95,7 +92,6 @@ export function InitiativeSheet({
   readonly subject: InitiativeSheetSubject | null;
   readonly onSave: (draft: InitiativeDraft) => Promise<void>;
   readonly onCloseInitiative: () => Promise<void>;
-  readonly onReopenInitiative: () => Promise<void>;
   readonly onDelete: () => Promise<void>;
   readonly onDismiss: () => void;
 }): JSX.Element {
@@ -326,10 +322,10 @@ export function InitiativeSheet({
                     className="btn btn--quiet"
                     aria-disabled={isBusy}
                     onClick={() => {
-                      run(subject.isClosed ? onReopenInitiative : onCloseInitiative);
+                      run(onCloseInitiative);
                     }}
                   >
-                    {subject.isClosed ? "Reopen" : "Close initiative"}
+                    Close initiative
                   </button>
                 )}
                 {subject !== null && (

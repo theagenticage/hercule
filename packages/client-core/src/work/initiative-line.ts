@@ -9,7 +9,7 @@
  * - In a cell the beads come in this order: failed, question, open, blocked,
  *   landed. Beads of one kind keep the board's order.
  * - A Done Task has no card, so it is a ring with no Task at the end of the
- *   Landed cell, one for each (`InitiativeLane.doneRingCount`).
+ *   Landed cell, one for each (`InitiativeRowLane.doneRingCount`).
  * - Past ten beads in a cell they are drawn as tally marks, and a cell draws
  *   at most `MOST_TALLY_MARKS` of them. The failed mark stays first, because it
  *   is first in the list.
@@ -78,19 +78,20 @@ export const buildInitiativeLine = (
     const beads = cards
       .map((card): InitiativeBead => ({ taskId: card.id, kind: decideCardState(card) }))
       .toSorted((a, b) => BEAD_ORDER[a.kind] - BEAD_ORDER[b.kind]);
-    const rings =
-      stage === "landed"
-        ? Array.from({ length: doneRingCount }, (): InitiativeBead => ({
-            taskId: null,
-            kind: "landed",
-          }))
-        : [];
-    const all = [...beads, ...rings];
-    const isTally = all.length > MOST_BEADS_BEFORE_TALLY;
+    const ringCount = stage === "landed" ? doneRingCount : 0;
+    const beadCount = beads.length + ringCount;
+    const isTally = beadCount > MOST_BEADS_BEFORE_TALLY;
+    // A tally cell draws a few marks, so only the rings that will be drawn are made.
+    const drawnCount = isTally ? Math.min(beadCount, MOST_TALLY_MARKS) : beadCount;
+    const drawnRingCount = Math.max(0, Math.min(ringCount, drawnCount - beads.length));
+    const rings = Array.from({ length: drawnRingCount }, (): InitiativeBead => ({
+      taskId: null,
+      kind: "landed",
+    }));
     return {
       stage,
-      beads: isTally ? all.slice(0, MOST_TALLY_MARKS) : all,
-      beadCount: all.length,
+      beads: [...beads.slice(0, drawnCount), ...rings],
+      beadCount,
       isTally,
     };
   });

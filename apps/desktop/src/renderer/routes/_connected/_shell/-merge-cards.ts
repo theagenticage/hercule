@@ -19,6 +19,7 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   describeMerge,
   describeMergedInto,
+  describeMergedWithoutCheck,
   describeMergeFailure,
   type MergeCheckResult,
 } from "@hercule/client-core/work";
@@ -44,15 +45,17 @@ export interface MergeCards {
    * board and the undo line offers Undo. Returns `false`, and holds nothing,
    * when either card is not on the board or both are the same. The drag
    * calls it inside its own committed change and plays the motion itself.
+   * `isChecked` is whether the merge check allowed it; when it did not (it
+   * could not be asked), the undo line says so.
    */
-  readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
+  readonly holdMerge: (sourceCardId: string, targetCardId: string, isChecked: boolean) => boolean;
   /**
    * Merges the card `sourceCardId` into the card `targetCardId` as the user
    * asked by key or from the details: the card slides in under the target and
    * fades, and the target settles. Says on the undo line when either card has
-   * left the board.
+   * left the board. `isChecked` is as for `holdMerge`.
    */
-  readonly mergeCard: (sourceCardId: string, targetCardId: string) => void;
+  readonly mergeCard: (sourceCardId: string, targetCardId: string, isChecked: boolean) => void;
   /**
    * Asks the controller whether the card `sourceCardId` could be merged into
    * the card `targetCardId`, so a refusal shows before the drop. Asks once per
@@ -136,7 +139,7 @@ export const useMergeCards = ({
     return Promise.resolve(undefined);
   };
 
-  const holdMerge = (sourceCardId: string, targetCardId: string): boolean => {
+  const holdMerge = (sourceCardId: string, targetCardId: string, isChecked: boolean): boolean => {
     const { readBoard: read, openTaskId: openId, closePane: close, moves: lines } = latest.current;
     const cards = read()?.cards ?? [];
     const source = cards.find((card) => card.id === sourceCardId);
@@ -147,7 +150,9 @@ export const useMergeCards = ({
       { kind: "merge", taskId: source.id, intoTaskId: target.id },
       {
         sayWithUndo: lines.sayWithUndo,
-        line: describeMergedInto(target.title),
+        line: isChecked
+          ? describeMergedInto(target.title)
+          : describeMergedWithoutCheck(target.title),
         words: describeMerge(source.title, target.title),
         undo: (intentId) => undoMerge(intentId, source.id, target.id),
       },
@@ -156,13 +161,13 @@ export const useMergeCards = ({
     return true;
   };
 
-  const mergeCard = (sourceCardId: string, targetCardId: string): void => {
+  const mergeCard = (sourceCardId: string, targetCardId: string, isChecked: boolean): void => {
     const scroller = scrollRef.current;
     // The card in the page is hidden by the change, so a copy of it slides in.
     const ghost = scroller === null ? null : launchLeavingCard(scroller, sourceCardId);
     let isHeld = false;
     playBoardChange(() => {
-      isHeld = holdMerge(sourceCardId, targetCardId);
+      isHeld = holdMerge(sourceCardId, targetCardId, isChecked);
     });
     if (!isHeld) {
       if (ghost !== null) removeFlight(ghost);

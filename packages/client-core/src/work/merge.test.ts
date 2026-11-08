@@ -7,6 +7,7 @@ import {
   describeMergeKeeps,
   describeMergeNote,
   describeMergedInto,
+  describeMergedWithoutCheck,
   describeMergeRefused,
   describeMergeTarget,
   hideHeldMergeSources,
@@ -138,6 +139,12 @@ describe("the words after a merge", () => {
 
   it("names the Task merged into, quoted", () => {
     expect(describeMergedInto("Refund emails")).toBe('Merged into "Refund emails".');
+  });
+
+  it("says on the undo line that a merge went ahead without being checked", () => {
+    expect(describeMergedWithoutCheck("Refund emails")).toBe(
+      'Merged into "Refund emails". It could not be checked first.',
+    );
   });
 
   it("cuts a long title of the Task merged into", () => {

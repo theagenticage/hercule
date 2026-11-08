@@ -30,7 +30,7 @@ const HOLDS_NONE: readonly HeldInitiative[] = [];
  */
 const describeFoldedCounts = (cells: readonly ArrangedLaneCell[]): string => {
   const words = cells
-    .filter((cell) => cell.cardCount > 0)
+    .filter((cell) => cell.cardCountWithRows > 0)
     .map((cell) => {
       const dot =
         cell.dot === "failed"
@@ -38,7 +38,7 @@ const describeFoldedCounts = (cells: readonly ArrangedLaneCell[]): string => {
           : cell.dot === "question"
             ? " with a question"
             : "";
-      return `${STAGE_NAMES[cell.stage]} ${String(cell.cardCount)}${dot}`;
+      return `${STAGE_NAMES[cell.stage]} ${String(cell.cardCountWithRows)}${dot}`;
     });
   return words.length === 0 ? "No cards" : words.join(", ");
 };
@@ -77,7 +77,10 @@ function OutsideFacts({ outside }: { readonly outside: OutsideLane }): JSX.Eleme
  * - The head is a button that folds or opens the lane, with a chevron, a
  *   folder, the Project's name, how many cards the lane holds, and "1 failed"
  *   in ink when a card failed, whether the lane is folded or not. The `+`
- *   beside it adds a Task to this lane.
+ *   beside it adds a Task to this lane. The count, the failures, the counts
+ *   of a folded lane and its dots stand for every Task of the Project: the
+ *   cards of the rows drawn under the lane (In lanes) are in them, though the
+ *   rows draw those cards themselves.
  * - The lane of an outside place, such as a repository, has the source's
  *   mark in place of the folder and says what the place says about itself
  *   under its name (`OutsideFacts`). The lane that collects what has no such
@@ -132,13 +135,20 @@ export function BoardLane({
   readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (at: CardInLane) => void;
 }): JSX.Element {
-  const { lane, isFolded, failedCount, cells } = arrangedLane;
+  const { lane, isFolded, failedCount, cardCountWithRows, cells } = arrangedLane;
   const { outside, initiative } = lane;
   const held = heldInitiatives ?? HOLDS_NONE;
   const isNoPlace = outside?.pluginId === null || lane.id === NO_INITIATIVE_LANE_ID;
-  const total = cells.reduce((sum, cell) => sum + cell.cardCount, 0);
   return (
-    <section className={isFolded ? "board-lane is-folded" : "board-lane"} data-lane-id={lane.id}>
+    <section
+      className={isFolded ? "board-lane is-folded" : "board-lane"}
+      data-lane-id={lane.id}
+      // The stylesheet spaces a lane by what it draws and by the rows that follow it.
+      data-has-cards={
+        isFolded || !cells.some((cell) => cell.shownCards.length > 0) ? undefined : ""
+      }
+      data-rows-follow={isFolded || held.length === 0 ? undefined : ""}
+    >
       <h3 className="board-lane-head" data-lane-head={lane.id}>
         <button
           type="button"
@@ -171,7 +181,7 @@ export function BoardLane({
           <span className="board-lane-words">
             <span className="board-lane-line">
               <span className="board-lane-name">{lane.name}</span>
-              <span className="board-lane-total">{total}</span>
+              <span className="board-lane-total">{cardCountWithRows}</span>
               {isFolded &&
                 held.map((each) => (
                   <HueFlag
@@ -214,7 +224,7 @@ export function BoardLane({
                   className={cell.dot === "failed" ? "board-fold-dot is-failed" : "board-fold-dot"}
                 />
               )}
-              {cell.cardCount > 0 && <span>{cell.cardCount}</span>}
+              {cell.cardCountWithRows > 0 && <span>{cell.cardCountWithRows}</span>}
             </span>
           ))}
         </div>

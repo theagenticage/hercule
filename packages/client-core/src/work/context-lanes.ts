@@ -122,11 +122,13 @@ export const groupBoardByContext = (
         }),
       );
       return buildLane(buildPlaceLaneId(place.ref), readPlaceName(place), null, cards, {
-        pluginId,
-        caption,
-        ...(place.status === undefined ? {} : { status: place.status }),
-        ...(place.progress === undefined ? {} : { progress: place.progress }),
-        cardPlaces,
+        outside: {
+          pluginId,
+          caption,
+          ...(place.status === undefined ? {} : { status: place.status }),
+          ...(place.progress === undefined ? {} : { progress: place.progress }),
+          cardPlaces,
+        },
       });
     });
   return loose.length === 0
@@ -134,9 +136,7 @@ export const groupBoardByContext = (
     : [
         ...lanes,
         buildLane(buildNoPlaceLaneId(kind), `No ${caption}`, null, loose, {
-          pluginId: null,
-          caption,
-          cardPlaces: {},
+          outside: { pluginId: null, caption, cardPlaces: {} },
         }),
       ];
 };

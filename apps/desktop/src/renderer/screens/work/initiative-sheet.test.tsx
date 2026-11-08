@@ -24,7 +24,7 @@ const NEW_DRAFT: InitiativeDraft = {
   hue: INITIATIVE_HUES[1],
 };
 
-const OPEN: InitiativeSheetSubject = { name: "Gift card refunds", isClosed: false };
+const OPEN: InitiativeSheetSubject = { name: "Gift card refunds" };
 
 /** Renders the sheet and returns what it calls. */
 const renderSheet = (
@@ -39,7 +39,6 @@ const renderSheet = (
   const calls = {
     onSave: vi.fn(options.onSave ?? (() => Promise.resolve())),
     onCloseInitiative: vi.fn(options.onCloseInitiative ?? (() => Promise.resolve())),
-    onReopenInitiative: vi.fn(() => Promise.resolve()),
     onDelete: vi.fn(options.onDelete ?? (() => Promise.resolve())),
     onDismiss: vi.fn(),
   };
@@ -164,26 +163,13 @@ describe("InitiativeSheet", () => {
     expect(calls.onSave).toHaveBeenCalledWith(expect.objectContaining({ target: "" }));
   });
 
-  it("closes the initiative from the foot, and offers Reopen on a closed one", async () => {
+  it("closes the initiative from the foot", async () => {
     const user = userEvent.setup();
     const calls = renderSheet({ subject: OPEN, initial: { ...NEW_DRAFT, name: OPEN.name } });
 
     await user.click(screen.getByRole("button", { name: "Close initiative" }));
 
     expect(calls.onCloseInitiative).toHaveBeenCalledOnce();
-  });
-
-  it("reopens a closed initiative", async () => {
-    const user = userEvent.setup();
-    const calls = renderSheet({
-      subject: { name: "Gift card refunds", isClosed: true },
-      initial: { ...NEW_DRAFT, name: "Gift card refunds" },
-    });
-
-    expect(screen.queryByRole("button", { name: "Close initiative" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Reopen" }));
-
-    expect(calls.onReopenInitiative).toHaveBeenCalledOnce();
   });
 
   it("asks to confirm a delete, in words that say there is no Undo, with the focus on Cancel", async () => {

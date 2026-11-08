@@ -19,7 +19,9 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubIntersectionObserver,
+  type Answer,
   type Call,
+  type Handler,
 } from "../../../app/testing";
 
 beforeEach(() => {
@@ -118,6 +120,7 @@ const LOOP_MESSAGE =
  *   read shows something else, as when another client changed them a moment ago.
  * - `refuseAdd` is the answer of every `task.addBlocker` call instead.
  * - `initiativeId` is the Initiative the Task is on.
+ * - `answerUpdate` is the handler of every `task.update` call, to hold an answer back.
  */
 const openPane = async ({
   blockers = [toBlocker(LOYALTY)],
@@ -126,6 +129,7 @@ const openPane = async ({
   controllerBlockers,
   refuseAdd,
   initiativeId,
+  answerUpdate,
 }: {
   readonly blockers?: readonly WorkCardBlocker[];
   readonly blocks?: readonly WorkCardBlocker[];
@@ -133,6 +137,7 @@ const openPane = async ({
   readonly controllerBlockers?: readonly WorkCardBlocker[];
   readonly refuseAdd?: { readonly status: number; readonly body: unknown };
   readonly initiativeId?: string;
+  readonly answerUpdate?: Handler;
 } = {}) => {
   let current = [...(controllerBlockers ?? blockers)];
   // True until the first change: the details read then shows what the user last saw.
@@ -151,7 +156,7 @@ const openPane = async ({
       body: buildDetail(LOYALTY, [], [toBlocker(CARD)]),
     },
     [`POST ${TASK_PATH}/move`]: { body: buildTask(card) },
-    [UPDATE_PATH]: { body: buildTask(card) },
+    [UPDATE_PATH]: answerUpdate ?? { body: buildTask(card) },
     [ADD_PATH]: (call: Call) => {
       if (refuseAdd !== undefined) return refuseAdd;
       isStale = false;
@@ -418,7 +423,7 @@ describe("adding and removing a blocker", () => {
 });
 
 describe("the Initiative of a Task on the details pane", () => {
-  it("shows the Initiative in the crumbs with its flag, and in its own row", async () => {
+  it("shows the Initiative in the crumbs after the Project, and with its flag in its own row", async () => {
     const { pane } = await openPane({ initiativeId: CHECKOUT.id });
 
     const row = await within(pane).findByRole("button", {
@@ -427,8 +432,8 @@ describe("the Initiative of a Task on the details pane", () => {
 
     expect(row.textContent).toBe("Accessible checkout");
     const crumb = pane.querySelector<HTMLElement>(".task-pane-crumb")!;
-    expect(crumb.textContent).toContain("Accessible checkout");
-    expect(crumb.querySelector(".hue-flag")).not.toBeNull();
+    expect(crumb.textContent).toBe(`${SIDEBAR_FIXTURE.projects[0]!.name} · Accessible checkout`);
+    expect(row.querySelector(".hue-flag")).not.toBeNull();
   });
 
   it("says no initiative for a Task on none, and draws no Initiative in the crumbs", async () => {
@@ -510,5 +515,63 @@ describe("the Initiative of a Task on the details pane", () => {
 
     expect(await screen.findByText("Took Print depot pick lists off its initiative.")).toBeTruthy();
     expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: null }]);
+  });
+
+  it("offers no Undo when the Task comes off an Initiative that is closed, which nothing can put it back on", async () => {
+    const { calls, user, pane } = await openPane({ initiativeId: buildTaskId(999) });
+    await within(pane).findByRole("button", { name: "Initiative: none" });
+    const menu = readInitiativeMenu(pane);
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "No initiative", hidden: true }),
+    );
+
+    expect(
+      await screen.findByText("Took Print depot pick lists off its closed initiative."),
+    ).toBeTruthy();
+    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: null }]);
+    expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
+  });
+
+  it("puts the Task back on the Initiative the pick before it chose, when two picks come before the pane shows the first", async () => {
+    let answerFirst: (reply: Answer) => void = () => undefined;
+    let updates = 0;
+    const { calls, user, pane } = await openPane({
+      // The Task is on none, and the first pick's answer is slow.
+      answerUpdate: () => {
+        updates += 1;
+        return updates === 1
+          ? new Promise<Answer>((resolve) => {
+              answerFirst = resolve;
+            })
+          : Promise.resolve({ body: buildTask(CARD) });
+      },
+    });
+    await within(pane).findByRole("button", { name: "Initiative: none" });
+    const menu = readInitiativeMenu(pane);
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+    );
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
+    );
+    await waitFor(() => {
+      expect(readBodies(calls, UPDATE_PATH)).toHaveLength(1);
+    });
+    answerFirst({ body: buildTask(CARD) });
+    await waitFor(() => {
+      expect(readBodies(calls, UPDATE_PATH)).toHaveLength(2);
+    });
+    await user.click(await screen.findByRole("button", { name: /^Undo/ }));
+
+    await waitFor(() => {
+      expect(readBodies(calls, UPDATE_PATH)).toEqual([
+        { initiativeId: SEARCH.id },
+        { initiativeId: CHECKOUT.id },
+        // Not null: the Task was on Faster search when the second pick came.
+        { initiativeId: SEARCH.id },
+      ]);
+    });
   });
 });

@@ -19,7 +19,7 @@ import {
   buildLane,
   buildLanes,
   chooseProjectLaneId,
-  type InitiativeLane,
+  type InitiativeRowLane,
   type WorkInitiative,
   type WorkLane,
   type WorkProject,
@@ -52,7 +52,8 @@ type InitiativeBoard = Pick<WorkBoard, "cards" | "initiativeDoneCounts">;
  * lane in Group by Initiative, so that the cells of the two never share an id
  * (`buildCellId`) when the user opens one in each.
  */
-const buildInitiativeRowId = (initiativeId: string): string => `initiative-row:${initiativeId}`;
+export const buildInitiativeRowId = (initiativeId: string): string =>
+  `initiative-row:${initiativeId}`;
 
 const buildInitiativeLaneId = (initiativeId: string): string => `initiative:${initiativeId}`;
 
@@ -88,7 +89,7 @@ const partitionByInitiative = (
  *
  * - `top`: all rows first, in the order of `initiatives`, then the lanes of
  *   the cards on no Initiative. A row says its Project's name in its facts
- *   (`InitiativeLane.projectName`).
+ *   (`InitiativeRowLane.projectName`).
  * - `lanes`: each lane is followed by the rows of the Initiatives whose
  *   Project it is. An Initiative with no Project, or a Project that is not in
  *   `projects`, draws in the "No project" lane. A lane with no loose card is
@@ -113,20 +114,21 @@ export const groupBoardByProject = (
   );
   const buildRow = (
     initiative: WorkInitiative,
-    where: Pick<InitiativeLane, "underLaneId" | "projectName">,
+    where: Pick<InitiativeRowLane, "underLaneId" | "projectName">,
   ): WorkLane =>
     buildLane(
       buildInitiativeRowId(initiative.id),
       initiative.name,
       null,
       byInitiative.get(initiative.id) ?? [],
-      undefined,
       {
-        initiativeId: initiative.id,
-        hue: initiative.hue,
-        isRow: true,
-        doneRingCount: view.isFiltering ? 0 : (board.initiativeDoneCounts[initiative.id] ?? 0),
-        ...where,
+        initiative: {
+          initiativeId: initiative.id,
+          hue: initiative.hue,
+          isRow: true,
+          doneRingCount: view.isFiltering ? 0 : (board.initiativeDoneCounts[initiative.id] ?? 0),
+          ...where,
+        },
       },
     );
   if (view.place === "top") {
@@ -169,11 +171,8 @@ export const groupBoardByInitiative = (
     return view.isFiltering && cards.length === 0
       ? []
       : [
-          buildLane(buildInitiativeLaneId(initiative.id), initiative.name, null, cards, undefined, {
-            initiativeId: initiative.id,
-            hue: initiative.hue,
-            isRow: false,
-            doneRingCount: 0,
+          buildLane(buildInitiativeLaneId(initiative.id), initiative.name, null, cards, {
+            initiative: { initiativeId: initiative.id, hue: initiative.hue, isRow: false },
           }),
         ];
   });
@@ -201,7 +200,7 @@ export const listLaneInitiatives = (
   laneId: string,
 ): readonly HeldInitiative[] =>
   lanes.flatMap(({ lane }): HeldInitiative[] =>
-    lane.initiative?.underLaneId === laneId
+    lane.initiative?.isRow === true && lane.initiative.underLaneId === laneId
       ? [{ id: lane.initiative.initiativeId, hue: lane.initiative.hue, name: lane.name }]
       : [],
   );

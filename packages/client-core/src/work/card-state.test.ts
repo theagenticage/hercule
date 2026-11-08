@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkCard } from "@hercule/contract";
 import { buildCard, FAILURE, QUESTION } from "./cards.testing";
-import { decideCardState, describeCardBlockers } from "./card-state";
+import { decideCardState, describeCardBlockers, isCardWaiting } from "./card-state";
 
 const blocker = (id: string, title: string) => ({ id, title, stage: "building" as const });
 
@@ -30,6 +30,19 @@ describe("decideCardState", () => {
     ["a failed card at Landed", buildCard("x", { stage: "landed", failure: FAILURE }), "failed"],
   ])("reads %s", (_, card, state) => {
     expect(decideCardState(card)).toBe(state);
+  });
+});
+
+describe("isCardWaiting", () => {
+  it.each([
+    ["a card with nothing to wait on", buildCard("x"), false],
+    ["a card that waits on a Task", waiting(), true],
+    // The look of these cards is failed, question and landed, but they still wait.
+    ["a failed card that waits", waiting({ failure: FAILURE }), true],
+    ["a card with a question that waits", waiting({ openQuestion: QUESTION }), true],
+    ["a card at Landed that waits", waiting({ stage: "landed" }), true],
+  ])("reads %s", (_, card, isWaiting) => {
+    expect(isCardWaiting(card)).toBe(isWaiting);
   });
 });
 

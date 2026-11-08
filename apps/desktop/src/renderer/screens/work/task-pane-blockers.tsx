@@ -12,6 +12,9 @@ import { ArrowIcon } from "../../icons/arrow";
 import { CloseIcon } from "../../icons/close";
 import { LockIcon } from "../../icons/lock";
 import { PlusIcon } from "../../icons/plus";
+// "Add a blocker" searches the board's cards, which `LinkSearch` (a search of outside things) cannot,
+// so it draws with the same rows and imports their styles itself.
+import "../desk/link-search.css";
 
 /**
  * Renders one row of Blocked by or Blocks: the Task's title and the stage it

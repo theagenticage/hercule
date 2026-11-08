@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import {
   chooseTargetStage,
   describeCardMove,
@@ -7,9 +8,16 @@ import {
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { BoardStage, WorkCard } from "@hercule/contract";
-import { swallowNextClick, trackBody, trackCarryGesture, type MotionBody } from "../../app/motion";
+import {
+  swallowNextClick,
+  trackBody,
+  trackCarryGesture,
+  type MotionBody,
+  type SpringName,
+} from "../../app/motion";
 import { computeSlideOffset, HELD_BEAD_SCALE, SLIDE_DISTANCE } from "./bead-slide";
 import { pickStage, type StageEdge } from "./board-drag-geometry";
+import { flipBoard } from "./flip-board";
 import { measureStageEdges } from "./measure-board-geometry";
 import { readBoardKey } from "./read-board-key";
 
@@ -30,6 +38,14 @@ export interface BeadSlideOptions {
    * commits the move to the page before it returns.
    */
   readonly moveCard: (move: CardMove, words: string) => void;
+  /**
+   * Tells the screen whether a bead is in the hand, the same value a card in
+   * the hand of a drag sets: the board's reads wait for it, and Undo and the
+   * board keys stand still. It is called with `true` when a bead is lifted and
+   * with `false` when the bead is put down, inside the change that shows the
+   * bead's new place.
+   */
+  readonly onCarryingChange: (isCarrying: boolean) => void;
 }
 
 /** What a press on a bead found: the bead, its Task, and where the pointer was. */
@@ -37,6 +53,12 @@ interface Pressed {
   readonly element: HTMLElement;
   readonly taskId: string;
   readonly pressX: number;
+}
+
+/** A move to send, with the words for the undo line. */
+interface PlannedMove {
+  readonly move: CardMove;
+  readonly words: string;
 }
 
 /** A bead in the hand. */
@@ -69,23 +91,51 @@ const createBeadSlide = (
   };
 
   /**
-   * Moves the Task of `taskId` to `stage` as a stage-only move, through the
-   * same pipeline as every other move of a card. Returns whether a move was
-   * sent: a card that has left the board, or already stands in `stage`, sends
-   * none.
+   * Returns the stage-only move that sends the Task of `taskId` to `stage`,
+   * with the words for the undo line, or `undefined` when the card has left
+   * the board or already stands in `stage`.
    */
-  const moveToStage = (taskId: string, stage: BoardStage): boolean => {
+  const planMove = (taskId: string, stage: BoardStage): PlannedMove | undefined => {
     const options = readOptions();
     const card = options.cards.find((each) => each.id === taskId);
-    if (card === undefined || card.stage === stage) return false;
+    if (card === undefined || card.stage === stage) return undefined;
     const move: CardMove = { taskId, stage };
-    options.moveCard(move, describeCardMove(card, move, options.projects, options.initiatives));
-    return true;
+    return { move, words: describeCardMove(card, move, options.projects, options.initiatives) };
+  };
+
+  /**
+   * Sends `plan` through the same pipeline as every other move of a card, and
+   * commits it to the page. With `isReleasing`, the hand lets go of the bead in
+   * the same committed change, so the board is drawn once with both.
+   */
+  const sendMove = (plan: PlannedMove, isReleasing: boolean): void => {
+    const options = readOptions();
+    flushSync(() => {
+      if (isReleasing) options.onCarryingChange(false);
+      options.moveCard(plan.move, plan.words);
+    });
+  };
+
+  /**
+   * Lets the bead go when no move follows: the screen shows what it held back
+   * for the carry, and the board glides to it on `spring`.
+   */
+  const putDownWithoutMove = (spring: SpringName): void => {
+    flipBoard(scroller, spring, () => {
+      flushSync(() => {
+        readOptions().onCarryingChange(false);
+      });
+    });
   };
 
   const lift = (pressed: Pressed): Slide | null => {
     const stage = readOptions().cards.find((each) => each.id === pressed.taskId)?.stage;
     if (stage === undefined || !pressed.element.isConnected) return null;
+    // The screen is told first and at once, so what it holds back for the carry
+    // is held before the bead moves, and a push cannot take the bead away.
+    flushSync(() => {
+      readOptions().onCarryingChange(true);
+    });
     const body = trackBody(pressed.element);
     pressed.element.dataset["held"] = "";
     return {
@@ -112,14 +162,22 @@ const createBeadSlide = (
   /**
    * Lets go of the bead: its Task moves to the stage under the pointer, and
    * the bead comes down in its new cell from where the hand left it (the
-   * glide of `flipBoard` takes over the bead's offset and size). A bead that
-   * stays, or whose move was not sent, comes home.
+   * glide of `flipBoard` takes over the bead's offset and size). The bead
+   * leaves the hand in the same change as the move. A bead that stays, or
+   * whose move was not sent, comes home.
    */
   const drop = (slide: Slide): void => {
     swallowNextClick(true);
+    const plan = slide.element.isConnected ? planMove(slide.taskId, slide.stage) : undefined;
+    if (plan === undefined) {
+      putDownWithoutMove("hand");
+      comeHome(slide, "hand");
+      return;
+    }
+    // Not held any more, so the glide of the board takes the bead over.
     delete slide.element.dataset["held"];
-    const isSent = slide.element.isConnected && moveToStage(slide.taskId, slide.stage);
-    if (!isSent || slide.element.isConnected) comeHome(slide, "hand");
+    sendMove(plan, true);
+    if (slide.element.isConnected) comeHome(slide, "hand");
   };
 
   const gesture = trackCarryGesture<Pressed, Slide>({
@@ -140,6 +198,8 @@ const createBeadSlide = (
     drop,
     cancel: (slide, isPointerUp) => {
       swallowNextClick(isPointerUp);
+      // The bead is still marked held while the board glides, which leaves it to its own spring.
+      putDownWithoutMove("travel");
       comeHome(slide, "travel");
     },
   });
@@ -155,7 +215,9 @@ const createBeadSlide = (
     event.preventDefault();
     const card = readOptions().cards.find((each) => each.id === taskId);
     const stage = card === undefined ? undefined : chooseTargetStage(card, command);
-    if (stage === undefined || !moveToStage(taskId, stage)) return;
+    const plan = stage === undefined ? undefined : planMove(taskId, stage);
+    if (plan === undefined) return;
+    sendMove(plan, false);
     // The bead is a new element in its new cell, and focus went with the old one.
     scroller
       .querySelector<HTMLElement>(`[data-bead-task-id="${CSS.escape(taskId)}"]`)
@@ -168,6 +230,7 @@ const createBeadSlide = (
       scroller.removeEventListener("keydown", onKeyDown);
       const held = gesture.destroy();
       if (held !== null) {
+        readOptions().onCarryingChange(false);
         delete held.element.dataset["held"];
         held.body.clear();
       }

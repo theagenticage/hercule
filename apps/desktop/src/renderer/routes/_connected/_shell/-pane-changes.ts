@@ -282,13 +282,14 @@ export const usePaneChanges = ({
           blockerTitle: blocker.title,
         });
       },
-      onSetInitiative: (initiative) => {
+      onSetInitiative: (initiative, canPutBack) => {
         const pane = shownPane.current;
         if (pane?.card === undefined) return;
         setTaskInitiative({
           taskId: pane.taskId,
           taskTitle: pane.card.title,
           fromInitiativeId: pane.card.initiativeId,
+          canPutBack,
           to: initiative,
         });
       },
