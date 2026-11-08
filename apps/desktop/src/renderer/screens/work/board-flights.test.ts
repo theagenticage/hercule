@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findBody } from "../../app/motion";
 import {
+  findFoldTarget,
   growCardsFromOrigins,
   launchFlights,
   playHandOff,
@@ -137,5 +138,78 @@ describe("copies of cards in flight", () => {
     expect(desk.querySelector("[data-flight-card]")).toBeNull();
     growCardsFromOrigins([lane], origins);
     expect(findBody(card)).toBeDefined();
+  });
+});
+
+describe("the target of a card that folds", () => {
+  /** Returns a folded line with a bead for `t1` in Building and a count for each of two stages. */
+  const makeLine = () => {
+    const line = document.createElement("div");
+    line.dataset["foldRow"] = "row-1";
+    const building = document.createElement("span");
+    building.dataset["stage"] = "building";
+    const bead = document.createElement("button");
+    bead.dataset["beadTaskId"] = "t1";
+    building.append(bead);
+    const planned = document.createElement("span");
+    planned.dataset["stage"] = "planned";
+    line.append(planned, building);
+    return { line, bead, building, planned };
+  };
+
+  it("is the bead of the card's Task when the line has one", () => {
+    const { line, bead } = makeLine();
+
+    expect(findFoldTarget(line, "t1", "planned")).toBe(bead);
+  });
+
+  it("is the count of the card's stage when the line has no bead for it", () => {
+    const { line, planned } = makeLine();
+
+    expect(findFoldTarget(line, "t2", "planned")).toBe(planned);
+  });
+
+  it("is nothing when the line is not folded or has neither", () => {
+    const { line } = makeLine();
+
+    expect(findFoldTarget(null, "t1", "building")).toBeNull();
+    expect(findFoldTarget(line, "t2", "landed")).toBeNull();
+  });
+});
+
+describe("cards that grow out of beads", () => {
+  it("starts a card at its bead, not at the count of its stage", () => {
+    const desk = document.createElement("div");
+    desk.className = "work-desk";
+    const scroller = document.createElement("div");
+    const row = document.createElement("section");
+    row.dataset["laneId"] = "row-1";
+    const line = document.createElement("div");
+    line.dataset["foldRow"] = "row-1";
+    const count = document.createElement("span");
+    count.dataset["stage"] = "building";
+    count.getBoundingClientRect = () => new DOMRect(700, 40, 20, 14);
+    const bead = document.createElement("button");
+    bead.dataset["beadTaskId"] = "t1";
+    bead.getBoundingClientRect = () => new DOMRect(496, 46, 8, 8);
+    count.append(bead);
+    line.append(count);
+    row.append(line);
+    scroller.append(row);
+    desk.append(scroller);
+    document.body.append(desk);
+
+    const origins = recordGrowthOrigins(scroller, [row]);
+    line.remove();
+    // The row is open now: the card stands in its band.
+    const card = document.createElement("div");
+    card.dataset["cardId"] = "t1";
+    card.dataset["stage"] = "building";
+    card.getBoundingClientRect = () => new DOMRect(100, 100, 200, 90);
+    row.append(card);
+    growCardsFromOrigins([row], origins);
+
+    // The card's center is (200, 145) and the bead's is (500, 50).
+    expect(findBody(card)!.values).toMatchObject({ x: 300, y: -95, s: 0.1, o: 0 });
   });
 });

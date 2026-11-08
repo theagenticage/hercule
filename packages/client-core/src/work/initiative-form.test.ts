@@ -11,6 +11,7 @@ import {
   buildNewInitiativeDraft,
   chooseNewInitiativeHue,
   convertDayToTimestamp,
+  INITIATIVE_HUE_NAMES,
   putInitiative,
   readTimestampDay,
 } from "./initiative-form";
@@ -25,6 +26,13 @@ const buildInitiative = (overrides: Partial<Initiative> = {}): Initiative => ({
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   ...overrides,
+});
+
+describe("INITIATIVE_HUE_NAMES", () => {
+  it("gives every hue its own name, so no two swatches sound alike", () => {
+    const names = INITIATIVE_HUES.map((hue) => INITIATIVE_HUE_NAMES[hue]);
+    expect(new Set(names).size).toBe(INITIATIVE_HUES.length);
+  });
 });
 
 describe("chooseNewInitiativeHue", () => {

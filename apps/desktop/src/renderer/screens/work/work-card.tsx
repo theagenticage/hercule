@@ -14,9 +14,8 @@ import { findNextDeskAgeChange } from "@hercule/client-core/desk";
 import type { WorkCard } from "@hercule/contract";
 import { useClockValue } from "../../app/age-clock";
 import { buildLook } from "../../faces";
-import { FlagIcon } from "../../icons/flag";
 import { PluginMark } from "../../marks";
-import { Card, useDeskAgeLabel, type CardColleague } from "../desk";
+import { Card, HueFlag, useDeskAgeLabel, type CardColleague } from "../desk";
 
 /** The keys held while a card was clicked, which is how the screen tells a selecting click from an opening one. */
 export interface PressedKeys {
@@ -61,8 +60,8 @@ const listSourcePluginIds = (card: WorkCard): readonly string[] => [
  *   outside (`entityMarks`), drawn by the plugin's own mark in `plugins`.
  * - `initiative` is the Initiative whose small flag the card draws beside the
  *   age, in the Initiative's colour, and whose name the flag's hover and the
- *   card's reading carry. It is undefined where the card draws no flag (see
- *   `findCardInitiativeFlag`).
+ *   card's reading carry. It is undefined where the card draws no flag: under
+ *   Group by Project, and when its Initiative is closed.
  * - A card that waits on other Tasks (`decideCardState`) is drawn quiet, with
  *   a lock before "Waits on <title>." on its second line. A failure or a
  *   question outranks that: such a card draws as itself. The element carries
@@ -149,13 +148,7 @@ export const WorkCardView = memo(function WorkCardView({
       meta={
         <>
           {initiative !== undefined && (
-            <span
-              className="card-plan"
-              style={{ "--plan-hue": String(initiative.hue) }}
-              title={initiative.name}
-            >
-              <FlagIcon size={11} />
-            </span>
+            <HueFlag hue={initiative.hue} size={11} title={initiative.name} />
           )}
           {listSourcePluginIds(card).map((pluginId) => (
             <span key={pluginId} className="card-src" title={namePlugin(pluginId, plugins)}>

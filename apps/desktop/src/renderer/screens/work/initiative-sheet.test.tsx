@@ -1,7 +1,7 @@
 /**
  * Tests the Initiative sheet as the user works it: the fields, the colour
  * flags with the arrow keys, Return, Esc, the foot's Close and Delete with its
- * second press, and the error the foot shows.
+ * confirmation, and the error the foot shows.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -60,12 +60,8 @@ describe("InitiativeSheet", () => {
 
     expect(screen.getByRole("heading", { name: "New initiative" })).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Name" }));
-    expect(screen.getByRole("radio", { name: "Colour 2" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("radio", { name: "Colour 1" }).getAttribute("aria-checked")).toBe(
-      "false",
-    );
+    expect(screen.getByRole("radio", { name: "Green" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Blue" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getAllByRole("radio")).toHaveLength(INITIATIVE_HUES.length);
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Close initiative" })).toBeNull();
@@ -104,7 +100,7 @@ describe("InitiativeSheet", () => {
     await user.type(screen.getByRole("textbox", { name: "Target" }), "Live by spring");
     await user.type(screen.getByLabelText("Target date"), "2026-03-14");
     await user.selectOptions(screen.getByRole("combobox", { name: "Project" }), "web");
-    await user.click(screen.getByRole("radio", { name: "Colour 5" }));
+    await user.click(screen.getByRole("radio", { name: "Rose" }));
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Gift card refunds{Enter}");
 
     expect(calls.onSave).toHaveBeenCalledExactlyOnceWith({
@@ -134,21 +130,21 @@ describe("InitiativeSheet", () => {
       screen.getAllByRole("radio").find((each) => each.getAttribute("aria-checked") === "true")
         ?.ariaLabel ?? undefined;
 
-    screen.getByRole("radio", { name: "Colour 1" }).focus();
+    screen.getByRole("radio", { name: "Blue" }).focus();
     await user.keyboard("{ArrowLeft}");
-    expect(checked()).toBe("Colour 12");
-    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Colour 12" }));
+    expect(checked()).toBe("Gold");
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Gold" }));
 
     await user.keyboard("{ArrowRight}{ArrowDown}");
-    expect(checked()).toBe("Colour 2");
+    expect(checked()).toBe("Green");
 
     await user.keyboard("{ArrowUp}{End}");
-    expect(checked()).toBe("Colour 12");
+    expect(checked()).toBe("Gold");
     await user.keyboard("{Home}");
-    expect(checked()).toBe("Colour 1");
+    expect(checked()).toBe("Blue");
     // Only the chosen flag is a tab stop.
-    expect(screen.getByRole("radio", { name: "Colour 2" }).tabIndex).toBe(-1);
-    expect(screen.getByRole("radio", { name: "Colour 1" }).tabIndex).toBe(0);
+    expect(screen.getByRole("radio", { name: "Green" }).tabIndex).toBe(-1);
+    expect(screen.getByRole("radio", { name: "Blue" }).tabIndex).toBe(0);
   });
 
   it("shows an edited initiative by its name, with its own fields and Save", async () => {
@@ -159,7 +155,7 @@ describe("InitiativeSheet", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Gift card refunds" })).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Target" }) as HTMLInputElement).value).toBe(
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Target" }).value).toBe(
       "Live by spring",
     );
     await user.clear(screen.getByRole("textbox", { name: "Target" }));
@@ -190,7 +186,7 @@ describe("InitiativeSheet", () => {
     expect(calls.onReopenInitiative).toHaveBeenCalledOnce();
   });
 
-  it("asks for a second press before deleting, in words that say there is no Undo", async () => {
+  it("asks to confirm a delete, in words that say there is no Undo, with the focus on Cancel", async () => {
     const user = userEvent.setup();
     const calls = renderSheet({ subject: OPEN, initial: { ...NEW_DRAFT, name: OPEN.name } });
 
@@ -202,10 +198,22 @@ describe("InitiativeSheet", () => {
         "Delete Gift card refunds? Its Tasks stay, and leave it. This cannot be undone.",
       ),
     ).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete initiative" }));
 
     expect(calls.onDelete).toHaveBeenCalledOnce();
+  });
+
+  it("does not confirm a delete on a double click, because the button that was pressed is gone", async () => {
+    const user = userEvent.setup();
+    const calls = renderSheet({ subject: OPEN, initial: { ...NEW_DRAFT, name: OPEN.name } });
+
+    await user.dblClick(screen.getByRole("button", { name: "Delete" }));
+
+    expect(calls.onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Delete initiative" })).toBeTruthy();
   });
 
   it("takes the delete back with Cancel and with Esc, which does not dismiss the sheet", async () => {
@@ -230,13 +238,11 @@ describe("InitiativeSheet", () => {
     const name = screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement;
 
     await user.type(name, "Refunds");
-    await user.click(screen.getByRole("radio", { name: "Colour 7" }));
+    await user.click(screen.getByRole("radio", { name: "Indigo" }));
     await user.keyboard("{Escape}");
 
     expect(name.value).toBe("");
-    expect(screen.getByRole("radio", { name: "Colour 2" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: "Green" }).getAttribute("aria-checked")).toBe("true");
     expect(document.activeElement).toBe(name);
     expect(calls.onDismiss).not.toHaveBeenCalled();
 
@@ -254,9 +260,7 @@ describe("InitiativeSheet", () => {
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Refunds{Enter}");
 
     expect((await screen.findByRole("alert")).textContent).toBe("That project is gone.");
-    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe(
-      "Refunds",
-    );
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name" }).value).toBe("Refunds");
     expect(calls.onDismiss).not.toHaveBeenCalled();
   });
 
@@ -269,7 +273,7 @@ describe("InitiativeSheet", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete initiative" }));
 
     expect(await screen.findByText("Could not reach the controller.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();

@@ -8,11 +8,9 @@ import {
   type KeyboardEvent,
 } from "react";
 import { readErrorMessage } from "@hercule/client-core";
-import type { InitiativeDraft } from "@hercule/client-core/work";
+import { INITIATIVE_HUE_NAMES, type InitiativeDraft } from "@hercule/client-core/work";
 import { INITIATIVE_HUES } from "@hercule/contract";
-import { FlagIcon } from "../../icons/flag";
-import { SideSheet } from "../desk";
-import { buildInitiativeHueStyle } from "./initiative-flag";
+import { HueFlag, SideSheet } from "../desk";
 import "./initiative-sheet.css";
 
 /** A Project the Initiative can draw in the lane of. */
@@ -71,7 +69,10 @@ const readSwatchTarget = (key: string, at: number): number | undefined => {
  *   after which the caller takes the sheet away. When it rejects, the foot
  *   line shows the error's message and the fields stay as they are.
  *   `onCloseInitiative`, `onReopenInitiative` and `onDelete` work the same
- *   way. Deleting asks a second press first, in words, in the foot.
+ *   way. Deleting asks to be confirmed first, in words, in the foot: the
+ *   Delete button gives way to a "Delete initiative" button at the other end
+ *   of the foot, so a double click on Delete never confirms it. Focus goes to
+ *   Cancel, so a held Return does not confirm it either.
  * - `onDismiss` is called by the Close button of the sheet and by Esc.
  *
  * Name has the focus on opening, and Return in any text field saves. Esc steps
@@ -104,12 +105,17 @@ export function InitiativeSheet({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const swatchesRef = useRef<HTMLDivElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
   const ids = useId();
   const labelOf = (field: string): string => `${ids}-${field}`;
 
   useEffect(() => {
     nameRef.current?.focus({ preventScroll: true });
   }, []);
+
+  useEffect(() => {
+    if (isConfirmingDelete) cancelDeleteRef.current?.focus({ preventScroll: true });
+  }, [isConfirmingDelete]);
 
   const change = (patch: Partial<InitiativeDraft>): void => {
     setDraft((before) => ({ ...before, ...patch }));
@@ -252,10 +258,10 @@ export function InitiativeSheet({
                   type="button"
                   role="radio"
                   aria-checked={hue === draft.hue}
-                  aria-label={`Colour ${String(at + 1)}`}
+                  aria-label={INITIATIVE_HUE_NAMES[hue]}
+                  title={INITIATIVE_HUE_NAMES[hue]}
                   tabIndex={hue === draft.hue ? 0 : -1}
                   className="initiative-swatch"
-                  style={buildInitiativeHueStyle(hue)}
                   onClick={() => {
                     change({ hue });
                   }}
@@ -263,7 +269,7 @@ export function InitiativeSheet({
                     handleSwatchKeyDown(event, at);
                   }}
                 >
-                  <FlagIcon size={16} />
+                  <HueFlag hue={hue} size={16} />
                 </button>
               ))}
             </div>
@@ -282,57 +288,64 @@ export function InitiativeSheet({
           )}
           <div className="initiative-sheet-actions">
             {isConfirmingDelete ? (
-              <button
-                type="button"
-                className="btn btn--quiet"
-                onClick={() => {
-                  setIsConfirmingDelete(false);
-                }}
-              >
-                Cancel
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  aria-disabled={isBusy}
+                  onClick={() => {
+                    run(onDelete);
+                  }}
+                >
+                  Delete initiative
+                </button>
+                <button
+                  ref={cancelDeleteRef}
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() => {
+                    setIsConfirmingDelete(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
             ) : (
-              <button
-                type="submit"
-                className="btn btn--accent"
-                disabled={!canSave}
-                aria-disabled={isBusy}
-              >
-                {subject === null ? "Create initiative" : "Save"}
-              </button>
-            )}
-            {subject !== null && !isConfirmingDelete && (
-              <button
-                type="button"
-                className="btn btn--quiet"
-                aria-disabled={isBusy}
-                onClick={() => {
-                  run(subject.isClosed ? onReopenInitiative : onCloseInitiative);
-                }}
-              >
-                {subject.isClosed ? "Reopen" : "Close initiative"}
-              </button>
-            )}
-            {subject !== null && (
-              <button
-                type="button"
-                className={
-                  isConfirmingDelete
-                    ? "btn btn--danger initiative-sheet-end"
-                    : "btn btn--quiet btn--danger initiative-sheet-end"
-                }
-                aria-disabled={isBusy}
-                onClick={() => {
-                  if (!isConfirmingDelete) {
-                    setError(null);
-                    setIsConfirmingDelete(true);
-                    return;
-                  }
-                  run(onDelete);
-                }}
-              >
-                Delete
-              </button>
+              <>
+                <button
+                  type="submit"
+                  className="btn btn--accent"
+                  disabled={!canSave}
+                  aria-disabled={isBusy}
+                >
+                  {subject === null ? "Create initiative" : "Save"}
+                </button>
+                {subject !== null && (
+                  <button
+                    type="button"
+                    className="btn btn--quiet"
+                    aria-disabled={isBusy}
+                    onClick={() => {
+                      run(subject.isClosed ? onReopenInitiative : onCloseInitiative);
+                    }}
+                  >
+                    {subject.isClosed ? "Reopen" : "Close initiative"}
+                  </button>
+                )}
+                {subject !== null && (
+                  <button
+                    type="button"
+                    className="btn btn--quiet btn--danger initiative-sheet-end"
+                    aria-disabled={isBusy}
+                    onClick={() => {
+                      setError(null);
+                      setIsConfirmingDelete(true);
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </>
             )}
           </div>
         </footer>

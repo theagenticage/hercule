@@ -24,6 +24,28 @@ export interface InitiativeDraft {
   readonly hue: InitiativeHue;
 }
 
+/**
+ * The name of each colour of an Initiative, for a screen reader and a hover.
+ * Each name was chosen by looking at the colour at the lightness and chroma
+ * of the dark themes and of the light ones, so it is the colour a person
+ * would call it. A new hue in `INITIATIVE_HUES` needs a name here: the type
+ * refuses a record without one.
+ */
+export const INITIATIVE_HUE_NAMES: Readonly<Record<InitiativeHue, string>> = {
+  245: "Blue",
+  150: "Green",
+  300: "Violet",
+  200: "Teal",
+  345: "Rose",
+  118: "Olive",
+  270: "Indigo",
+  175: "Jade",
+  325: "Orchid",
+  222: "Sky",
+  135: "Leaf",
+  100: "Gold",
+};
+
 /** Matches the text of a date field. */
 const DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 

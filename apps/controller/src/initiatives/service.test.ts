@@ -537,7 +537,9 @@ describe("a session", () => {
       expect(error).toMatchObject({
         error: {
           code: "forbidden",
-          message: expect.stringContaining("Only the user creates and changes initiatives"),
+          message: expect.stringContaining(
+            "Only the user creates and changes initiatives",
+          ) as unknown,
         },
       });
     }

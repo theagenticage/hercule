@@ -83,15 +83,15 @@ export const glideBeads = (before: BeadPlaces, after: BeadPlaces, spring: Spring
   const isReduced = isMotionReduced();
   for (const [taskId, now] of after) {
     const was = before.get(taskId);
-    if (was === undefined) continue;
+    // A bead in the hand follows the pointer, and nothing else moves it.
+    if (was === undefined || now.element.dataset["held"] !== undefined) continue;
     const isReplaced = was.element !== now.element;
     if (isReplaced && !was.element.isConnected) findBody(was.element)?.clear();
     const dx = was.x - now.x;
     const dy = was.y - now.y;
-    const body = trackBody(now.element);
-    const hasOffset = body.values.x !== 0 || body.values.y !== 0;
     const isMoved = Math.abs(dx) >= SMALLEST_MOVE || Math.abs(dy) >= SMALLEST_MOVE;
-    if (!isMoved && !hasOffset && was.scale === 1) continue;
+    if (!isMoved && was.scale === 1) continue;
+    const body = trackBody(now.element);
     if (isReduced) {
       if (isMoved) {
         body.set({ o: 0 });

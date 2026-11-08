@@ -133,3 +133,78 @@ describe("useViewMotion toggleStack", () => {
     );
   });
 });
+
+/** A board of one Initiative row, open or folded, and the block heading over it. */
+function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isBlockFolded, setIsBlockFolded] = useState(false);
+  const view = {
+    openedInitiativeIds: new Set(isOpen ? ["platform"] : []),
+    foldedLaneIds: new Set<string>(),
+    isFiltering: false,
+    toggleInitiativeRow: (rowLaneId: string, initiativeId: string) => {
+      calls.push(`${rowLaneId}:${initiativeId}`);
+      setIsOpen((open) => !open);
+    },
+    toggleInitiativeBlock: () => {
+      setIsBlockFolded((folded) => !folded);
+    },
+  } as unknown as WorkView;
+  const { toggleInitiativeRow, toggleInitiativeBlock } = useViewMotion(view, scrollRef);
+  return (
+    <div ref={scrollRef} data-testid="scroller">
+      <button type="button" className="initiative-block-button" onClick={toggleInitiativeBlock}>
+        Initiatives
+      </button>
+      {!isBlockFolded && (
+        <section
+          className={isOpen ? "initiative-row is-open" : "initiative-row"}
+          data-lane-id="row:platform"
+          data-open={isOpen}
+        >
+          <button
+            type="button"
+            className="initiative-toggle"
+            onClick={() => {
+              toggleInitiativeRow("row:platform", "platform");
+            }}
+          >
+            Platform
+          </button>
+        </section>
+      )}
+    </div>
+  );
+}
+
+describe("useViewMotion toggleInitiativeRow", () => {
+  it("toggles the row through the view with its lane id and its Initiative, and keeps the row still", () => {
+    const calls: string[] = [];
+    const { getByTestId, container } = render(<RowBoard calls={calls} />);
+    const scroller = getByTestId("scroller");
+    const row = container.querySelector<HTMLElement>(".initiative-row")!;
+    const rect = (top: number): DOMRect => ({ top, bottom: top, height: 0 }) as DOMRect;
+    // The row's top sits 500px lower while it is open, as if cards above it had grown.
+    row.getBoundingClientRect = () =>
+      rect(300 - scroller.scrollTop + (row.dataset["open"] === "true" ? 500 : 0));
+    const before = row.getBoundingClientRect().top;
+
+    fireEvent.click(container.querySelector(".initiative-toggle")!);
+
+    expect(calls).toEqual(["row:platform:platform"]);
+    expect(row.className).toContain("is-open");
+    expect(row.getBoundingClientRect().top).toBe(before);
+  });
+
+  it("folds and opens the block of rows as one change", () => {
+    const { container } = render(<RowBoard calls={[]} />);
+    const heading = container.querySelector(".initiative-block-button")!;
+
+    fireEvent.click(heading);
+    expect(container.querySelector(".initiative-row")).toBeNull();
+
+    fireEvent.click(heading);
+    expect(container.querySelector(".initiative-row")).not.toBeNull();
+  });
+});

@@ -16,9 +16,8 @@ import {
   type WorkInitiative,
 } from "@hercule/client-core/work";
 import { PluginMark } from "../../marks";
-import { ProgressBar } from "../desk";
+import { HueFlag, ProgressBar } from "../desk";
 import { BoardCell } from "./board-cell";
-import { InitiativeFlag } from "./initiative-flag";
 import type { PressedKeys } from "./work-card";
 
 /** The Initiatives a lane holds when the caller passes none. */
@@ -154,7 +153,7 @@ export function BoardLane({
           </span>
           {initiative !== undefined ? (
             <span className="board-lane-folder is-flag">
-              <InitiativeFlag hue={initiative.hue} />
+              <HueFlag hue={initiative.hue} />
             </span>
           ) : isNoPlace ? (
             <span className="board-lane-folder is-brand">
@@ -175,7 +174,12 @@ export function BoardLane({
               <span className="board-lane-total">{total}</span>
               {isFolded &&
                 held.map((each) => (
-                  <InitiativeFlag key={each.id} hue={each.hue} name={each.name} />
+                  <HueFlag
+                    key={each.id}
+                    hue={each.hue}
+                    title={each.name}
+                    label={`Initiative ${each.name}`}
+                  />
                 ))}
             </span>
             {outside !== undefined && <OutsideFacts outside={outside} />}

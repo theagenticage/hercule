@@ -440,7 +440,7 @@ describe("the Initiative of a Task on the details pane", () => {
     expect(pane.querySelector(".task-pane-crumb .hue-flag")).toBeNull();
   });
 
-  it("lists the open Initiatives, then No initiative, and has no New initiative row until the screen gives one", async () => {
+  it("lists the open Initiatives, then No initiative, then New initiative", async () => {
     const { pane } = await openPane();
     await within(pane).findByRole("button", { name: "Initiative: none" });
 
@@ -450,7 +450,25 @@ describe("the Initiative of a Task on the details pane", () => {
       within(menu)
         .getAllByRole("menuitemradio", { hidden: true })
         .map((item) => item.textContent),
-    ).toEqual(["Accessible checkout", "Faster search", "No initiative"]);
+    ).toEqual(["Accessible checkout", "Faster search", "No initiative", "New initiative…"]);
+  });
+
+  it("opens the Initiative sheet from New initiative, in the Task's Project, and closes the details", async () => {
+    const { user, pane } = await openPane();
+    await within(pane).findByRole("button", { name: "Initiative: none" });
+    const menu = readInitiativeMenu(pane);
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "New initiative…", hidden: true }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "New initiative" })).toBeTruthy();
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Project" }).value).toBe(
+      CARD.projectId,
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Print depot pick lists" })).toBeNull();
+    });
   });
 
   it("puts the Task on the Initiative chosen, says so with Undo, and Undo puts it back", async () => {

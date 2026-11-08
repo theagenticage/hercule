@@ -225,10 +225,7 @@ export const showBeadOnArrival = (target: HTMLElement | null, after: number): vo
  * Call it after the change, once the beads exist. A bead no copy flies to is
  * left as it is: it is just there.
  */
-export const showBeadsOnArrival = (
-  scroller: ParentNode,
-  flights: readonly CardFlight[],
-): void => {
+export const showBeadsOnArrival = (scroller: ParentNode, flights: readonly CardFlight[]): void => {
   for (const flight of flights) {
     showBeadOnArrival(
       findFoldTarget(findFoldRow(scroller, flight.laneId), flight.cardId, flight.stage),

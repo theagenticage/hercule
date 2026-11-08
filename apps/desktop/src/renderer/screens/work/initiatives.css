@@ -5,29 +5,12 @@
    lane label modes are here: `.work-desk[data-lanes="band"]` and the side
    labels, which are the default. */
 
-/* ---------- The colour ---------- */
-/* An Initiative's colour is declared where its hue is set, because a custom
-   property resolves on the element that declares it: `--plan-hue` is set on the
-   row and on every flag, and these two follow from it. */
-.initiative-row,
-.initiative-flag {
-  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
-  --plan-soft: oklch(var(--plan-l) var(--plan-c) var(--plan-hue) / var(--plan-soft-a));
-}
-.initiative-flag {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 14px;
-  color: var(--plan-ink);
-  line-height: 0;
-}
 /* The flag stands for the folder in the head of an Initiative's lane, 2px wider as the drawing has it. */
 .board-lane-folder.is-flag {
   width: 16px;
 }
 /* A folded Project lane's flags sit after its count, 4px apart. */
-.board-lane-line > .initiative-flag {
+.board-lane-line > .hue-flag {
   align-self: center;
   margin-right: -3px;
 }
@@ -237,6 +220,16 @@
   right: 0;
   background: var(--plan-soft);
 }
+/* The line is the target of a card carried over a folded row: the ring the drawing calls
+   `.wire.is-target`. */
+.initiative-row[data-drop-target] .initiative-line::after {
+  content: "";
+  position: absolute;
+  inset: 0 -8px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--focus);
+  pointer-events: none;
+}
 /* The bright line from the start across the stages before the reach cell, and
    over the gap to it. It is positioned so it paints over the faint line. */
 .initiative-reach {
@@ -321,6 +314,16 @@ button.initiative-bead:focus-visible {
   .initiative-bead {
     transition: transform var(--m-quick) var(--m-ease);
   }
+  /* A bead that a spring moves is written to every frame: a transition on top would lag behind it. */
+  .initiative-bead.is-moving,
+  .initiative-bead[data-held] {
+    transition: none;
+  }
+}
+/* A bead in the hand stands over the beads it passes, and the pointer shows it is held. */
+.initiative-bead[data-held] {
+  z-index: 1;
+  cursor: grabbing;
 }
 /* Past ten, a cell is tally marks: 3px by 11px, 2px apart. The failed mark keeps its size and its place first. */
 .initiative-line-cell.is-tally .initiative-beads {

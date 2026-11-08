@@ -11,9 +11,8 @@ import {
 import type { WorkCard } from "@hercule/contract";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { ComposeIcon } from "../../icons/compose";
-import { StatusShape } from "../desk";
+import { buildHueStyle, HueFlag, StatusShape } from "../desk";
 import { BoardCell } from "./board-cell";
-import { InitiativeFlag, buildInitiativeHueStyle } from "./initiative-flag";
 import type { PressedKeys } from "./work-card";
 import "./initiatives.css";
 
@@ -143,6 +142,8 @@ function InitiativeLine({
   const taskCount = line.cells.reduce((sum, cell) => sum + cell.beadCount, 0);
 
   const walkBeads = (event: KeyboardEvent<HTMLDivElement>): void => {
+    // Shift with an arrow moves the Task of the bead a stage (`useBeadSlide`), which is not a walk.
+    if (event.shiftKey || event.defaultPrevented) return;
     const beads = [...event.currentTarget.querySelectorAll<HTMLElement>(BEAD_SELECTOR)];
     const at = beads.findIndex((bead) => bead === document.activeElement);
     const target =
@@ -255,7 +256,7 @@ export function InitiativeRow({
   return (
     <section
       className={isFolded ? "initiative-row" : "initiative-row is-open"}
-      style={buildInitiativeHueStyle(initiative.hue)}
+      style={buildHueStyle(initiative.hue)}
       data-lane-id={lane.id}
       data-place={initiative.underLaneId === undefined ? "top" : "lane"}
     >
@@ -271,7 +272,7 @@ export function InitiativeRow({
           <span className="initiative-chevron">
             <ChevronRightIcon size={12} />
           </span>
-          <InitiativeFlag hue={initiative.hue} />
+          <HueFlag hue={initiative.hue} />
           <span className="initiative-words">
             <span className="initiative-name">{lane.name}</span>
             {facts !== null && <small className="initiative-facts">{facts}</small>}

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { CheckIcon } from "../../icons/check";
+import { PlusIcon } from "../../icons/plus";
 import { SideSheet } from "../desk";
 import "./add-task-sheet.css";
 
@@ -17,11 +18,13 @@ export interface AddTaskLane {
   readonly name: string;
   /** The Project the new Task joins, or null for the lane of Tasks with no Project. */
   readonly projectId: string | null;
+  /** The Initiative the new Task is created on, when the sheet was opened from an Initiative's row or lane. `name` is then the Initiative's. */
+  readonly initiativeId?: string;
 }
 
 /** Returns the line under the title field that says where the new Task will land. */
 const describeLanding = (lane: AddTaskLane): string =>
-  lane.projectId === null
+  lane.projectId === null && lane.initiativeId === undefined
     ? "Starts in Exploring, with no project."
     : `Starts in Exploring, in ${lane.name}.`;
 
@@ -41,6 +44,8 @@ const describeLanding = (lane: AddTaskLane): string =>
  *   or `null` when no source can be searched. It handles its own keys, such
  *   as Esc to clear its search.
  * - `onClose` is called by the Close button and by Esc.
+ * - `onNewInitiative` is called by "New initiative" at the foot, a quiet
+ *   row that goes to the sheet that makes an Initiative.
  *
  * Esc steps back one thing at a time: in the title field it clears the typed
  * title, and anywhere else, or with nothing typed, it closes the sheet. The
@@ -51,12 +56,14 @@ export function AddTaskSheet({
   lane,
   onCreate,
   onClose,
+  onNewInitiative,
   result,
   fromSource,
 }: {
   readonly lane: AddTaskLane;
   readonly onCreate: (title: string) => Promise<void>;
   readonly onClose: () => void;
+  readonly onNewInitiative: () => void;
   readonly result: string | null;
   readonly fromSource: ReactNode;
 }): JSX.Element {
@@ -129,6 +136,12 @@ export function AddTaskSheet({
           </p>
         )}
         {fromSource}
+        <footer className="add-task-foot">
+          <button type="button" className="btn btn--quiet" onClick={onNewInitiative}>
+            <PlusIcon size={14} />
+            New initiative
+          </button>
+        </footer>
       </div>
     </SideSheet>
   );

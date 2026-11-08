@@ -104,9 +104,9 @@
   opacity: 1;
 }
 
-/* A folded lane has no cell to hold a slot, so its head is the target. */
-.board-lane[data-drop-target] .board-lane-head,
-.initiative-row[data-drop-target] .initiative-head {
+/* A folded lane has no cell to hold a slot, so its head is the target. A folded
+   Initiative row's target is its line (`initiatives.css`). */
+.board-lane[data-drop-target] .board-lane-head {
   box-shadow: inset 0 0 0 1px var(--focus);
   border-radius: var(--r-xs);
 }

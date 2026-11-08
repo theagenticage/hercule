@@ -29,7 +29,7 @@ function BlockerRowItem({
   readonly row: BlockerRow;
   readonly mark: JSX.Element;
   readonly onOpen: (taskId: string) => void;
-  readonly onRemove?: (row: BlockerRow) => void;
+  readonly onRemove?: ((row: BlockerRow) => void) | undefined;
 }): JSX.Element {
   const words = (
     <>
@@ -92,7 +92,7 @@ function BlockerRows({
   readonly list: BlockerList;
   readonly mark: JSX.Element;
   readonly onOpen: (taskId: string) => void;
-  readonly onRemove?: (row: BlockerRow) => void;
+  readonly onRemove?: ((row: BlockerRow) => void) | undefined;
 }): JSX.Element {
   return (
     <>

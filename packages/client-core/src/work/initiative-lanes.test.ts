@@ -6,7 +6,6 @@
 import { describe, expect, it } from "vitest";
 import { buildBoard, buildCard, listIds } from "./cards.testing";
 import {
-  findCardInitiativeFlag,
   groupBoardByInitiative,
   groupBoardByProject,
   listLaneInitiatives,
@@ -214,23 +213,6 @@ describe("groupBoardByInitiative", () => {
         (lane) => lane.id,
       ),
     ).toEqual(["initiative:launch"]);
-  });
-});
-
-describe("findCardInitiativeFlag", () => {
-  const card = buildCard("a", { initiativeId: "platform" });
-
-  it.each([
-    ["Group by Project, where the row or the lane says it", "project", undefined],
-    ["Group by Initiative", "initiative", PLATFORM],
-    ["a grouping by an outside kind", "linear/project", PLATFORM],
-  ])("under %s", (_, groupBy, flag) => {
-    expect(findCardInitiativeFlag(card, groupBy, [PLATFORM])).toEqual(flag);
-  });
-
-  it("shows no flag for a card with no Initiative, or one that is not listed", () => {
-    expect(findCardInitiativeFlag(buildCard("b"), "initiative", [PLATFORM])).toBeUndefined();
-    expect(findCardInitiativeFlag(card, "initiative", [LAUNCH])).toBeUndefined();
   });
 });
 

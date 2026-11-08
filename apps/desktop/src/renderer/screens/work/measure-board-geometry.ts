@@ -16,6 +16,26 @@ const readStage = (value: string | undefined): BoardStage | undefined =>
   BOARD_STAGES.find((stage) => stage === value);
 
 /**
+ * Measures the left edge of each stage from the stage names over the board.
+ * `toLeft` turns a window position into the coordinates the caller wants
+ * (the board's, for the geometry of a carry); by default the edges are in the
+ * window's.
+ */
+export const measureStageEdges = (
+  scroller: HTMLElement,
+  toLeft: (left: number) => number = (left) => left,
+): StageEdge[] => {
+  const edges: StageEdge[] = [];
+  for (const element of scroller.querySelectorAll<HTMLElement>(".board-rule [data-stage]")) {
+    const stage = readStage(element.dataset["stage"]);
+    if (stage !== undefined) {
+      edges.push({ stage, left: toLeft(element.getBoundingClientRect().left) });
+    }
+  }
+  return edges;
+};
+
+/**
  * Measures the stage edges, the lanes, the cells and the cards of the board
  * under `scroller`, in board coordinates (`BoardGeometry`). `arrangedLanes` are
  * the lanes the page was drawn from: they say which lanes are folded and which
@@ -44,13 +64,7 @@ export const measureBoardGeometry = (
   const toBoardLeft = (left: number): number => left - view.left + view.scrollLeft;
   const toBoardTop = (top: number): number => top - view.top + view.scrollTop;
 
-  const stageEdges: StageEdge[] = [];
-  for (const element of scroller.querySelectorAll<HTMLElement>(".board-rule [data-stage]")) {
-    const stage = readStage(element.dataset["stage"]);
-    if (stage !== undefined) {
-      stageEdges.push({ stage, left: toBoardLeft(element.getBoundingClientRect().left) });
-    }
-  }
+  const stageEdges = measureStageEdges(scroller, toBoardLeft);
 
   // An Initiative row is a lane to a drop: open, it has cells; folded, its head and line take the card.
   const lanes = [

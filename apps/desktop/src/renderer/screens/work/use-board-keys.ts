@@ -86,6 +86,8 @@ export interface BoardKeysInput {
   readonly onAdd: (laneId: string | undefined) => void;
   /** The Add to Work sheet: whether it is open, and a way to close it. */
   readonly addSheet: { readonly isOpen: boolean; readonly close: () => void };
+  /** The Initiative sheet: whether it is open, and a way to close it. */
+  readonly initiativeSheet: { readonly isOpen: boolean; readonly close: () => void };
   /**
    * The Task's details sheet: whether it is open, a way to close it, and what
    * Return does on the card it is open for. `pressReturn` does what the sheet's
@@ -239,6 +241,8 @@ export const useBoardKeys = (input: BoardKeysInput): BoardKeys => {
       setKeysSheetOpen(false);
     } else if (input.addSheet.isOpen) {
       input.addSheet.close();
+    } else if (input.initiativeSheet.isOpen) {
+      input.initiativeSheet.close();
     } else if (input.taskPane.isOpen) {
       input.taskPane.close();
     } else if (view.findText !== "") {

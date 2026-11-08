@@ -183,17 +183,6 @@
   color: var(--muted);
   line-height: 0;
 }
-/* The small flag of the Initiative a card belongs to, beside the age and the marks, in the
-   Initiative's colour (--plan-hue, set on the flag). It is drawn on cards of every grouping
-   but Group by Project, where the Initiative has a row of its own. */
-.card-plan {
-  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
-  display: grid;
-  flex: none;
-  place-items: center;
-  color: var(--plan-ink);
-  line-height: 0;
-}
 /* What a card in two lanes says at the bottom left, so no lane looks like its
    only home. It stops short of the marks and the age on the right. */
 .card-also {

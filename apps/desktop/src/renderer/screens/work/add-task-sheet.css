@@ -34,3 +34,14 @@
   flex-direction: column;
   min-height: 0;
 }
+/* The foot, as the details pane's: a hairline above and 48px of one quiet button, at 12px
+   from the sheet's edges, which the sheet's own padding puts 24px in. */
+.add-task-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 48px;
+  margin: 0 -24px;
+  padding: 0 12px;
+  border-top: 1px solid var(--divider);
+}

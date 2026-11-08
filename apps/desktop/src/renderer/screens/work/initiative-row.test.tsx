@@ -343,7 +343,7 @@ describe("BoardLane and Initiatives", () => {
       />,
     );
 
-    expect(document.querySelector(".board-lane-folder.is-flag .initiative-flag")).not.toBeNull();
+    expect(document.querySelector(".board-lane-folder.is-flag .hue-flag")).not.toBeNull();
     expect(document.querySelector(".board-lane-folder svg path[d^='M2.2']")).toBeNull();
   });
 });

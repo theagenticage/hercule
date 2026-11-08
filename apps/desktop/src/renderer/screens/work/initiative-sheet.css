@@ -75,7 +75,6 @@
   width: 30px;
   height: 30px;
   border-radius: var(--r-btn);
-  color: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
   transition:
     background var(--m-quick) var(--m-ease),
     box-shadow var(--m-quick) var(--m-ease);

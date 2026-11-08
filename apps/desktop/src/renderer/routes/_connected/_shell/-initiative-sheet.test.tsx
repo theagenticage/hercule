@@ -192,7 +192,7 @@ describe("useInitiativeSheet", () => {
     expect(readList()).toEqual([REFUNDS]);
   });
 
-  it("deletes on the second press, takes the Initiative off the list, and offers no Undo", async () => {
+  it("deletes once confirmed, takes the Initiative off the list, and offers no Undo", async () => {
     const user = userEvent.setup();
     const { controls, calls, readList, lines, gestures } = setUp();
 
@@ -201,7 +201,7 @@ describe("useInitiativeSheet", () => {
     });
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     expect(calls.delete).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete initiative" }));
 
     await waitFor(() => {
       expect(calls.delete).toHaveBeenCalledExactlyOnceWith({ params: { id: "refunds" } });

@@ -17,7 +17,6 @@ const INITIATIVE: WorkInitiative = {
   id: "initiative-1",
   name: "Accessible checkout",
   hue: 200,
-  projectId: null,
 };
 
 /** Returns a card that waits on `BLOCKER` and, by `count`, on that many Tasks in all. */
@@ -124,7 +123,7 @@ describe("the small flag of an Initiative", () => {
       <Card card={buildCard("free-1", { initiativeId: "initiative-1" })} initiative={INITIATIVE} />,
     );
     const element = findCardElement();
-    const flag = element.querySelector<HTMLElement>(".card-meta .card-plan");
+    const flag = element.querySelector<HTMLElement>(".card-meta .hue-flag");
     expect(flag?.getAttribute("title")).toBe("Accessible checkout");
     expect(flag?.style.getPropertyValue("--plan-hue")).toBe("200");
     expect(flag?.querySelector("svg")).not.toBeNull();
@@ -133,7 +132,7 @@ describe("the small flag of an Initiative", () => {
 
   it("is not drawn on a card the screen gives no Initiative", () => {
     render(<Card card={buildCard("free-1", { initiativeId: "initiative-1" })} />);
-    expect(findCardElement().querySelector(".card-plan")).toBeNull();
+    expect(findCardElement().querySelector(".hue-flag")).toBeNull();
     expect(findCardElement().getAttribute("aria-label")).not.toContain("Initiative");
   });
 });

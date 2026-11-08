@@ -212,8 +212,10 @@
   display: none;
 }
 .hue-flag {
+  flex: none;
   display: grid;
   place-items: center;
+  color: var(--plan-ink);
   line-height: 0;
 }
 .menu-box {

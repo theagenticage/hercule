@@ -12,11 +12,9 @@
  * its cells walk, drop and animate like the cells of any other lane. Group by
  * Project draws Initiatives as rows (`groupBoardByProject`); Group by
  * Initiative draws one lane for each (`groupBoardByInitiative`); every other
- * grouping draws none, and its cards show a small flag instead
- * (`findCardInitiativeFlag`).
+ * grouping draws none, and its cards show a small flag instead.
  */
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { PROJECT_FACET_ID } from "./facets";
 import {
   buildLane,
   buildLanes,
@@ -184,22 +182,6 @@ export const groupBoardByInitiative = (
     ? lanes
     : [...lanes, buildLane(NO_INITIATIVE_LANE_ID, NO_INITIATIVE_LANE_NAME, null, loose)];
 };
-
-/**
- * Returns the Initiative whose small flag `card` shows, or `undefined` when it
- * shows none. A card shows the flag under every grouping but Group by Project
- * (`groupBy` is the id of the grouping), where an Initiative has its own row
- * or the card is in its lane, so that its Initiative is not lost. A card whose
- * Initiative is not in `initiatives`, because it is closed, shows none.
- */
-export const findCardInitiativeFlag = (
-  card: WorkCard,
-  groupBy: string,
-  initiatives: readonly WorkInitiative[],
-): WorkInitiative | undefined =>
-  groupBy === PROJECT_FACET_ID
-    ? undefined
-    : initiatives.find((initiative) => initiative.id === card.initiativeId);
 
 /** What a folded Project lane shows of an Initiative it holds: its small flag. */
 export interface HeldInitiative {

@@ -5,10 +5,10 @@
  * beads and progress are worked out is tested in client-core.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
-import type { Initiative, WorkCard } from "@hercule/contract";
+import type { Initiative, Task, WorkCard } from "@hercule/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -77,14 +77,31 @@ const CARDS: readonly WorkCard[] = [
   DELIVERY_SLOTS,
 ];
 
+/** Returns the Task the controller answers to a create. */
+const buildCreatedTask = ({ title }: { readonly title: string }): Task => ({
+  id: buildTaskId(60),
+  title,
+  description: "",
+  status: "open",
+  stage: "exploring",
+  priority: "normal",
+  labels: [],
+  provenance: [],
+  createdAt: "2026-11-02T09:00:00.000Z",
+  updatedAt: "2026-11-02T09:00:00.000Z",
+  statusChangedAt: "2026-11-02T09:00:00.000Z",
+  stageChangedAt: "2026-11-02T09:00:00.000Z",
+});
+
 /** Opens the app at Work on `cards`, with the open `initiatives` and one Done Task on the first. */
 const openWork = async (
   initiatives: readonly Initiative[] = [CHECKOUT_REWORK],
   cards: readonly WorkCard[] = CARDS,
 ) => {
   const first = initiatives[0];
-  stubApi({
+  const calls = stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+    "POST /api/v1/tasks": (call) => ({ body: buildCreatedTask(call.body as { title: string }) }),
     "GET /api/v1/tasks/board": {
       body: {
         ...buildBoard(...cards),
@@ -94,9 +111,13 @@ const openWork = async (
     "GET /api/v1/initiatives": { body: { items: initiatives } },
     "GET /api/v1/tasks": { body: { items: [] } },
   });
-  return renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
-    path: "/work",
-  });
+  const app = await renderApp(
+    createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    {
+      path: "/work",
+    },
+  );
+  return { ...app, calls };
 };
 
 /** Returns the head button of the Initiative row named `name`. */
@@ -240,5 +261,91 @@ describe("Initiatives on the Work board", () => {
     expect(queryCard(GIFT_WRAP.id)).toBeNull();
     expect(queryCard(DELIVERY_SLOTS.id)).toBeNull();
     expect(getRowHead("Checkout rework").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("creates a Task on the Initiative whose lane's plus was pressed, in its Project, and says so", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+    await user.click(screen.getByRole("menuitemradio", { name: "Initiative", hidden: true }));
+
+    await user.click(await screen.findByRole("button", { name: "Add to Checkout rework" }));
+    expect(screen.getByText("Starts in Exploring, in Checkout rework.")).toBeTruthy();
+    await user.type(screen.getByRole("textbox", { name: "New Task" }), "Pay by link{Enter}");
+
+    expect(await screen.findByText("Added to Exploring in Checkout rework.")).toBeTruthy();
+    const created = calls.find((call) => call.method === "POST" && call.path === "/api/v1/tasks");
+    expect(created?.body).toEqual({
+      title: "Pay by link",
+      description: "",
+      stage: "exploring",
+      projectId: WEBSHOP.id,
+      initiativeId: CHECKOUT_REWORK.id,
+    });
+  });
+
+  it("creates a Task from the toolbar's Add in the Project's lane, on no Initiative", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.type(screen.getByRole("textbox", { name: "New Task" }), "Label the crates{Enter}");
+
+    await screen.findByText(/^Added to Exploring/);
+    const created = calls.find((call) => call.method === "POST" && call.path === "/api/v1/tasks");
+    expect(created?.body).toEqual({
+      title: "Label the crates",
+      description: "",
+      stage: "exploring",
+      projectId: WEBSHOP.id,
+    });
+  });
+
+  it("opens the Initiative sheet from New initiative in Add to Work, which gives way to it", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("heading", { name: "Add to Work" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "New initiative" }));
+
+    expect(await screen.findByRole("heading", { name: "New initiative" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Add to Work" })).toBeNull();
+    expect(document.querySelector(".work-desk")?.classList.contains("has-sheet")).toBe(true);
+  });
+
+  it("opens the Initiative sheet on an Initiative from the edit button of its row, and Add to Work closes it", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+
+    await user.click(screen.getByRole("button", { name: "Edit Checkout rework" }));
+
+    expect(await screen.findByRole("heading", { name: "Checkout rework", level: 2 })).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name" }).value).toBe(
+      "Checkout rework",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("heading", { name: "Add to Work" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+  });
+
+  it("closes the Initiative sheet when a card opens its details", async () => {
+    const user = userEvent.setup();
+    await openWork();
+    await screen.findByRole("button", { name: /^Checkout rework/ });
+    await user.click(screen.getByRole("button", { name: "Edit Checkout rework" }));
+    await screen.findByRole("textbox", { name: "Name" });
+
+    await user.click(screen.getByRole("button", { name: /^Offer gift wrap/ }));
+
+    await screen.findByRole("dialog", { name: GIFT_WRAP.title });
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+    });
   });
 });

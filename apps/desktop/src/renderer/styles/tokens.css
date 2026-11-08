@@ -782,6 +782,16 @@
 
 /* Each dark theme tints its card stock. Nile also has its own suggested-answer colour, because its
    accent is not green. Orient Express uses the dark values above unchanged. */
+/* An Initiative's ink and its soft wash, derived from the hue the element carries (--plan-hue,
+   from buildHueStyle). A custom property resolves on the element that declares it, so these are
+   declared on each element that sets a hue, not on [data-theme]. A new element that draws in an
+   Initiative's colour goes in this list. */
+.hue-flag,
+.initiative-row {
+  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
+  --plan-soft: oklch(var(--plan-l) var(--plan-c) var(--plan-hue) / var(--plan-soft-a));
+}
+
 [data-theme="nile"] {
   --stock: oklch(0.335 0.026 172);
   --answer: oklch(0.76 0.1 162);

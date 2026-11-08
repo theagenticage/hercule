@@ -67,6 +67,7 @@ import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-
 import { keepCardInView } from "../../../screens/work/keep-in-view";
 import { KeysSheet } from "../../../screens/work/keys-sheet";
 import { SelectionBar } from "../../../screens/work/selection-bar";
+import { useBeadSlide } from "../../../screens/work/use-bead-slide";
 import { useBoardDrag } from "../../../screens/work/use-board-drag";
 import { useBoardKeys } from "../../../screens/work/use-board-keys";
 import { useCardSelection } from "../../../screens/work/use-card-selection";
@@ -82,6 +83,7 @@ import { SinceLine } from "../../../screens/work/since-line";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
+import { useInitiativeSheet } from "./-initiative-sheet";
 import { useLogicalBoard } from "./-logical-board";
 import { useMergeCards } from "./-merge-cards";
 import { useStopRun } from "./-stop-run";
@@ -182,6 +184,14 @@ export function WorkScreen({
       noteReturnedTask.current(taskId, how);
     },
     isCarrying,
+  });
+  // The sheet that makes or changes an Initiative. It shares the right-hand side with Add to
+  // Work and the details, so each of the three closes the other two when it opens.
+  const initiativeSheet = useInitiativeSheet({
+    client,
+    scope,
+    sayWithUndo: moves.sayWithUndo,
+    sayWithoutUndo: moves.sayWithoutUndo,
   });
   const savedView = useWorkView(buildWorkViewKey(url, username));
   const isNarrow = useMediaQueryMatch(`(max-width: ${String(SIDE_LABELS_FROM_PX - 0.02)}px)`);
@@ -395,7 +405,10 @@ export function WorkScreen({
       mergePick.confirm(card.id);
       return;
     }
-    if (card.id !== openTaskId) onChangeOpenTask(card.id);
+    if (card.id === openTaskId) return;
+    // Two sheets would cover each other at the right.
+    if (initiativeSheet.isOpen) initiativeSheet.close();
+    onChangeOpenTask(card.id);
   };
 
   const stopRun = useStopRun({ client, scope, say: moves.sayWithoutUndo });
@@ -474,6 +487,9 @@ export function WorkScreen({
    * the context the filter is on.
    */
   const openAddSheet = (lane: AddTaskLane, fromLaneId?: string): void => {
+    // Closing the Initiative sheet first gives the focus back to what it came from, which is
+    // then where this sheet gives it back to.
+    if (initiativeSheet.isOpen) initiativeSheet.close();
     addOpener.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAddResult(null);
@@ -499,6 +515,19 @@ export function WorkScreen({
     if (lane === undefined) {
       return { id: NO_PROJECT_LANE_ID, name: NO_PROJECT_LANE_NAME, projectId: null };
     }
+    // A Task added on an Initiative joins it, and the Initiative's Project, as a card dropped there would.
+    if (lane.initiative !== undefined) {
+      const { initiativeId } = lane.initiative;
+      const projectId = initiatives.find((each) => each.id === initiativeId)?.projectId;
+      return {
+        id: lane.id,
+        name: lane.name,
+        projectId: projects.some((project) => project.id === projectId)
+          ? (projectId ?? null)
+          : null,
+        initiativeId,
+      };
+    }
     // A lane for an outside place has no Project of its own: a Task added
     // there joins the Project most of its cards are in, and the sheet names it.
     const projectId = chooseLaneProject(lane, new Set(projects.map((project) => project.id)));
@@ -508,7 +537,9 @@ export function WorkScreen({
   /**
    * Returns the lane the toolbar's Add opens in: the current card's, else the
    * first on screen, else No project. A card on an Initiative row stands in
-   * no Project lane, so its own Project's lane is the one.
+   * no Project lane, so its own Project's lane is the one: the toolbar's Add
+   * does not put a Task on an Initiative, only a key or a lane's `+` that
+   * names one does.
    */
   const chooseAddLane = (): AddTaskLane => {
     const stopLane = lanes.find((each) => each.id === tabStop?.laneId);
@@ -530,12 +561,14 @@ export function WorkScreen({
           // controller would file it as Planned.
           stage: "exploring",
           ...(lane.projectId === null ? {} : { projectId: lane.projectId }),
+          ...(lane.initiativeId === undefined ? {} : { initiativeId: lane.initiativeId }),
         },
       }),
     onSuccess: (task, { lane }) => {
       const stage = BOARD_STAGES.find((each) => each === task.stage);
       const where = stage === undefined ? task.stage : STAGE_NAMES[stage];
-      setAddResult(`Added to ${where}${lane.projectId === null ? "" : ` in ${lane.name}`}.`);
+      const isInNamedLane = lane.projectId !== null || lane.initiativeId !== undefined;
+      setAddResult(`Added to ${where}${isInNamedLane ? ` in ${lane.name}` : ""}.`);
       reads.noteAddedTask(task.id);
     },
     onError: (error) => {
@@ -568,15 +601,52 @@ export function WorkScreen({
     },
   });
 
+  // Sliding a bead along a folded Initiative line, or moving it a stage by key, moves its Task.
+  useBeadSlide({
+    scrollRef,
+    cards: logicalCards,
+    projects,
+    initiatives,
+    moveCard: moves.moveCardWithMotion,
+  });
+
+  /** Closes the details and Add to Work, which would cover the Initiative sheet at the right. */
+  const clearRightSide = (): void => {
+    if (addLane !== null) closeAddSheet();
+    if (openTaskId !== null) onChangeOpenTask(null);
+  };
+
   /**
    * Opens the sheet that edits the Initiative `initiativeId`, from the edit
    * button in a row's head.
    */
   const editInitiative = (initiativeId: string): void => {
-    // TODO(#1036 sheet): open the Initiative sheet for `initiativeId`. The coordinator wires
-    // the sheet's hook here; until then the button says so instead of doing nothing.
-    void initiativeId;
-    moves.sayWithoutUndo("Editing an initiative is not ready yet.");
+    clearRightSide();
+    initiativeSheet.openEdit(initiativeId);
+  };
+
+  /**
+   * Opens the sheet that makes a new Initiative, from "New initiative" in Add
+   * to Work, which starts it in `fromProjectId`'s lane.
+   */
+  const createInitiativeFromAddSheet = (fromProjectId: string | null): void => {
+    clearRightSide();
+    initiativeSheet.openNew(fromProjectId);
+  };
+
+  /**
+   * Opens the sheet that makes a new Initiative, from "New initiative…" in the
+   * details of a Task, which starts it in the Task's Project. The Task's card
+   * takes the focus first: the details close, and the sheet gives the focus
+   * back to what had it when it opened.
+   */
+  const createInitiativeFromPane = (): void => {
+    const card = logicalCards.find((each) => each.id === openTaskId);
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(openTaskId ?? "")}"]`)
+      ?.focus({ preventScroll: true });
+    clearRightSide();
+    initiativeSheet.openNew(card?.projectId ?? null);
   };
 
   /** Opens the Task of a bead on an Initiative's line, as a click on its card does. */
@@ -636,6 +706,7 @@ export function WorkScreen({
       openAddSheet(laneId === undefined ? chooseAddLane() : toAddLane(laneId), laneId);
     },
     addSheet: { isOpen: addLane !== null, close: closeAddSheet },
+    initiativeSheet: { isOpen: initiativeSheet.isOpen, close: initiativeSheet.close },
     taskPane: {
       isOpen: openTaskId !== null,
       close: () => {
@@ -779,6 +850,9 @@ export function WorkScreen({
               lane={addLane}
               result={addResult}
               onClose={closeAddSheet}
+              onNewInitiative={() => {
+                createInitiativeFromAddSheet(addLane.projectId);
+              }}
               onCreate={async (title) => {
                 await createTask({ title, lane: addLane });
               }}
@@ -843,9 +917,11 @@ export function WorkScreen({
             }}
             moveToStage={moveCardToStage}
             onFilterByPlace={filterByPlace}
+            onCreateInitiative={createInitiativeFromPane}
             onShown={pane.onPaneShown}
             onChangeTask={onChangeOpenTask}
           />
+          {initiativeSheet.sheet}
           {keys.isKeysSheetOpen && <KeysSheet platform={bridge.platform} />}
           <SelectionBar
             count={selection.selectedIds.size}
@@ -870,7 +946,7 @@ export function WorkScreen({
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}
-      hasSheet={addLane !== null || openTaskId !== null}
+      hasSheet={addLane !== null || openTaskId !== null || initiativeSheet.isOpen}
       isArriving={isArriving}
       state={state}
       scrollRef={scrollRef}
