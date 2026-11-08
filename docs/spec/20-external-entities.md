@@ -654,13 +654,15 @@ daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> 
 A Fact is a lifecycle change of a linked thing, so it is written where the entity is written. Every write that can change what a Task counts goes through one pair of `TaskService` methods, and nothing else in this domain knows the rules:
 
 1. `snapshotLinkedEntities(refs)` reads, before the write, the linked-work state of those refs that a live Task links.
-2. The write happens: `writeObservations` (for `reconcile`, `refresh` and a read of one ref), `reportMissing`, and any other place that changes `access` (the inaccessible rows of `listWanted`, pruning).
+2. The write happens: `writeObservations` (for `reconcile`, `refresh` and a read of one ref), `reportMissing`, and any other place that changes `access` (the inaccessible rows of `listWanted`, pruning, and the deletion of a Connection).
 3. `recordEntityFacts(snapshot)` compares each ref's state now with the snapshot, in the same transaction, and writes one Fact and one `task.entityChanged` for each live linked Task when:
    - the lifecycle changed;
    - the ref had no record before (a first observation, `previous_lifecycle` null);
    - the Task's `openLinks` or `completedLinks` differ between before and now (a change of `access`, or a first full record), with `previous_lifecycle` equal to the lifecycle.
 
    Never anything else. A poll that changes nothing writes nothing: no Fact, no event, no push.
+
+**Deleting a Connection also records Facts.** Its observation rows go, so `access` can change for the things it was the only reader of. The connections domain declares a port, `ConnectionEntityFacts` (`recordFactsOfDeletion`), and `daemon/connections/entity-facts.ts` answers it. The port snapshots the linked refs the Connection holds an observation for, runs the deletion, and records the Facts after it, in the same transaction, through the same pair of `TaskService` methods. The connections domain cannot read External Entities itself, because External Entities depends on it.
 
 A first observation with no link writes no Fact. `reconcile` and `refresh` still emit no event and raise no signal of their own ([section 5.1](#51-reconcile)).
 
@@ -669,7 +671,7 @@ A first observation with no link writes no Fact. `reconcile` and `refresh` still
 The count that decides whether a card lands is in [./09-tasks.md](./09-tasks.md#what-counts-as-open). The entity side of it:
 
 - Work or context for a **full record** comes from the stored record. So a record stays counted after its kind leaves the catalog, and its stored `access` decides whether it is readable. A kind leaving the catalog does not by itself make a record unreadable.
-- Work or context for a **partial record**, and for a ref with no record, comes from the kind the catalog declares. `isWorkRecord` needs a full record and cannot classify a partial one.
+- Work or context for a **partial record**, and for a ref with no record, comes from the kind the catalog declares. The catalog definition of an event source stores its entity kinds as `{ kind, refPrefix, work }` for this, and the daemon reads them with SQL alone, only for the enabled plugins ([./05-plugins.md](./05-plugins.md#43-event-source)). `isWorkRecord` needs a full record and cannot classify a partial one.
 - Readable means `access: ok` (derived across Connections, [section 4](#4-lifecycle)). Anything else counts as open.
 
 ### 14.3 Links, suppressions and unlinking

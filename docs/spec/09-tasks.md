@@ -282,7 +282,7 @@ Last write wins is not enough. A queued run can land after a newer drag, and a r
 3. The Fact is voided: nothing happens. An unlink voids every Fact of that `(task, ref)` pair, so a Fact queued before an unlink dies with it, even if the user links the pair again before its run gets here. The relink writes a new Fact of its own.
 4. `fact.id <= stage_fact_fence`: nothing happens.
 5. With `onlyWhenLinkedWorkFinished`, the links are counted again in this transaction. Unless `openLinks` is 0 and `completedLinks` is above 0, nothing happens. The count on the event is a snapshot, and a link can arrive or leave between a Fact and its run, so the write checks again. A filter alone cannot.
-6. Otherwise the fence is set to `fact.id`, the cause to the Fact, and `stage_revision` rises. If the stage differs, it is written, `task.updated` is emitted, and the card goes last in its new cell. If the Task already holds that stage, only the fence, the cause and the revision move: no event, no `updatedAt`, no move. This is what stops an older queued Fact from moving the card afterwards.
+6. Otherwise the fence is set to `fact.id` and `stage_revision` rises. If the stage differs, it is written, the cause is set to the Fact, `task.updated` is emitted, and the card goes last in its new cell. If the Task already holds that stage, only the fence and the revision move: no event, no `updatedAt`, no move, and the cause stays as it is, because this Fact placed nothing. This is what stops an older queued Fact from moving the card afterwards.
 
 "Nothing happens" returns the Task as it is, with no error and no event, as a no-change update does. A run must not fail because a user dragged a card.
 
@@ -291,7 +291,7 @@ Last write wins is not enough. A queued run can land after a newer drag, and a r
 - a `task.move` with a `stage`, or a `task.update` with a `stage`, **even when the stage is the same**: it is an explicit "keep it here";
 - a legacy `status` write that changes the stage.
 
-The same write clears the cause. A merge also clears it ([Merging Tasks](#merging-tasks)).
+The same write clears the cause, even when the stage is the same. A merge also clears it ([Merging Tasks](#merging-tasks)).
 
 **Reordering inside a column affirms nothing.** A `task.move` with no `stage` carries no opinion on the stage, so a Fact still applies, and the fence and cause stay as they are. The desktop sends `stage` only when the card changes column.
 
@@ -320,16 +320,32 @@ Agents use the same `task.update`. A session that passes `stageFactId` is held t
 
 ### The cause of a move
 
-`tasks.stage_cause_fact_id` holds the Fact that placed the current stage. The fence cannot say it: a person's write sets the fence to the table's maximum, which may be the Fact of another Task. The cause is set only by a Fact write that applies (step 6 above), and cleared by any stage write with no `stageFactId`: a person, an agent, a legacy `status` write, a `task.move` with a `stage`, and a merge.
+`tasks.stage_cause_fact_id` holds the Fact that placed the current stage. The fence cannot say it: a person's write sets the fence to the table's maximum, which may be the Fact of another Task. The cause is set only by a Fact write that changes the stage (step 6 above). A Fact write whose stage the Task already holds moves the fence and `stage_revision` and leaves the cause as it is. Any stage decision with no `stageFactId` clears it:
 
-`WorkCard` carries `stageCause`, an optional `{ ref, text }`, present when the cause is set. `text` is built in the read from the cause Fact's **own** `lifecycle`, never the entity's latest one, plus the entity's stored noun and identifier: "PR #6221 merged". So a pull request reopened later does not change why the card moved. The card's cause label reads it ([./17](./17-desktop-app.md#a-card-moving-by-itself)). <!-- coordinator: check: exact wording per lifecycle (open, completed, abandoned) of the cause text -->
+- a `task.update` with a `stage`, even the same stage;
+- a `task.move` with a `stage`;
+- a legacy `status` write, only when it changes the stage;
+- a merge.
+
+Unlinking the cause's ref keeps the cause: the card still moved because of that Fact, and the unlink only voids it for later runs.
+
+`WorkCard` carries `stageCause`, an optional `{ factId, ref, text }`, present when the cause is set. `factId` lets a client tell one cause from another. `text` is built in the read from the cause Fact's **own** `lifecycle`, never the entity's latest one, so a pull request reopened later does not change why the card moved. It reads "<Noun> <identifier> <verb>", with the noun the entity kind's stored noun. So GitHub reads "Pull request #6221 merged". The verb follows the Fact:
+
+| The Fact's `lifecycle` | Verb |
+|---|---|
+| `open`, after `completed` or `abandoned` | "reopened" |
+| `open`, otherwise | "opened" |
+| `completed` | the entity's stored status label in lower case ("merged", "done") while the entity still holds that lifecycle, else "completed" |
+| `abandoned` | the same rule, else "closed" |
+
+When the entity has no identifier, the identifier is left out ("Pull request done"). When Hercule holds no record of the entity any more, the text is "A linked thing completed" (or "opened", "closed"). The text is cut at a word to a fixed length. The code is `apps/controller/src/tasks/stage-cause.ts`. The card's cause label reads it ([./17](./17-desktop-app.md#a-card-moving-by-itself)).
 
 ### Links by hand and suppressions
 
-A person links a thing to a Task, or takes it away ([./11](./11-public-api-and-agent-surface.md#task)). Both operations have the grant `task.update`, stamp the actor, announce, resolve merged ids at the write, and are methods on `TaskService`. Refs hold `:`, `/` and `#`, so they travel in a body, never in a path.
+A person links a thing to a Task, or takes it away ([./11](./11-public-api-and-agent-surface.md#task)). Both operations have the grant `task.update`, stamp the actor, announce, resolve merged ids at the write, and are methods on `TaskService`. Their input is `{ id, ref }` and they return the Task ([./11](./11-public-api-and-agent-surface.md#task) holds the errors). Refs hold `:`, `/` and `#`, so the ref travels in a body, never in a path.
 
-- **`task.linkEntity { taskId, ref }`** adds the link to `task_entity_links`, writes a Fact when the entity has a stored lifecycle (`previous_lifecycle` null), and clears the Task's suppression of the ref. A link that exists already changes nothing.
-- **`task.unlinkEntity { taskId, ref }`** removes the link row, voids that pair's Facts, and writes a suppression, `task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)`, in one transaction. It never touches provenance, which stays the history. If the unlink leaves nothing open and something completed, it also writes a Fact for the newest completed link (see the table above).
+- **`task.linkEntity`** goes through the provenance write, as a provenance `ref` on `task.update` does. It adds the link to `task_entity_links`, appends a provenance entry, emits `task.updated`, writes a Fact when the entity has a stored lifecycle (`previous_lifecycle` null), marks the summary dirty, and clears the Task's suppression of the ref. A ref with no stored record can be linked. A finished Task takes the link and no Fact. A link that exists already changes nothing.
+- **`task.unlinkEntity`** removes the link row, voids that pair's Facts, and writes a suppression, `task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)`, in one transaction. It never touches provenance, which stays the history. If the unlink leaves nothing open and something completed, it also writes a Fact for the newest completed link (see the table above). It raises `updatedAt` and the revision and marks the summary dirty, but emits no `task.updated`. A ref that is not linked is a no-op: no suppression, no event.
 - **An unlink sticks.** The branch link step checks the suppression first, so the next scan does not add back what the user took away. A refresh of the entity updates it and never restores the link.
 - **Asking for the link clears the suppression.** `task.linkEntity` does, and so does an explicit provenance `ref` on `task.update`. Both are someone asking for the link.
 - A second live Task on a ref is allowed. The oldest stays the active Task of the ref ([Entity links](#entity-links)).
