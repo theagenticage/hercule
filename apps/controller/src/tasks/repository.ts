@@ -1294,14 +1294,17 @@ const make = Effect.gen(function* () {
      * A Task of a deleted project is returned with no `projectId` and ordered
      * with the Tasks that have none, as `resolveCell` explains.
      *
-     * Two statements. The failed Tasks come from `tasks_failed`, which holds
-     * only them. The others walk `tasks_board_rank` in its own order, which is
+     * One statement, so both parts see one snapshot: a Task whose failure is
+     * cleared meanwhile (Try again) is in one part and never in both, and so
+     * never twice on the board. The failed Tasks come from `tasks_failed`,
+     * which holds only them. The others walk `tasks_board_rank` in its own order, which is
      * project, stage, rank, so it sorts nothing and stops after `limit + 1`
      * Tasks. The index leaves out finished and deleted Tasks, so the walk never
      * meets them. The index order puts stages in alphabetical order, so the
-     * rows are put in board order afterwards, in memory. It reads no
-     * description and no provenance. The statements name their index, because
-     * left to themselves the planner reads `tasks_stage` and sorts.
+     * rows are put in board order afterwards, in memory, which is also the
+     * order the others are cut in when they do not all fit. It reads no
+     * description and no provenance. The statement names both indexes, because
+     * left to itself the planner reads `tasks_stage` and sorts.
      *
      * Each Task's summary comes in the same statement, from a join on the
      * summary's primary key. A Task has a summary once it has a line. The
@@ -1313,30 +1316,39 @@ const make = Effect.gen(function* () {
       { readonly tasks: ReadonlyArray<BoardTask>; readonly truncated: boolean },
       SqlError
     > =>
-      Effect.gen(function* () {
-        const failed = yield* sql<BoardTaskRow>`
-          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
-          FROM tasks t INDEXED BY tasks_failed
-          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
-          LEFT JOIN task_summaries s ON s.task_id = t.id
-          WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
-            AND ${buildLiveTaskSql("t")}
-          LIMIT ${limit + 1}`;
-        const others = yield* sql<BoardTaskRow>`
-          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
-          FROM tasks t INDEXED BY tasks_board_rank
-          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
-          LEFT JOIN task_summaries s ON s.task_id = t.id
-          WHERE t.${sql.literal(ON_BOARD)} AND t.failed_run_id IS NULL
-            AND ${buildLiveTaskSql("t")}
-          ORDER BY t.project_id, t.stage, t.board_rank
-          LIMIT ${limit + 1}`;
-        const kept = [...failed.slice(0, limit), ...others].slice(0, limit);
-        return {
-          tasks: kept.map(readBoardTaskRow).toSorted(compareBoardOrder),
-          truncated: failed.length + others.length > limit,
-        };
-      }),
+      Effect.map(
+        sql<BoardTaskRow>`
+          SELECT * FROM (
+            SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
+            FROM tasks t INDEXED BY tasks_failed
+            LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+            LEFT JOIN task_summaries s ON s.task_id = t.id
+            WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
+              AND ${buildLiveTaskSql("t")}
+            LIMIT ${limit + 1})
+          UNION ALL
+          SELECT * FROM (
+            SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
+            FROM tasks t INDEXED BY tasks_board_rank
+            LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+            LEFT JOIN task_summaries s ON s.task_id = t.id
+            WHERE t.${sql.literal(ON_BOARD)} AND t.failed_run_id IS NULL
+              AND ${buildLiveTaskSql("t")}
+            ORDER BY t.project_id, t.stage, t.board_rank
+            LIMIT ${limit + 1})`,
+        (rows) => {
+          const toCards = (selected: ReadonlyArray<BoardTaskRow>) =>
+            selected.map(readBoardTaskRow).toSorted(compareBoardOrder);
+          const failed = toCards(rows.filter((row) => row.failed_run_id !== null));
+          const others = toCards(rows.filter((row) => row.failed_run_id === null));
+          return {
+            tasks: [...failed.slice(0, limit), ...others]
+              .slice(0, limit)
+              .toSorted(compareBoardOrder),
+            truncated: failed.length + others.length > limit,
+          };
+        },
+      ),
 
     /**
      * Returns the refs each of the Tasks links, in the order they were linked

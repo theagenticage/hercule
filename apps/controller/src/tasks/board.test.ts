@@ -1138,15 +1138,17 @@ describe("the query plans of the board's Task statements", () => {
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
-  it("reads the failed Tasks from their index and walks the others on the board rank index in the order it returns them, with no sort and no scan of the table", async () => {
-    const [failed, others] = await readPlans();
+  it("reads the failed Tasks and the others in one statement, from their two indexes, with no sort and no scan of the table", async () => {
+    const plans = await readPlans();
 
-    expect(failed).toContain("SEARCH t USING INDEX tasks_failed (failed_run_id>?)");
-    expect(others).toContain("SCAN t USING INDEX tasks_board_rank");
-    for (const plan of [failed!, others!]) {
-      expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
-      expect(plan.some((step) => step.startsWith("SCAN t") && !step.includes("INDEX"))).toBe(false);
-    }
+    // One statement is one snapshot, so a Task cannot be listed twice when
+    // its failure is cleared between two reads.
+    expect(plans).toHaveLength(1);
+    const plan = plans[0]!;
+    expect(plan).toContain("SEARCH t USING INDEX tasks_failed (failed_run_id>?)");
+    expect(plan).toContain("SCAN t USING INDEX tasks_board_rank");
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
+    expect(plan.some((step) => step.startsWith("SCAN t") && !step.includes("INDEX"))).toBe(false);
   });
 });
 
