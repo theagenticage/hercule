@@ -16,9 +16,15 @@
  *   a Task that waits on itself. The service keeps the relation free of loops;
  *   the table cannot.
  * - `tasks.initiative_id` is the Initiative a Task belongs to, if any. A Task
- *   keeps it when the Initiative is closed; a delete clears it. The index
- *   holds only Tasks that are live and on an Initiative, which is few, so
- *   its size does not follow the number of Tasks.
+ *   keeps it when the Initiative is closed; a delete clears it. Two partial
+ *   indexes serve it. `tasks_initiative` holds the Tasks that are live and on
+ *   an Initiative, so reading or clearing one Initiative's Tasks costs what
+ *   they are, not the number of Tasks. Its size follows the Tasks that were
+ *   ever put on an Initiative, closed ones included. `tasks_initiative_done`
+ *   holds only those at the stage `done` and not merged, so the board's Done
+ *   count of an Initiative is answered from the index alone. It lists the
+ *   columns of its own condition as well, because SQLite reads the table row
+ *   for a column the query mentions, even one the condition already fixes.
  *
  * The migration only adds tables, a column and indexes, so the upgrade test
  * needs no fixture for it.
@@ -71,5 +77,11 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX tasks_initiative ON tasks (initiative_id, id)
     WHERE deleted_at IS NULL AND initiative_id IS NOT NULL
+  `;
+  yield* sql`
+    CREATE INDEX tasks_initiative_done
+    ON tasks (initiative_id, deleted_at, merged_into_id, stage)
+    WHERE deleted_at IS NULL AND merged_into_id IS NULL AND initiative_id IS NOT NULL
+      AND stage = 'done'
   `;
 });

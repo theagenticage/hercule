@@ -315,9 +315,9 @@ const make = Effect.gen(function* () {
      * included even for a blocker that is not on the board. One statement
      * reads them for every card.
      *
-     * `initiativeDoneCounts` counts, for each Initiative, its live Tasks at
-     * `done`, which have no card. A client adds them to the Initiative's
-     * cards to say how much has landed.
+     * `initiativeDoneCounts` counts, for each open Initiative, its live Tasks
+     * at `done`, which have no card. A client adds them to the Initiative's
+     * cards to say how much has landed. A closed Initiative has no entry.
      *
      * The number of statements is fixed, whatever the number of cards.
      */

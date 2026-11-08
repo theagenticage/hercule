@@ -446,7 +446,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
  * deleted Tasks and merged Tasks, so its size follows the board and not the
  * history.
  */
-export const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+const ON_BOARD = "stage NOT IN ('done', 'dropped')";
 
 /**
  * Returns the text of the condition that a Task is live: not deleted and not
@@ -1793,19 +1793,23 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Counts, for each Initiative, its live Tasks at the stage `done`. An
-     * Initiative with none has no entry. One statement over the partial index
-     * `tasks_initiative`, which holds only live Tasks that are on an
-     * Initiative.
+     * Counts, for each open Initiative (not closed, not deleted), its live
+     * Tasks at the stage `done`. An Initiative with none, and a closed one,
+     * has no entry. One statement: it reads the open Initiatives, then
+     * counts each one's Tasks from the partial index `tasks_initiative_done`
+     * alone. Each condition on a Task repeats the index's own, because
+     * SQLite uses a partial index only for a query that implies it.
      */
     countDoneTasksByInitiative: (): Effect.Effect<Readonly<Record<string, number>>, SqlError> =>
       Effect.map(
         sql<{ readonly initiative_id: Uint8Array; readonly done: number }>`
-          SELECT initiative_id, COUNT(*) AS done
-          FROM tasks INDEXED BY tasks_initiative
-          WHERE deleted_at IS NULL AND initiative_id IS NOT NULL
-            AND merged_into_id IS NULL AND stage = 'done'
-          GROUP BY initiative_id`,
+          SELECT t.initiative_id, COUNT(*) AS done
+          FROM initiatives i
+            CROSS JOIN tasks t INDEXED BY tasks_initiative_done ON t.initiative_id = i.id
+          WHERE i.deleted_at IS NULL AND i.closed_at IS NULL
+            AND t.deleted_at IS NULL AND t.merged_into_id IS NULL
+            AND t.initiative_id IS NOT NULL AND t.stage = 'done'
+          GROUP BY t.initiative_id`,
         (rows) =>
           Object.fromEntries(rows.map((row) => [uuidToString(row.initiative_id), row.done])),
       ),

@@ -534,7 +534,7 @@ describe("the Initiative on the board", () => {
     expect(result.loose?.initiativeId).toBeUndefined();
   });
 
-  it("counts the Done Tasks of each Initiative, and leaves out Dropped, deleted and merged ones", async () => {
+  it("counts the Done Tasks of each open Initiative, and leaves out Dropped, deleted and merged ones, and closed Initiatives", async () => {
     const result = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -557,6 +557,12 @@ describe("the Initiative on the board", () => {
         );
         yield* insertTaskAt("Done elsewhere", "done", storefront);
         yield* insertTaskAt("Done and loose", "done", undefined);
+        const closed = yield* insertInitiative("Shipped");
+        yield* insertTaskAt("Done on a closed one", "done", closed);
+        yield* setInitiativeState(closed, "closed_at");
+        const gone = yield* insertInitiative("Gone");
+        yield* insertTaskAt("Done on a deleted one", "done", gone);
+        yield* setInitiativeState(gone, "deleted_at");
         const board = yield* Effect.flatMap(TaskBoard, (reader) => reader.query());
         return { platform, storefront, noDone, counts: board.initiativeDoneCounts };
       }),
@@ -564,7 +570,7 @@ describe("the Initiative on the board", () => {
     expect(result.counts).toEqual({ [result.platform]: 2, [result.storefront]: 1 });
   });
 
-  it("reads the Done counts from the partial index of Tasks on an Initiative", async () => {
+  it("reads the Done counts from the index of Done Tasks alone, with no scan of Tasks", async () => {
     const plan = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -586,6 +592,9 @@ describe("the Initiative on the board", () => {
         return rows.map((row) => row.detail);
       }),
     );
-    expect(plan.join("\n")).toContain("USING INDEX tasks_initiative");
+    expect(plan.join("\n")).toContain("USING COVERING INDEX tasks_initiative_done");
+    expect(plan.some((step) => step.startsWith("SCAN t") || step.startsWith("SCAN tasks"))).toBe(
+      false,
+    );
   });
 });

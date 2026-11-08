@@ -597,6 +597,7 @@ export const CLI = {
         flag: "initiative",
         help: "Only tasks on this initiative, by its id or a tail of eight or more characters.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
       handedOff: {
         flag: "handed-off",
@@ -712,6 +713,7 @@ export const CLI = {
         flag: "initiative",
         help: "The open initiative this task belongs to, by its id or a tail of eight or more characters. Find one with `hercule initiative list`.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
       provenance: {
         flag: "provenance",
@@ -761,6 +763,7 @@ export const CLI = {
         flag: "initiative",
         help: "Put the task on this initiative, by its id or a tail of eight or more characters; `null` takes it off its initiative. A closed initiative takes no task that is not on it already.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
       addLabels: {
         flag: "add-label",
@@ -808,6 +811,7 @@ export const CLI = {
         flag: "initiative",
         help: "The initiative to put the task on, by its id or a tail of eight or more characters; `null` takes it off its initiative.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
       afterTaskId: {
         flag: "after",

@@ -347,6 +347,64 @@ describe("loops of blockers", () => {
     });
   });
 
+  it("names a correct path through a hub that many Tasks reach and leave", async () => {
+    const error = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const start = yield* createTask("Start", { stage: "building" });
+        const hub = yield* createTask("Hub", { stage: "building" });
+        const end = yield* createTask("End", { stage: "building" });
+        // Start waits on six Tasks that each wait on the hub, and the hub
+        // waits on six Tasks that each wait on End, so six times six
+        // paths cross the hub.
+        for (const index of [1, 2, 3, 4, 5, 6]) {
+          const before = yield* createTask(`Before ${index}`, { stage: "building" });
+          const after = yield* createTask(`After ${index}`, { stage: "building" });
+          yield* block(start, before);
+          yield* block(before, hub);
+          yield* block(hub, after);
+          yield* block(after, end);
+        }
+        return yield* Effect.flip(tasks.addBlocker(end.id, start.id));
+      }),
+    );
+    const { message } = (error as { error: { message: string } }).error;
+    expect(message).toMatch(
+      /^Start already waits on this Task, through Before \d, Hub, After \d\.$/,
+    );
+  });
+
+  it("looks up the edges of the loop check by the primary key of task_blockers, not by a scan", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const tasks = yield* TaskService;
+        const [first, second, third] = yield* createTasks("First", "Second", "Third");
+        yield* block(second, third);
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* tasks.addBlocker(first.id, second.id).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile());
+              return statement;
+            }),
+          ),
+        );
+        const [text, params] = statements.find(([text]) => text.includes("WITH RECURSIVE"))!;
+        const rows = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return rows.map((row) => row.detail);
+      }),
+    );
+    // The statement aliases the table as `e`.
+    expect(plan.filter((step) => step === "SEARCH e USING PRIMARY KEY (task_id=?)")).toHaveLength(
+      3,
+    );
+    expect(plan.some((step) => step.startsWith("SCAN e"))).toBe(false);
+  });
+
   it("counts an edge whose blocker has finished, because the stored edges stay a DAG", async () => {
     const error = await run(
       Effect.gen(function* () {

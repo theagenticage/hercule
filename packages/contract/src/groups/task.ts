@@ -1081,9 +1081,10 @@ export const WorkBoard = Schema.Struct({
   /** True when more candidates exist than `MAX_BOARD_STACK_CANDIDATES`. What was left out draws as cards. */
   stackCandidatesTruncated: Schema.Boolean,
   /**
-   * For each Initiative that has Tasks at `done`, how many of its live Tasks
-   * are Done. Done Tasks have no card, so a client adds these to the cards of
-   * the Initiative to count its progress. An Initiative with none is absent.
+   * For each open Initiative that has Tasks at `done`, how many of its live
+   * Tasks are Done. Done Tasks have no card, so a client adds these to the
+   * cards of the Initiative to count its progress. An Initiative with none,
+   * and a closed Initiative, is absent.
    */
   initiativeDoneCounts: Schema.Record(Id, Schema.Int),
 });
@@ -1396,7 +1397,7 @@ export const task = HttpApiGroup.make("task")
       params: { id: Id },
       query: TaskMergeCheckQuery,
       success: TaskMergeCheck,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     /**
      * Makes a Task wait on another: `blockedByTaskId` must land first. Returns

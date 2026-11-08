@@ -275,12 +275,19 @@ const make = Effect.gen(function* () {
      * self edge and is dropped, and the other paths between them are what
      * becomes a loop.
      *
-     * One statement. The first part (`reach`) walks the edges from `from`,
-     * keeping each edge it crosses with the Task it came from. The set of
-     * edges is finite and the walk drops repeats, so it costs at most the
-     * edges `from` reaches, however many paths there are. The second part
-     * (`path`) walks back from `to` along one such edge for each Task, which
-     * is the witness path.
+     * One statement, in three parts:
+     * - `reach` walks the edges from `from` and keeps each Task it reaches
+     *   once, whatever the number of paths to it, so the walk costs at most
+     *   the edges `from` reaches.
+     * - `parent` picks, for each Task reached, one Task that waits on it
+     *   (the lowest id), among `from` and the Tasks reached. `CROSS JOIN`
+     *   makes SQLite read the edges of those Tasks by the primary key,
+     *   rather than scan every edge.
+     * - `path` walks back from `to` along those parents, which is the
+     *   witness path. The stored edges are a DAG, so the walk ends at
+     *   `from`. Should a loop ever be in the table, the depth limit (one
+     *   step per Task reached) ends the walk instead of hanging the writer
+     *   transaction.
      */
     findWaitPath: (input: {
       readonly from: string;
@@ -290,23 +297,32 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly id: Uint8Array; readonly title: string }>`
           WITH RECURSIVE
-            reach (id, via) AS (
-              SELECT e.blocked_by_task_id, e.task_id
+            reach (id) AS (
+              SELECT e.blocked_by_task_id
               FROM task_blockers e
               WHERE e.task_id = ${uuidFromString(input.from)}
                 AND (${input.directEdgeCounts ? 1 : 0}
                      OR e.blocked_by_task_id <> ${uuidFromString(input.to)})
               UNION
-              SELECT e.blocked_by_task_id, reach.id
+              SELECT e.blocked_by_task_id
               FROM reach JOIN task_blockers e ON e.task_id = reach.id
             ),
-            parent (id, via) AS (SELECT id, MIN(via) FROM reach GROUP BY id),
+            parent (id, via) AS (
+              SELECT e.blocked_by_task_id, MIN(e.task_id)
+              FROM (SELECT ${uuidFromString(input.from)} AS id UNION SELECT id FROM reach) scope
+                CROSS JOIN task_blockers e ON e.task_id = scope.id
+              WHERE ${input.directEdgeCounts ? 1 : 0}
+                OR e.task_id <> ${uuidFromString(input.from)}
+                OR e.blocked_by_task_id <> ${uuidFromString(input.to)}
+              GROUP BY e.blocked_by_task_id
+            ),
             path (id, depth) AS (
               SELECT ${uuidFromString(input.to)}, 0
               WHERE EXISTS (SELECT 1 FROM reach WHERE id = ${uuidFromString(input.to)})
               UNION ALL
               SELECT parent.via, path.depth + 1
               FROM path JOIN parent ON parent.id = path.id
+              WHERE path.depth < (SELECT COUNT(*) FROM reach)
             )
           SELECT path.id, (SELECT tasks.title FROM tasks WHERE tasks.id = path.id) AS title
           FROM path

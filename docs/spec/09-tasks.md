@@ -541,7 +541,7 @@ Reads and moves: `task.queryBoard` and `task.move` ([./11](./11-public-api-and-a
 
 - **Writes.** `task.create`, `task.update` and `task.move` take `initiativeId`, and `null` clears it. A move takes it so that one drop between Initiative lanes is one write and one Undo. `not_found` for an Initiative that does not exist or is deleted.
 - **A closed Initiative.** A write that changes a Task's `initiativeId` to a closed Initiative fails `invalid_state`, telling the caller to reopen it first. A write that leaves `initiativeId` as it is never fails for this, so a Task already on a closed Initiative can still be edited.
-- **Who may.** Only the user creates, changes, closes, reopens or deletes an Initiative. A session or workflow step with `task.update` may put a Task on an Initiative that exists.
+- **Who may.** Only the user creates, changes, closes, reopens or deletes an Initiative. A session or workflow step with `task.update` may also put a Task on an Initiative that exists, take a Task off its Initiative, or move it to another one: that is an ordinary `task.update` of the Task, not a change to the Initiative.
 - **`task.updated`** reports `changes.initiativeId` as `{ old, new }`, beside any other change of the same write.
 - **Closing** sets the Initiative's `closedAt` and leaves every Task's `initiativeId` alone. **Reopening** clears it. Neither writes to a Task.
 - **Deleting an Initiative** is soft. In the same transaction it clears `initiativeId` on each of its Tasks, with one `task.updated` each (`changes.initiativeId` from the id to nothing), and announces each Task and the Initiative on their live topics. The tasks domain owns that write (`TaskService.clearInitiative`), so every Task write stays in tasks.

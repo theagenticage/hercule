@@ -319,25 +319,20 @@ const readItemKeyType = (name: string, element: Ast | undefined, itemKey: string
 };
 
 /**
- * Builds one field from its schema type and its CLI row.
- *
- * `schema` is the field's own schema, when the operation declares one; the
- * shorthand decoder is read from it. Everything else comes from the AST.
- */
-/**
  * Returns the queries a field's row sends to its list operation: the row's
  * `resolvesQuery` as a list, or `[{}]` (the listing as it comes) when the row
  * names none.
  */
 const listResolvingQueries = (
   query: ResolvingQuery | ReadonlyArray<ResolvingQuery> | undefined,
-): ReadonlyArray<ResolvingQuery> =>
-  query === undefined ? [{}] : isQueryList(query) ? query : [query];
+): ReadonlyArray<ResolvingQuery> => (query === undefined ? [{}] : [query].flat());
 
-const isQueryList = (
-  query: ResolvingQuery | ReadonlyArray<ResolvingQuery>,
-): query is ReadonlyArray<ResolvingQuery> => Array.isArray(query);
-
+/**
+ * Builds one field from its schema type and its CLI row.
+ *
+ * `schema` is the field's own schema, when the operation declares one; the
+ * shorthand decoder is read from it. Everything else comes from the AST.
+ */
 const buildField = (
   name: string,
   ast: Ast,
