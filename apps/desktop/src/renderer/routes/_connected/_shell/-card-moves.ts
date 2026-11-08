@@ -80,8 +80,18 @@ export interface CardMoves {
    * the line, such as why the card landed somewhere else than the user aimed.
    * A move that changes nothing does nothing. The board jumps to the new place: the caller plays the movement, as the
    * drag does when its card lands.
+   *
+   * `options.canUndo` is `true` unless the caller says otherwise. With
+   * `false`, the line says `words` with no Undo and nothing goes on the undo
+   * stack, for a move that nothing could reverse, such as taking a Task off
+   * a closed Initiative (the controller refuses to put it back).
    */
-  readonly moveCard: (move: CardMove, words: string, note?: string) => void;
+  readonly moveCard: (
+    move: CardMove,
+    words: string,
+    note?: string,
+    options?: { readonly canUndo: boolean },
+  ) => void;
   /** Does what `moveCard` does, and glides the cards to their new places on `hand`. For a move by key. */
   readonly moveCardWithMotion: (move: CardMove, words: string, note?: string) => void;
   /**
@@ -576,6 +586,7 @@ export const useCardMoves = ({
     words: string,
     note: string | undefined,
     isPlayed: boolean,
+    canUndo: boolean,
   ): void => {
     const board = readBoard();
     if (board === undefined) return;
@@ -583,6 +594,12 @@ export const useCardMoves = ({
     if (from === undefined) return;
     if (leavesCardInPlace(board, move, from)) return;
 
+    if (!canUndo) {
+      // A refusal says why on the line through the mutation's `onError`.
+      void sendMove(move, isPlayed).catch(() => undefined);
+      say(note === undefined ? `${words}.` : `${words}. ${note}`);
+      return;
+    }
     const wasSaved = sendMove(move, isPlayed).then(
       () => true,
       () => false,
@@ -595,8 +612,13 @@ export const useCardMoves = ({
     );
   };
 
-  const moveCard = (move: CardMove, words: string, note?: string): void => {
-    makeMove(move, words, note, false);
+  const moveCard = (
+    move: CardMove,
+    words: string,
+    note?: string,
+    options?: { readonly canUndo: boolean },
+  ): void => {
+    makeMove(move, words, note, false, options?.canUndo ?? true);
   };
 
   const moveCards = (
@@ -639,7 +661,7 @@ export const useCardMoves = ({
   };
 
   const moveCardWithMotion = (move: CardMove, words: string, note?: string): void => {
-    makeMove(move, words, note, true);
+    makeMove(move, words, note, true, true);
   };
 
   return {

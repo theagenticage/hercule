@@ -22,6 +22,7 @@ import {
   describeMergedWithoutCheck,
   describeMergeFailure,
   type MergeCheckResult,
+  type MergeDecision,
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
@@ -40,22 +41,31 @@ import { askMergeCheck } from "./-merge-check";
 /** What `useMergeCards` returns. */
 export interface MergeCards {
   /**
-   * Holds the merge of the card `sourceCardId` into the card `targetCardId`
-   * for the undo line and shows it done, with no motion: the source leaves the
-   * board and the undo line offers Undo. Returns `false`, and holds nothing,
-   * when either card is not on the board or both are the same. The drag
-   * calls it inside its own committed change and plays the motion itself.
-   * `isChecked` is whether the merge check allowed it; when it did not (it
-   * could not be asked), the undo line says so.
+   * Settles the merge of the card `sourceCardId` into the card `targetCardId`
+   * as `decision` says, with no motion:
+   * - `accepted`: holds the merge for the undo line and shows it done. The
+   *   source leaves the board and the undo line offers Undo.
+   * - `unchecked`: the same, and the undo line says the merge could not be
+   *   checked first.
+   * - `refused`: holds nothing and says the refusal on the undo line.
+   *
+   * Returns `true` when the merge is held. Returns `false`, and says so on the
+   * undo line, when nothing was held: refused, or either card is not on the
+   * board, or both are the same. The drag calls it inside its own committed
+   * change and plays the motion itself.
    */
-  readonly holdMerge: (sourceCardId: string, targetCardId: string, isChecked: boolean) => boolean;
+  readonly settleMerge: (
+    sourceCardId: string,
+    targetCardId: string,
+    decision: MergeDecision,
+  ) => boolean;
   /**
    * Merges the card `sourceCardId` into the card `targetCardId` as the user
-   * asked by key or from the details: the card slides in under the target and
-   * fades, and the target settles. Says on the undo line when either card has
-   * left the board. `isChecked` is as for `holdMerge`.
+   * asked by key or from the details, and `decision` says: the card slides in
+   * under the target and fades, and the target settles. Says on the undo line
+   * when nothing was merged, as `settleMerge` does.
    */
-  readonly mergeCard: (sourceCardId: string, targetCardId: string, isChecked: boolean) => void;
+  readonly mergeCard: (sourceCardId: string, targetCardId: string, decision: MergeDecision) => void;
   /**
    * Asks the controller whether the card `sourceCardId` could be merged into
    * the card `targetCardId`, so a refusal shows before the drop. Asks once per
@@ -139,20 +149,32 @@ export const useMergeCards = ({
     return Promise.resolve(undefined);
   };
 
-  const holdMerge = (sourceCardId: string, targetCardId: string, isChecked: boolean): boolean => {
+  const settleMerge = (
+    sourceCardId: string,
+    targetCardId: string,
+    decision: MergeDecision,
+  ): boolean => {
     const { readBoard: read, openTaskId: openId, closePane: close, moves: lines } = latest.current;
+    if (decision.kind === "refused") {
+      lines.sayWithoutUndo(decision.words);
+      return false;
+    }
     const cards = read()?.cards ?? [];
     const source = cards.find((card) => card.id === sourceCardId);
     const target = cards.find((card) => card.id === targetCardId);
-    if (source === undefined || target === undefined || source.id === target.id) return false;
+    if (source === undefined || target === undefined || source.id === target.id) {
+      lines.sayWithoutUndo("A card left the board, so nothing was merged.");
+      return false;
+    }
     holdWithUndo(
       store,
       { kind: "merge", taskId: source.id, intoTaskId: target.id },
       {
         sayWithUndo: lines.sayWithUndo,
-        line: isChecked
-          ? describeMergedInto(target.title)
-          : describeMergedWithoutCheck(target.title),
+        line:
+          decision.kind === "accepted"
+            ? describeMergedInto(target.title)
+            : describeMergedWithoutCheck(target.title),
         words: describeMerge(source.title, target.title),
         undo: (intentId) => undoMerge(intentId, source.id, target.id),
       },
@@ -161,20 +183,21 @@ export const useMergeCards = ({
     return true;
   };
 
-  const mergeCard = (sourceCardId: string, targetCardId: string, isChecked: boolean): void => {
+  const mergeCard = (sourceCardId: string, targetCardId: string, decision: MergeDecision): void => {
+    if (decision.kind === "refused") {
+      settleMerge(sourceCardId, targetCardId, decision);
+      return;
+    }
     const scroller = scrollRef.current;
     // The card in the page is hidden by the change, so a copy of it slides in.
     const ghost = scroller === null ? null : launchLeavingCard(scroller, sourceCardId);
     let isHeld = false;
     playBoardChange(() => {
-      isHeld = holdMerge(sourceCardId, targetCardId, isChecked);
+      isHeld = settleMerge(sourceCardId, targetCardId, decision);
     });
-    if (!isHeld) {
-      if (ghost !== null) removeFlight(ghost);
-      latest.current.moves.sayWithoutUndo("A card left the board, so nothing was merged.");
-    } else if (ghost !== null && scroller !== null) {
-      playMergeIn(scroller, ghost, targetCardId);
-    }
+    if (ghost === null) return;
+    if (isHeld && scroller !== null) playMergeIn(scroller, ghost, targetCardId);
+    else removeFlight(ghost);
   };
 
   /**
@@ -226,5 +249,5 @@ export const useMergeCards = ({
   const checkMerge = (sourceCardId: string, targetCardId: string): Promise<MergeCheckResult> =>
     askMergeCheck(queryClient, client, sourceCardId, targetCardId);
 
-  return { holdMerge, mergeCard, checkMerge };
+  return { settleMerge, mergeCard, checkMerge };
 };

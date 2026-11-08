@@ -136,7 +136,7 @@ describe("copies of cards in flight", () => {
     expect(origins.size).toBe(1);
     expect([...origins.values()][0]).toMatchObject({ isLive: true, opacity: 1 });
     expect(desk.querySelector("[data-flight-card]")).toBeNull();
-    growCardsFromOrigins([lane], origins);
+    growCardsFromOrigins([lane], origins, new Map());
     expect(findBody(card)).toBeDefined();
   });
 });
@@ -207,7 +207,7 @@ describe("cards that grow out of beads", () => {
     card.dataset["stage"] = "building";
     card.getBoundingClientRect = () => new DOMRect(100, 100, 200, 90);
     row.append(card);
-    growCardsFromOrigins([row], origins);
+    growCardsFromOrigins([row], origins, new Map());
 
     // The card's center is (200, 145) and the bead's is (500, 50).
     expect(findBody(card)!.values).toMatchObject({ x: 300, y: -95, s: 0.1, o: 0 });

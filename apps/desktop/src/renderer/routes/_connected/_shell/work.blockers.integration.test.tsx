@@ -47,7 +47,7 @@ const BOARD_CARDS = [CARD, LOYALTY, BASKET, ROTA, GIFT, RESTOCK];
 const TASK_PATH = `/api/v1/tasks/${CARD.id}`;
 const ADD_PATH = `POST ${TASK_PATH}/blockers`;
 const removePath = (blockerId: string): string => `DELETE ${TASK_PATH}/blockers/${blockerId}`;
-const UPDATE_PATH = `PATCH ${TASK_PATH}`;
+const MOVE_PATH = `POST ${TASK_PATH}/move`;
 
 const CHECKOUT: Initiative = {
   id: buildTaskId(901),
@@ -101,6 +101,12 @@ const buildDetail = (
   edges: [],
 });
 
+/** Lists the Initiative every move of the Task named, oldest first (`null` takes it off). */
+const readMovedInitiatives = (calls: readonly Call[]): unknown[] =>
+  readBodies(calls, MOVE_PATH).map(
+    (body) => (body as { initiativeId?: string | null }).initiativeId,
+  );
+
 /** Lists the bodies sent to `path`, oldest first. */
 const readBodies = (calls: readonly Call[], path: string): unknown[] =>
   calls.filter((call) => `${call.method} ${call.path}` === path).map((call) => call.body);
@@ -119,9 +125,9 @@ const LOOP_MESSAGE =
  *   read shows something else, as when another client changed them a moment ago.
  * - `refuseAdd` is the answer of every `task.addBlocker` call instead.
  * - `initiativeId` is the Initiative the Task is on.
- * - `answerUpdate` is the handler of every `task.update` call, to hold an answer
- *   back. It gets `accept`, which changes the Initiative the controller has and
- *   answers as the default answer does.
+ * - `answerMove` is the handler of every `task.move` call, to hold an answer
+ *   back or refuse it. It gets `accept`, which changes the Initiative the
+ *   controller has and answers as the default answer does.
  * - `detail.mode` (on the result) makes the next details reads answer, fail or
  *   never answer.
  */
@@ -132,7 +138,7 @@ const openPane = async ({
   controllerBlockers,
   refuseAdd,
   initiativeId,
-  answerUpdate,
+  answerMove,
 }: {
   readonly blockers?: readonly WorkCardBlocker[];
   readonly blocks?: readonly WorkCardBlocker[];
@@ -140,21 +146,21 @@ const openPane = async ({
   readonly controllerBlockers?: readonly WorkCardBlocker[];
   readonly refuseAdd?: { readonly status: number; readonly body: unknown };
   readonly initiativeId?: string;
-  readonly answerUpdate?: (call: Call, accept: (call: Call) => Answer) => Answer | Promise<Answer>;
+  readonly answerMove?: (call: Call, accept: (call: Call) => Answer) => Answer | Promise<Answer>;
 } = {}) => {
   let current = [...(controllerBlockers ?? blockers)];
   // True until the first change: the details read then shows what the user last saw.
   let isStale = controllerBlockers !== undefined;
-  // The Initiative the controller has the Task on: a `task.update` changes it.
+  // The Initiative the controller has the Task on: a `task.move` changes it.
   let currentInitiativeId = initiativeId;
   const detail = { mode: "answer" as "answer" | "fail" | "never" };
   const readCard = (): WorkCard =>
     currentInitiativeId === undefined ? CARD : { ...CARD, initiativeId: currentInitiativeId };
   const card: WorkCard = readCard();
   const answerInitiative = (call: Call): Answer => {
-    const next = (call.body as { initiativeId: string | null }).initiativeId;
-    currentInitiativeId = next ?? undefined;
-    return { body: next === null ? buildTask(card) : { ...buildTask(card), initiativeId: next } };
+    const next = (call.body as { initiativeId?: string | null }).initiativeId;
+    if (next !== undefined) currentInitiativeId = next ?? undefined;
+    return { body: buildTask(readCard()) };
   };
   const handlers = {
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
@@ -172,9 +178,8 @@ const openPane = async ({
     [`GET /api/v1/tasks/${LOYALTY.id}/detail`]: {
       body: buildDetail(LOYALTY, [], [toBlocker(CARD)]),
     },
-    [`POST ${TASK_PATH}/move`]: { body: buildTask(card) },
-    [UPDATE_PATH]: (call: Call) =>
-      answerUpdate === undefined ? answerInitiative(call) : answerUpdate(call, answerInitiative),
+    [MOVE_PATH]: (call: Call) =>
+      answerMove === undefined ? answerInitiative(call) : answerMove(call, answerInitiative),
     [ADD_PATH]: (call: Call) => {
       if (refuseAdd !== undefined) return refuseAdd;
       isStale = false;
@@ -499,7 +504,9 @@ describe("the Initiative of a Task on the details pane", () => {
 
   it("puts the Task on the Initiative chosen, says so with Undo, and Undo puts it back", async () => {
     const { calls, user, pane } = await openPane({ initiativeId: CHECKOUT.id });
-    await within(pane).findByRole("button", { name: "Initiative: Accessible checkout" });
+    const row = await within(pane).findByRole("button", {
+      name: "Initiative: Accessible checkout",
+    });
     const menu = readInitiativeMenu(pane);
 
     await user.click(
@@ -507,17 +514,18 @@ describe("the Initiative of a Task on the details pane", () => {
     );
 
     expect(await screen.findByText("Put Print depot pick lists on Faster search.")).toBeTruthy();
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: SEARCH.id }]);
+    expect(readMovedInitiatives(calls)).toEqual([SEARCH.id]);
+    expect(row.textContent).toBe("Faster search");
 
     await user.click(screen.getByRole("button", { name: /^Undo/ }));
 
     expect(
       await screen.findByText("Put back: Put Print depot pick lists on Faster search."),
     ).toBeTruthy();
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([
-      { initiativeId: SEARCH.id },
-      { initiativeId: CHECKOUT.id },
-    ]);
+    expect(readMovedInitiatives(calls)).toEqual([SEARCH.id, CHECKOUT.id]);
+    await waitFor(() => {
+      expect(row.textContent).toBe("Accessible checkout");
+    });
   });
 
   it("takes the Task off its Initiative with No initiative, and sends nothing for the one it is on", async () => {
@@ -528,14 +536,14 @@ describe("the Initiative of a Task on the details pane", () => {
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
     );
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([]);
+    expect(readMovedInitiatives(calls)).toEqual([]);
 
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "No initiative", hidden: true }),
     );
 
     expect(await screen.findByText("Took Print depot pick lists off its initiative.")).toBeTruthy();
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: null }]);
+    expect(readMovedInitiatives(calls)).toEqual([null]);
   });
 
   it("offers no Undo when the Task comes off an Initiative that is closed, which nothing can put it back on", async () => {
@@ -550,19 +558,19 @@ describe("the Initiative of a Task on the details pane", () => {
     expect(
       await screen.findByText("Took Print depot pick lists off its closed initiative."),
     ).toBeTruthy();
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: null }]);
+    expect(readMovedInitiatives(calls)).toEqual([null]);
     expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
   });
 
-  it("offers no second pick while the first is on its way, and shows the Initiative it chose as pending", async () => {
-    let answerFirst: () => void = () => undefined;
+  it("shows a pick at once and starts the next pick from it, while the controller has not answered", async () => {
+    const answers: (() => void)[] = [];
     const { calls, user, pane } = await openPane({
-      // The Task is on none, and the answer is slow.
-      answerUpdate: (call, accept) =>
+      // The Task is on none, and every answer waits until the test lets it through.
+      answerMove: (call, accept) =>
         new Promise<Answer>((resolve) => {
-          answerFirst = () => {
+          answers.push(() => {
             resolve(accept(call));
-          };
+          });
         }),
     });
     const row = await within(pane).findByRole("button", { name: "Initiative: none" });
@@ -571,29 +579,49 @@ describe("the Initiative of a Task on the details pane", () => {
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
     );
-
-    const pending = await within(pane).findByRole("button", { name: "Initiative: Faster search" });
-    expect(pending.getAttribute("aria-disabled")).toBe("true");
-    // Even a pick that reaches the menu another way sends nothing.
+    expect(row.textContent).toBe("Faster search");
+    expect(row.getAttribute("aria-disabled")).toBeNull();
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
     );
-    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: SEARCH.id }]);
+    expect(row.textContent).toBe("Accessible checkout");
 
-    answerFirst();
+    // The moves are sent in order, the second after the first is answered.
     await waitFor(() => {
-      expect(row.getAttribute("aria-disabled")).toBeNull();
+      expect(answers).toHaveLength(1);
+    });
+    answers[0]!();
+    await waitFor(() => {
+      expect(answers).toHaveLength(2);
+    });
+    answers[1]!();
+    await user.click(await screen.findByRole("button", { name: /^Undo/ }));
+    await waitFor(() => {
+      expect(answers).toHaveLength(3);
+    });
+    answers[2]!();
+
+    await waitFor(() => {
+      expect(readMovedInitiatives(calls)).toEqual([
+        SEARCH.id,
+        CHECKOUT.id,
+        // Undo of the second pick puts back Faster search, which the pane showed after the first.
+        SEARCH.id,
+      ]);
+    });
+    await waitFor(() => {
+      expect(row.textContent).toBe("Faster search");
     });
   });
 
-  it("starts the next pick's Undo from the Initiative the Task is really on, after a refused pick", async () => {
-    let updates = 0;
+  it("sends the card back and starts the next pick's Undo from the Initiative the Task is really on, after a refused pick", async () => {
+    let moves = 0;
     const { calls, user, pane } = await openPane({
       // The Task is on none. The first pick is refused, the second accepted.
-      answerUpdate: (call, accept) => {
-        updates += 1;
+      answerMove: (call, accept) => {
+        moves += 1;
         return Promise.resolve(
-          updates === 1
+          moves === 1
             ? {
                 status: 409,
                 body: buildErrorBody("invalid_state", "That initiative was closed."),
@@ -608,8 +636,9 @@ describe("the Initiative of a Task on the details pane", () => {
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
     );
+    expect(await screen.findByText(/That initiative was closed\./)).toBeTruthy();
     await waitFor(() => {
-      expect(row.getAttribute("aria-disabled")).toBeNull();
+      expect(row.textContent).toBe("No initiative");
     });
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
@@ -617,11 +646,11 @@ describe("the Initiative of a Task on the details pane", () => {
     await user.click(await screen.findByRole("button", { name: /^Undo/ }));
 
     await waitFor(() => {
-      expect(readBodies(calls, UPDATE_PATH)).toEqual([
-        { initiativeId: SEARCH.id },
-        { initiativeId: CHECKOUT.id },
+      expect(readMovedInitiatives(calls)).toEqual([
+        SEARCH.id,
+        CHECKOUT.id,
         // Not Faster search: the first pick was refused, so the Task was on none.
-        { initiativeId: null },
+        null,
       ]);
     });
   });
@@ -630,7 +659,7 @@ describe("the Initiative of a Task on the details pane", () => {
     ["fails", "fail"],
     ["never answers", "never"],
   ] as const)(
-    "shows the Initiative the controller confirmed and starts the next Undo from it, when the read after the pick %s",
+    "shows the Initiative the controller confirmed and starts the next Undo from it, when the details read after the pick %s",
     async (_name, mode) => {
       const { calls, detail, user, pane } = await openPane();
       const row = await within(pane).findByRole("button", { name: "Initiative: none" });
@@ -640,40 +669,35 @@ describe("the Initiative of a Task on the details pane", () => {
       await user.click(
         within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
       );
-
-      // The pane does not wait for the read: the answer alone settles it.
       await waitFor(() => {
-        expect(row.getAttribute("aria-disabled")).toBeNull();
         expect(row.textContent).toBe("Faster search");
       });
       await user.click(
         within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
       );
       await waitFor(() => {
-        expect(row.getAttribute("aria-disabled")).toBeNull();
         expect(row.textContent).toBe("Accessible checkout");
       });
       await user.click(await screen.findByRole("button", { name: /^Undo/ }));
 
       await waitFor(() => {
-        expect(readBodies(calls, UPDATE_PATH)).toEqual([
-          { initiativeId: SEARCH.id },
-          { initiativeId: CHECKOUT.id },
-          // Back to Faster search, which the controller confirmed, not to none.
-          { initiativeId: SEARCH.id },
+        expect(readMovedInitiatives(calls)).toEqual([
+          SEARCH.id,
+          CHECKOUT.id,
+          // Back to Faster search, which the pane showed, not to none.
+          SEARCH.id,
         ]);
       });
       await waitFor(() => {
-        expect(row.getAttribute("aria-disabled")).toBeNull();
         expect(row.textContent).toBe("Faster search");
       });
     },
   );
 
-  it("leaves the Initiative the pane shows alone when the pick is refused, even if the read fails", async () => {
+  it("leaves the Initiative the pane shows alone when the pick is refused, even if the details read fails", async () => {
     const { detail, user, pane } = await openPane({
       initiativeId: CHECKOUT.id,
-      answerUpdate: () =>
+      answerMove: () =>
         Promise.resolve({
           status: 409,
           body: buildErrorBody("invalid_state", "That initiative was closed."),
@@ -691,44 +715,7 @@ describe("the Initiative of a Task on the details pane", () => {
 
     expect(await screen.findByText(/That initiative was closed\./)).toBeTruthy();
     await waitFor(() => {
-      expect(row.getAttribute("aria-disabled")).toBeNull();
-    });
-    expect(row.textContent).toBe("Accessible checkout");
-  });
-
-  it("offers no pick while an Undo is on its way", async () => {
-    let updates = 0;
-    let answerUndo: () => void = () => undefined;
-    const { user, pane } = await openPane({
-      initiativeId: CHECKOUT.id,
-      answerUpdate: (call, accept) => {
-        updates += 1;
-        return updates === 1
-          ? Promise.resolve(accept(call))
-          : new Promise<Answer>((resolve) => {
-              answerUndo = () => {
-                resolve(accept(call));
-              };
-            });
-      },
-    });
-    await within(pane).findByRole("button", { name: "Initiative: Accessible checkout" });
-    const menu = readInitiativeMenu(pane);
-    await user.click(
-      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
-    );
-    await user.click(await screen.findByRole("button", { name: /^Undo/ }));
-
-    const pending = await within(pane).findByRole("button", {
-      name: "Initiative: Accessible checkout",
-    });
-    await waitFor(() => {
-      expect(pending.getAttribute("aria-disabled")).toBe("true");
-    });
-
-    answerUndo();
-    await waitFor(() => {
-      expect(pending.getAttribute("aria-disabled")).toBeNull();
+      expect(row.textContent).toBe("Accessible checkout");
     });
   });
 });

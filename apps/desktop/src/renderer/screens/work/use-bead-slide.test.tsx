@@ -9,13 +9,8 @@ import { useRef, useState, type JSX } from "react";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
-import {
-  applyCardMove,
-  arrangeLanes,
-  groupBoardByProject,
-  type CardMove,
-} from "@hercule/client-core/work";
-import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
+import { applyCardMove, type CardMove } from "@hercule/client-core/work";
+import { arrangeTestBoard, buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
 import { findBody } from "../../app/motion/body";
 import { BoardDesk } from "./board-desk";
@@ -86,18 +81,11 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
     isCarrying,
     queueStage: cards.find((each) => each.id === "queue")!.stage,
   });
-  const lanes = groupBoardByProject({ cards, initiativeDoneCounts: {} }, PROJECTS, INITIATIVES, {
+  const arranged = arrangeTestBoard(buildBoard(...cards), {
+    projects: PROJECTS,
+    initiatives: INITIATIVES,
     place: "top",
-    isFiltering: false,
-  });
-  const arranged = arrangeLanes(lanes, {
-    foldedLaneIds: new Set(),
-    openedCellIds: new Set(),
-    openedInitiativeIds: new Set(),
-    openedStackIds: new Set(),
-    stackCandidates: [],
-    isFiltering: false,
-  }).find((each) => each.lane.initiative?.isRow === true)!;
+  }).everyLane.find((each) => each.lane.initiative?.isRow === true)!;
   useBeadSlide({
     scrollRef,
     cards,

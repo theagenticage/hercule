@@ -100,12 +100,12 @@ describe("confirming while the merge check has not answered", () => {
     check.answer({ kind: "allowed" });
     await act(() => check.promise.then(() => undefined));
 
-    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", true);
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", { kind: "accepted" });
     expect(say).not.toHaveBeenCalled();
     expect(hook.result.current.sourceId).toBeNull();
   });
 
-  it("merges nothing and says why when the check refuses", async () => {
+  it("hands the refusal to the merge, which says why, when the check refuses", async () => {
     const check = deferAnswer();
     const { hook, merge, say } = startPick(() => check.promise);
     act(() => {
@@ -118,10 +118,11 @@ describe("confirming while the merge check has not answered", () => {
     check.answer({ kind: "refused", refusal: "Pack already waits on this Task." });
     await act(() => check.promise.then(() => undefined));
 
-    expect(merge).not.toHaveBeenCalled();
-    expect(say).toHaveBeenCalledExactlyOnceWith(
-      '"Label the pallets" was not merged: Pack already waits on this Task.',
-    );
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", {
+      kind: "refused",
+      words: '"Label the pallets" was not merged: Pack already waits on this Task.',
+    });
+    expect(say).not.toHaveBeenCalled();
     expect(hook.result.current.sourceId).toBeNull();
   });
 
@@ -139,7 +140,7 @@ describe("confirming while the merge check has not answered", () => {
     expect(getCard("weigh").dataset["mergeCheck"]).toBe("checking");
 
     await act(() => vi.advanceTimersByTimeAsync(200));
-    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", false);
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", { kind: "unchecked" });
   });
 
   it("goes ahead unchecked at once when the question could not be asked", async () => {
@@ -154,7 +155,7 @@ describe("confirming while the merge check has not answered", () => {
       hook.result.current.confirm("weigh");
     });
 
-    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", false);
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", { kind: "unchecked" });
   });
 
   it("drops the wait when the walk moves to another card", async () => {
@@ -175,6 +176,63 @@ describe("confirming while the merge check has not answered", () => {
 
     expect(merge).not.toHaveBeenCalled();
     expect(hook.result.current.sourceId).toBe("label");
+  });
+});
+
+describe("confirming a card the walk is not on", () => {
+  it("asks about it and merges on the answer, as a click does", async () => {
+    const checkMerge = vi.fn(() => Promise.resolve({ kind: "allowed" } as const));
+    const { hook, merge } = startPick(checkMerge);
+
+    act(() => {
+      hook.result.current.confirm("ship");
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(checkMerge).toHaveBeenCalledExactlyOnceWith("label", "ship");
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "ship", { kind: "accepted" });
+    expect(getCard("ship").hasAttribute("data-merge-target")).toBe(false);
+  });
+});
+
+describe("a confirm that waits for the check", () => {
+  it("ignores a second confirm, whichever card it names", async () => {
+    const check = deferAnswer();
+    const { hook, merge } = startPick(() => check.promise);
+    act(() => {
+      getCard("weigh").focus();
+    });
+    act(() => {
+      hook.result.current.confirm("weigh");
+    });
+
+    act(() => {
+      hook.result.current.confirm("pack");
+    });
+    check.answer({ kind: "allowed" });
+    await act(() => check.promise.then(() => undefined));
+
+    expect(merge).toHaveBeenCalledExactlyOnceWith("label", "weigh", { kind: "accepted" });
+  });
+
+  it("is dropped by cancel, with nothing merged and no marks left", async () => {
+    const check = deferAnswer();
+    const { hook, merge } = startPick(() => check.promise);
+    act(() => {
+      getCard("weigh").focus();
+    });
+    act(() => {
+      hook.result.current.confirm("weigh");
+    });
+
+    act(() => {
+      hook.result.current.cancel();
+    });
+    check.answer({ kind: "allowed" });
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+
+    expect(merge).not.toHaveBeenCalled();
+    expect(getCard("weigh").hasAttribute("data-merge-target")).toBe(false);
   });
 });
 

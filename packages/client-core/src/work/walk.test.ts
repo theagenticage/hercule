@@ -2,9 +2,9 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes, buildStackId } from "./arrange-lanes";
-import { buildBoard, buildCard, buildPlace } from "./cards.testing";
+import { buildBoardFolds } from "./board-folds";
+import { arrangeTestBoard, buildBoard, buildCard, buildPlace } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
-import { groupBoardByProject } from "./initiative-lanes";
 import { buildLanes } from "./lanes";
 import { walkBoard, type BoardWalk, type WalkStop } from "./walk";
 
@@ -51,12 +51,10 @@ const LANES = arrangeLanes(
     PROJECTS,
   ),
   {
-    foldedLaneIds: new Set(["delivery"]),
+    folds: buildBoardFolds({ saved: { foldedLaneIds: ["delivery"] } }),
     openedCellIds: new Set<string>(),
-    openedInitiativeIds: new Set<string>(),
     openedStackIds: new Set<string>(),
     stackCandidates: [],
-    isFiltering: false,
   },
 );
 
@@ -81,15 +79,13 @@ describe("walkBoard over stacks", () => {
   ];
   const view = (isOpen: boolean) =>
     arrangeLanes(buildLanes(buildBoard(...cards), PROJECTS), {
-      foldedLaneIds: new Set<string>(),
+      folds: buildBoardFolds(),
       openedCellIds: new Set<string>(),
-      openedInitiativeIds: new Set<string>(),
       openedStackIds: new Set(isOpen ? [buildStackId("cart", "ticket")] : []),
       stackCandidates: [
         { leadTaskId: "ticket", memberTaskId: "pr1", noun: "pull request" },
         { leadTaskId: "ticket", memberTaskId: "pr2", noun: "pull request" },
       ],
-      isFiltering: false,
     });
   const stop = (cardId: string): WalkStop => ({ kind: "card", laneId: "cart", cardId });
 
@@ -190,12 +186,10 @@ describe("walkBoard", () => {
       groupings: [{ kind: "acme/project", caption: "Acme project" }],
     };
     const shown = arrangeLanes(groupBoardByContext(board, "acme/project"), {
-      foldedLaneIds: new Set<string>(),
+      folds: buildBoardFolds(),
       openedCellIds: new Set<string>(),
-      openedInitiativeIds: new Set<string>(),
       openedStackIds: new Set<string>(),
       stackCandidates: [],
-      isFiltering: false,
     });
     const inLane = (laneId: string, cardId: string): WalkStop => ({ kind: "card", laneId, cardId });
 
@@ -227,17 +221,11 @@ describe("walkBoard over Initiative rows", () => {
     initiativeDoneCounts: {},
   };
   const rows = (opened: readonly string[]) =>
-    arrangeLanes(
-      groupBoardByProject(board, PROJECTS, [PLATFORM], { place: "top", isFiltering: false }),
-      {
-        foldedLaneIds: new Set<string>(),
-        openedCellIds: new Set<string>(),
-        openedInitiativeIds: new Set(opened),
-        openedStackIds: new Set<string>(),
-        stackCandidates: [],
-        isFiltering: false,
-      },
-    );
+    arrangeTestBoard(board, {
+      projects: PROJECTS,
+      initiatives: [PLATFORM],
+      folds: buildBoardFolds({ saved: { openedInitiativeIds: opened } }),
+    }).drawnLanes;
 
   it("walks into an open row like into a lane, down to the lane below", () => {
     const lanes = rows(["platform"]);

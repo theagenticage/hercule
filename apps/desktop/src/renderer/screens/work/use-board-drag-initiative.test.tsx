@@ -9,14 +9,8 @@ import { useRef, useState, type JSX } from "react";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import {
-  applyCardMove,
-  arrangeLanes,
-  groupBoardByProject,
-  listDrawnLanes,
-  type CardMove,
-} from "@hercule/client-core/work";
-import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
+import { applyCardMove, type CardMove } from "@hercule/client-core/work";
+import { arrangeTestBoard, buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import { BOARD_STAGES, type BoardStage, type WorkCard } from "@hercule/contract";
 import { findBody } from "../../app/motion/body";
 import { BoardBody } from "./board-body";
@@ -87,27 +81,17 @@ interface Harness {
 function Board({ harness }: { readonly harness: Harness }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [cards, setCards] = useState(CARDS);
-  const lanes = groupBoardByProject({ cards, initiativeDoneCounts: {} }, PROJECTS, INITIATIVES, {
+  const arrangement = arrangeTestBoard(buildBoard(...cards), {
+    projects: PROJECTS,
+    initiatives: INITIATIVES,
     place: "lanes",
-    isFiltering: false,
   });
-  const arrangedLanes = listDrawnLanes(
-    arrangeLanes(lanes, {
-      foldedLaneIds: new Set(),
-      openedCellIds: new Set(),
-      openedInitiativeIds: new Set(),
-      openedStackIds: new Set(),
-      stackCandidates: [],
-      isFiltering: false,
-    }),
-    false,
-  );
   useBoardDrag({
     scrollRef,
     cards,
     projects: PROJECTS,
     initiatives: INITIATIVES,
-    arrangedLanes,
+    arrangedLanes: arrangement.drawnLanes,
     selectedIds: new Set(),
     moveCard: (move, words) => {
       harness.moveCard(move, words);
@@ -117,7 +101,7 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
     },
     moveCards: () => {},
     say: () => {},
-    holdMerge: () => true,
+    settleMerge: () => true,
     checkMerge: () => Promise.resolve({ kind: "allowed" }),
     onCarryingChange: () => {},
   });
@@ -135,18 +119,15 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
       scrollRef={scrollRef}
     >
       <BoardBody
-        arrangedLanes={arrangedLanes}
+        arrangement={arrangement}
         plugins={[]}
         initiativeFlags={undefined}
-        factsByInitiativeId={new Map()}
         tabStop={null}
         isStill
         canWriteSummaries={false}
         selectedIds={new Set()}
-        isBlockFolded={false}
         onToggleBlock={() => {}}
-        onToggleLane={() => {}}
-        onToggleRow={() => {}}
+        onToggleFold={() => {}}
         onEditInitiative={() => {}}
         onPressBead={() => {}}
         onToggleCell={() => {}}

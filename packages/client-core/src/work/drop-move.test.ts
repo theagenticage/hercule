@@ -4,17 +4,22 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
-import { arrangeLanes } from "./arrange-lanes";
+import { arrangeLanes, type ArrangedLane } from "./arrange-lanes";
 import { applyCardMove, type CardMove } from "./card-move";
-import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
+import { buildBoardFolds } from "./board-folds";
+import {
+  arrangeTestBoard,
+  buildBoard,
+  buildCard,
+  buildPlace,
+  FAILURE,
+  listIds,
+} from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
 import { buildDropMove, buildFollowerMoves, settleGroupDrop } from "./drop-move";
-import {
-  groupBoardByInitiative,
-  groupBoardByProject,
-  NO_INITIATIVE_LANE_ID,
-} from "./initiative-lanes";
-import { buildLanes, type WorkLane } from "./lanes";
+import { NO_INITIATIVE_LANE_ID } from "./initiative-lanes";
+import { buildLanes } from "./lanes";
+import { INITIATIVE_FACET_ID } from "./facets";
 
 const PROJECTS = [
   { id: "storefront", name: "Storefront" },
@@ -47,12 +52,12 @@ const buildDrop = (
   }: { cards?: typeof CARDS; foldedLaneId?: string; followerIds?: readonly string[] } = {},
 ) => {
   const lane = arrangeLanes(buildLanes({ cards }, PROJECTS), {
-    foldedLaneIds: new Set(foldedLaneId === undefined ? [] : [foldedLaneId]),
+    folds: buildBoardFolds({
+      saved: { foldedLaneIds: foldedLaneId === undefined ? [] : [foldedLaneId] },
+    }),
     openedCellIds: new Set(),
-    openedInitiativeIds: new Set(),
     openedStackIds: new Set(),
     stackCandidates: [],
-    isFiltering: false,
   }).find((each) => each.lane.id === laneId)!;
   return buildDropMove({
     movingCard: cards.find((card) => card.id === movingCardId)!,
@@ -215,12 +220,10 @@ describe("buildDropMove", () => {
     };
     const dropOnOutside = (laneId: string, beforeCardId: string | null, folded = false) => {
       const lane = arrangeLanes(groupBoardByContext(board, "acme/project"), {
-        foldedLaneIds: new Set(folded ? [laneId] : []),
+        folds: buildBoardFolds({ saved: { foldedLaneIds: folded ? [laneId] : [] } }),
         openedCellIds: new Set(),
-        openedInitiativeIds: new Set(),
         openedStackIds: new Set(),
         stackCandidates: [],
-        isFiltering: false,
       }).find((each) => each.lane.id === laneId)!;
       return buildDropMove({
         movingCard: board.cards[0]!,
@@ -434,17 +437,9 @@ describe("buildDropMove with Initiatives", () => {
     buildCard("on-closed", { projectId: "storefront", initiativeId: "closed-one" }),
   ];
   const board = { ...buildBoard(...cards), initiativeDoneCounts: {} };
-  const view = {
-    foldedLaneIds: new Set<string>(),
-    openedCellIds: new Set<string>(),
-    openedInitiativeIds: new Set<string>(),
-    openedStackIds: new Set<string>(),
-    stackCandidates: [],
-    isFiltering: false,
-  };
 
   const dropOnLane = (
-    lanes: readonly WorkLane[],
+    lanes: readonly ArrangedLane[],
     movingCardId: string,
     laneId: string,
     stage: BoardStage | null,
@@ -452,18 +447,19 @@ describe("buildDropMove with Initiatives", () => {
   ) =>
     buildDropMove({
       movingCard: cards.find((card) => card.id === movingCardId)!,
-      lane: arrangeLanes(lanes, view).find((each) => each.lane.id === laneId)!,
+      lane: lanes.find((each) => each.lane.id === laneId)!,
       stage,
       beforeCardId: null,
       listedInitiativeIds: LISTED,
       ...(followerIds === undefined ? {} : { followerIds }),
     });
 
-  const onTop = groupBoardByProject(board, PROJECTS, INITIATIVES, {
-    place: "top",
-    isFiltering: false,
-  });
-  const byInitiative = groupBoardByInitiative(board, INITIATIVES, { isFiltering: false });
+  const onTop = arrangeTestBoard(board, { projects: PROJECTS, initiatives: INITIATIVES }).everyLane;
+  const byInitiative = arrangeTestBoard(board, {
+    projects: PROJECTS,
+    initiatives: INITIATIVES,
+    requestedGroupBy: INITIATIVE_FACET_ID,
+  }).everyLane;
 
   it.each([
     [

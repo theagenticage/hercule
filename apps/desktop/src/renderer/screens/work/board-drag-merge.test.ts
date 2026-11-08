@@ -1,13 +1,14 @@
 /**
- * Tests the merge gesture through its own interface: the wait, the card
- * chosen, the dock, and how it ends. The real carry is covered by
- * `use-board-drag.test.tsx`.
+ * Tests the merge gesture through its own interface: the wait for the pointer
+ * to rest, the card it chooses and the dock of the card in the hand. What a
+ * chosen card shows and when its merge may go ahead belong to the merge intent,
+ * tested in `merge-intent.test.ts`; here the intent is a fake that records what
+ * the gesture asks of it. The real carry is covered by `use-board-drag.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MergeCheckResult } from "@hercule/client-core/work";
-import { buildCard } from "@hercule/client-core/work/testing";
 import { trackBody } from "../../app/motion";
 import { createMergeGesture, type MergeGesture } from "./board-drag-merge";
+import type { MergeCommit, MergeIntent } from "./merge-intent";
 
 const HOME = { left: 100, top: 100, width: 140, height: 90 };
 const START = { x: 120, y: 120 };
@@ -17,22 +18,33 @@ let slot: HTMLElement;
 let ghost: HTMLElement;
 let target: HTMLElement;
 
-/** Starts a gesture on a board with one card, "delivery-slots", whose merge check allows it unless `checkMerge` says otherwise. */
-const startGesture = (
-  isOptionHeld = false,
-  checkMerge: (sourceId: string, targetId: string) => Promise<MergeCheckResult> = () =>
-    Promise.resolve({ kind: "allowed" }),
-): MergeGesture => {
+/** An intent that chooses what it is given, until it is left, and records the calls. */
+const createFakeIntent = () => {
+  let isChosen = false;
+  const intent = {
+    choose: vi.fn<MergeIntent["choose"]>(() => {
+      isChosen = true;
+      return true;
+    }),
+    leave: vi.fn(() => {
+      isChosen = false;
+    }),
+    isWaiting: vi.fn(() => false),
+    commit: vi.fn<MergeIntent["commit"]>(() => isChosen),
+  };
+  return { intent, isChosen: () => isChosen };
+};
+
+let fake: ReturnType<typeof createFakeIntent>;
+
+/** Starts a gesture on a board with one card, "delivery-slots". */
+const startGesture = (isOptionHeld = false): MergeGesture => {
   ghost = document.createElement("div");
+  fake = createFakeIntent();
   return createMergeGesture({
     scroller,
-    readCards: () => [
-      buildCard("delivery-slots", { title: "Delivery slots", initiativeId: "checkout" }),
-      buildCard("refund-emails", { title: "Refund emails", initiativeId: "billing" }),
-    ],
-    readInitiatives: () => [{ id: "checkout", name: "Checkout", hue: 245 }],
     sourceId: "refund-emails",
-    checkMerge,
+    intent: fake.intent,
     slot,
     body: trackBody(ghost),
     home: HOME,
@@ -43,7 +55,7 @@ const startGesture = (
   });
 };
 
-const isMarked = (): boolean => target.hasAttribute("data-merge-target");
+const isMarked = (): boolean => fake.isChosen();
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -69,7 +81,11 @@ describe("the merge gesture", () => {
     expect(isMarked()).toBe(false);
     vi.advanceTimersByTime(1);
 
-    expect(isMarked()).toBe(true);
+    expect(fake.intent.choose).toHaveBeenCalledExactlyOnceWith({
+      sourceId: "refund-emails",
+      targetId: "delivery-slots",
+      element: target,
+    });
     expect(slot.classList.contains("is-shut")).toBe(true);
     expect(merge.handMotion()).toBe("docked");
   });
@@ -97,7 +113,7 @@ describe("the merge gesture", () => {
   it("chooses at once with Option held, and when Option goes down over a resting pointer", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
-    expect(merge.commit()?.cardId).toBe("delivery-slots");
+    expect(fake.intent.choose).toHaveBeenCalledOnce();
 
     const later = startGesture();
     later.update({ x: 300, y: 200 }, "delivery-slots");
@@ -107,12 +123,22 @@ describe("the merge gesture", () => {
     expect(later.handMotion()).toBe("docked");
   });
 
-  it("undoes the merge at once when the pointer leaves the middle, and the hand glides for 200ms", () => {
+  it("keeps the card chosen while the pointer drifts inside its middle", () => {
+    const merge = startGesture(true);
+    merge.update({ x: 300, y: 200 }, "delivery-slots");
+    merge.update({ x: 301, y: 200 }, "delivery-slots");
+
+    expect(fake.intent.choose).toHaveBeenCalledOnce();
+    expect(fake.intent.leave).not.toHaveBeenCalled();
+  });
+
+  it("leaves the card at once when the pointer leaves the middle, and the hand glides for 200ms", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
 
     merge.update({ x: 300, y: 260 }, null);
 
+    expect(fake.intent.leave).toHaveBeenCalledOnce();
     expect(isMarked()).toBe(false);
     expect(slot.classList.contains("is-shut")).toBe(false);
     expect(merge.handMotion()).toBe("gliding");
@@ -120,90 +146,62 @@ describe("the merge gesture", () => {
     expect(merge.handMotion()).toBe("free");
   });
 
-  it("returns the chosen card on commit, leaves the marks, and stops the wait", () => {
+  it("chooses nothing when the intent does not take the card", () => {
     const merge = startGesture(true);
+    fake.intent.choose.mockReturnValue(false);
+
     merge.update({ x: 300, y: 200 }, "delivery-slots");
 
-    const choice = merge.commit();
-    expect(choice).toMatchObject({
-      cardId: "delivery-slots",
-      element: target,
-      check: { kind: "checking" },
-    });
-    expect(choice?.result).toBeInstanceOf(Promise);
-    expect(isMarked()).toBe(true);
-    merge.cancel();
-    expect(isMarked()).toBe(false);
+    expect(slot.classList.contains("is-shut")).toBe(false);
+    expect(merge.handMotion()).toBe("free");
   });
 
-  it("returns none on commit while the wait is still running, and the wait never fires", () => {
+  it("commits to the chosen card through the intent, and leaves the marks to cancel", () => {
+    const merge = startGesture(true);
+    merge.update({ x: 300, y: 200 }, "delivery-slots");
+    const commit: MergeCommit = { onDecision: () => undefined };
+
+    expect(merge.commit(commit)).toBe(true);
+
+    expect(fake.intent.commit).toHaveBeenCalledExactlyOnceWith(commit);
+    expect(fake.intent.leave).not.toHaveBeenCalled();
+    merge.cancel();
+    expect(fake.intent.leave).toHaveBeenCalledOnce();
+  });
+
+  it("commits nothing while the wait is still running, and the wait never fires", () => {
     const merge = startGesture();
     merge.update({ x: 300, y: 200 }, "delivery-slots");
     vi.advanceTimersByTime(900);
 
-    expect(merge.commit()).toBeNull();
+    expect(merge.commit({ onDecision: () => undefined })).toBe(false);
     vi.advanceTimersByTime(2000);
 
-    expect(isMarked()).toBe(false);
+    expect(fake.intent.choose).not.toHaveBeenCalled();
+    expect(fake.intent.commit).not.toHaveBeenCalled();
   });
 
-  it("chooses nothing after cancel, even with Option held", () => {
+  it("chooses nothing after cancel, even with Option held, and leaves only once", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
     merge.cancel();
+    merge.cancel();
     merge.update({ x: 300, y: 200 }, "delivery-slots");
 
-    expect(isMarked()).toBe(false);
-    expect(merge.commit()).toBeNull();
+    expect(fake.intent.choose).toHaveBeenCalledOnce();
+    expect(fake.intent.leave).toHaveBeenCalledOnce();
+    expect(merge.commit({ onDecision: () => undefined })).toBe(false);
   });
 
-  it("undoes the merge on refresh when the chosen card was replaced by a new element", () => {
+  it("leaves the card on refresh when it was replaced by a new element", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
     target.remove();
 
     merge.refresh();
 
+    expect(fake.intent.leave).toHaveBeenCalledOnce();
     expect(merge.handMotion()).toBe("gliding");
     expect(slot.classList.contains("is-shut")).toBe(false);
-  });
-});
-
-describe("the merge check of the gesture", () => {
-  it("asks once for the pair chosen, and says what stays with the initiative of the card merged into", async () => {
-    const ask = vi.fn(() => Promise.resolve({ kind: "allowed" } as const));
-    const merge = startGesture(true, ask);
-    merge.update({ x: 300, y: 200 }, "delivery-slots");
-    merge.update({ x: 301, y: 200 }, "delivery-slots");
-
-    expect(ask).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
-    await Promise.resolve();
-    expect(target.dataset["mergeKeeps"]).toBe(
-      "Keeps its title, stage, place and initiative Checkout",
-    );
-    expect(merge.commit()?.check).toEqual({ kind: "allowed" });
-  });
-
-  it("commits a refused choice with its refusal", async () => {
-    const merge = startGesture(true, () =>
-      Promise.resolve({ kind: "refused", refusal: "A loop." } as const),
-    );
-    merge.update({ x: 300, y: 200 }, "delivery-slots");
-    await Promise.resolve();
-
-    expect(merge.commit()?.check).toEqual({ kind: "refused", refusal: "A loop." });
-    expect(target.dataset["mergeLabel"]).toBe("Cannot merge: A loop");
-  });
-
-  it("ignores an answer that comes after the drop", async () => {
-    let answer: (result: MergeCheckResult) => void = () => undefined;
-    const merge = startGesture(true, () => new Promise((resolve) => (answer = resolve)));
-    merge.update({ x: 300, y: 200 }, "delivery-slots");
-    merge.commit();
-
-    answer({ kind: "refused", refusal: "A loop." });
-    await Promise.resolve();
-
-    expect(target.dataset["mergeCheck"]).toBe("checking");
   });
 });

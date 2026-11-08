@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  arrangeLanes,
+  arrangeLane,
+  buildBoardFolds,
   buildLane,
   buildLanes,
   type ArrangedLane,
@@ -34,16 +35,12 @@ const arrangeRow = (
   const lane = buildLane("initiative-row:platform", "Retire the scheduler", null, cards, {
     initiative: { ...INITIATIVE, doneRingCount },
   });
-  const [arranged] = arrangeLanes([lane], {
-    foldedLaneIds: new Set(),
+  return arrangeLane(lane, {
+    folds: buildBoardFolds({ saved: { openedInitiativeIds: isFolded ? [] : ["platform"] } }),
     openedCellIds: new Set(),
-    openedInitiativeIds: new Set(isFolded ? [] : ["platform"]),
     openedStackIds: new Set(),
     stackCandidates: [],
-    isFiltering: false,
   });
-  if (arranged === undefined) throw new Error("No lane");
-  return arranged;
 };
 
 const BLOCKED = {
@@ -259,15 +256,12 @@ describe("BoardLane and Initiatives", () => {
     held: readonly { id: string; hue: number; name: string }[],
   ): void => {
     if (project === undefined) throw new Error("No lane");
-    const [arranged] = arrangeLanes([project], {
-      foldedLaneIds: new Set(isFolded ? ["storefront"] : []),
+    const arranged = arrangeLane(project, {
+      folds: buildBoardFolds({ saved: { foldedLaneIds: isFolded ? ["storefront"] : [] } }),
       openedCellIds: new Set(),
-      openedInitiativeIds: new Set(),
       openedStackIds: new Set(),
       stackCandidates: [],
-      isFiltering: false,
     });
-    if (arranged === undefined) throw new Error("No lane");
     render(
       <BoardLane
         arrangedLane={arranged}
@@ -308,15 +302,12 @@ describe("BoardLane and Initiatives", () => {
     const lane = buildLane("initiative:platform", "Platform", null, [], {
       initiative: { initiativeId: INITIATIVE.initiativeId, hue: INITIATIVE.hue, isRow: false },
     });
-    const [arranged] = arrangeLanes([lane], {
-      foldedLaneIds: new Set(),
+    const arranged = arrangeLane(lane, {
+      folds: buildBoardFolds(),
       openedCellIds: new Set(),
-      openedInitiativeIds: new Set(),
       openedStackIds: new Set(),
       stackCandidates: [],
-      isFiltering: false,
     });
-    if (arranged === undefined) throw new Error("No lane");
     render(
       <BoardLane
         arrangedLane={arranged}

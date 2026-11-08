@@ -647,19 +647,7 @@ const make = Effect.gen(function* () {
         );
       }
 
-      // Once the two Tasks are one, a path between them (other than their own
-      // edge) leads from the Task back to itself. Either direction does.
-      const loop = [
-        ...(yield* blockers.findWaitPath({
-          from: sourceId,
-          to: targetId,
-          directEdgeCounts: false,
-        })),
-      ];
-      const path =
-        loop.length > 0
-          ? loop
-          : yield* blockers.findWaitPath({ from: targetId, to: sourceId, directEdgeCounts: false });
+      const path = yield* blockers.findMergeLoop(sourceId, targetId);
       if (path.length > 0) {
         return yield* Effect.fail(
           createInvalidStateError(describeMergeLoop(target.title, path), {
@@ -2154,11 +2142,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const { waiting, blocker } = yield* readTasksOfBlocker(taskId, blockedByTaskId);
-            const loop = yield* blockers.findWaitPath({
-              from: blocker.id,
-              to: waiting.id,
-              directEdgeCounts: true,
-            });
+            const loop = yield* blockers.findBlockerLoop(waiting.id, blocker.id);
             if (loop.length > 0) {
               return yield* Effect.fail(
                 createInvalidStateError(describeBlockerLoop(loop), { reason: "blocker-cycle" }),

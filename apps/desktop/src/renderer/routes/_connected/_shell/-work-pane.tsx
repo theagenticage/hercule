@@ -32,7 +32,6 @@ import {
   type TaskPaneChanges,
   type TaskPaneRead,
 } from "../../../screens/work/task-pane";
-import type { PendingInitiative } from "./-task-initiative";
 import { taskDetailQuery, useWorkInitiatives } from "./-work-board";
 
 /** How long the line "This Task no longer exists." shows before the pane closes, in milliseconds. */
@@ -66,8 +65,7 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * again whenever they change, because a card the board draws again is a new
  * element. `threadPromptWords` turns the pane's foot into the line that asks what a new
  * Thread should do, starting with those words; `null` leaves the foot as it is.
- * `pendingInitiatives` are the changes of a Task's Initiative that have not
- * finished, which the pane shows as pending. `intents` are the answers the app holds, which the pane shows as said or
+ * `intents` are the answers the app holds, which the pane shows as said or
  * as not sent. `onShown` is told the pane's content after every draw, and
  * with `null` when the sheet is gone, so that the keys act on the content
  * that is on screen. `changes` are the pane's buttons that change something. `moveToStage` is how a
@@ -91,7 +89,6 @@ export function WorkPane({
   drawnLanes,
   isStill,
   intents,
-  pendingInitiatives,
   threadPromptWords,
   changes,
   moveToStage,
@@ -108,7 +105,6 @@ export function WorkPane({
   readonly drawnLanes: readonly ArrangedLane[];
   readonly isStill: boolean;
   readonly intents: readonly PendingIntent[];
-  readonly pendingInitiatives: readonly PendingInitiative[];
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
@@ -193,7 +189,6 @@ export function WorkPane({
       scrollRef={scrollRef}
       isStill={isStill}
       intents={intents}
-      pendingInitiatives={pendingInitiatives}
       threadPromptWords={threadPromptWords}
       changes={changes}
       moveToStage={moveToStage}
@@ -221,7 +216,6 @@ function PresentedTask({
   scrollRef,
   isStill,
   intents,
-  pendingInitiatives,
   threadPromptWords,
   changes,
   moveToStage,
@@ -241,7 +235,6 @@ function PresentedTask({
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly isStill: boolean;
   readonly intents: readonly PendingIntent[];
-  readonly pendingInitiatives: readonly PendingInitiative[];
   readonly threadPromptWords: string | null;
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
@@ -407,7 +400,6 @@ function PresentedTask({
         pane={pane}
         projectName={projectName}
         initiatives={initiatives}
-        pendingInitiative={pendingInitiatives.findLast((each) => each.taskId === presentedId)}
         boardCards={cards}
         read={read}
         plugins={plugins}

@@ -6,9 +6,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useRef, useState, type JSX } from "react";
+import { buildBoardFolds, buildLane, type ArrangedBoard } from "@hercule/client-core/work";
 import { findBody } from "../../app/motion";
 import { useViewMotion } from "./use-view-motion";
 import type { WorkView } from "./use-work-view";
+
+/** An arrangement with no Initiative row under any lane. */
+const NO_ROWS = { findLane: () => undefined };
+
+const CORE_LANE = buildLane("core", "Core", "core", []);
+const PLATFORM_ROW = buildLane("initiative-row:platform", "Platform", null, [], {
+  initiative: { initiativeId: "platform", hue: 245, isRow: true, doneRingCount: 0 },
+});
 
 /** How far the button moves down while its cell is open: the height of the extra cards. */
 const OPEN_CELL_HEIGHT = 1000;
@@ -19,13 +28,13 @@ function Board(): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const view = {
     openedCellIds: new Set(isOpen ? ["lane/stage"] : []),
-    foldedLaneIds: new Set<string>(),
+    folds: buildBoardFolds(),
     isFiltering: false,
     toggleCell: () => {
       setIsOpen((open) => !open);
     },
   } as unknown as WorkView;
-  const { toggleCell } = useViewMotion(view, scrollRef);
+  const { toggleCell } = useViewMotion(view, scrollRef, NO_ROWS);
   return (
     <div ref={scrollRef} data-testid="scroller">
       <section className="board-lane" data-lane-id="lane" data-open={isOpen}>
@@ -75,13 +84,13 @@ function StackBoard(): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const view = {
     openedStackIds: new Set(isOpen ? [STACK_ID] : []),
-    foldedLaneIds: new Set<string>(),
+    folds: buildBoardFolds(),
     isFiltering: false,
     toggleStack: () => {
       setIsOpen((open) => !open);
     },
   } as unknown as WorkView;
-  const { toggleStack } = useViewMotion(view, scrollRef);
+  const { toggleStack } = useViewMotion(view, scrollRef, NO_ROWS);
   return (
     <div ref={scrollRef} data-testid="scroller">
       <section className="board-lane" data-lane-id="lane" data-open={isOpen}>
@@ -141,18 +150,17 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [isBlockFolded, setIsBlockFolded] = useState(false);
   const view = {
-    openedInitiativeIds: new Set(isOpen ? ["platform"] : []),
-    foldedLaneIds: new Set<string>(),
+    folds: buildBoardFolds({ saved: { openedInitiativeIds: isOpen ? ["platform"] : [] } }),
     isFiltering: false,
-    toggleInitiativeRow: (initiativeId: string) => {
-      calls.push(initiativeId);
+    toggleFold: (target: { readonly id: string }) => {
+      calls.push(target.id);
       setIsOpen((open) => !open);
     },
     toggleInitiativeBlock: () => {
       setIsBlockFolded((folded) => !folded);
     },
   } as unknown as WorkView;
-  const { toggleInitiativeRow, toggleInitiativeBlock } = useViewMotion(view, scrollRef);
+  const { toggleFold, toggleInitiativeBlock } = useViewMotion(view, scrollRef, NO_ROWS);
   return (
     <div ref={scrollRef} data-testid="scroller">
       <button type="button" className="initiative-block-button" onClick={toggleInitiativeBlock}>
@@ -168,7 +176,7 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
             type="button"
             className="initiative-toggle"
             onClick={() => {
-              toggleInitiativeRow("platform");
+              toggleFold(PLATFORM_ROW);
             }}
           >
             Platform
@@ -179,7 +187,7 @@ function RowBoard({ calls }: { readonly calls: string[] }): JSX.Element {
   );
 }
 
-describe("useViewMotion toggleInitiativeRow", () => {
+describe("useViewMotion toggleFold of an Initiative row", () => {
   it("toggles the row of the Initiative through the view, and keeps the row still", () => {
     const calls: string[] = [];
     const { getByTestId, container } = render(<RowBoard calls={calls} />);
@@ -193,7 +201,7 @@ describe("useViewMotion toggleInitiativeRow", () => {
 
     fireEvent.click(container.querySelector(".initiative-toggle")!);
 
-    expect(calls).toEqual(["platform"]);
+    expect(calls).toEqual(["initiative-row:platform"]);
     expect(row.className).toContain("is-open");
     expect(row.getBoundingClientRect().top).toBe(before);
   });
@@ -215,13 +223,17 @@ function LaneWithRowBoard(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFolded, setIsFolded] = useState(false);
   const view = {
-    foldedLaneIds: new Set(isFolded ? ["core"] : []),
+    folds: buildBoardFolds({ saved: { foldedLaneIds: isFolded ? ["core"] : [] } }),
     isFiltering: false,
-    toggleLane: () => {
+    toggleFold: () => {
       setIsFolded((folded) => !folded);
     },
   } as unknown as WorkView;
-  const { toggleLane } = useViewMotion(view, scrollRef);
+  const arrangement = {
+    findLane: (laneId: string) =>
+      laneId === "core" ? { rows: [{ lane: PLATFORM_ROW }] } : undefined,
+  } as unknown as Pick<ArrangedBoard, "findLane">;
+  const { toggleFold } = useViewMotion(view, scrollRef, arrangement);
   return (
     <div className="work-desk">
       <div ref={scrollRef} data-testid="scroller">
@@ -229,7 +241,7 @@ function LaneWithRowBoard(): JSX.Element {
           <button
             type="button"
             onClick={() => {
-              toggleLane("core");
+              toggleFold(CORE_LANE);
             }}
           >
             Core
@@ -241,11 +253,7 @@ function LaneWithRowBoard(): JSX.Element {
           )}
         </section>
         {!isFolded && (
-          <section
-            className="initiative-row is-open"
-            data-lane-id="initiative-row:platform"
-            data-under-lane="core"
-          >
+          <section className="initiative-row is-open" data-lane-id="initiative-row:platform">
             <div data-card-id="queue" data-stage="building" />
           </section>
         )}
@@ -254,7 +262,7 @@ function LaneWithRowBoard(): JSX.Element {
   );
 }
 
-describe("useViewMotion toggleLane with an Initiative row under the lane", () => {
+describe("useViewMotion toggleFold with an Initiative row under the lane", () => {
   beforeEach(() => {
     document.documentElement.style.setProperty("--dur-2", "200ms");
     // jsdom has no layout: every part is the same 40px strip, which is in view of the scroller.

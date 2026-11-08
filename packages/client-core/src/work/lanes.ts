@@ -77,8 +77,6 @@ interface InitiativeLaneBase {
  */
 export interface InitiativeRowLane extends InitiativeLaneBase {
   readonly isRow: true;
-  /** Only for a row In lanes: the id of the Project lane the row is drawn under. */
-  readonly underLaneId?: string;
   /** Only for a row On top: the name of the Initiative's Project, which no lane above the row says. */
   readonly projectName?: string;
   /**
@@ -101,6 +99,13 @@ export interface InitiativeGroupLane extends InitiativeLaneBase {
  */
 export type InitiativeLane = InitiativeRowLane | InitiativeGroupLane;
 
+/** What a folded Project lane shows of an Initiative it holds: its small flag. */
+export interface HeldInitiative {
+  readonly id: string;
+  readonly hue: number;
+  readonly name: string;
+}
+
 /** One lane of the board: a Project (or an outside place) and its five cells, in `BOARD_STAGES` order. */
 export interface WorkLane {
   /** The Project's id, `NO_PROJECT_LANE_ID`, or the id of an outside lane or an Initiative lane. */
@@ -113,6 +118,27 @@ export interface WorkLane {
   readonly outside?: OutsideLane;
   /** Set on a lane for an Initiative: an Initiative row, or a lane of Group by Initiative. */
   readonly initiative?: InitiativeLane;
+}
+
+/**
+ * A lane and the Initiative rows drawn under it (Group by Project, In lanes).
+ * The rows are the lane's own: they are not lanes of the board beside it.
+ */
+export interface LaneGroup {
+  readonly lane: WorkLane;
+  readonly rows: readonly WorkLane[];
+}
+
+/**
+ * The lanes of a grouping as the board nests them. There are two nestings and
+ * no more: the Initiative rows On top, above all lanes, and the rows under a
+ * lane. Every grouping but Group by Project has only `groups` with no rows.
+ */
+export interface GroupedLanes {
+  /** The Initiative rows drawn above all lanes (On top), in drawing order. */
+  readonly topRows: readonly WorkLane[];
+  /** The lanes in drawing order, each with the rows drawn under it. */
+  readonly groups: readonly LaneGroup[];
 }
 
 /**

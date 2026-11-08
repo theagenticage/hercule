@@ -1330,7 +1330,7 @@ The rules for this layer:
 | Merges two Tasks | `task.merge`, after the undo line |
 | Reads the Initiatives | `initiative.query`, beside the board, in the query `WORK_INITIATIVES_KEY` beside the route. A small list; not shell data |
 | Makes, changes, closes, reopens or deletes an Initiative | `initiative.create`, `update`, `close`, `reopen` and `delete`, from the Initiative sheet |
-| Puts a Task on an Initiative, or takes it off | `task.update` with `initiativeId` from the pane; `task.move` with `initiativeId` from a drop between Initiative lanes |
+| Puts a Task on an Initiative, or takes it off | `task.move` with `initiativeId` alone, from the pane and from a drop between Initiative lanes: both are a card move, so the board and the pane show it at once, moves are sent in order, a refusal sends the card back, and Undo restores the card's placement |
 | Makes a Task wait on another, or stops it | `task.addBlocker` and `task.removeBlocker`, from the pane. Undo is the opposite call, offered only when `changed` is true |
 | Asks whether a merge would close a loop | `task.checkMerge`, when a merge target is picked, before the drop |
 
@@ -1623,7 +1623,7 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 **The details pane.** Three additions to [The details pane](#the-details-pane):
 
 - **Crumbs:** the Project, then the Initiative, then the title.
-- **An Initiative row** shows the Task's Initiative with its flag, and a picker to choose another, or none. A closed Initiative is not offered. The picker ends with **New initiative…**, which opens the Initiative sheet. Choosing sends `task.update` with `initiativeId`.
+- **An Initiative row** shows the Task's Initiative with its flag, and a picker to choose another, or none. A closed Initiative is not offered. The picker ends with **New initiative…**, which opens the Initiative sheet. Choosing moves the card to that Initiative as a card move (`task.move` with `initiativeId` alone, which keeps the Task's stage and its place in its cell), with an Undo. The row shows the Initiative of the board's card with every move not yet answered applied, so a second pick starts from the first. Taking a Task off a closed Initiative has no Undo, because the controller refuses to put it back; a Task that is not on the board (Done or Dropped) has its picker disabled.
 - **Blocked by and Blocks** sit between What is left and Threads. Each lists up to 50 Tasks as the pane's 32px rows, with the Task's title, its stage, and a button to open it, which Esc then goes back from. Each row has a remove button that stands over the end of the row while it is hovered or focused, as an unlink does. Both sections show a finished Task too, quietly, since the edge is history. "and 12 more" names the rest. Under **Blocked by**, **Add a blocker** opens a picker over the board's cards with a Find box. Choosing sends `task.addBlocker`. The Undo line is offered only when `changed` is true.
 - **A refused blocker shows its message** under the picker, with the path named by the controller: "*Add a refund button* already waits on this Task, through *Plan the rollout*." The desktop reads `details.reason` to know the refusal is a cycle, and never matches the words.
 

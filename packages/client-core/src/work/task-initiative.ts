@@ -89,21 +89,3 @@ export const describeInitiativeGesture = (
   initiativeName === null
     ? `Took ${shortenTitle(taskTitle)} off its ${wasClosed ? "closed " : ""}initiative`
     : `Put ${shortenTitle(taskTitle)} on ${initiativeName}`;
-
-/** Returns the sentence for a change the user asked for, which the undo line says when they act. */
-export const describeInitiativeDone = (
-  taskTitle: string,
-  initiativeName: string | null,
-  wasClosed: boolean,
-): string => `${describeInitiativeGesture(taskTitle, initiativeName, wasClosed)}.`;
-
-/** Returns the sentence for a change the controller refused, with its `reason` and what to do. */
-export const describeInitiativeFailure = (
-  taskTitle: string,
-  initiativeName: string | null,
-  wasClosed: boolean,
-  reason: string,
-): string =>
-  initiativeName === null
-    ? `${shortenTitle(taskTitle)} was not taken off its ${wasClosed ? "closed " : ""}initiative: ${reason}. Try again.`
-    : `${shortenTitle(taskTitle)} was not put on ${initiativeName}: ${reason}. Try again.`;

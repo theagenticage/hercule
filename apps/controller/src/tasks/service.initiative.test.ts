@@ -178,6 +178,41 @@ describe("putting a Task on an Initiative", () => {
     ]);
   });
 
+  it("moves a Task to another Initiative alone, keeping its stage and its place in its cell", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const initiative = yield* insertInitiative("Platform");
+        const first = yield* createTask("First", { stage: "building" });
+        const middle = yield* createTask("Middle", { stage: "building" });
+        const last = yield* createTask("Last", { stage: "building" });
+        const order = () =>
+          Effect.map(
+            Effect.flatMap(TaskBoard, (reader) => reader.query()),
+            (board) => board.cards.map((card) => card.id),
+          );
+        const before = yield* order();
+        yield* TestClock.adjust(A_MINUTE);
+        const moved = yield* tasks.move({ id: middle.id, initiativeId: initiative });
+        const after = yield* order();
+        return {
+          initiative,
+          first,
+          middle,
+          last,
+          before,
+          after,
+          moved,
+          changes: yield* readChanges(middle.id),
+        };
+      }),
+    );
+    expect(result.before).toEqual([result.first.id, result.middle.id, result.last.id]);
+    expect(result.after).toEqual(result.before);
+    expect(result.moved).toMatchObject({ stage: "building" });
+    expect(result.changes).toEqual([{ initiativeId: { old: null, new: result.initiative } }]);
+  });
+
   it("lets a session put a Task on an Initiative that exists", async () => {
     const task = await run(
       Effect.gen(function* () {

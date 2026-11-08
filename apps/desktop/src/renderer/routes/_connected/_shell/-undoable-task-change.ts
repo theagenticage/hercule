@@ -1,7 +1,7 @@
 /**
  * How the details pane sends a change of one Task that the user can undo: a
- * link, a blocker, an Initiative. The undo line and the undo stack work the
- * same way for each, so the rules live here once.
+ * link or a blocker. The undo line and the undo stack work the same way for
+ * each, so the rules live here once.
  *
  * - Each change is one gesture on the undo stack, and its words are on the
  *   undo line, both taken when the user acts and while the request is still
@@ -54,12 +54,6 @@ export interface UndoableTaskChange {
    * after an Undo, while the user is signed in. It does not wait for the read.
    */
   readonly readAgain: () => void;
-  /**
-   * Called when the user undoes the change, with a promise that resolves
-   * once the Undo has been sent (and rejects if it failed). For a caller
-   * that shows the Task as changing meanwhile.
-   */
-  readonly trackUndo?: (undoing: Promise<unknown>) => void;
   readonly words: {
     /** The gesture as Undo reports it ("Put back: ..."). */
     readonly gesture: string;
@@ -131,12 +125,8 @@ export const useUndoableTaskChanges = ({
       const gesture: Gesture<CardMover> = {
         words: change.words.gesture,
         undo: async () => {
-          const undoing = (async () => {
-            await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
-            if (scope.isCurrent()) change.readAgain();
-          })();
-          change.trackUndo?.(undoing);
-          await undoing;
+          await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
+          if (scope.isCurrent()) change.readAgain();
           return undefined;
         },
       };

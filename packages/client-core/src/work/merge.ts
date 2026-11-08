@@ -122,6 +122,35 @@ export const describeMergeNote = (check: MergeCheckState, keeps: string): string
 export const describeMergeRefused = (sourceTitle: string, refusal: string): string =>
   `"${shortenTitle(sourceTitle)}" was not merged: ${dropClosingFullStops(refusal)}.`;
 
+/**
+ * What the app does with a merge once the merge check is known:
+ * - `accepted`: the check allowed it, so the merge is held for the undo line.
+ * - `refused`: the check showed the controller would refuse it, so nothing is
+ *   merged. `words` is the line for the undo line, ready to show.
+ * - `unchecked`: the check could not be made or did not answer in time. The
+ *   merge is held anyway, and the controller's merge decides.
+ */
+export type MergeDecision =
+  | { readonly kind: "accepted" }
+  | { readonly kind: "refused"; readonly words: string }
+  | { readonly kind: "unchecked" };
+
+/**
+ * Returns the decision for a merge of the card titled `sourceTitle` once its
+ * merge check has the result `check`. A check that is still running has no
+ * decision yet, so it is not an argument.
+ */
+export const decideMerge = (check: MergeCheckResult, sourceTitle: string): MergeDecision => {
+  switch (check.kind) {
+    case "allowed":
+      return { kind: "accepted" };
+    case "refused":
+      return { kind: "refused", words: describeMergeRefused(sourceTitle, check.refusal) };
+    case "unchecked":
+      return { kind: "unchecked" };
+  }
+};
+
 /** Returns what the undo line says after a merge: `Merged into "Serve smaller checkout".` A long title is cut. */
 export const describeMergedInto = (targetTitle: string): string =>
   `Merged into "${shortenTitle(targetTitle)}".`;

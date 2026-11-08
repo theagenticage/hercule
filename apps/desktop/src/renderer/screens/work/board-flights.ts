@@ -338,19 +338,20 @@ export const recordGrowthOrigins = (
 /**
  * Grows each card of `lanes` out of the origin recorded for it, 16ms apart
  * (a card following a copy in flight starts at once). A row drawn under a lane
- * (`data-under-lane`) that has no count or bead of its own grows out of the
- * count of that lane. Under Reduce motion the cards fade in where they stand.
- * Call it after the change.
+ * (`hostLaneIds` maps the id of the row to the id of that lane) that has no
+ * count or bead of its own grows out of the count of that lane. Under Reduce
+ * motion the cards fade in where they stand. Call it after the change.
  */
 export const growCardsFromOrigins = (
   lanes: readonly HTMLElement[],
   origins: ReadonlyMap<string, GrowthOrigin>,
+  hostLaneIds: ReadonlyMap<string, string>,
 ): void => {
   const reduced = isMotionReduced();
   let index = 0;
   for (const lane of lanes) {
     const laneId = lane.dataset["laneId"] ?? "";
-    const hostLaneId = lane.dataset["underLane"];
+    const hostLaneId = hostLaneIds.get(laneId);
     for (const card of lane.querySelectorAll<HTMLElement>("[data-card-id]")) {
       const cardId = card.dataset["cardId"] ?? "";
       const stage = card.dataset["stage"] ?? "";

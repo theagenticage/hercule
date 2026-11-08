@@ -217,6 +217,71 @@ const make = Effect.gen(function* () {
     blockedByCount: rows[0]?.total ?? 0,
   });
 
+  /**
+   * Returns one path of waits from the Task `from` to the Task `to`, as the
+   * Tasks on it in order (`from` first, `to` last), or an empty list when
+   * `from` does not wait on `to`, directly or through other Tasks. It reads
+   * every stored edge, finished blockers included.
+   *
+   * With `directEdgeCounts` false, the edge "`from` waits on `to`" itself
+   * is not followed, so only a path through at least one other Task is
+   * found. `findMergeLoop` asks that; `findBlockerLoop` does not.
+   *
+   * One statement, in three parts:
+   * - `reach` walks the edges from `from` and keeps each Task it reaches
+   *   once, whatever the number of paths to it, so the walk costs at most
+   *   the edges `from` reaches.
+   * - `parent` picks, for each Task reached, one Task that waits on it
+   *   (the lowest id), among `from` and the Tasks reached. `CROSS JOIN`
+   *   makes SQLite read the edges of those Tasks by the primary key,
+   *   rather than scan every edge.
+   * - `path` walks back from `to` along those parents, which is the
+   *   witness path. The stored edges are a DAG, so the walk ends at
+   *   `from`. Should a loop ever be in the table, the depth limit (one
+   *   step per Task reached) ends the walk instead of hanging the writer
+   *   transaction.
+   */
+  const findWaitPath = (input: {
+    readonly from: string;
+    readonly to: string;
+    readonly directEdgeCounts: boolean;
+  }): Effect.Effect<ReadonlyArray<WaitPathStep>, SqlError> =>
+    Effect.map(
+      sql<{ readonly id: Uint8Array; readonly title: string }>`
+        WITH RECURSIVE
+          reach (id) AS (
+            SELECT e.blocked_by_task_id
+            FROM task_blockers e
+            WHERE e.task_id = ${uuidFromString(input.from)}
+              AND (${input.directEdgeCounts ? 1 : 0}
+                   OR e.blocked_by_task_id <> ${uuidFromString(input.to)})
+            UNION
+            SELECT e.blocked_by_task_id
+            FROM reach JOIN task_blockers e ON e.task_id = reach.id
+          ),
+          parent (id, via) AS (
+            SELECT e.blocked_by_task_id, MIN(e.task_id)
+            FROM (SELECT ${uuidFromString(input.from)} AS id UNION SELECT id FROM reach) scope
+              CROSS JOIN task_blockers e ON e.task_id = scope.id
+            WHERE ${input.directEdgeCounts ? 1 : 0}
+              OR e.task_id <> ${uuidFromString(input.from)}
+              OR e.blocked_by_task_id <> ${uuidFromString(input.to)}
+            GROUP BY e.blocked_by_task_id
+          ),
+          path (id, depth) AS (
+            SELECT ${uuidFromString(input.to)}, 0
+            WHERE EXISTS (SELECT 1 FROM reach WHERE id = ${uuidFromString(input.to)})
+            UNION ALL
+            SELECT parent.via, path.depth + 1
+            FROM path JOIN parent ON parent.id = path.id
+            WHERE path.depth < (SELECT COUNT(*) FROM reach)
+          )
+        SELECT path.id, (SELECT tasks.title FROM tasks WHERE tasks.id = path.id) AS title
+        FROM path
+        ORDER BY path.depth DESC`,
+      (rows) => rows.map((row) => ({ id: uuidToString(row.id), title: row.title })),
+    );
+
   return {
     /**
      * Writes the edge "`taskId` waits on `blockedById`", stamped with the
@@ -264,71 +329,40 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns one path of waits from the Task `from` to the Task `to`, as the
-     * Tasks on it in order (`from` first, `to` last), or an empty list when
-     * `from` does not wait on `to`, directly or through other Tasks. It reads
-     * every stored edge, finished blockers included.
-     *
-     * With `directEdgeCounts` false, the edge "`from` waits on `to`" itself
-     * is not followed, so only a path through at least one other Task is
-     * found. A merge asks that: the edge between the two Tasks becomes a
-     * self edge and is dropped, and the other paths between them are what
-     * becomes a loop.
-     *
-     * One statement, in three parts:
-     * - `reach` walks the edges from `from` and keeps each Task it reaches
-     *   once, whatever the number of paths to it, so the walk costs at most
-     *   the edges `from` reaches.
-     * - `parent` picks, for each Task reached, one Task that waits on it
-     *   (the lowest id), among `from` and the Tasks reached. `CROSS JOIN`
-     *   makes SQLite read the edges of those Tasks by the primary key,
-     *   rather than scan every edge.
-     * - `path` walks back from `to` along those parents, which is the
-     *   witness path. The stored edges are a DAG, so the walk ends at
-     *   `from`. Should a loop ever be in the table, the depth limit (one
-     *   step per Task reached) ends the walk instead of hanging the writer
-     *   transaction.
+     * Returns the path of waits that adding the edge "`taskId` waits on
+     * `blockedByTaskId`" would close into a loop, as the Tasks on it from
+     * `blockedByTaskId` to `taskId` (`describeBlockerLoop` words it), or an
+     * empty list when the edge closes no loop. The edge between the two
+     * Tasks the other way round counts.
      */
-    findWaitPath: (input: {
-      readonly from: string;
-      readonly to: string;
-      readonly directEdgeCounts: boolean;
-    }): Effect.Effect<ReadonlyArray<WaitPathStep>, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array; readonly title: string }>`
-          WITH RECURSIVE
-            reach (id) AS (
-              SELECT e.blocked_by_task_id
-              FROM task_blockers e
-              WHERE e.task_id = ${uuidFromString(input.from)}
-                AND (${input.directEdgeCounts ? 1 : 0}
-                     OR e.blocked_by_task_id <> ${uuidFromString(input.to)})
-              UNION
-              SELECT e.blocked_by_task_id
-              FROM reach JOIN task_blockers e ON e.task_id = reach.id
-            ),
-            parent (id, via) AS (
-              SELECT e.blocked_by_task_id, MIN(e.task_id)
-              FROM (SELECT ${uuidFromString(input.from)} AS id UNION SELECT id FROM reach) scope
-                CROSS JOIN task_blockers e ON e.task_id = scope.id
-              WHERE ${input.directEdgeCounts ? 1 : 0}
-                OR e.task_id <> ${uuidFromString(input.from)}
-                OR e.blocked_by_task_id <> ${uuidFromString(input.to)}
-              GROUP BY e.blocked_by_task_id
-            ),
-            path (id, depth) AS (
-              SELECT ${uuidFromString(input.to)}, 0
-              WHERE EXISTS (SELECT 1 FROM reach WHERE id = ${uuidFromString(input.to)})
-              UNION ALL
-              SELECT parent.via, path.depth + 1
-              FROM path JOIN parent ON parent.id = path.id
-              WHERE path.depth < (SELECT COUNT(*) FROM reach)
-            )
-          SELECT path.id, (SELECT tasks.title FROM tasks WHERE tasks.id = path.id) AS title
-          FROM path
-          ORDER BY path.depth DESC`,
-        (rows) => rows.map((row) => ({ id: uuidToString(row.id), title: row.title })),
-      ),
+    findBlockerLoop: (
+      taskId: string,
+      blockedByTaskId: string,
+    ): Effect.Effect<ReadonlyArray<WaitPathStep>, SqlError> =>
+      findWaitPath({ from: blockedByTaskId, to: taskId, directEdgeCounts: true }),
+
+    /**
+     * Returns the path of waits that merging the Task `sourceId` into the Task
+     * `survivorId` would turn into a loop, as the Tasks on it between the two
+     * (`describeMergeLoop` words it), or an empty list when the merge closes
+     * none. Once the two Tasks are one, a path between them in either
+     * direction leads from the survivor back to itself. The edge between the
+     * two Tasks themselves is no loop: the merge drops it, so only paths
+     * through at least one other Task count.
+     */
+    findMergeLoop: (
+      sourceId: string,
+      survivorId: string,
+    ): Effect.Effect<ReadonlyArray<WaitPathStep>, SqlError> =>
+      Effect.gen(function* () {
+        const forward = yield* findWaitPath({
+          from: sourceId,
+          to: survivorId,
+          directEdgeCounts: false,
+        });
+        if (forward.length > 0) return forward;
+        return yield* findWaitPath({ from: survivorId, to: sourceId, directEdgeCounts: false });
+      }),
 
     /**
      * Removes every edge of the Task `taskId`, the ones where it waits and the

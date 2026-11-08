@@ -234,8 +234,7 @@ function InitiativeLine({
  * The section carries `data-lane-id`, the head `data-lane-head`, and the
  * folded line `data-fold-row`, as a lane does, which motion and keyboard code
  * find them by. `data-place` is `lane` for a row drawn under its Project's
- * lane and `top` for one drawn above the lanes; `data-under-lane` is the id of
- * that lane, which folding it finds its rows by.
+ * lane and `top` for one drawn above the lanes.
  */
 export function InitiativeRow({
   arrangedLane,
@@ -252,10 +251,13 @@ export function InitiativeRow({
   onToggleStack,
   onPressCard,
   onFocusCard,
+  isUnderLane,
   isLastUnderLane,
 }: {
   /** A lane whose `initiative` is set and whose `isRow` is true. */
   readonly arrangedLane: ArrangedLane;
+  /** Whether the row is drawn under the lane of its Project (In lanes) and not On top. */
+  readonly isUnderLane?: boolean;
   /** Whether no row of the same lane follows this one: the stylesheet leaves a gap under the last row of a lane. */
   readonly isLastUnderLane?: boolean;
   /** The small facts under the name (`describeInitiativeFacts`), or `null` for none. */
@@ -285,8 +287,7 @@ export function InitiativeRow({
       className={isFolded ? "initiative-row" : "initiative-row is-open"}
       style={buildHueStyle(initiative.hue)}
       data-lane-id={lane.id}
-      data-place={initiative.underLaneId === undefined ? "top" : "lane"}
-      data-under-lane={initiative.underLaneId}
+      data-place={isUnderLane === true ? "lane" : "top"}
       data-last-under-lane={isLastUnderLane === true ? "" : undefined}
     >
       <h4 className="initiative-head" data-lane-head={lane.id}>

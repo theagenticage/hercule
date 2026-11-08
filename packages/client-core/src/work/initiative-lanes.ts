@@ -19,6 +19,7 @@ import {
   buildLane,
   buildLanes,
   chooseProjectLaneId,
+  type GroupedLanes,
   type InitiativeRowLane,
   type WorkInitiative,
   type WorkLane,
@@ -83,38 +84,39 @@ const partitionByInitiative = (
 
 /**
  * Returns the lanes of Group by Project: the Project lanes of `buildLanes`,
- * with an Initiative row for each Initiative in `initiatives`, in the order
- * they are drawn. A card on a listed Initiative is on its row and in no lane;
- * every other card is in its Project lane.
+ * with an Initiative row for each Initiative in `initiatives`. A card on a
+ * listed Initiative is on its row and in no lane; every other card is in its
+ * Project lane.
  *
- * - `top`: all rows first, in the order of `initiatives`, then the lanes of
- *   the cards on no Initiative. A row says its Project's name in its facts
- *   (`InitiativeRowLane.projectName`).
- * - `lanes`: each lane is followed by the rows of the Initiatives whose
- *   Project it is. An Initiative with no Project, or a Project that is not in
- *   `projects`, draws in the "No project" lane. A lane with no loose card is
- *   still drawn when it holds a row.
+ * - `top`: all rows are `topRows`, in the order of `initiatives`, and the
+ *   groups are the lanes of the cards on no Initiative, with no rows. A row
+ *   says its Project's name in its facts (`InitiativeRowLane.projectName`).
+ * - `lanes`: no `topRows`; each lane's group holds the rows of the
+ *   Initiatives whose Project it is. An Initiative with no Project, or a
+ *   Project that is not in `projects`, draws in the "No project" lane. A lane
+ *   with no loose card is still drawn when it holds a row.
  * - An Initiative with no Task still has its row, so the user can drop the
  *   first card on it. While `view.isFiltering`, a row with no card left, and a
  *   lane with nothing left, are dropped: a filter is a question about Tasks.
  *
- * With no Initiative it returns what `buildLanes` returns. Call it with the
- * cards the filter leaves, to draw the board. `board.initiativeDoneCounts`
- * gives the rings at the end of each row's Landed cell.
+ * With no Initiative it returns the lanes of `buildLanes`, each with no rows.
+ * Call it with the cards the filter leaves, to draw the board. The Done counts
+ * of `board.initiativeDoneCounts` give the rings at the end of each row's
+ * Landed cell.
  */
 export const groupBoardByProject = (
   board: InitiativeBoard,
   projects: readonly WorkProject[],
   initiatives: readonly WorkInitiative[],
   view: InitiativeView,
-): readonly WorkLane[] => {
+): GroupedLanes => {
   const { byInitiative, loose } = partitionByInitiative(board.cards, initiatives);
   const shown = initiatives.filter(
     (initiative) => !view.isFiltering || (byInitiative.get(initiative.id)?.length ?? 0) > 0,
   );
   const buildRow = (
     initiative: WorkInitiative,
-    where: Pick<InitiativeRowLane, "underLaneId" | "projectName">,
+    where: Pick<InitiativeRowLane, "projectName">,
   ): WorkLane =>
     buildLane(
       buildInitiativeRowId(initiative.id),
@@ -132,22 +134,26 @@ export const groupBoardByProject = (
       },
     );
   if (view.place === "top") {
-    const rows = shown.map((initiative) => {
+    const topRows = shown.map((initiative) => {
       const projectName = projects.find((project) => project.id === initiative.projectId)?.name;
       return buildRow(initiative, projectName === undefined ? {} : { projectName });
     });
-    return [...rows, ...buildLanes({ cards: loose }, projects)];
+    const groups = buildLanes({ cards: loose }, projects).map((lane) => ({ lane, rows: [] }));
+    return { topRows, groups };
   }
   const projectIds = new Set(projects.map((project) => project.id));
   const laneIdOf = (initiative: WorkInitiative): string =>
     chooseProjectLaneId(initiative.projectId, projectIds);
   const lanes = buildLanes({ cards: loose }, projects, new Set(shown.map(laneIdOf)));
-  return lanes.flatMap((lane) => [
-    lane,
-    ...shown
-      .filter((initiative) => laneIdOf(initiative) === lane.id)
-      .map((initiative) => buildRow(initiative, { underLaneId: lane.id })),
-  ]);
+  return {
+    topRows: [],
+    groups: lanes.map((lane) => ({
+      lane,
+      rows: shown
+        .filter((initiative) => laneIdOf(initiative) === lane.id)
+        .map((initiative) => buildRow(initiative, {})),
+    })),
+  };
 };
 
 /**
@@ -181,26 +187,3 @@ export const groupBoardByInitiative = (
     ? lanes
     : [...lanes, buildLane(NO_INITIATIVE_LANE_ID, NO_INITIATIVE_LANE_NAME, null, loose)];
 };
-
-/** What a folded Project lane shows of an Initiative it holds: its small flag. */
-export interface HeldInitiative {
-  readonly id: string;
-  readonly hue: number;
-  readonly name: string;
-}
-
-/**
- * Returns the Initiatives the lane `laneId` holds, in the order of their rows:
- * the rows drawn under it In lanes. A folded lane hides its rows, so it keeps
- * a flag for each in its head. Returns no Initiative for a lane that holds
- * none, and for every lane while the rows are On top.
- */
-export const listLaneInitiatives = (
-  lanes: readonly { readonly lane: WorkLane }[],
-  laneId: string,
-): readonly HeldInitiative[] =>
-  lanes.flatMap(({ lane }): HeldInitiative[] =>
-    lane.initiative?.isRow === true && lane.initiative.underLaneId === laneId
-      ? [{ id: lane.initiative.initiativeId, hue: lane.initiative.hue, name: lane.name }]
-      : [],
-  );

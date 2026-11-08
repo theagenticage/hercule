@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { WorkInitiative } from "./lanes";
 import {
   decideInitiativePick,
-  describeInitiativeDone,
-  describeInitiativeFailure,
   describeInitiativeGesture,
   findCardInitiative,
   NEW_INITIATIVE_CHOICE_ID,
@@ -90,26 +88,11 @@ describe("the words of an Initiative change", () => {
     expect(describeInitiativeGesture("Restore a basket", null, false)).toBe(
       "Took Restore a basket off its initiative",
     );
-    expect(describeInitiativeDone("Restore a basket", "Accessible checkout", false)).toBe(
-      "Put Restore a basket on Accessible checkout.",
-    );
   });
 
   it("says the Initiative was closed when the Task came off one", () => {
-    expect(describeInitiativeDone("Restore a basket", null, true)).toBe(
-      "Took Restore a basket off its closed initiative.",
-    );
-    expect(describeInitiativeFailure("Restore a basket", null, true, "Offline")).toBe(
-      "Restore a basket was not taken off its closed initiative: Offline. Try again.",
-    );
-  });
-
-  it("gives the reason of a refusal and says what to do", () => {
-    expect(
-      describeInitiativeFailure("Restore a basket", "Accessible checkout", false, "It is closed"),
-    ).toBe("Restore a basket was not put on Accessible checkout: It is closed. Try again.");
-    expect(describeInitiativeFailure("Restore a basket", null, false, "Offline")).toBe(
-      "Restore a basket was not taken off its initiative: Offline. Try again.",
+    expect(describeInitiativeGesture("Restore a basket", null, true)).toBe(
+      "Took Restore a basket off its closed initiative",
     );
   });
 });

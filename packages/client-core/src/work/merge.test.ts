@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { buildCard } from "./cards.testing";
 import {
+  decideMerge,
   describeMerge,
   describeMergeFailure,
   describeMergeKeeps,
@@ -127,6 +128,28 @@ describe("what stays when two cards merge", () => {
     ],
   ])("says it when %s", (_name, into, away, words) => {
     expect(describeMergeKeeps(into, away, initiatives)).toBe(words);
+  });
+});
+
+describe("the decision for a merge once its check is known", () => {
+  it("accepts what the check allowed", () => {
+    expect(decideMerge({ kind: "allowed" }, "Refund emails")).toEqual({ kind: "accepted" });
+  });
+
+  it("refuses with the words for the undo line", () => {
+    expect(
+      decideMerge(
+        { kind: "refused", refusal: "Plan already waits on this Task." },
+        "Refund emails",
+      ),
+    ).toEqual({
+      kind: "refused",
+      words: '"Refund emails" was not merged: Plan already waits on this Task.',
+    });
+  });
+
+  it("leaves a check that could not be made unchecked, never accepted", () => {
+    expect(decideMerge({ kind: "unchecked" }, "Refund emails")).toEqual({ kind: "unchecked" });
   });
 });
 

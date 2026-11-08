@@ -1,19 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
-  describeMergeKeeps,
-  describeMergeRefused,
   MERGE_PICK_WORDS,
   type MergeCheckResult,
+  type MergeDecision,
   type WorkInitiative,
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import { keepCardInView } from "./keep-in-view";
-import {
-  startMergeTargetCheck,
-  unmarkMergeTarget,
-  waitForMergeCheck,
-  type MergeTargetCheck,
-} from "./merge-target";
+import { createMergeIntent, type MergeIntent } from "./merge-intent";
 
 /**
  * How long, in milliseconds, the walk must rest on a card before the merge
@@ -41,9 +35,8 @@ export interface MergePick {
    * says why instead.
    *
    * While the check has not answered, the pick stays on the card, showing
-   * "Checking", and the merge follows the answer. An answer that does not come
-   * within 2 seconds lets the merge go ahead unchecked, and the undo line says
-   * so. Moving to another card or cancelling drops the wait.
+   * "Checking", and the merge follows the answer (see `MergeIntent.commit`).
+   * Moving to another card or cancelling drops the wait.
    */
   readonly confirm: (targetCardId: string) => void;
 }
@@ -58,17 +51,19 @@ export interface MergePick {
  * is merged into and what stays. All marks are data attributes set outside
  * React.
  *
- * Each card the walk rests on is checked with `checkMerge` (the controller
- * answers whether the merge would be refused). Until it answers, the card
- * promises nothing; a refusal shows on the card in place of its label.
+ * Each card the walk rests on is chosen as the target of a merge intent
+ * (`merge-intent.ts`), which checks it with `checkMerge` (the controller
+ * answers whether the merge would be refused) and decides the merge. Until the
+ * check answers, the card promises nothing; a refusal shows on the card in
+ * place of its label.
  *
  * Picking ends by itself when the picked card leaves the board. The caller
  * cancels it when a card is put in the hand.
  *
  * - `cards` are the cards the board draws.
  * - `initiatives` are the open Initiatives, to name the one a merge keeps.
- * - `merge` merges one card into another (see `MergeCards.mergeCard`); its
- *   last argument is whether the merge check allowed it.
+ * - `merge` settles the merge of one card into another as the intent decided
+ *   (see `MergeCards.mergeCard`); it also says a refusal on the undo line.
  * - `checkMerge` asks whether a merge would be refused; it never rejects.
  * - `say` shows a line on the undo line with no Undo.
  * - `onStart` runs when picking starts, such as to close the details.
@@ -85,23 +80,20 @@ export const useMergePick = ({
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly cards: readonly WorkCard[];
   readonly initiatives: readonly WorkInitiative[];
-  readonly merge: (sourceCardId: string, targetCardId: string, isChecked: boolean) => void;
+  readonly merge: (sourceCardId: string, targetCardId: string, decision: MergeDecision) => void;
   readonly checkMerge: (sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>;
   readonly say: (text: string) => void;
   readonly onStart: () => void;
 }): MergePick => {
   const [pickedId, setPickedId] = useState<string | null>(null);
-  const unmarkTarget = useRef<() => void>(() => undefined);
   // False from the moment picking ends, before React has drawn that, so a focus change in between marks nothing.
   const isPicking = useRef(false);
   const latest = useRef({ cards, initiatives, checkMerge });
   useLayoutEffect(() => {
     latest.current = { cards, initiatives, checkMerge };
   });
-  /** The card the walk is on, and its merge check. `null` when the walk is on no card. */
-  const checked = useRef<{ cardId: string; check: MergeTargetCheck } | null>(null);
-  /** Set while a confirm waits for the merge check; any other value or `null` drops the wait. */
-  const confirming = useRef<object | null>(null);
+  /** The merge intent of the pick that is running: made when picking starts, and gone when it ends. */
+  const intentRef = useRef<MergeIntent | null>(null);
 
   // A picked card that leaves the board (merged by another client, done, deleted) ends the picking.
   const sourceId = cards.some((card) => card.id === pickedId) ? pickedId : null;
@@ -118,16 +110,20 @@ export const useMergePick = ({
     const desk = scroller?.closest<HTMLElement>(".work-desk");
     if (sourceId === null || scroller == null || desk == null) return;
     desk.dataset["mergePicking"] = "";
+    const intent = createMergeIntent({
+      readCards: () => latest.current.cards,
+      readInitiatives: () => latest.current.initiatives,
+      askCheck: (sourceCardId, targetCardId) =>
+        latest.current.checkMerge(sourceCardId, targetCardId),
+      // The check asks once the walk has rested on a card, so stepping over many cards asks only about the last.
+      askAfterMs: WALK_REST_MS,
+    });
+    intentRef.current = intent;
     let marked: HTMLElement | null = null;
     const unmark = (): void => {
-      if (marked !== null) unmarkMergeTarget(marked);
       marked = null;
-      checked.current?.check.stop();
-      checked.current = null;
-      // A confirm waiting for this card's check is dropped: the walk moved on.
-      confirming.current = null;
+      intent.leave();
     };
-    unmarkTarget.current = unmark;
     const markFocused = (): void => {
       if (!isPicking.current) return;
       const focused = document.activeElement;
@@ -138,27 +134,8 @@ export const useMergePick = ({
           : null;
       if (next === marked) return;
       unmark();
-      const { cards: current, initiatives: open, checkMerge: check } = latest.current;
-      const target = current.find((card) => card.id === cardId);
-      if (next !== null && target !== undefined) {
-        const walk: { cardId: string; check: MergeTargetCheck } = {
-          cardId: target.id,
-          check: startMergeTargetCheck({
-            element: next,
-            title: target.title,
-            keeps: describeMergeKeeps(
-              target,
-              current.find((card) => card.id === sourceId) ?? {},
-              open,
-            ),
-            ask: () => check(sourceId, target.id),
-            askAfterMs: WALK_REST_MS,
-            // The answer counts only while the walk is still on this card.
-            isCurrent: () => checked.current === walk,
-          }),
-        };
-        marked = next;
-        checked.current = walk;
+      if (next !== null && cardId !== undefined) {
+        if (intent.choose({ sourceId, targetId: cardId, element: next })) marked = next;
       }
     };
     const onFocusOut = (event: FocusEvent): void => {
@@ -172,7 +149,7 @@ export const useMergePick = ({
       scroller.removeEventListener("focusin", markFocused);
       scroller.removeEventListener("focusout", onFocusOut);
       unmark();
-      unmarkTarget.current = () => undefined;
+      intentRef.current = null;
       delete desk.dataset["mergePicking"];
       for (const source of scroller.querySelectorAll<HTMLElement>("[data-merge-source]")) {
         delete source.dataset["mergeSource"];
@@ -180,20 +157,14 @@ export const useMergePick = ({
     };
   }, [sourceId, scrollRef]);
 
-  /** Ends the pick on the card `targetCardId` with the merge check's answer `check`: merges, or says why not. */
-  const finish = (pickedSourceId: string, targetCardId: string, check: MergeCheckResult): void => {
-    confirming.current = null;
+  /** Ends the pick on the card `targetCardId` with the merge `decision`: merges, or says why not. */
+  const finish = (pickedSourceId: string, targetCardId: string, decision: MergeDecision): void => {
     isPicking.current = false;
     setPickedId(null);
     // The target gives up its marks first, so its settle after the merge is not cut short.
-    unmarkTarget.current();
-    if (check.kind === "refused") {
-      const title =
-        latest.current.cards.find((card) => card.id === pickedSourceId)?.title ?? "The card";
-      say(describeMergeRefused(title, check.refusal));
-      return;
-    }
-    merge(pickedSourceId, targetCardId, check.kind === "allowed");
+    intentRef.current?.leave();
+    merge(pickedSourceId, targetCardId, decision);
+    if (decision.kind === "refused") return;
     scrollRef.current
       ?.querySelector<HTMLElement>(`[data-card-id="${targetCardId}"]`)
       ?.focus({ preventScroll: true });
@@ -215,31 +186,24 @@ export const useMergePick = ({
     },
     cancel: () => {
       isPicking.current = false;
-      confirming.current = null;
+      intentRef.current?.leave();
       setPickedId(null);
     },
     confirm: (targetCardId) => {
-      if (sourceId === null || confirming.current !== null) return;
+      const intent = intentRef.current;
+      if (sourceId === null || intent === null || intent.isWaiting()) return;
       if (targetCardId === sourceId) {
         isPicking.current = false;
         setPickedId(null);
         return;
       }
-      const walk = checked.current?.cardId === targetCardId ? checked.current : null;
-      const found = walk?.check.read();
-      if (found !== undefined && found.kind !== "checking") {
-        finish(sourceId, targetCardId, found);
+      // A card chosen with the pointer has not been walked to, so it is chosen here, with no marks.
+      if (!intent.choose({ sourceId, targetId: targetCardId })) {
+        // The card left the board: the merge says so.
+        finish(sourceId, targetCardId, { kind: "unchecked" });
         return;
       }
-      // The answer is not here yet: the card stays picked, showing "Checking", until it is.
-      const ticket = {};
-      confirming.current = ticket;
-      walk?.check.askNow();
-      const result = walk?.check.result ?? latest.current.checkMerge(sourceId, targetCardId);
-      void waitForMergeCheck(result).then((answer) => {
-        if (confirming.current !== ticket) return;
-        finish(sourceId, targetCardId, answer);
-      });
+      intent.commit({ onDecision: (decision) => finish(sourceId, targetCardId, decision) });
     },
   };
 };

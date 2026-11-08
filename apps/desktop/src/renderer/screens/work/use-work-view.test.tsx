@@ -1,8 +1,8 @@
 /** Tests how the view of the Work board keeps its folds: the block of rows On top, the opened rows, and Fold everything. */
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { buildLane } from "@hercule/client-core/work";
-import { toggleLaneOrRow, useWorkView } from "./use-work-view";
+import { buildLane, isBlockFolded, isFolded } from "@hercule/client-core/work";
+import { useWorkView } from "./use-work-view";
 import { readSavedWorkView, writeSavedWorkView, EMPTY_WORK_VIEW } from "./work-view-storage";
 
 const KEY = "work-view:test";
@@ -12,6 +12,12 @@ afterEach(() => {
   localStorage.clear();
 });
 
+const STOREFRONT = buildLane("storefront", "Storefront", "storefront", []);
+const rowOf = (initiativeId: string) =>
+  buildLane(`initiative-row:${initiativeId}`, initiativeId, null, [], {
+    initiative: { initiativeId, hue: 245, isRow: true, doneRingCount: 0 },
+  });
+
 const renderView = (listed: readonly string[] | undefined) =>
   renderHook(({ ids }) => useWorkView(KEY, ids), { initialProps: { ids: listed } });
 
@@ -19,17 +25,17 @@ describe("the block of rows On top", () => {
   it("is open while a Find text is on, whatever the user saved, and folds again after", () => {
     writeSavedWorkView(KEY, { ...EMPTY_WORK_VIEW, isInitiativeBlockFolded: true });
     const { result } = renderView(["a", "b"]);
-    expect(result.current.isInitiativeBlockFolded).toBe(true);
+    expect(isBlockFolded(result.current.folds)).toBe(true);
 
     act(() => {
       result.current.setFindText("refund");
     });
-    expect(result.current.isInitiativeBlockFolded).toBe(false);
+    expect(isBlockFolded(result.current.folds)).toBe(false);
 
     act(() => {
       result.current.setFindText("");
     });
-    expect(result.current.isInitiativeBlockFolded).toBe(true);
+    expect(isBlockFolded(result.current.folds)).toBe(true);
     expect(readSavedWorkView(KEY).isInitiativeBlockFolded).toBe(true);
   });
 
@@ -42,13 +48,13 @@ describe("the block of rows On top", () => {
     act(() => {
       result.current.toggleInitiativeBlock();
     });
-    expect(result.current.isInitiativeBlockFolded).toBe(true);
+    expect(isBlockFolded(result.current.folds)).toBe(true);
     expect(readSavedWorkView(KEY).isInitiativeBlockFolded).toBe(false);
 
     act(() => {
       result.current.setFilter({});
     });
-    expect(result.current.isInitiativeBlockFolded).toBe(false);
+    expect(isBlockFolded(result.current.folds)).toBe(false);
   });
 });
 
@@ -57,14 +63,14 @@ describe("the opened rows", () => {
     writeSavedWorkView(KEY, { ...EMPTY_WORK_VIEW, openedInitiativeIds: ["a", "gone"] });
     const { result } = renderView(["a"]);
 
-    expect([...result.current.openedInitiativeIds]).toEqual(["a"]);
+    expect([...result.current.folds.saved.openedInitiativeIds]).toEqual(["a"]);
   });
 
   it("keeps every opened row until the list is read", () => {
     writeSavedWorkView(KEY, { ...EMPTY_WORK_VIEW, openedInitiativeIds: ["a", "gone"] });
     const { result } = renderView(undefined);
 
-    expect([...result.current.openedInitiativeIds]).toEqual(["a", "gone"]);
+    expect([...result.current.folds.saved.openedInitiativeIds]).toEqual(["a", "gone"]);
   });
 
   it("drops an unlisted Initiative from what it saves", () => {
@@ -72,7 +78,7 @@ describe("the opened rows", () => {
     const { result } = renderView(["a", "b"]);
 
     act(() => {
-      result.current.toggleInitiativeRow("b");
+      result.current.toggleFold(rowOf("b"));
     });
 
     expect(readSavedWorkView(KEY).openedInitiativeIds).toEqual(["a", "b"]);
@@ -88,35 +94,47 @@ describe("the opened rows", () => {
 
     // Every lane is folded and no listed row is open, so this opens the lanes.
     act(() => {
-      result.current.foldEverything(["storefront"]);
+      result.current.foldEverything([STOREFRONT, rowOf("a")]);
     });
 
     expect(readSavedWorkView(KEY).foldedLaneIds).toEqual([]);
   });
 });
 
-describe("toggleLaneOrRow", () => {
-  const calls: string[] = [];
-  const view = {
-    toggleLane: (laneId: string) => calls.push(`lane:${laneId}`),
-    toggleInitiativeRow: (initiativeId: string) => calls.push(`row:${initiativeId}`),
-  };
+describe("toggleFold", () => {
+  it("saves the fold of a lane and the opening of a row", () => {
+    const { result } = renderView(["a"]);
 
-  it("folds a row by its Initiative and any other lane by its id", () => {
-    toggleLaneOrRow(view, buildLane("storefront", "Storefront", "storefront", []));
-    toggleLaneOrRow(
-      view,
-      buildLane("initiative-row:a", "A", null, [], {
-        initiative: { initiativeId: "a", hue: 245, isRow: true, doneRingCount: 0 },
-      }),
-    );
-    toggleLaneOrRow(
-      view,
-      buildLane("initiative:a", "A", null, [], {
-        initiative: { initiativeId: "a", hue: 245, isRow: false },
-      }),
-    );
+    act(() => {
+      result.current.toggleFold(STOREFRONT);
+    });
+    act(() => {
+      result.current.toggleFold(rowOf("a"));
+    });
 
-    expect(calls).toEqual(["lane:storefront", "row:a", "lane:initiative:a"]);
+    expect(isFolded(result.current.folds, STOREFRONT)).toBe(true);
+    expect(isFolded(result.current.folds, rowOf("a"))).toBe(false);
+    expect(readSavedWorkView(KEY)).toMatchObject({
+      foldedLaneIds: ["storefront"],
+      openedInitiativeIds: ["a"],
+    });
+  });
+
+  it("holds a fold made while filtering only as long as the filter, and saves nothing for it", () => {
+    const { result } = renderView(["a"]);
+    act(() => {
+      result.current.setFilter({ state: ["failed"] });
+    });
+
+    act(() => {
+      result.current.toggleFold(STOREFRONT);
+    });
+    expect(isFolded(result.current.folds, STOREFRONT)).toBe(true);
+    expect(readSavedWorkView(KEY).foldedLaneIds).toEqual([]);
+
+    act(() => {
+      result.current.setFilter({});
+    });
+    expect(isFolded(result.current.folds, STOREFRONT)).toBe(false);
   });
 });

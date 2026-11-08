@@ -71,7 +71,6 @@ const PATHS = [
   join(HERE, "-stop-run.ts"),
   join(HERE, "-task-links.ts"),
   join(HERE, "-task-blockers.ts"),
-  join(HERE, "-task-initiative.ts"),
   join(HERE, "-initiative-sheet.tsx"),
   join(HERE, "-pane-changes.ts"),
   join(HERE, "-undoable-task-change.ts"),
