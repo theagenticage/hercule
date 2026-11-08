@@ -1,6 +1,7 @@
 import type { BoardStage, WorkBoard, WorkCard } from "@hercule/contract";
 import type { ArrangedLane } from "./arrange-lanes";
 import { chooseAfterTaskId, settleDropMove, type CardMove, type DropMove } from "./card-move";
+import { NO_INITIATIVE_LANE_ID } from "./initiative-lanes";
 import type { WorkProject } from "./lanes";
 
 /**
@@ -40,7 +41,33 @@ export interface DropRequest {
    * card carried alone.
    */
   readonly followerIds?: readonly string[];
+  /**
+   * The ids of the Initiatives the board lists (the open ones). A drop on a
+   * Project lane takes a card off its Initiative only when the Initiative is
+   * in here, because only then was the card drawn on it.
+   */
+  readonly listedInitiativeIds: ReadonlySet<string>;
 }
+
+/** The part of a `DropMove` that says what a drop does to the Initiative of the cards. */
+type InitiativeChange = NonNullable<DropMove["initiativeChange"]>;
+
+/**
+ * Returns the `initiativeId` field of the move of `card` for a drop with
+ * `change`: empty when the drop changes nothing about its Initiative.
+ */
+const buildInitiativeField = (
+  card: WorkCard,
+  change: InitiativeChange | undefined,
+): { readonly initiativeId?: string | null } => {
+  if (change === undefined) return {};
+  if (change.kind === "join") {
+    return card.initiativeId === change.initiativeId ? {} : { initiativeId: change.initiativeId };
+  }
+  return card.initiativeId !== undefined && change.listedInitiativeIds.has(card.initiativeId)
+    ? { initiativeId: null }
+    : {};
+};
 
 /**
  * Returns the drop: the `task.move` it asks for, and the Project of the lane
@@ -65,6 +92,15 @@ export interface DropRequest {
  *   `projectId` and no `afterTaskId`, because the lane belongs to the source
  *   and a cell is still a Project and a stage. The card goes last in its
  *   stored cell, and the lane shows it by that order.
+ * - On an Initiative (a row, or a lane of Group by Initiative) the drop names
+ *   the stage and `initiativeId`, never a Project, and no `afterTaskId`: the
+ *   cells of such a lane hold cards of many Projects, so the card goes last in
+ *   its own stored cell. `initiativeId` is named only when it changes.
+ * - On "Not in an initiative" the drop works the same way, taking the card off
+ *   its Initiative when it was drawn on one.
+ * - On a Project lane the drop also takes a card off its Initiative, when it
+ *   was drawn on one (`DropRequest.listedInitiativeIds`): a Project lane holds
+ *   what is on no Initiative.
  * - On a folded lane there is no slot, so `afterTaskId` is absent and the
  *   card goes last in its cell.
  */
@@ -75,6 +111,22 @@ export const buildDropMove = (request: DropRequest): DropMove => {
   if (lane.lane.outside !== undefined) {
     return { move: { taskId: movingCard.id, ...stageField }, targetStage: stage };
   }
+  const { initiative } = lane.lane;
+  const initiativeChange: InitiativeChange =
+    initiative === undefined
+      ? { kind: "leave", listedInitiativeIds: request.listedInitiativeIds }
+      : { kind: "join", initiativeId: initiative.initiativeId };
+  if (initiative !== undefined || lane.lane.id === NO_INITIATIVE_LANE_ID) {
+    return {
+      move: {
+        taskId: movingCard.id,
+        ...stageField,
+        ...buildInitiativeField(movingCard, initiativeChange),
+      },
+      targetStage: stage,
+      initiativeChange,
+    };
+  }
   const isOwnLane = lane.lane.cells.some((cell) =>
     cell.cards.some((card) => card.id === movingCard.id),
   );
@@ -82,9 +134,10 @@ export const buildDropMove = (request: DropRequest): DropMove => {
     taskId: movingCard.id,
     ...stageField,
     ...(isOwnLane ? {} : { projectId: lane.lane.projectId }),
+    ...buildInitiativeField(movingCard, initiativeChange),
   };
   const targetProjectId = lane.lane.projectId;
-  if (lane.isFolded) return { move, targetProjectId, targetStage: stage };
+  if (lane.isFolded) return { move, targetProjectId, targetStage: stage, initiativeChange };
 
   const leavingIds = new Set([movingCard.id, ...(request.followerIds ?? [])]);
   const storedCell = (lane.lane.cells.find((cell) => cell.stage === stage)?.cards ?? []).filter(
@@ -97,7 +150,12 @@ export const buildDropMove = (request: DropRequest): DropMove => {
     nextVisibleCardId: beforeCardId ?? firstHiddenCardId,
     movingCardFailed: movingCard.failure !== undefined,
   });
-  return { move: { ...move, afterTaskId }, targetProjectId, targetStage: stage };
+  return {
+    move: { ...move, afterTaskId },
+    targetProjectId,
+    targetStage: stage,
+    initiativeChange,
+  };
 };
 
 /**
@@ -110,10 +168,12 @@ export const buildDropMove = (request: DropRequest): DropMove => {
  * A follower names the stage (`targetStage`) only when it stands in another
  * one, and a Project (`targetProjectId`) only when it stands in another one,
  * as the lead card's move does. A drop with no `targetProjectId`
- * (an outside lane) changes the stage only, so no follower names a Project.
+ * (an outside lane, an Initiative) changes no Project, so no follower names
+ * one. A follower names its Initiative by the same rule as the lead card
+ * (`DropMove.initiativeChange`), and no `afterTaskId` when the lead card names none.
  */
 export const buildFollowerMoves = (
-  { move: leadMove, targetProjectId, targetStage = leadMove.stage }: DropMove,
+  { move: leadMove, targetProjectId, targetStage = leadMove.stage, initiativeChange }: DropMove,
   followers: readonly WorkCard[],
 ): readonly CardMove[] => {
   let previousId = leadMove.taskId;
@@ -124,6 +184,7 @@ export const buildFollowerMoves = (
       ...(targetProjectId === undefined || (card.projectId ?? null) === targetProjectId
         ? {}
         : { projectId: targetProjectId }),
+      ...buildInitiativeField(card, initiativeChange),
       ...(leadMove.afterTaskId === undefined ? {} : { afterTaskId: previousId }),
     };
     previousId = card.id;

@@ -1,6 +1,11 @@
 /** Tests the second line of a card and the name a screen reader reads for a card. */
 import { describe, expect, it } from "vitest";
 import { buildCard, buildSummary, FAILURE, QUESTION } from "./cards.testing";
+
+const WAITING = {
+  blockedBy: [{ id: "b", title: "Plan the rollout", stage: "building" as const }],
+  blockedByCount: 2,
+};
 import {
   chooseCardSecondLine,
   describeCardForReader,
@@ -68,6 +73,26 @@ describe("chooseCardSecondLine", () => {
       { text: "You said: “Ship it”.", tone: "summary" },
     ],
     [
+      "what a blocked card waits on, over a summary",
+      { ...WAITING, summary: SUMMARY },
+      { text: "Waits on Plan the rollout and 1 more.", tone: "blocked" },
+    ],
+    [
+      "what broke, over what a card waits on",
+      { ...WAITING, failure: FAILURE },
+      { text: "Review PR failed: the branch changed mid-run.", tone: "failed" },
+    ],
+    [
+      "the question, over what a card waits on",
+      { ...WAITING, openQuestion: QUESTION },
+      { text: "Should refunds go back to the original card?", tone: "question" },
+    ],
+    [
+      "the summary of a card at Landed, which waits on nothing any more",
+      { ...WAITING, stage: "landed", summary: SUMMARY },
+      { text: "Three designs, depots worried.", tone: "summary" },
+    ],
+    [
       "the summary line",
       { summary: SUMMARY },
       { text: "Three designs, depots worried.", tone: "summary" },
@@ -125,6 +150,11 @@ describe("describeCardForReader", () => {
       "a held answer in place of the summary",
       { stage: "in-review", summary: SUMMARY, heldAnswer: "You said: “Ship it”." },
       "Add a refund button, In review, You said: “Ship it”., 3 days ago",
+    ],
+    [
+      "what it waits on before the stage, and no summary beside it",
+      { stage: "building", ...WAITING, summary: SUMMARY },
+      "Add a refund button, Waits on Plan the rollout and 1 more, Building, 3 days ago",
     ],
     [
       "a blank question as Has a question, and no summary beside it",

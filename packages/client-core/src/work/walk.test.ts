@@ -4,6 +4,7 @@ import type { BoardStage } from "@hercule/contract";
 import { arrangeLanes, buildStackId } from "./arrange-lanes";
 import { buildBoard, buildCard, buildPlace } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
+import { groupBoardByProject } from "./initiative-lanes";
 import { buildLanes } from "./lanes";
 import { walkBoard, type BoardWalk, type WalkStop } from "./walk";
 
@@ -52,6 +53,7 @@ const LANES = arrangeLanes(
   {
     foldedLaneIds: new Set(["delivery"]),
     openedCellIds: new Set<string>(),
+    openedInitiativeIds: new Set<string>(),
     openedStackIds: new Set<string>(),
     stackCandidates: [],
     isFiltering: false,
@@ -81,6 +83,7 @@ describe("walkBoard over stacks", () => {
     arrangeLanes(buildLanes(buildBoard(...cards), PROJECTS), {
       foldedLaneIds: new Set<string>(),
       openedCellIds: new Set<string>(),
+      openedInitiativeIds: new Set<string>(),
       openedStackIds: new Set(isOpen ? [buildStackId("cart", "ticket")] : []),
       stackCandidates: [
         { leadTaskId: "ticket", memberTaskId: "pr1", noun: "pull request" },
@@ -189,6 +192,7 @@ describe("walkBoard", () => {
     const shown = arrangeLanes(groupBoardByContext(board, "acme/project"), {
       foldedLaneIds: new Set<string>(),
       openedCellIds: new Set<string>(),
+      openedInitiativeIds: new Set<string>(),
       openedStackIds: new Set<string>(),
       stackCandidates: [],
       isFiltering: false,
@@ -208,6 +212,53 @@ describe("walkBoard", () => {
       expect(walkBoard(shown, inLane("place:acme:b", "t1"), "up")).toEqual(
         inLane("place:acme:a", "t1"),
       );
+    });
+  });
+});
+
+describe("walkBoard over Initiative rows", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const };
+  const board = {
+    ...buildBoard(
+      buildCard("p1", { initiativeId: "platform" }),
+      buildCard("p2", { initiativeId: "platform" }),
+      buildCard("loose"),
+    ),
+    initiativeDoneCounts: {},
+  };
+  const rows = (opened: readonly string[]) =>
+    arrangeLanes(
+      groupBoardByProject(board, PROJECTS, [PLATFORM], { place: "top", isFiltering: false }),
+      {
+        foldedLaneIds: new Set<string>(),
+        openedCellIds: new Set<string>(),
+        openedInitiativeIds: new Set(opened),
+        openedStackIds: new Set<string>(),
+        stackCandidates: [],
+        isFiltering: false,
+      },
+    );
+
+  it("walks into an open row like into a lane, down to the lane below", () => {
+    const lanes = rows(["platform"]);
+    const row = lanes[0]!.lane.id;
+    expect(walkBoard(lanes, undefined, "down")).toEqual({
+      kind: "card",
+      laneId: row,
+      cardId: "p1",
+    });
+    expect(walkBoard(lanes, { kind: "card", laneId: row, cardId: "p2" }, "down")).toEqual({
+      kind: "card",
+      laneId: "no-project",
+      cardId: "loose",
+    });
+  });
+
+  it("stops on the head of a folded row, which shows no card", () => {
+    const lanes = rows([]);
+    expect(walkBoard(lanes, undefined, "nextLane")).toEqual({
+      kind: "lane",
+      laneId: lanes[0]!.lane.id,
     });
   });
 });

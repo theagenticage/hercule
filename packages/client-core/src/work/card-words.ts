@@ -6,6 +6,7 @@
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { describeDeskAge } from "../desk/age";
 import { dropClosingFullStops } from "../text";
+import { describeCardBlockers } from "./card-state";
 
 /** The name of each stage as the board shows it. */
 export const STAGE_NAMES: Readonly<Record<BoardStage, string>> = {
@@ -65,22 +66,24 @@ export type ShownWorkCard = WorkCard & {
  *
  * - `failed`: what broke.
  * - `question`: what a Thread asks.
+ * - `blocked`: what the card waits on.
  * - `summary`: the Task's summary line, or the words of the answer given to
  *   its question while that answer is held.
  * - `pending`: no summary has been written yet, and one is being written.
  */
 export interface CardSecondLine {
   readonly text: string;
-  readonly tone: "failed" | "question" | "summary" | "pending";
+  readonly tone: "failed" | "question" | "blocked" | "summary" | "pending";
 }
 
 /**
  * Returns the second line of `card`, or `null` when the card has none. What
  * broke takes the line first, then what a Thread asks, then the answer the
- * user gave that is still held (`You said: “Ship it”.`), then the summary
- * line, then "Writing a summary" for a Task that has no summary yet. A summary draws
- * the same whether it is stale or not, and it is never shown beside a failure
- * or a question.
+ * user gave that is still held (`You said: “Ship it”.`), then what a blocked
+ * card waits on (`Waits on Add a refund button.`), then the summary line,
+ * then "Writing a summary" for a Task that has no summary yet. A summary draws
+ * the same whether it is stale or not, and it is never shown beside a failure,
+ * a question or a blocker.
  *
  * `canWriteSummaries` says whether Text Generation can run. When it cannot, no
  * summary is coming, so a card with none has no second line rather than
@@ -98,6 +101,8 @@ export const chooseCardSecondLine = (
     return { text: describeCardQuestion(card.openQuestion), tone: "question" };
   }
   if (card.heldAnswer !== undefined) return { text: card.heldAnswer, tone: "summary" };
+  const blockers = describeCardBlockers(card);
+  if (blockers !== null) return { text: `${blockers.words}.`, tone: "blocked" };
   if (card.summary === undefined) {
     return canWriteSummaries ? { text: PENDING_SUMMARY_WORDS, tone: "pending" } : null;
   }
@@ -107,10 +112,10 @@ export const chooseCardSecondLine = (
 
 /**
  * Returns the name a screen reader reads for a card, in this order: the
- * title, what broke, what it asks, the stage, the summary, the age. What
- * broke comes before what it asks because a failure outranks everything else
- * on a card. The summary is read only where the card shows it: not beside a
- * failure or a question. A Task with no summary yet reads "Summary being
+ * title, what broke, what it asks, what it waits on, the stage, the summary,
+ * the age. What broke comes before what it asks because a failure outranks
+ * everything else on a card. The summary is read only where the card shows it:
+ * not beside a failure, a question or a blocker. A Task with no summary yet reads "Summary being
  * written", unless `canWriteSummaries` is false (see `chooseCardSecondLine`).
  * `now` is a parameter so a test can fix it.
  */
@@ -121,6 +126,7 @@ export const describeCardForReader = (
 ): string => {
   const failure = card.failure === undefined ? [] : [describeCardFailure(card.failure)];
   const question = card.openQuestion === undefined ? [] : [describeCardQuestion(card.openQuestion)];
+  const blockers = describeCardBlockers(card)?.words;
   const secondLine = chooseCardSecondLine(card, canWriteSummaries);
   const summary =
     secondLine?.tone === "pending"
@@ -132,6 +138,7 @@ export const describeCardForReader = (
     card.title,
     ...failure,
     ...question,
+    ...(blockers === undefined ? [] : [blockers]),
     STAGE_NAMES[card.stage],
     ...summary,
     describeDeskAge(card.lastActivityAt, now),

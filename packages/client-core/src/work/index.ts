@@ -5,7 +5,8 @@
  * and the snapshot and plan of the morning replay that plays them back,
  * the changes the board holds back until the user's hand is still, the keyboard walk, which cards are selected, the
  * words and the pose of a card, the lanes and facets of the outside places a
- * Task stands under, what the Add sheet opens on and says, and the words of
+ * Task stands under, the Initiative rows and lanes with their beads and
+ * progress, what a blocked card says, what the Add sheet opens on and says, and the words of
  * linking a thing to a Task. It is the
  * subpath `@hercule/client-core/work`, not part of the
  * library's index, so that its code stays out of the shell's chunk. The
@@ -20,6 +21,8 @@ export * from "./board-replay";
 export * from "./card-change";
 export * from "./card-move";
 export * from "./card-pose";
+export * from "./card-state";
+export * from "./card-title";
 export * from "./card-words";
 export * from "./context-lanes";
 export * from "./describe-card-move";
@@ -28,6 +31,9 @@ export * from "./facets";
 export * from "./find";
 export * from "./held-answers";
 export * from "./hold-back-board";
+export * from "./initiative-lanes";
+export * from "./initiative-line";
+export * from "./initiative-progress";
 export * from "./lanes";
 export * from "./list-card-moves";
 export * from "./logical-board";

@@ -2,7 +2,7 @@
 import type { TryAgainUndo } from "@hercule/contract";
 import { dropClosingFullStops } from "../text";
 import type { EndStage } from "./card-change";
-import { shortenTitle } from "./describe-card-move";
+import { shortenTitle } from "./card-title";
 
 /**
  * Returns what the undo line says after Try again, in the past tense like a

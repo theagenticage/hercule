@@ -115,7 +115,7 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
  * Returns `board` with the card `cardId` back in the stage and place it has in
  * `shown`, with the `stageCause` and `stageChangedAt` it has there: after the card that stood before
  * it in its cell, or last in the cell when that card is gone. The card keeps
- * the Project it has in `board`. Returns `board` itself when either board has
+ * the Project and the Initiative it has in `board`. Returns `board` itself when either board has
  * no such card.
  */
 const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string): WorkBoard => {
@@ -126,6 +126,7 @@ const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string)
   const { move } = buildMoveToPlacement(board, {
     ...placement,
     projectId: current.projectId ?? null,
+    initiativeId: current.initiativeId ?? null,
   });
   const moved = applyCardMove(board, move);
   return {

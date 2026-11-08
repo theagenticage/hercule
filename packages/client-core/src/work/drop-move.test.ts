@@ -9,7 +9,12 @@ import { applyCardMove, type CardMove } from "./card-move";
 import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
 import { buildDropMove, buildFollowerMoves, settleGroupDrop } from "./drop-move";
-import { buildLanes } from "./lanes";
+import {
+  groupBoardByInitiative,
+  groupBoardByProject,
+  NO_INITIATIVE_LANE_ID,
+} from "./initiative-lanes";
+import { buildLanes, type WorkLane } from "./lanes";
 
 const PROJECTS = [
   { id: "storefront", name: "Storefront" },
@@ -44,6 +49,7 @@ const buildDrop = (
   const lane = arrangeLanes(buildLanes({ cards }, PROJECTS), {
     foldedLaneIds: new Set(foldedLaneId === undefined ? [] : [foldedLaneId]),
     openedCellIds: new Set(),
+    openedInitiativeIds: new Set(),
     openedStackIds: new Set(),
     stackCandidates: [],
     isFiltering: false,
@@ -53,6 +59,7 @@ const buildDrop = (
     lane,
     stage,
     beforeCardId,
+    listedInitiativeIds: new Set(),
     ...(followerIds === undefined ? {} : { followerIds }),
   });
 };
@@ -210,11 +217,18 @@ describe("buildDropMove", () => {
       const lane = arrangeLanes(groupBoardByContext(board, "acme/project"), {
         foldedLaneIds: new Set(folded ? [laneId] : []),
         openedCellIds: new Set(),
+        openedInitiativeIds: new Set(),
         openedStackIds: new Set(),
         stackCandidates: [],
         isFiltering: false,
       }).find((each) => each.lane.id === laneId)!;
-      return buildDropMove({ movingCard: board.cards[0]!, lane, stage: "building", beforeCardId });
+      return buildDropMove({
+        movingCard: board.cards[0]!,
+        lane,
+        stage: "building",
+        beforeCardId,
+        listedInitiativeIds: new Set(),
+      });
     };
 
     it.each([
@@ -402,5 +416,196 @@ describe("buildFollowerMoves", () => {
     ]);
 
     expect(moves).toEqual([{ taskId: "d" }, { taskId: "b", stage: "building" }]);
+  });
+});
+
+describe("buildDropMove with Initiatives", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const, projectId: "storefront" };
+  const LAUNCH = { id: "launch", name: "Spring launch", hue: 150 as const };
+  const INITIATIVES = [PLATFORM, LAUNCH];
+  const LISTED = new Set(INITIATIVES.map((initiative) => initiative.id));
+
+  const cards = [
+    buildCard("loose", { projectId: "storefront" }),
+    buildCard("other", { projectId: "checkout", stage: "planned" }),
+    buildCard("on-platform", { projectId: "storefront", initiativeId: "platform" }),
+    buildCard("on-platform-2", { projectId: "storefront", initiativeId: "platform" }),
+    buildCard("on-launch", { projectId: "checkout", initiativeId: "launch", stage: "building" }),
+    buildCard("on-closed", { projectId: "storefront", initiativeId: "closed-one" }),
+  ];
+  const board = { ...buildBoard(...cards), initiativeDoneCounts: {} };
+  const view = {
+    foldedLaneIds: new Set<string>(),
+    openedCellIds: new Set<string>(),
+    openedInitiativeIds: new Set<string>(),
+    openedStackIds: new Set<string>(),
+    stackCandidates: [],
+    isFiltering: false,
+  };
+
+  const dropOnLane = (
+    lanes: readonly WorkLane[],
+    movingCardId: string,
+    laneId: string,
+    stage: BoardStage | null,
+    followerIds?: readonly string[],
+  ) =>
+    buildDropMove({
+      movingCard: cards.find((card) => card.id === movingCardId)!,
+      lane: arrangeLanes(lanes, view).find((each) => each.lane.id === laneId)!,
+      stage,
+      beforeCardId: null,
+      listedInitiativeIds: LISTED,
+      ...(followerIds === undefined ? {} : { followerIds }),
+    });
+
+  const onTop = groupBoardByProject(board, PROJECTS, INITIATIVES, {
+    place: "top",
+    isFiltering: false,
+  });
+  const byInitiative = groupBoardByInitiative(board, INITIATIVES, { isFiltering: false });
+
+  it.each([
+    [
+      "a row, at a stage",
+      onTop,
+      "loose",
+      "initiative-row:platform",
+      "building",
+      { taskId: "loose", stage: "building", initiativeId: "platform" },
+    ],
+    [
+      "a row, keeping the stage",
+      onTop,
+      "loose",
+      "initiative-row:platform",
+      null,
+      { taskId: "loose", initiativeId: "platform" },
+    ],
+    [
+      "another row",
+      onTop,
+      "on-launch",
+      "initiative-row:platform",
+      "building",
+      { taskId: "on-launch", initiativeId: "platform" },
+    ],
+    [
+      "its own row, at another stage",
+      onTop,
+      "on-platform",
+      "initiative-row:platform",
+      "planned",
+      { taskId: "on-platform", stage: "planned" },
+    ],
+    [
+      "its own row, at its own stage",
+      onTop,
+      "on-platform",
+      "initiative-row:platform",
+      "exploring",
+      { taskId: "on-platform" },
+    ],
+    [
+      "a lane of Group by Initiative",
+      byInitiative,
+      "loose",
+      "initiative:launch",
+      "planned",
+      { taskId: "loose", stage: "planned", initiativeId: "launch" },
+    ],
+    [
+      "a card of a closed Initiative",
+      onTop,
+      "on-closed",
+      "initiative-row:launch",
+      null,
+      { taskId: "on-closed", initiativeId: "launch" },
+    ],
+  ] as const)(
+    "on %s names the stage and the Initiative, never a Project or a place",
+    (_, lanes, id, laneId, stage, move) => {
+      const drop = dropOnLane(lanes, id, laneId, stage);
+      expect(drop.move).toEqual(move);
+      expect(drop.targetProjectId).toBeUndefined();
+    },
+  );
+
+  it.each([
+    [
+      "a Project lane, from a row",
+      onTop,
+      "on-launch",
+      "storefront",
+      {
+        taskId: "on-launch",
+        stage: "exploring",
+        projectId: "storefront",
+        initiativeId: null,
+        afterTaskId: "on-closed",
+      },
+    ],
+    [
+      "Not in an initiative, from a row",
+      byInitiative,
+      "on-platform",
+      NO_INITIATIVE_LANE_ID,
+      { taskId: "on-platform", initiativeId: null },
+    ],
+    [
+      "Not in an initiative, from a closed Initiative",
+      byInitiative,
+      "on-closed",
+      NO_INITIATIVE_LANE_ID,
+      { taskId: "on-closed" },
+    ],
+  ] as const)("on %s takes the card off its Initiative", (_, lanes, id, laneId, move) => {
+    const drop = dropOnLane(lanes, id, laneId, "exploring");
+    expect(drop.move).toMatchObject(move);
+    if (laneId === NO_INITIATIVE_LANE_ID) expect(drop.move).toEqual(move);
+  });
+
+  it("leaves the Initiative of a card of a closed Initiative alone on a Project lane", () => {
+    const drop = dropOnLane(onTop, "on-closed", "checkout", "exploring");
+    expect(drop.move).not.toHaveProperty("initiativeId");
+    expect(drop.move).toMatchObject({ projectId: "checkout" });
+  });
+
+  it("names no Initiative on a Project lane for a card that is on none, nor on its own lane", () => {
+    expect(dropOnLane(onTop, "loose", "checkout", "exploring").move).not.toHaveProperty(
+      "initiativeId",
+    );
+    expect(dropOnLane(onTop, "loose", "storefront", "planned").move).not.toHaveProperty(
+      "initiativeId",
+    );
+  });
+
+  it("gives the cards carried along the same treatment, by their own Initiative", () => {
+    const drop = dropOnLane(byInitiative, "loose", "initiative:launch", "building", [
+      "on-platform",
+      "on-launch",
+      "on-closed",
+    ]);
+    const followers = ["on-platform", "on-launch", "on-closed"].map((id) =>
+      cards.find((card) => card.id === id)!,
+    );
+    expect(buildFollowerMoves(drop, followers)).toEqual([
+      { taskId: "on-platform", stage: "building", initiativeId: "launch" },
+      { taskId: "on-launch" },
+      { taskId: "on-closed", stage: "building", initiativeId: "launch" },
+    ]);
+  });
+
+  it("takes a follower off a listed Initiative on a Project lane, and keeps a closed one", () => {
+    const drop = dropOnLane(onTop, "on-launch", "storefront", "exploring", [
+      "on-platform",
+      "on-closed",
+    ]);
+    const followers = ["on-platform", "on-closed"].map((id) =>
+      cards.find((card) => card.id === id)!,
+    );
+    const [platform, closed] = buildFollowerMoves(drop, followers);
+    expect(platform).toMatchObject({ taskId: "on-platform", initiativeId: null });
+    expect(closed).not.toHaveProperty("initiativeId");
   });
 });

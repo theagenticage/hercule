@@ -6,7 +6,7 @@
  */
 import type { WorkCard } from "@hercule/contract";
 import { dropClosingFullStops, cutWithEllipsis } from "../text";
-import { shortenTitle } from "./describe-card-move";
+import { shortenTitle } from "./card-title";
 
 /** The most characters of a title that the label on the card to merge into shows before it is cut. */
 const MOST_LABEL_TITLE_CHARACTERS = 22;

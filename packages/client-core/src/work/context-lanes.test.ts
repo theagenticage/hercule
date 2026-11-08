@@ -123,6 +123,7 @@ describe("groupBoardByContext", () => {
       const arranged = arrangeLanes(lanes, {
         foldedLaneIds: new Set(),
         openedCellIds: new Set(),
+        openedInitiativeIds: new Set(),
         openedStackIds: new Set(),
         stackCandidates: [],
         isFiltering: false,

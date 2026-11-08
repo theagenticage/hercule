@@ -2,12 +2,14 @@
 import { describe, expect, it } from "vitest";
 import { arrangeLanes, buildCellId, buildStackId, countCardsByStage } from "./arrange-lanes";
 import { buildBoard, buildCard, FAILURE, QUESTION } from "./cards.testing";
+import { groupBoardByProject } from "./initiative-lanes";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [{ id: "storefront", name: "Storefront" }];
 const CLOSED: Parameters<typeof arrangeLanes>[1] = {
   foldedLaneIds: new Set<string>(),
   openedCellIds: new Set<string>(),
+  openedInitiativeIds: new Set<string>(),
   openedStackIds: new Set<string>(),
   stackCandidates: [],
   isFiltering: false,
@@ -169,5 +171,71 @@ describe("countCardsByStage", () => {
     );
 
     expect(counts).toEqual({ exploring: 2, planned: 0, building: 8, "in-review": 1, landed: 0 });
+  });
+});
+
+describe("arrangeLanes with Initiative rows", () => {
+  const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const };
+  const board = {
+    ...buildBoard(
+      buildCard("open", { initiativeId: "platform" }),
+      buildCard("broke", { initiativeId: "platform", failure: FAILURE, stage: "building" }),
+      buildCard("loose", { projectId: "storefront" }),
+    ),
+    initiativeDoneCounts: { platform: 1 },
+  };
+  const rowLanes = groupBoardByProject(board, PROJECTS, [PLATFORM], {
+    place: "top",
+    isFiltering: false,
+  });
+  const arrange = (view: Partial<Parameters<typeof arrangeLanes>[1]> = {}) =>
+    arrangeLanes(rowLanes, { ...CLOSED, ...view })[0]!;
+
+  it("folds a row unless its Initiative is opened", () => {
+    expect(arrange().isFolded).toBe(true);
+    expect(arrange({ openedInitiativeIds: new Set(["platform"]) }).isFolded).toBe(false);
+  });
+
+  it("does not fold a row because a lane with the same id is in foldedLaneIds while no filter is on", () => {
+    const row = arrange({ openedInitiativeIds: new Set(["platform"]) });
+    const folded = arrange({
+      openedInitiativeIds: new Set(["platform"]),
+      foldedLaneIds: new Set([row.lane.id]),
+    });
+    expect(folded.isFolded).toBe(false);
+  });
+
+  it("opens a row while a filter is on, and the user can fold it again by hand", () => {
+    const row = arrange({ isFiltering: true });
+    expect(row.isFolded).toBe(false);
+    expect(arrange({ isFiltering: true, foldedLaneIds: new Set([row.lane.id]) }).isFolded).toBe(
+      true,
+    );
+  });
+
+  it("folds a Project lane by foldedLaneIds only", () => {
+    const lane = arrangeLanes(rowLanes, { ...CLOSED, foldedLaneIds: new Set(["storefront"]) })[1]!;
+    expect(lane.isFolded).toBe(true);
+    expect(lane.line).toBeUndefined();
+  });
+
+  it("carries the beads of a row, folded or open, with its failed count", () => {
+    for (const row of [arrange(), arrange({ openedInitiativeIds: new Set(["platform"]) })]) {
+      expect(row.failedCount).toBe(1);
+      expect(row.line?.reachStageIndex).toBe(4);
+      expect(row.line?.cells.map((cell) => cell.beads.map((bead) => bead.taskId))).toEqual([
+        ["open"],
+        [],
+        ["broke"],
+        [],
+        [null],
+      ]);
+    }
+  });
+
+  it("draws the cards of an open row as it draws any cell", () => {
+    const row = arrange({ openedInitiativeIds: new Set(["platform"]) });
+    expect(row.cells[0]?.shownCards.map((card) => card.id)).toEqual(["open"]);
+    expect(row.cells[2]?.dot).toBe("failed");
   });
 });

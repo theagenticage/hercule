@@ -12,6 +12,7 @@ import {
   type WorkStackCandidate,
 } from "@hercule/contract";
 import { arrangeCell, type ArrangedCell } from "./arrange-cell";
+import { buildInitiativeLine, type InitiativeLine } from "./initiative-line";
 import type { WorkLane } from "./lanes";
 
 /** The dot a folded lane shows under a stage: a card in it failed, or has a question. */
@@ -48,11 +49,24 @@ export interface ArrangedLane {
   readonly failedCount: number;
   /** The five cells. A folded lane draws counts instead, and its cells show no card. */
   readonly cells: readonly ArrangedLaneCell[];
+  /**
+   * The beads of an Initiative row, folded or not (a row opens in place into
+   * its cells, and its beads stay for the user to fold it again). Absent for
+   * any lane that is not a row.
+   */
+  readonly line?: InitiativeLine;
 }
 
 /** How the user looks at the lanes, as `useWorkView` holds it. */
 interface LaneView {
+  /** The ids of the lanes the user folded. While a filter is on, also the ids of the Initiative rows the user folded. */
   readonly foldedLaneIds: ReadonlySet<string>;
+  /**
+   * The ids of the Initiatives whose row the user opened. A row is folded
+   * unless its Initiative is in here, or a filter is on, which opens rows as it
+   * opens lanes.
+   */
+  readonly openedInitiativeIds: ReadonlySet<string>;
   readonly openedCellIds: ReadonlySet<string>;
   /** The ids (`buildStackId`) of the stacks the user opened. */
   readonly openedStackIds: ReadonlySet<string>;
@@ -116,6 +130,18 @@ const groupCandidatesByLead = (
   return byLead;
 };
 
+/**
+ * Returns whether the lane is folded. A row of an Initiative is folded by
+ * default, and a lane is open by default. A filter opens rows and lanes alike,
+ * so that nothing that matches stays behind a fold; the user can fold one by
+ * hand, and `foldedLaneIds` then holds it.
+ */
+const isLaneFolded = (lane: WorkLane, view: LaneView): boolean => {
+  const { initiative } = lane;
+  if (initiative?.isRow !== true || view.isFiltering) return view.foldedLaneIds.has(lane.id);
+  return !view.openedInitiativeIds.has(initiative.initiativeId);
+};
+
 /** Returns each of `lanes` with what its cells show under `view`. */
 export const arrangeLanes = (
   lanes: readonly WorkLane[],
@@ -124,7 +150,10 @@ export const arrangeLanes = (
   const candidatesByLead = groupCandidatesByLead(view.stackCandidates);
   return lanes.map((lane) => ({
     lane,
-    isFolded: view.foldedLaneIds.has(lane.id),
+    isFolded: isLaneFolded(lane, view),
+    ...(lane.initiative?.isRow === true
+      ? { line: buildInitiativeLine(lane.cells, lane.initiative.doneRingCount) }
+      : {}),
     failedCount: lane.cells.reduce(
       (total, cell) => total + cell.cards.filter((card) => card.failure !== undefined).length,
       0,
