@@ -34,6 +34,8 @@ const PLATFORM_EVENT_DESCRIPTIONS: Record<PlatformEventKind, string> = {
   "run.cancelled": "A run was cancelled. A cancellation is not a failure.",
   "task.created": "A Task was created.",
   "task.updated": "A Task was changed.",
+  "task.entityChanged":
+    "A fact was recorded about a thing a Task links: the thing's lifecycle changed, or it was only just linked or observed.",
   "permission.decided":
     "The user decided a Permission Request: the session may use the grant, its profile gained it, or it was denied.",
 };

@@ -74,6 +74,20 @@ export const EntityStatus = Schema.Struct({
 
 export type EntityStatus = Schema.Schema.Type<typeof EntityStatus>;
 
+/**
+ * Whether the work a thing stands for is still going on, finished, or given
+ * up. The source's own states (a pull request's merged or closed, a ticket's
+ * done or canceled) are mapped to one of these three when the thing is
+ * observed.
+ *
+ * - `open`: still going on.
+ * - `completed`: finished, such as a pull request that merged.
+ * - `abandoned`: closed without being done, such as a canceled ticket.
+ */
+export const EntityLifecycle = Schema.Literals(["open", "completed", "abandoned"]);
+
+export type EntityLifecycle = Schema.Schema.Type<typeof EntityLifecycle>;
+
 /** The most characters the finished sentence of an `EntityReason` holds. */
 export const MAX_ENTITY_REASON_LENGTH = 200;
 

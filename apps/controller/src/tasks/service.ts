@@ -52,6 +52,8 @@ import {
   TaskMoveInput,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
+  refuseFinishedCheckWithoutStageFact,
+  refuseStageFactWithoutStage,
   refuseStageWithStatus,
   NotFound,
   Validation,
@@ -109,14 +111,17 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 /**
  * The input of `task.update`: the task's id and the fields to change. Decoding
- * fails when the edit sets no field, or sets both `stage` and `status`. The
- * checks are the same ones the request schema uses, so both reject the same
- * edits. Spreading the fields drops the checks of `TaskUpdateInput`, so they
+ * fails when the edit sets no field, sets both `stage` and `status`, sends
+ * `stageFactId` without `stage`, or sends `onlyWhenLinkedWorkFinished` without
+ * `stageFactId`. The checks are the same ones the request schema uses, so both
+ * reject the same edits. Spreading the fields drops the checks of `TaskUpdateInput`, so they
  * are attached again here; a workflow step calls this service directly.
  */
 const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
   refuseEmptyTaskUpdate,
   refuseStageWithStatus,
+  refuseStageFactWithoutStage,
+  refuseFinishedCheckWithoutStageFact,
 );
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;

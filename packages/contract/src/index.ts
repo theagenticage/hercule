@@ -553,6 +553,7 @@ export {
   TaskCreatedEventPayload,
   TaskDetail,
   TaskDetailSession,
+  TaskEntityChangedEventPayload,
   TaskFilter,
   TaskMergeInput,
   TaskMoveInput,
@@ -564,6 +565,7 @@ export {
   TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
+  MAX_STAGE_CAUSE_TEXT,
   MAX_TRACKING_DETAIL_RUNS,
   MAX_TRACKING_FAILURE_CAUSE,
   MAX_TRACKING_HANDOFFS,
@@ -588,6 +590,8 @@ export {
   WorkCard,
   WorkStackCandidate,
   refuseEmptyTaskUpdate,
+  refuseFinishedCheckWithoutStageFact,
+  refuseStageFactWithoutStage,
   refuseStageWithStatus,
 } from "./groups/task";
 export {
@@ -707,6 +711,7 @@ export {
   EntityChange,
   EntityEdge,
   EntityGrouping,
+  EntityLifecycle,
   EntityMark,
   EntityPlace,
   EntityProgress,

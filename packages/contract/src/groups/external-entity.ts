@@ -39,6 +39,7 @@ import { MAX_CONNECTION_LABEL_LENGTH } from "./connection";
 import {
   EntityChange,
   EntityEdge,
+  EntityLifecycle,
   EntityPlace,
   EntityReason,
   EntityStatus,
@@ -407,7 +408,7 @@ const entityFields = {
   url: Schema.String,
   /** Absent for a kind with no status. */
   status: Schema.optionalKey(EntityStatus),
-  lifecycle: Schema.Literals(["open", "completed", "abandoned"]),
+  lifecycle: EntityLifecycle,
   person: Schema.optionalKey(EntityPerson),
   /**
    * True when any observing Connection reported the thing as owned by its

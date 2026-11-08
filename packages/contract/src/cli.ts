@@ -740,6 +740,14 @@ export const CLI = {
         flag: "provenance",
         help: "A JSON entry to append to the record of what has touched this task; provenance is never edited and never removed.",
       },
+      stageFactId: {
+        flag: "stage-fact",
+        help: "For workflows: the id of the fact a stage write comes from, with --stage. The write does nothing if the task is done or dropped, the fact was voided by an unlink, or the task already accounts for this fact or a newer one because someone set a stage by hand. A person at a terminal has no use for it.",
+      },
+      onlyWhenLinkedWorkFinished: {
+        flag: "only-when-linked-work-finished",
+        help: "For workflows, with --stage-fact: true moves the task only if nothing linked to it is still open and at least one linked thing completed. The links are counted again when the write happens.",
+      },
     },
   },
   "task.move": {

@@ -9,6 +9,7 @@ import {
   TaskCreateInput,
   TaskFilter,
   TaskMoveInput,
+  TaskUpdateCall,
   TaskUpdateInput,
   BOARD_STAGES,
   task,
@@ -170,5 +171,27 @@ describe("the stages of the board", () => {
 
   it("let a move name a project and a card to follow, or null for none", () => {
     expect(decodeOutcome(TaskMoveInput, { projectId: null, afterTaskId: null })).toBe("Success");
+  });
+});
+
+describe("a stage write that comes from a fact", () => {
+  it("needs a stage, and the finished-work check needs a fact, in the request and in a workflow step", () => {
+    const taskId = "0199f0b7-0000-7000-8000-00000000c001";
+    for (const schema of [TaskUpdateInput, TaskUpdateCall]) {
+      const base = schema === TaskUpdateCall ? { taskId } : {};
+      expect(decodeOutcome(schema, { ...base, stage: "landed", stageFactId: 7 })).toBe("Success");
+      expect(
+        decodeOutcome(schema, {
+          ...base,
+          stage: "landed",
+          stageFactId: 7,
+          onlyWhenLinkedWorkFinished: true,
+        }),
+      ).toBe("Success");
+      expect(decodeOutcome(schema, { ...base, stageFactId: 7, priority: "low" })).toBe("Failure");
+      expect(
+        decodeOutcome(schema, { ...base, stage: "landed", onlyWhenLinkedWorkFinished: true }),
+      ).toBe("Failure");
+    }
   });
 });

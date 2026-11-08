@@ -99,6 +99,7 @@ const PLATFORM_EVENT_KINDS = [
   "run.completed",
   "run.failed",
   "task.created",
+  "task.entityChanged",
   "task.updated",
 ];
 
