@@ -985,6 +985,18 @@ export const TryAgainUndo = Schema.Struct({
 
 export type TryAgainUndo = Schema.Schema.Type<typeof TryAgainUndo>;
 
+/**
+ * What `task.readAttention` answers: whether any live Task needs a look from
+ * outside the board. It is a boolean on purpose, so the sidebar draws a dot
+ * and no number.
+ */
+export const TaskAttention = Schema.Struct({
+  /** True when a live Task has a failed run, the same rule as the board's `failure`. */
+  anyFailure: Schema.Boolean,
+});
+
+export type TaskAttention = Schema.Schema.Type<typeof TaskAttention>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -1033,6 +1045,16 @@ export const task = HttpApiGroup.make("task")
       }),
       success: HandoffLegs,
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    /**
+     * Returns whether any live Task has a failed run, for the sidebar's dot on
+     * every screen. Needs `task.read` and `run.query`.
+     */
+    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
+    // the router prefers it, and "attention" is not an id.
+    HttpApiEndpoint.get("readAttention", "/tasks/attention", {
+      success: TaskAttention,
+      error: [Unauthenticated, Forbidden, Internal],
     }),
     // `/tasks/:id/tracking` has one more segment than `/tasks/:id`, so the
     // router never takes it for that route.

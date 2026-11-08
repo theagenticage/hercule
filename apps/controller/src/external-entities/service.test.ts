@@ -365,6 +365,31 @@ describe("takeOn", () => {
     expect(error).toMatchObject({ error: { code: "forbidden" } });
   });
 
+  it("refuses the Inbox and the detail to a session that lacks a grant the offers need", async () => {
+    const ALL = ["task.read", "signal.read", "workflow.read", "connection.read"];
+    const refused = await run(({ service, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const id = yield* entityId(ticketRef("1"));
+        return yield* Effect.forEach(ALL, (missing) => {
+          const actor = {
+            ...A_SESSION,
+            grants: ALL.filter((grant) => grant !== missing),
+          } as unknown as Actor;
+          return Effect.all([
+            Effect.flip(Effect.provideService(service.queryInbox(), CurrentActor, actor)),
+            Effect.flip(Effect.provideService(service.read(id), CurrentActor, actor)),
+          ]).pipe(Effect.map((errors) => ({ missing, errors })));
+        });
+      }),
+    );
+    for (const { missing, errors } of refused) {
+      for (const error of errors) {
+        expect(error).toMatchObject({ error: { code: "forbidden", details: { grant: missing } } });
+      }
+    }
+  });
+
   it("refuses a place, saying why", async () => {
     const error = await run(({ service, report, connectionId, entityId }) =>
       Effect.gen(function* () {

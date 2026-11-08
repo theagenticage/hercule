@@ -60,6 +60,7 @@ import {
   type InvalidState,
   type ProvenanceEntry,
   type Task,
+  type TaskAttention,
   type TaskPriority,
   type TaskStage,
   type TaskStatus,
@@ -897,6 +898,14 @@ const make = Effect.gen(function* () {
         yield* requireGrant("task.read");
         return yield* readLiveTaskOrFail(id);
       }),
+
+    /**
+     * Returns whether any live Task has a failed run. Needs the grants
+     * `task.read` and `run.query`.
+     */
+    readAttention: (): Effect.Effect<TaskAttention, Unauthenticated | Forbidden | SqlError> =>
+      // TODO(#1034): read `tasks.failed_run_id` and check the grants.
+      Effect.die(new Error("not implemented: #1034")),
 
     /**
      * Creates a task and returns it, at the stage the input names or at

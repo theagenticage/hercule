@@ -1299,6 +1299,9 @@ const make = Effect.gen(function* () {
           side: card.side,
           ...buildCardSignalFields(cardSignals.get(row.ref), row.reason_templates as string | null),
           ...buildRidesOn(riding.get(row.ref)),
+          // TODO(#1034): fill the offers and the acting accounts.
+          offerSetId: "none",
+          actingConnections: [],
         }));
         const { places, edges } = context;
 
@@ -1324,7 +1327,8 @@ const make = Effect.gen(function* () {
           found.links.length > MAX_INBOX_LINKS ||
           found.hints.length > MAX_INBOX_HINTS ||
           foundPeers.length > MAX_INBOX_PEERS;
-        return { cards, places, edges, counts, links, hints, peers, truncated };
+        // TODO(#1034): fill the offer sets.
+        return { cards, places, edges, counts, links, hints, peers, offerSets: {}, truncated };
       }),
 
     /**
@@ -1407,6 +1411,9 @@ const make = Effect.gen(function* () {
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
+          // TODO(#1034): fill the offers and the acting accounts.
+          offers: [],
+          actingConnections: [],
         });
       }),
 

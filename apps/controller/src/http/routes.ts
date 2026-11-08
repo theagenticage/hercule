@@ -109,7 +109,12 @@ import {
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
-import { ExternalEntityService, ExternalEntityServiceLayer } from "../external-entities";
+import {
+  ExternalEntityHandoffs,
+  ExternalEntityHandoffsLayer,
+  ExternalEntityService,
+  ExternalEntityServiceLayer,
+} from "../external-entities";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
@@ -294,6 +299,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryBoard", () => withApiErrors(board.query()))
+      .handle("readAttention", () => withApiErrors(tasks.readAttention()))
       .handle("queryTracking", () => withApiErrors(tracking.query()))
       .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
       .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
@@ -317,6 +323,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
 const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handlers) =>
   Effect.gen(function* () {
     const entities = yield* ExternalEntityService;
+    const handoffs = yield* ExternalEntityHandoffs;
     return handlers
       .handle("queryInbox", () => withApiErrors(entities.queryInbox()))
       .handle("countInbox", () => withApiErrors(entities.countInbox()))
@@ -327,6 +334,10 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("undoTakeOn", ({ params, payload }) =>
         withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),
       )
+      .handle("handOff", ({ params, payload }) =>
+        withApiErrors(handoffs.handOff(params.id, payload)),
+      )
+      .handle("undoHandOff", ({ params }) => withApiErrors(handoffs.undoHandOff(params.runId)))
       .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
       .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
       .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
@@ -1041,6 +1052,8 @@ const operationServices = Layer.mergeAll(
     Layer.provide(EntityLookupsLayer),
     Layer.provide(TaskServiceWithLinkOwnersLayer),
   ),
+  // TODO(#1034): the handoff will need the run and workflow services.
+  ExternalEntityHandoffsLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner

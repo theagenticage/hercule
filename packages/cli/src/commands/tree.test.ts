@@ -333,6 +333,7 @@ describe("the placeholders a usage line shows", () => {
     "entity add-to-work": "<ref>",
     "entity link": "<ref>",
     "entity unlink": "<ref>",
+    "entity undo-hand-off": "<run-id>",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",

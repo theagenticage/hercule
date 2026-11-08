@@ -582,12 +582,15 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the Inbox: the cards, the places above them, the edges between
-     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text.
+     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text,
+     * and `workflow.query` and `connection.query`, because the offers name workflows and accounts.
      */
     queryInbox: (): Effect.Effect<Inbox, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
+        yield* requireGrant("workflow.query");
+        yield* requireGrant("connection.query");
         return yield* entities.queryInbox(yield* readEnvironment);
       }),
 
@@ -603,7 +606,9 @@ const make = Effect.gen(function* () {
      * Returns one entity with the records above it and what it links to.
      * Fails with `NotFound` for an unknown id, a partial record or a place:
      * only a full record of a work kind has a detail. Needs the grants
-     * `task.read` and `signal.query`, because the detail shows signal text.
+     * `task.read` and `signal.query`, because the detail shows signal text,
+     * and `workflow.query` and `connection.query`, because the offers name
+     * workflows and accounts.
      */
     read: (
       id: string,
@@ -611,6 +616,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
+        yield* requireGrant("workflow.query");
+        yield* requireGrant("connection.query");
         const found = yield* entities.readEntity(id, yield* readEnvironment);
         return yield* Option.match(found, {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),

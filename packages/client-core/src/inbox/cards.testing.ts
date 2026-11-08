@@ -41,6 +41,8 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   contextComplete: true,
   side: "ongoing",
   signals: { openCount: 0 },
+  offerSetId: "none",
+  actingConnections: [],
   ...overrides,
 });
 
@@ -151,7 +153,9 @@ export const buildSignalLine = (
 /** Returns an Inbox of these cards, in this order, with the places and edges given. */
 export const buildInbox = (
   cards: readonly InboxCard[],
-  context: Partial<Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers">> = {},
+  context: Partial<
+    Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers" | "offerSets">
+  > = {},
 ): Inbox => ({
   cards,
   places: [],
@@ -159,6 +163,7 @@ export const buildInbox = (
   links: [],
   hints: [],
   peers: [],
+  offerSets: {},
   counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
   truncated: false,
   ...context,

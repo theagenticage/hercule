@@ -609,6 +609,7 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
     signalCount: 2,
     timeline: TICKET_142_CHANGES,
     peers: [],
+    offers: [],
   };
   const signal: Signal = {
     id: COMMENT_SIGNAL_ID,

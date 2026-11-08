@@ -2,9 +2,10 @@
  * Tests the walk along a workflow's edges that the controller and the run
  * graph both use to find the steps a set of steps can lead to.
  */
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { collectReachableSteps, WorkspacePolicy } from "./workflow-definition";
+import { decodeWorkflowDefinition } from "./workflow-definition-decode";
 
 describe("collecting the steps reachable from some steps", () => {
   it("includes the starting steps and every step a path of edges leads to", () => {
@@ -98,5 +99,43 @@ describe("starting revisions in workflow workspace policies", () => {
           ._tag,
       ).toBe("Failure");
     }
+  });
+});
+
+describe("a workflow input that takes an entity", () => {
+  const define = (input: Record<string, unknown>) =>
+    decodeWorkflowDefinition({
+      name: "Review",
+      inputs: [{ name: "pull_request", required: true, ...input }],
+      steps: [{ id: "start", kind: "action", action: "task.create" }],
+    });
+
+  it("accepts qualified entity kinds and the signal kinds it answers", () => {
+    const result = define({
+      entity: { kinds: ["github/pull-request"], answers: ["github/review-requested"] },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+  });
+
+  it("accepts entity kinds with no answers", () => {
+    expect(Result.isSuccess(define({ entity: { kinds: ["github/pull-request"] } }))).toBe(true);
+  });
+
+  it("refuses an empty list of kinds, an unqualified kind and an empty list of answers", () => {
+    for (const entity of [
+      { kinds: [] },
+      { kinds: ["pull-request"] },
+      { kinds: ["github/pull-request"], answers: [] },
+    ]) {
+      expect(Result.isFailure(define({ entity })), JSON.stringify(entity)).toBe(true);
+    }
+  });
+
+  it("refuses an input that sets an entity and another type", () => {
+    const result = define({
+      entity: { kinds: ["github/pull-request"] },
+      signal: { kinds: ["fyi"] },
+    });
+    expect(Result.isFailure(result)).toBe(true);
   });
 });

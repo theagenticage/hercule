@@ -70,6 +70,7 @@ const buildDetail = (
     signalCount: 0,
     timeline: [],
     peers: [],
+    offers: [],
     ...overrides,
   };
 };
