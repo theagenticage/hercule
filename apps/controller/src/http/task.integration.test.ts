@@ -12,7 +12,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import { api, type Task, type TaskPriority } from "@hercule/contract";
-import { completeSetup, get, post, send, withServer } from "./testing";
+import { completeSetup, del, get, post, send, withServer } from "./testing";
 
 interface TaskPage {
   readonly items: ReadonlyArray<Task>;
@@ -415,6 +415,55 @@ describe("linking a thing to a task by hand", () => {
         token,
       );
       expect(missing.status).toBe(404);
+    });
+  });
+});
+
+describe("blockers over the API", () => {
+  it("adds and removes a blocker, refuses a loop with its reason, and checks a merge", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const waiting = await createTask(base, token, { title: "Ship refund emails" });
+      const blocker = await createTask(base, token, { title: "Add a refund button" });
+
+      const added = await post(
+        base,
+        `/api/v1/tasks/${waiting.id}/blockers`,
+        { blockedByTaskId: blocker.id },
+        token,
+      );
+      expect(added.status).toBe(200);
+      const addedResult = (await added.json()) as { task: Task; changed: boolean };
+      expect(addedResult.changed).toBe(true);
+      expect(addedResult.task.id).toBe(waiting.id);
+
+      const loop = await post(
+        base,
+        `/api/v1/tasks/${blocker.id}/blockers`,
+        { blockedByTaskId: waiting.id },
+        token,
+      );
+      expect(loop.status).toBe(409);
+      expect(await loop.json()).toMatchObject({
+        error: {
+          code: "invalid_state",
+          message: "Ship refund emails already waits on this Task.",
+          details: { reason: "blocker-cycle" },
+        },
+      });
+
+      // The two Tasks are tied by an edge only, which a merge drops.
+      const check = await get(
+        base,
+        `/api/v1/tasks/${waiting.id}/merge-check?intoTaskId=${blocker.id}`,
+        token,
+      );
+      expect(check.status).toBe(200);
+      expect(await check.json()).toEqual({});
+
+      const removed = await del(base, `/api/v1/tasks/${waiting.id}/blockers/${blocker.id}`, token);
+      expect(removed.status).toBe(200);
+      expect(((await removed.json()) as { changed: boolean }).changed).toBe(true);
     });
   });
 });

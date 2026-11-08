@@ -1191,10 +1191,13 @@ export type TaskMergeCheckQuery = Schema.Schema.Type<typeof TaskMergeCheckQuery>
 
 /**
  * What `task.checkMerge` returns. `refusal` is present when `task.merge` would
- * refuse the same merge because it would close a loop of blockers, and holds
- * the message that merge would fail with, which names the path. Absent when
- * the blockers allow the merge. It is a pre-check for showing the refusal
- * before a drop: the merge itself still decides.
+ * refuse the same merge, and holds the message that merge would fail with:
+ * the Tasks are the same, one is unknown, deleted, merged or finished, the
+ * result would hold too many labels or too long a description, or the blockers
+ * would close a loop (the message then names the path). Absent when the merge
+ * would go ahead. It runs every check the merge runs before it writes, and
+ * writes nothing, so a client can show the refusal before a drop: the merge
+ * itself still decides.
  */
 export const TaskMergeCheck = Schema.Struct({
   refusal: Schema.optionalKey(Schema.String),
@@ -1384,8 +1387,8 @@ export const task = HttpApiGroup.make("task")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
-     * Says whether `task.merge` would refuse a merge because of its blockers,
-     * without writing anything. See `TaskMergeCheck`.
+     * Says whether `task.merge` would refuse a merge, and why, without
+     * writing anything. See `TaskMergeCheck`.
      */
     // `/tasks/:id/merge-check` has one more segment than `/tasks/:id`, so the
     // router never takes it for that route.

@@ -703,7 +703,7 @@ The answer is `HandOffUndo`. `undone` is returned only when the Task was actuall
 
 The merge returns the survivor.
 
-*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* **The pre-check.** `task.checkMerge` answers whether a merge would be refused for a blocker cycle, by the same check step 6 runs, and writes nothing. A client calls it when a merge target is picked, so it can say so before the drop. It answers `refusal`, the words of the refusal, or nothing when the merge would not be refused for that reason. It checks only that. The merge's own checks (step 1 and 2) stay with `task.merge`, and its refusal is decisive: a Task can change between the check and the merge.
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* **The pre-check.** `task.checkMerge` answers whether a merge would be refused, and writes nothing. It runs every check `task.merge` runs before it writes (the same Task twice, a Task that is unknown, deleted, merged or finished, too many labels or too long a description, and the blocker cycle of step 6) from the one function the merge calls, so its refusal is the message the merge would fail with. A client calls it when a merge target is picked, so it can say so before the drop. It answers `refusal`, or nothing when the merge would go ahead. It does not ask who the caller is, so a session may check a merge only the user may make. The merge's refusal is decisive: a Task can change between the check and the merge.
 
 **The redirect.** After a merge, the source's id still works, once. `resolveTaskId(id)` returns the survivor of a merged id, and the id itself otherwise. It follows one hop.
 
@@ -818,7 +818,7 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hercule task link <id> --ref <ref>` | links an outside thing to a Task by hand, and clears a suppression of it ([Links by hand and suppressions](#links-by-hand-and-suppressions)); grant `task.update` |
 | `hercule task unlink <id> --ref <ref>` | takes a link away and keeps it away: voids the pair's Facts and suppresses the ref; grant `task.update` |
 | `hercule task merge <id> --into <id>` | merges the first Task into the second, as the user ([Merging Tasks](#merging-tasks)); grant `task.update`; refused for a session |
-| `hercule task check-merge <id> --into <id>` | says whether that merge would be refused for a blocker cycle, and writes nothing ([Merging Tasks](#merging-tasks)); grant `task.read` |
+| `hercule task check-merge <id> --into <id>` | says whether that merge would be refused, and why, and writes nothing ([Merging Tasks](#merging-tasks)); grant `task.read` |
 | `hercule task block <id> --by <id>` | makes the first Task wait on the second ([Blockers](#blockers)); refused with the path when it would close a loop; grant `task.update` |
 | `hercule task unblock <id> --by <id>` | removes that blocker edge; grant `task.update` |
 | `hercule session move-to-task <id> [--task <id>]` | moves a Thread to a Task, or to a new one ([Moving a Thread to another Task](#moving-a-thread-to-another-task)); grant `session.steer`; refused for a session |

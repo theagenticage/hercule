@@ -902,7 +902,7 @@ export const CLI = {
   },
   "task.checkMerge": {
     command: "task check-merge",
-    help: "Says whether `hercule task merge` would refuse a merge because of blockers, and writes nothing. When it would, the reply holds the refusal, which names the path; otherwise it holds none. Use it to learn the refusal before you merge.",
+    help: "Says whether `hercule task merge` would refuse a merge, and why, and writes nothing. When it would, the reply holds the refusal (for a loop of blockers, it names the path); otherwise it holds none. Use it to learn the refusal before you merge.",
     examples: [{ args: ["1f3a9c2e", "--into", "7b2d40aa"] }],
     fields: {
       id: {

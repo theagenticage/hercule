@@ -446,7 +446,17 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
  * deleted Tasks and merged Tasks, so its size follows the board and not the
  * history.
  */
-const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+export const ON_BOARD = "stage NOT IN ('done', 'dropped')";
+
+/**
+ * Returns the text of the condition that a Task is live: not deleted and not
+ * merged into another Task. `table` is the name or alias the query gives the
+ * `tasks` table. The partial index `tasks_board_rank` carries the same two
+ * conditions, and SQLite matches them by their text, so this text must stay
+ * as it is.
+ */
+export const buildLiveTaskCondition = (table: "t" | "tasks"): string =>
+  `${table}.deleted_at IS NULL AND ${table}.merged_into_id IS NULL`;
 
 /**
  * Reads the stored answer to an Undo of Try again from a recovery row, or
@@ -590,8 +600,7 @@ const make = Effect.gen(function* () {
    * The partial index `tasks_board_rank` carries the same two conditions, and
    * SQLite matches them by their text, so this text must stay as it is.
    */
-  const buildLiveTaskSql = (table: "t" | "tasks") =>
-    sql.literal(`${table}.deleted_at IS NULL AND ${table}.merged_into_id IS NULL`);
+  const buildLiveTaskSql = (table: "t" | "tasks") => sql.literal(buildLiveTaskCondition(table));
 
   /**
    * The condition a Task meets to hold a summary: it is live and not

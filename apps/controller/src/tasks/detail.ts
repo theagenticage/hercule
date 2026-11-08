@@ -35,6 +35,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { buildWorkCard, TaskBoardFacts, type BoardEntityContext } from "./board";
+import { blockerRepository } from "./blockers";
 import { taskRepository } from "./repository";
 import { TaskTrackingRuns } from "./tracking";
 
@@ -92,6 +93,7 @@ const buildLinkedEntities = (
 
 const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
+  const blockers = yield* blockerRepository;
   const cardFacts = yield* TaskBoardFacts;
   const runs = yield* TaskTrackingRuns;
   const detailFacts = yield* TaskDetailFacts;
@@ -104,7 +106,9 @@ const make = Effect.gen(function* () {
      * card's open question) with how many it has, up to
      * `MAX_TRACKING_DETAIL_RUNS` of its runs (oldest first, as Tracking lists
      * them) with how many it has, and the outside things it links with the
-     * places above them.
+     * places above them. It lists the Tasks the Task waits on (`blockers`) and
+     * the Tasks that wait on it (`blocks`), every edge whatever the stage of
+     * the other end, where the card lists only the blockers that still block.
      *
      * The caller needs `task.read`, `session.query` and `run.query`, because
      * the reply shows a session's open Requests and a run's output. A caller
@@ -146,7 +150,7 @@ const make = Effect.gen(function* () {
           cards: [facts],
           context,
         } = yield* cardFacts.readFacts([boardTask]);
-        const card = buildWorkCard(boardTask, facts!);
+        const card = buildWorkCard(boardTask, facts!, yield* blockers.readCardBlockersOf(id));
         // The card's open question is asked by one Thread, and the pane answers it from that
         // Thread's Requests, so that Thread is listed even when newer sessions would crowd it out.
         const { sessions, total: sessionCount } = yield* detailFacts.readSessions(
@@ -156,6 +160,7 @@ const make = Effect.gen(function* () {
         );
         const history = yield* runs.readRunHistory(id);
         const runCount = yield* detailFacts.countRuns(id);
+        const blocking = yield* blockers.readDetailBlocking(id);
         return {
           task,
           card,
@@ -163,11 +168,7 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
-          // TODO(#1036): read the blocker edges of both directions.
-          blockers: [],
-          blockerCount: 0,
-          blocks: [],
-          blockCount: 0,
+          ...blocking,
           ...buildLinkedEntities(facts!.linkedRefs, card, context),
         };
       }),
