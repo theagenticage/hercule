@@ -5,6 +5,7 @@
  * page takes its theme from `?theme=` and its glass from `?glass=`, as every
  * specimen does. With `?details` in the address, the details of the Task that
  * asks a question are open beside the board, and with `?details=failed`, those of the Task whose run failed.
+ * With `?initiatives`, the board has Initiatives: four rows On top, one of them opened in place.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -12,6 +13,7 @@ import "./fixed-clock";
 import {
   WORK_DETAILS_RECORDS,
   WORK_FAILED_TASK_ID,
+  WORK_INITIATIVES_RECORDS,
   WORK_OPEN_TASK_ID,
   WORK_RECORDS,
   WORK_SIDEBAR_RECORDS,
@@ -19,8 +21,11 @@ import {
 import { mountWorkSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
-const details = new URLSearchParams(location.search).get("details");
-if (details !== null) {
+const query = new URLSearchParams(location.search);
+const details = query.get("details");
+if (query.has("initiatives")) {
+  await mountWorkSpecimen(WORK_SIDEBAR_RECORDS, WORK_INITIATIVES_RECORDS);
+} else if (details !== null) {
   await mountWorkSpecimen(
     WORK_SIDEBAR_RECORDS,
     WORK_DETAILS_RECORDS,

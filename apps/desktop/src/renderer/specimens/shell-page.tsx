@@ -1858,7 +1858,8 @@ export async function mountWorkflowsSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Work board open: the main pane shows the app's real Work screen,
  * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
- * folded, as if the user had folded them, and the details of `openTaskId` open
+ * folded and the Initiative rows of `work.openedInitiativeIds` opened, as if
+ * the user had done both, and the details of `openTaskId` open
  * beside it when one is given (`work.details` holds what they read). Returns
  * once a card is in the document. Fails when the page has no `#root`, draws no sidebar row and no
  * card, or tries to read a record the cache does not hold.
@@ -1871,6 +1872,7 @@ export async function mountWorkSpecimen(
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
     ...EMPTY_WORK_VIEW,
     foldedLaneIds: work.foldedLaneIds,
+    openedInitiativeIds: work.openedInitiativeIds ?? [],
   });
   await mountShellSpecimen(
     records,
