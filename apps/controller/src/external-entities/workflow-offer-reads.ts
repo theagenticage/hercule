@@ -1,7 +1,8 @@
 /**
- * The reads behind a card's offers: the Connections that can act on each
- * thing, the workflows a run can start and the repositories of their
- * workspaces. The rules that turn them into offers are in `workflow-offers.ts`.
+ * The reads behind a card's offers and a handoff: the Connections that can
+ * act on each thing, the workflows a run can start and the repositories of
+ * their workspaces. The rules that turn them into offers are in
+ * `workflow-offers.ts`.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -24,12 +25,30 @@ import {
   type WorkflowOfferSubject,
 } from "./workflow-offers";
 
+/** The refusal of a handoff to a workflow that is not enabled, not valid, or not listed for the kind of thing. */
+const WORKFLOW_NOT_LISTED = "That workflow cannot take this. Reload the Inbox and choose again.";
+
+/** The refusal of a handoff by an account that cannot act on the thing. */
+const CHOSEN_ACCOUNT_CANNOT_ACT = "That account cannot act on this. Choose another account.";
+
 /** A thing to read the offers of: its ref, its qualified kind and the repository its work lands in, if it has one. */
 export interface WorkflowOfferTarget {
   readonly ref: string;
   readonly kind: string;
   readonly targetRemote: string | undefined;
 }
+
+/**
+ * What `prepareHandoff` returns: the offer the handoff accepts and the
+ * Connection that acts, or the words that refuse it.
+ */
+export type HandoffPreparation =
+  | {
+      readonly _tag: "Accepted";
+      readonly offer: WorkflowOffer;
+      readonly connection: ActingConnection;
+    }
+  | { readonly _tag: "Refused"; readonly words: string };
 
 /** What `readWorkflowOffers` returns. */
 export interface WorkflowOffersRead {
@@ -136,10 +155,10 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
   /** Builds the subject of a target: an unknown kind (its plugin is not running) has no Connection type. */
   const buildSubject = (
     target: WorkflowOfferTarget,
-    kinds: ReadonlyMap<string, EntityKindSource>,
+    source: EntityKindSource | undefined,
     hasAccount: boolean,
   ): WorkflowOfferSubject => ({
-    kind: kinds.get(target.kind) ?? { kind: target.kind, connectionType: "", signalKinds: [] },
+    kind: source ?? { kind: target.kind, connectionType: "", signalKinds: [] },
     targetRemote: target.targetRemote,
     hasAccount,
   });
@@ -157,8 +176,8 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
      * The lists are cut so a read can never exceed the contract's bounds:
      * offers to `MAX_ENTITY_OFFERS` (available first, each group by name),
      * Connections to `MAX_ACTING_CONNECTIONS` (oldest first). Nothing that
-     * decides a handoff may read these lists; use `readWorkflowOffer` and
-     * `findActingConnection`, which are not cut.
+     * decides a handoff may read these lists; use `prepareHandoff`, which is
+     * not cut.
      *
      * A constant number of statements however many targets there are: the
      * acting Connections, the workflows with an entity or signal input and the Resources
@@ -182,7 +201,11 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
         const offerSetIds = new Map<string, string>();
         const offerSets: Record<string, ReadonlyArray<WorkflowOffer>> = {};
         for (const target of targets) {
-          const subject = buildSubject(target, kinds, actingConnections.has(target.ref));
+          const subject = buildSubject(
+            target,
+            kinds.get(target.kind),
+            actingConnections.has(target.ref),
+          );
           const id = buildWorkflowOfferSetId(subject);
           offerSetIds.set(target.ref, id);
           offerSets[id] ??= evaluateWorkflowOffers(candidates, subject, remotes);
@@ -191,56 +214,71 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the offer of one workflow for one target, evaluated by the same
-     * rules as the menu (`evaluateWorkflowOffer`) but from the whole state: no cut
-     * applies. Returns none when the workflow is not enabled and valid, or is
-     * not listed for the target's kind. An offer with `unavailable` set is
-     * returned as it is; the caller refuses it.
+     * Decides whether one workflow can take one thing and which Connection
+     * acts, for a handoff, and returns the accepted offer with that
+     * Connection, or the words that refuse it. It reads the one workflow and
+     * the accounts of the one thing, so no cut list decides a handoff, and it
+     * evaluates the workflow with the same `evaluateWorkflowOffer` and the
+     * same acting rule as the menu: what a menu offered and what a handoff
+     * accepts cannot disagree.
+     *
+     * With `connectionId`, that Connection acts when it can; when it cannot,
+     * the handoff is refused and no other account is put in its place.
+     * Without one, the oldest Connection that can act does. `kindSource` is
+     * what the thing's plugin declares for its kind, or none when the plugin
+     * is not running.
+     *
+     * The words refuse: a workflow that is not enabled, not valid or not
+     * listed for the kind; an offer that is unavailable (its own message); a
+     * chosen account that cannot act.
      */
-    readWorkflowOffer: (
+    prepareHandoff: (
       target: WorkflowOfferTarget,
       workflowId: string,
-      kindSources: ReadonlyArray<EntityKindSource>,
-    ): Effect.Effect<Option.Option<WorkflowOffer>, SqlError> =>
+      connectionId: string | undefined,
+      kindSource: EntityKindSource | undefined,
+    ): Effect.Effect<HandoffPreparation, SqlError> =>
       Effect.gen(function* () {
         const found = Option.getOrUndefined(
           yield* workflows.readWorkflowOfferCandidate(workflowId),
         );
-        if (found === undefined) return Option.none();
-        const kinds = indexKinds(kindSources);
-        const pairs = buildPairs([target], kinds);
-        const acting =
+        if (found === undefined) return { _tag: "Refused", words: WORKFLOW_NOT_LISTED };
+        const pairs =
+          kindSource === undefined ? [] : [{ ref: target.ref, type: kindSource.connectionType }];
+        // The chosen Connection sorts first, so it is the row returned when it
+        // can act; else the oldest acting Connection is, and `chosen` is 0.
+        const rows =
           pairs.length === 0
             ? []
-            : yield* sql<{ readonly one: number }>`
-                SELECT 1 AS one ${buildActingFilter(pairs)} LIMIT 1`;
+            : yield* sql<{
+                readonly id: Uint8Array;
+                readonly label: string;
+                readonly chosen: number;
+              }>`
+                SELECT c.id AS id, c.label AS label,
+                  COALESCE(c.id = ${connectionId === undefined ? null : uuidFromString(connectionId)}, 0) AS chosen
+                ${buildActingFilter(pairs)}
+                ORDER BY chosen DESC, c.created_at, c.id LIMIT 1`;
+        const row = rows[0];
         const remotes = yield* readWorkspaceRemotes(listWorkspaceResourceIds(found.workspace));
-        return Option.fromNullishOr(
-          evaluateWorkflowOffer(found, buildSubject(target, kinds, acting.length > 0), remotes),
+        const offer = evaluateWorkflowOffer(
+          found,
+          buildSubject(target, kindSource, row !== undefined),
+          remotes,
         );
-      }),
-
-    /**
-     * Returns the Connection that acts for a handoff on `target`, or none.
-     * With `connectionId`, that Connection when it can act on the target.
-     * Without, the oldest one that can. Not cut by any bound.
-     */
-    findActingConnection: (
-      target: WorkflowOfferTarget,
-      connectionId: string | undefined,
-      kindSources: ReadonlyArray<EntityKindSource>,
-    ): Effect.Effect<Option.Option<ActingConnection>, SqlError> =>
-      Effect.gen(function* () {
-        const pairs = buildPairs([target], indexKinds(kindSources));
-        if (pairs.length === 0) return Option.none();
-        const rows = yield* sql<{ readonly id: Uint8Array; readonly label: string }>`
-          SELECT c.id AS id, c.label AS label ${buildActingFilter(pairs)}
-          ${connectionId === undefined ? sql`` : sql`AND c.id = ${uuidFromString(connectionId)}`}
-          ORDER BY c.created_at, c.id LIMIT 1`;
-        return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
-          id: uuidToString(row.id),
-          label: row.label,
-        }));
+        if (offer === undefined) return { _tag: "Refused", words: WORKFLOW_NOT_LISTED };
+        if (offer.unavailable !== undefined) {
+          return { _tag: "Refused", words: offer.unavailable.message };
+        }
+        // An offer is available only when an account can act, so `row` exists.
+        if (row === undefined || (connectionId !== undefined && row.chosen === 0)) {
+          return { _tag: "Refused", words: CHOSEN_ACCOUNT_CANNOT_ACT };
+        }
+        return {
+          _tag: "Accepted",
+          offer,
+          connection: { id: uuidToString(row.id), label: row.label },
+        };
       }),
   };
 });

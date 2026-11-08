@@ -1,6 +1,7 @@
 /**
  * The record of each handoff of an External Entity to a workflow
- * (`entity_handoffs`). The record says what the handoff did to the Task, so
+ * (`entity_handoffs`), kept by the Task module that writes the handoff's Task.
+ * The record says what the handoff did to the Task, so
  * its Undo can tell what may be taken back, and it keeps the first answer of
  * that Undo, so a repeat returns it.
  */
@@ -21,7 +22,7 @@ export interface HandoffRecord {
   readonly taskCreated: boolean;
   /** The stage a continued Task had before the handoff, or `undefined` for a Task the handoff made. */
   readonly stageBefore: TaskStage | undefined;
-  /** What `TaskService.recordEntityHandoff` returned as `stageRevision` and `joinRevision`. */
+  /** The Task's `stage_revision` and `join_revision` once the handoff had written everything. */
   readonly stageRevision: number;
   readonly joinRevision: number;
   /** The first answer of the Undo, or `undefined` while nobody has undone the handoff. */

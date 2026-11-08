@@ -373,6 +373,7 @@ export const makeRunEngine = Effect.gen(function* () {
         // two announcements are collected into one push.
         if (run.taskId !== undefined) {
           yield* announceTaskCardChange(run.taskId);
+          yield* tasks.recordRunEnd({ taskId: run.taskId });
           // The summary lists the Task's runs and how they ended.
           yield* tasks.markSummaryDirty(run.taskId);
         }

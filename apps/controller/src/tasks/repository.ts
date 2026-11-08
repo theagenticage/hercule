@@ -1039,6 +1039,22 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the id of one External Entity that the Task links, or none when
+     * it links no ref that has an entity record. One lookup on the Task's
+     * links (`task_entity_links`, keyed by Task) and one by ref on
+     * `external_entities`, so it reads nothing of the other cards.
+     */
+    findLinkedEntityId: (taskId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT e.id FROM task_entity_links l
+          JOIN external_entities e ON e.ref = l.ref
+          WHERE l.task_id = ${uuidFromString(taskId)}
+          LIMIT 1`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
      * Ends the failure the Task shows, because a Thread was started on it by
      * name, and raises its failure revision whether or not it showed one, so
      * that no older Undo of a Try again restores a failure over it. Does

@@ -32,6 +32,7 @@ import {
   MAX_INBOX_LINKS,
   MAX_INBOX_PEERS,
   MAX_INBOX_PLACES,
+  MAX_LIVE_WORKFLOWS,
   type EntityChange,
   type EntityConflict,
   type EntityEdge,
@@ -47,6 +48,7 @@ import {
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { runRepository } from "../runs";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
 import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
 import {
@@ -497,6 +499,7 @@ const make = Effect.gen(function* () {
   const claims = yield* claimRepository;
   const tasks = yield* taskRepository;
   const signals = yield* signalRepository;
+  const runs = yield* runRepository;
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
@@ -1313,6 +1316,10 @@ const make = Effect.gen(function* () {
           rows.map(({ row }) => buildWorkflowOfferTarget(row)),
           environment.kindSources ?? [],
         );
+        const liveWorkflows = yield* runs.listLiveWorkflowsOfTasks(
+          pageCards.flatMap((card) => (card.taskId === null ? [] : [uuidToString(card.taskId)])),
+          MAX_LIVE_WORKFLOWS,
+        );
 
         const cards = rows.map(({ card, row }): InboxCard => ({
           ...buildEntityFields({
@@ -1334,6 +1341,8 @@ const make = Effect.gen(function* () {
           ...buildRidesOn(riding.get(row.ref)),
           offerSetId: offers.offerSetIds.get(row.ref)!,
           actingConnections: offers.actingConnections.get(row.ref) ?? [],
+          liveWorkflows:
+            card.taskId === null ? [] : (liveWorkflows.get(uuidToString(card.taskId)) ?? []),
         }));
         const { places, edges } = context;
 
@@ -1380,18 +1389,11 @@ const make = Effect.gen(function* () {
     readWorkflowOffers: workflowOfferReads.readWorkflowOffers,
 
     /**
-     * Returns the offer of one workflow for one thing, by the rules of the
-     * menu but without any cut. The handoff checks its workflow through it
-     * inside its transaction.
+     * Decides whether a workflow can take one thing and which Connection acts,
+     * for a handoff, without any cut (see `prepareHandoff` in
+     * `makeWorkflowOfferReads`). The handoff calls it inside its transaction.
      */
-    readWorkflowOffer: workflowOfferReads.readWorkflowOffer,
-
-    /**
-     * Returns the Connection that acts for a handoff on one thing: the chosen
-     * one when it can act, else none; with no choice, the oldest that can.
-     * Not cut by any bound.
-     */
-    findActingConnection: workflowOfferReads.findActingConnection,
+    prepareHandoff: workflowOfferReads.prepareHandoff,
 
     /**
      * Reads what lies above `starts`, as places and edges, cut by one rule

@@ -57,6 +57,7 @@ import {
   Validation,
   type ExternalRef,
   type Forbidden,
+  type HandOffUndo,
   type InvalidState,
   type ProvenanceEntry,
   type Task,
@@ -83,6 +84,7 @@ import {
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
+import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { TaskLinkOwners } from "./link-owners";
 import { makeSummaryDirtyMarker } from "./summary-dirty";
 import {
@@ -148,8 +150,8 @@ interface TaskPatch {
   readonly provenance?: ReadonlyArray<ProvenanceInput>;
 }
 
-/** The provenance entry of a handoff: the signal handed off and the run it started. */
-export interface HandoffEntry {
+/** The provenance entry of a handoff of a signal: the signal handed off and the run it started. */
+export interface SignalHandoffEntry {
   readonly signalId: string;
   readonly runId: string;
   /** The signal's thread ref, when it has one. */
@@ -164,35 +166,19 @@ export interface EntityHandoffEntry {
   readonly runId: string;
 }
 
-/**
- * What `recordEntityHandoff` did to the Task, which the handoff's record
- * needs for its Undo. The caller reads the Task's revisions itself, once
- * everything the handoff writes is written (see `TaskRepository.readRevisions`).
- */
-export interface EntityHandoffRecorded {
-  /** The Task as stored. When the handoff continued a merged Task, this is the survivor. */
-  readonly task: Task;
-  /** True when the handoff made the Task. */
-  readonly created: boolean;
-  /** The stage a continued Task had before the handoff, or `undefined` for a new Task. */
-  readonly stageBefore: TaskStage | undefined;
-}
+/** The provenance entry of a handoff: of a signal (it names the signal), or of a card (it does not). */
+export type HandoffEntry = SignalHandoffEntry | EntityHandoffEntry;
 
-/** What `reverseEntityHandoff` needs to know of the handoff, from its record. */
-export interface EntityHandoffToReverse {
-  /** The Task as the record names it, never followed to a survivor. */
-  readonly taskId: string;
-  /** The run the handoff started. */
-  readonly runId: string;
+/**
+ * What the Undo of a handoff from a card has to know of its record: the
+ * thing and the Task to announce, and the first answer once there is one.
+ */
+export interface EntityHandoffUndoState {
   readonly ref: ExternalRef;
-  /** True when the handoff made the Task. */
-  readonly taskCreated: boolean;
-  /** The stage a continued Task had before the handoff, or `undefined` when the handoff made the Task. */
-  readonly stageBefore: TaskStage | undefined;
-  /** The Task's `stage_revision` once the handoff had written everything. */
-  readonly stageRevision: number;
-  /** The Task's `join_revision` once the handoff had written everything. */
-  readonly joinRevision: number;
+  /** The Task as the handoff left it, never followed to a survivor. */
+  readonly taskId: string;
+  /** The first answer of the Undo, or `undefined` while nobody has undone the handoff. */
+  readonly undo: HandOffUndo | undefined;
 }
 
 /** The result of `reverseEntityHandoff`. */
@@ -429,7 +415,7 @@ const findMadeTaskRefusal = (
  */
 const chooseWhyHandoffStays = (
   traces: Option.Option<TaskTraces>,
-  handoff: EntityHandoffToReverse,
+  handoff: HandoffRecord,
 ): string | undefined => {
   if (Option.isNone(traces)) return HANDOFF_STAYS["task-gone"];
   const since = traces.value;
@@ -446,6 +432,7 @@ const chooseWhyHandoffStays = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tasks = yield* taskRepository;
+  const handoffRecords = yield* handoffRecordRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const platformEvents = yield* PlatformEvents;
@@ -503,6 +490,24 @@ const make = Effect.gen(function* () {
     });
 
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
+
+  /**
+   * Records, for the transaction it runs in, an `externalEntity` change when
+   * the Task links an External Entity, so clients read the Inbox again. The
+   * Inbox card of that entity names the workflows with a live run on the
+   * Task, so a run starting or ending on the Task changes it. A Task that
+   * links no entity changes no card, and announces nothing.
+   *
+   * It is not a `task` push: a plain one makes every client read Tracking and
+   * Your work again, and a derived one reads the Work board alone. A run
+   * starts and ends rarely, but a workflow trigger can start many.
+   */
+  const announceRunChangeOnLinkedEntity = (taskId: string): Effect.Effect<void, SqlError> =>
+    Effect.flatMap(tasks.findLinkedEntityId(taskId), (entityId) =>
+      Option.isSome(entityId)
+        ? announce({ _tag: "record", topic: "externalEntity", id: entityId.value, kind: "updated" })
+        : Effect.void,
+    );
 
   /**
    * Checks that the project a task points at exists. Fails with `NotFound` if
@@ -1141,131 +1146,104 @@ const make = Effect.gen(function* () {
 
     /**
      * Writes the Task of a handoff and the handoff's provenance entry in one
-     * write, and returns the Task. This is the one way to record a handoff:
-     * `create` and `update` refuse an entry that names a signal.
+     * write, and returns the Task as stored. This is the one way to record a
+     * handoff: `create` and `update` refuse an entry that names a signal. The
+     * entry is either a signal's (it names the signal) or a card's (it names
+     * the ref and no signal).
      *
      * - With `newTask`, it creates the Task at `building`, with the id the
-     *   handoff chose, and the entry. One `task.created` event carries the
-     *   entry, and no `task.updated` follows.
-     * - Without it, it appends the entry to the Task `taskId` and sets the
-     *   status `in-progress`, as any legacy status write does: a Task that is
-     *   `open` moves to `building`, and one that is already `in-progress`
-     *   keeps its stage. One `task.updated` event.
+     *   handoff chose, the entry, and the title, priority and project in
+     *   `newTask` (`projectId` absent is "No project"). One `task.created`
+     *   event carries the entry, and no `task.updated` follows.
+     * - Without it, it appends the entry to the Task `taskId`. For a signal's
+     *   entry it also sets the status `in-progress`, as any legacy status
+     *   write does: a Task that is `open` moves to `building`, and one that
+     *   is already `in-progress` keeps its stage. For a card's entry it
+     *   follows a merged id to the survivor, and a Task at `exploring` or
+     *   `planned` moves to `building`; at any other stage the stage is decided
+     *   again as itself. That is an explicit stage decision, so the stage
+     *   revision rises, and `task.updated` lists the stage only when it
+     *   moved. One `task.updated` event.
      *
-     * It runs in the caller's transaction. Only the user hands work off, so it
-     * fails with `Forbidden` for any other caller, whatever grants they hold.
-     * It fails with `NotFound` if the Task to continue does not exist.
+     * For a card's entry it ends by writing the handoff's record, which the
+     * Undo (`reverseEntityHandoff`) reads, with the Task's revisions as they
+     * are after all of this write. Nothing written after the record may
+     * change what the record holds, so the caller starts the run first: the
+     * run's own start counts as a join, and is in the record.
+     *
+     * It runs in the caller's transaction, or opens one. Only the user hands
+     * work off, so it fails with `Forbidden` for any other caller, whatever
+     * grants they hold. It fails with `NotFound` if the Task to continue, or
+     * the project, does not exist.
      */
     recordHandoff: (handoff: {
       readonly taskId: string;
       readonly entry: HandoffEntry;
-      readonly newTask?: { readonly title: string; readonly priority: TaskPriority };
+      readonly newTask?: {
+        readonly title: string;
+        readonly priority: TaskPriority;
+        readonly projectId?: string;
+      };
     }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor(
           handoff.newTask === undefined ? "task.update" : "task.create",
           ONLY_THE_USER_RECORDS_HANDOFF,
         );
-        if (handoff.newTask !== undefined) {
-          return yield* insertTask(
-            {
-              id: handoff.taskId,
-              title: handoff.newTask.title,
-              description: "",
-              stage: "building",
-              priority: handoff.newTask.priority,
-              labels: [],
-              projectId: undefined,
-              provenance: [handoff.entry],
-            },
-            yield* currentStamp,
-          );
-        }
-        return yield* updateTask(
-          handoff.taskId,
-          { status: "in-progress", provenance: [handoff.entry] },
-          yield* currentStamp,
-        );
-      }),
-
-    /**
-     * Writes the Task of a handoff from a card and the handoff's provenance
-     * entry in one write, and returns what the handoff's record needs for its
-     * Undo. It is `recordHandoff` for an entry that names a ref and a run
-     * and no signal.
-     *
-     * - With `newTask`, it creates the Task at `building`, with the id the
-     *   handoff chose, priority `normal`, no description, and the project
-     *   the caller chose (`undefined` is "No project"). The entry's ref
-     *   becomes its link. The stage revision stays 0: the creation is the
-     *   stage decision.
-     * - Without it, it appends the entry to the Task `taskId`, or to the
-     *   Task it was merged into. A Task at `exploring` or `planned` moves to
-     *   `building`; at any other stage the stage is decided again as itself.
-     *   Either way it is an explicit stage decision, so the stage revision
-     *   rises, and `task.updated` lists the stage only when it moved.
-     *
-     * It runs in the caller's transaction, or opens one. Only the user hands
-     * work off, so it fails with `Forbidden` for any other caller, whatever
-     * grants they hold. It fails with `NotFound` when the Task to continue,
-     * or the project, does not exist.
-     */
-    recordEntityHandoff: (handoff: {
-      readonly taskId: string;
-      readonly entry: EntityHandoffEntry;
-      readonly newTask?: { readonly title: string; readonly projectId?: string };
-    }): Effect.Effect<
-      EntityHandoffRecorded,
-      Unauthenticated | Forbidden | NotFound | Validation | SqlError
-    > =>
-      Effect.gen(function* () {
-        yield* requireUserActor(
-          handoff.newTask === undefined ? "task.update" : "task.create",
-          ONLY_THE_USER_RECORDS_HANDOFF,
-        );
         const actor = yield* currentStamp;
+        const { entry, newTask } = handoff;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            if (handoff.newTask !== undefined) {
-              yield* ensureProjectExists(handoff.newTask.projectId);
-              const task = yield* insertTask(
-                {
-                  id: handoff.taskId,
-                  title: handoff.newTask.title,
-                  description: "",
-                  stage: "building",
-                  priority: "normal",
-                  labels: [],
-                  projectId: handoff.newTask.projectId,
-                  provenance: [handoff.entry],
-                },
-                actor,
-              );
-              return {
-                task,
-                created: true,
-                stageBefore: undefined,
-              };
-            }
-            // A merged id lands on the survivor, and everything below is about it.
-            const before = yield* readLiveTaskOrFail(handoff.taskId);
-            const task = yield* updateTask(
-              before.id,
-              {
-                stage:
-                  before.stage === "exploring" || before.stage === "planned"
-                    ? "building"
-                    : before.stage,
-                provenance: [handoff.entry],
-              },
-              actor,
-            );
-            return {
-              task,
-              created: false,
-              stageBefore: before.stage,
-            };
+            const isSignalEntry = "signalId" in entry;
+            yield* ensureProjectExists(newTask?.projectId);
+            // A card's entry follows a merged id to the survivor, and
+            // everything below is about it.
+            const before =
+              newTask === undefined && !isSignalEntry
+                ? yield* readLiveTaskOrFail(handoff.taskId)
+                : undefined;
+            const task =
+              newTask !== undefined
+                ? yield* insertTask(
+                    {
+                      id: handoff.taskId,
+                      title: newTask.title,
+                      description: "",
+                      stage: "building",
+                      priority: newTask.priority,
+                      labels: [],
+                      projectId: newTask.projectId,
+                      provenance: [entry],
+                    },
+                    actor,
+                  )
+                : yield* updateTask(
+                    before?.id ?? handoff.taskId,
+                    before === undefined
+                      ? { status: "in-progress", provenance: [entry] }
+                      : {
+                          stage:
+                            before.stage === "exploring" || before.stage === "planned"
+                              ? "building"
+                              : before.stage,
+                          provenance: [entry],
+                        },
+                    actor,
+                  );
+            if (isSignalEntry) return task;
+            const revisions = yield* tasks.readRevisions(task.id);
+            const { stageRevision, joinRevision } = Option.getOrThrow(revisions);
+            yield* handoffRecords.insert({
+              runId: entry.runId,
+              ref: entry.ref,
+              taskId: task.id,
+              taskCreated: newTask !== undefined,
+              stageBefore: before?.stage,
+              stageRevision,
+              joinRevision,
+            });
+            return task;
           }),
         );
       }),
@@ -1350,9 +1328,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Takes back what `recordEntityHandoff` did to the Task, when nothing has
-     * happened to the Task since that the user would want to keep, and says
-     * what it took back. Otherwise it changes nothing and returns
+     * Takes back what `recordHandoff` did to the Task of the handoff from a
+     * card that started `runId`, when nothing has happened to the Task since
+     * that the user would want to keep, and says what it took back. It reads
+     * the handoff's record itself. Otherwise it changes nothing and returns
      * `{ reversed: false, reason }`, in words for the line that tells the
      * user. It does not cancel the run and does not look at the run's steps:
      * whether anything was dispatched is the caller's check. The caller may
@@ -1363,10 +1342,10 @@ const make = Effect.gen(function* () {
      * taken back only when all of these hold:
      *
      * - it exists, is not merged, is not at `done` or `dropped`, and still
-     *   links `ref`;
-     * - its stage revision is still `stageRevision`, so no stage decision came
+     *   links the handoff's ref;
+     * - its stage revision is still the record's, so no stage decision came
      *   after the handoff, not even one that kept the stage;
-     * - its join revision is still `joinRevision`. So a second workflow, a
+     * - its join revision is still the record's. So a second workflow, a
      *   Thread that joined or was moved onto it, or another Task merged into
      *   it, keeps the Task even when the stage stayed the same. A session of
      *   the handoff's own run counts too: whether the run dispatched anything
@@ -1374,17 +1353,19 @@ const make = Effect.gen(function* () {
      * - for a Task the handoff made, it also links no other ref and was not
      *   edited since.
      *
-     * When it holds, a Task the handoff made (`taskCreated`) is deleted, and a
-     * Task the handoff continued goes back to `stageBefore`. That write is a stage decision too, so it raises the stage revision. If
-     * the run's start had ended a failure, the failure is restored
-     * (`restoreRecoveredFailure`), which does so only while nothing else has
-     * handled the failure since.
+     * When it holds, a Task the handoff made is deleted, and a Task the
+     * handoff continued goes back to the stage it had. That write is a stage
+     * decision too, so it raises the stage revision. If the run's start had
+     * ended a failure, the failure is restored (`restoreRecoveredFailure`),
+     * which does so only while nothing else has handled the failure since.
      *
      * Runs in the caller's transaction, or opens one. Only the user takes a
-     * handoff back, so it fails with `Forbidden` for any other caller.
+     * handoff back, so it fails with `Forbidden` for any other caller. The
+     * caller has found the record (`readHandoffUndo`) in this transaction, so
+     * a run without one is a defect.
      */
     reverseEntityHandoff: (
-      handoff: EntityHandoffToReverse,
+      runId: string,
     ): Effect.Effect<EntityHandoffReversal, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_REVERSES_HANDOFF);
@@ -1392,6 +1373,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const handoff = Option.getOrThrow(yield* handoffRecords.read(runId));
             const traces = yield* tasks.readTraces(handoff.taskId, handoff.ref);
             const stays = chooseWhyHandoffStays(traces, handoff);
             if (stays !== undefined) return { reversed: false, reason: stays } as const;
@@ -1416,6 +1398,33 @@ const make = Effect.gen(function* () {
             } as const;
           }),
         );
+      }),
+
+    /**
+     * Returns what the Undo of the handoff from a card that started `runId`
+     * has to know of its record, or none when no such handoff was recorded.
+     */
+    readHandoffUndo: (
+      runId: string,
+    ): Effect.Effect<Option.Option<EntityHandoffUndoState>, SqlError> =>
+      Effect.map(
+        handoffRecords.read(runId),
+        Option.map(({ ref, taskId, undo }) => ({ ref, taskId, undo })),
+      ),
+
+    /**
+     * Stores the first answer of the Undo of the handoff that started
+     * `runId`, with the time it was given, so a repeat of the Undo can return
+     * it. Only the user takes a handoff back, so it fails with `Forbidden`
+     * for any other caller.
+     */
+    storeHandoffUndo: (
+      runId: string,
+      undo: HandOffUndo,
+    ): Effect.Effect<void, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_REVERSES_HANDOFF);
+        yield* handoffRecords.storeUndo(runId, undo, yield* nowIso);
       }),
 
     /**
@@ -1780,7 +1789,10 @@ const make = Effect.gen(function* () {
      *   `restoreRecoveredFailure` can bring it back. A second start finds no
      *   failure and writes no row.
      * - A Task with no row yet has nothing to clear, as in a handoff that
-     *   starts its run before it creates the Task. It does nothing.
+     *   starts its run before it creates the Task. It clears nothing.
+     * - When the Task links an External Entity, it announces an
+     *   `externalEntity` change, so the Inbox card names the workflow now
+     *   working on it.
      *
      * It checks no grant: whoever may start the run may start it on the Task.
      */
@@ -1795,8 +1807,20 @@ const make = Effect.gen(function* () {
           if (clearedFailure) {
             yield* announceTaskFailureChange(input.taskId);
           }
+          yield* announceRunChangeOnLinkedEntity(input.taskId);
         }),
       ),
+
+    /**
+     * Records that a run ended on the Task `taskId`, in the caller's
+     * transaction, which is the one that writes the run's ending. It only
+     * announces: when the Task links an External Entity, an `externalEntity`
+     * change, so the Inbox card stops naming the workflow (see
+     * `announceRunChangeOnLinkedEntity`). It checks no grant, as
+     * `recordRunStart` does.
+     */
+    recordRunEnd: (input: { readonly taskId: string }): Effect.Effect<void, SqlError> =>
+      withTransaction(sql, announceRunChangeOnLinkedEntity(input.taskId)),
 
     /**
      * Makes the run `runId` the failure the Task `taskId` shows, in the

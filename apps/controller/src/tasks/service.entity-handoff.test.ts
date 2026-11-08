@@ -3,7 +3,8 @@
  *
  * - the stage revision, which rises on every stage decision and on nothing
  *   else;
- * - `recordEntityHandoff`, which makes or continues the Task of a handoff;
+ * - `recordHandoff` with a card's entry, which makes or continues the Task of a
+ *   handoff and writes the handoff's record;
  * - `reverseEntityHandoff`, which takes that back only while nothing has
  *   happened to the Task since;
  * - `readAttention`, the one read behind the sidebar's failure dot.
@@ -22,12 +23,7 @@ import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { TaskLinkOwnersLayer } from "../daemon/tasks";
 import { taskRepository } from "./repository";
-import {
-  TaskService,
-  TaskServiceLayer,
-  type EntityHandoffRecorded,
-  type EntityHandoffReversal,
-} from "./index";
+import { TaskService, TaskServiceLayer, type EntityHandoffReversal } from "./index";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
@@ -107,17 +103,29 @@ const insertSession = (taskId: string, createdAt: string, runId?: string) =>
   });
 
 /**
- * Records a handoff on the Task, and returns what it did together with the
- * Task's revisions right after, which is what the controller's handoff stores
- * for the Undo.
+ * Records a card's handoff on the Task, and returns the Task with the record
+ * the handoff wrote: whether it made the Task, the stage the Task had, and the
+ * Task's revisions right after.
  */
-const recordHandoff = (input: Parameters<TaskService["Service"]["recordEntityHandoff"]>[0]) =>
+const recordHandoff = (input: Parameters<TaskService["Service"]["recordHandoff"]>[0]) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
-    const repository = yield* taskRepository;
-    const recorded = yield* tasks.recordEntityHandoff(input);
-    const revisions = Option.getOrThrow(yield* repository.readRevisions(recorded.task.id));
-    return { ...recorded, ...revisions };
+    const sql = yield* SqlClient.SqlClient;
+    const task = yield* tasks.recordHandoff(input);
+    const rows = yield* sql<{
+      readonly task_created: number;
+      readonly stage_before: string | null;
+      readonly stage_revision: number;
+      readonly join_revision: number;
+    }>`SELECT * FROM entity_handoffs WHERE run_id = ${uuidFromString(input.entry.runId)}`;
+    const row = rows[0]!;
+    return {
+      task,
+      created: row.task_created === 1,
+      stageBefore: row.stage_before ?? undefined,
+      stageRevision: row.stage_revision,
+      joinRevision: row.join_revision,
+    };
   });
 
 const readStageRevision = (taskId: string) =>
@@ -177,7 +185,7 @@ describe("the stage revision", () => {
   });
 });
 
-describe("recordEntityHandoff", () => {
+describe("recordHandoff for a card", () => {
   it("makes a Task at building for a new handoff, linked to the ref, with no signal in its entry", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -193,7 +201,7 @@ describe("recordEntityHandoff", () => {
         const recorded = yield* recordHandoff({
           taskId,
           entry: { ref: REF, runId },
-          newTask: { title: "Review PR 12", projectId },
+          newTask: { title: "Review PR 12", priority: "normal", projectId },
         });
         const links = yield* sql<{ readonly ref: string }>`
           SELECT ref FROM task_entity_links WHERE task_id = ${uuidFromString(taskId)}`;
@@ -299,10 +307,10 @@ describe("recordEntityHandoff", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         return yield* Effect.flip(
-          tasks.recordEntityHandoff({
+          tasks.recordHandoff({
             taskId: newId(),
             entry: { ref: REF, runId: newId() },
-            newTask: { title: "forged" },
+            newTask: { title: "forged", priority: "normal" },
           }),
         );
       }),
@@ -321,7 +329,7 @@ describe("reverseEntityHandoff", () => {
     const recorded = yield* recordHandoff({
       taskId,
       entry: { ref: REF, runId },
-      newTask: { title: "Review PR 12" },
+      newTask: { title: "Review PR 12", priority: "normal" },
     });
     return { taskId, runId, recorded };
   });
@@ -339,25 +347,8 @@ describe("reverseEntityHandoff", () => {
       return { taskId: task.id, runId, recorded };
     });
 
-  const reverse = (handoff: {
-    readonly taskId: string;
-    readonly runId: string;
-    readonly recorded: Pick<EntityHandoffRecorded, "created" | "stageBefore"> & {
-      readonly stageRevision: number;
-      readonly joinRevision: number;
-    };
-  }) =>
-    Effect.flatMap(TaskService, (tasks) =>
-      tasks.reverseEntityHandoff({
-        taskId: handoff.taskId,
-        runId: handoff.runId,
-        ref: REF,
-        taskCreated: handoff.recorded.created,
-        stageBefore: handoff.recorded.stageBefore,
-        stageRevision: handoff.recorded.stageRevision,
-        joinRevision: handoff.recorded.joinRevision,
-      }),
-    );
+  const reverse = (handoff: { readonly runId: string }) =>
+    Effect.flatMap(TaskService, (tasks) => tasks.reverseEntityHandoff(handoff.runId));
 
   const isGone = (taskId: string) =>
     Effect.flatMap(TaskService, (tasks) =>
@@ -549,7 +540,7 @@ describe("reverseEntityHandoff", () => {
         yield* insertSession(task.id, BEFORE_HANDOFF);
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
-        const recorded = yield* recordHandoff({
+        yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
@@ -565,7 +556,7 @@ describe("reverseEntityHandoff", () => {
           SELECT count(*) AS n FROM sessions WHERE task_id = ${uuidFromString(task.id)}`;
         return {
           sessions: sessions[0]!.n,
-          reversal: yield* reverse({ taskId: task.id, runId, recorded }),
+          reversal: yield* reverse({ runId }),
           task: yield* tasks.read(task.id),
         };
       }),
@@ -598,12 +589,12 @@ describe("reverseEntityHandoff", () => {
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
         yield* tasks.recordRunStart({ taskId: task.id, runId });
-        const recorded = yield* recordHandoff({
+        yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
         const during = yield* repository.readFailureState(task.id);
-        const reversal = yield* reverse({ taskId: task.id, runId, recorded });
+        const reversal = yield* reverse({ runId });
         return { during, reversal, after: yield* repository.readFailureState(task.id) };
       }),
     );
@@ -627,13 +618,13 @@ describe("reverseEntityHandoff", () => {
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
         yield* tasks.recordRunStart({ taskId: task.id, runId });
-        const recorded = yield* recordHandoff({
+        yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
         // Handling that leaves no run or Thread row behind, so only the failure fence sees it.
         yield* tasks.recordRunFailure({ taskId: task.id, runId: NEWER_RUN });
-        const reversal = yield* reverse({ taskId: task.id, runId, recorded });
+        const reversal = yield* reverse({ runId });
         return { reversal, after: yield* repository.readFailureState(task.id) };
       }),
     );
@@ -651,15 +642,7 @@ describe("reverseEntityHandoff", () => {
         const tasks = yield* TaskService;
         return yield* Effect.flip(
           Effect.provideService(
-            tasks.reverseEntityHandoff({
-              taskId: newId(),
-              runId: newId(),
-              ref: REF,
-              taskCreated: true,
-              stageBefore: undefined,
-              stageRevision: 0,
-              joinRevision: 0,
-            }),
+            tasks.reverseEntityHandoff(newId()),
             CurrentActor,
             buildSessionActor(["task.update", "task.delete", "task.read"]),
           ),

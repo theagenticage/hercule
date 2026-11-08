@@ -266,7 +266,7 @@ describe("handOff", () => {
         });
         expect(response.status).toBe(200);
       },
-      "Review cannot take this",
+      "That workflow cannot take this",
     ],
     [
       "the account was disabled",

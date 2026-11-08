@@ -13,7 +13,14 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { NotFound, type Run, type TryAgainUndo } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { AfterCommit, uuidFromString, type Change } from "../db";
+import {
+  AfterCommit,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  withTransaction,
+  type Change,
+} from "../db";
 import { RunExecutorLayer } from "../daemon/runs";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -374,6 +381,68 @@ describe("the card of a Task, when a run of it starts or ends", () => {
     // starting or ending must send one. The rest of the card stays derived.
     const changes = cardChanges(published, taskId);
     expect(changes.map((change) => "derived" in change)).toEqual([false, true, false, true]);
+  });
+
+  it("announces the linked entity, and no plain task push, when a run starts and ends on a Task that links one", async () => {
+    const published: Array<Change> = [];
+    const { taskId, entityId } = await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const task = yield* tasks.create({ title: "Add a refund button", description: "" });
+        const entityId = uuidToString(mintUuid());
+        const at = new Date().toISOString();
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO external_entities
+                (id, ref, kind, noun, completeness, title, first_observed_at, updated_at)
+              VALUES (${uuidFromString(entityId)}, 'acme:ticket:1', 'acme/ticket', 'Ticket', 'full',
+                      'Refund button', ${at}, ${at})`;
+            yield* sql`
+              INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+              VALUES (${uuidFromString(task.id)}, 'acme:ticket:1', ${at}, 'user', 0)`;
+          }),
+        );
+        published.length = 0;
+        const run = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
+        yield* waitForRunToEnd(run.runId);
+        yield* waitForAnnouncements(published, task.id, 1);
+        return { taskId: task.id, entityId };
+      }),
+      published,
+    );
+
+    const entityChanges = published.filter(
+      (change) => change._tag === "record" && change.topic === "externalEntity",
+    );
+    // One at the start and one at the end.
+    expect(entityChanges).toEqual([
+      { _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" },
+      { _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" },
+    ]);
+    expect(cardChanges(published, taskId).every((change) => "derived" in change)).toBe(true);
+  });
+
+  it("announces no entity when a run starts and ends on a Task that links none", async () => {
+    const published: Array<Change> = [];
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const tasks = yield* TaskService;
+        const task = yield* tasks.create({ title: "Add a refund button", description: "" });
+        const run = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
+        yield* waitForRunToEnd(run.runId);
+        yield* waitForAnnouncements(published, task.id, 1);
+      }),
+      published,
+    );
+
+    expect(
+      published.filter((change) => change._tag === "record" && change.topic === "externalEntity"),
+    ).toEqual([]);
   });
 
   it("is not announced when a run that cannot start is refused", async () => {

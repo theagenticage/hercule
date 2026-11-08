@@ -25,7 +25,7 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { requireUserActor } from "../actor";
-import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { resourceRepository } from "../resources";
 import { isUnfinished, RunService, runRepository } from "../runs";
@@ -33,7 +33,6 @@ import { SignalClaims, SignalService, signalRepository } from "../signals";
 import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
 import { announceEntityChanges } from "./announce";
-import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { listEntityKindSources } from "./workflow-offers";
 import { findProjectOfRemote } from "./project-of-remote";
 import { externalEntityRepository, type TaskableEntity } from "./repository";
@@ -83,7 +82,6 @@ const holdSameKinds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): bool
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const entities = yield* externalEntityRepository;
-  const records = yield* handoffRecordRepository;
   const workflows = yield* workflowRepository;
   const signalRows = yield* signalRepository;
   const taskRows = yield* taskRepository;
@@ -113,44 +111,29 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks that the workflow is available on the entity and that the account
-   * can act on it, and returns the offer and the account that acts. It reads
-   * the one workflow and the one account directly, by the same rules the
-   * Inbox shows its offers by, so what a menu offered and what a handoff
-   * accepts cannot disagree, and no cut list decides a handoff. Fails with
-   * `InvalidState`, in words for the user, when it is not available or the
-   * account cannot act.
+   * can act on it, and returns the offer and the account that acts. One read
+   * decides both (`prepareHandoff`), by the same rules the Inbox shows its
+   * offers by, so what a menu offered and what a handoff accepts cannot
+   * disagree, and no cut list decides a handoff. Fails with `InvalidState`,
+   * in words for the user, when it is not available or the account cannot
+   * act.
    */
-  const checkOffer = (
-    entity: TaskableEntity,
-    definition: WorkflowDefinition,
-    input: EntityHandOffInput,
-  ) =>
+  const checkOffer = (entity: TaskableEntity, input: EntityHandOffInput) =>
     Effect.gen(function* () {
-      const kindSources = listEntityKindSources(yield* host.listActiveEventSources());
+      const kindSource = listEntityKindSources(yield* host.listActiveEventSources()).find(
+        (source) => source.kind === entity.kind,
+      );
       const target = { ref: entity.ref, kind: entity.kind, targetRemote: entity.targetRemote };
-      const offer = Option.getOrUndefined(
-        yield* entities.readWorkflowOffer(target, input.workflowId, kindSources),
+      const prepared = yield* entities.prepareHandoff(
+        target,
+        input.workflowId,
+        input.connectionId,
+        kindSource,
       );
-      if (offer === undefined) {
-        return yield* Effect.fail(
-          createInvalidStateError(
-            `${definition.name} cannot take this. Reload the Inbox and choose again.`,
-          ),
-        );
+      if (prepared._tag === "Refused") {
+        return yield* Effect.fail(createInvalidStateError(prepared.words));
       }
-      if (offer.unavailable !== undefined) {
-        return yield* Effect.fail(createInvalidStateError(offer.unavailable.message));
-      }
-      const acting = Option.getOrUndefined(
-        yield* entities.findActingConnection(target, input.connectionId, kindSources),
-      );
-      if (acting === undefined) {
-        return yield* Effect.fail(
-          createInvalidStateError("That account cannot act on this. Choose another account."),
-        );
-      }
-      const connectionId = acting.id;
-      return { offer, connectionId };
+      return { offer: prepared.offer, connectionId: prepared.connection.id };
     });
 
   /**
@@ -174,7 +157,7 @@ const make = Effect.gen(function* () {
       if (!holdSameKinds(listAnswers(definition), boundary.answers)) {
         return yield* Effect.fail(createInvalidStateError(WORKFLOW_CHANGED));
       }
-      const { offer, connectionId } = yield* checkOffer(entity, definition, input);
+      const { offer, connectionId } = yield* checkOffer(entity, input);
 
       const existing = Option.getOrUndefined(yield* taskRows.findActiveTaskForRef(entity.ref));
       if (
@@ -206,13 +189,14 @@ const make = Effect.gen(function* () {
         taskId,
       );
 
-      const recorded = yield* tasks.recordEntityHandoff({
+      const task = yield* tasks.recordHandoff({
         taskId,
         entry: { ref: entity.ref, runId: started.runId },
         ...(existing === undefined
           ? {
               newTask: {
                 title: entity.title,
+                priority: "normal",
                 ...(projectId === undefined ? {} : { projectId }),
               },
             }
@@ -224,21 +208,8 @@ const make = Effect.gen(function* () {
         workflowName: definition.name,
         runId: started.runId,
       });
-      // The revisions are read after every write of the handoff, so the
-      // record holds the Task as the handoff left it, whatever order the
-      // writes above are made in. The run's own start counts as a join.
-      const revisions = Option.getOrThrow(yield* taskRows.readRevisions(recorded.task.id));
-      yield* records.insert({
-        runId: started.runId,
-        ref: entity.ref,
-        taskId: recorded.task.id,
-        taskCreated: recorded.created,
-        stageBefore: recorded.stageBefore,
-        stageRevision: revisions.stageRevision,
-        joinRevision: revisions.joinRevision,
-      });
-      yield* announceEntityChanges({ entityIds: [entity.id], affectedTaskIds: [recorded.task.id] });
-      return { ...started, taskId: recorded.task.id } satisfies EntityHandOffResult;
+      yield* announceEntityChanges({ entityIds: [entity.id], affectedTaskIds: [task.id] });
+      return { ...started, taskId: task.id } satisfies EntityHandOffResult;
     });
 
   /**
@@ -246,28 +217,18 @@ const make = Effect.gen(function* () {
    * caller's transaction. The Task is taken back before the run is cancelled,
    * and only when nothing of the run was dispatched.
    */
-  const undoInTransaction = (record: HandoffRecord) =>
+  const undoInTransaction = (runId: string) =>
     Effect.gen(function* () {
       // Runs are never deleted, and the record names this one.
-      const run = Option.getOrThrow(yield* runRows.read(record.runId));
+      const run = Option.getOrThrow(yield* runRows.read(runId));
       if (!isUnfinished(run.status)) return TOO_LATE;
 
-      const dispatched = yield* runRows.hasDispatchedWork(record.runId);
-      const reversal = dispatched
-        ? undefined
-        : yield* tasks.reverseEntityHandoff({
-            taskId: record.taskId,
-            runId: record.runId,
-            ref: record.ref,
-            taskCreated: record.taskCreated,
-            stageBefore: record.stageBefore,
-            stageRevision: record.stageRevision,
-            joinRevision: record.joinRevision,
-          });
+      const dispatched = yield* runRows.hasDispatchedWork(runId);
+      const reversal = dispatched ? undefined : yield* tasks.reverseEntityHandoff(runId);
       // The run was found unfinished in this transaction, so the cancel
       // cannot refuse it.
       yield* runs
-        .cancel(record.runId, {})
+        .cancel(runId, {})
         .pipe(
           Effect.catchIf(
             (error): error is Validation | InvalidState | NotFound =>
@@ -315,10 +276,10 @@ const make = Effect.gen(function* () {
      *    `answers` changed since step 2; checks the offer and the account
      *    again; refuses a second run of the same workflow on the Task; starts
      *    the run with the entity's ref and the acting account as inputs;
-     *    writes the Task (`building`, with the entity's title, or the active
-     *    Task continued); ends the claimed signals that are still open; and
-     *    writes the record the Undo reads, with the Task's revisions as they
-     *    are after all of those writes.
+     *    writes the Task and the record the Undo reads
+     *    (`TaskService.recordHandoff`: `building`, with the entity's title, or
+     *    the active Task continued); and ends the claimed signals that are
+     *    still open.
      *
      * A run that fails to start rolls everything back.
      *
@@ -369,7 +330,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const found = yield* records.read(runId);
+            const found = yield* tasks.readHandoffUndo(runId);
             if (Option.isNone(found)) {
               return yield* Effect.fail(
                 createNotFoundError("no handoff of an entity has this run"),
@@ -378,8 +339,8 @@ const make = Effect.gen(function* () {
             const record = found.value;
             if (record.undo !== undefined) return record.undo;
 
-            const undo = yield* undoInTransaction(record);
-            yield* records.storeUndo(runId, undo, yield* nowIso);
+            const undo = yield* undoInTransaction(runId);
+            yield* tasks.storeHandoffUndo(runId, undo);
             const entity = yield* entities.readTaskableEntity({ ref: record.ref });
             yield* announceEntityChanges({
               entityIds: Option.isSome(entity) ? [entity.value.id] : [],

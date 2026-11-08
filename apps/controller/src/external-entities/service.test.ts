@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import { MAX_ACTING_CONNECTIONS, type ExternalRef } from "@hercule/contract";
+import { MAX_ACTING_CONNECTIONS, MAX_LIVE_WORKFLOWS, type ExternalRef } from "@hercule/contract";
 import {
   HOST_API,
   registerConnectionType,
@@ -1589,7 +1589,7 @@ describe("what a card offers", () => {
     ]);
   });
 
-  it("cuts the accounts of a card to the bound, while the handoff checks still see every account", async () => {
+  it("cuts the accounts of a card to the bound, while the handoff still sees every account", async () => {
     const result = await run(({ service, sql, report, connectionId, insertAccount, entityId }) =>
       Effect.gen(function* () {
         const entities = yield* externalEntityRepository;
@@ -1601,58 +1601,177 @@ describe("what a card offers", () => {
         const review = yield* insertWorkflow(sql, "Review");
         const detail = yield* service.read(yield* entityId(ticketRef("1")));
         const target = { ref: ticketRef("1"), kind: KIND, targetRemote: undefined };
-        const kinds = [{ kind: KIND, connectionType: "acme/acme", signalKinds: [] }];
+        const kind = { kind: KIND, connectionType: "acme/acme", signalKinds: [] };
         const shown = new Set(detail.actingConnections.map((account) => account.id));
         const cutOff = ids.filter((id) => !shown.has(id));
         return {
           detail,
-          shown,
           cutOff,
-          review,
-          chosen: yield* entities.findActingConnection(target, cutOff[0], kinds),
-          oldest: yield* entities.findActingConnection(target, undefined, kinds),
-          unknown: yield* entities.findActingConnection(target, uuidToString(mintUuid()), kinds),
-          offer: yield* entities.readWorkflowOffer(target, review, kinds),
-          missing: yield* entities.readWorkflowOffer(target, uuidToString(mintUuid()), kinds),
+          chosen: yield* entities.prepareHandoff(target, review, cutOff[0], kind),
         };
       }),
     );
     expect(result.detail.actingConnections).toHaveLength(MAX_ACTING_CONNECTIONS);
     expect(result.cutOff).toHaveLength(1);
-    expect(Option.map(result.chosen, (account) => account.id)).toEqual(
-      Option.some(result.cutOff[0]),
-    );
-    expect(Option.map(result.oldest, (account) => account.id)).toEqual(
-      Option.some(result.detail.actingConnections[0]!.id),
-    );
-    expect(Option.isNone(result.unknown)).toBe(true);
-    expect(Option.getOrThrow(result.offer)).toEqual(result.detail.offers[0]);
-    expect(Option.isNone(result.missing)).toBe(true);
+    expect(result.chosen).toMatchObject({
+      _tag: "Accepted",
+      offer: result.detail.offers[0],
+      connection: { id: result.cutOff[0] },
+    });
   });
 
-  it("answers for a workflow the same way the menu does, whether it is unavailable, disabled or invalid", async () => {
-    const result = await run(({ sql, report, connectionId }) =>
+  it("decides a handoff from one read: the offer by the menu's rules, and the account that acts or the words that refuse", async () => {
+    const outcomes = await run(({ sql, report, connectionId, insertAccount }) =>
       Effect.gen(function* () {
         const entities = yield* externalEntityRepository;
-        yield* report(connectionId, [
-          buildObservation("1", { repository: { target: { remote: API } } }),
-        ]);
-        const webOnly = yield* insertWorkflow(sql, "Web only", {
-          workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
-        });
-        const disabled = yield* insertWorkflow(sql, "Disabled", { enabled: false });
-        const invalid = yield* insertWorkflow(sql, "Invalid", { invalid: true });
+        const second = yield* insertAccount("acme-2");
+        const bystander = yield* insertAccount("acme-3");
+        const observation = buildObservation("1", { repository: { target: { remote: API } } });
+        yield* report(connectionId, [observation]);
+        yield* report(second, [observation]);
+        const workflowIds = {
+          review: yield* insertWorkflow(sql, "Review"),
+          webOnly: yield* insertWorkflow(sql, "Web only", {
+            workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
+          }),
+          disabled: yield* insertWorkflow(sql, "Disabled", { enabled: false }),
+          invalid: yield* insertWorkflow(sql, "Invalid", { invalid: true }),
+          unknown: uuidToString(mintUuid()),
+        };
+        const accountIds = { oldest: connectionId, second, bystander };
         const target = { ref: ticketRef("1"), kind: KIND, targetRemote: API };
-        const kinds = [{ kind: KIND, connectionType: "acme/acme", signalKinds: [] }];
+        const kind = { kind: KIND, connectionType: "acme/acme", signalKinds: [] };
+        const decide = (
+          workflow: keyof typeof workflowIds,
+          account: keyof typeof accountIds | undefined,
+          plugin: "running" | "stopped" = "running",
+        ) =>
+          Effect.map(
+            entities.prepareHandoff(
+              target,
+              workflowIds[workflow],
+              account === undefined ? undefined : accountIds[account],
+              plugin === "running" ? kind : undefined,
+            ),
+            (prepared) =>
+              prepared._tag === "Accepted"
+                ? `${prepared.offer.name} by ${prepared.connection.label}`
+                : prepared.words,
+          );
+        return [
+          yield* decide("review", undefined),
+          yield* decide("review", "second"),
+          yield* decide("review", "bystander"),
+          yield* decide("webOnly", undefined),
+          yield* decide("disabled", undefined),
+          yield* decide("invalid", undefined),
+          yield* decide("unknown", undefined),
+          yield* decide("review", undefined, "stopped"),
+        ];
+      }),
+    );
+    expect(outcomes).toEqual([
+      "Review by acme-1",
+      "Review by acme-2",
+      "That account cannot act on this. Choose another account.",
+      "Web only works on acme/web only",
+      "That workflow cannot take this. Reload the Inbox and choose again.",
+      "That workflow cannot take this. Reload the Inbox and choose again.",
+      "That workflow cannot take this. Reload the Inbox and choose again.",
+      "Review needs account, which a card cannot fill",
+    ]);
+  });
+});
+
+describe("what a card shows of the live work on its Task", () => {
+  /** Inserts a run of a workflow on a Task, live or finished, created `minute` minutes into the hour. */
+  const insertRun = (
+    sql: SqlClient.SqlClient,
+    run: {
+      readonly taskId: string;
+      readonly workflowId: string;
+      readonly name: string;
+      readonly status: "pending" | "running" | "completed";
+      readonly minute: number;
+    },
+  ) => {
+    const at = `2026-03-01T00:${String(run.minute).padStart(2, "0")}:00.000Z`;
+    return withTransaction(
+      sql,
+      sql`
+        INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at, finished_at, task_id)
+        VALUES (${uuidFromString(uuidToString(mintUuid()))}, ${uuidFromString(run.workflowId)},
+                ${JSON.stringify({ name: run.name })}, '{}', '{"kind":"manual","actor":"user"}',
+                ${run.status}, ${at}, ${run.status === "completed" ? at : null},
+                ${uuidFromString(run.taskId)})`,
+    );
+  };
+
+  it("names each workflow with a live run on the card's Task once, newest run first, and no finished one", async () => {
+    const cards = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1"),
+          buildObservation("2"),
+          buildObservation("3"),
+        ]);
+        const taken = yield* service.takeOn(yield* entityId(ticketRef("1")));
+        const finishedOnly = yield* service.takeOn(yield* entityId(ticketRef("2")));
+        const review = yield* insertWorkflow(sql, "Review");
+        const plan = yield* insertWorkflow(sql, "Plan");
+        const ship = yield* insertWorkflow(sql, "Ship");
+        const on =
+          (taskId: string, workflowId: string, name: string) =>
+          (status: "pending" | "running" | "completed", minute: number) =>
+            insertRun(sql, { taskId, workflowId, name, status, minute });
+        yield* on(taken.taskId, review, "Review")("pending", 1);
+        yield* on(taken.taskId, plan, "Plan")("running", 2);
+        yield* on(taken.taskId, ship, "Ship")("completed", 3);
+        yield* on(taken.taskId, review, "Review")("running", 4);
+        yield* on(finishedOnly.taskId, ship, "Ship")("completed", 5);
+        const inbox = yield* service.queryInbox();
         return {
-          webOnly: yield* entities.readWorkflowOffer(target, webOnly, kinds),
-          disabled: yield* entities.readWorkflowOffer(target, disabled, kinds),
-          invalid: yield* entities.readWorkflowOffer(target, invalid, kinds),
+          ids: { review, plan },
+          cards: inbox.cards.map((card) => [card.ref, card.liveWorkflows] as const),
         };
       }),
     );
-    expect(Option.getOrThrow(result.webOnly).unavailable?.reason).toBe("repository");
-    expect(Option.isNone(result.disabled)).toBe(true);
-    expect(Option.isNone(result.invalid)).toBe(true);
+    expect(cards.cards).toEqual([
+      [
+        ticketRef("1"),
+        [
+          { workflowId: cards.ids.review, name: "Review" },
+          { workflowId: cards.ids.plan, name: "Plan" },
+        ],
+      ],
+      [ticketRef("2"), []],
+      [ticketRef("3"), []],
+    ]);
+  });
+
+  it("cuts the workflows of a card to the bound, keeping the newest runs", async () => {
+    const live = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const taken = yield* service.takeOn(yield* entityId(ticketRef("1")));
+        for (let index = 1; index <= MAX_LIVE_WORKFLOWS + 1; index++) {
+          const name = `Workflow ${String(index)}`;
+          yield* insertRun(sql, {
+            taskId: taken.taskId,
+            workflowId: yield* insertWorkflow(sql, name),
+            name,
+            status: "running",
+            minute: index,
+          });
+        }
+        return (yield* service.queryInbox()).cards[0]!.liveWorkflows;
+      }),
+    );
+    expect(live.map((workflow) => workflow.name)).toEqual(
+      Array.from(
+        { length: MAX_LIVE_WORKFLOWS },
+        (_, index) => `Workflow ${String(MAX_LIVE_WORKFLOWS + 1 - index)}`,
+      ),
+    );
   });
 });
