@@ -360,9 +360,19 @@ describe("linking a thing to a task by hand", () => {
         token,
       );
       expect(linked.status).toBe(200);
-      const linkedTask = (await linked.json()) as Task;
-      expect(linkedTask.id).toBe(created.id);
-      expect(linkedTask.provenance.map((entry) => entry.ref)).toEqual([REF]);
+      const linkedResult = (await linked.json()) as { task: Task; changed: boolean };
+      expect(linkedResult.changed).toBe(true);
+      expect(linkedResult.task.id).toBe(created.id);
+      expect(linkedResult.task.provenance.map((entry) => entry.ref)).toEqual([REF]);
+
+      // A second link finds nothing to do, and says so.
+      const linkedAgain = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: REF },
+        token,
+      );
+      expect(((await linkedAgain.json()) as { changed: boolean }).changed).toBe(false);
 
       const unlinked = await post(
         base,
@@ -371,7 +381,17 @@ describe("linking a thing to a task by hand", () => {
         token,
       );
       expect(unlinked.status).toBe(200);
-      expect(((await unlinked.json()) as Task).provenance.map((entry) => entry.ref)).toEqual([REF]);
+      const unlinkedResult = (await unlinked.json()) as { task: Task; changed: boolean };
+      expect(unlinkedResult.changed).toBe(true);
+      expect(unlinkedResult.task.provenance.map((entry) => entry.ref)).toEqual([REF]);
+
+      const unlinkedAgain = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/unlink`,
+        { ref: REF },
+        token,
+      );
+      expect(((await unlinkedAgain.json()) as { changed: boolean }).changed).toBe(false);
     });
   });
 

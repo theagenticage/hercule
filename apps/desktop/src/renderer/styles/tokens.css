@@ -814,6 +814,9 @@
   --fail-ink-on-stock: var(--fail-ink);
   /* The share of ink in the band behind a lane's head on the Work board. */
   --band-share: 5%;
+  /* Muted words that need a little more strength to meet the contrast target on a sheet in every
+     theme (--muted itself falls short in Orient Express). A step between --muted and --ink. */
+  --muted-firm: color-mix(in oklab, var(--ink) 40%, var(--muted));
 }
 [data-theme="styles"] {
   --mark-l: 0.43;

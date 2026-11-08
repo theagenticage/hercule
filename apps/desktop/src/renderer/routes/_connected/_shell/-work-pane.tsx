@@ -335,6 +335,7 @@ function PresentedTask({
           read.status === "ready" ? (
             <LinkSearch
               client={client}
+              size="tall"
               excludedRefs={read.detail.entities.map((entity) => entity.ref)}
               onPick={changes.onLinkEntity}
             />

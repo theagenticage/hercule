@@ -49,6 +49,7 @@ import {
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskEntityLinkInput,
+  type TaskEntityLinkResult,
   TaskFilter,
   TaskMoveInput,
   TaskUpdateInput,
@@ -1563,14 +1564,16 @@ const make = Effect.gen(function* () {
 
     /**
      * Links the outside thing `input.ref` to the Task `input.id` (or to the
-     * Task it was merged into) by hand, and returns the Task. Through the same
+     * Task it was merged into) by hand, and returns the Task and whether the
+     * call changed anything (`changed`). Through the same
      * write as a provenance `ref` on `update`: the Task gains a provenance
      * entry, a `task.updated` event, a Fact when the thing is a piece of work
      * with a lifecycle, and its summary is marked out of date. The link clears
      * an earlier unlink of the thing, so scans may link it again. Announces
      * `task`, and `externalEntity` when Hercule holds a record of the thing.
      *
-     * A thing the Task links already changes nothing. A thing Hercule has no
+     * A thing the Task links already changes nothing, and `changed` is false:
+     * a client must not offer an Undo for a call that did nothing. A thing Hercule has no
      * record of is linked too: the ref is all a link needs. A Task at `done`
      * or `dropped` takes the link but no Fact, as Facts never move finished
      * work. Fails with `NotFound` when the Task does not exist or is deleted,
@@ -1578,7 +1581,10 @@ const make = Effect.gen(function* () {
      */
     linkEntity: (
       input: LinkEntityInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      TaskEntityLinkResult,
+      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ref } = yield* Effect.mapError(
@@ -1590,10 +1596,10 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const task = yield* readLiveTaskOrFail(id);
-            if (yield* tasks.hasLink(task.id, ref)) return task;
+            if (yield* tasks.hasLink(task.id, ref)) return { task, changed: false };
             const linkedTask = yield* updateTask(task.id, { provenance: [{ ref }] }, actor);
             yield* announceEntityOfRef(ref);
-            return linkedTask;
+            return { task: linkedTask, changed: true };
           }),
         );
       }),
@@ -1601,7 +1607,8 @@ const make = Effect.gen(function* () {
     /**
      * Takes the link to the outside thing `input.ref` away from the Task
      * `input.id` (or from the Task it was merged into) and keeps it away, and
-     * returns the Task. In one transaction it:
+     * returns the Task and whether the call changed anything (`changed`). In
+     * one transaction it:
      *
      * - removes the link row, and never touches provenance, which stays the
      *   history;
@@ -1616,13 +1623,17 @@ const make = Effect.gen(function* () {
      *   `externalEntity` when Hercule holds a record of the thing.
      *
      * A thing the Task does not link changes nothing, and writes no unlink
-     * record: the call is safe to repeat. Fails with `NotFound` when the Task
+     * record: the call is safe to repeat, and `changed` is false, so a client
+     * must not offer an Undo for it. Fails with `NotFound` when the Task
      * does not exist or is deleted, and with `Validation` when the ref is not
      * a valid external ref.
      */
     unlinkEntity: (
       input: LinkEntityInput,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      TaskEntityLinkResult,
+      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ref } = yield* Effect.mapError(
@@ -1635,7 +1646,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const task = yield* readLiveTaskOrFail(id);
-            if (!(yield* tasks.removeLink(task.id, ref, at))) return task;
+            if (!(yield* tasks.removeLink(task.id, ref, at))) return { task, changed: false };
             yield* facts.voidFacts(task.id, ref, at);
             yield* facts.suppress(task.id, ref, at, actor);
             yield* linked.recordLandingFact(task.id);
@@ -1643,7 +1654,7 @@ const make = Effect.gen(function* () {
             if (!isFinishedStage(task.stage)) yield* markSummaryDirty(task.id);
             yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "updated" });
             yield* announceEntityOfRef(ref);
-            return yield* readLiveTaskOrFail(task.id);
+            return { task: yield* readLiveTaskOrFail(task.id), changed: true };
           }),
         );
       }),

@@ -3632,9 +3632,11 @@ describe("upgrading from the previous edge release", () => {
         expect(inReview.title).toBe(PULL_REQUEST_TASK.title);
         const runReader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {
-          const runs = await waitUntil("the shipped run to finish", async () => {
+          const runs = await waitUntil("the shipped run to finish", () => {
             const rows = readRunsOfShippedWorkflow(runReader, "card-in-review");
-            return rows.every((row) => row.status === "completed") ? rows : undefined;
+            return Promise.resolve(
+              rows.every((row) => row.status === "completed") ? rows : undefined,
+            );
           });
           expect(runs.map((row) => JSON.parse(row.inputs) as unknown)).toMatchObject([
             { task_id: PULL_REQUEST_TASK.id },

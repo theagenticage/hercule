@@ -181,7 +181,7 @@ describe("a source that does not validate", () => {
       expect(await readWorkflowNames(controller)).toEqual([]);
       expect(await readInstalledKeys(harness)).toEqual([]);
       const notifications = await readFailureNotifications(harness);
-      expect(notifications.map((one) => JSON.parse(one.subject))).toEqual(
+      expect(notifications.map((one) => JSON.parse(one.subject) as unknown)).toEqual(
         FAILING_KEYS.map((key) => [{ kind: "shippedWorkflow", id: key }]),
       );
       for (const one of notifications) {

@@ -110,7 +110,7 @@ const pullRequest = (
   lifecycle,
   fields: { key: String(number) },
   concerns: ["assigned"],
-  ...(createdAt === null ? {} : { createdAt }),
+  ...(createdAt === null ? {} : { sourceCreatedAt: createdAt }),
   sourceUpdatedAt,
   repository: {
     target: { remote: REMOTE },

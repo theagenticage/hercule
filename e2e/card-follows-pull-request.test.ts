@@ -136,6 +136,8 @@ function buildPullRequestNode(pullRequest: "OPEN" | "MERGED") {
     bodyText: "",
     isDraft: false,
     state: pullRequest,
+    // After the Thread's workspace was made, so a merged pull request counts as the Thread's.
+    createdAt: "2026-11-02T10:00:00Z",
     updatedAt: now,
     author: { login: "casey-colleague" },
     repository: { nameWithOwner: REPOSITORY, createdAt: "2026-01-05T09:00:00Z" },
@@ -522,14 +524,16 @@ describe("A card follows its pull request", () => {
     );
 
     // The first poll looks the branch up and finds nothing, so the card stays.
-    await waitUntil("the poll to ask GitHub about the branch", async () =>
-      standIn.requests.some(
-        (request) =>
-          request.query?.includes("headRefName") === true &&
-          request.query.includes("pullRequests(headRefName"),
-      )
-        ? true
-        : undefined,
+    await waitUntil("the poll to ask GitHub about the branch", () =>
+      Promise.resolve(
+        standIn.requests.some(
+          (request) =>
+            request.query?.includes("headRefName") === true &&
+            request.query.includes("pullRequests(headRefName"),
+        )
+          ? true
+          : undefined,
+      ),
     );
     expect(await readStage(task.id)).toBe("building");
 
@@ -564,9 +568,9 @@ describe("A card follows its pull request", () => {
     for (let poll = 0; poll < 2; poll++) {
       const refreshedBefore = readLastRefresh();
       await restartController();
-      await waitUntil("the poll to read the pull request again", async () => {
+      await waitUntil("the poll to read the pull request again", () => {
         const at = readLastRefresh();
-        return at !== null && at !== refreshedBefore ? at : undefined;
+        return Promise.resolve(at !== null && at !== refreshedBefore ? at : undefined);
       });
       expect(await readStage(task.id)).toBe("building");
       expect(await readRunSummaries()).toEqual([LANDED_RUN, IN_REVIEW_RUN]);

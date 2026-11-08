@@ -48,20 +48,23 @@ export interface RelationProgress {
  * - `own`: the Task the pane is open for holds the link itself. It draws like
  *   a place, with its status in words, and the user can remove it.
  */
-export interface RowLink {
-  readonly kind: "confirmed" | "hint" | "own";
-  /**
-   * Who says the two are linked, in words, such as "Linear reports this".
-   * Absent on a Task's own link, which no claim explains.
-   */
-  readonly claimWords?: string;
-  /**
-   * True when the user has made a claim on the link, so they can remove it,
-   * even when a source reports the same link as well. A source's own claim is
-   * never removed.
-   */
-  readonly canUnlink: boolean;
-}
+export type RowLink =
+  | {
+      readonly kind: "confirmed" | "hint";
+      /** Who says the two are linked, in words, such as "Linear reports this". */
+      readonly claimWords: string;
+      /**
+       * True when the user has made a claim on the link, so they can remove it,
+       * even when a source reports the same link as well. A source's own claim is
+       * never removed.
+       */
+      readonly canUnlink: boolean;
+    }
+  | {
+      /** No one's words explain a link the Task holds itself, and the user can always remove it. */
+      readonly kind: "own";
+      readonly canUnlink: true;
+    };
 
 /** The newest thing that changed at a row's source, in finished words. */
 export interface RowChange {

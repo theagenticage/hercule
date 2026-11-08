@@ -40,7 +40,7 @@ const buildRowClass = (
 ): string =>
   [
     base,
-    row.link?.claimWords !== undefined && "has-claim",
+    row.link !== undefined && row.link.kind !== "own" && "has-claim",
     row.link?.canUnlink === true && onUnlink !== undefined && "has-unlink",
   ]
     .filter((name) => name !== false)
@@ -65,7 +65,7 @@ function ClaimAndUnlink({
   if (link === undefined) return null;
   return (
     <>
-      {link.claimWords !== undefined && <small className="relation-claim">{link.claimWords}</small>}
+      {link.kind !== "own" && <small className="relation-claim">{link.claimWords}</small>}
       {link.canUnlink && onUnlink !== undefined && (
         <button
           type="button"
@@ -124,7 +124,9 @@ function HintRow({
       <div className="relation-go">
         <LinkIcon size={13} />
         <span className="relation-title">{row.title}</span>
-        <small className="relation-why">{row.link?.claimWords}</small>
+        <small className="relation-why">
+          {row.link?.kind === "hint" ? row.link.claimWords : ""}
+        </small>
       </div>
       {onLink !== undefined && (
         <button

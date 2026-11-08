@@ -262,7 +262,7 @@ const buildIncomingValues = ({
         observation.progress === undefined ? undefined : JSON.stringify(observation.progress),
       target_date: observation.targetDate,
       source_updated_at: observation.sourceUpdatedAt,
-      source_created_at: observation.createdAt,
+      source_created_at: observation.sourceCreatedAt,
       source_revision: observation.sourceRevision,
     });
   }
@@ -293,7 +293,7 @@ const buildIncomingValues = ({
     target_date: observation.targetDate ?? null,
     waiting_since: observation.waitingSince ?? null,
     source_updated_at: observation.sourceUpdatedAt,
-    source_created_at: observation.createdAt ?? null,
+    source_created_at: observation.sourceCreatedAt ?? null,
     source_revision: observation.sourceRevision ?? null,
   };
 };

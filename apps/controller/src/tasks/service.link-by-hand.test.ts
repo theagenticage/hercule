@@ -118,7 +118,8 @@ describe("linking a thing by hand", () => {
         };
       }),
     );
-    expect(second).toEqual(first);
+    expect(first.changed).toBe(true);
+    expect(second).toEqual({ task: first.task, changed: false });
     expect(provenance).toEqual([pr(1)]);
     expect(facts).toHaveLength(1);
   });
@@ -180,15 +181,16 @@ describe("linking a thing by hand", () => {
 
 describe("unlinking a thing by hand", () => {
   it("removes the link, voids the pair's facts and records the unlink, and leaves provenance alone", async () => {
-    const { links, provenance, suppressions, voided } = await run(
+    const { changed, links, provenance, suppressions, voided } = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* arrangeConnection;
         yield* arrange({ ref: pr(1), lifecycle: "open" }, { ref: pr(2), lifecycle: "open" });
         const task = yield* createTaskLinking("Linked", pr(1), pr(2)); // facts 1, 2
         const tasks = yield* minuteLater;
-        yield* tasks.unlinkEntity({ id: task.id, ref: pr(1) });
+        const unlinked = yield* tasks.unlinkEntity({ id: task.id, ref: pr(1) });
         return {
+          changed: unlinked.changed,
           links: yield* readLinks(task.id),
           provenance: yield* readProvenanceRefs(task.id),
           suppressions: yield* readSuppressions(task.id),
@@ -199,6 +201,7 @@ describe("unlinking a thing by hand", () => {
         };
       }),
     );
+    expect(changed).toBe(true);
     expect(links.map((link) => link.ref)).toEqual([pr(2)]);
     expect(provenance).toEqual([pr(1), pr(2)]);
     expect(suppressions).toEqual([{ ref: pr(1), suppressed_by: "user" }]);
@@ -215,7 +218,7 @@ describe("unlinking a thing by hand", () => {
         return { before, after, suppressions: yield* readSuppressions(task.id) };
       }),
     );
-    expect(after).toEqual(before);
+    expect(after).toEqual({ task: before, changed: false });
     expect(suppressions).toEqual([]);
   });
 
@@ -363,7 +366,7 @@ describe("a merged Task", () => {
         const unlinked = yield* tasks.unlinkEntity({ id: source.id, ref: pr(1) });
         return {
           survivorLinks,
-          afterUnlink: unlinked.id === survivor.id,
+          afterUnlink: unlinked.task.id === survivor.id,
           suppressions: yield* readSuppressions(survivor.id),
         };
       }),

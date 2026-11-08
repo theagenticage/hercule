@@ -4,6 +4,7 @@ import {
   describeTaskLinkDone,
   describeTaskLinkFailure,
   describeTaskLinkGesture,
+  describeTaskLinkNothing,
   reverseTaskLinkDirection,
 } from "./task-links";
 
@@ -27,6 +28,15 @@ describe("the words of a link on a Task", () => {
     expect(describeTaskLinkDone("link", THING, TITLE)).toBe(`Linked #412 to ${TITLE}.`);
     expect(describeTaskLinkDone("unlink", THING, TITLE)).toBe(
       `Removed #412 from ${TITLE}. It stays removed until you link it again.`,
+    );
+  });
+
+  it("says a change found nothing to do, without a word about what was done", () => {
+    expect(describeTaskLinkNothing("link", THING, TITLE)).toBe(
+      `#412 was linked to ${TITLE} already, so nothing changed.`,
+    );
+    expect(describeTaskLinkNothing("unlink", THING, TITLE)).toBe(
+      `#412 was not linked to ${TITLE}, so nothing was removed.`,
     );
   });
 

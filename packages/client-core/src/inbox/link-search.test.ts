@@ -1,7 +1,7 @@
 /** Tests which refs the open card's search must not offer. */
 import { describe, expect, it } from "vitest";
 import type { EntityLink } from "@hercule/contract";
-import { listLinkedRefs } from "./link-search";
+import { listRefsNotToOffer } from "./link-search";
 
 const SELF = "acme:ticket:1";
 
@@ -12,9 +12,9 @@ const link = (toRef: string, type: EntityLink["claim"]["type"]): EntityLink => (
   hasPersonClaim: type === "person",
 });
 
-describe("listLinkedRefs", () => {
+describe("listRefsNotToOffer", () => {
   it("names the thing itself and what a source or the user linked to it, in either direction", () => {
-    const refs = listLinkedRefs(SELF, [
+    const refs = listRefsNotToOffer(SELF, [
       link("a", "source"),
       link("b", "person"),
       { fromRef: "c", toRef: SELF, claim: { type: "source" }, hasPersonClaim: false },

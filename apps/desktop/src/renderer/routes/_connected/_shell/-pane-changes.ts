@@ -237,7 +237,8 @@ export const usePaneChanges = ({
           taskId: pane.taskId,
           taskTitle: pane.card.title,
           ref: row.ref,
-          thingName: row.identifier,
+          // A search row always has an identifier, so this names it the way a linked row is named.
+          thingName: nameLinkedThing({ ...row, noun: row.title }),
         });
       },
       onUnlinkEntity: (row) => {

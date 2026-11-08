@@ -1098,6 +1098,20 @@ export const TaskEntityLinkInput = Schema.Struct({
 
 export type TaskEntityLinkInput = Schema.Schema.Type<typeof TaskEntityLinkInput>;
 
+/**
+ * What `task.linkEntity` and `task.unlinkEntity` return: the Task as stored,
+ * and whether the call changed anything. `changed` is false when there was
+ * nothing to do (the Task linked the thing already, or did not link it), so a
+ * client can tell a call that did something from one that did not, and offer
+ * an Undo only for the first.
+ */
+export const TaskEntityLinkResult = Schema.Struct({
+  task: Task,
+  changed: Schema.Boolean,
+});
+
+export type TaskEntityLinkResult = Schema.Schema.Type<typeof TaskEntityLinkResult>;
+
 /** The input of `task.undoTryAgain`, beside the Task's id in the path. */
 export const TaskUndoTryAgainInput = Schema.Struct({
   /** The run that Try again started, whose start ended the Task's failure. */
@@ -1252,27 +1266,29 @@ export const task = HttpApiGroup.make("task")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
-     * Links an outside thing to a Task by hand. Returns the Task. A thing the
-     * Task links already changes nothing. Linking clears an earlier unlink of
-     * the same thing, so scans may link it again.
+     * Links an outside thing to a Task by hand. Returns the Task and whether
+     * anything changed. A thing the Task links already changes nothing
+     * (`changed` is false). Linking clears an earlier unlink of the same
+     * thing, so scans may link it again.
      */
     // `/tasks/:id/entities/link` has more segments than `/tasks/:id`, so the
     // router never takes it for that route.
     HttpApiEndpoint.post("linkEntity", "/tasks/:id/entities/link", {
       params: { id: Id },
       payload: TaskEntityLinkInput,
-      success: Task,
+      success: TaskEntityLinkResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
      * Takes the link to an outside thing away from a Task, and keeps it away:
-     * no scan links it again until someone links it by hand. Returns the Task.
-     * A thing the Task does not link changes nothing.
+     * no scan links it again until someone links it by hand. Returns the Task
+     * and whether anything changed. A thing the Task does not link changes
+     * nothing (`changed` is false).
      */
     HttpApiEndpoint.post("unlinkEntity", "/tasks/:id/entities/unlink", {
       params: { id: Id },
       payload: TaskEntityLinkInput,
-      success: Task,
+      success: TaskEntityLinkResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**

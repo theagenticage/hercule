@@ -29,6 +29,25 @@ const buildTranscriptRow = (position: number, event: Record<string, unknown>) =>
   event: { eventId: "e1", sessionId: SESSION, at: "2026-09-07T10:00:00.000Z", ...event },
 });
 
+describe("hercule task link and task unlink", () => {
+  const task = { id: "0199e0e7-1111-7000-8000-0000000000aa" };
+
+  it.each([
+    ["link", true, "linked"],
+    ["link", false, "already links it, nothing changed"],
+    ["unlink", true, "taken away and kept away"],
+    ["unlink", false, "does not link it, nothing changed"],
+  ] as const)("prints what `task %s` did when changed is %s", (word, changed, said) => {
+    const lines = renderHuman(
+      { kind: "value", value: { task, changed } },
+      lookUpCommand("task", word),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([`task ${task.id.slice(-8)}: ${said}`]);
+  });
+});
+
 describe("hercule session spawn", () => {
   it("prints the session and a hint with the command that reads its transcript", () => {
     const lines = renderHuman(

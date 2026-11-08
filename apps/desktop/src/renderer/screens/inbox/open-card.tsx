@@ -20,7 +20,7 @@ import {
   decideOpenCard,
   describeTimelineOverflow,
   findFirstOpenLine,
-  listLinkedRefs,
+  listRefsNotToOffer,
   readOpenCardHandOff,
   readPlaceView,
   type EntityLinkMove,
@@ -210,7 +210,8 @@ function OpenCardContents({
           words.moves._tag === "off" ? null : (
             <LinkSearch
               client={client}
-              excludedRefs={listLinkedRefs(record.ref, detail.data.links)}
+              size="compact"
+              excludedRefs={listRefsNotToOffer(record.ref, detail.data.links)}
               ownPluginId={readEntityPluginId(record.kind)}
               onPick={(row: AddRow) => {
                 moves.onLink(buildMove(row.ref, row.identifier));

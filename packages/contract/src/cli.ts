@@ -808,7 +808,7 @@ export const CLI = {
   },
   "task.linkEntity": {
     command: "task link",
-    help: "Links an outside thing, such as a pull request or a ticket, to a task by hand. The task then shows it, and its card follows what happens to it. A thing the task links already changes nothing. If you unlinked the thing before, linking it again lets scans link it once more. Returns the task.",
+    help: "Links an outside thing, such as a pull request or a ticket, to a task by hand. The task then shows it, and its card follows what happens to it. A thing the task links already changes nothing. If you unlinked the thing before, linking it again lets scans link it once more. Says whether anything changed; with `--json` it returns the task and `changed`.",
     examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
     fields: {
       id: {
@@ -824,7 +824,7 @@ export const CLI = {
   },
   "task.unlinkEntity": {
     command: "task unlink",
-    help: "Takes an outside thing away from a task and keeps it away. No scan links it again, and changes it had queued for the task's card do nothing. Linking it by hand again undoes this. Nothing is changed at the source, and the task's record of where it came from is kept. A thing the task does not link changes nothing. Returns the task.",
+    help: "Takes an outside thing away from a task and keeps it away. No scan links it again, and changes it had queued for the task's card do nothing. Linking it by hand again undoes this. Nothing is changed at the source, and the task's record of where it came from is kept. A thing the task does not link changes nothing. Says whether anything changed; with `--json` it returns the task and `changed`.",
     examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
     fields: {
       id: {

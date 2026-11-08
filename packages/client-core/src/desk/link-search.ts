@@ -4,7 +4,7 @@
  * (`externalEntity.search`, `buildResultRows`); this decides which of its rows
  * can be linked.
  */
-import type { AddRow } from "./add-list";
+import type { AddRow } from "../work/add-list";
 
 /** The most rows the search under "Link something" lists. A longer list is narrowed by typing more. */
 export const MAX_LINK_RESULTS = 5;

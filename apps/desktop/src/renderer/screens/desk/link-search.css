@@ -87,3 +87,35 @@
   flex: none;
   color: var(--muted);
 }
+
+/* The tall rows of the details pane: the button and what the search finds are
+   as tall as the pane's other rows (32px). The icon and the mark are 13px with
+   4px beside them and the gap is 8px, which puts the words where the titles
+   above start, and every value is on the 4px grid. */
+.link-search.is-tall {
+  margin-top: 0;
+}
+.is-tall .link-search-open,
+.is-tall .link-search-go {
+  gap: 8px;
+  width: calc(100% + 16px);
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.is-tall .link-search-open {
+  display: flex;
+  color: var(--muted-firm);
+}
+.is-tall .link-search-open:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.is-tall .link-search-open svg {
+  margin: 0 4px;
+  color: var(--faint);
+}
+.is-tall .link-search-mark {
+  margin: 0 4px;
+}

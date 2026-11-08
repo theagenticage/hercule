@@ -138,6 +138,7 @@ export const USER_ACTOR = "user";
 export const SYSTEM_ACTOR = "system";
 
 const SESSION_STAMP_PREFIX = "session:";
+const RUN_STAMP_PREFIX = "run:";
 
 /**
  * Returns the actor stamp of the session with this id, `session:<id>`. A write
@@ -156,7 +157,7 @@ export const parseSessionStamp = (stamp: string): string | undefined =>
   stamp.startsWith(SESSION_STAMP_PREFIX) ? stamp.slice(SESSION_STAMP_PREFIX.length) : undefined;
 
 /** Returns true when the actor stamp names a workflow run (`run:<id>`). */
-export const isRunStamp = (stamp: string): boolean => stamp.startsWith("run:");
+export const isRunStamp = (stamp: string): boolean => stamp.startsWith(RUN_STAMP_PREFIX);
 
 /**
  * Returns the actor a run's step executes as. The run engine executes both
@@ -189,7 +190,7 @@ export const buildActorStamp = (actor: UserActor | SessionActor | RunActor): str
     case "session":
       return buildSessionStamp(actor.sessionId);
     case "run":
-      return `run:${actor.runId}`;
+      return `${RUN_STAMP_PREFIX}${actor.runId}`;
   }
 };
 

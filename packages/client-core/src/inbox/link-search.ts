@@ -22,7 +22,7 @@ export interface EntityLinkMove {
  * either direction. `links` holds no hint, because a reference found in text
  * proves nothing: its thing can still be linked.
  */
-export const listLinkedRefs = (
+export const listRefsNotToOffer = (
   selfRef: string,
   links: readonly EntityLink[],
 ): readonly string[] => [selfRef, ...links.flatMap((link) => [link.fromRef, link.toRef])];

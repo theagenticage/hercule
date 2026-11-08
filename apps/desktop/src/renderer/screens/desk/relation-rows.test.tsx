@@ -151,7 +151,7 @@ describe("RelationRows for linked things", () => {
     const onUnlink = vi.fn();
     const row = {
       ...buildPlaceRow(place()),
-      link: { kind: "confirmed", canUnlink: true },
+      link: { kind: "own", canUnlink: true },
     } as const;
     render(<RelationRows rows={[row]} plugins={PLUGINS} onUnlink={onUnlink} />);
 

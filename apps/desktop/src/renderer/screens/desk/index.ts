@@ -53,7 +53,7 @@ export { copyCardForMotion } from "./copy-card-for-motion";
 export { openDent } from "./dent";
 export { FilterChips, FilterControl } from "./filter-control";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
-export { LinkSearch } from "./link-search";
+export { LinkSearch, type LinkSearchSize } from "./link-search";
 export { LedgerAnswer } from "./ledger-answer";
 export { ProgressBar } from "./progress-bar";
 export { ReadFailure } from "./read-failure";

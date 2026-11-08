@@ -1,6 +1,6 @@
 /** Tests which search results can be linked. */
 import { describe, expect, it } from "vitest";
-import type { AddRow } from "./add-list";
+import type { AddRow } from "../work/add-list";
 import { listLinkableRows, MAX_LINK_RESULTS } from "./link-search";
 
 const row = (ref: string): AddRow => ({

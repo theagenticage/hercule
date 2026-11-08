@@ -78,6 +78,7 @@ import {
   type SignalResolution,
   type SignalSnoozeResult,
   type SignalUnsnoozeResult,
+  type TaskEntityLinkResult,
   type Skill,
   type SkillDetail,
   type SkillFileChange,
@@ -1131,6 +1132,16 @@ const renderDiscussionCreated = ({ discussion }: DiscussionCreated): ReadonlyArr
   `discussion ${discussion.id} created in ${discussion.repository}`,
 ];
 
+/**
+ * Returns the line printed after `task link` or `task unlink`. It says
+ * whether the call changed anything, because a call with nothing to do
+ * succeeds and the person should know it did nothing.
+ */
+const renderTaskEntityLinked = (
+  { task, changed }: TaskEntityLinkResult,
+  words: { readonly done: string; readonly nothing: string },
+): ReadonlyArray<string> => [`task ${toIdTail(task.id)}: ${changed ? words.done : words.nothing}`];
+
 /** Returns the line printed after `discussion post`, with the new Post's full id. */
 const renderPosted = (post: Post): ReadonlyArray<string> => [
   `post ${post.id} added to discussion ${formatCell(post.discussionId)}`,
@@ -1442,6 +1453,16 @@ const VALUE_RENDERERS: Partial<
   "discussion.read": (value) => renderDiscussion(value as DiscussionWithPosts),
   "discussion.create": (value) => renderDiscussionCreated(value as DiscussionCreated),
   "discussion.post": (value) => renderPosted(value as Post),
+  "task.linkEntity": (value) =>
+    renderTaskEntityLinked(value as TaskEntityLinkResult, {
+      done: "linked",
+      nothing: "already links it, nothing changed",
+    }),
+  "task.unlinkEntity": (value) =>
+    renderTaskEntityLinked(value as TaskEntityLinkResult, {
+      done: "taken away and kept away",
+      nothing: "does not link it, nothing changed",
+    }),
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),

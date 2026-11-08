@@ -26,9 +26,9 @@ export const describeTaskLinkGesture = (
     : `Removed the link from ${taskTitle} to ${thing}`;
 
 /**
- * Returns the sentence for a change the controller accepted. A removed link
- * stays removed, which the line says, because the user may expect the next
- * scan of the source to bring it back.
+ * Returns the sentence for a change the user asked for, which the undo line
+ * says when they act. A removed link stays removed, which the line says,
+ * because the user may expect the next scan of the source to bring it back.
  */
 export const describeTaskLinkDone = (
   direction: TaskLinkDirection,
@@ -38,6 +38,20 @@ export const describeTaskLinkDone = (
   direction === "link"
     ? `Linked ${thing} to ${taskTitle}.`
     : `Removed ${thing} from ${taskTitle}. It stays removed until you link it again.`;
+
+/**
+ * Returns the sentence for a change that found nothing to do: the Task linked
+ * the thing already, or did not link it. It replaces the sentence said when
+ * the user acted, which was for a change that has not happened.
+ */
+export const describeTaskLinkNothing = (
+  direction: TaskLinkDirection,
+  thing: string,
+  taskTitle: string,
+): string =>
+  direction === "link"
+    ? `${thing} was linked to ${taskTitle} already, so nothing changed.`
+    : `${thing} was not linked to ${taskTitle}, so nothing was removed.`;
 
 /** Returns the sentence for a change the controller refused, with its `reason` and what to do. */
 export const describeTaskLinkFailure = (

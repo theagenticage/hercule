@@ -287,7 +287,7 @@ const buildPullRequestObservation = (
     concerns,
     ownedByYou,
     ...(reason === undefined ? {} : { reason }),
-    createdAt: node.createdAt,
+    sourceCreatedAt: node.createdAt,
     sourceUpdatedAt: node.updatedAt,
   };
 };

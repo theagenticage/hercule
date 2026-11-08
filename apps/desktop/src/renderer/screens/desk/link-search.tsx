@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient, PluginIdentity } from "@hercule/client-core";
+import { listLinkableRows } from "@hercule/client-core/desk";
 import {
   decideAddList,
   listAddSources,
-  listLinkableRows,
   type AddRow,
   type AddSource,
 } from "@hercule/client-core/work";
@@ -18,12 +18,19 @@ import "./link-search.css";
 const PLACEHOLDER = "Search by title or number";
 
 /**
+ * How tall the rows of the search are: `compact` (24px) for the Inbox's open
+ * card, and `tall` (32px) for the details pane, whose other rows are that tall.
+ */
+export type LinkSearchSize = "compact" | "tall";
+
+/**
  * Renders the search of one source, and the rows that can be linked from what
  * it finds. It runs Work's Add search (`useEntitySearch`, the same words for
  * each outcome): a source is chosen on a tab, and Return links the first row.
  */
 function SourceSearch({
   client,
+  size,
   sources,
   names,
   plugins,
@@ -33,6 +40,7 @@ function SourceSearch({
   onClose,
 }: {
   readonly client: HerculeClient;
+  readonly size: LinkSearchSize;
   readonly sources: readonly AddSource[];
   readonly names: ReadonlyMap<string, string>;
   readonly plugins: readonly PluginIdentity[];
@@ -140,7 +148,11 @@ function SourceSearch({
                 }}
               >
                 <span className="link-search-mark">
-                  <PluginMark pluginId={reply?.source ?? tab} plugins={plugins} size={14} />
+                  <PluginMark
+                    pluginId={reply?.source ?? tab}
+                    plugins={plugins}
+                    size={size === "tall" ? 13 : 14}
+                  />
                 </span>
                 <span className="link-search-title">{row.title}</span>
                 <small>{row.identifier}</small>
@@ -162,6 +174,7 @@ function SourceSearch({
  *
  * - `excludedRefs` are the refs the search never offers: what is linked
  *   already, and the thing itself when it has a ref.
+ * - `size` is how tall its rows are (`LinkSearchSize`).
  * - `ownPluginId` is the plugin that owns the open thing, if any. The search
  *   starts on another source when there is one, because a link between two
  *   sources is the usual one: a ticket and its pull request.
@@ -170,21 +183,24 @@ function SourceSearch({
  */
 export function LinkSearch({
   client,
+  size,
   excludedRefs,
   ownPluginId,
   onPick,
 }: {
   readonly client: HerculeClient;
+  readonly size: LinkSearchSize;
   readonly excludedRefs: readonly string[];
   readonly ownPluginId?: string;
   readonly onPick: (row: AddRow) => void;
 }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   return (
-    <div className="link-search">
+    <div className={size === "tall" ? "link-search is-tall" : "link-search"}>
       {isOpen ? (
         <OpenSearch
           client={client}
+          size={size}
           excludedRefs={excludedRefs}
           ownPluginId={ownPluginId}
           onPick={(row) => {
@@ -203,7 +219,7 @@ export function LinkSearch({
             setIsOpen(true);
           }}
         >
-          <LinkIcon size={12} />
+          <LinkIcon size={size === "tall" ? 13 : 12} />
           Link something
         </button>
       )}
@@ -214,12 +230,14 @@ export function LinkSearch({
 /** Reads the plugins and draws the search on the first source that can be searched, or says there is none. */
 function OpenSearch({
   client,
+  size,
   excludedRefs,
   ownPluginId,
   onPick,
   onClose,
 }: {
   readonly client: HerculeClient;
+  readonly size: LinkSearchSize;
   readonly excludedRefs: readonly string[];
   readonly ownPluginId: string | undefined;
   readonly onPick: (row: AddRow) => void;
@@ -234,6 +252,7 @@ function OpenSearch({
   return (
     <SourceSearch
       client={client}
+      size={size}
       sources={sources}
       names={new Map(plugins.map((plugin) => [plugin.id, plugin.displayName]))}
       plugins={plugins}

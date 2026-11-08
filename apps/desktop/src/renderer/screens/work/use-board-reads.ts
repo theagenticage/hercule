@@ -20,7 +20,6 @@ import { useHeldChanges } from "./use-held-changes";
 import "./motion.css";
 
 const NOTHING_RELEASED: ReadonlySet<string> = new Set();
-const NO_KEYS: readonly string[] = [];
 const NO_PLAYED_KEYS: ReadonlySet<string> = new Set();
 
 /** The board the screen draws, and what the reads did to it. */
@@ -75,7 +74,8 @@ interface Picture {
  */
 interface VisitReplay {
   readonly summary: string;
-  readonly playedKeys: readonly string[];
+  /** The keys, oldest first: a Set keeps the order they were added in. */
+  readonly playedKeys: ReadonlySet<string>;
 }
 
 /** What the screen gave `useBoardReads` at its last render. */
@@ -192,7 +192,7 @@ export const useBoardReads = ({
   let drawn = logicalBoard;
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
-  let playedKeys = visitReplay === undefined ? NO_PLAYED_KEYS : new Set(visitReplay.playedKeys);
+  let playedKeys = visitReplay?.playedKeys ?? NO_PLAYED_KEYS;
   if (logicalBoard !== undefined) {
     // The first picture of a visit, which is also the first one after the
     // replay is asked for again, may start from how the board looked.
@@ -202,11 +202,7 @@ export const useBoardReads = ({
       const isPlayed = plan !== undefined && !isMotionReduced();
       replayStart = isPlayed ? plan.shown : undefined;
       playedKeys = isPlayed ? new Set(plan.playedKeys) : NO_PLAYED_KEYS;
-      setVisitReplay(
-        plan === undefined
-          ? undefined
-          : { summary: plan.summary, playedKeys: isPlayed ? plan.playedKeys : NO_KEYS },
-      );
+      setVisitReplay(plan === undefined ? undefined : { summary: plan.summary, playedKeys });
     }
     const decided = decidePicture(picture, replayStart, logicalBoard, {
       hiddenIds,
@@ -357,7 +353,7 @@ export const useBoardReads = ({
     release: (key) => {
       setReleased((before) => new Set(before).add(key));
     },
-    startDelays: buildReplayDelays(visitReplay?.playedKeys ?? NO_KEYS),
+    startDelays: buildReplayDelays(visitReplay?.playedKeys ?? NO_PLAYED_KEYS),
   });
 
   const noteAddedTask = useCallback((taskId: string): void => {
@@ -377,7 +373,7 @@ export const useBoardReads = ({
   }, []);
 
   const isReplaying =
-    visitReplay !== undefined && held.some((change) => visitReplay.playedKeys.includes(change.key));
+    visitReplay !== undefined && held.some((change) => visitReplay.playedKeys.has(change.key));
   return {
     drawnBoard: drawn,
     note,
@@ -385,6 +381,6 @@ export const useBoardReads = ({
     noteReturnedTask,
     sinceLastLook: visitReplay === undefined || isReplaying ? null : visitReplay.summary,
     playReplayAgain:
-      visitReplay !== undefined && visitReplay.playedKeys.length > 0 ? playReplayAgain : null,
+      visitReplay !== undefined && visitReplay.playedKeys.size > 0 ? playReplayAgain : null,
   };
 };

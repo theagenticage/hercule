@@ -662,7 +662,7 @@ describe("the entities feed's tracked branches", () => {
 
     await pollEntitiesFeed(stub, {}, many);
 
-    const request = readJsonBody(stub.requests[3]!) as GraphqlBody;
+    const request = readJsonBody(stub.requests[3]) as GraphqlBody;
     expect(stub.requests).toHaveLength(4);
     expect(request.query.match(/pullRequests\(headRefName:/g)).toHaveLength(50);
   });
@@ -685,7 +685,7 @@ describe("the entities feed's tracked branches", () => {
       { remote: "github.com/acme/storefront-api", branch: "fix/totals" },
     ]);
 
-    const request = readJsonBody(stub.requests[3]!) as GraphqlBody;
+    const request = readJsonBody(stub.requests[3]) as GraphqlBody;
     expect(stub.requests).toHaveLength(4);
     expect(request.variables).toEqual({
       o0: "acme",
@@ -718,7 +718,7 @@ describe("the entities feed's tracked branches", () => {
       repository: { head: { remote: BRANCH.remote, branch: BRANCH.branch } },
       // The creation time never moves, so the core can tell an old pull request
       // on a reused branch name from a new one, whatever happened to it since.
-      createdAt: "2026-10-30T08:00:00Z",
+      sourceCreatedAt: "2026-10-30T08:00:00Z",
       sourceUpdatedAt: "2026-11-01T10:00:00Z",
     });
   });

@@ -58,7 +58,7 @@ import { renderEntitySlots, type EntitySlots, type FullEntityObservation } from 
 const MAX_LISTED_ISSUES = 5;
 
 /** The observation fields that hold a time, which the core stores as UTC with milliseconds. */
-const TIME_FIELDS = ["sourceUpdatedAt", "waitingSince", "targetDate", "createdAt"] as const;
+const TIME_FIELDS = ["sourceUpdatedAt", "waitingSince", "targetDate", "sourceCreatedAt"] as const;
 
 const decodeObservations = Schema.decodeUnknownEffect(Schema.Array(EntityObservation), {
   errors: "all",

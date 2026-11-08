@@ -371,7 +371,7 @@ const optionalObservationFields = {
    * made after it. The branch link step reads it to keep an old pull request
    * on a reused branch name from linking to a new Task.
    */
-  createdAt: Schema.optionalKey(Timestamp),
+  sourceCreatedAt: Schema.optionalKey(Timestamp),
   relations: Schema.optionalKey(EntityObservationRelations),
   /**
    * The source's revision of this thing. An unchanged revision means the

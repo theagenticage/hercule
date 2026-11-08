@@ -340,7 +340,7 @@ interface EntityObservation {                  // a full one; a partial one (par
                 linkedUrls?: string[] }        // at most 64 http(s) addresses the source says belong to this thing; the core recognizes them
   texts?: { evidenceKey: string; text: string; revision?: string }[]   // at most 3; text at most 16 KiB; the core searches them for references and stores no text
   waitingSince?: string; sourceUpdatedAt: string; sourceRevision?: string
-  createdAt?: string      // when the source created the thing; never changes. Without it a pull request that is not open never links to a Task by its branch
+  sourceCreatedAt?: string      // when the source created the thing; never changes. Without it a pull request that is not open never links to a Task by its branch
 }
 
 interface EntityLookup {

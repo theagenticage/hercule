@@ -35,6 +35,15 @@ import {
 } from "./pending-intents";
 import { createUndoStack, type UndoStack } from "./undo-stack";
 
+/**
+ * Throws when the user who made a request has signed out, so nothing goes to
+ * the controller as the next account. Call it when a queued request reaches
+ * the front of its line and after each wait in it.
+ */
+export const requireSignedIn = (scope: Pick<AccountScope, "isCurrent">): void => {
+  if (!scope.isCurrent()) throw new Error("You signed out before this was sent.");
+};
+
 /** What the window holds for one signed-in user on one controller. */
 export interface AccountScope {
   readonly username: string;
@@ -112,7 +121,7 @@ const readAgainAfterChange = async (
 const buildIntentSender =
   (client: HerculeClient, queryClient: QueryClient, isCurrent: () => boolean) =>
   async (intent: IntentContent): Promise<void> => {
-    if (!isCurrent()) throw new Error("You signed out before this was sent.");
+    requireSignedIn({ isCurrent });
     switch (intent.kind) {
       case "answer":
         await client.session.respondToQuestion({

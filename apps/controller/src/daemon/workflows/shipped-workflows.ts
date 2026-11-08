@@ -8,7 +8,7 @@ import { absorbFailures } from "../../absorbing";
 import { withTransaction } from "../../db";
 import { formatInlineCode, Notifier } from "../../notifications";
 import { TaskService } from "../../tasks";
-import { CARD_WORKFLOW_KEYS, WorkflowService, type ShippedWorkflowSource } from "../../workflows";
+import { WorkflowService, type ShippedWorkflowSource } from "../../workflows";
 
 /** The kind of the notification raised for a shipped workflow that failed validation. */
 const FAILED_KIND = "core.shipped-workflow-failed";
@@ -61,7 +61,7 @@ const describeRejectedSource = (errors: RejectedSource["errors"]): string => {
  *
  * The missing keys install together in one transaction: each workflow with
  * its triggers and its key, then, when one of them moves cards
- * (`CARD_WORKFLOW_KEYS`), the first-install reconciliation, which writes a
+ * (`movesCards`), the first-install reconciliation, which writes a
  * fact for every live Task's link to a thing that has a lifecycle.
  * The transaction commits only if every source validates and the
  * reconciliation succeeds. Then the Event Router, which reads the log after
@@ -116,7 +116,7 @@ export const installShippedWorkflows = (
           // when a workflow that moves cards is installed: a fact written at
           // any other start would be newer than a drag's fence and would undo
           // the drag.
-          if (missing.some((shipped) => CARD_WORKFLOW_KEYS.has(shipped.key))) {
+          if (missing.some((shipped) => shipped.movesCards === true)) {
             yield* tasks.recordFirstInstallFacts();
           }
         }),
