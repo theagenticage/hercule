@@ -2,7 +2,9 @@
    ("The rail that rises while a card is carried", `.rail`, `.rail-t`, `.rail-rule`, `.rail-x`), value for value.
    The motion kernel moves the rail and its targets (`transform` and `opacity`), so there is no transition or
    animation on them here, and under Reduce motion the kernel makes the rise a fade. The rail is centred with
-   auto margins and not with a translate, because the kernel owns the element's `transform`. */
+   auto margins and not with a translate, because the kernel owns the element's `transform`. It is as wide as its
+   targets up to the desk's width less 12px each side, and past that the targets wrap into a second row, centred;
+   it is anchored by its bottom, so the extra row grows upwards. */
 .inbox-rail {
   position: absolute;
   inset-inline: 0;
@@ -11,7 +13,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
   width: max-content;
+  max-width: calc(100% - 24px);
   margin-inline: auto;
   padding: 10px 12px;
   border-radius: 18px;
@@ -48,6 +53,12 @@
   place-items: center;
   width: 40px;
   height: 40px;
+}
+/* The hairline and Dismiss wrap as one, so the hairline never ends a row. */
+.inbox-rail-tail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .inbox-rail-rule {
   width: 1px;

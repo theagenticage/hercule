@@ -265,6 +265,7 @@ export {
 } from "./skills";
 export { filterSessionSkills } from "./session-skills";
 export { containsSkillReference, splitSkillReferences, type SkillTextPart } from "./skill-text";
+export { lowerFirst } from "./text";
 export { formatBytes } from "./format-bytes";
 export {
   parseMarkdown,
@@ -405,7 +406,6 @@ export {
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
-  lowerFirst,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
   moveEventSelection,

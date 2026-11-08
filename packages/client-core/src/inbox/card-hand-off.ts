@@ -11,14 +11,17 @@
 import type {
   ActingConnection,
   EntitySignalLine,
+  ExternalEntityDetail,
   HandOffUndo,
+  Inbox,
   InboxCard,
   WorkflowOffer,
 } from "@hercule/contract";
 import { nameSignalKind } from "../intake";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
-import type { CardFace } from "./card-face";
+import { decideCardFace, type CardFace } from "./card-face";
+import type { CardTime } from "./card-wait";
 
 /** The workflows a card can be handed to, and the ones it could be if something changed. */
 export interface CardOffers {
@@ -60,7 +63,7 @@ export type HandMove =
   | { readonly kind: "several" };
 
 /** Returns the Hand to move of a card with these offers. Offers that cannot take the card do not count. */
-export const describeHandMove = ({ available }: CardOffers): HandMove => {
+export const decideHandMove = ({ available }: CardOffers): HandMove => {
   const [first] = available;
   if (first === undefined) return { kind: "none" };
   return available.length === 1 ? { kind: "one", offer: first } : { kind: "several" };
@@ -89,17 +92,6 @@ export const describeHandOffEnds = (
 };
 
 /**
- * Returns the account a hand-off acts as: the one in `connections` with id
- * `chosenId`, else the first, which is the default. Returns `undefined` when
- * `connections` is empty, as for a workflow that takes no account.
- */
-export const findActingConnection = (
-  connections: readonly ActingConnection[],
-  chosenId: string | undefined,
-): ActingConnection | undefined =>
-  connections.find((connection) => connection.id === chosenId) ?? connections[0];
-
-/**
  * Returns the distinct kinds of the open signals among `lines`, snoozed ones
  * included, in the order they first appear. These are the `openKinds` of
  * `describeHandOffEnds` for an open card, which reads its signals as lines
@@ -119,15 +111,93 @@ export interface HandedWorkflow {
 }
 
 /**
- * Returns `face` as a handed card draws it: its sentence reads "Agent review
- * has it", in a plain tone. The rest of the face stays. A screen reader reads
- * the sentence through `describeCardAloud`, so pass no wait there: the
- * colleague stands in the wait's place.
+ * Returns the sentence a handed card draws: "Agent review has it", in a plain
+ * tone. The card's colleague names itself with the same words.
  */
-export const decideHandedFace = (face: CardFace, workflow: HandedWorkflow): CardFace => ({
-  ...face,
-  sentence: { text: `${workflow.name} has it`, tone: "plain" },
+export const decideHandedSentence = (
+  workflow: HandedWorkflow,
+): { readonly text: string; readonly tone: "plain" } => ({
+  text: `${workflow.name} has it`,
+  tone: "plain",
 });
+
+/** Who stands where a card's wait was: the colleague the user handed it to, or the user, who holds its Task. */
+export type CardHolder =
+  | { readonly kind: "colleague"; readonly workflow: HandedWorkflow }
+  | { readonly kind: "you" };
+
+/** What a card of the Inbox draws: its face and time, and who holds it. */
+export interface CardDraw extends CardTime {
+  readonly face: CardFace;
+  /** `undefined` for a card nobody holds, which draws its wait instead. */
+  readonly holder: CardHolder | undefined;
+}
+
+/**
+ * Returns what `card` draws, given its `time` and the colleague it was handed
+ * to in this visit (`handed`, `undefined` if none).
+ *
+ * - A handed card has its sentence replaced by `decideHandedSentence`, and no
+ *   wait and no sentence age: the colleague stands in the wait's place, and
+ *   the sentence's age would be about a signal the hand-off ended. A screen
+ *   reader reads the sentence through `describeCardAloud`.
+ * - A card a Task holds is held by the user. A handed card is held by its
+ *   colleague even when it has a Task, because a hand-off continues the Task.
+ */
+export const decideCardDraw = (
+  card: InboxCard,
+  time: CardTime,
+  handed: HandedWorkflow | undefined,
+): CardDraw => {
+  const face = decideCardFace(card);
+  if (handed === undefined) {
+    return { ...time, face, holder: card.taskId === undefined ? undefined : { kind: "you" } };
+  }
+  return {
+    ...time,
+    wait: null,
+    signalAge: undefined,
+    face: { ...face, sentence: decideHandedSentence(handed) },
+    holder: { kind: "colleague", workflow: handed },
+  };
+};
+
+/**
+ * What the open card can be handed to and what a hand-off would end: the
+ * offers, the accounts it could act as, and the kinds of its open signals.
+ */
+export interface OpenCardHandOff {
+  readonly offers: CardOffers;
+  readonly actingConnections: readonly ActingConnection[];
+  readonly openKinds: readonly string[];
+}
+
+/**
+ * Returns the hand-off facts of an open card. The read of the card
+ * (`detail`) is the source once it has answered. Until then they come from
+ * the card as the Inbox lists it (`listed`), and from the Inbox's offer sets.
+ * A card whose kind is not available, or an Inbox that has not answered, has
+ * no offers.
+ */
+export const readOpenCardHandOff = (
+  detail:
+    | Pick<ExternalEntityDetail, "kindAvailable" | "offers" | "actingConnections" | "signals">
+    | undefined,
+  listed: Pick<InboxCard, "offerSetId" | "actingConnections" | "signals"> | undefined,
+  inbox: Pick<Inbox, "offerSets"> | undefined,
+): OpenCardHandOff => {
+  const readOffers = (): CardOffers => {
+    if (inbox === undefined || detail?.kindAvailable === false) return NO_OFFERS;
+    if (detail !== undefined) return partitionOffers(detail.offers);
+    return listed === undefined ? NO_OFFERS : listCardOffers(listed, inbox.offerSets);
+  };
+  return {
+    offers: readOffers(),
+    actingConnections: detail?.actingConnections ?? listed?.actingConnections ?? [],
+    openKinds:
+      detail === undefined ? (listed?.signals.kinds ?? []) : listOpenSignalKinds(detail.signals),
+  };
+};
 
 /**
  * Returns the undo line after a hand-off is taken back, and never says more

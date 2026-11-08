@@ -27,6 +27,12 @@ export interface InboxCarry {
    * The page holds back every change nobody asked for while it is true.
    */
   readonly isCarrying: boolean;
+  /**
+   * Returns whether a card is in the hand right now. Unlike `isCarrying` it
+   * is never a render behind, and the function itself never changes, so
+   * hooks that run before this one can be given it.
+   */
+  readonly readIsCarrying: () => boolean;
 }
 
 /**
@@ -59,6 +65,8 @@ export function useInboxCarry(options: UseInboxCarryOptions): InboxCarry {
     railElement.current = element;
   }, []);
   const [view, setView] = useState<CarryView | null>(null);
+  const isHeld = useRef(false);
+  const readIsCarrying = useCallback((): boolean => isHeld.current, []);
   const { pageRef } = options;
   useEffect(() => {
     const page = pageRef.current;
@@ -67,12 +75,16 @@ export function useInboxCarry(options: UseInboxCarryOptions): InboxCarry {
       page,
       readOptions: () => latest.current,
       readRail: () => railElement.current,
-      publish: setView,
+      publish: (next) => {
+        isHeld.current = next?.isHeld === true;
+        setView(next);
+      },
     }).destroy;
   }, [pageRef]);
   return {
     rail: view === null ? null : { cardId: view.cardId, targets: view.targets },
     attachRail,
     isCarrying: view?.isHeld === true,
+    readIsCarrying,
   };
 }

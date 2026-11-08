@@ -7,6 +7,7 @@ import {
   describeDismissal,
   describeHandOffRefusal,
   describeMoveRefusal,
+  listRailTargets,
   nameCard,
   reapplyInboxEdits,
   type InboxEdit,
@@ -145,5 +146,27 @@ describe("describeDismissal", () => {
     ],
   ])("says what becomes of what rode on it when %s", (_name, riders, words) => {
     expect(describeDismissal(lead, riders)).toBe(words);
+  });
+});
+
+describe("listRailTargets", () => {
+  const review = buildWorkflowOffer("Review PR");
+  const blocked = buildWorkflowOffer("Ship it", [], { reason: "repository", message: "No" });
+  const offers = partitionOffers([review, blocked]);
+  const hand = { kind: "hand", workflowId: review.workflowId, name: "Review PR" };
+
+  it("offers a card that waits the workflows that can take it, then Take and Dismiss", () => {
+    expect(listRailTargets(waiting, offers, false)).toEqual([
+      hand,
+      { kind: "take" },
+      { kind: "dismiss" },
+    ]);
+  });
+
+  it.each([
+    ["a Task holds", held, false],
+    ["the user handed off in this visit", waiting, true],
+  ])("offers only the workflows for a card %s", (_name, card, isHanded) => {
+    expect(listRailTargets(card, offers, isHanded)).toEqual([hand]);
   });
 });

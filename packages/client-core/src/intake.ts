@@ -24,6 +24,7 @@ import {
   type SignalView,
 } from "@hercule/contract";
 import { parsePluginId } from "./plugin-id";
+import { lowerFirst } from "./text";
 import { countCalendarDaysBetween, formatRelativeDay, formatRelativeMoment } from "./time-context";
 
 /** A plugin's id and the name the user knows it by, as `plugin.query` returns them. */
@@ -59,14 +60,6 @@ const CORE_KIND_LABELS: Readonly<Record<string, string>> = {
   unsure: "Unsure",
   fyi: "FYI",
 };
-
-/**
- * Returns `text` with its first letter in lower case: "Review requested"
- * becomes "review requested". Text that starts with an acronym, such as
- * "FYI", is returned unchanged, because "fYI" would misspell it.
- */
-export const lowerFirst = (text: string): string =>
-  /^\p{Lu}{2}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
 const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);

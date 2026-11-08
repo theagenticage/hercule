@@ -1,26 +1,19 @@
 import type { JSX, Ref } from "react";
+import type { RailTarget } from "@hercule/client-core/inbox";
 import { buildLook, Face, UserAvatar } from "../../faces";
 import { CloseIcon } from "../../icons/close";
 import "./rail.css";
 
-/**
- * Who can take a carried card, as the rail offers it:
- *
- * - `hand` hands it to the workflow `workflowId`, shown as a colleague named `name`;
- * - `take` makes it the user's own;
- * - `dismiss` sets it aside.
- */
-export type RailTarget =
-  | { readonly kind: "hand"; readonly workflowId: string; readonly name: string }
-  | { readonly kind: "take" }
-  | { readonly kind: "dismiss" };
+export type { RailTarget };
 
 /** The size of the face, the monogram and the cross of a target, in pixels. */
 const TARGET_SIZE = 40;
 
 /**
  * Renders the rail that rises while a card is carried: one target for each of
- * `targets`, in order, with a hairline before `dismiss`. A `hand` target shows
+ * `targets`, in order, with a hairline before `dismiss`. The rail is as wide as
+ * its targets, up to the width of the desk. Past that the targets wrap into a
+ * second row, centred, and the hairline stays with `dismiss`. A `hand` target shows
  * the workflow's colleague, `take` shows the user's `monogram` (its first
  * letter), and `dismiss` a cross.
  *
@@ -43,7 +36,7 @@ export function Rail({
     <div ref={ref} className="inbox-rail" aria-hidden="true">
       {targets.map((target, index) => (
         <RailTargetView
-          key={describeKey(target)}
+          key={buildRailTargetKey(target)}
           target={target}
           index={index}
           monogram={monogram}
@@ -54,7 +47,7 @@ export function Rail({
 }
 
 /** Returns a key that tells `target` apart from the others of one rail. */
-const describeKey = (target: RailTarget): string =>
+const buildRailTargetKey = (target: RailTarget): string =>
   target.kind === "hand" ? `hand:${target.workflowId}` : target.kind;
 
 function RailTargetView({
@@ -66,25 +59,30 @@ function RailTargetView({
   readonly index: number;
   readonly monogram: string;
 }): JSX.Element {
-  return (
-    <>
-      {target.kind === "dismiss" && <i className="inbox-rail-rule" />}
-      <div className="inbox-rail-target" data-rail-target={index}>
-        <span className="inbox-rail-face" data-rail-face>
-          {target.kind === "hand" && (
-            <Face look={buildLook(target.workflowId)} pose="idle" size={TARGET_SIZE} />
-          )}
-          {target.kind === "take" && <UserAvatar name={monogram} size={TARGET_SIZE} />}
-          {target.kind === "dismiss" && (
-            <span className="inbox-rail-cross">
-              <CloseIcon size={18} />
-            </span>
-          )}
-        </span>
-        <span>
-          {target.kind === "hand" ? target.name : target.kind === "take" ? "Take it" : "Dismiss"}
-        </span>
-      </div>
-    </>
+  const targetView = (
+    <div className="inbox-rail-target" data-rail-target={index}>
+      <span className="inbox-rail-face" data-rail-face>
+        {target.kind === "hand" && (
+          <Face look={buildLook(target.workflowId)} pose="idle" size={TARGET_SIZE} />
+        )}
+        {target.kind === "take" && <UserAvatar name={monogram} size={TARGET_SIZE} />}
+        {target.kind === "dismiss" && (
+          <span className="inbox-rail-cross">
+            <CloseIcon size={18} />
+          </span>
+        )}
+      </span>
+      <span>
+        {target.kind === "hand" ? target.name : target.kind === "take" ? "Take it" : "Dismiss"}
+      </span>
+    </div>
+  );
+  return target.kind === "dismiss" ? (
+    <span className="inbox-rail-tail">
+      <i className="inbox-rail-rule" />
+      {targetView}
+    </span>
+  ) : (
+    targetView
   );
 }

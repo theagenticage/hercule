@@ -30,6 +30,7 @@
  *   a hint, and one that is linked to a pull request with no card says so.
  */
 import type {
+  ActingConnection,
   Connection,
   EntityChange,
   EntityEdge,
@@ -43,8 +44,14 @@ import type {
   InboxCard,
   PluginDetail,
   Signal,
+  WorkflowOffer,
 } from "@hercule/contract";
-import { buildInbox, buildInboxCard, buildRequestCard } from "@hercule/client-core/inbox/testing";
+import {
+  buildInbox,
+  buildInboxCard,
+  buildRequestCard,
+  buildWorkflowOffer,
+} from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN, TIDEWATCH_PLUGIN } from "./plugins-fixture";
 import type { InboxOpenCardRecords, SidebarRecords } from "./shell-page";
@@ -67,6 +74,53 @@ const CHECKOUT = "tidewatch:project:checkout-revamp";
 const BETA = "tidewatch:milestone:beta";
 const LAUNCH = "tidewatch:milestone:launch";
 const CONNECTION_TIDEWATCH = "c-tidewatch";
+const CONNECTION_GITHUB = "c-github";
+const CONNECTION_GITHUB_BOT = "c-github-bot";
+
+const ACCOUNT_GITHUB: ActingConnection = { id: CONNECTION_GITHUB, label: "acme" };
+const ACCOUNT_GITHUB_BOT: ActingConnection = { id: CONNECTION_GITHUB_BOT, label: "northwind-bot" };
+const ACCOUNT_TIDEWATCH: ActingConnection = { id: CONNECTION_TIDEWATCH, label: "shop" };
+
+/**
+ * The workflows each kind of card can be handed to, by offer set id, as
+ * `externalEntity.queryInbox` groups them:
+ *
+ * - pull requests: one available workflow, so the move on hover is named after it;
+ * - issues: two available workflows (a menu), and two that cannot take the
+ *   card, with their reasons;
+ * - tickets: one available workflow, and one whose `signal` input has to
+ *   change before it can take a card;
+ * - purchase orders: no account can act on them, so the one workflow is
+ *   unavailable and the card offers no hand-off.
+ */
+const OFFER_SETS: Readonly<Record<string, readonly WorkflowOffer[]>> = {
+  "github/pull-request": [buildWorkflowOffer("Agent review", ["github/review-requested"])],
+  "github/issue": [
+    buildWorkflowOffer("Triage", ["github/commented", "github/assigned"]),
+    buildWorkflowOffer("Fix it", ["github/assigned"]),
+    buildWorkflowOffer("Draft the change", [], {
+      reason: "repository",
+      message: "Works on acme/platform-core only.",
+    }),
+    buildWorkflowOffer("Check the release", [], {
+      reason: "needs-input",
+      message: "Asks for a release tag the Inbox cannot fill.",
+    }),
+  ],
+  "tidewatch/ticket": [
+    buildWorkflowOffer("Plan the work", ["tidewatch/commented", "tidewatch/assigned"]),
+    buildWorkflowOffer("Estimate the ticket", [], {
+      reason: "needs-workflow-change",
+      message: "Takes a signal, not a card. Give it an entity input.",
+    }),
+  ],
+  "quayside/purchase-order": [
+    buildWorkflowOffer("Chase the supplier", [], {
+      reason: "no-account",
+      message: "No connected account can act on this.",
+    }),
+  ],
+};
 
 const repository = (ref: string, title: string): EntityPlace => ({
   ref,
@@ -154,6 +208,8 @@ const issue = (n: number, title: string, overrides: Partial<InboxCard> = {}): In
     yours: true,
     ancestors: [WEB],
     firstObservedAt: daysAgo(20 - n / 100),
+    offerSetId: "github/issue",
+    actingConnections: [ACCOUNT_GITHUB],
     ...overrides,
   });
 
@@ -177,6 +233,7 @@ const order = (
     yours: true,
     ancestors: [roundRef, SITE],
     firstObservedAt: daysAgo(9 - n / 10000),
+    offerSetId: "quayside/purchase-order",
     ...overrides,
   });
 
@@ -200,6 +257,8 @@ const ticket = (
     yours: true,
     ancestors: milestoneRef === undefined ? [CHECKOUT] : [milestoneRef, CHECKOUT],
     firstObservedAt: daysAgo(12 - n / 1000),
+    offerSetId: "tidewatch/ticket",
+    actingConnections: [ACCOUNT_TIDEWATCH],
     ...overrides,
   });
 
@@ -223,6 +282,8 @@ const review = (
     ancestors: [WEB],
     waitingSince: hoursAgo(waitingHours),
     firstObservedAt: hoursAgo(waitingHours + 1),
+    offerSetId: "github/pull-request",
+    actingConnections: [ACCOUNT_GITHUB],
     ...overrides,
   });
 
@@ -269,6 +330,7 @@ const CARDS: readonly InboxCard[] = [
     yours: false,
     facts: [{ form: "bars", level: 3 }],
     reason: { say: "Tessa commented", tone: "plain" },
+    actingConnections: [ACCOUNT_GITHUB, ACCOUNT_GITHUB_BOT],
     signals: {
       openCount: 2,
       kinds: ["github/commented"],
@@ -486,7 +548,14 @@ const HINTS: readonly EntityHint[] = [
 
 /** What `externalEntity.queryInbox` answers in the specimen. */
 export const INBOX: Inbox = {
-  ...buildInbox(CARDS, { places: PLACES, edges: EDGES, links: LINKS, hints: HINTS, peers: PEERS }),
+  ...buildInbox(CARDS, {
+    places: PLACES,
+    edges: EDGES,
+    links: LINKS,
+    hints: HINTS,
+    peers: PEERS,
+    offerSets: OFFER_SETS,
+  }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
 
@@ -565,12 +634,18 @@ const connect = (id: string, type: string, label: string): Connection => ({
   updatedAt: daysAgo(40),
 });
 
-/** The sidebar's lists with the two plugins and their Connections added, for a specimen that opens the Inbox. */
+/**
+ * The sidebar's lists with the two plugins and their Connections added, for a
+ * specimen that opens the Inbox. A run failed on one of the Tasks that hold
+ * the "with someone else" cards, so the Overview row shows the failed-run dot.
+ */
 export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
+  hasFailedRun: true,
   plugins: PLUGINS,
   connections: [
-    connect("c-github", "github/github", "acme"),
+    connect(CONNECTION_GITHUB, "github/github", "acme"),
+    connect(CONNECTION_GITHUB_BOT, "github/github", "northwind-bot"),
     connect("c-quayside", "quayside/quayside", "rotterdam"),
     connect(CONNECTION_TIDEWATCH, "tidewatch/tidewatch", "shop"),
   ],
@@ -610,7 +685,7 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
     signalCount: 2,
     timeline: TICKET_142_CHANGES,
     peers: [],
-    offers: [],
+    offers: OFFER_SETS[card.offerSetId]!,
   };
   const signal: Signal = {
     id: COMMENT_SIGNAL_ID,

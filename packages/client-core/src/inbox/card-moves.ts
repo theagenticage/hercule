@@ -5,8 +5,7 @@
  * confirms it.
  */
 import type { Inbox, InboxCard } from "@hercule/contract";
-import { lowerFirst } from "../intake";
-import { endSentence } from "../text";
+import { endSentence, lowerFirst } from "../text";
 import { NO_OFFERS, type CardOffers } from "./card-hand-off";
 import { applySetLink, type SetLinkEdit } from "./card-links";
 
@@ -27,7 +26,7 @@ export type InboxMove = "take" | "dismiss" | "see-task" | "hand";
  *   says how to get a workflow that can.
  */
 export const describeMoveRefusal = (
-  card: InboxCard,
+  card: Pick<InboxCard, "kind" | "noun" | "taskId">,
   move: InboxMove,
   offers: CardOffers = NO_OFFERS,
 ): string | undefined => {
@@ -46,8 +45,42 @@ export const describeMoveRefusal = (
   return card.taskId === undefined ? undefined : "It already has a Task. Press G to see it.";
 };
 
+/**
+ * Who can take a carried card, as the rail offers it:
+ *
+ * - `hand` hands it to the workflow `workflowId`, shown as a colleague named `name`;
+ * - `take` makes it the user's own;
+ * - `dismiss` sets it aside.
+ */
+export type RailTarget =
+  | { readonly kind: "hand"; readonly workflowId: string; readonly name: string }
+  | { readonly kind: "take" }
+  | { readonly kind: "dismiss" };
+
+/**
+ * Returns the rail targets of a carried `card`: one `hand` target for each
+ * workflow in `offers.available`, then Take and Dismiss. A card that is held
+ * can be handed on but not taken or dismissed: a live Task holds it
+ * (`describeMoveRefusal` refuses Take), or the user handed it off in this
+ * visit (`isHanded`) and the Inbox does not know the Task yet.
+ */
+export const listRailTargets = (
+  card: InboxCard,
+  offers: CardOffers,
+  isHanded: boolean,
+): readonly RailTarget[] => {
+  const hands: RailTarget[] = offers.available.map((offer) => ({
+    kind: "hand",
+    workflowId: offer.workflowId,
+    name: offer.name,
+  }));
+  const isHeld = isHanded || describeMoveRefusal(card, "take") !== undefined;
+  return isHeld ? hands : [...hands, { kind: "take" }, { kind: "dismiss" }];
+};
+
 /** Returns what to call `card` in a sentence about a move: its noun and identifier, such as "Pull request #87". */
-export const nameCard = (card: InboxCard): string => `${card.noun} ${card.identifier}`;
+export const nameCard = (card: Pick<InboxCard, "noun" | "identifier">): string =>
+  `${card.noun} ${card.identifier}`;
 
 /**
  * Returns what the undo line says after a dismissal: "Dismissed Ticket ACME-1."
@@ -72,7 +105,7 @@ export const describeDismissal = (card: InboxCard, riders: readonly InboxCard[])
  * again.
  */
 export const describeHandOffRefusal = (
-  card: InboxCard,
+  card: Pick<InboxCard, "noun" | "identifier">,
   workflowName: string,
   reason: string,
 ): string => `${nameCard(card)} was not handed to ${workflowName}. ${endSentence(reason)}`;

@@ -1,5 +1,12 @@
 import type { JSX } from "react";
-import { describeHandMove, NO_OFFERS, type CardOffers } from "@hercule/client-core/inbox";
+import {
+  decideHandedSentence,
+  decideHandMove,
+  NO_OFFERS,
+  type CardHolder,
+  type CardOffers,
+  type HandedWorkflow,
+} from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import { ArrowIcon } from "../../icons/arrow";
@@ -82,7 +89,7 @@ const HAND_FACE_SIZE = 18;
  * id, as the menu and the rail do.
  */
 function HandMoveButton({ offers }: { readonly offers: CardOffers }): JSX.Element | null {
-  const hand = describeHandMove(offers);
+  const hand = decideHandMove(offers);
   if (hand.kind === "none") return null;
   const isOne = hand.kind === "one";
   const shown = offers.available.slice(0, 2);
@@ -131,29 +138,41 @@ export function CardMonogram({ monogram }: { readonly monogram: string }): JSX.E
 
 /**
  * Renders the colleague that has a card, in the place the wait had: the face
- * of the workflow `workflowId`, working, 22px: the same face the hand-off
- * button, the menu and the rail draw for it. It names itself for a screen
- * reader with `workflowName` ("Agent review has it"), and its face is hidden
- * from one.
+ * of the `workflow`, working, 22px: the same face the hand-off button, the
+ * menu and the rail draw for it. It names itself for a screen reader
+ * ("Agent review has it"), and its face is hidden from one.
  *
  * The box clips the face, so it can rise into its place from below and sink
- * out of it (`playHandOff` and `playHandOffBack` find the face by
+ * out of it (`playCardHandOff` and `playCardHandOffBack` find the face by
  * `data-hand-off-colleague`). A card shows this where it shows `CardMonogram`
  * for the user.
  */
-export function CardColleague({
-  workflowId,
-  workflowName,
-}: {
-  readonly workflowId: string;
-  readonly workflowName: string;
-}): JSX.Element {
-  const name = `${workflowName} has it`;
+export function CardColleague({ workflow }: { readonly workflow: HandedWorkflow }): JSX.Element {
+  const name = decideHandedSentence(workflow).text;
   return (
     <span className="card-colleague" role="img" aria-label={name} title={name}>
       <span className="card-colleague-in" data-hand-off-colleague>
-        <Face look={buildLook(workflowId)} pose="working" size={22} />
+        <Face look={buildLook(workflow.workflowId)} pose="working" size={22} />
       </span>
     </span>
+  );
+}
+
+/**
+ * Renders who holds a card where its wait was: the colleague it was handed to
+ * or the user's `monogram`, and nothing for a card nobody holds.
+ */
+export function CardHolderMark({
+  holder,
+  monogram,
+}: {
+  readonly holder: CardHolder | undefined;
+  readonly monogram: string;
+}): JSX.Element | null {
+  if (holder === undefined) return null;
+  return holder.kind === "colleague" ? (
+    <CardColleague workflow={holder.workflow} />
+  ) : (
+    <CardMonogram monogram={monogram} />
   );
 }

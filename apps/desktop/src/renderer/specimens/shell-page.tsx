@@ -304,6 +304,8 @@ export interface SidebarRecords {
    * when left out.
    */
   readonly yourWorkTasks?: ReadonlyArray<YourWorkTask>;
+  /** Whether a run failed on a live Task, which draws the sidebar's failed-run dot. False when left out. */
+  readonly hasFailedRun?: boolean;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -907,8 +909,10 @@ const seedQueryCache = (
       textGeneration: { model: null, lastFailure: null, unavailableReason: null },
     });
   }
-  // The sidebar's dot reads whether a run failed on a Task on every screen. No specimen has one.
-  queryClient.setQueryData(taskAttentionQuery(client).queryKey, { anyFailure: false });
+  // The sidebar's dot reads whether a run failed on a Task on every screen.
+  queryClient.setQueryData(taskAttentionQuery(client).queryKey, {
+    anyFailure: records.hasFailedRun ?? false,
+  });
   // The sidebar's Inbox row reads the counts on every screen. Without an Inbox, nothing is on the clock.
   queryClient.setQueryData(
     inboxCountQuery(client).queryKey,

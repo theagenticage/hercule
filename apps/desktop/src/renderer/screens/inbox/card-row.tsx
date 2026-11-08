@@ -3,15 +3,14 @@ import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
 import {
-  decideCardFace,
-  decideHandedFace,
+  decideCardDraw,
   describeCardAloud,
   listCardOffers,
   type CardBundle,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
-import { CardColleague, CardMonogram, CardMoves } from "./card-moves";
+import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
 import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
 import { LinkLines } from "./link-lines";
@@ -94,10 +93,11 @@ function CardRowView({
   monogram,
   step,
 }: CardRowProps): JSX.Element {
-  const { wait, trust, signalAge } = useCardTime(card);
-  const handed = handOffs.handed.get(card.id);
-  const face =
-    handed === undefined ? decideCardFace(card) : decideHandedFace(decideCardFace(card), handed);
+  const { face, wait, trust, signalAge, holder } = decideCardDraw(
+    card,
+    useCardTime(card),
+    handOffs.handed.get(card.id),
+  );
   return (
     <div className="inbox-bundle" style={{ "--arrive-step": step }}>
       <div
@@ -105,13 +105,9 @@ function CardRowView({
         role="listitem"
         data-card-id={card.id}
         data-access={card.access === "ok" ? undefined : card.access}
-        data-has-task={card.taskId === undefined && handed === undefined ? undefined : ""}
+        data-has-task={holder === undefined ? undefined : ""}
         tabIndex={-1}
-        aria-label={describeCardAloud(
-          face,
-          handed === undefined ? wait : null,
-          bundle.riders.length,
-        )}
+        aria-label={describeCardAloud(face, wait, bundle.riders.length)}
       >
         <span className="card-body">
           <span className="row-rail">
@@ -144,7 +140,7 @@ function CardRowView({
               {face.sentence !== undefined && (
                 <span className="row-news" data-landing-sentence data-tone={face.sentence.tone}>
                   {face.sentence.text}
-                  {signalAge !== undefined && handed === undefined && (
+                  {signalAge !== undefined && (
                     <>
                       {" "}
                       <small>{signalAge}</small>
@@ -157,12 +153,8 @@ function CardRowView({
           </span>
           <span className="row-end">
             <span className="row-id">{face.identifier}</span>
-            {wait !== null && handed === undefined && <CardWaitFigure wait={wait} />}
-            {handed !== undefined ? (
-              <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
-            ) : (
-              card.taskId !== undefined && <CardMonogram monogram={monogram} />
-            )}
+            {wait !== null && <CardWaitFigure wait={wait} />}
+            <CardHolderMark holder={holder} monogram={monogram} />
           </span>
           <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
         </span>

@@ -24,22 +24,35 @@ interface BundledCardProps {
   readonly handOffs: CardHandOffs;
 }
 
-/** Checks whether `freshIds` marks the same cards of this card, and of the parts under it, as it did. */
-const isSameFreshness = (before: BundledCardProps, after: BundledCardProps): boolean =>
-  listBundleCardIds(after.card, after.bundle).every(
-    (id) => before.freshIds.has(id) === after.freshIds.has(id),
-  );
+/**
+ * Checks whether `freshIds` marks the same cards of this card, and of the
+ * parts under it, as it did. `ids` are those cards' ids.
+ */
+const isSameFreshness = (
+  before: BundledCardProps,
+  after: BundledCardProps,
+  ids: readonly string[],
+): boolean => ids.every((id) => before.freshIds.has(id) === after.freshIds.has(id));
 
 /**
  * Checks whether the hand-offs mean the same for this card, and for the parts
- * under it, as they did: the same offers, and the same colleague on each card.
- * A card handed off elsewhere on the page does not draw this one again.
+ * under it, as they did: the same offers for each card that draws a Hand to
+ * move (this card and its asking parts), and the same colleague on each of
+ * `ids`. A card handed off elsewhere, or a workflow edited that this card is
+ * not offered, does not draw this one again.
  */
-const isSameHandOffs = (before: BundledCardProps, after: BundledCardProps): boolean =>
-  before.handOffs.offerSets === after.handOffs.offerSets &&
-  listBundleCardIds(after.card, after.bundle).every(
-    (id) => before.handOffs.handed.get(id) === after.handOffs.handed.get(id),
-  );
+const isSameHandOffs = (
+  before: BundledCardProps,
+  after: BundledCardProps,
+  ids: readonly string[],
+): boolean =>
+  [
+    after.card,
+    ...after.bundle.parts.flatMap((part) => (part._tag === "asking" ? [part.card] : [])),
+  ].every(
+    ({ offerSetId }) =>
+      before.handOffs.offerSets[offerSetId] === after.handOffs.offerSets[offerSetId],
+  ) && ids.every((id) => before.handOffs.handed.get(id) === after.handOffs.handed.get(id));
 
 /**
  * Returns the comparison `memo` uses to decide whether a row or a request
@@ -53,9 +66,13 @@ export const buildCardPropsComparer =
   <Props extends BundledCardProps>(
     compare: { readonly [Key in keyof Props]?: (before: Props, after: Props) => boolean } = {},
   ) =>
-  (before: Props, after: Props): boolean =>
-    (Object.keys(after) as (keyof Props)[]).every((key) => {
-      if (key === "freshIds") return isSameFreshness(before, after);
-      if (key === "handOffs") return isSameHandOffs(before, after);
+  (before: Props, after: Props): boolean => {
+    // Read at most once per comparison, and only if a prop reaches it.
+    let ids: readonly string[] | undefined;
+    const readIds = (): readonly string[] => (ids ??= listBundleCardIds(after.card, after.bundle));
+    return (Object.keys(after) as (keyof Props)[]).every((key) => {
+      if (key === "freshIds") return isSameFreshness(before, after, readIds());
+      if (key === "handOffs") return isSameHandOffs(before, after, readIds());
       return compare[key]?.(before, after) ?? Object.is(before[key], after[key]);
     });
+  };

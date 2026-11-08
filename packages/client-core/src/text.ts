@@ -26,3 +26,11 @@ export const dropClosingFullStops = (text: string): string => text.replace(/\.+$
  * already ends in a full stop, "!" or "?" comes back as it is.
  */
 export const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/**
+ * Returns `text` with its first letter in lower case: "Review requested"
+ * becomes "review requested". Text that starts with an acronym, such as
+ * "FYI", is returned unchanged, because "fYI" would misspell it.
+ */
+export const lowerFirst = (text: string): string =>
+  /^\p{Lu}{2}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);

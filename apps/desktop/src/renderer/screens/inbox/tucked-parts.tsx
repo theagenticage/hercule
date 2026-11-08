@@ -4,6 +4,7 @@ import { describeClaim, describeLockedRow } from "@hercule/client-core/desk";
 import {
   decideAskingSentence,
   decideCardFace,
+  decideHandedSentence,
   listCardOffers,
   type AskingPart,
   type LockedPart,
@@ -46,10 +47,7 @@ function AskingPartRow({
   const { wait } = useCardTime(card);
   const handed = handOffs.handed.get(card.id);
   const face = decideCardFace(card);
-  const sentence =
-    handed === undefined
-      ? decideAskingSentence(card)
-      : ({ text: `${handed.name} has it`, tone: "plain" } as const);
+  const sentence = handed === undefined ? decideAskingSentence(card) : decideHandedSentence(handed);
   const claimWords = part.claim === undefined ? undefined : describeClaim(part.claim, plugins);
   const where = [face.identifier, part.homeName].filter((each) => each !== undefined).join(" ");
   return (
@@ -77,7 +75,7 @@ function AskingPartRow({
         )}
       </span>
       {handed !== undefined ? (
-        <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
+        <CardColleague workflow={handed} />
       ) : (
         wait !== null && <CardWaitFigure wait={wait} />
       )}

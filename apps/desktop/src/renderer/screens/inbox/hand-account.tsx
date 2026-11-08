@@ -1,5 +1,4 @@
 import type { JSX } from "react";
-import { findActingConnection } from "@hercule/client-core/inbox";
 import type { ActingConnection } from "@hercule/contract";
 import "./hand-account.css";
 
@@ -8,9 +7,12 @@ import "./hand-account.css";
  * pick another. It renders nothing unless there is more than one account to
  * choose from, because a single account needs no choice.
  *
- * `chosenConnectionId` is the account in use. When it is not one of
- * `actingConnections`, the first account is shown, which is the default.
- * `onChoose` is called with the id of the account the user picks.
+ * `chosenConnectionId` is the account the user picked, or `undefined` when
+ * they picked none: the select then shows the first account, which is the one
+ * the controller uses by default. A pick that is no longer in
+ * `actingConnections` is kept, never swapped for another account: the select
+ * shows it as unable to act, and the controller refuses the hand-off with its
+ * reason. `onChoose` is called with the id of the account the user picks.
  */
 export function HandAccount({
   actingConnections,
@@ -21,18 +23,25 @@ export function HandAccount({
   readonly chosenConnectionId: string | undefined;
   readonly onChoose: (connectionId: string) => void;
 }): JSX.Element | null {
-  const chosen = findActingConnection(actingConnections, chosenConnectionId);
-  if (chosen === undefined || actingConnections.length < 2) return null;
+  const isGone =
+    chosenConnectionId !== undefined &&
+    !actingConnections.some((connection) => connection.id === chosenConnectionId);
+  if (actingConnections.length < 2 && !isGone) return null;
   return (
     <label className="hand-account">
       <span>as</span>
       <select
         aria-label="Account to act as"
-        value={chosen.id}
+        value={chosenConnectionId ?? actingConnections[0]?.id}
         onChange={(event) => {
           onChoose(event.currentTarget.value);
         }}
       >
+        {isGone && (
+          <option value={chosenConnectionId} disabled>
+            This account can no longer act
+          </option>
+        )}
         {actingConnections.map((connection) => (
           <option key={connection.id} value={connection.id}>
             {connection.label}

@@ -2,20 +2,21 @@
 import type { HandOffUndo } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { describeCardAloud } from "./card-aloud";
-import { decideCardFace } from "./card-face";
+import type { CardTime } from "./card-wait";
 import {
-  decideHandedFace,
-  describeHandMove,
+  decideCardDraw,
+  decideHandedSentence,
+  decideHandMove,
   describeHandOffEnds,
   describeHandOffUndo,
-  findActingConnection,
   isHandOffTakenBack,
   listOpenSignalKinds,
   listCardOffers,
   NO_OFFERS,
   partitionOffers,
+  readOpenCardHandOff,
 } from "./card-hand-off";
-import { buildInboxCard, buildWorkflowOffer } from "./cards.testing";
+import { buildInbox, buildInboxCard, buildSignalLine, buildWorkflowOffer } from "./cards.testing";
 
 const review = buildWorkflowOffer("Review PR", ["github/review-requested"]);
 const fix = buildWorkflowOffer("Fix bug", ["github/checks-failed"]);
@@ -38,7 +39,7 @@ describe("listCardOffers", () => {
   });
 });
 
-describe("describeHandMove", () => {
+describe("decideHandMove", () => {
   it.each([
     ["no offer", NO_OFFERS, { kind: "none" }],
     ["only offers that cannot take it", partitionOffers([sameRepoOnly]), { kind: "none" }],
@@ -50,7 +51,7 @@ describe("describeHandMove", () => {
     ],
     ["several", partitionOffers([review, fix]), { kind: "several" }],
   ])("%s", (_name, offers, move) => {
-    expect(describeHandMove(offers)).toEqual(move);
+    expect(decideHandMove(offers)).toEqual(move);
   });
 });
 
@@ -83,14 +84,88 @@ describe("describeHandOffEnds", () => {
   });
 });
 
-describe("decideHandedFace", () => {
-  it("says the workflow has it, and a screen reader reads that where the wait was", () => {
-    const card = buildInboxCard("1", { title: "Fix the basket" });
-    const face = decideHandedFace(decideCardFace(card), { workflowId: "wf", name: "Agent review" });
-    expect(face.sentence).toEqual({ text: "Agent review has it", tone: "plain" });
-    expect(describeCardAloud(face, null, 0)).toBe(
+describe("decideHandedSentence", () => {
+  it("says the workflow has it, in a plain tone", () => {
+    expect(decideHandedSentence({ workflowId: "wf", name: "Agent review" })).toEqual({
+      text: "Agent review has it",
+      tone: "plain",
+    });
+  });
+});
+
+describe("decideCardDraw", () => {
+  const agent = { workflowId: "wf-agent-review", name: "Agent review" };
+  const time: CardTime = {
+    wait: { text: "2d", words: "Waiting 2 days", level: "fresh" },
+    trust: "Facts from 3 days ago",
+    signalAge: "4m",
+  };
+
+  it("draws the face and the time of a card nobody holds, with no holder", () => {
+    const draw = decideCardDraw(buildInboxCard("1", { title: "Fix the basket" }), time, undefined);
+    expect(draw).toMatchObject({ ...time, holder: undefined });
+    expect(draw.face.title).toBe("Fix the basket");
+  });
+
+  it("holds a card a Task has for the user", () => {
+    const card = buildInboxCard("1", { taskId: "task-1" });
+    expect(decideCardDraw(card, time, undefined).holder).toEqual({ kind: "you" });
+  });
+
+  it("gives a handed card its colleague in the wait's place, and a sentence a screen reader reads", () => {
+    const card = buildInboxCard("1", { title: "Fix the basket", taskId: "task-1" });
+    const draw = decideCardDraw(card, time, agent);
+    expect(draw).toMatchObject({
+      wait: null,
+      signalAge: undefined,
+      trust: time.trust,
+      holder: { kind: "colleague", workflow: agent },
+    });
+    expect(draw.face.sentence).toEqual({ text: "Agent review has it", tone: "plain" });
+    expect(describeCardAloud(draw.face, draw.wait, 0)).toBe(
       "Ticket, ACME-1, Fix the basket, Agent review has it",
     );
+  });
+});
+
+describe("readOpenCardHandOff", () => {
+  const bot = { id: "conn-bot", label: "northwind-bot" };
+  const ava = { id: "conn-ava", label: "ava-northwind" };
+  const listed = buildInboxCard("1", {
+    offerSetId: "set-a",
+    actingConnections: [bot],
+    signals: { openCount: 1, kinds: ["github/mentioned"] },
+  });
+  const inbox = buildInbox([listed], { offerSets: { "set-a": [review, sameRepoOnly] } });
+  const detail = {
+    kindAvailable: true,
+    offers: [fix],
+    actingConnections: [ava],
+    signals: [buildSignalLine("s1", "Asked", { kind: "github/review-requested" })],
+  };
+
+  it("reads the Inbox's own sets and the card as listed until the read has answered", () => {
+    expect(readOpenCardHandOff(undefined, listed, inbox)).toEqual({
+      offers: { available: [review], unavailable: [sameRepoOnly] },
+      actingConnections: [bot],
+      openKinds: ["github/mentioned"],
+    });
+  });
+
+  it("reads the card's own answer once it has one", () => {
+    expect(readOpenCardHandOff(detail, listed, inbox)).toEqual({
+      offers: { available: [fix], unavailable: [] },
+      actingConnections: [ava],
+      openKinds: ["github/review-requested"],
+    });
+  });
+
+  it.each([
+    ["the kind is not available", { ...detail, kindAvailable: false }, listed, inbox],
+    ["the Inbox has not answered", detail, listed, undefined],
+    ["the card is not listed and has no read", undefined, undefined, inbox],
+  ])("has no offers when %s", (_name, forDetail, forListed, forInbox) => {
+    expect(readOpenCardHandOff(forDetail, forListed, forInbox).offers).toEqual(NO_OFFERS);
   });
 });
 
@@ -150,19 +225,5 @@ describe("listOpenSignalKinds", () => {
         { kind: "github/checks-failed", status: "open" },
       ]),
     ).toEqual(["github/review-requested", "github/checks-failed"]);
-  });
-});
-
-describe("findActingConnection", () => {
-  const bot = { id: "conn-bot", label: "northwind-bot" };
-  const ava = { id: "conn-ava", label: "ava-northwind" };
-
-  it.each([
-    ["the chosen account", [bot, ava], "conn-ava", ava],
-    ["the first when none is chosen", [bot, ava], undefined, bot],
-    ["the first when the chosen one is gone", [bot, ava], "conn-old", bot],
-    ["nothing when there is no account", [], "conn-bot", undefined],
-  ])("returns %s", (_name, connections, chosenId, expected) => {
-    expect(findActingConnection(connections, chosenId)).toEqual(expected);
   });
 });

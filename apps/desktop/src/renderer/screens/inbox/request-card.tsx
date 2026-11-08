@@ -1,8 +1,7 @@
 import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import {
-  decideCardFace,
-  decideHandedFace,
+  decideCardDraw,
   describeCardAloud,
   listCardOffers,
   type CardBundle,
@@ -11,7 +10,7 @@ import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import "../desk/card.css";
-import { CardColleague, CardMonogram, CardMoves } from "./card-moves";
+import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
 import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
 import { LinkLines } from "./link-lines";
@@ -73,10 +72,11 @@ function RequestCardView({
   monogram,
   step,
 }: RequestCardProps): JSX.Element {
-  const { wait, trust } = useCardTime(card);
-  const handed = handOffs.handed.get(card.id);
-  const face =
-    handed === undefined ? decideCardFace(card) : decideHandedFace(decideCardFace(card), handed);
+  const { face, wait, trust, holder } = decideCardDraw(
+    card,
+    useCardTime(card),
+    handOffs.handed.get(card.id),
+  );
   const where = [homeName, card.card === "compact" ? face.whose : undefined]
     .filter((part) => part !== undefined)
     .join(" · ");
@@ -87,9 +87,9 @@ function RequestCardView({
         role="listitem"
         data-card-id={card.id}
         data-access={card.access === "ok" ? undefined : card.access}
-        data-has-task={card.taskId === undefined && handed === undefined ? undefined : ""}
+        data-has-task={holder === undefined ? undefined : ""}
         tabIndex={-1}
-        aria-label={describeCardAloud(face, handed === undefined ? wait : null, 0)}
+        aria-label={describeCardAloud(face, wait, 0)}
       >
         <i className="card-stock" />
         <span className="card-body">
@@ -99,12 +99,8 @@ function RequestCardView({
           <p className="request-title" title={face.title}>
             {face.title}
           </p>
-          {wait !== null && handed === undefined && <CardWaitFigure wait={wait} />}
-          {handed !== undefined ? (
-            <CardColleague workflowId={handed.workflowId} workflowName={handed.name} />
-          ) : (
-            card.taskId !== undefined && <CardMonogram monogram={monogram} />
-          )}
+          {wait !== null && <CardWaitFigure wait={wait} />}
+          <CardHolderMark holder={holder} monogram={monogram} />
           <span className="request-under" data-landing-line>
             {freshIds.has(card.id) && <NewMark />}
             {face.status !== undefined && (

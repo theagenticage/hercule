@@ -78,18 +78,27 @@ export const useCurrentCard = (
   const set = (id: string | null, by: CurrentBy, takesFocus = true): void => {
     const scroller = scrollRef.current;
     if (scroller === null) return;
+    // The hand-off is named for the workflow, so the moves are as wide as that name. The line they cover ends
+    // before them by this width (`--moves-width`): 6px for the gap between the moves and the card's
+    // edge, and 2px between the line's words and the moves. It is measured before any attribute
+    // changes, so the read finds the layout up to date and forces none.
+    const element = id === null ? null : findCardElement(scroller, id);
+    const moves = element?.querySelector<HTMLElement>(".card-moves") ?? null;
+    const movesWidth = moves === null ? undefined : `${moves.offsetWidth + 8}px`;
     const before = current.current;
     if (before !== null) findCardElement(scroller, before.id)?.removeAttribute("data-current");
     current.current = null;
-    if (id === null) return;
-    const element = findCardElement(scroller, id);
-    if (element === null) return;
+    if (id === null || element === null) return;
     current.current = { id, by };
     element.setAttribute("data-current", by);
-    // The hand-off is named for the workflow, so the moves are as wide as that name. The line they cover ends
-    // before them by this width (`--moves-width`), 6px for the gap to the edge.
-    const moves = element.querySelector<HTMLElement>(".card-moves");
-    if (moves !== null) element.style.setProperty("--moves-width", `${moves.offsetWidth + 6}px`);
+    // The property sits on the element that holds the moves, where the lines that give up room read it
+    // (inbox.css). It is registered as not inherited, so setting it restyles that element alone.
+    const holder = moves?.parentElement;
+    if (holder && movesWidth !== undefined) {
+      if (holder.style.getPropertyValue("--moves-width") !== movesWidth) {
+        holder.style.setProperty("--moves-width", movesWidth);
+      }
+    }
     onReach(id);
     if (by === "pointer") {
       // The ring and the pointer's mark must not both stand: the pointer took over.

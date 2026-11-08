@@ -32,6 +32,8 @@
 }
 
 .hand-menu-heading {
+  /* The heading sits 8px in from the menu's edge above and at the sides, and 2px above the first row. */
+  margin: 8px 8px 2px;
   padding: 4px 8px 6px;
   color: var(--faint);
   font-size: var(--t-11);

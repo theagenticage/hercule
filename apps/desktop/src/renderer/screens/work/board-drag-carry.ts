@@ -24,7 +24,6 @@ export interface Follower {
 
 /** A card in the hand. */
 export interface Carry {
-  readonly pointerId: number;
   readonly card: WorkCard;
   /** The id of the lane the card was lifted from. */
   readonly laneId: string;
@@ -50,7 +49,6 @@ export interface Carry {
   /** The scroller in the window, and how far it is scrolled. */
   view: BoardView;
   place: DropPlace | null;
-  uprightTimer: number | undefined;
   scrollFrame: number;
   /** The folded lane that is marked as the target, if one is. */
   markedLane: HTMLElement | null;

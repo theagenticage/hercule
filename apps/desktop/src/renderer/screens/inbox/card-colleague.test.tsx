@@ -6,7 +6,7 @@ import { CardColleague } from "./card-moves";
 
 describe("a card's colleague", () => {
   it("is named by the workflow that has the card", () => {
-    render(<CardColleague workflowId="wf-agent-review" workflowName="Agent review" />);
+    render(<CardColleague workflow={{ workflowId: "wf-agent-review", name: "Agent review" }} />);
     expect(screen.getByRole("img", { name: "Agent review has it" })).toBeTruthy();
   });
 
@@ -15,7 +15,7 @@ describe("a card's colleague", () => {
       <Face look={buildLook("wf-agent-review")} pose="working" size={22} />,
     );
     const { container } = render(
-      <CardColleague workflowId="wf-agent-review" workflowName="Any name" />,
+      <CardColleague workflow={{ workflowId: "wf-agent-review", name: "Any name" }} />,
     );
 
     expect(container.querySelector("svg")?.outerHTML).toBe(

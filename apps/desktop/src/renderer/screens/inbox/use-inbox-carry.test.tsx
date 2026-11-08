@@ -33,6 +33,9 @@ const BANDS = [
   { id: "c", top: 300, bottom: 400 },
 ] as const;
 
+/** The transforms a rail and its target had each time the carry measured a target, to check it measures them at rest. */
+let measuredTransforms: { readonly rail: string; readonly target: string }[] = [];
+
 interface HostProps {
   readonly canCarry?: (cardId: string) => boolean;
   readonly disabled?: boolean;
@@ -151,6 +154,7 @@ const lift = (page: Rendered, id: string): { x: number; y: number } => {
 };
 
 beforeEach(() => {
+  measuredTransforms = [];
   vi.useFakeTimers({
     toFake: [
       "setTimeout",
@@ -169,6 +173,10 @@ beforeEach(() => {
     if (band !== undefined) return new DOMRect(0, band.top, 400, band.bottom - band.top);
     const index = this.dataset["railTarget"];
     if (index !== undefined) {
+      measuredTransforms.push({
+        rail: this.closest<HTMLElement>(".inbox-rail")!.style.transform,
+        target: this.style.transform,
+      });
       const { x, y } = targetCenter(Number(index));
       return new DOMRect(x - 50, y - 40, 100, 80);
     }
@@ -298,6 +306,65 @@ describe("letting go", () => {
     expect(host.card("b").hasAttribute("data-carried")).toBe(false);
   });
 
+  it("two drops on targets within the landing delay both reach the page, each with its own card", () => {
+    const host = renderHost();
+    lift(host, "b");
+    const first = targetCenter(0);
+    moveTo(host.page, first.x, first.y);
+    release(host.page, first.x, first.y);
+    play(50);
+    lift(host, "c");
+    const second = targetCenter(1);
+    moveTo(host.page, second.x, second.y);
+    release(host.page, second.x, second.y);
+    play(4000);
+
+    expect(host.onDropOnTarget.mock.calls).toEqual([
+      ["b", TARGETS[0]],
+      ["c", TARGETS[1]],
+    ]);
+    expect(host.ghost()).toBeNull();
+    expect(host.card("b").hasAttribute("data-carried")).toBe(false);
+    expect(host.card("c").hasAttribute("data-carried")).toBe(false);
+  });
+
+  it("on unmount with two drops waiting still sends both", () => {
+    const host = renderHost();
+    lift(host, "b");
+    const first = targetCenter(0);
+    moveTo(host.page, first.x, first.y);
+    release(host.page, first.x, first.y);
+    play(50);
+    lift(host, "c");
+    const second = targetCenter(1);
+    moveTo(host.page, second.x, second.y);
+    release(host.page, second.x, second.y);
+    host.unmount();
+
+    expect(host.onDropOnTarget.mock.calls).toEqual([
+      ["b", TARGETS[0]],
+      ["c", TARGETS[1]],
+    ]);
+    play(4000);
+    expect(host.onDropOnTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it("measures the targets where they rest, even while the rail of the last drop is still leaving", () => {
+    const host = renderHost();
+    lift(host, "b");
+    const { x, y } = targetCenter(1);
+    moveTo(host.page, x, y);
+    release(host.page, x, y);
+    // The rail has held for its 340ms and is part of the way out.
+    play(400);
+    expect(host.rail()!.style.transform).not.toBe("");
+    measuredTransforms = [];
+    lift(host, "c");
+
+    expect(measuredTransforms).toHaveLength(TARGETS.length);
+    expect(measuredTransforms.every((each) => each.rail === "" && each.target === "")).toBe(true);
+  });
+
   it("on Dismiss calls for it at once, and the card is back in the page for it to leave from", () => {
     const host = renderHost();
     lift(host, "b");
@@ -380,7 +447,7 @@ describe("cancelling", () => {
     host.unmount();
 
     expect(document.querySelector(".inbox-carry-ghost")).toBeNull();
-    expect(document.documentElement.hasAttribute("data-carrying")).toBe(false);
+    expect(document.querySelector("[data-carrying]")).toBeNull();
     expect(card.hasAttribute("data-carried")).toBe(false);
     expect(document.querySelector("[data-link-target]")).toBeNull();
     expect(host.onDropOnCard).not.toHaveBeenCalled();

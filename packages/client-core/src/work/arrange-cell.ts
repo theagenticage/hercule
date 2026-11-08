@@ -18,7 +18,7 @@
  * Arranging only chooses what to draw. It does not change `boardRank`.
  */
 import type { BoardStage, WorkCard, WorkStackCandidate } from "@hercule/contract";
-import { lowerFirst } from "../intake";
+import { lowerFirst } from "../text";
 import { pluralizeNoun } from "./context-lanes";
 
 /** The most cards a cell shows before it hides any (the Landed cell shows none). */

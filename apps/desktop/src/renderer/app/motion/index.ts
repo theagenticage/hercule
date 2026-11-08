@@ -30,6 +30,7 @@ export {
   type SidebarTargetName,
 } from "./sidebar-flight";
 export { HAND_STILL_AFTER_MS, HandTracker } from "./hand";
+export { trackCarryGesture, type CarryGesture } from "./carry-gesture";
 export { swallowNextClick } from "./swallow-click";
 export { copyElementWithoutIds } from "./copy-element";
 export { isMotionReduced } from "./reduced";

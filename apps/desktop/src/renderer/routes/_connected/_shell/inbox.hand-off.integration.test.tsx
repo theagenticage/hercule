@@ -238,15 +238,15 @@ const UNDO_OF: Readonly<Record<HandOffUndo["outcome"], HandOffUndo>> = {
 };
 
 describe("handing a card to a workflow", () => {
-  it("hands the card to its one workflow on a click: the colleague has it, the answer's Task lands, and the account acts", async () => {
+  it("hands the card to its one workflow on a click: the colleague has it, the answer's Task lands, and the controller picks the account", async () => {
     const user = userEvent.setup();
     const { calls } = await openInbox({ [handOffPath(REFUNDS)]: { body: HANDED } });
 
     await handRefunds(user);
 
+    // The user chose no account, so none is sent and the controller uses the default.
     expect(listCallsTo(calls, handOffPath(REFUNDS))[0]?.body).toEqual({
       workflowId: REVIEW_OFFER.workflowId,
-      connectionId: BOT.id,
     });
     const card = getCard("Refund a returned order");
     expect(within(card).getByRole("img", { name: "Agent review has it" })).toBeTruthy();
@@ -299,7 +299,6 @@ describe("handing a card to a workflow", () => {
     });
     expect(listCallsTo(calls, handOffPath(SLOTS))[0]?.body).toEqual({
       workflowId: REPAIR_OFFER.workflowId,
-      connectionId: BOT.id,
     });
     expect(
       await screen.findByText("Handed Ticket OPS-2 to Repair the build. Its Task is on Work."),
@@ -372,6 +371,130 @@ describe("handing a card to a workflow", () => {
     expect(within(card).queryByRole("img", { name: "Agent review has it" })).toBeNull();
     expect(card.hasAttribute("data-has-task")).toBe(false);
     expect(within(card).getByRole("button", { name: "Take it", hidden: true })).toBeTruthy();
+  });
+});
+
+/** Returns what `externalEntity.read` answers for `card`: it can be handed to the review workflow, as `BOT`. */
+const buildDetailAnswer = (
+  card: InboxCard,
+  overrides: Readonly<Record<string, unknown>> = {},
+): Record<string, Handler> => ({
+  [`GET /api/v1/external-entities/${card.id}`]: {
+    body: {
+      ...card,
+      kindAvailable: true,
+      places: [PRICING],
+      edges: [{ fromRef: card.ref, toRef: PRICING.ref }],
+      links: [],
+      hints: [],
+      conflicts: [],
+      signals: [],
+      openCount: 0,
+      signalCount: 0,
+      timeline: [],
+      peers: [],
+      offers: [REVIEW_OFFER],
+      actingConnections: [BOT],
+      ...overrides,
+    },
+  },
+});
+
+/** Opens the card titled `title` with a click and waits until the moves in its sheet take a pointer. */
+const openSheetOf = async (
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+): Promise<HTMLElement> => {
+  await user.click(await screen.findByText(title));
+  const sheet = await screen.findByRole("dialog", { name: title });
+  await waitFor(() => {
+    expect(sheet.querySelector("[data-arming]")).toBeNull();
+  });
+  return sheet;
+};
+
+describe("handing a card from its open sheet", () => {
+  it("hands on H to the one workflow the sheet lists, and the controller picks the account", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openInbox({
+      ...buildDetailAnswer(REFUNDS),
+      [handOffPath(REFUNDS)]: { body: HANDED },
+    });
+    await screen.findByText("Refund a returned order");
+    const sheet = await openSheetOf(user, "Refund a returned order");
+    await within(sheet).findByRole("button", { name: /^Agent review/ });
+
+    await user.keyboard("h");
+
+    expect(await screen.findByText(HAND_OFF_LINE)).toBeTruthy();
+    expect(listCallsTo(calls, handOffPath(REFUNDS))[0]?.body).toEqual({
+      workflowId: REVIEW_OFFER.workflowId,
+    });
+  });
+
+  it("says why on H when no workflow can take the card, as the page does", async () => {
+    const user = userEvent.setup();
+    const none = ticket(5, "Reprice the loyalty tiers", { offerSetId: "none" });
+    const { calls } = await openInbox(buildDetailAnswer(none, { offers: [] }), [none]);
+    await screen.findByText("Reprice the loyalty tiers");
+    await openSheetOf(user, "Reprice the loyalty tiers");
+
+    await user.keyboard("h");
+
+    expect(await screen.findByText(/No workflow takes a ticket/)).toBeTruthy();
+    expect(listCallsTo(calls, handOffPath(none))).toHaveLength(0);
+  });
+
+  it("hands a linked thing the Inbox does not list, from the sheet that walked to it", async () => {
+    const user = userEvent.setup();
+    const peer = ticket(7, "Reconcile the depot counts");
+    const { calls } = await openInbox(
+      {
+        ...buildDetailAnswer(REFUNDS, {
+          links: [
+            {
+              fromRef: REFUNDS.ref,
+              toRef: peer.ref,
+              hasPersonClaim: true,
+              claim: { type: "person" },
+            },
+          ],
+          peers: [
+            {
+              id: peer.id,
+              ref: peer.ref,
+              kind: peer.kind,
+              noun: peer.noun,
+              identifier: peer.identifier,
+              title: peer.title,
+              yours: false,
+              restricted: false,
+            },
+          ],
+        }),
+        ...buildDetailAnswer(peer),
+        [handOffPath(peer)]: { body: HANDED },
+      },
+      [REFUNDS],
+    );
+    await screen.findByText("Refund a returned order");
+    const sheet = await openSheetOf(user, "Refund a returned order");
+
+    await user.click(
+      await within(sheet).findByRole("button", { name: /^(?!Remove).*Reconcile the depot counts/ }),
+    );
+    // The Inbox does not list the peer, so the sheet is named from the peer's own read.
+    const peerSheet = await screen.findByRole("dialog", { name: "Reconcile the depot counts" });
+    await waitFor(() => {
+      expect(peerSheet.querySelector("[data-arming]")).toBeNull();
+    });
+    await user.click(await within(peerSheet).findByRole("button", { name: /^Agent review/ }));
+
+    expect(
+      await screen.findByText("Handed Ticket OPS-7 to Agent review. Its Task is on Work."),
+    ).toBeTruthy();
+    expect(listCallsTo(calls, handOffPath(peer))).toHaveLength(1);
+    expect(listCallsTo(calls, handOffPath(REFUNDS))).toHaveLength(0);
   });
 });
 

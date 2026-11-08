@@ -24,9 +24,8 @@ const renderMenu = (
     readonly accounts?: readonly ActingConnection[];
   } = {},
 ) => {
-  const onHand = vi.fn<(workflowId: string) => void>();
+  const onHand = vi.fn<(workflowId: string, connectionId: string | undefined) => void>();
   const onClose = vi.fn<() => void>();
-  const onChooseConnection = vi.fn<(connectionId: string) => void>();
   const outside = document.createElement("div");
   outside.setAttribute("data-card-id", "card-1");
   document.body.append(outside);
@@ -35,14 +34,12 @@ const renderMenu = (
       offers={options.offers ?? partitionOffers([review, repair, draft, shipIt])}
       openKinds={["github/review-requested", "github/mention"]}
       actingConnections={options.accounts ?? [BOT]}
-      chosenConnectionId={undefined}
-      onChooseConnection={onChooseConnection}
       onHand={onHand}
       onClose={onClose}
       anchor={outside}
     />,
   );
-  return { onHand, onClose, onChooseConnection };
+  return { onHand, onClose };
 };
 
 describe("HandToMenu", () => {
@@ -89,7 +86,7 @@ describe("HandToMenu", () => {
 
     await userEvent.click(screen.getByRole("menuitem", { name: /Repair the build/, hidden: true }));
 
-    expect(onHand).toHaveBeenCalledExactlyOnceWith(repair.workflowId);
+    expect(onHand).toHaveBeenCalledExactlyOnceWith(repair.workflowId, undefined);
   });
 
   it("closes on Esc, and no key reaches the page behind it", async () => {
@@ -108,8 +105,8 @@ describe("HandToMenu", () => {
     expect(reachedPage).not.toHaveBeenCalled();
   });
 
-  it("names the account it acts as when there are several, and lets the user pick another", async () => {
-    const { onChooseConnection } = renderMenu({ accounts: [BOT, AVA] });
+  it("names the account it acts as when there are several, and hands as the one the user picks", async () => {
+    const { onHand } = renderMenu({ accounts: [BOT, AVA] });
 
     const account = screen.getByRole<HTMLSelectElement>("combobox", {
       name: "Account to act as",
@@ -117,8 +114,49 @@ describe("HandToMenu", () => {
     });
     expect(account.selectedOptions[0]?.textContent).toBe("northwind-bot");
     await userEvent.selectOptions(account, "conn-ava");
+    await userEvent.click(screen.getByRole("menuitem", { name: /Repair the build/, hidden: true }));
 
-    expect(onChooseConnection).toHaveBeenCalledExactlyOnceWith("conn-ava");
+    expect(onHand).toHaveBeenCalledExactlyOnceWith(repair.workflowId, "conn-ava");
+  });
+
+  it("hands with no account when the user picked none, so the controller chooses", async () => {
+    const { onHand } = renderMenu({ accounts: [BOT, AVA] });
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Agent review/, hidden: true }));
+
+    expect(onHand).toHaveBeenCalledExactlyOnceWith(review.workflowId, undefined);
+  });
+
+  it("keeps the account the user picked when a push says it can no longer act, and says so", async () => {
+    const onHand = vi.fn<(workflowId: string, connectionId: string | undefined) => void>();
+    const anchor = document.createElement("div");
+    anchor.setAttribute("data-card-id", "card-1");
+    document.body.append(anchor);
+    const menu = (accounts: readonly ActingConnection[]) => (
+      <HandToMenu
+        offers={partitionOffers([review])}
+        openKinds={[]}
+        actingConnections={accounts}
+        onHand={onHand}
+        onClose={vi.fn()}
+        anchor={anchor}
+      />
+    );
+    const { rerender } = render(menu([BOT, AVA]));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Account to act as", hidden: true }),
+      "conn-ava",
+    );
+
+    rerender(menu([BOT]));
+
+    const account = screen.getByRole<HTMLSelectElement>("combobox", {
+      name: "Account to act as",
+      hidden: true,
+    });
+    expect(account.selectedOptions[0]?.textContent).toBe("This account can no longer act");
+    await userEvent.click(screen.getByRole("menuitem", { name: /Agent review/, hidden: true }));
+    expect(onHand).toHaveBeenCalledExactlyOnceWith(review.workflowId, "conn-ava");
   });
 
   it("names no account when there is only one", () => {

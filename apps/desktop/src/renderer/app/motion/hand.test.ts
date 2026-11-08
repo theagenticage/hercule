@@ -42,4 +42,21 @@ describe("a hand", () => {
     expect(hand.isStill()).toBe(true);
     expect(hand.readThrow()).toEqual({ x: 0, y: 0 });
   });
+
+  it("leans with the sideways speed, to either side and never past the most", () => {
+    const hand = new HandTracker(0, 0);
+    expect(hand.readLean(4, 3.5)).toBe(0);
+    for (let step = 1; step <= 10; step++) {
+      vi.advanceTimersByTime(16);
+      hand.moveTo(step * 8, 0);
+    }
+    expect(hand.readLean(0.9, 1.2)).toBeGreaterThan(0);
+    expect(hand.readLean(0.9, 1.2)).toBeLessThanOrEqual(1.2);
+    expect(hand.readLean(1000, 3.5)).toBe(3.5);
+    for (let step = 1; step <= 20; step++) {
+      vi.advanceTimersByTime(16);
+      hand.moveTo(80 - step * 20, 0);
+    }
+    expect(hand.readLean(1000, 3.5)).toBe(-3.5);
+  });
 });

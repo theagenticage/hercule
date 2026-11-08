@@ -49,6 +49,15 @@ export class HandTracker {
   }
 
   /**
+   * Returns the tilt, in degrees, of a card carried by this hand: `perSpeed`
+   * degrees for each pixel per millisecond of sideways speed, never more than
+   * `most` to either side.
+   */
+  readLean(perSpeed: number, most: number): number {
+    return Math.max(-most, Math.min(most, this.vx * perSpeed));
+  }
+
+  /**
    * Returns the speed a card let go now is thrown at, in pixels a second: the
    * smoothed speed, never more than a fixed cap, and none once the hand has
    * been still.

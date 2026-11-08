@@ -4,7 +4,7 @@
  * and whether typed text is a pasted link.
  */
 import type { EntityPlace, EntitySearchQuery, PluginDetail } from "@hercule/contract";
-import { lowerFirst } from "../intake";
+import { lowerFirst } from "../text";
 import { parsePluginId } from "../plugin-id";
 
 /** The part of a plugin that decides whether it is a source: what `plugin.query` returns. */

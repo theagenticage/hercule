@@ -88,7 +88,7 @@ const holdPart = (card: HTMLElement, part: HTMLElement, keepData: readonly strin
 /**
  * Records how `card` looks now: its sentence, its colleague and its wait, with
  * where each lies. Call it just before the change that hands the card on or
- * takes it back, then give the result to `playHandOff` or `playHandOffBack`.
+ * takes it back, then give the result to `playCardHandOff` or `playCardHandOffBack`.
  */
 export const holdHandOff = (card: HTMLElement): HeldHandOff => {
   const box = card.querySelector(COLLEAGUE)?.parentElement ?? null;
@@ -176,7 +176,7 @@ const sinkColleague = (card: HTMLElement, held: HeldPart, delay: number): (() =>
  * The card's neighbours do not move, and the signal landing's rim and knock
  * are not played: a hand-off is the user's own move, not news.
  */
-export const playHandOff = (card: HTMLElement, held: HeldHandOff): (() => void) => {
+export const playCardHandOff = (card: HTMLElement, held: HeldHandOff): (() => void) => {
   const cancels: (() => void)[] = [];
   const mark = findMark(card);
   if (mark !== null) cancels.push(flyToSidebarTarget(mark, "overview", WEIGHT_DELAY).cancel);
@@ -211,7 +211,7 @@ export const playHandOff = (card: HTMLElement, held: HeldHandOff): (() => void) 
  *   When the sidebar shows no Overview, the flight is skipped and the rest
  *   starts at once.
  */
-export const playHandOffBack = (card: HTMLElement, held: HeldHandOff): (() => void) => {
+export const playCardHandOffBack = (card: HTMLElement, held: HeldHandOff): (() => void) => {
   const cancels: (() => void)[] = [];
   const mark = findMark(card);
   const home = mark === null ? undefined : flyHomeFromSidebarTarget(mark, "overview");

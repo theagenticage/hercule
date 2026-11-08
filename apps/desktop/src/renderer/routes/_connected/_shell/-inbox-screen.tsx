@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { buildInitials, readErrorMessage } from "@hercule/client-core";
@@ -8,6 +8,7 @@ import {
   describeFailingSources,
   describeTruncatedInbox,
   listCardOffers,
+  listRailTargets,
   listRiders,
   nameLinkEnd,
   NO_OFFERS,
@@ -31,11 +32,11 @@ import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
 import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
 import { OngoingSide } from "../../../screens/inbox/ongoing-side";
 import { InboxOpenCard } from "../../../screens/inbox/open-card";
-import { Rail, type RailTarget } from "../../../screens/inbox/rail";
+import { Rail } from "../../../screens/inbox/rail";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
 import { useInboxCarry } from "../../../screens/inbox/use-inbox-carry";
-import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
+import { useInboxPage, type HandOffCandidate } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
 import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
 import { useOpenCard } from "../../../screens/inbox/use-open-card";
@@ -97,7 +98,7 @@ const describeOffline = (since: Date): string =>
  */
 export function InboxScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
   const { client, url, live } = controller;
-  const { undoStack } = controller.accountScopes.read();
+  const scope = controller.accountScopes.read();
   const navigate = useNavigate();
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const queryClient = useQueryClient();
@@ -107,17 +108,16 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: connections } = useSuspenseQuery(connectionsQuery(client));
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Whether a card is in the hand, for the visit to read when a card arrives (set below, once the carry runs).
-  const isCarryingRef = useRef(false);
   const read = useInbox(client);
   const visitHistory = useVisitHistory();
   const moves = useInboxMoves({
     client,
-    undoStack,
+    scope,
     serverInbox: read.data,
     visit: visitHistory,
     scrollRef,
-    isCarrying: () => isCarryingRef.current,
+    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
+    isCarrying: () => readIsCarrying(),
     openTask: (taskId) => {
       void navigate({ to: "/work", search: { task: taskId } });
     },
@@ -154,7 +154,8 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     },
     visit: visitHistory,
     scrollRef,
-    isCarrying: () => isCarryingRef.current,
+    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
+    isCarrying: () => readIsCarrying(),
   });
   const hasWords = inbox !== undefined && !isHolding;
   const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
@@ -203,13 +204,14 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     });
   };
   const [handMenu, setHandMenu] = useState<HandMenuTarget | null>(null);
-  // The account the user picked in the menu. A menu that opens starts from the default again.
-  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
+  // What the open sheet can hand to a workflow, which the sheet keeps up to date and the page's keys read.
+  const sheetHand = useRef<HandOffCandidate | null>(null);
   const page = useInboxPage({
     scrollRef,
     current,
     findCard,
     open: openCard,
+    sheetHand,
     moves: {
       take: moves.take,
       dismiss: dismissWithRiders,
@@ -219,7 +221,6 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       readOffers,
       hand: moves.handOff,
       openHandMenu: (card, anchor, by) => {
-        setChosenConnectionId(undefined);
         setHandMenu({ cardId: card.id, anchor, by });
       },
     },
@@ -227,21 +228,14 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const handMenuCard = handMenu === null ? undefined : findCard(handMenu.cardId);
 
   // ---------- Carrying a card ----------
-  const { rail, attachRail, isCarrying } = useInboxCarry({
+  const { rail, attachRail, readIsCarrying } = useInboxCarry({
     pageRef: scrollRef,
     disabled: openCard.isOpen,
     canCarry: (cardId) => findCard(cardId) !== undefined,
     readRailTargets: (cardId) => {
       const card = findCard(cardId);
       if (card === undefined) return [];
-      const hands: RailTarget[] = readOffers(card).available.map((offer) => ({
-        kind: "hand",
-        workflowId: offer.workflowId,
-        name: offer.name,
-      }));
-      // A card a Task holds can be handed on, but not taken or dismissed.
-      const holdsTask = card.taskId !== undefined || moves.handed.has(card.id);
-      return holdsTask ? hands : [...hands, { kind: "take" }, { kind: "dismiss" }];
+      return listRailTargets(card, readOffers(card), moves.handed.has(card.id));
     },
     onDropOnTarget: (cardId, target) => {
       const card = findCard(cardId);
@@ -256,9 +250,6 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       if (card !== undefined && onto !== undefined) linkCards(card.ref, onto.ref);
     },
   });
-  useLayoutEffect(() => {
-    isCarryingRef.current = isCarrying;
-  }, [isCarrying]);
 
   let state: InboxDeskState = "board";
   let body: JSX.Element | null;
@@ -391,14 +382,13 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
                 });
               }
             }}
-            onHand={(cardId, workflowId, connectionId, by) => {
-              const card = findCard(cardId);
-              if (card === undefined) return;
+            handRef={sheetHand}
+            onHand={(candidate, workflowId, by) => {
               // By keys the sheet walks on to the next card and the chain plays behind it. By pointer it folds home first.
-              if (by === "keys") page.handCard(card, workflowId, connectionId, by);
+              if (by === "keys") page.handFromSheet(candidate, workflowId, by);
               else {
                 openCard.closeThen(() => {
-                  page.handCard(card, workflowId, connectionId, by);
+                  page.handFromSheet(candidate, workflowId, by);
                 });
               }
             }}
@@ -412,11 +402,9 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
               offers={readOffers(handMenuCard)}
               openKinds={handMenuCard.signals.kinds}
               actingConnections={handMenuCard.actingConnections}
-              chosenConnectionId={chosenConnectionId}
-              onChooseConnection={setChosenConnectionId}
-              onHand={(workflowId) => {
+              onHand={(workflowId, connectionId) => {
                 setHandMenu(null);
-                page.handCard(handMenuCard, workflowId, chosenConnectionId, handMenu.by);
+                page.handCard(handMenuCard, workflowId, connectionId, handMenu.by);
               }}
               onClose={() => {
                 setHandMenu(null);

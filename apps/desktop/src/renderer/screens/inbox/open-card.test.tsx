@@ -3,7 +3,7 @@
  * says (every place above it, why its facts may be old), what its moves do
  * and when they are off, and walking to a place inside the sheet and back.
  */
-import { Suspense, type JSX } from "react";
+import { createRef, Suspense, type JSX } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -28,6 +28,7 @@ import type { EntityLinkMove } from "@hercule/client-core/inbox";
 import { createQueryClient } from "../../app/query-client";
 import { CONTROLLER_URL, stubApi, type Call, type Handler } from "../../app/testing";
 import { InboxOpenCard } from "./open-card";
+import type { HandOffCandidate } from "./use-inbox-page";
 import { useOpenCard } from "./use-open-card";
 
 const ORDER_ID = "01a06d02-7e00-7000-8000-000000000a01";
@@ -81,18 +82,24 @@ const buildDetail = (
   };
 };
 
+/** What the sheet calls to hand its card on. */
+type HandHandler = (
+  candidate: HandOffCandidate,
+  workflowId: string,
+  by: "keys" | "pointer",
+) => void;
+
+/** Returns what the newest call of `onHand` was given. */
+const readLastHand = (onHand: ReturnType<typeof vi.fn<HandHandler>>) => {
+  const call = onHand.mock.calls.at(-1);
+  if (call === undefined) throw new Error("The sheet handed nothing.");
+  const [candidate, workflowId, by] = call;
+  return { candidate, workflowId, by };
+};
+
 interface Rendered {
   readonly onTake: ReturnType<typeof vi.fn<(cardId: string) => void>>;
-  readonly onHand: ReturnType<
-    typeof vi.fn<
-      (
-        cardId: string,
-        workflowId: string,
-        connectionId: string | undefined,
-        by: "keys" | "pointer",
-      ) => void
-    >
-  >;
+  readonly onHand: ReturnType<typeof vi.fn<HandHandler>>;
   readonly onSeeTask: ReturnType<typeof vi.fn<(taskId: string) => void>>;
   readonly onLink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
   readonly onUnlink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
@@ -117,20 +124,13 @@ const renderPage = (
   });
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
   const onTake = vi.fn<(cardId: string) => void>();
-  const onHand =
-    vi.fn<
-      (
-        cardId: string,
-        workflowId: string,
-        connectionId: string | undefined,
-        by: "keys" | "pointer",
-      ) => void
-    >();
+  const onHand = vi.fn<HandHandler>();
   const onSeeTask = vi.fn<(taskId: string) => void>();
   const onLink = vi.fn<(move: EntityLinkMove) => void>();
   const onUnlink = vi.fn<(move: EntityLinkMove) => void>();
   const onSeeInIntake = vi.fn<(entityId: string) => void>();
   const inbox = options.inbox ?? buildInboxOf(card);
+  const handRef = createRef<HandOffCandidate | null>();
   function Page(): JSX.Element {
     const openCard = useOpenCard();
     return (
@@ -150,6 +150,7 @@ const renderPage = (
           inbox={inbox}
           plugins={[]}
           platform="linux"
+          handRef={handRef}
           onTake={onTake}
           onDismiss={vi.fn()}
           onHand={onHand}
@@ -297,12 +298,10 @@ describe("InboxOpenCard", () => {
       expect(row.textContent).toBe("Agent reviewEnds Review.H");
       await userEvent.setup().click(row);
 
-      expect(onHand).toHaveBeenCalledExactlyOnceWith(
-        ORDER_ID,
-        REVIEW.workflowId,
-        BOT.id,
-        "pointer",
-      );
+      expect(onHand).toHaveBeenCalledOnce();
+      const { candidate, workflowId, by } = readLastHand(onHand);
+      expect(candidate.target.id).toBe(ORDER_ID);
+      expect([workflowId, by]).toEqual([REVIEW.workflowId, "pointer"]);
     });
 
     it("numbers several workflows, lists the ones that cannot take the card below with why, and keeps them before Take it", async () => {
@@ -354,24 +353,27 @@ describe("InboxOpenCard", () => {
       await user.selectOptions(within(sheet).getByRole("combobox"), AVA.id);
       await user.click(within(sheet).getByRole("button", { name: /^Repair the build/ }));
 
-      expect(onHand).toHaveBeenCalledExactlyOnceWith(
-        ORDER_ID,
-        REPAIR.workflowId,
-        AVA.id,
-        "pointer",
-      );
+      expect(onHand).toHaveBeenCalledOnce();
+      const { candidate, workflowId } = readLastHand(onHand);
+      expect(candidate.chosenConnectionId).toBe(AVA.id);
+      expect(workflowId).toBe(REPAIR.workflowId);
     });
 
-    it("hands at once on H when one workflow fits, and picks with 1 to 3 when several do", async () => {
-      const one = renderPage(ORDER, buildDetail(ORDER, { offers: [REVIEW] }));
-      await openTheCard();
-      await userEvent.setup().keyboard("h");
-      expect(one.onHand).toHaveBeenCalledExactlyOnceWith(
-        ORDER_ID,
-        REVIEW.workflowId,
-        undefined,
-        "keys",
+    it("passes up no account when the user chose none, so the controller picks the default", async () => {
+      const { onHand } = renderPage(
+        ORDER,
+        buildDetail(ORDER, { offers: [REVIEW], actingConnections: [BOT, AVA] }),
       );
+      const sheet = await openTheCard();
+
+      await userEvent
+        .setup()
+        .click(await within(sheet).findByRole("button", { name: /^Agent review/ }));
+
+      expect(onHand).toHaveBeenCalledOnce();
+      const { candidate, workflowId } = readLastHand(onHand);
+      expect(candidate.chosenConnectionId).toBeUndefined();
+      expect(workflowId).toBe(REVIEW.workflowId);
     });
 
     it("counts Return on a focused Hand to row as keys, so the sheet walks on, and a click as pointer", async () => {
@@ -379,32 +381,13 @@ describe("InboxOpenCard", () => {
       const sheet = await openTheCard();
       const user = userEvent.setup();
 
-      await user.keyboard("h");
+      const first = await within(sheet).findByRole("button", { name: /^Agent review/ });
+      first.focus();
       await user.keyboard("{Enter}");
-      expect(onHand).toHaveBeenLastCalledWith(ORDER_ID, REVIEW.workflowId, undefined, "keys");
+      expect(readLastHand(onHand)).toMatchObject({ workflowId: REVIEW.workflowId, by: "keys" });
 
       await user.click(within(sheet).getByRole("button", { name: /^Repair the build/ }));
-      expect(onHand).toHaveBeenLastCalledWith(ORDER_ID, REPAIR.workflowId, undefined, "pointer");
-    });
-
-    it("moves to the rows on H when several workflows fit, and 2 picks the second", async () => {
-      const { onHand } = renderPage(ORDER, buildDetail(ORDER, { offers: [REVIEW, REPAIR] }));
-      const sheet = await openTheCard();
-      const user = userEvent.setup();
-
-      await user.keyboard("h");
-      expect(document.activeElement).toBe(
-        within(sheet).getByRole("button", { name: /^Agent review/ }),
-      );
-      expect(onHand).not.toHaveBeenCalled();
-      await user.keyboard("2");
-
-      expect(onHand).toHaveBeenCalledExactlyOnceWith(
-        ORDER_ID,
-        REPAIR.workflowId,
-        undefined,
-        "keys",
-      );
+      expect(readLastHand(onHand)).toMatchObject({ workflowId: REPAIR.workflowId, by: "pointer" });
     });
   });
 

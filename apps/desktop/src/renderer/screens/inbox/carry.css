@@ -60,8 +60,8 @@
     var(--h-hover);
 }
 
-/* While a card is in the hand the pointer is a grabbing hand everywhere. */
-html[data-carrying],
-html[data-carrying] * {
+/* While a card is in the hand the pointer is a grabbing hand all over the desk. */
+.inbox-desk[data-carrying],
+.inbox-desk[data-carrying] * {
   cursor: grabbing !important;
 }

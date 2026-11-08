@@ -9,7 +9,7 @@
  */
 import type { EntityGrouping, EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
 import { describeLockedRow } from "../desk/relation-rows";
-import { lowerFirst } from "../intake";
+import { lowerFirst } from "../text";
 import { parsePluginId } from "../plugin-id";
 import { buildLane, type CardPlaces, type WorkLane } from "./lanes";
 

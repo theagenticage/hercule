@@ -12,7 +12,7 @@ import {
   removeFakeAnimations,
   type FakeAnimation,
 } from "../../app/motion/testing-animations";
-import { holdHandOff, playHandOff, playHandOffBack } from "./hand-off-motion";
+import { holdHandOff, playCardHandOff, playCardHandOffBack } from "./hand-off-motion";
 
 let played: FakeAnimation[];
 
@@ -121,7 +121,7 @@ describe("handing a card on", () => {
     before.card.remove();
     const after = drawCard("Agent review has it", true);
 
-    playHandOff(after.card, held);
+    playCardHandOff(after.card, held);
 
     expect(after.colleague?.style.transform).toContain("translate3d(0.00px,22.00px,0)");
     const delays = played.map((animation) => animation.options.delay);
@@ -136,7 +136,7 @@ describe("handing a card on", () => {
     before.card.remove();
     const after = drawCardUnderPlaceMark("Agent review has it", true);
 
-    playHandOff(after.card, held);
+    playCardHandOff(after.card, held);
 
     // The place's mark is dimmed where it stands while its copy flies.
     expect(played.some((animation) => animation.element === after.placeMark)).toBe(true);
@@ -150,7 +150,7 @@ describe("handing a card on", () => {
     before.card.remove();
     const after = drawCard("Agent review has it", true);
 
-    playHandOff(after.card, held);
+    playCardHandOff(after.card, held);
 
     const copy = after.card.querySelector("[data-level]");
     expect(copy?.textContent).toBe("3d");
@@ -168,7 +168,7 @@ describe("handing a card on", () => {
     const held = holdHandOff(before.card);
     before.card.remove();
     const { card, colleague } = drawCard("Agent review has it", true);
-    const cancel = playHandOff(card, held);
+    const cancel = playCardHandOff(card, held);
     const copyFlight = played.find((animation) => animation.element.closest(".motion-flights"));
 
     cancel();
@@ -185,7 +185,7 @@ describe("handing a card on", () => {
     const icon = drawOverview();
     const { card, colleague } = drawCard("Agent review has it", true);
 
-    playHandOff(card, { sentence: undefined, colleague: undefined, wait: undefined });
+    playCardHandOff(card, { sentence: undefined, colleague: undefined, wait: undefined });
 
     expect(colleague?.style.transform).toBe("");
     expect(played).toHaveLength(1);
@@ -208,7 +208,7 @@ describe("taking a hand-off back", () => {
     drawOverview();
     const { held, back } = undo();
 
-    playHandOffBack(back.card, held);
+    playCardHandOffBack(back.card, held);
 
     const standUp = played.find((animation) => animation.element === back.card);
     expect(standUp?.options.delay).toBe(240);
@@ -226,7 +226,7 @@ describe("taking a hand-off back", () => {
     handed.card.remove();
     const back = drawCardUnderPlaceMark("Opened by Sam", false);
 
-    playHandOffBack(back.card, held);
+    playCardHandOffBack(back.card, held);
 
     expect(played.some((animation) => animation.element.closest(".motion-flights"))).toBe(true);
     expect(played.find((animation) => animation.element === back.card)?.options.delay).toBe(240);
@@ -235,7 +235,7 @@ describe("taking a hand-off back", () => {
   it("starts the rest at once when the sidebar shows no Overview to fly from", () => {
     const { held, back } = undo();
 
-    playHandOffBack(back.card, held);
+    playCardHandOffBack(back.card, held);
 
     expect(played.find((animation) => animation.element === back.card)?.options.delay).toBe(0);
   });
@@ -245,7 +245,7 @@ describe("taking a hand-off back", () => {
     const { held, back } = undo();
     const before = back.card.childElementCount;
 
-    const cancel = playHandOffBack(back.card, held);
+    const cancel = playCardHandOffBack(back.card, held);
     expect(back.card.querySelector("[aria-hidden]")).not.toBeNull();
     cancel();
 
@@ -260,7 +260,7 @@ describe("taking a hand-off back", () => {
     const { held, back } = undo();
     setReduced(true);
 
-    playHandOffBack(back.card, held);
+    playCardHandOffBack(back.card, held);
 
     expect(played).toEqual([]);
     expect(back.card.querySelector("[aria-hidden]")).toBeNull();
