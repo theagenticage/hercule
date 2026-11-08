@@ -142,6 +142,8 @@ describe("buildWorkCard", () => {
       lastActivityAt: AT,
       entityMarks: [],
       contextRefs: [],
+      blockedBy: [],
+      blockedByCount: 0,
     });
   });
 

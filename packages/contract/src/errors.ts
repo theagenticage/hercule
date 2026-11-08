@@ -142,8 +142,13 @@ export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
  * - `request-closed`: the Request that a decision or an answer was for is
  *   not open (the session waits on no Request, waits on another, or has
  *   exited). A client that sent the answer before may find it was taken.
+ * - `blocker-cycle`: the write would make Tasks wait on each other in a loop
+ *   (a blocker added, or two Tasks merged). The message names the path. A
+ *   client shows the message as it is and never matches its text.
  */
-export const InvalidStateDetails = Schema.Struct({ reason: Schema.Literal("request-closed") });
+export const InvalidStateDetails = Schema.Struct({
+  reason: Schema.Literals(["request-closed", "blocker-cycle"]),
+});
 
 export type InvalidStateDetails = Schema.Schema.Type<typeof InvalidStateDetails>;
 

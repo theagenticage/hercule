@@ -107,6 +107,9 @@ const COMMANDS: Record<string, string> = {
   "task.merge": "task merge",
   "task.linkEntity": "task link",
   "task.unlinkEntity": "task unlink",
+  "task.addBlocker": "task block",
+  "task.removeBlocker": "task unblock",
+  "task.checkMerge": "task check-merge",
   "task.delete": "task delete",
 
   "notification.query": "notification list",
@@ -146,6 +149,14 @@ const COMMANDS: Record<string, string> = {
   "discussion.read": "discussion read",
   "discussion.create": "discussion create",
   "discussion.post": "discussion post",
+
+  "initiative.query": "initiative list",
+  "initiative.read": "initiative read",
+  "initiative.create": "initiative create",
+  "initiative.update": "initiative update",
+  "initiative.close": "initiative close",
+  "initiative.reopen": "initiative reopen",
+  "initiative.delete": "initiative delete",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -377,6 +388,16 @@ const RESOLVES: Record<string, string> = {
   "task.move id": "task.query",
   "task.move projectId": "project.query",
   "task.move afterTaskId": "task.query",
+  "task.move initiativeId": "initiative.query",
+  "task.query initiativeId": "initiative.query",
+  "task.create initiativeId": "initiative.query",
+  "task.update initiativeId": "initiative.query",
+  "task.addBlocker id": "task.query",
+  "task.addBlocker blockedByTaskId": "task.query",
+  "task.removeBlocker id": "task.query",
+  "task.removeBlocker blockedByTaskId": "task.query",
+  "task.checkMerge id": "task.query",
+  "task.checkMerge intoTaskId": "task.query",
   "task.delete id": "task.query",
   "task.queryLegs runIds": "run.query",
 
@@ -399,6 +420,14 @@ const RESOLVES: Record<string, string> = {
   "ignoreRule.delete id": "ignoreRule.query",
   "discussion.read id": "discussion.query",
   "discussion.post id": "discussion.query",
+
+  "initiative.read id": "initiative.query",
+  "initiative.update id": "initiative.query",
+  "initiative.close id": "initiative.query",
+  "initiative.reopen id": "initiative.query",
+  "initiative.delete id": "initiative.query",
+  "initiative.create projectId": "project.query",
+  "initiative.update projectId": "project.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
@@ -770,6 +799,11 @@ const USER_ONLY = [
   "signal.markDone",
   "signal.lowerPriority",
   "task.merge",
+  "initiative.create",
+  "initiative.update",
+  "initiative.close",
+  "initiative.reopen",
+  "initiative.delete",
   "session.moveToTask",
 ];
 

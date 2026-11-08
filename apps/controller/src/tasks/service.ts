@@ -49,7 +49,7 @@ import {
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskEntityLinkInput,
-  type TaskEntityLinkResult,
+  type TaskChangeResult,
   TaskFilter,
   TaskMoveInput,
   TaskUpdateInput,
@@ -1504,7 +1504,7 @@ const make = Effect.gen(function* () {
     linkEntity: (
       input: LinkEntityInput,
     ): Effect.Effect<
-      TaskEntityLinkResult,
+      TaskChangeResult,
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
@@ -1553,7 +1553,7 @@ const make = Effect.gen(function* () {
     unlinkEntity: (
       input: LinkEntityInput,
     ): Effect.Effect<
-      TaskEntityLinkResult,
+      TaskChangeResult,
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {

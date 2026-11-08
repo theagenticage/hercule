@@ -287,6 +287,24 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   }),
 );
 
+// TODO(#1036): remove with the placeholder handlers below, once InitiativeService
+// and the blocker methods of TaskService exist.
+const NOT_IMPLEMENTED_1036 = "this operation is not implemented yet";
+
+// TODO(#1036): bind InitiativeService.
+const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
+  Effect.succeed(
+    handlers
+      .handle("query", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("read", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("create", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("update", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("close", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("reopen", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+      .handle("delete", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036))),
+  ),
+);
+
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
@@ -294,33 +312,39 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     const board = yield* TaskBoard;
     const details = yield* TaskDetails;
     const runs = yield* RunService;
-    return handlers
-      .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
-      .handle("queryBoard", () => withApiErrors(board.query()))
-      .handle("readAttention", () => withApiErrors(tasks.readAttention()))
-      .handle("queryTracking", () => withApiErrors(tracking.query()))
-      .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
-      .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
-      .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
-      .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
-      .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
-      .handle("update", ({ params, payload }) =>
-        withApiErrors(tasks.update({ id: params.id, ...payload })),
-      )
-      .handle("move", ({ params, payload }) =>
-        withApiErrors(tasks.move({ id: params.id, ...payload })),
-      )
-      .handle("linkEntity", ({ params, payload }) =>
-        withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
-      )
-      .handle("unlinkEntity", ({ params, payload }) =>
-        withApiErrors(tasks.unlinkEntity({ id: params.id, ...payload })),
-      )
-      .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
-      .handle("undoTryAgain", ({ params, payload }) =>
-        withApiErrors(runs.undoTryAgain(params.id, payload)),
-      )
-      .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
+    return (
+      handlers
+        .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
+        .handle("queryBoard", () => withApiErrors(board.query()))
+        .handle("readAttention", () => withApiErrors(tasks.readAttention()))
+        .handle("queryTracking", () => withApiErrors(tracking.query()))
+        .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
+        .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
+        .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
+        .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
+        .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
+        .handle("update", ({ params, payload }) =>
+          withApiErrors(tasks.update({ id: params.id, ...payload })),
+        )
+        .handle("move", ({ params, payload }) =>
+          withApiErrors(tasks.move({ id: params.id, ...payload })),
+        )
+        .handle("linkEntity", ({ params, payload }) =>
+          withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
+        )
+        .handle("unlinkEntity", ({ params, payload }) =>
+          withApiErrors(tasks.unlinkEntity({ id: params.id, ...payload })),
+        )
+        .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
+        // TODO(#1036): call the TaskService methods once they exist.
+        .handle("checkMerge", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+        .handle("addBlocker", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+        .handle("removeBlocker", () => Effect.fail(createInternalError(NOT_IMPLEMENTED_1036)))
+        .handle("undoTryAgain", ({ params, payload }) =>
+          withApiErrors(runs.undoTryAgain(params.id, payload)),
+        )
+        .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)))
+    );
   }),
 );
 
@@ -1208,6 +1232,7 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  initiativeRoutes,
   externalEntityRoutes,
   notificationRoutes,
   signalRoutes,

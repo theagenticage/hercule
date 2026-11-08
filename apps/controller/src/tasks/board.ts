@@ -267,6 +267,9 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     ...(facts.stageCause === undefined ? {} : { stageCause: facts.stageCause }),
     entityMarks: facts.entityMarks.slice(0, MAX_ENTITY_MARKS),
     contextRefs: facts.contextRefs.slice(0, MAX_CARD_CONTEXTS),
+    // TODO(#1036): read the blockers that still block this card.
+    blockedBy: [],
+    blockedByCount: 0,
   };
 };
 
@@ -318,6 +321,8 @@ const make = Effect.gen(function* () {
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
           stackCandidates: stackRead.candidates,
           stackCandidatesTruncated: stackRead.truncated,
+          // TODO(#1036): count each initiative's Done Tasks in one statement.
+          initiativeDoneCounts: {},
         };
       }),
   };

@@ -31,6 +31,7 @@ import { permission } from "./groups/permission";
 import { signal } from "./groups/signal";
 import { discussion } from "./groups/discussion";
 import { ignoreRule } from "./groups/ignore-rule";
+import { initiative } from "./groups/initiative";
 import { project } from "./groups/project";
 import { resource } from "./groups/resource";
 import { run } from "./groups/run";
@@ -63,6 +64,7 @@ export const api = HttpApi.make("hercule")
     permission,
     secret,
     task,
+    initiative,
     notification,
     signal,
     externalEntity,

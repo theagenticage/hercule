@@ -5,7 +5,7 @@
  * screen reads it, and the shell's chunk should not carry it.
  */
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, readEveryPage, type HerculeClient } from "@hercule/client-core";
 import { LIVE_KEPT_READ_OPTIONS } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
 
@@ -18,6 +18,18 @@ export const workBoardQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workBoard(),
     queryFn: () => client.task.queryBoard(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Returns the query that reads the open Initiatives, every page, in creation
+ * order. Work reads it beside the board. A closed Initiative is left out, and
+ * its cards go back to their lanes.
+ */
+export const initiativesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.initiatives(),
+    queryFn: () => readEveryPage((page) => client.initiative.query({ query: page })),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 

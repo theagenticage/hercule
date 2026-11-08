@@ -17,6 +17,8 @@ export const buildCard = (id: string, overrides: Partial<WorkCard> = {}): WorkCa
   lastActivityAt: "2026-11-01T09:00:00.000Z",
   entityMarks: [],
   contextRefs: [],
+  blockedBy: [],
+  blockedByCount: 0,
   ...overrides,
 });
 
@@ -30,6 +32,7 @@ export const buildBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   contextComplete: true,
   stackCandidates: [],
   stackCandidatesTruncated: false,
+  initiativeDoneCounts: {},
 });
 
 /**

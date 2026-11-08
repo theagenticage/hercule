@@ -1328,9 +1328,14 @@ The rules for this layer:
 | Starts a Thread on a Task | `session.spawn`, with the Task's id as `taskId` |
 | Moves a Thread to a new Task | `session.moveToTask` |
 | Merges two Tasks | `task.merge`, after the undo line |
+| Reads the Initiatives | `initiative.query`, beside the board, in the query `WORK_INITIATIVES_KEY` beside the route. A small list; not shell data |
+| Makes, changes, closes, reopens or deletes an Initiative | `initiative.create`, `update`, `close`, `reopen` and `delete`, from the Initiative sheet |
+| Puts a Task on an Initiative, or takes it off | `task.update` with `initiativeId` from the pane; `task.move` with `initiativeId` from a drop between Initiative lanes |
+| Makes a Task wait on another, or stops it | `task.addBlocker` and `task.removeBlocker`, from the pane. Undo is the opposite call, offered only when `changed` is true |
+| Asks whether a merge would close a loop | `task.checkMerge`, when a merge target is picked, before the drop |
 
 - **The controller decides what a card shows** ([./09-tasks.md](./09-tasks.md#the-board), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)): a question open in a Thread, a failure, and a working session are three independent facts on the card. The desktop keeps only the words. "Wants you" means a Thread's open question and nothing else; an approval, a Permission Request, a signal and a finished run never set it, and no screen joins sessions or runs itself to guess it.
-- **Live updates.** The board's key sits under `queryKeys.tasks`, so every `task` push reads it again, and Work adds no live topic. It does not follow the `session` topic: that would read the board about once a second for every busy agent. The controller announces a card that changed with a `task` push of its own, collected for one second ([./14-web-app.md](./14-web-app.md)). After a reconnect the first push names no ids, so the board reads again. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A summary that is written is such a push too, so a burst of summaries is still one board read a second, and an open pane reads its own Task again.
+- **Live updates.** The board's key sits under `queryKeys.tasks`, so every `task` push reads it again, and Work adds no live topic for the board. *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* It adds one for the Initiative list, `initiative` (below). It does not follow the `session` topic: that would read the board about once a second for every busy agent. The controller announces a card that changed with a `task` push of its own, collected for one second ([./14-web-app.md](./14-web-app.md)). After a reconnect the first push names no ids, so the board reads again. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A summary that is written is such a push too, so a burst of summaries is still one board read a second, and an open pane reads its own Task again.
 - **A hidden window reads no board.** The query is enabled only while the window is visible ([Rules](#rules), rule 3). A push that arrives meanwhile marks it out of date, and the board is read once when the window shows.
 - **Project names have no live topic** ([#279](https://github.com/theagenticage/hercule/issues/279)). A lane renamed from the CLI shows at the next read. That is accepted.
 - **A board past `MAX_BOARD_CARDS` (1,000)** says so on the screen, in a line under the lanes. It never hides it.
@@ -1360,11 +1365,11 @@ So the page holds a few rows per cell however many Tasks exist, unless the user 
 
 One row of 36px glass controls, from the shared parts, 10px from the top. It stays while the board scrolls. From the left: the view pill, Group by, Filter and the chips. At the right end: Find, Display and Add.
 
-- **Group by** lists Project alone for now. The menu takes its rows from data, so later slices add Initiative and the sources' kinds. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* It gains "From your sources": the groupable kinds of the board's `groupings` ([Work and your sources](#work-and-your-sources)).
-- **Filter** has the state rows Has a question, Failed and With an agent (`workingSessionId`, whatever the Task's other facts), then Project. Each value shows how many Tasks it would leave. Values of one facet add up, and facets narrow. What is on sits beside Filter as chips, a click removes one, and Esc clears them. What does not match leaves the page, and lanes with nothing left go. Filtering runs in client-core over the board already read, so it costs no read. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* Filter gains Source and the contexts of the board's places ([Work and your sources](#work-and-your-sources)).
+- **Group by** lists Project alone for now. The menu takes its rows from data, so later slices add Initiative and the sources' kinds. *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* Initiative is a row now, after Project ([Initiatives and blockers](#initiatives-and-blockers)). *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* It gains "From your sources": the groupable kinds of the board's `groupings` ([Work and your sources](#work-and-your-sources)).
+- **Filter** has the state rows Has a question, Failed and With an agent (`workingSessionId`, whatever the Task's other facts), *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* and Blocked (a card with a `blockedBy` entry), then Project, then Initiative. Each value shows how many Tasks it would leave. Values of one facet add up, and facets narrow. What is on sits beside Filter as chips, a click removes one, and Esc clears them. What does not match leaves the page, and lanes with nothing left go. Filtering runs in client-core over the board already read, so it costs no read. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* Filter gains Source and the contexts of the board's places ([Work and your sources](#work-and-your-sources)).
 - **Find** (`/`) narrows the board by title and summary as you type, and lists the top matches. Return opens the first.
-- **Display** holds Side labels or Bands, Still colleagues, Single-key shortcuts and Fold everything. Below 1320px, lanes are bands. The choices, and the lanes the user folded, are kept in `localStorage`, one entry per controller and user.
-- **Add** (the button, `A`, or the `+` on a lane's head) opens the shared right-hand sheet with New Task: type, Return, and `task.create` runs in the lane it came from. A line says where the Task landed, and the board does not scroll. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* The sheet gains From a source, to reach a thing in another system ([Work and your sources](#work-and-your-sources)).
+- **Display** holds *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* Initiatives on top or in lanes, then Side labels or Bands, Still colleagues, Single-key shortcuts and Fold everything. Below 1320px, lanes are bands. The choices, and the lanes the user folded, are kept in `localStorage`, one entry per controller and user.
+- **Add** (the button, `A`, or the `+` on a lane's head) opens the shared right-hand sheet with New Task: type, Return, and `task.create` runs in the lane it came from. A line says where the Task landed, and the board does not scroll. *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* The sheet gains From a source, to reach a thing in another system ([Work and your sources](#work-and-your-sources)). *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* It ends with a quiet **New initiative** row, which opens the Initiative sheet ([Initiatives and blockers](#initiatives-and-blockers)).
 
 ### Moving a card
 
@@ -1391,7 +1396,7 @@ One row of 36px glass controls, from the shared parts, 10px from the top. It sta
 
 From the top:
 
-1. **Crumbs and title.** The Project, then the title at 20/26. A colleague on the Task rides the sheet's top edge.
+1. **Crumbs and title.** The Project, *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* then the Initiative, then the title at 20/26. A colleague on the Task rides the sheet's top edge.
 2. **The stage path.** The five stages, the current one in ink. Choosing a stage moves the Task there, as a move on the board does.
 3. **Where it stands.** The summary's `standing` text, with a faint line under it: "Written 12 minutes ago", and " · newer work since" when the summary is stale, which is as soon as the Task changes. It is never red. With no summary yet, the line reads "Writing a summary". When Text Generation is Off or cannot run, it reads "Summaries are off", linked to the Text Generation setting; a stale summary then adds " · summaries are off".
 4. **A failure or an open question,** only if the Task has one. A failure leads: the colleague with the plaster, the card's words with the failed mark, **Try again** (filled, and Return does it), then **Open the run**. A question sits under it when both exist. See [Answering from the pane](#answering-from-the-pane).
@@ -1401,7 +1406,7 @@ From the top:
 8. **Linked.** *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* The outside things the Task links, in the order they were linked, as the same rows: the source's mark, the identifier and title, and the status on the right (not the kind: the identifier names it). A thing no Connection can read is a locked row. *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The section is always drawn, because "Link something" stands under the rows and is how the first link is made. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A row that changed at its source shows the change under its title ("Now with Ines"), as the shared relation rows draw it. The direct links between things and the hints found in text are not drawn here: they are on the Inbox's open card ([Signals, links and the timeline](#signals-links-and-the-timeline)).
 9. **The foot.** Done, Start a thread and Merge at the left, and Drop alone at the right, far from Done. With a failure, the order down the sheet is Try again, Open the run, Done, Drop.
 
-Blocked by and Blocks come with slice 8. Part of and Linked read `TaskDetail.entities`, `places` and `edges`, worked into rows by `buildTaskContextRows` in `@hercule/client-core/work`. The rows are drawn the size of the pane's other rows (32px), not the Inbox's 24px. Linked rows leave out the kind's noun ("In progress", not "Issue · In progress"), because the identifier in the title already names it.
+**Blocked by and Blocks** *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* are two sections between What is left and Threads, drawn in [Initiatives and blockers](#initiatives-and-blockers), with an **Initiative** row above them. Part of and Linked read `TaskDetail.entities`, `places` and `edges`, worked into rows by `buildTaskContextRows` in `@hercule/client-core/work`. The rows are drawn the size of the pane's other rows (32px), not the Inbox's 24px. Linked rows leave out the kind's noun ("In progress", not "Issue · In progress"), because the identifier in the title already names it.
 
 - **The summary is the card's.** The pane draws no summary of its own: the summary comes with the card in the same read, so the board and the pane cannot disagree.
 - **It opens at once.** The pane opens from what the board already has, with its words laid out at final size and loading bars where the read is still coming. The read makes no sheet move twice.
@@ -1442,6 +1447,7 @@ Blocked by and Blocks come with slice 8. Part of and Linked read `TaskDetail.ent
 **Merging.** Two cards can become one. All three ways name the target and what stays before anything is sent: the target keeps its title, stage, project, priority and place, and takes the other's labels, description, Threads and runs.
 
 - **By key.** `M` on a card, or the pane's Merge: pick the target with the arrows, and Return confirms.
+- *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* **A merge that would close a loop of blockers says so before anything is sent.** When a target is picked (the hover over a card settles, a key pick, the pane's Merge), the desktop calls `task.checkMerge`. If it answers a `refusal`, the target takes no focus ring or label that offers the merge: the refusal's words stand in the label's place, the drop does nothing, and Return does not confirm. The words are the server's, and name the path. The check is advice. `task.merge` refuses the same merge with the same words, and its refusal is decisive.
 - **By gesture.** Carry a card and hold it still over the middle 40% of another for one second, or hold Option for an instant merge. Moving more than 6px starts the wait again. The target takes a focus ring and a label naming it, "Merge into *Serve smaller…*".
 - **The merge waits out an undo line, then is sent.** The merged card leaves the board at once, and a line offers Undo for 5 seconds. Undo brings the card back and sends nothing. After the line, `task.merge` is sent. It is held in the same store as answers, so quitting or reloading during the line never sends it by itself.
 - **A refused merge is never lost without a word.** When `task.merge` fails, the card comes back and the line shows the controller's reason. Merging a finished Task, or a result with too many labels or too long a description, is refused this way, with what to do. The CLI's `hercule task merge` sends at once, with no line.
@@ -1491,7 +1497,7 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 
 ~~The drawing's other motions come with later slices: a card moving by itself and the morning replay.~~ *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035): both are built, below.)*
 
-**Left out of Work,** and so out of Display and Keys: "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5; *amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032): both are built, for GitHub, in [Work and your sources](#work-and-your-sources)*); the sidebar's dot (slice 6); ~~a card moving by itself and the morning replay (slice 7)~~ *(built in slice 7, [#1035](https://github.com/theagenticage/hercule/issues/1035))*; initiatives, plans, the Blocked state and Filter row (slice 8); Wear.
+**Left out of Work,** and so out of Display and Keys: "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5; *amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032): both are built, for GitHub, in [Work and your sources](#work-and-your-sources)*); the sidebar's dot (slice 6); ~~a card moving by itself and the morning replay (slice 7)~~ *(built in slice 7, [#1035](https://github.com/theagenticage/hercule/issues/1035))*; ~~initiatives, plans, the Blocked state and Filter row (slice 8)~~ *(built in slice 8, [#1036](https://github.com/theagenticage/hercule/issues/1036), below)*; Wear.
 
 ### A card moving by itself
 
@@ -1567,6 +1573,74 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 - **The sheet's motion** is the drawing's: it slides in 18px on `hand`, the board stays in view beside it and does not scroll, and a Task the user adds fades into its cell on `travel`. Reduce motion shows it at once.
 - **Live updates.** The `externalEntity` push reads the board again, as well as the Inbox, so a card's marks and lanes follow a poll that changed what they show. A Task whose linked thing changed also gets a derived `task` push ([./20-external-entities.md](./20-external-entities.md#12-live-updates)).
 
+### Initiatives and blockers
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* Work shows an Initiative, the user's own lasting intent ([./02-domain-model.md](./02-domain-model.md#initiative)), and a Task that waits on another ([./09-tasks.md](./09-tasks.md#blockers)). The word on screen is **Initiative**. An outside initiative, such as a Linear initiative, is an External Entity: it is only ever a lane or a filter, under its own caption ("Linear initiative"), and the words always say whose it is. Filtering by one never sets `initiativeId`. The reference is the Overview drawing: `DESIGN.md` §Plans, §`blockedBy`, §Card states, §The details pane, §The toolbar, §Lanes and §Every state, and `MOTION.md` §Folding a lane or plan and §Sliding a bead. Where this section and the drawing disagree on how something looks or moves, the drawing wins. Most Tasks have no Initiative, and that is the normal case: the board never draws a "no Initiative" group unless Group by Initiative asks for one.
+
+**What the screen reads.** `initiative.query` (open Initiatives, in creation order) beside `task.queryBoard`. Everything else is worked out in client-core, over the cards already read, with table tests:
+
+- `groupBoardByInitiative(cards, initiatives, display)` partitions the cards once. A card whose `initiativeId` names a listed Initiative goes on that Initiative. Any other card is **loose**: a card whose Initiative is closed or deleted, and so not listed, goes back to its lane. It returns each Initiative's row (its cards, its beads by stage and its progress) and the loose cards. **A Task is drawn in one place only,** on its line or in its lane, never both.
+- `describeInitiativeProgress` returns "2 of 8 landed". Landed is the Initiative's cards at Landed plus `initiativeDoneCounts[id]`, and the total is its cards plus that count ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#task)). It reads all the cards, never the filtered ones, so a filter never changes a count, and the count and the beads always agree, even in the middle of a move. A Done Task draws as a ring at the end of the Landed cell, so progress never shrinks. This is the Initiative's own truth; it is unlike an outside project, whose progress is only what its source reports.
+- `describeCardBlockers(card)` returns the card's words, "Waits on *Plan the rollout*", and "and 2 more" past one, with whether the card reads as blocked. It reads as blocked unless it has failed.
+
+**An Initiative is a row.** A chevron, a flag in its colour, its name at 13/18 medium, and small facts under it. The facts read "*Project* · 2 of 8 landed" on top and "2 of 8 landed" in lanes, and add "1 failed" in ink when any of its cards failed. The head also says "1 failed" when the failed Task is under an Initiative that is closed, because that Task has no card there; the Filter and the sidebar's dot reach it. Its **line** runs across the stages, bright as far as its last Task and faint to the end of the board. A lane's head is 14/20 bold with a folder, at the margin; an Initiative is indented 14px in a lane, has no ground, and when folded shows a coloured line.
+
+- **The colour** is the Initiative's `hue`, at one lightness and chroma for each theme family so the hues read alike in all six themes. The list keeps away from marigold and tomato.
+- **Beads.** One for each Task, at its stage, in its colour, 13px. Filled is open. A ring is landed. A faint ring is blocked. Marigold has a question. The failed mark has failed, and it is first in its cell, even among tally marks. A bead has one kind, and the order is failed, then question, then blocked, then landed, then open. The rest keep the board's order. A Done Task adds a ring at the end of the Landed cell: display only, not clickable, since it has no card and no details. Past ten beads in a cell they become tally marks.
+- **Click a bead** to open that Task's details. **Drag it along its line** to change that Task's stage: a stage-only `task.move`, through the same move, Undo and failure path as a card.
+- **Click the row's head** to open the Initiative in place into cards, with a 2px bar in its colour down the left. Cards never reshuffle: an opened Initiative is a cell like any other, with the rows and the "13 more" of [Rows, lanes and folds](#rows-lanes-and-folds). Its fold is client state, kept as lanes' folds are, in the same `localStorage` entry.
+- **Nothing unfolds by itself,** except that a filter opens folded Initiatives while it is on.
+
+**Two places, switched in Display.** Both draw the same rows from the same data.
+
+- **On top** is the default. All Initiatives sit together above the lanes. The lanes below hold what is in no Initiative, under the heading "Not in an initiative". The heading folds the whole block of Initiatives, for a day with many.
+- **In lanes.** Each Initiative sits under its project's cards, in the lane of its `projectId`. An Initiative with no project, or one whose project is no longer listed, sits in the No project lane. A client treats an unlisted project as none. Its Tasks draw on its line whatever their own project.
+- With **zero Initiatives** nothing is drawn, and no message.
+
+**Group by Initiative.** The board gets a lane for each Initiative, with its flag, and a last lane, "Not in an initiative", for what has none, because that was asked for. These lanes draw cards, with no Initiative rows and no beads.
+
+- **A drop in an Initiative's lane** is one `task.move` with `stage` and `initiativeId` and no `afterTaskId`: the card goes last in its stored cell, as for a drop in an outside lane. A drop in the last lane sends `initiativeId: null`. One drop is one write and one Undo.
+- With any grouping but Project and Initiative, a card shows a small flag in its Initiative's colour, so that identity is not lost. Group by Initiative shows no flag, because the lane is the Initiative. Group by an outside kind draws no Initiative rows at all: every card is in its lanes and shows the flag.
+- A **folded lane** keeps a small flag in colour for each Initiative it holds, so nothing vanishes without a trace. A folded lane has no beads and no line.
+
+**Filter.** Initiative is a facet under Project, with a value for each listed Initiative, in its colour, and its count. An outside initiative stays under its own caption and the words say whose it is. Blocked is a state row beside Failed. Filtering by an Initiative shows its cards and opens its row, as a filter opens lanes while it is on. Filtering runs in client-core over the board already read.
+
+**Drops that join or leave an Initiative.**
+
+- **On an open Initiative's band:** `task.move` with `stage` and `initiativeId` and no `afterTaskId`. The card goes last in its stored cell.
+- **On a folded Initiative's row:** the card shrinks into its bead, at the stage the pointer is over, and the move sets `initiativeId`.
+- **A bead's slide** sends `stage` alone.
+- **A drop between project lanes** changes `projectId` as it did, and sends no `initiativeId`.
+
+**Open:** what a drop of a card out of an open Initiative's band onto a project lane does to its `initiativeId`. The API leaves it alone unless the move names it, but the card would then draw back in the band it left. Until this is decided, the pane's Initiative row is how a Task leaves an Initiative.
+
+**A blocked card goes quiet.** `--stock-flat`, a hairline, words in `--word-press`, a small lock, and "Waits on *blocker*" in the summary's place. Hover draws a thin line to the blocker, through the gaps between cards, so it never crosses anyone's words. The card comes back by itself when its blocker lands, because the next board read lists no blocker. Nothing is gated: a blocked card can still be dragged, started and marked Done.
+
+- **A failure outranks this.** A card that has failed shows as a failed card even while blocked, because the run needs the user either way. The card keeps what it knows about its blockers, and its pane lists them.
+- **A blocker on another project** is named in the words, as one on the board is. A blocker with no card in view has no hover line, and the words still name it.
+- **A blocker's title or stage changing** reaches its dependents with the next board read, since any `task` push reads the board.
+
+**The details pane.** Three additions to [The details pane](#the-details-pane):
+
+- **Crumbs:** the Project, then the Initiative, then the title.
+- **An Initiative row** shows the Task's Initiative with its flag, and a picker to choose another, or none. A closed Initiative is not offered. The picker ends with **New initiative…**, which opens the Initiative sheet. Choosing sends `task.update` with `initiativeId`.
+- **Blocked by and Blocks** sit between What is left and Threads. Each lists up to 50 Tasks as the pane's 32px rows, with the Task's title, its stage, and a button to open it, which Esc then goes back from. Each row has a remove button that stands over the end of the row while it is hovered or focused, as an unlink does. Both sections show a finished Task too, quietly, since the edge is history. "and 12 more" names the rest. Under **Blocked by**, **Add a blocker** opens a picker over the board's cards with a Find box. Choosing sends `task.addBlocker`. The Undo line is offered only when `changed` is true.
+- **A refused blocker shows its message** under the picker, with the path named by the controller: "*Add a refund button* already waits on this Task, through *Plan the rollout*." The desktop reads `details.reason` to know the refusal is a cycle, and never matches the words.
+
+**The Initiative sheet.** A `SideSheet` of the details pane's size, opened from three places: the quiet **New initiative** row at the foot of the Add to Work sheet, **New initiative…** in the pane's picker, and an **edit** button at the right end of an Initiative's head, where a lane's head has `+`, shown on hover and focus. It holds Name, Intent, Target, Target date, Project and Colour (twelve swatches, from `INITIATIVE_HUES`). At the foot: **Close initiative**, or **Reopen** when the sheet is open for a closed one, and **Delete** at the right, far from Close. A refusal says why.
+
+**Open:** how the desktop reaches a closed Initiative, to reopen it. Work draws no row for one, so the sheet has no head to open from. `hercule initiative reopen` does it meanwhile.
+
+- **Create** sends `initiative.create` with no `hue` unless a swatch is chosen, and the controller takes the least used.
+- **Only the user** makes, changes, closes, reopens or deletes an Initiative, and the desktop is the user. A session can add a Task to one that exists.
+- **Delete** clears `initiativeId` on each of the Initiative's Tasks. The Tasks stay, and go back to their lanes.
+
+**Motion** is the drawing's `MOTION.md`, on the springs of [Work's motion](#works-motion):
+
+- **Folding a lane or an Initiative (`travel`).** A copy of each card flies to its count on the lane's line, or to its bead on an Initiative's line, and shrinks to 0.1, 12 ms apart, staying solid until it is small. The lanes below wait 70 ms, then glide up. Opening reverses it: each card grows from its count or bead from scale 0.1, 16 ms apart, and the lanes below glide down. Reversing halfway starts each card from the copy still in flight. Fold everything is one change, however many lanes.
+- **Sliding a bead (`hand`).** A bead follows the pointer along its line at 1.5 scale. Near the start of a stage it is pulled toward it by 45% of the distance, like a bead finding a notch. On release it springs to its stage.
+- **Reduced motion:** the bead jumps to its stage, and a fold shows its end state with a fade.
+
 ### What Work costs
 
 Stated before the slices build it ([Performance](#performance), as [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md) asks). *(Added 2026-11-07, decided by Rogier.)* **These are targets, not measurements.** The slices of the Overview map measure nothing, and [#1047](https://github.com/theagenticage/hercule/issues/1047) measures every row after slice 8 ([Performance](#performance)). Each slice picks the design that meets them. CI's own checks, the bundle budget and `ui:metrics` among them, still pass.
@@ -1586,6 +1660,11 @@ Stated before the slices build it ([Performance](#performance), as [ADR 0037](..
 | Opening the pane | One `task.readDetail`, under 15 ms; the open moves one empty sheet by size and everything else by `transform` and `opacity`; no timer while it is open | A speed test and the perf script |
 | Summary model calls | At most one per Task every 5 minutes and 2 at once, none while the board is quiet; at most 24 KiB in and three short fields out. This is a controller cost, not the desktop's | A controller test with a fake clock, which stays ([./09-tasks.md](./09-tasks.md#task-summaries)) |
 | Bundle, the pane | Inside the `/work` chunk; the growth is stated in the PR | `scripts/check-bundle-budget.ts` |
+| Board read with Initiatives and blockers *(added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036))* | Two more statements (the blockers and the Done counts), still a fixed number; under 25 ms at 300 Tasks and 20 Initiatives | A speed test |
+| Initiative read | One small read, on Work only; `initiative` is subscribed by the Work route alone and drops while the window is hidden | The perf script |
+| Opening an Initiative | `transform` and `opacity`; no dropped frame; no frame over 2 ms of style and layout | The perf script's frame collector |
+| Idle, and per streamed token | None | The perf script |
+| Bundle, Initiatives and blockers | Inside the `/work` chunk; the growth is stated in the PR | `scripts/check-bundle-budget.ts` |
 
 ## Inbox
 
@@ -6237,6 +6316,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - *(Amended 2026-11-07, [#1030](https://github.com/theagenticage/hercule/issues/1030).)* The Work board joins them as the 16th screen, `work`: 16 screens and 96 PNGs. AGENTS.md's count changes with them.
   - *(Amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* The Inbox joins them as the 18th screen, `inbox`, in `ui-screens.ts`, after #1031's `work-details`: 18 screens and 108 PNGs, checked in all six themes. AGENTS.md's count changes with them. The sidebar's new Inbox row moves the sidebar of the nine screens that show the Work section (54 goldens, only inside the sidebar), so `spacing.onGrid` falls by 0.0 to 0.4 points on those screens and the baseline was re-written for that reason. The Inbox's own numbers are new in the baseline: its 30 `focus.missing` are the Take it and Dismiss buttons of each card, which are invisible and out of reach (`tabindex=-1`) until the card is the current one, so the probe focuses them with no ring to see.
   - *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* The Inbox with a card open joins them as the 19th screen, `inbox-open` (`inbox.html?open`), after `inbox`: 19 screens and 114 PNGs, checked in all six themes. AGENTS.md's count changes with them.
+  - *(Amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* Work with Initiatives and blockers joins them as the 20th screen, `work-initiatives`, in `ui-screens.ts`: an Initiative open into cards, one on its line with beads (a question, a failure, a tally), and a blocked card with its hover line. 20 screens and 120 PNGs, checked in all six themes. AGENTS.md's count changes with them.
   - The same Playwright Chromium code as `capture:ui` records them, so a nightly run on a Linux machine can re-record them. The job's budget is 3 minutes.
   - The comparison is exact: every decoded pixel is equal. A missing golden, an extra golden and a size mismatch fail it too.
   - `pnpm --filter @hercule/desktop ui:metrics --write-goldens` re-records them. It never skips the metrics ratchet. Every golden that moved is looked at before it is committed, as the Android app's Roborazzi goldens are.

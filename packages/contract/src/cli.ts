@@ -19,6 +19,7 @@
 import { OWN_SESSION_ALIAS } from "./ids";
 import type { ErrorCode } from "./errors";
 import { GRANTS_ONLY_THE_USER_GIVES_TEXT } from "./grants";
+import { INITIATIVE_HUES } from "./groups/initiative";
 import { ONLY_THE_USER_IMPORTS_SKILLS } from "./groups/skill";
 import {
   MEMORY_CORE_CAP,
@@ -578,6 +579,11 @@ export const CLI = {
         flag: "project",
         help: "Only tasks in this project, by its full id.",
       },
+      initiativeId: {
+        flag: "initiative",
+        help: "Only tasks on this initiative, by its id or a tail of eight or more characters.",
+        resolves: "initiative.query",
+      },
       handedOff: {
         flag: "handed-off",
         help: "true for the tasks with a handoff entry in their provenance - the tasks that work the user handed to an agent from Intake - and false for the rest.",
@@ -590,7 +596,7 @@ export const CLI = {
   },
   "task.queryBoard": {
     command: "task board",
-    help: "Lists every unfinished task as a card on the Work board. The cards come ordered by project, then stage, then the order the user gave them in, never by recent activity. Each card gives the task's stage and priority, its project, how many threads it has, a live session when one is working on it, the question a thread has open when it does (the only thing that means a card wants the user), and the failure the task still shows when a run of it failed. At most 1000 cards come back; the reply says when there were more. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
+    help: "Lists every unfinished task as a card on the Work board. The cards come ordered by project, then stage, then the order the user gave them in, never by recent activity. Each card gives the task's stage and priority, its project, how many threads it has, a live session when one is working on it, the question a thread has open when it does (the only thing that means a card wants the user), and the failure the task still shows when a run of it failed. A card also gives its initiative, and the tasks that still block it (a blocker that has landed, or is done or dropped, no longer counts). The reply also counts, for each initiative, how many of its tasks are done, because done tasks have no card. At most 1000 cards come back; the reply says when there were more. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -629,7 +635,7 @@ export const CLI = {
   },
   "task.readDetail": {
     command: "task details",
-    help: "Shows one task with everything its details pane draws. The reply holds the task in full, the card the board shows for it, up to 10 of its sessions with their open questions (unfinished first, then newest) and how many it has, and up to 20 of its runs with how many it has. The card holds the summary a cheap model wrote of the task (absent until one exists, and marked stale when something changed since). A summary only describes: an open question or a failure is always read from the sessions and runs. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
+    help: "Shows one task with everything its details pane draws. The reply holds the task in full, the card the board shows for it, up to 10 of its sessions with their open questions (unfinished first, then newest) and how many it has, and up to 20 of its runs with how many it has, and up to 50 tasks it waits on and up to 50 tasks that wait on it, each with its stage and a count of all of them. The card holds the summary a cheap model wrote of the task (absent until one exists, and marked stale when something changed since). A summary only describes: an open question or a failure is always read from the sessions and runs. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -688,6 +694,11 @@ export const CLI = {
         flag: "project",
         help: "The project this task belongs to, by its full id.",
       },
+      initiativeId: {
+        flag: "initiative",
+        help: "The open initiative this task belongs to, by its id or a tail of eight or more characters. Find one with `hercule initiative list`.",
+        resolves: "initiative.query",
+      },
       provenance: {
         flag: "provenance",
         help: "A JSON entry that records what created this task - at least one of ref, eventId and runId - so a repeated signal finds it again.",
@@ -701,6 +712,7 @@ export const CLI = {
       { args: ["1f3a9c2e", "--stage", "in-review"] },
       { args: ["1f3a9c2e", "--status", "in-progress"] },
       { args: ["1f3a9c2e", "--add-label", "triaged", "--remove-label", "needs-triage"] },
+      { args: ["1f3a9c2e", "--initiative", "4e8b21c7"] },
       {
         args: ["1f3a9c2e", "--description-stdin"],
         stdin: "Reproduced: the redirect races the session cookie.",
@@ -731,6 +743,11 @@ export const CLI = {
         flag: "project",
         help: "Move the task to this project; `null` detaches it from the one it has.",
       },
+      initiativeId: {
+        flag: "initiative",
+        help: "Put the task on this initiative, by its id or a tail of eight or more characters; `null` takes it off its initiative. A closed initiative takes no task that is not on it already.",
+        resolves: "initiative.query",
+      },
       addLabels: {
         flag: "add-label",
         help: "A label to add, leaving the ones already on the task alone.",
@@ -752,7 +769,7 @@ export const CLI = {
   },
   "task.move": {
     command: "task move",
-    help: "Moves a task on the Work board: to another stage, project or place among the cards of its stage. Send at least one of the three; a field you leave out keeps its value. The task goes last among the cards of its new project and stage unless --after names the card it follows. A move to done or dropped is refused: use `hercule task update --stage` for those. Returns the task.",
+    help: "Moves a task on the Work board: to another stage, project, initiative or place in its cell. Send at least one of them; a field you leave out keeps its value. The task goes last among the cards of its new project and stage unless --after names the card it follows. A move to done or dropped is refused: use `hercule task update --stage` for those. Returns the task.",
     examples: [
       { args: ["1f3a9c2e", "--stage", "building"] },
       { args: ["1f3a9c2e", "--stage", "in-review", "--after", "7b2d40aa"] },
@@ -773,6 +790,11 @@ export const CLI = {
         help: "The project lane to move to, by its id or a tail of eight or more characters; `null` moves it to the lane of no project.",
         resolves: "project.query",
       },
+      initiativeId: {
+        flag: "initiative",
+        help: "The initiative to put the task on, by its id or a tail of eight or more characters; `null` takes it off its initiative.",
+        resolves: "initiative.query",
+      },
       afterTaskId: {
         flag: "after",
         help: "The card this one now follows among the cards of the task's new project and stage, by its id or a tail of eight or more characters; `null` puts it first. Leave it off to put the task last.",
@@ -784,7 +806,7 @@ export const CLI = {
   },
   "task.merge": {
     command: "task merge",
-    help: "Merges one task into another, as you. The task you name is merged away; the one named by --into survives and stays exactly where it is on the board, with its title, stage, project and priority. The labels of both are kept, the merged task's description is appended to the survivor's under a line naming its title, and its threads, runs and workspaces move to the survivor. A failure the merged task still shows moves too, so a merge never hides one. Reading the merged task's old id afterwards returns the survivor. Returns the survivor.",
+    help: "Merges one task into another, as you. The task you name is merged away; the one named by --into survives and stays exactly where it is on the board, with its title, stage, project and priority. The labels of both are kept, the merged task's description is appended to the survivor's under a line naming its title, and its threads, runs and workspaces move to the survivor. A failure the merged task still shows moves too, so a merge never hides one. The survivor keeps its own initiative, and takes the merged task's when it has none. The tasks the merged task waited on, and the tasks that waited on it, now wait on the survivor. Reading the merged task's old id afterwards returns the survivor. Returns the survivor.",
     examples: [{ args: ["1f3a9c2e", "--into", "7b2d40aa"] }],
     fields: {
       id: {
@@ -801,7 +823,7 @@ export const CLI = {
     errors: {
       forbidden: USER_ONLY_FORBIDDEN,
       invalid_state:
-        "one of the tasks is done or dropped; reopen it with `hercule task update --stage` first. Merging a task into itself, or a task already merged, is refused as invalid input",
+        "one of the tasks is done or dropped; reopen it with `hercule task update --stage` first. Or the merge would make tasks wait on each other in a loop; the message names the path, and `hercule task unblock` removes a link of it. Merging a task into itself, or a task already merged, is refused as invalid input",
       validation:
         "the merged task would hold more labels or a longer description than a task may; shorten one of them first, or leave the merge",
     },
@@ -838,6 +860,63 @@ export const CLI = {
       },
     },
   },
+  "task.addBlocker": {
+    command: "task block",
+    help: "Makes a task wait on another, which must land first. The task you name is blocked by the one named by --by, until that one lands, or is done or dropped. It only shows: a blocked card goes quiet on the Work board and says what it waits on, and nothing stops it from being moved or worked on. A link that exists already changes nothing. Fails with invalid_state when the other task already waits on this one, directly or through others; the message names the path. Says whether anything changed; with `--json` it returns the task and `changed`.",
+    examples: [{ args: ["1f3a9c2e", "--by", "7b2d40aa"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task that waits, by its id or a tail of eight or more characters. A task that was merged into another stands for the one it was merged into.",
+        resolves: "task.query",
+      },
+      blockedByTaskId: {
+        flag: "by",
+        help: "The task that must land first, by its id or a tail of eight or more characters. It may be in another project.",
+        resolves: "task.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the other task already waits on this one, directly or through others, so the link would close a loop; the message names the path. Remove a link of it with `hercule task unblock` first",
+    },
+  },
+  "task.removeBlocker": {
+    command: "task unblock",
+    help: "Takes a blocker away from a task, whatever stage the blocker is at. A link that does not exist changes nothing. Says whether anything changed; with `--json` it returns the task and `changed`.",
+    examples: [{ args: ["1f3a9c2e", "7b2d40aa"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "task-id",
+        help: "The task that waits, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      blockedByTaskId: {
+        positional: true,
+        placeholder: "blocker-id",
+        help: "The blocker to take away, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+    },
+  },
+  "task.checkMerge": {
+    command: "task check-merge",
+    help: "Says whether `hercule task merge` would refuse a merge because of blockers, and writes nothing. When it would, the reply holds the refusal, which names the path; otherwise it holds none. Use it to learn the refusal before you merge.",
+    examples: [{ args: ["1f3a9c2e", "--into", "7b2d40aa"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task that would be merged away, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      intoTaskId: {
+        flag: "into",
+        help: "The task that would survive, by its id or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+    },
+  },
   // Exists only for the sidebar's failed-run dot, which reads it on every
   // screen. A terminal finds failed runs with `hercule task board`.
   "task.readAttention": { hidden: true },
@@ -856,6 +935,159 @@ export const CLI = {
         resolves: "task.query",
       },
     },
+  },
+
+  "initiative.query": {
+    command: "initiative list",
+    help: "Lists initiatives: the lasting intents the user groups tasks under, oldest first. Closed ones are left out unless you ask for them. Use it to find the id that `hercule task update --initiative` and the other `hercule initiative` commands take.",
+    examples: [{ args: [] }, { args: ["--closed", "true"] }, { args: ["--project", "9c41d7e0"] }],
+    fields: {
+      closed: {
+        flag: "closed",
+        help: "true lists the closed initiatives instead of the open ones. Leave it off for the open ones.",
+      },
+      projectId: {
+        flag: "project",
+        help: "Only initiatives that draw in this project's lane, by its full id.",
+      },
+    },
+  },
+  "initiative.read": {
+    command: "initiative read",
+    help: "Reads one initiative: its name, intent, target, colour, project and whether it is closed.",
+    examples: [{ args: ["4e8b21c7"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The initiative's id, or a tail of eight or more characters.",
+        resolves: "initiative.query",
+      },
+    },
+  },
+  "initiative.create": {
+    command: "initiative create",
+    help: "Creates an initiative: a lasting intent that tasks join. Work draws it as a line with one bead per task. Only the user creates one; a session may put a task on one that exists, with `hercule task update --initiative`. Returns the initiative's id. Without --hue it takes the colour the fewest open initiatives use.",
+    examples: [
+      { args: ["--name", "Gift card refunds", "--target", "Live by the spring sale"] },
+      {
+        args: [
+          "--name",
+          "Gift card refunds",
+          "--intent",
+          "Let shoppers return a gift card order without a call to support.",
+          "--target-date",
+          "2027-03-20T00:00:00.000Z",
+          "--project",
+          "9c41d7e0",
+          "--hue",
+          "150",
+        ],
+      },
+    ],
+    fields: {
+      name: { flag: "name", help: "What to call the initiative; one line." },
+      intent: {
+        flag: "intent",
+        help: "What the initiative is for, in a few sentences. Leave it off for none.",
+      },
+      target: {
+        flag: "target",
+        help: "What finished looks like, when it is a goal, such as `Live by the spring sale`.",
+      },
+      targetDate: {
+        flag: "target-date",
+        help: "When the target is due, as a UTC timestamp such as 2027-03-20T00:00:00.000Z.",
+      },
+      projectId: {
+        flag: "project",
+        help: "The project whose lane the initiative draws in, by its id or a tail of eight or more characters. Leave it off for the lane of no project.",
+        resolves: "project.query",
+      },
+      hue: {
+        flag: "hue",
+        help: `The colour of its flag, line and beads, as one of these hue angles: ${INITIATIVE_HUES.join(", ")}. Leave it off to take the least used.`,
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      not_found: "--project is no project",
+    },
+  },
+  "initiative.update": {
+    command: "initiative update",
+    help: "Edits an initiative; a field you leave out is not changed, and at least one must be set. Only the user edits one. Its tasks are not touched.",
+    examples: [
+      { args: ["4e8b21c7", "--name", "Gift card refunds, phase 2"] },
+      { args: ["4e8b21c7", "--target-date", "null"] },
+      { args: ["4e8b21c7", "--project", "9c41d7e0", "--hue", "300"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The initiative's id, or a tail of eight or more characters.",
+        resolves: "initiative.query",
+      },
+      name: { flag: "name", help: "A new name." },
+      intent: { flag: "intent", help: "A new intent." },
+      target: { flag: "target", help: "A new target; `null` removes it." },
+      targetDate: {
+        flag: "target-date",
+        help: "A new target date, as a UTC timestamp; `null` removes it.",
+      },
+      projectId: {
+        flag: "project",
+        help: "The project whose lane it draws in, by its id or a tail of eight or more characters; `null` moves it to the lane of no project.",
+        resolves: "project.query",
+      },
+      hue: {
+        flag: "hue",
+        help: `A new colour, as one of these hue angles: ${INITIATIVE_HUES.join(", ")}.`,
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      not_found: "the initiative was deleted, or --project is no project",
+    },
+  },
+  "initiative.close": {
+    command: "initiative close",
+    help: "Closes an initiative, as the user. Work stops drawing it and its tasks go back to their lanes, but they keep the initiative, and closing it again changes nothing. A closed initiative takes no task that is not on it already. `hercule initiative reopen` brings it back. Returns the initiative.",
+    examples: [{ args: ["4e8b21c7"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The initiative's id, or a tail of eight or more characters.",
+        resolves: "initiative.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "initiative.reopen": {
+    command: "initiative reopen",
+    help: "Reopens a closed initiative, as the user. Work draws it again with its tasks, and reopening an open one changes nothing. Returns the initiative.",
+    examples: [{ args: ["4e8b21c7"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The initiative's id, or a tail of eight or more characters. A closed one is found with `hercule initiative list --closed true`.",
+        resolves: "initiative.query",
+        resolvesQuery: { closed: "true" },
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "initiative.delete": {
+    command: "initiative delete",
+    help: "Deletes an initiative, as the user. The delete is soft and cannot be undone: each of its tasks is taken off it, and reading the initiative fails with not_found. Open and closed ones can be deleted.",
+    examples: [{ args: ["4e8b21c7"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The initiative's id, or a tail of eight or more characters. Only open initiatives are found by a tail; give the full id of a closed one.",
+        resolves: "initiative.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "notification.query": {
@@ -4957,7 +5189,12 @@ export const NOUNS = {
   },
   task: {
     summary: "Tasks: units of human intent, work-type-agnostic and never executions themselves.",
-    flow: "hercule task list to find work, hercule task read for the whole of one, hercule task create to record new intent, hercule task update as it moves.",
+    flow: "hercule task list to find work, hercule task read for the whole of one, hercule task create to record new intent, hercule task update as it moves, hercule task block when one task must land before another.",
+  },
+  initiative: {
+    summary:
+      "Initiatives: lasting intents of the user's own that tasks belong to, drawn on the Work board as a line with one bead per task.",
+    flow: "hercule initiative list to find one, hercule initiative create for a new one (the user only), then hercule task update --initiative to put a task on it, hercule initiative close when it is done with.",
   },
   notification: {
     summary:

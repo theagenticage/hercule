@@ -129,6 +129,11 @@ export const queryKeys = {
    * here: a poll cannot change what the source answers.
    */
   entitySuggestions: (): LiveQueryKey => ["entity-suggestions"],
+  /**
+   * The open Initiatives, every page (`initiative.query`). Live topic:
+   * `initiative`. Work reads it beside the board; it is not shell data.
+   */
+  initiatives: (): LiveQueryKey => ["initiatives"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * One project read by its id. It sits under the `projects` prefix, so
@@ -603,6 +608,11 @@ export const buildQueryKeys = (
           ...TASK_LINK_KEYS,
         ];
   }
+  // Work reads Initiatives as one small list, so the whole list is read
+  // again whichever Initiative changed. The board is not read again: it
+  // carries only each card's `initiativeId`, and a deletion that clears Tasks
+  // announces each Task on the `task` topic.
+  if (topic === "initiative") return [queryKeys.initiatives()];
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.
   //

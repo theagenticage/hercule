@@ -163,6 +163,11 @@ const make = Effect.gen(function* () {
           sessionCount,
           runs: history.runs,
           runCount,
+          // TODO(#1036): read the blocker edges of both directions.
+          blockers: [],
+          blockerCount: 0,
+          blocks: [],
+          blockCount: 0,
           ...buildLinkedEntities(facts!.linkedRefs, card, context),
         };
       }),
