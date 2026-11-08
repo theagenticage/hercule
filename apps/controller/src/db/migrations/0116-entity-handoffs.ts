@@ -5,11 +5,10 @@
  *   the Undo of that handoff can tell what it did and what may be taken back.
  *   `task_created` is whether the handoff made the Task, and `stage_before` is
  *   the stage a continued Task had (null for a new one). `stage_revision` is
- *   the Task's `stage_revision` right after the handoff wrote it: an Undo
- *   restores the stage only while the Task still has that value.
- *   `join_revision` is the Task's `join_revision` right after the handoff
- *   wrote it: an Undo takes the handoff back only while nothing has joined
- *   the Task since.
+ *   the Task's `stage_revision` once the handoff had written everything: an
+ *   Undo restores the stage only while the Task still has that value.
+ *   `join_revision` is the Task's `join_revision` at the same moment: an Undo
+ *   takes the handoff back only while nothing has joined the Task since.
  *   `undone_at` and `undo_result` (the first answer, as JSON) are set by the
  *   first Undo, and a repeat returns that answer. Like `runs.task_id`, its ids
  *   are not foreign keys: a run is history that keeps the id of a Task deleted
@@ -29,8 +28,8 @@
  *   live, not at `done` or `dropped`, and `failed_run_id` set (see
  *   `existsFailedTaskOnBoard`).
  *
- * The migration only adds a table, columns, triggers and an index, so the upgrade test
- * needs no fixture for it.
+ * The migration only adds a table, columns, triggers and an index, so the
+ * upgrade test needs no fixture for it.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -58,9 +57,9 @@ export default Effect.gen(function* () {
   // Each trigger raises the revision of the Task the row now points at. They
   // fire for an insert, and for an update that changes `task_id` (a Thread
   // moved, a merge moving rows), and not for other updates, such as a run's
-  // status. A Task that has no row yet is not raised: the row is written
-  // after its first run, with the revision at 0, which is what a handoff
-  // reads and remembers.
+  // status. A Task that has no row yet is not raised, so a Task written after
+  // its first run starts at 0. A handoff reads the revision after all its
+  // writes, so it remembers the right value in either order.
   for (const table of ["runs", "sessions"] as const) {
     yield* sql`
       CREATE TRIGGER ${sql.literal(`${table}_join_insert`)} AFTER INSERT ON ${sql.literal(table)}

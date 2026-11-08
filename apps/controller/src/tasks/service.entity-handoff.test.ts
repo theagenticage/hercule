@@ -106,6 +106,20 @@ const insertSession = (taskId: string, createdAt: string, runId?: string) =>
     );
   });
 
+/**
+ * Records a handoff on the Task, and returns what it did together with the
+ * Task's revisions right after, which is what the controller's handoff stores
+ * for the Undo.
+ */
+const recordHandoff = (input: Parameters<TaskService["Service"]["recordEntityHandoff"]>[0]) =>
+  Effect.gen(function* () {
+    const tasks = yield* TaskService;
+    const repository = yield* taskRepository;
+    const recorded = yield* tasks.recordEntityHandoff(input);
+    const revisions = Option.getOrThrow(yield* repository.readRevisions(recorded.task.id));
+    return { ...recorded, ...revisions };
+  });
+
 const readStageRevision = (taskId: string) =>
   Effect.gen(function* () {
     const repository = yield* taskRepository;
@@ -167,7 +181,6 @@ describe("recordEntityHandoff", () => {
   it("makes a Task at building for a new handoff, linked to the ref, with no signal in its entry", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const tasks = yield* TaskService;
         const sql = yield* SqlClient.SqlClient;
         const taskId = newId();
         const runId = newId();
@@ -177,7 +190,7 @@ describe("recordEntityHandoff", () => {
           sql`INSERT INTO projects (id, name, created_at, updated_at)
                    VALUES (${uuidFromString(projectId)}, 'Northwind', ${HANDOFF_AT}, ${HANDOFF_AT})`,
         );
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId,
           entry: { ref: REF, runId },
           newTask: { title: "Review PR 12", projectId },
@@ -215,12 +228,11 @@ describe("recordEntityHandoff", () => {
   it("moves a Task at exploring or planned to building, and raises the revision", async () => {
     const results = await run(
       Effect.gen(function* () {
-        const tasks = yield* TaskService;
         const out: Array<unknown> = [];
         for (const stage of ["exploring", "planned"] as const) {
           const task = yield* createTask(stage);
           const before = yield* readStageRevision(task.id);
-          const recorded = yield* tasks.recordEntityHandoff({
+          const recorded = yield* recordHandoff({
             taskId: task.id,
             entry: { ref: REF, runId: newId() },
           });
@@ -243,10 +255,9 @@ describe("recordEntityHandoff", () => {
   it("keeps a Task at any other stage where it is, and still raises the revision", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const tasks = yield* TaskService;
         const task = yield* createTask("in-review");
         const before = yield* readStageRevision(task.id);
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId: newId() },
         });
@@ -272,7 +283,7 @@ describe("recordEntityHandoff", () => {
         const survivor = yield* createTask("planned", [OTHER_REF]);
         const source = yield* createTask("planned", [REF]);
         yield* tasks.merge(source.id, { intoTaskId: survivor.id });
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId: source.id,
           entry: { ref: REF, runId: newId() },
         });
@@ -304,11 +315,10 @@ describe("recordEntityHandoff", () => {
 describe("reverseEntityHandoff", () => {
   /** Hands a new Task off: the run exists, as the run service writes it first. */
   const handOffNewTask = Effect.gen(function* () {
-    const tasks = yield* TaskService;
     const taskId = newId();
     const runId = newId();
     yield* insertRun(runId, taskId, HANDOFF_AT);
-    const recorded = yield* tasks.recordEntityHandoff({
+    const recorded = yield* recordHandoff({
       taskId,
       entry: { ref: REF, runId },
       newTask: { title: "Review PR 12" },
@@ -319,11 +329,10 @@ describe("reverseEntityHandoff", () => {
   /** Hands off a Task that exists already, at `stage`. */
   const handOffContinuedTask = (stage: TaskStage) =>
     Effect.gen(function* () {
-      const tasks = yield* TaskService;
       const task = yield* createTask(stage);
       const runId = newId();
       yield* insertRun(runId, task.id, HANDOFF_AT);
-      const recorded = yield* tasks.recordEntityHandoff({
+      const recorded = yield* recordHandoff({
         taskId: task.id,
         entry: { ref: REF, runId },
       });
@@ -333,16 +342,17 @@ describe("reverseEntityHandoff", () => {
   const reverse = (handoff: {
     readonly taskId: string;
     readonly runId: string;
-    readonly recorded: Pick<
-      EntityHandoffRecorded,
-      "stageBefore" | "stageRevision" | "joinRevision"
-    >;
+    readonly recorded: Pick<EntityHandoffRecorded, "created" | "stageBefore"> & {
+      readonly stageRevision: number;
+      readonly joinRevision: number;
+    };
   }) =>
     Effect.flatMap(TaskService, (tasks) =>
       tasks.reverseEntityHandoff({
         taskId: handoff.taskId,
         runId: handoff.runId,
         ref: REF,
+        taskCreated: handoff.recorded.created,
         stageBefore: handoff.recorded.stageBefore,
         stageRevision: handoff.recorded.stageRevision,
         joinRevision: handoff.recorded.joinRevision,
@@ -386,8 +396,7 @@ describe("reverseEntityHandoff", () => {
         Effect.gen(function* () {
           const runId = newId();
           yield* insertRun(runId, taskId, AFTER_HANDOFF);
-          const tasks = yield* TaskService;
-          yield* tasks.recordEntityHandoff({ taskId, entry: { ref: REF, runId } });
+          yield* recordHandoff({ taskId, entry: { ref: REF, runId } });
         }),
       "joined",
     ],
@@ -483,14 +492,13 @@ describe("reverseEntityHandoff", () => {
   it("lets a continued Task keep its earlier Threads and runs, and refuses one that came after", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const tasks = yield* TaskService;
         const earlier = yield* Effect.gen(function* () {
           const task = yield* createTask("planned");
           yield* insertSession(task.id, BEFORE_HANDOFF);
           yield* insertRun(newId(), task.id, BEFORE_HANDOFF);
           const runId = newId();
           yield* insertRun(runId, task.id, HANDOFF_AT);
-          const recorded = yield* tasks.recordEntityHandoff({
+          const recorded = yield* recordHandoff({
             taskId: task.id,
             entry: { ref: REF, runId },
           });
@@ -541,7 +549,7 @@ describe("reverseEntityHandoff", () => {
         yield* insertSession(task.id, BEFORE_HANDOFF);
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
@@ -590,7 +598,7 @@ describe("reverseEntityHandoff", () => {
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
         yield* tasks.recordRunStart({ taskId: task.id, runId });
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
@@ -619,7 +627,7 @@ describe("reverseEntityHandoff", () => {
         const runId = newId();
         yield* insertRun(runId, task.id, HANDOFF_AT);
         yield* tasks.recordRunStart({ taskId: task.id, runId });
-        const recorded = yield* tasks.recordEntityHandoff({
+        const recorded = yield* recordHandoff({
           taskId: task.id,
           entry: { ref: REF, runId },
         });
@@ -647,6 +655,7 @@ describe("reverseEntityHandoff", () => {
               taskId: newId(),
               runId: newId(),
               ref: REF,
+              taskCreated: true,
               stageBefore: undefined,
               stageRevision: 0,
               joinRevision: 0,

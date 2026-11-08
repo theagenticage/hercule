@@ -1078,9 +1078,45 @@ describe("the size of the board", () => {
   });
 });
 
-describe("the query plan of the board's Task statement", () => {
-  it("walks the Tasks on the board rank index in the order it returns them, with no sort and no scan of the table", async () => {
-    const plan = await Effect.runPromise(
+describe("the cap on the board and a failed Task", () => {
+  it("lists every Task that shows a failure, however small the cap, and fills the rest in board order", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const tasks = yield* taskRepository;
+        const ids: Array<string> = [];
+        for (let index = 0; index < 6; index++) {
+          const task = yield* inTransaction(tasks.insert({ ...NEW_TASK, title: `Task ${index}` }));
+          ids.push(task.id);
+        }
+        // The last two Tasks of the board are the ones a cap of three would cut.
+        yield* inTransaction(
+          Effect.forEach([ids[4]!, ids[5]!], (id) =>
+            tasks.setFailedRun(id, uuidToString(mintUuid())),
+          ),
+        );
+        return {
+          ids,
+          capped: yield* tasks.listBoardTasks(3),
+          whole: yield* tasks.listBoardTasks(6),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.capped.tasks.map((task) => task.id)).toEqual([
+      result.ids[0],
+      result.ids[4],
+      result.ids[5],
+    ]);
+    expect(result.capped.truncated).toBe(true);
+    expect(result.whole.tasks).toHaveLength(6);
+    expect(result.whole.truncated).toBe(false);
+  });
+});
+
+describe("the query plans of the board's Task statements", () => {
+  /** Returns the query plan of each statement `listBoardTasks` runs. */
+  const readPlans = () =>
+    Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const tasks = yield* taskRepository;
@@ -1093,18 +1129,24 @@ describe("the query plan of the board's Task statement", () => {
             }),
           ),
         );
-        const [text, params] = statements[0]!;
-        const rows = yield* sql.unsafe<{ readonly detail: string }>(
-          `EXPLAIN QUERY PLAN ${text}`,
-          params,
+        return yield* Effect.forEach(statements, ([text, params]) =>
+          Effect.map(
+            sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params),
+            (rows) => rows.map((row) => row.detail),
+          ),
         );
-        return rows.map((row) => row.detail);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(plan).toContain("SCAN t USING INDEX tasks_board_rank");
-    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
-    expect(plan.some((step) => step.startsWith("SCAN t") && !step.includes("INDEX"))).toBe(false);
+  it("reads the failed Tasks from their index and walks the others on the board rank index in the order it returns them, with no sort and no scan of the table", async () => {
+    const [failed, others] = await readPlans();
+
+    expect(failed).toContain("SEARCH t USING INDEX tasks_failed (failed_run_id>?)");
+    expect(others).toContain("SCAN t USING INDEX tasks_board_rank");
+    for (const plan of [failed!, others!]) {
+      expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
+      expect(plan.some((step) => step.startsWith("SCAN t") && !step.includes("INDEX"))).toBe(false);
+    }
   });
 });
 

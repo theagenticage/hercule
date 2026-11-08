@@ -184,6 +184,36 @@ describe("handOff", () => {
     });
   });
 
+  it.each([
+    ["a place that groups work", "context"],
+    ["a record that is not fully read yet", "partial"],
+  ] as const)("refuses %s, and writes nothing", async (_name, change) => {
+    await withNorthwind(async (controller) => {
+      const { thing, workflowId } = await arrangeOneThing(controller);
+      const { sql } = controller.harness;
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            sql,
+            change === "context"
+              ? sql`UPDATE external_entities SET pace = 'context' WHERE ref = ${thing.ref}`
+              : sql`UPDATE external_entities SET completeness = 'partial' WHERE ref = ${thing.ref}`,
+          ),
+        ),
+      );
+
+      const response = await requestHandOff(controller, thing, { workflowId });
+
+      expect(await readRefusal(response)).toEqual({
+        status: 409,
+        text: expect.stringContaining("not a piece of work that can be handed off") as unknown,
+      });
+      for (const table of ["tasks", "runs", "entity_handoffs"] as const) {
+        expect(await countRows(controller, table), table).toBe(0);
+      }
+    });
+  });
+
   it("writes nothing when the run cannot start", async () => {
     await withNorthwind(async (controller) => {
       const account = await createAccount(controller, "bot");
@@ -640,7 +670,7 @@ describe("undoHandOff", () => {
           const second = await createHandoffWorkflow(controller, { name: "Fix bug" });
           await handOff(controller, thing, { workflowId: second });
         },
-        answer: { ...STOPPED, reason: "Another run or thread joined the task since." },
+        answer: { ...STOPPED, reason: "Another run or thread joined the Task since." },
         verify: async ({ base, token }, { runId }) => {
           const others = (await queryRuns(base, token)).items.filter((run) => run.id !== runId);
           expect(others.map((run) => run.status)).toEqual(["running"]);
@@ -651,7 +681,7 @@ describe("undoHandOff", () => {
       "only stops when a Thread joined the Task",
       {
         meanwhile: (controller, { taskId }) => insertThread(controller, taskId),
-        answer: { ...STOPPED, reason: "Another run or thread joined the task since." },
+        answer: { ...STOPPED, reason: "Another run or thread joined the Task since." },
       },
     ],
     [
@@ -673,7 +703,7 @@ describe("undoHandOff", () => {
           );
           expect(merged.status, await merged.clone().text()).toBe(200);
         },
-        answer: { ...STOPPED, reason: "The task was merged into another task since." },
+        answer: { ...STOPPED, reason: "The Task was merged into another Task since." },
         verify: async (controller) => {
           const [survivor] = (await listTasks(controller.base, controller.token)).filter(
             (task) => task.title === "Survivor",
@@ -695,7 +725,7 @@ describe("undoHandOff", () => {
           );
           expect(moved.status, await moved.clone().text()).toBe(200);
         },
-        answer: { ...STOPPED, reason: "The task was moved or its stage was set since." },
+        answer: { ...STOPPED, reason: "The Task was moved or its stage was set since." },
         verify: async (controller, { taskId }) => expectTaskStage(controller, taskId, "in-review"),
       },
     ],
@@ -709,7 +739,7 @@ describe("undoHandOff", () => {
           });
           expect(updated.status, await updated.clone().text()).toBe(200);
         },
-        answer: { ...STOPPED, reason: "The task was moved or its stage was set since." },
+        answer: { ...STOPPED, reason: "The Task was moved or its stage was set since." },
       },
     ],
     [

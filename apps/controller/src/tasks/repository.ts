@@ -141,7 +141,8 @@ export interface ActiveTaskOnRef {
 
 /**
  * What a Task has gathered since it was created, for the check that decides
- * whether the Task can still be taken back (`readTraces`).
+ * whether the Task can still be taken back, as a Task made from a ref or as
+ * the Task of a handoff (`readTraces`).
  */
 export interface TaskTraces {
   /** The Task's stage now. */
@@ -158,26 +159,9 @@ export interface TaskTraces {
   readonly hasRun: boolean;
   /** How many refs the Task links. */
   readonly linkCount: number;
-}
-
-/**
- * What a Task is now, for the check that decides whether a handoff can be
- * taken back (`readHandoffTraces`).
- */
-export interface HandoffTraces {
-  /** The Task's stage now. */
-  readonly stage: TaskStage;
-  /** True when the Task was merged into another Task. */
-  readonly merged: boolean;
   /** How many stage decisions have been made on the Task (`stage_revision`). */
   readonly stageRevision: number;
-  /** True when the Task links the ref the handoff was made for. */
-  readonly linksRef: boolean;
-  /** How many refs the Task links. */
-  readonly linkCount: number;
-  /** True when `update` has written the Task since it was created. */
-  readonly edited: boolean;
-  /** How many times work has joined the Task (`join_revision`). */
+  /** How many times a run or a session has joined the Task (`join_revision`). */
   readonly joinRevision: number;
 }
 
@@ -1296,37 +1280,63 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the cards of the Work board: the live Tasks at a board stage
-     * (neither deleted nor merged into another Task), ordered by project (none first), then stage in the order of the board,
-     * then rank. It returns one Task more than `limit` at most, so the caller
-     * can tell that there were more.
+     * (neither deleted nor merged into another Task), ordered by project (none
+     * first), then stage in the order of the board, then rank. At most `limit`
+     * of them come back, and `truncated` says that there were more.
+     *
+     * Every live Task that shows a failed run is on the board, however many
+     * Tasks there are: the sidebar's failure dot is raised by such a Task
+     * (`existsFailedTaskOnBoard`), and the board must show the failure it
+     * points to. The failed Tasks come first, and the other Tasks fill what
+     * is left of `limit`, in the order the index walks them. Only when more
+     * than `limit` Tasks are failed are some of them left out.
      *
      * A Task of a deleted project is returned with no `projectId` and ordered
      * with the Tasks that have none, as `resolveCell` explains.
      *
-     * One statement. It walks `tasks_board_rank` in its own order, which is
+     * Two statements. The failed Tasks come from `tasks_failed`, which holds
+     * only them. The others walk `tasks_board_rank` in its own order, which is
      * project, stage, rank, so it sorts nothing and stops after `limit + 1`
      * Tasks. The index leaves out finished and deleted Tasks, so the walk never
      * meets them. The index order puts stages in alphabetical order, so the
      * rows are put in board order afterwards, in memory. It reads no
-     * description and no provenance. The statement names the index, because
-     * left to itself the planner reads `tasks_stage` and sorts.
+     * description and no provenance. The statements name their index, because
+     * left to themselves the planner reads `tasks_stage` and sorts.
      *
      * Each Task's summary comes in the same statement, from a join on the
      * summary's primary key. A Task has a summary once it has a line. The
      * summary is stale while the Task is dirty or its last attempt failed.
      */
-    listBoardTasks: (limit: number): Effect.Effect<ReadonlyArray<BoardTask>, SqlError> =>
-      Effect.map(
-        sql<BoardTaskRow>`
+    listBoardTasks: (
+      limit: number,
+    ): Effect.Effect<
+      { readonly tasks: ReadonlyArray<BoardTask>; readonly truncated: boolean },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const failed = yield* sql<BoardTaskRow>`
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
+          FROM tasks t INDEXED BY tasks_failed
+          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+          LEFT JOIN task_summaries s ON s.task_id = t.id
+          WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
+            AND ${buildLiveTaskSql("t")}
+          LIMIT ${limit + 1}`;
+        const others = yield* sql<BoardTaskRow>`
           SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
           FROM tasks t INDEXED BY tasks_board_rank
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
           LEFT JOIN task_summaries s ON s.task_id = t.id
-          WHERE t.${sql.literal(ON_BOARD)} AND ${buildLiveTaskSql("t")}
+          WHERE t.${sql.literal(ON_BOARD)} AND t.failed_run_id IS NULL
+            AND ${buildLiveTaskSql("t")}
           ORDER BY t.project_id, t.stage, t.board_rank
-          LIMIT ${limit + 1}`,
-        (rows) => rows.map(readBoardTaskRow).toSorted(compareBoardOrder),
-      ),
+          LIMIT ${limit + 1}`;
+        const kept = [...failed.slice(0, limit), ...others].slice(0, limit);
+        return {
+          tasks: kept.map(readBoardTaskRow).toSorted(compareBoardOrder),
+          truncated: failed.length + others.length > limit,
+        };
+      }),
 
     /**
      * Returns the refs each of the Tasks links, in the order they were linked
@@ -1504,8 +1514,11 @@ const make = Effect.gen(function* () {
           readonly has_session: number;
           readonly has_run: number;
           readonly link_count: number;
+          readonly stage_revision: number;
+          readonly join_revision: number;
         }>`
           SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged,
+                 tasks.stage_revision, tasks.join_revision,
                  EXISTS (SELECT 1 FROM task_entity_links
                          WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
                  tasks.revision > 0 AS edited,
@@ -1525,48 +1538,8 @@ const make = Effect.gen(function* () {
                 hasSession: row.has_session === 1,
                 hasRun: row.has_run === 1,
                 linkCount: row.link_count,
-              });
-        },
-      ),
-
-    /**
-     * Returns the facts about the Task `id` that decide whether a handoff can
-     * be taken back, or none when there is no such Task or it is deleted.
-     * Reads the Task by its own id, so a merged Task is returned as itself.
-     */
-    readHandoffTraces: (
-      id: string,
-      ref: ExternalRef,
-    ): Effect.Effect<Option.Option<HandoffTraces>, SqlError> =>
-      Effect.map(
-        sql<{
-          readonly stage: string;
-          readonly merged: number;
-          readonly stage_revision: number;
-          readonly join_revision: number;
-          readonly links_ref: number;
-          readonly link_count: number;
-          readonly edited: number;
-        }>`
-          SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged, tasks.stage_revision,
-                 tasks.join_revision,
-                 EXISTS (SELECT 1 FROM task_entity_links
-                         WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
-                 (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count,
-                 tasks.revision > 0 AS edited
-          FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`,
-        (rows) => {
-          const row = rows[0];
-          return row === undefined
-            ? Option.none()
-            : Option.some({
-                stage: row.stage as TaskStage,
-                merged: row.merged === 1,
                 stageRevision: row.stage_revision,
                 joinRevision: row.join_revision,
-                linksRef: row.links_ref === 1,
-                linkCount: row.link_count,
-                edited: row.edited === 1,
               });
         },
       ),

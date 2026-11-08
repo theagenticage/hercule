@@ -265,6 +265,10 @@ export const makeRunStart = (
           const connectionId = step.params?.[CONNECTION_PARAM];
           if (action?.connection === undefined || !isId(connectionId)) continue;
           const found = yield* connections.one(connectionId);
+          // Keep this rule the same as the SQL condition of a Connection that
+          // can act for a handoff (`buildActingFilter` in
+          // external-entities/workflow-offer-reads.ts), so a menu never offers
+          // an account that the run start then refuses.
           if (Option.isSome(found) && found.value.status === "disabled") {
             issues.push({
               path: ["steps", String(index), "params", CONNECTION_PARAM],

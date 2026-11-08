@@ -5,7 +5,7 @@
  *
  * Nothing here reads the database. The caller reads the workflows, the
  * Resources and the acting accounts, and these functions decide. The Inbox,
- * the detail of one thing and the handoff all go through `evaluateOffer`, so
+ * the detail of one thing and the handoff all go through `evaluateWorkflowOffer`, so
  * what a menu offers and what a handoff accepts can never disagree.
  */
 import { createHash } from "node:crypto";
@@ -16,6 +16,7 @@ import {
   type WorkflowOffer,
 } from "@hercule/contract";
 import { cutTextAtWord } from "../text";
+import type { WorkflowOfferCandidate } from "../workflows";
 
 /**
  * What the offers need to know of an entity kind's plugin: the type of the
@@ -27,32 +28,27 @@ import { cutTextAtWord } from "../text";
  * the entity kind it is raised on. So the cards of a kind count as showing
  * every signal kind of the plugin's event source.
  */
-export interface OfferedKind {
+export interface EntityKindSource {
   readonly kind: string;
   readonly connectionType: string;
   readonly signalKinds: ReadonlyArray<string>;
 }
 
-/** A stored workflow that a run can start: enabled and valid. */
-export interface OfferableWorkflow {
-  readonly id: string;
-  readonly definition: WorkflowDefinition;
-}
-
 /** What the offers depend on. Two things with the same subject have the same offers. */
-export interface OfferSubject {
-  readonly kind: OfferedKind;
+export interface WorkflowOfferSubject {
+  readonly kind: EntityKindSource;
   /** The canonical remote of the repository the work lands in, or none for a kind with no repository. */
   readonly targetRemote: string | undefined;
   /** True when at least one Connection can act on the thing. */
   readonly hasAccount: boolean;
 }
 
-type InputDeclaration = NonNullable<WorkflowDefinition["inputs"]>[number];
+type InputDeclaration = WorkflowOfferCandidate["inputs"][number];
 
 /** The Resources of a workflow's workspace: the repo of a primary workspace, or the repos it checks out. */
-export const listWorkspaceResourceIds = (definition: WorkflowDefinition): ReadonlyArray<string> => {
-  const workspace = definition.workspace;
+export const listWorkspaceResourceIds = (
+  workspace: WorkflowDefinition["workspace"],
+): ReadonlyArray<string> => {
   if (workspace === undefined) return [];
   return workspace.kind === "primary"
     ? [workspace.resourceId]
@@ -64,7 +60,7 @@ export const listWorkspaceResourceIds = (definition: WorkflowDefinition): Readon
  * the same id, and the id fits the contract's bound however long the remote
  * is. Clients only compare these ids.
  */
-export const buildOfferSetId = (subject: OfferSubject): string =>
+export const buildWorkflowOfferSetId = (subject: WorkflowOfferSubject): string =>
   createHash("sha256")
     .update(JSON.stringify([subject.kind.kind, subject.targetRemote ?? null, subject.hasAccount]))
     .digest("hex")
@@ -104,11 +100,11 @@ const describeRemote = (canonicalRemote: string): string =>
  * compares its target. The list is never empty when it is returned.
  */
 const findOtherRepositories = (
-  definition: WorkflowDefinition,
+  workspace: WorkflowDefinition["workspace"],
   targetRemote: string | undefined,
   resourceRemotes: ReadonlyMap<string, string>,
 ): ReadonlyArray<string> | undefined => {
-  const remotes = listWorkspaceResourceIds(definition).flatMap(
+  const remotes = listWorkspaceResourceIds(workspace).flatMap(
     (id) => resourceRemotes.get(id) ?? [],
   );
   if (targetRemote === undefined || remotes.length === 0 || remotes.includes(targetRemote)) {
@@ -133,14 +129,12 @@ const findOtherRepositories = (
  * When several reasons hold, the first of these is given: a required input
  * the card cannot fill, a repository that differs, no account.
  */
-export const evaluateOffer = (
-  workflow: OfferableWorkflow,
-  subject: OfferSubject,
+export const evaluateWorkflowOffer = (
+  workflow: WorkflowOfferCandidate,
+  subject: WorkflowOfferSubject,
   resourceRemotes: ReadonlyMap<string, string>,
 ): WorkflowOffer | undefined => {
-  const { id: workflowId, definition } = workflow;
-  const { name } = definition;
-  const inputs = definition.inputs ?? [];
+  const { id: workflowId, name, inputs } = workflow;
   const entityInput = inputs.find((input) => input.entity !== undefined);
 
   if (entityInput === undefined) {
@@ -169,7 +163,7 @@ export const evaluateOffer = (
     (input) => input !== entityInput && input !== connectionInput && needsValue(input),
   );
   const otherRepositories = findOtherRepositories(
-    definition,
+    workflow.workspace,
     subject.targetRemote,
     resourceRemotes,
   );
@@ -212,15 +206,15 @@ export const evaluateOffer = (
  * available ones first, then the unavailable ones, each group by name, cut
  * to `MAX_ENTITY_OFFERS`. The cut keeps the available ones before any
  * unavailable one. The list is for a menu; whether a workflow can be handed
- * a thing is decided by `evaluateOffer`, never by this list.
+ * a thing is decided by `evaluateWorkflowOffer`, never by this list.
  */
-export const evaluateOffers = (
-  workflows: ReadonlyArray<OfferableWorkflow>,
-  subject: OfferSubject,
+export const evaluateWorkflowOffers = (
+  workflows: ReadonlyArray<WorkflowOfferCandidate>,
+  subject: WorkflowOfferSubject,
   resourceRemotes: ReadonlyMap<string, string>,
 ): ReadonlyArray<WorkflowOffer> =>
   workflows
-    .flatMap((workflow) => evaluateOffer(workflow, subject, resourceRemotes) ?? [])
+    .flatMap((workflow) => evaluateWorkflowOffer(workflow, subject, resourceRemotes) ?? [])
     .sort(
       (a, b) =>
         Number(a.unavailable !== undefined) - Number(b.unavailable !== undefined) ||
@@ -234,13 +228,13 @@ export const evaluateOffers = (
  * declares. A source's signal kinds and Connection type are those of its
  * plugin.
  */
-export const listOfferedKinds = (
+export const listEntityKindSources = (
   sources: ReadonlyArray<{
     readonly connectionType: string;
     readonly entityKinds: ReadonlyArray<{ readonly word: string }>;
     readonly signalKinds: ReadonlyArray<{ readonly kind: string }>;
   }>,
-): ReadonlyArray<OfferedKind> =>
+): ReadonlyArray<EntityKindSource> =>
   sources.flatMap((source) =>
     source.entityKinds.map((declaration) => ({
       kind: declaration.word,

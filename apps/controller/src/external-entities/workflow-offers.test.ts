@@ -11,12 +11,12 @@ import {
   type WorkflowOffer,
 } from "@hercule/contract";
 import {
-  buildOfferSetId,
-  evaluateOffer,
-  evaluateOffers,
-  type OfferSubject,
-  type OfferableWorkflow,
-} from "./offers";
+  buildWorkflowOfferSetId,
+  evaluateWorkflowOffer,
+  evaluateWorkflowOffers,
+  type WorkflowOfferSubject,
+} from "./workflow-offers";
+import type { WorkflowOfferCandidate } from "../workflows";
 
 const WEB = "github.com/acme/web";
 const API = "github.com/acme/api";
@@ -25,7 +25,7 @@ const RESOURCES = new Map([
   ["api-resource", API],
 ]);
 
-const PULL_REQUEST: OfferSubject = {
+const PULL_REQUEST: WorkflowOfferSubject = {
   kind: {
     kind: "forge/pull-request",
     connectionType: "forge/forge",
@@ -48,15 +48,7 @@ const ACCOUNT: Input = { name: "account", connection: { type: "forge/forge" }, r
 const workflow = (
   inputs: ReadonlyArray<Input> = [ENTITY, ACCOUNT],
   workspace?: WorkflowDefinition["workspace"],
-): OfferableWorkflow => ({
-  id: "workflow-1",
-  definition: {
-    name: "Review PR",
-    inputs,
-    steps: [],
-    ...(workspace === undefined ? {} : { workspace }),
-  },
-});
+): WorkflowOfferCandidate => ({ id: "workflow-1", name: "Review PR", inputs, workspace });
 
 const AVAILABLE: WorkflowOffer = {
   workflowId: "workflow-1",
@@ -79,8 +71,10 @@ const checkouts = (...resourceIds: ReadonlyArray<string>): WorkflowDefinition["w
   checkouts: resourceIds.map((resourceId) => ({ resourceId })),
 });
 
-describe("evaluateOffer", () => {
-  it.each<[string, OfferableWorkflow, Partial<OfferSubject>, WorkflowOffer | undefined]>([
+describe("evaluateWorkflowOffer", () => {
+  it.each<
+    [string, WorkflowOfferCandidate, Partial<WorkflowOfferSubject>, WorkflowOffer | undefined]
+  >([
     ["is available with an entity input and an account input", workflow(), {}, AVAILABLE],
     [
       "needs no connection input to be available",
@@ -236,7 +230,9 @@ describe("evaluateOffer", () => {
     ],
     ["is not listed with no inputs", workflow([]), {}, undefined],
   ])("%s", (_name, offered, subject, expected) => {
-    expect(evaluateOffer(offered, { ...PULL_REQUEST, ...subject }, RESOURCES)).toEqual(expected);
+    expect(evaluateWorkflowOffer(offered, { ...PULL_REQUEST, ...subject }, RESOURCES)).toEqual(
+      expected,
+    );
   });
 });
 
@@ -249,13 +245,21 @@ describe("the length of a message", () => {
         `github.com/acme/${"r".repeat(30)}-${String(index)}`,
       ]),
     );
-    const offer = evaluateOffer(workflow(undefined, checkouts(...many)), PULL_REQUEST, remotes);
+    const offer = evaluateWorkflowOffer(
+      workflow(undefined, checkouts(...many)),
+      PULL_REQUEST,
+      remotes,
+    );
     expect(offer?.unavailable?.message).toBe(
       `Review PR works on acme/${"r".repeat(30)}-0 and 39 more only`,
     );
 
     const longRemote = new Map([["long", `github.com/acme/${"x".repeat(800)}`]]);
-    const cut = evaluateOffer(workflow(undefined, primary("long")), PULL_REQUEST, longRemote);
+    const cut = evaluateWorkflowOffer(
+      workflow(undefined, primary("long")),
+      PULL_REQUEST,
+      longRemote,
+    );
     expect(cut?.unavailable?.reason).toBe("repository");
     expect(cut!.unavailable!.message.length).toBeLessThanOrEqual(MAX_OFFER_MESSAGE_LENGTH);
 
@@ -263,27 +267,25 @@ describe("the length of a message", () => {
       ENTITY,
       { name: "i".repeat(900), schema: { type: "string" }, required: true },
     ]);
-    const needs = evaluateOffer(longInput, PULL_REQUEST, RESOURCES);
+    const needs = evaluateWorkflowOffer(longInput, PULL_REQUEST, RESOURCES);
     expect(needs?.unavailable?.reason).toBe("needs-input");
     expect(needs!.unavailable!.message.length).toBeLessThanOrEqual(MAX_OFFER_MESSAGE_LENGTH);
   });
 });
 
-describe("evaluateOffers", () => {
+describe("evaluateWorkflowOffers", () => {
   it("cuts the list to the contract's bound and keeps the available offers first", () => {
     const needsBranch: ReadonlyArray<Input> = [
       ENTITY,
       { name: "base_branch", schema: { type: "string" }, required: true },
     ];
     const many = (count: number, prefix: string, inputs?: ReadonlyArray<Input>) =>
-      Array.from({ length: count }, (_, index): OfferableWorkflow => ({
+      Array.from({ length: count }, (_, index): WorkflowOfferCandidate => ({
+        ...workflow(inputs),
         id: `${prefix}-${String(index)}`,
-        definition: {
-          ...workflow(inputs).definition,
-          name: `${prefix} ${String(index).padStart(3, "0")}`,
-        },
+        name: `${prefix} ${String(index).padStart(3, "0")}`,
       }));
-    const offers = evaluateOffers(
+    const offers = evaluateWorkflowOffers(
       [...many(MAX_ENTITY_OFFERS + 20, "unavailable", needsBranch), ...many(5, "available")],
       PULL_REQUEST,
       RESOURCES,
@@ -297,15 +299,16 @@ describe("evaluateOffers", () => {
   });
 
   it("lists the available offers first, then the unavailable ones, each by name", () => {
-    const named = (id: string, name: string, inputs?: ReadonlyArray<Input>): OfferableWorkflow => ({
-      id,
-      definition: { ...workflow(inputs).definition, name },
-    });
+    const named = (
+      id: string,
+      name: string,
+      inputs?: ReadonlyArray<Input>,
+    ): WorkflowOfferCandidate => ({ ...workflow(inputs), id, name });
     const needsBranch: ReadonlyArray<Input> = [
       ENTITY,
       { name: "base_branch", schema: { type: "string" }, required: true },
     ];
-    const offers = evaluateOffers(
+    const offers = evaluateWorkflowOffers(
       [
         named("1", "Zeta"),
         named("2", "Alpha", needsBranch),
@@ -325,24 +328,24 @@ describe("evaluateOffers", () => {
   });
 });
 
-describe("buildOfferSetId", () => {
+describe("buildWorkflowOfferSetId", () => {
   it("is the same for the same kind, target and account state, and differs when any differs", () => {
-    const id = buildOfferSetId(PULL_REQUEST);
-    expect(buildOfferSetId({ ...PULL_REQUEST })).toBe(id);
+    const id = buildWorkflowOfferSetId(PULL_REQUEST);
+    expect(buildWorkflowOfferSetId({ ...PULL_REQUEST })).toBe(id);
     for (const other of [
       { targetRemote: API },
       { targetRemote: undefined },
       { hasAccount: false },
       { kind: { ...PULL_REQUEST.kind, kind: "forge/issue" } },
     ]) {
-      expect(buildOfferSetId({ ...PULL_REQUEST, ...other })).not.toBe(id);
+      expect(buildWorkflowOfferSetId({ ...PULL_REQUEST, ...other })).not.toBe(id);
     }
   });
 
   it("fits the contract's bound for a very long remote", () => {
     const remote = `github.com/${"a".repeat(200)}/${"b".repeat(200)}`;
-    expect(buildOfferSetId({ ...PULL_REQUEST, targetRemote: remote }).length).toBeLessThanOrEqual(
-      64,
-    );
+    expect(
+      buildWorkflowOfferSetId({ ...PULL_REQUEST, targetRemote: remote }).length,
+    ).toBeLessThanOrEqual(64);
   });
 });

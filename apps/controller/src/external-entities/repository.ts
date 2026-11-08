@@ -75,7 +75,7 @@ import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
 import { selectInboxPage } from "./riding";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
-import { makeOfferReads, type OfferTarget } from "./offer-reads";
+import { makeWorkflowOfferReads, type WorkflowOfferTarget } from "./workflow-offer-reads";
 import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
@@ -486,7 +486,7 @@ const readTargetRemote = (row: EntityRow): string | undefined =>
     : (JSON.parse(String(row.repository)) as { target: { remote: string } }).target.remote;
 
 /** Builds what the offers read needs of a full record of a work kind. */
-const buildOfferTarget = (row: EntityRow): OfferTarget => ({
+const buildWorkflowOfferTarget = (row: EntityRow): WorkflowOfferTarget => ({
   ref: row.ref,
   kind: row.kind as string,
   targetRemote: readTargetRemote(row),
@@ -501,7 +501,7 @@ const make = Effect.gen(function* () {
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
   const inbox = makeInboxPopulation(sql, linkReads);
-  const offerReads = yield* makeOfferReads;
+  const workflowOfferReads = yield* makeWorkflowOfferReads;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
@@ -1265,7 +1265,7 @@ const make = Effect.gen(function* () {
      * Each card carries the id of its offer set and the Connections that can
      * act on it. Cards that share a kind, a target repository and an
      * acting-account state share one set in `offerSets`, evaluated once (see
-     * `readOffers`).
+     * `readWorkflowOffers`).
      *
      * A constant number of statements however many cards there are: the
      * eligible cards and their links (evaluating the membership once), the
@@ -1309,9 +1309,9 @@ const make = Effect.gen(function* () {
           rows.map(({ row }) => row.ref),
           MAX_ENTITY_SIGNALS,
         );
-        const offers = yield* offerReads.readOffers(
-          rows.map(({ row }) => buildOfferTarget(row)),
-          environment.offeredKinds ?? [],
+        const offers = yield* workflowOfferReads.readWorkflowOffers(
+          rows.map(({ row }) => buildWorkflowOfferTarget(row)),
+          environment.kindSources ?? [],
         );
 
         const cards = rows.map(({ card, row }): InboxCard => ({
@@ -1375,23 +1375,23 @@ const make = Effect.gen(function* () {
     /**
      * Returns the offers and acting Connections of things, as the Inbox and
      * the detail show them, with their lists cut to the contract's bounds
-     * (see `makeOfferReads`). They are for display only.
+     * (see `makeWorkflowOfferReads`). They are for display only.
      */
-    readOffers: offerReads.readOffers,
+    readWorkflowOffers: workflowOfferReads.readWorkflowOffers,
 
     /**
      * Returns the offer of one workflow for one thing, by the rules of the
      * menu but without any cut. The handoff checks its workflow through it
      * inside its transaction.
      */
-    readOfferOfWorkflow: offerReads.readOfferOfWorkflow,
+    readWorkflowOffer: workflowOfferReads.readWorkflowOffer,
 
     /**
      * Returns the Connection that acts for a handoff on one thing: the chosen
      * one when it can act, else none; with no choice, the oldest that can.
      * Not cut by any bound.
      */
-    findActingConnection: offerReads.findActingConnection,
+    findActingConnection: workflowOfferReads.findActingConnection,
 
     /**
      * Reads what lies above `starts`, as places and edges, cut by one rule
@@ -1446,9 +1446,9 @@ const make = Effect.gen(function* () {
           maxPlaces: MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS + MAX_ENTITY_HINTS,
           environment,
         });
-        const offers = yield* offerReads.readOffers(
-          [buildOfferTarget(row)],
-          environment.offeredKinds ?? [],
+        const offers = yield* workflowOfferReads.readWorkflowOffers(
+          [buildWorkflowOfferTarget(row)],
+          environment.kindSources ?? [],
         );
         return Option.some({
           ...buildEntityFields({

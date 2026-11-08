@@ -34,7 +34,7 @@ import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
 import { announceEntityChanges } from "./announce";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
-import { listOfferedKinds } from "./offers";
+import { listEntityKindSources } from "./workflow-offers";
 import { findProjectOfRemote } from "./project-of-remote";
 import { externalEntityRepository, type TaskableEntity } from "./repository";
 
@@ -48,6 +48,10 @@ const ONLY_THE_USER_TAKES_HANDOFF_BACK =
 
 /** The refusal of a handoff while a plugin answer or a withdrawal works on one of the signals it would end. */
 const REPLY_STILL_RUNNING = "A reply to this is still running. Try again in a moment.";
+
+/** The refusal of a handoff of a record that is a place or is not read in full yet. */
+const NOT_A_THING_TO_HAND_OFF =
+  "This is not a piece of work that can be handed off: it is a place that groups work, or a record that is not fully read yet. Hand off one of the things in it.";
 
 /** The refusal of a handoff when the workflow's `answers` changed after the handoff chose its signals. */
 const WORKFLOW_CHANGED = "This workflow changed. Try again.";
@@ -75,10 +79,6 @@ const holdSameKinds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): bool
   const right = new Set(b);
   return left.size === right.size && [...left].every((kind) => right.has(kind));
 };
-
-/** Returns the field a new Task takes its Project from, or nothing when it has none. */
-const optionalProjectId = (projectId: string | undefined) =>
-  projectId === undefined ? {} : { projectId };
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -126,10 +126,10 @@ const make = Effect.gen(function* () {
     input: EntityHandOffInput,
   ) =>
     Effect.gen(function* () {
-      const offeredKinds = listOfferedKinds(yield* host.listActiveEventSources());
+      const kindSources = listEntityKindSources(yield* host.listActiveEventSources());
       const target = { ref: entity.ref, kind: entity.kind, targetRemote: entity.targetRemote };
       const offer = Option.getOrUndefined(
-        yield* entities.readOfferOfWorkflow(target, input.workflowId, offeredKinds),
+        yield* entities.readWorkflowOffer(target, input.workflowId, kindSources),
       );
       if (offer === undefined) {
         return yield* Effect.fail(
@@ -142,7 +142,7 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(createInvalidStateError(offer.unavailable.message));
       }
       const acting = Option.getOrUndefined(
-        yield* entities.findActingConnection(target, input.connectionId, offeredKinds),
+        yield* entities.findActingConnection(target, input.connectionId, kindSources),
       );
       if (acting === undefined) {
         return yield* Effect.fail(
@@ -167,6 +167,9 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const entity = yield* readEntityOrFail(entityId);
+      if (!entity.isWorkRecord) {
+        return yield* Effect.fail(createInvalidStateError(NOT_A_THING_TO_HAND_OFF));
+      }
       const definition = yield* readDefinitionOrFail(input.workflowId);
       if (!holdSameKinds(listAnswers(definition), boundary.answers)) {
         return yield* Effect.fail(createInvalidStateError(WORKFLOW_CHANGED));
@@ -185,6 +188,10 @@ const make = Effect.gen(function* () {
         );
       }
       const taskId = existing?.id ?? uuidToString(mintUuid());
+      const projectId =
+        existing === undefined
+          ? yield* findProjectOfRemote(resources, entity.targetRemote)
+          : undefined;
 
       const started = yield* runs.startOnTask(
         {
@@ -206,7 +213,7 @@ const make = Effect.gen(function* () {
           ? {
               newTask: {
                 title: entity.title,
-                ...optionalProjectId(yield* findProjectOfRemote(resources, entity.targetRemote)),
+                ...(projectId === undefined ? {} : { projectId }),
               },
             }
           : {}),
@@ -217,14 +224,18 @@ const make = Effect.gen(function* () {
         workflowName: definition.name,
         runId: started.runId,
       });
+      // The revisions are read after every write of the handoff, so the
+      // record holds the Task as the handoff left it, whatever order the
+      // writes above are made in. The run's own start counts as a join.
+      const revisions = Option.getOrThrow(yield* taskRows.readRevisions(recorded.task.id));
       yield* records.insert({
         runId: started.runId,
         ref: entity.ref,
         taskId: recorded.task.id,
         taskCreated: recorded.created,
         stageBefore: recorded.stageBefore,
-        stageRevision: recorded.stageRevision,
-        joinRevision: recorded.joinRevision,
+        stageRevision: revisions.stageRevision,
+        joinRevision: revisions.joinRevision,
       });
       yield* announceEntityChanges({ entityIds: [entity.id], affectedTaskIds: [recorded.task.id] });
       return { ...started, taskId: recorded.task.id } satisfies EntityHandOffResult;
@@ -248,6 +259,7 @@ const make = Effect.gen(function* () {
             taskId: record.taskId,
             runId: record.runId,
             ref: record.ref,
+            taskCreated: record.taskCreated,
             stageBefore: record.stageBefore,
             stageRevision: record.stageRevision,
             joinRevision: record.joinRevision,
@@ -305,15 +317,17 @@ const make = Effect.gen(function* () {
      *    the run with the entity's ref and the acting account as inputs;
      *    writes the Task (`building`, with the entity's title, or the active
      *    Task continued); ends the claimed signals that are still open; and
-     *    writes the record the Undo reads.
+     *    writes the record the Undo reads, with the Task's revisions as they
+     *    are after all of those writes.
      *
      * A run that fails to start rolls everything back.
      *
      * Fails with `Forbidden` for any caller but the user, `NotFound` for an
-     * unknown entity or workflow, `InvalidState` when the workflow is not
-     * available on the entity, the account cannot act, the workflow changed,
-     * the same workflow already works on the Task, or a reply to one of the
-     * signals is still running, and with whatever starting the run fails with.
+     * unknown entity or workflow, `InvalidState` when the entity is a place or
+     * a partial record, the workflow is not available on the entity, the
+     * account cannot act, the workflow changed, the same workflow already
+     * works on the Task, or a reply to one of the signals is still running,
+     * and with whatever starting the run fails with.
      */
     handOff: (entityId: string, input: EntityHandOffInput) =>
       Effect.gen(function* () {

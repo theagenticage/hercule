@@ -1612,8 +1612,8 @@ describe("what a card offers", () => {
           chosen: yield* entities.findActingConnection(target, cutOff[0], kinds),
           oldest: yield* entities.findActingConnection(target, undefined, kinds),
           unknown: yield* entities.findActingConnection(target, uuidToString(mintUuid()), kinds),
-          offer: yield* entities.readOfferOfWorkflow(target, review, kinds),
-          missing: yield* entities.readOfferOfWorkflow(target, uuidToString(mintUuid()), kinds),
+          offer: yield* entities.readWorkflowOffer(target, review, kinds),
+          missing: yield* entities.readWorkflowOffer(target, uuidToString(mintUuid()), kinds),
         };
       }),
     );
@@ -1645,9 +1645,9 @@ describe("what a card offers", () => {
         const target = { ref: ticketRef("1"), kind: KIND, targetRemote: API };
         const kinds = [{ kind: KIND, connectionType: "acme/acme", signalKinds: [] }];
         return {
-          webOnly: yield* entities.readOfferOfWorkflow(target, webOnly, kinds),
-          disabled: yield* entities.readOfferOfWorkflow(target, disabled, kinds),
-          invalid: yield* entities.readOfferOfWorkflow(target, invalid, kinds),
+          webOnly: yield* entities.readWorkflowOffer(target, webOnly, kinds),
+          disabled: yield* entities.readWorkflowOffer(target, disabled, kinds),
+          invalid: yield* entities.readWorkflowOffer(target, invalid, kinds),
         };
       }),
     );

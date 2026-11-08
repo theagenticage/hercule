@@ -1,7 +1,7 @@
 /**
  * The reads behind a card's offers: the Connections that can act on each
  * thing, the workflows a run can start and the repositories of their
- * workspaces. The rules that turn them into offers are in `offers.ts`.
+ * workspaces. The rules that turn them into offers are in `workflow-offers.ts`.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -16,23 +16,23 @@ import { uuidFromString, uuidToString } from "../db";
 import { isCheckedOut, resourceRepository } from "../resources";
 import { workflowRepository } from "../workflows";
 import {
-  buildOfferSetId,
-  evaluateOffer,
-  evaluateOffers,
+  buildWorkflowOfferSetId,
+  evaluateWorkflowOffer,
+  evaluateWorkflowOffers,
   listWorkspaceResourceIds,
-  type OfferedKind,
-  type OfferSubject,
-} from "./offers";
+  type EntityKindSource,
+  type WorkflowOfferSubject,
+} from "./workflow-offers";
 
 /** A thing to read the offers of: its ref, its qualified kind and the repository its work lands in, if it has one. */
-export interface OfferTarget {
+export interface WorkflowOfferTarget {
   readonly ref: string;
   readonly kind: string;
   readonly targetRemote: string | undefined;
 }
 
-/** What `readOffers` returns. */
-export interface OffersRead {
+/** What `readWorkflowOffers` returns. */
+export interface WorkflowOffersRead {
   /** The id of the offer set of each target, by ref. */
   readonly offerSetIds: ReadonlyMap<string, string>;
   /** The offers of each distinct set, by offer set id. */
@@ -45,7 +45,7 @@ export interface OffersRead {
 }
 
 /** Builds the offer reads. They need the database and the repositories of workflows and Resources. */
-export const makeOfferReads = Effect.gen(function* () {
+export const makeWorkflowOfferReads = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workflows = yield* workflowRepository;
   const resources = yield* resourceRepository;
@@ -58,6 +58,10 @@ export const makeOfferReads = Effect.gen(function* () {
    * `connection` input. `pairs` give each ref the type that counts for it.
    * Every read below uses this fragment, so the menu and the handoff cannot
    * disagree. It exposes the aliases `o` (observation) and `c` (Connection).
+   *
+   * The status condition is written in SQL here and in TypeScript in the run
+   * start (`listDisabledConnectionIssues` in runs/start.ts). Change one and
+   * you must change the other.
    */
   const buildActingFilter = (
     pairs: ReadonlyArray<{ readonly ref: string; readonly type: string }>,
@@ -74,8 +78,8 @@ export const makeOfferReads = Effect.gen(function* () {
    * acts on it.
    */
   const buildPairs = (
-    targets: ReadonlyArray<OfferTarget>,
-    kinds: ReadonlyMap<string, OfferedKind>,
+    targets: ReadonlyArray<WorkflowOfferTarget>,
+    kinds: ReadonlyMap<string, EntityKindSource>,
   ) =>
     targets.flatMap((target) => {
       const type = kinds.get(target.kind)?.connectionType;
@@ -131,87 +135,88 @@ export const makeOfferReads = Effect.gen(function* () {
 
   /** Builds the subject of a target: an unknown kind (its plugin is not running) has no Connection type. */
   const buildSubject = (
-    target: OfferTarget,
-    kinds: ReadonlyMap<string, OfferedKind>,
+    target: WorkflowOfferTarget,
+    kinds: ReadonlyMap<string, EntityKindSource>,
     hasAccount: boolean,
-  ): OfferSubject => ({
+  ): WorkflowOfferSubject => ({
     kind: kinds.get(target.kind) ?? { kind: target.kind, connectionType: "", signalKinds: [] },
     targetRemote: target.targetRemote,
     hasAccount,
   });
 
-  const indexKinds = (offeredKinds: ReadonlyArray<OfferedKind>) =>
-    new Map(offeredKinds.map((offered) => [offered.kind, offered]));
+  const indexKinds = (kindSources: ReadonlyArray<EntityKindSource>) =>
+    new Map(kindSources.map((offered) => [offered.kind, offered]));
 
   return {
     /**
      * Returns the offers and the acting Connections of `targets`, for a menu.
      * Targets with the same kind, target repository and acting-account state
      * share one offer set, evaluated once. A target whose kind is not in
-     * `offeredKinds` (its plugin is not running) has no acting Connection.
+     * `kindSources` (its plugin is not running) has no acting Connection.
      *
      * The lists are cut so a read can never exceed the contract's bounds:
      * offers to `MAX_ENTITY_OFFERS` (available first, each group by name),
      * Connections to `MAX_ACTING_CONNECTIONS` (oldest first). Nothing that
-     * decides a handoff may read these lists; use `readOfferOfWorkflow` and
+     * decides a handoff may read these lists; use `readWorkflowOffer` and
      * `findActingConnection`, which are not cut.
      *
      * A constant number of statements however many targets there are: the
-     * acting Connections, the runnable workflows and the Resources they name.
+     * acting Connections, the workflows with an entity or signal input and the Resources
+     * they name.
      */
-    readOffers: (
-      targets: ReadonlyArray<OfferTarget>,
-      offeredKinds: ReadonlyArray<OfferedKind>,
-    ): Effect.Effect<OffersRead, SqlError> =>
+    readWorkflowOffers: (
+      targets: ReadonlyArray<WorkflowOfferTarget>,
+      kindSources: ReadonlyArray<EntityKindSource>,
+    ): Effect.Effect<WorkflowOffersRead, SqlError> =>
       Effect.gen(function* () {
         if (targets.length === 0) {
           return { offerSetIds: new Map(), offerSets: {}, actingConnections: new Map() };
         }
-        const kinds = indexKinds(offeredKinds);
+        const kinds = indexKinds(kindSources);
         const actingConnections = yield* listActingConnections(buildPairs(targets, kinds));
-        const runnable = yield* workflows.listRunnableDefinitions();
+        const candidates = yield* workflows.listWorkflowOfferCandidates();
         const remotes = yield* readWorkspaceRemotes(
-          runnable.flatMap(({ definition }) => listWorkspaceResourceIds(definition)),
+          candidates.flatMap(({ workspace }) => listWorkspaceResourceIds(workspace)),
         );
 
         const offerSetIds = new Map<string, string>();
         const offerSets: Record<string, ReadonlyArray<WorkflowOffer>> = {};
         for (const target of targets) {
           const subject = buildSubject(target, kinds, actingConnections.has(target.ref));
-          const id = buildOfferSetId(subject);
+          const id = buildWorkflowOfferSetId(subject);
           offerSetIds.set(target.ref, id);
-          offerSets[id] ??= evaluateOffers(runnable, subject, remotes);
+          offerSets[id] ??= evaluateWorkflowOffers(candidates, subject, remotes);
         }
         return { offerSetIds, offerSets, actingConnections };
       }),
 
     /**
      * Returns the offer of one workflow for one target, evaluated by the same
-     * rules as the menu (`evaluateOffer`) but from the whole state: no cut
+     * rules as the menu (`evaluateWorkflowOffer`) but from the whole state: no cut
      * applies. Returns none when the workflow is not enabled and valid, or is
      * not listed for the target's kind. An offer with `unavailable` set is
      * returned as it is; the caller refuses it.
      */
-    readOfferOfWorkflow: (
-      target: OfferTarget,
+    readWorkflowOffer: (
+      target: WorkflowOfferTarget,
       workflowId: string,
-      offeredKinds: ReadonlyArray<OfferedKind>,
+      kindSources: ReadonlyArray<EntityKindSource>,
     ): Effect.Effect<Option.Option<WorkflowOffer>, SqlError> =>
       Effect.gen(function* () {
-        const found = (yield* workflows.listRunnableDefinitions()).find(
-          (candidate) => candidate.id === workflowId,
+        const found = Option.getOrUndefined(
+          yield* workflows.readWorkflowOfferCandidate(workflowId),
         );
         if (found === undefined) return Option.none();
-        const kinds = indexKinds(offeredKinds);
+        const kinds = indexKinds(kindSources);
         const pairs = buildPairs([target], kinds);
         const acting =
           pairs.length === 0
             ? []
             : yield* sql<{ readonly one: number }>`
                 SELECT 1 AS one ${buildActingFilter(pairs)} LIMIT 1`;
-        const remotes = yield* readWorkspaceRemotes(listWorkspaceResourceIds(found.definition));
+        const remotes = yield* readWorkspaceRemotes(listWorkspaceResourceIds(found.workspace));
         return Option.fromNullishOr(
-          evaluateOffer(found, buildSubject(target, kinds, acting.length > 0), remotes),
+          evaluateWorkflowOffer(found, buildSubject(target, kinds, acting.length > 0), remotes),
         );
       }),
 
@@ -221,12 +226,12 @@ export const makeOfferReads = Effect.gen(function* () {
      * Without, the oldest one that can. Not cut by any bound.
      */
     findActingConnection: (
-      target: OfferTarget,
+      target: WorkflowOfferTarget,
       connectionId: string | undefined,
-      offeredKinds: ReadonlyArray<OfferedKind>,
+      kindSources: ReadonlyArray<EntityKindSource>,
     ): Effect.Effect<Option.Option<ActingConnection>, SqlError> =>
       Effect.gen(function* () {
-        const pairs = buildPairs([target], indexKinds(offeredKinds));
+        const pairs = buildPairs([target], indexKinds(kindSources));
         if (pairs.length === 0) return Option.none();
         const rows = yield* sql<{ readonly id: Uint8Array; readonly label: string }>`
           SELECT c.id AS id, c.label AS label ${buildActingFilter(pairs)}

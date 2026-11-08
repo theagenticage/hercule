@@ -125,9 +125,9 @@ const make = Effect.gen(function* () {
      * signal or the workflow does not exist or the signal does not offer the
      * workflow, `InvalidState` when the signal is resolved or the workflow is
      * already working on the Task, `Validation` when the answer names another
-     * signal or the workflow takes no signal of the signal's kind, and with whatever starting the run fails with, such as a
-     * workflow that is invalid or has no capable runner. The caller's
-     * transaction then rolls back.
+     * signal or the workflow takes no signal of the signal's kind, and with
+     * whatever starting the run fails with, such as a workflow that is invalid
+     * or has no capable runner. The caller's transaction then rolls back.
      *
      * The run is started before the Task is written, so a new Task has the id
      * chosen in step 3: the run names the Task, and the Task's first entry

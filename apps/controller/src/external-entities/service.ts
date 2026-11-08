@@ -70,7 +70,7 @@ import {
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
 import { buildActiveEntityKind } from "./entity-records";
-import { listOfferedKinds, type OfferedKind } from "./offers";
+import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
 import { claimRepository } from "./claims";
@@ -113,7 +113,7 @@ interface Catalog {
   /** The active kinds, by qualified word. */
   readonly kinds: ReadonlyMap<string, CatalogKind>;
   /** What the offers need of the plugin of each active kind. */
-  readonly offeredKinds: ReadonlyArray<OfferedKind>;
+  readonly kindSources: ReadonlyArray<EntityKindSource>;
 }
 
 /** What `prepareEntityForTask` read: nothing when the rows already held a full, readable record. */
@@ -204,7 +204,7 @@ const make = Effect.gen(function* () {
       return {
         activePluginIds: [...new Set(sources.map((source) => source.pluginId))],
         kinds,
-        offeredKinds: listOfferedKinds(sources),
+        kindSources: listEntityKindSources(sources),
       };
     },
   );
@@ -219,7 +219,7 @@ const make = Effect.gen(function* () {
       activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
         buildActiveEntityKind(declaration),
       ),
-      offeredKinds: catalog.offeredKinds,
+      kindSources: catalog.kindSources,
     };
   });
 

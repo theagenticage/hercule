@@ -91,7 +91,7 @@ import {
   type NewTask,
   type ProvenanceInput,
   type TaskEdit,
-  type HandoffTraces,
+  type TaskTraces,
   type TaskFailureState,
   type TaskOrder,
   type TaskSortField,
@@ -166,7 +166,8 @@ export interface EntityHandoffEntry {
 
 /**
  * What `recordEntityHandoff` did to the Task, which the handoff's record
- * needs for its Undo.
+ * needs for its Undo. The caller reads the Task's revisions itself, once
+ * everything the handoff writes is written (see `TaskRepository.readRevisions`).
  */
 export interface EntityHandoffRecorded {
   /** The Task as stored. When the handoff continued a merged Task, this is the survivor. */
@@ -175,10 +176,6 @@ export interface EntityHandoffRecorded {
   readonly created: boolean;
   /** The stage a continued Task had before the handoff, or `undefined` for a new Task. */
   readonly stageBefore: TaskStage | undefined;
-  /** The Task's `stage_revision` right after the handoff wrote it. */
-  readonly stageRevision: number;
-  /** The Task's `join_revision` right after the handoff wrote it. */
-  readonly joinRevision: number;
 }
 
 /** What `reverseEntityHandoff` needs to know of the handoff, from its record. */
@@ -188,11 +185,13 @@ export interface EntityHandoffToReverse {
   /** The run the handoff started. */
   readonly runId: string;
   readonly ref: ExternalRef;
+  /** True when the handoff made the Task. */
+  readonly taskCreated: boolean;
   /** The stage a continued Task had before the handoff, or `undefined` when the handoff made the Task. */
   readonly stageBefore: TaskStage | undefined;
-  /** The `stageRevision` that `recordEntityHandoff` returned. */
+  /** The Task's `stage_revision` once the handoff had written everything. */
   readonly stageRevision: number;
-  /** The `joinRevision` that `recordEntityHandoff` returned. */
+  /** The Task's `join_revision` once the handoff had written everything. */
   readonly joinRevision: number;
 }
 
@@ -213,16 +212,19 @@ export type EntityHandoffReversal =
       readonly reason: string;
     };
 
-/** Why `reverseEntityHandoff` leaves a Task as it is, in words for the user. */
+/**
+ * Why `reverseEntityHandoff` leaves a Task as it is, in words for the user.
+ * The keys it shares with `undoCreatedTask` are the same refusals.
+ */
 const HANDOFF_STAYS = {
-  gone: "The task was deleted since.",
-  merged: "The task was merged into another task since.",
-  finished: "The task was finished since.",
-  notLinked: "The task no longer links this.",
-  stageDecided: "The task was moved or its stage was set since.",
-  joined: "Another run or thread joined the task since.",
-  otherLink: "The task links something else too.",
-  edited: "The task was edited since.",
+  "task-gone": "The Task was deleted since.",
+  "task-merged": "The Task was merged into another Task since.",
+  finished: "The Task was finished since.",
+  "not-linked": "The Task no longer links this.",
+  "stage-decided": "The Task was moved or its stage was set since.",
+  joined: "Another run or thread joined the Task since.",
+  "has-other-link": "The Task links something else too.",
+  edited: "The Task was edited since.",
 } as const;
 
 /**
@@ -393,29 +395,52 @@ const chooseOrder = (
 };
 
 /**
- * Returns why the Task of a handoff must stay as it is, in words for the user,
- * or `undefined` when the handoff can be taken back. `traces` is what
- * happened to the Task since the handoff (`readHandoffTraces`).
+ * Returns why a Task that exists must stay in place when someone takes back
+ * what made it, or `undefined` when none of these hold. It holds the checks
+ * `undoCreatedTask` and `reverseEntityHandoff` share, in one order: the Task
+ * was merged away, does not link the ref, or is at `done` or `dropped`.
+ */
+const findStandingRefusal = (
+  traces: TaskTraces,
+): Extract<TaskUndoRefusal, "task-merged" | "not-linked" | "finished"> | undefined => {
+  if (traces.merged) return "task-merged";
+  if (!traces.linksRef) return "not-linked";
+  if (isFinishedStage(traces.stage)) return "finished";
+  return undefined;
+};
+
+/**
+ * Returns why a Task that was made for a ref must stay in place, or
+ * `undefined` when it is still only what it was made as: it links no other
+ * ref, and nobody has edited it since.
+ */
+const findMadeTaskRefusal = (
+  traces: TaskTraces,
+): Extract<TaskUndoRefusal, "has-other-link" | "edited"> | undefined => {
+  if (traces.linkCount > 1) return "has-other-link";
+  if (traces.edited) return "edited";
+  return undefined;
+};
+
+/**
+ * Returns why the Task of a handoff must stay as it is, in words for the
+ * user, or `undefined` when the handoff can be taken back. `traces` is what
+ * happened to the Task since the handoff (`TaskRepository.readTraces`).
  */
 const chooseWhyHandoffStays = (
-  traces: Option.Option<HandoffTraces>,
+  traces: Option.Option<TaskTraces>,
   handoff: EntityHandoffToReverse,
 ): string | undefined => {
-  if (Option.isNone(traces)) return HANDOFF_STAYS.gone;
+  if (Option.isNone(traces)) return HANDOFF_STAYS["task-gone"];
   const since = traces.value;
-  if (since.merged) return HANDOFF_STAYS.merged;
-  if (isFinishedStage(since.stage)) return HANDOFF_STAYS.finished;
-  if (!since.linksRef) return HANDOFF_STAYS.notLinked;
+  const standing = findStandingRefusal(since);
+  if (standing !== undefined) return HANDOFF_STAYS[standing];
   // Work that joined is named before a stage decision, because a handoff of
   // another workflow is a stage decision too and the work is the cause.
   if (since.joinRevision !== handoff.joinRevision) return HANDOFF_STAYS.joined;
-  if (since.stageRevision !== handoff.stageRevision) return HANDOFF_STAYS.stageDecided;
-  // A Task the handoff made has only the ref it was made for, and no edit.
-  if (handoff.stageBefore === undefined) {
-    if (since.linkCount > 1) return HANDOFF_STAYS.otherLink;
-    if (since.edited) return HANDOFF_STAYS.edited;
-  }
-  return undefined;
+  if (since.stageRevision !== handoff.stageRevision) return HANDOFF_STAYS["stage-decided"];
+  const made = handoff.taskCreated ? findMadeTaskRefusal(since) : undefined;
+  return made === undefined ? undefined : HANDOFF_STAYS[made];
 };
 
 const make = Effect.gen(function* () {
@@ -976,23 +1001,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Reads what a handoff must remember of the Task it just wrote: the stage
-   * revision and the join revision. The Task was written a moment ago in the
-   * same transaction, so the row is there.
-   *
-   * The join revision is raised by database triggers whenever a run or a
-   * session gets the Task or is moved onto it, so a later Undo sees any work
-   * that joined, by any path, without a list of those paths. A count of the
-   * Task's runs and sessions would miss a Thread that joins while another
-   * one is moved away, and `tasks.revision` does not move when a Thread is
-   * started or moved.
-   */
-  const readHandoffMemory = (
-    id: string,
-  ): Effect.Effect<Pick<EntityHandoffRecorded, "stageRevision" | "joinRevision">, SqlError> =>
-    Effect.map(tasks.readRevisions(id), Option.getOrThrow);
-
-  /**
    * Puts back the failure that the start of the run `runId` ended, if nothing
    * has handled it since. The service's `restoreRecoveredFailure` is this
    * function and holds the rules in its docstring.
@@ -1238,7 +1246,6 @@ const make = Effect.gen(function* () {
                 task,
                 created: true,
                 stageBefore: undefined,
-                ...(yield* readHandoffMemory(task.id)),
               };
             }
             // A merged id lands on the survivor, and everything below is about it.
@@ -1258,7 +1265,6 @@ const make = Effect.gen(function* () {
               task,
               created: false,
               stageBefore: before.stage,
-              ...(yield* readHandoffMemory(task.id)),
             };
           }),
         );
@@ -1330,21 +1336,11 @@ const make = Effect.gen(function* () {
             const found = yield* tasks.readTraces(id, ref);
             if (Option.isNone(found)) return { undone: false, reason: "task-gone" } as const;
             const traces = found.value;
-            const reason: TaskUndoRefusal | undefined = traces.merged
-              ? "task-merged"
-              : !traces.linksRef
-                ? "not-linked"
-                : traces.hasSession
-                  ? "has-thread"
-                  : traces.hasRun
-                    ? "has-run"
-                    : traces.linkCount > 1
-                      ? "has-other-link"
-                      : traces.edited
-                        ? "edited"
-                        : isFinishedStage(traces.stage)
-                          ? "finished"
-                          : undefined;
+            const reason: TaskUndoRefusal | undefined =
+              findStandingRefusal(traces) ??
+              (traces.hasSession ? "has-thread" : undefined) ??
+              (traces.hasRun ? "has-run" : undefined) ??
+              findMadeTaskRefusal(traces);
             if (reason !== undefined) return { undone: false, reason } as const;
             // The Task was read live a moment ago, in this transaction.
             yield* Effect.orDie(softDeleteTask(id));
@@ -1378,9 +1374,8 @@ const make = Effect.gen(function* () {
      * - for a Task the handoff made, it also links no other ref and was not
      *   edited since.
      *
-     * When it holds, a Task the handoff made (`stageBefore` is `undefined`)
-     * is deleted, and a Task the handoff continued goes back to `stageBefore`.
-     * That write is a stage decision too, so it raises the stage revision. If
+     * When it holds, a Task the handoff made (`taskCreated`) is deleted, and a
+     * Task the handoff continued goes back to `stageBefore`. That write is a stage decision too, so it raises the stage revision. If
      * the run's start had ended a failure, the failure is restored
      * (`restoreRecoveredFailure`), which does so only while nothing else has
      * handled the failure since.
@@ -1397,10 +1392,10 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const traces = yield* tasks.readHandoffTraces(handoff.taskId, handoff.ref);
+            const traces = yield* tasks.readTraces(handoff.taskId, handoff.ref);
             const stays = chooseWhyHandoffStays(traces, handoff);
             if (stays !== undefined) return { reversed: false, reason: stays } as const;
-            if (handoff.stageBefore === undefined) {
+            if (handoff.taskCreated) {
               // The Task was read live a moment ago, in this transaction.
               yield* Effect.orDie(softDeleteTask(handoff.taskId));
               return {
@@ -1410,7 +1405,8 @@ const make = Effect.gen(function* () {
                 failureRestored: false,
               } as const;
             }
-            yield* Effect.orDie(updateTask(handoff.taskId, { stage: handoff.stageBefore }, actor));
+            // A Task the handoff continued always has the stage it had before.
+            yield* Effect.orDie(updateTask(handoff.taskId, { stage: handoff.stageBefore! }, actor));
             const failure = yield* restoreRecoveredFailure({ runId: handoff.runId });
             return {
               reversed: true,

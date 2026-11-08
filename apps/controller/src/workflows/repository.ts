@@ -269,6 +269,44 @@ interface TriggerRow {
 const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
 
 /**
+ * The parts of a workflow's definition that its offers on a card depend on:
+ * what the Inbox shows of a workflow, and what a handoff checks it by.
+ */
+export interface WorkflowOfferCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly inputs: ReadonlyArray<Input>;
+  readonly workspace: WorkflowDefinition["workspace"];
+}
+
+interface OfferCandidateRow {
+  readonly id: Uint8Array;
+  readonly name: string;
+  readonly inputs: string | null;
+  readonly workspace: string | null;
+}
+
+/** The columns of an offer candidate: its id and three fields of the stored definition. */
+const OFFER_CANDIDATE_COLUMNS = `id, ${NAME_FROM_DEFINITION} AS name,
+  json_extract(definition, '$.inputs') AS inputs, json_extract(definition, '$.workspace') AS workspace`;
+
+/** The condition that a workflow declares at least one `entity` or `signal` input. */
+const HAS_CARD_INPUT = `EXISTS (
+  SELECT 1 FROM json_each(workflows.definition, '$.inputs') AS declared
+  WHERE json_extract(declared.value, '$.entity') IS NOT NULL
+     OR json_extract(declared.value, '$.signal') IS NOT NULL)`;
+
+const toOfferCandidate = (row: OfferCandidateRow): WorkflowOfferCandidate => ({
+  id: uuidToString(row.id),
+  name: row.name,
+  inputs: row.inputs === null ? [] : (JSON.parse(row.inputs) as ReadonlyArray<Input>),
+  workspace:
+    row.workspace === null
+      ? undefined
+      : (JSON.parse(row.workspace) as WorkflowDefinition["workspace"]),
+});
+
+/**
  * The condition that picks the cron triggers out of the `triggers` table.
  *
  * A trigger's `on` is stored in its row by one rule. A start trigger whose
@@ -545,6 +583,42 @@ const make = Effect.gen(function* () {
             id: uuidToString(row.id),
             definition: JSON.parse(row.definition) as WorkflowDefinition,
           })),
+      ),
+
+    /**
+     * Returns, for every workflow `run.start` accepts (enabled, not marked
+     * invalid) that has an `entity` or a `signal` input, the parts of its
+     * definition a card's offers depend on, oldest first. Only those parts
+     * are read out of the stored definition, and only those workflows are
+     * returned, so the Inbox does not decode every workflow on each read.
+     */
+    listWorkflowOfferCandidates: (): Effect.Effect<
+      ReadonlyArray<WorkflowOfferCandidate>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<OfferCandidateRow>`
+          SELECT ${sql.literal(OFFER_CANDIDATE_COLUMNS)} FROM workflows
+          WHERE enabled = 1 AND invalid_since IS NULL AND ${sql.literal(HAS_CARD_INPUT)}
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toOfferCandidate),
+      ),
+
+    /**
+     * Returns the same parts of the one workflow with this id, when it is
+     * enabled and not marked invalid (whether or not it has an `entity` or a
+     * `signal` input), or `None` otherwise.
+     */
+    readWorkflowOfferCandidate: (
+      id: string,
+    ): Effect.Effect<Option.Option<WorkflowOfferCandidate>, SqlError> =>
+      Effect.map(
+        sql<OfferCandidateRow>`
+          SELECT ${sql.literal(OFFER_CANDIDATE_COLUMNS)} FROM workflows
+          WHERE id = ${uuidFromString(id)} AND enabled = 1 AND invalid_since IS NULL
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toOfferCandidate),
       ),
 
     /**

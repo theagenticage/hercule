@@ -436,7 +436,7 @@ describe("an id of a merged Task", () => {
         const moved = yield* tasks.move({ id: source.id, afterTaskId: other.id });
         const listed = yield* tasks.query({});
         const searched = yield* tasks.query({ text: "gift" });
-        const board = yield* repository.listBoardTasks(100);
+        const board = (yield* repository.listBoardTasks(100)).tasks;
         return {
           source,
           survivor,

@@ -272,7 +272,9 @@ const make = Effect.gen(function* () {
      * Returns the board: a card for every live Task at a board stage, ordered
      * by project, then stage, then rank, at most `MAX_BOARD_CARDS` of them.
      * `truncated` is true when there were more. Nothing sorts by recent
-     * activity, so a card stays where the user left it.
+     * activity, so a card stays where the user left it. A Task that shows a
+     * failed run is always a card, so the sidebar's failure dot always leads
+     * to one (see `TaskRepository.listBoardTasks`).
      *
      * The caller needs `task.read`, `session.read` and `run.read`: a card
      * shows a Thread's question and a run's failure, which `session.query`
@@ -295,13 +297,12 @@ const make = Effect.gen(function* () {
         yield* requireGrant("task.queryBoard");
         yield* requireGrant("session.query");
         yield* requireGrant("run.query");
-        const read = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
-        const listed = read.slice(0, MAX_BOARD_CARDS);
+        const { tasks: listed, truncated } = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
         const { cards, context } = yield* facts.readFacts(listed);
         const stackRead = yield* facts.readStackCandidates(listed.map((task) => task.id));
         return {
           cards: listed.map((task, index) => buildWorkCard(task, cards[index]!)),
-          truncated: read.length > MAX_BOARD_CARDS,
+          truncated,
           places: context.places,
           edges: context.edges,
           groupings: context.groupings,
