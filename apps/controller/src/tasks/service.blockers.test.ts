@@ -689,6 +689,40 @@ describe("checking a merge before it is made", () => {
     );
   });
 
+  it("returns a refusal, never a defect, when a Task is deleted between the reads of the check", async () => {
+    const check = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const tasks = yield* TaskService;
+        const [source, survivor] = yield* createTasks("Source", "Survivor");
+        // Deletes the survivor just before the check reads the Task row, after
+        // it has read the survivor's state. The deletion runs once.
+        let deleted = false;
+        return yield* tasks.checkMerge(source.id, survivor.id).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.gen(function* () {
+              const [text] = statement.compile();
+              if (!deleted && text.includes("FROM tasks") && text.includes("labels")) {
+                deleted = true;
+                yield* withTransaction(
+                  sql,
+                  sql`UPDATE tasks SET deleted_at = '2026-11-01T09:00:00.000Z'
+                      WHERE id = ${uuidFromString(survivor.id)}`,
+                ).pipe(
+                  Effect.provideService(Statement.CurrentTransformer, (inner) =>
+                    Effect.succeed(inner),
+                  ),
+                );
+              }
+              return statement;
+            }).pipe(Effect.orDie),
+          ),
+        );
+      }),
+    );
+    expect(check).toEqual({ refusal: "no such task" });
+  });
+
   it("needs only task.read, so a session that may not merge can still check", async () => {
     const check = await run(
       Effect.gen(function* () {
@@ -700,6 +734,65 @@ describe("checking a merge before it is made", () => {
       }),
     );
     expect(check).toEqual({});
+  });
+});
+
+describe("announcing the Tasks on the other end of an edge when a Task is edited", () => {
+  /**
+   * Builds the chain Downstream waits on Middle waits on Upstream, plus a
+   * Task with no edges, applies `patch` to Middle, and returns the Tasks and
+   * the derived announcements the edit made (not those of building the chain).
+   */
+  const editMiddle = async (patch: { readonly title?: string; readonly priority?: "high" }) => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const result = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const [upstream, middle, downstream, stranger] = yield* createTasks(
+          "Upstream",
+          "Middle",
+          "Downstream",
+          "Stranger",
+        );
+        yield* block(middle, upstream);
+        yield* block(downstream, middle);
+        const announcedBefore = announced.length;
+        yield* tasks.update({ id: middle.id, ...patch });
+        return {
+          upstream,
+          middle,
+          downstream,
+          stranger,
+          derived: derivedIds(announced.slice(announcedBefore)),
+        };
+      }).pipe(Effect.provide(listener)),
+    );
+    return result;
+  };
+
+  it("announces the Tasks on both ends of its edges as derived pushes when its title changes", async () => {
+    const result = await editMiddle({ title: "Middle, renamed" });
+    expect(result.derived).toEqual([result.upstream.id, result.downstream.id].toSorted());
+  });
+
+  it("does so when its stage changes", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const result = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const [upstream, middle] = yield* createTasks("Upstream", "Middle");
+        yield* block(middle, upstream);
+        const announcedBefore = announced.length;
+        yield* tasks.update({ id: middle.id, stage: "in-review" });
+        return { upstream, derived: derivedIds(announced.slice(announcedBefore)) };
+      }).pipe(Effect.provide(listener)),
+    );
+    expect(result.derived).toEqual([result.upstream.id]);
+  });
+
+  it("announces no neighbour when a field its neighbours do not show changes", async () => {
+    const result = await editMiddle({ priority: "high" });
+    expect(result.derived).toEqual([]);
   });
 });
 
@@ -835,5 +928,35 @@ describe("what the board and the pane read of blockers", () => {
       }),
     );
     expect(counts.second).toBe(counts.first);
+  });
+
+  it("reads the edges of the listed cards by the primary key of task_blockers, not by a scan", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const blocker = yield* createTask("Blocker", { stage: "building" });
+        const waiting = yield* createTask("Waiting", { stage: "building" });
+        yield* block(waiting, blocker);
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* Effect.flatMap(TaskBoard, (reader) => reader.query()).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile());
+              return statement;
+            }),
+          ),
+        );
+        const [text, params] = statements.find(([text]) => text.includes("task_blockers"))!;
+        const rows = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return rows.map((row) => row.detail);
+      }),
+    );
+    expect(plan.some((step) => step === "SEARCH task_blockers USING PRIMARY KEY (task_id=?)")).toBe(
+      true,
+    );
+    expect(plan.some((step) => step.startsWith("SCAN task_blockers"))).toBe(false);
   });
 });

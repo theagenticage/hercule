@@ -329,7 +329,7 @@ const make = Effect.gen(function* () {
         const { tasks: listed, truncated } = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
         const { cards, context } = yield* facts.readFacts(listed);
         const stackRead = yield* facts.readStackCandidates(listed.map((task) => task.id));
-        const blocking = yield* blockers.readCardBlockers();
+        const blocking = yield* blockers.readCardBlockers(listed.map((task) => task.id));
         return {
           cards: listed.map((task, index) =>
             buildWorkCard(task, cards[index]!, blocking.get(task.id) ?? NOT_BLOCKED),

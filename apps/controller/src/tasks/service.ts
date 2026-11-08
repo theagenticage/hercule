@@ -493,6 +493,18 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Reads the live Task `id`, taken as it is and never followed to a
+   * survivor. Fails with `NotFound` when it does not exist, is deleted, or was
+   * merged into another Task.
+   */
+  const readLiveTaskExactlyOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
+    Effect.flatMap(tasks.live(id), (found) =>
+      Option.isNone(found)
+        ? Effect.fail(createNotFoundError(NO_SUCH_TASK))
+        : Effect.succeed(found.value),
+    );
+
+  /**
    * Records, for the transaction it runs in, what a write of blocker edges
    * changed: a `task.updated` event with `changes.blockedBy` for each Task
    * whose blockers changed, and a `task` announcement for every Task at
@@ -600,8 +612,11 @@ const make = Effect.gen(function* () {
       }
       const sourceState = yield* requireMergeableTask(sourceId);
       const targetState = yield* requireMergeableTask(targetId);
-      const source = Option.getOrThrow(yield* tasks.live(sourceId));
-      const target = Option.getOrThrow(yield* tasks.live(targetId));
+      // The state reads above and these reads are separate statements, and a
+      // caller that runs no transaction (`checkMerge`) can see a Task deleted
+      // or merged in between: that is a refusal like any other.
+      const source = yield* readLiveTaskExactlyOrFail(sourceId);
+      const target = yield* readLiveTaskExactlyOrFail(targetId);
 
       const addedLabels = source.labels.filter((label) => !target.labels.includes(label));
       if (target.labels.length + addedLabels.length > MAX_TASK_LABELS) {
@@ -917,6 +932,21 @@ const make = Effect.gen(function* () {
           at,
         });
         yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
+        // The pane of a Task lists the title and the stage of the Tasks on the
+        // other end of its blocker edges, and the card draws them, so those
+        // Tasks have a stale read now. A derived push is enough: it re-reads
+        // the board and the pane, and nothing else changed for them.
+        if (changes.title !== undefined || changes.stage !== undefined) {
+          for (const neighbourId of yield* blockers.readNeighbourIds(id)) {
+            yield* announce({
+              _tag: "record",
+              topic: "task",
+              id: neighbourId,
+              kind: "updated",
+              derived: true,
+            });
+          }
+        }
         yield* linked.recordLinkFacts(id, newRefs);
         // Read back rather than merged in memory, so the caller gets the
         // row that was written, whatever the edit changed.

@@ -37,6 +37,9 @@ export interface CliExample {
   readonly stdin?: string;
 }
 
+/** The query a field's tail is resolved with: the listing's query fields and their values. */
+export type ResolvingQuery = Readonly<Record<string, string | boolean>>;
+
 /**
  * One field of an operation, as the command line takes it: a positional, a
  * flag, or a value read from stdin. A stdin field still has a flag, because
@@ -62,9 +65,13 @@ export type FieldRow =
        * The query sent to the list operation `resolves` names, when its
        * default listing does not hold the ids this field takes. `{ view:
        * "later" }` makes `signal unsnooze` match a tail among the snoozed
-       * signals.
+       * signals. A value is written as the operation's query schema types
+       * it: `{ closed: true }`, not `"true"`. A list of queries sends each of
+       * them and matches the tail among the ids of all the answers:
+       * `[{}, { closed: true }]` matches among the open and the closed
+       * initiatives.
        */
-      readonly resolvesQuery?: Readonly<Record<string, string>>;
+      readonly resolvesQuery?: ResolvingQuery | ReadonlyArray<ResolvingQuery>;
       /**
        * Makes the command send each word of a list positional as one object
        * of the list, written `{ <itemKey>: <word> }`. It is for a list of
@@ -188,6 +195,13 @@ export interface NounRow {
  */
 const USER_ONLY_FORBIDDEN =
   "only the user may make this call: a session token is refused whatever grants its profile holds, so a Permission Request cannot help; ask the user to run the command instead";
+
+/**
+ * The queries that read both the open and the closed initiatives. A command
+ * that takes an initiative's id tail resolves it through these, so a tail
+ * keeps working after the initiative is closed.
+ */
+const OPEN_AND_CLOSED_INITIATIVES = [{}, { closed: true }] as const;
 
 /**
  * The `forbidden` meaning of a command that gives grants: `profile create`,
@@ -959,8 +973,9 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The initiative's id, or a tail of eight or more characters.",
+        help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
     },
   },
@@ -1024,8 +1039,9 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The initiative's id, or a tail of eight or more characters.",
+        help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
       name: { flag: "name", help: "A new name." },
       intent: { flag: "intent", help: "A new intent." },
@@ -1056,8 +1072,9 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The initiative's id, or a tail of eight or more characters.",
+        help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -1069,9 +1086,9 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The initiative's id, or a tail of eight or more characters. A closed one is found with `hercule initiative list --closed true`.",
+        help: "The initiative's id, or a tail of eight or more characters. An open one is found too.",
         resolves: "initiative.query",
-        resolvesQuery: { closed: "true" },
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -1083,8 +1100,9 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The initiative's id, or a tail of eight or more characters. Only open initiatives are found by a tail; give the full id of a closed one.",
+        help: "The initiative's id, or a tail of eight or more characters. A closed one is found too.",
         resolves: "initiative.query",
+        resolvesQuery: OPEN_AND_CLOSED_INITIATIVES,
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

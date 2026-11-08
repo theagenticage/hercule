@@ -26,7 +26,7 @@ import {
 } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
 import { cutTextAtWord } from "../text";
-import { buildLiveTaskCondition, ON_BOARD } from "./repository";
+import { buildLiveTaskCondition } from "./repository";
 
 /**
  * The stages at which a blocker no longer blocks the Task that waits on it.
@@ -249,6 +249,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the ids of the Tasks on the other end of an edge of the Task
+     * `taskId`, in either direction, in id order: the Tasks it waits on and the
+     * Tasks that wait on it. Whatever their stage. Two index searches, one for
+     * each direction.
+     */
+    readNeighbourIds: (taskId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT blocked_by_task_id AS id FROM task_blockers WHERE task_id = ${uuidFromString(taskId)}
+          UNION
+          SELECT task_id AS id FROM task_blockers WHERE blocked_by_task_id = ${uuidFromString(taskId)}`,
+        (rows) => rows.map((row) => uuidToString(row.id)).toSorted(compareText),
+      ),
+
+    /**
      * Returns one path of waits from the Task `from` to the Task `to`, as the
      * Tasks on it in order (`from` first, `to` last), or an empty list when
      * `from` does not wait on `to`, directly or through other Tasks. It reads
@@ -359,29 +374,35 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Reads what every card of the board shows of the Tasks that still block
-     * it, as a map from a Task's id to its blockers. A Task that nothing
-     * blocks has no entry. One statement, whatever the number of cards: it
-     * walks the board's Tasks through the partial index `tasks_board_rank`
-     * and reads their edges by primary key.
+     * Reads what the cards of the Tasks `taskIds` show of the Tasks that still
+     * block them, as a map from a Task's id to its blockers. A Task that
+     * nothing blocks has no entry. One statement, whatever the number of
+     * cards: it reads the edges of the listed Tasks by the primary key of
+     * `task_blockers`, so the work follows the board's cards and never the
+     * number of edges in the database.
      */
-    readCardBlockers: (): Effect.Effect<ReadonlyMap<string, CardBlocking>, SqlError> =>
-      Effect.map(
-        readStillBlocking(
-          sql`SELECT e.task_id, e.blocked_by_task_id, e.created_at
-              FROM tasks t INDEXED BY tasks_board_rank
-              JOIN task_blockers e ON e.task_id = t.id
-              WHERE t.${sql.literal(ON_BOARD)} AND ${sql.literal(buildLiveTaskCondition("t"))}`,
-        ),
-        (rows) => {
-          const byTask = new Map<string, CardBlockerRow[]>();
-          for (const row of rows) {
-            const key = uuidToString(row.task_id);
-            byTask.set(key, [...(byTask.get(key) ?? []), row]);
-          }
-          return new Map([...byTask].map(([key, group]) => [key, buildCardBlocking(group)]));
-        },
-      ),
+    readCardBlockers: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, CardBlocking>, SqlError> =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            readStillBlocking(
+              sql`SELECT task_id, blocked_by_task_id, created_at
+                  FROM task_blockers
+                  WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(
+                    taskIds.map((id) => id.replaceAll("-", "")),
+                  )}))`,
+            ),
+            (rows) => {
+              const byTask = new Map<string, CardBlockerRow[]>();
+              for (const row of rows) {
+                const key = uuidToString(row.task_id);
+                byTask.set(key, [...(byTask.get(key) ?? []), row]);
+              }
+              return new Map([...byTask].map(([key, group]) => [key, buildCardBlocking(group)]));
+            },
+          ),
 
     /** Reads what the card of one Task shows of the Tasks that still block it, as `readCardBlockers` does for all cards. */
     readCardBlockersOf: (taskId: string): Effect.Effect<CardBlocking, SqlError> =>

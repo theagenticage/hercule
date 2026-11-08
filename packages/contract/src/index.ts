@@ -69,7 +69,15 @@ export {
 // name.
 export { DescribeLinePart } from "@hercule/plugin-host";
 
-export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
+export {
+  CLI,
+  NOUNS,
+  type CliExample,
+  type CliRow,
+  type FieldRow,
+  type NounRow,
+  type ResolvingQuery,
+} from "./cli";
 
 export {
   CapExceeded,
