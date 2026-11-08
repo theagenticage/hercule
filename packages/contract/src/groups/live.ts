@@ -247,6 +247,12 @@ export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
  * changed only because of their sessions or runs (a session changed status, a
  * question opened, a run ended), and no field of the Task record changed. A
  * client reads only what draws such a card, which is the Work board.
+ *
+ * A `workflow` push may carry `derived: true` too. It then names workflows
+ * whose triggers changed only in what the controller computes (the runs a
+ * trigger used, the events it holds, its next fire time, its health), and no
+ * field of the definition changed. A client reads only the workflow screens,
+ * not what draws the workflows' names or the offers made from them.
  */
 export const Invalidate = Schema.Struct({
   _tag: Schema.Literal("invalidate"),

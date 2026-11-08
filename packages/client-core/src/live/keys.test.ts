@@ -313,6 +313,26 @@ describe("the Inbox's and the entities' keys", () => {
     }
   });
 
+  it("leaves the Inbox, the entity panes and the signals alone on a derived workflow push, which a trigger's counts, next fire time or health cause", () => {
+    const keys = buildQueryKeys("workflow", ["w1"], undefined, true);
+    for (const key of [
+      ...inboxKeys,
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+      queryKeys.signals(),
+    ]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("still reads the workflow lists, the named workflow and every trigger on a derived workflow push", () => {
+    assert.deepStrictEqual(buildQueryKeys("workflow", ["w1"], undefined, true), [
+      queryKeys.workflows(),
+      queryKeys.workflow("w1"),
+      queryKeys.triggers(),
+    ]);
+  });
+
   it("leaves the Inbox alone on a workflow push that names no workflow, which is the first push of every subscription", () => {
     const keys = buildQueryKeys("workflow", []);
     for (const key of [...inboxKeys, queryKeys.externalEntity()]) {

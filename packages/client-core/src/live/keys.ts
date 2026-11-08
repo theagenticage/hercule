@@ -522,8 +522,11 @@ const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
  * The entity reads a push that names a changed workflow makes stale: the
  * Inbox, whose cards hold the workflows they can be handed to, and every
  * entity pane, which holds the same offers. The Inbox's count does not depend
- * on a workflow, so it is left out: the shell holds it active, and a cron fire
- * is a workflow push.
+ * on a workflow, so it is left out: the shell holds it active.
+ *
+ * A `derived` workflow push (a trigger's counts, next fire time or health)
+ * never changes an offer, so it reads none of these. A busy trigger or a
+ * minute-by-minute cron causes such a push about every second.
  *
  * A push that names no workflow (the controller's first push on every
  * subscription) leaves them alone. Opening the Inbox reads it afresh already,
@@ -544,21 +547,30 @@ const WORKFLOW_ENTITY_KEYS: ReadonlyArray<LiveQueryKey> = [
  * the push's map from each session to its conversation, which only a
  * `session` push carries.
  *
- * `derived` is the push's flag of the same name, which only a `task` push can
- * carry. It means a Task's card changed because of its sessions, runs or
- * summary, and no field of the Task record changed. Only the Work board and the
- * details pane of the named Tasks draw that, so the push reads the board and
- * those details. The sidebar's failure dot is read again only on a plain push,
- * which the controller sends when a failure starts or ends. The Inbox sorts a card by whether its Task is live and
- * has it, which only a plain `task` push (a Task created, edited, finished or
- * deleted) or an `externalEntity` push can change. Tracking already follows
- * `run` pushes, and the list, the Task's record and Your work read fields of
- * the Task itself, so reading them again would fetch the same data. A busy
- * agent causes this push every second, and the shell keeps Tracking, Your work
- * and the Inbox's count active on every screen, so reading them here would
- * cost a request a second for nothing. Only the open pane has a detail
- * mounted, so the details of the other Tasks are marked out of date and cost
- * no read.
+ * `derived` is the push's flag of the same name, which a `task` or a
+ * `workflow` push can carry.
+ *
+ * On a `task` push it means a Task's card changed because of its sessions,
+ * runs or summary, and no field of the Task record changed. Only the Work
+ * board and the details pane of the named Tasks draw that, so the push reads
+ * the board and those details. The sidebar's failure dot is read again only
+ * on a plain push, which the controller sends when a failure starts or ends.
+ * The Inbox sorts a card by whether its Task is live and has it, which only a
+ * plain `task` push (a Task created, edited, finished or deleted) or an
+ * `externalEntity` push can change. Tracking already follows `run` pushes,
+ * and the list, the Task's record and Your work read fields of the Task
+ * itself, so reading them again would fetch the same data. A busy agent
+ * causes this push every second, and the shell keeps Tracking, Your work and
+ * the Inbox's count active on every screen, so reading them here would cost a
+ * request a second for nothing. Only the open pane has a detail mounted, so
+ * the details of the other Tasks are marked out of date and cost no read.
+ *
+ * On a `workflow` push it means a trigger's counts, next fire time or health
+ * changed, and no field of the definition did. Only the workflow screens draw
+ * that, so the push reads the workflow lists, the named workflows and the
+ * triggers. It leaves out the signal reads (their describe lines show a
+ * workflow's name), the Inbox and the entity panes (their offers come from
+ * the definitions).
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
@@ -673,7 +685,15 @@ export const buildQueryKeys = (
   // refetched too, see `SIGNAL_DESCRIBE_KEYS`, and so are the Inbox and the
   // entity panes when a push names a workflow, because the workflows a card
   // can be handed to are read from the workflows (see `WORKFLOW_ENTITY_KEYS`).
+  // A `derived` push, which only a change of a trigger's counts, next fire
+  // time or health causes, reads the workflow screens alone.
   if (topic === "workflow") {
+    if (derived === true)
+      return [
+        queryKeys.workflows(),
+        ...ids.map((id) => queryKeys.workflow(id)),
+        queryKeys.triggers(),
+      ];
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers(), ...SIGNAL_DESCRIBE_KEYS]
       : [

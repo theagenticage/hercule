@@ -196,6 +196,32 @@ describe("the pace of a change to a Task's card", () => {
   });
 });
 
+describe("the pace of a change to a workflow", () => {
+  const WORKFLOW = "0199e0e7-0000-7000-8000-0000000000b1";
+
+  it("sends a definition change at once and a derived change of its triggers a second later, marked derived", async () => {
+    const [afterShortWindow, afterLongWindow] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("workflow");
+        yield* topics.publish([
+          { _tag: "record", topic: "workflow", id: WORKFLOW, kind: "updated", derived: true },
+          { _tag: "record", topic: "workflow", id: WORKFLOW, kind: "updated" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        const early = yield* Queue.clear(queue);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [early, yield* Queue.clear(queue)] as const;
+      }),
+    );
+
+    expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: [WORKFLOW], kind: "updated" }]);
+    expect(afterLongWindow).toEqual([
+      { _tag: "invalidate", ids: [WORKFLOW], kind: "updated", derived: true },
+    ]);
+  });
+});
+
 describe("the conversation of a session change", () => {
   it("is sent with each session id, through a batch of several changes, and only on the session topic", async () => {
     const [sessionMessages, taskMessages] = await run(

@@ -12,7 +12,7 @@ import { Cron, Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { TriggerKey, TriggerPausedBy } from "@hercule/contract";
 import { uuidFromString, withTransaction } from "../db";
-import { inTransaction, TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { Settings, SettingsLayer } from "../settings";
@@ -216,6 +216,27 @@ describe("the first pass over a new cron trigger", () => {
     expect(state).toMatchObject({
       next_fire_at: "2026-09-23T09:00:00.000Z",
       next_fire_zone: "UTC",
+    });
+  });
+});
+
+describe("announcing a schedule change", () => {
+  it("marks the push derived, because a next fire time is no change to the workflow's definition", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const workflowId = await run(
+      Effect.gen(function* () {
+        const id = yield* storeWorkflow([declareCronTrigger("nightly")]);
+        yield* firePass(FIRST_PASS);
+        return id;
+      }).pipe(Effect.provide(listener)),
+    );
+
+    expect(announced).toContainEqual({
+      _tag: "record",
+      topic: "workflow",
+      id: workflowId,
+      kind: "updated",
+      derived: true,
     });
   });
 });
