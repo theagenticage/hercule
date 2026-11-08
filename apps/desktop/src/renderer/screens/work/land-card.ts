@@ -1,5 +1,5 @@
 import { buildCellId, type CardMove, type DropPlace } from "@hercule/client-core/work";
-import type { WorkCard } from "@hercule/contract";
+import type { BoardStage, WorkCard } from "@hercule/contract";
 import {
   measureLayoutRect,
   trackBody,
@@ -40,13 +40,17 @@ export interface EndedCarry {
 }
 
 /**
- * Returns the element that stands for a card dropped at the carry's place,
- * now that the card itself is not drawn: the "13 more" line of its cell, the
- * count of its stage on a folded lane, or that lane's head. Returns `null`
- * when the carry has no place.
+ * Returns the element that stands for a card that has no place of its own on
+ * the page at `place`: the "13 more" line of its cell, the count of its stage
+ * on a folded lane, or that lane's head. A drop that keeps the card's stage
+ * (`place.stage` is `null`) means `cardStage`. Returns `null` when there is
+ * no place.
  */
-const findHidingPlace = (scroller: HTMLElement, carry: EndedCarry): Element | null => {
-  const { place } = carry;
+export const findHidingPlace = (
+  scroller: HTMLElement,
+  place: DropPlace | null,
+  cardStage: BoardStage,
+): Element | null => {
   if (place === null) return null;
   if (place.kind === "cell") {
     return scroller.querySelector(
@@ -54,7 +58,7 @@ const findHidingPlace = (scroller: HTMLElement, carry: EndedCarry): Element | nu
     );
   }
   const foldRow = scroller.querySelector(`[data-fold-row="${CSS.escape(place.laneId)}"]`);
-  const stage = place.stage ?? carry.card.stage;
+  const stage = place.stage ?? cardStage;
   return (
     [...(foldRow?.children ?? [])].find(
       (cell) => cell instanceof HTMLElement && cell.dataset["stage"] === stage,
@@ -81,22 +85,29 @@ const findLandedCard = (scroller: HTMLElement, carry: EndedCarry): HTMLElement |
 };
 
 /**
- * Sends the copy in the hand to the line that now stands for the card, and
- * fades it there: the count of the folded lane it was dropped on, or the
- * "3 landed" line of a cell that hides it. A card with no such place fades
- * where it is.
+ * Sends `ghost`, the copy of a card, to the line that now stands for the
+ * card, and fades it there: the count of the folded lane it went into, or the
+ * "3 landed" line of a cell that hides it (`findHidingPlace`). A card with no
+ * such place fades where it is. `spring` is `travel` for a card the user
+ * dropped, and `self` for one that moved by itself.
  */
-const flyAway = (scroller: HTMLElement, carry: EndedCarry): void => {
-  const target = findHidingPlace(scroller, carry);
+export const flyAway = (
+  scroller: HTMLElement,
+  ghost: HTMLElement,
+  place: DropPlace | null,
+  cardStage: BoardStage,
+  spring: SpringName,
+): void => {
+  const target = findHidingPlace(scroller, place, cardStage);
   if (target === null) {
-    carry.body.to({ s: 0.96, o: 0 }, "travel", {
+    trackBody(ghost).to({ s: 0.96, o: 0 }, spring, {
       done: () => {
-        removeFlight(carry.ghost);
+        removeFlight(ghost);
       },
     });
     return;
   }
-  flyFlightsTo([{ ghost: carry.ghost, delay: 0 }], () => target, INTO_PLACE);
+  flyFlightsTo([{ ghost, delay: 0 }], () => target, INTO_PLACE, spring);
 };
 
 /**
@@ -118,7 +129,7 @@ export const landCard = (
 ): void => {
   const card = findLandedCard(scroller, carry);
   if (card === null) {
-    flyAway(scroller, carry);
+    flyAway(scroller, carry.ghost, carry.place, carry.card.stage, "travel");
     return;
   }
   const place = measureLayoutRect(card);

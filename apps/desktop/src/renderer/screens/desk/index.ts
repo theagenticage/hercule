@@ -8,6 +8,8 @@
  * - `Card`, `Colleague`: the card sheet, and the colleague standing behind
  *   its top edge. `copyCardForMotion`: a copy of a drawn card to move or to
  *   show where the card was.
+ * - `showCauseLabel`, `openDent`: the label that tells why a card is about
+ *   to move by itself, and the dent that keeps its place open after it left.
  * - `Toolbar`, `ToolButton`, `IconPill`, `FilterChip`, `ClearChipsButton`,
  *   `FindBox`, `ToolMenu` and the menu rows: the toolbar's row, its controls
  *   and its menus.
@@ -40,9 +42,11 @@
  *   done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
+export { showCauseLabel } from "./cause-label";
 export { ChoiceMenu, type ChoiceMenuEntry } from "./choice-menu";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";
+export { openDent } from "./dent";
 export { FilterChips, FilterControl } from "./filter-control";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
 export { LedgerAnswer } from "./ledger-answer";

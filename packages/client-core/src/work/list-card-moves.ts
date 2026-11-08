@@ -1,4 +1,4 @@
-import type { BoardStage, WorkBoard, WorkCard } from "@hercule/contract";
+import type { BoardStage, WorkCard } from "@hercule/contract";
 
 /** A cell of the board: a stage, in a Project (`null` for no Project). */
 export interface CardCell {
@@ -8,6 +8,14 @@ export interface CardCell {
 
 /** Why a card is in its stage, as `WorkCard.stageCause` has it. */
 export type StageCause = NonNullable<WorkCard["stageCause"]>;
+
+/** What `listCardMoves` reads of a card: where it stands, and why. */
+export type PlacedCard = Pick<WorkCard, "id" | "stage" | "projectId" | "stageCause">;
+
+/** What `listCardMoves` reads of a board. A `WorkBoard` is one, and so is a snapshot of one. */
+export interface PlacedCards {
+  readonly cards: readonly PlacedCard[];
+}
 
 /**
  * What happened to one card between two reads of the board:
@@ -31,7 +39,7 @@ export type CardStageChange =
   | { readonly kind: "left"; readonly cardId: string; readonly from: CardCell };
 
 /** Returns the cell `card` stands in. */
-const readCell = (card: WorkCard): CardCell => ({
+const readCell = (card: PlacedCard): CardCell => ({
   stage: card.stage,
   projectId: card.projectId ?? null,
 });
@@ -51,7 +59,10 @@ const readCell = (card: WorkCard): CardCell => ({
  *   flag makes the cards past the cut look as if they left or arrived, so the
  *   caller should not compare a truncated board with a whole one.
  */
-export const listCardMoves = (previous: WorkBoard, next: WorkBoard): readonly CardStageChange[] => {
+export const listCardMoves = (
+  previous: PlacedCards,
+  next: PlacedCards,
+): readonly CardStageChange[] => {
   const before = new Map(previous.cards.map((card) => [card.id, card]));
   const nextIds = new Set(next.cards.map((card) => card.id));
   const changes: CardStageChange[] = [];

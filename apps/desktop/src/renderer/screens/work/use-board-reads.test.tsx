@@ -55,6 +55,7 @@ function Harness({
     logicalBoard: board,
     hiddenIds,
     serverBoard,
+    snapshot: undefined,
     projects: [],
     groupBy: PROJECT_FACET_ID,
     isCarrying,

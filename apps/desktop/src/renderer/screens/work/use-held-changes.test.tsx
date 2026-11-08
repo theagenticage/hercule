@@ -23,6 +23,8 @@ const buildPlaceBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   groupings: [{ kind: "acme/project", caption: "Acme project" }],
 });
 
+const NO_DELAYS: ReadonlyMap<string, number> = new Map();
+
 /** The `data-testid` of the element the pointer rests on, or `null` while it rests on none. */
 let hoveredTestId: string | null = null;
 
@@ -37,23 +39,29 @@ function Harness({
   held,
   board,
   lanes,
+  isCarrying = false,
+  startDelays = NO_DELAYS,
 }: {
   readonly held: readonly HeldChange[];
   readonly board: WorkBoard;
   readonly lanes: Readonly<Record<string, readonly string[]>>;
+  readonly isCarrying?: boolean;
+  readonly startDelays?: ReadonlyMap<string, number>;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  useHeldChanges({
+  const note = useHeldChanges({
     held,
     board,
     projects: [],
     groupBy: "acme/project",
-    isCarrying: false,
+    isCarrying,
     scrollRef,
     release,
+    startDelays,
   });
   return (
     <div ref={scrollRef}>
+      <output>{note}</output>
       {Object.entries(lanes).map(([laneId, cardIds]) => (
         <section key={laneId} data-lane-id={laneId}>
           <div data-lane-id={laneId} data-stage="exploring" data-testid={`cell:${laneId}`}>
@@ -143,5 +151,104 @@ describe("a run that fails on a Task drawn in two lanes", () => {
     await renderAndWait(props, 5_000);
 
     expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe("a card that a fact moves", () => {
+  const MERGED = { ref: "acme:pull-request:6221", text: "PR #6221 merged" };
+  const merged = buildCard("merging", {
+    stage: "landed",
+    stageCause: MERGED,
+    stageChangedAt: "2026-11-02T12:00:00.000Z",
+  });
+  const held = [{ kind: "fact", cardId: "merging", key: "fact:merging:noon" } as const];
+  const props = { held, board: buildBoard(merged), lanes: { here: ["merging"] } };
+  const findLabel = (): HTMLElement | null => document.querySelector<HTMLElement>(".card-cause");
+
+  // A page with no stylesheet counts as reduced motion, which holds the label for 80ms only.
+  beforeEach(() => {
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+  });
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--dur-2");
+  });
+
+  it("shows its cause on the card, holds it for 760ms, and only then lets the card move", async () => {
+    await renderAndWait(props, 0);
+
+    expect(findLabel()?.textContent).toBe("PR #6221 merged");
+    expect(document.querySelector("[data-card-id]")?.hasAttribute("data-cause")).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(759);
+    });
+    expect(release).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+    expect(document.querySelector("output")?.textContent).toBe("PR #6221 merged");
+  });
+
+  it("waits for the drop when a drag begins during the hold", async () => {
+    const { rerender } = render(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    rerender(<Harness {...props} isCarrying />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+
+    rerender(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+  });
+
+  it("takes its label away when the change is no longer held", async () => {
+    const { rerender } = render(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(findLabel()).not.toBeNull();
+
+    rerender(<Harness {...props} held={[]} />);
+
+    expect(findLabel()).toBeNull();
+    expect(document.querySelector("[data-card-id]")?.hasAttribute("data-cause")).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("shows no label for a move that has no cause, and says that the card moved", async () => {
+    const plain = buildCard("merging", { stage: "landed", title: "Cache slots" });
+
+    await renderAndWait({ ...props, board: buildBoard(plain) }, 0);
+
+    expect(findLabel()).toBeNull();
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+    expect(document.querySelector("output")?.textContent).toBe("Moved: Cache slots");
+  });
+
+  it("starts the wait after its delay, and its words stay for 1.5 seconds only", async () => {
+    const delays = new Map([["fact:merging:noon", 1_500]]);
+
+    await renderAndWait({ ...props, startDelays: delays }, 1_499);
+    expect(findLabel()).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1 + 760);
+    });
+    expect(document.querySelector("output")?.textContent).toBe("PR #6221 merged");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(document.querySelector("output")?.textContent).toBe("");
   });
 });

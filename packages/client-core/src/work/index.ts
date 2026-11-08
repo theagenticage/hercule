@@ -1,7 +1,8 @@
 /**
  * What the Work board works out from the cards it has read: the lanes, what a
  * cell shows, a move before the controller answers and the drop that asks for
- * it, the Filter menu's facets, Find, which cards moved between two reads,
+ * it, the Filter menu's facets, Find, which cards moved between two reads
+ * and the snapshot and plan of the morning replay that plays them back,
  * the changes the board holds back until the user's hand is still, the keyboard walk, which cards are selected, the
  * words and the pose of a card, the lanes and facets of the outside places a
  * Task stands under, and what the Add sheet opens on and says. It is the
@@ -14,6 +15,7 @@ export * from "./add-opening";
 export * from "./add-sources";
 export * from "./arrange-cell";
 export * from "./arrange-lanes";
+export * from "./board-replay";
 export * from "./card-change";
 export * from "./card-move";
 export * from "./card-pose";

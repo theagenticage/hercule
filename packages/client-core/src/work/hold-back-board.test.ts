@@ -276,6 +276,30 @@ describe("holdBackBoardChanges", () => {
       ]);
     });
 
+    it("holds a move with no cause too when its key is asked for, until it is released", () => {
+      const shown = buildBoard(buildCard("b", { stage: "in-review" }));
+      const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
+      const asked = new Set([FACT_KEY]);
+
+      const held = holdBackBoardChanges(shown, latest, NOTHING, NOTHING, asked);
+      expect(held.board).toBe(shown);
+      expect(held.held).toEqual([{ kind: "fact", cardId: "b", key: FACT_KEY }]);
+
+      const released = holdBackBoardChanges(shown, latest, asked, NOTHING, asked);
+      expect(released.board.cards[0]).toMatchObject({ stage: "landed" });
+      expect(released.held).toEqual([]);
+    });
+
+    it("does not hold a move with no cause when its key is not asked for", () => {
+      const shown = buildBoard(buildCard("b", { stage: "in-review" }));
+      const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
+
+      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING, new Set(["fact:x:y"]));
+
+      expect(result.board.cards[0]).toMatchObject({ stage: "landed" });
+      expect(result.held).toEqual([]);
+    });
+
     it("holds both the fact and the failure of a card, and releases them apart", () => {
       const shown = buildBoard(buildCard("b", { stage: "in-review" }));
       const latest = buildBoard(

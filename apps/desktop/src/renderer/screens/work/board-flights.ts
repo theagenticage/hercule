@@ -15,6 +15,7 @@ import {
   measureLayoutRect,
   staggerDelay,
   trackBody,
+  type SpringName,
 } from "../../app/motion";
 import { copyCardForMotion } from "../desk";
 
@@ -137,12 +138,15 @@ interface FlightEnd {
 /**
  * Sends each of `flights` to the center of the element `findTarget` returns
  * for it, and removes it on arrival. A flight with no target is removed at
- * once. Call it after the change, once the targets exist.
+ * once. Call it after the change, once the targets exist. `spring` is
+ * `travel` for what the user asked for, and `self` for what happened by
+ * itself.
  */
 export const flyFlightsTo = <T extends Flight>(
   flights: readonly T[],
   findTarget: (flight: T) => Element | null,
   end: FlightEnd,
+  spring: SpringName = "travel",
 ): void => {
   for (const flight of flights) {
     const target = findTarget(flight);
@@ -159,7 +163,7 @@ export const flyFlightsTo = <T extends Flight>(
         s: end.scale,
         ...(end.staysSolidUntilSmall ? {} : { o: 0 }),
       },
-      "travel",
+      spring,
       {
         delay: flight.delay,
         done: () => {

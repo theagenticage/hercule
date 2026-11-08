@@ -42,4 +42,5 @@ export {
 } from "./spring-curve";
 export type { SpringName } from "./springs";
 export { animateValue, type MotionValue } from "./value";
+export { pauseFor } from "./pause";
 export { waitForStillHand } from "./still-hand";
