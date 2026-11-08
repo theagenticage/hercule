@@ -82,9 +82,8 @@ Rules:
   - any `task.update` or `task.move` that names a `stage`, even the value the Task already has, which writes no stage event;
   - a legacy `status` write that changes the stage;
   - a handoff from a card, which decides the stage every time ([A handoff from a card](#a-handoff-from-a-card));
-  - *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* a `task.update` with a `stageFactId` that passes every check of [the fence](#the-fence), even when the Task already holds the stage.
 
-  Nothing else raises it: not a title or label edit, not a move inside a cell with no `stage`, not a run or Thread joining. It is not part of the contract, so no client reads it.
+  Nothing else raises it: not a title or label edit, not a move inside a cell with no `stage`, not a run or Thread joining. *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* Nor does a stage that comes from a Fact (`task.update` with a `stageFactId`): a Fact is not a person or an agent deciding, and a card moved by the shipped `card-in-review` workflow a moment after a handoff would otherwise make the handoff's Undo refuse. It is not part of the contract, so no client reads it.
 - **`stage_fact_fence`** and **`stage_cause_fact_id`** *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* are two columns on the row. The fence is the highest [Fact](#facts-and-the-fence) id already accounted for on this Task, 0 at the start. The cause is the Fact that placed the current stage, or null. Neither is part of the contract: the card reads the cause as `stageCause` ([The cause of a move](#the-cause-of-a-move)).
 - A stage names a position and nothing more. What it means for the work, and which fact moves a Task into it, is for workflows, as "done means the PR is merged" is below.
 
@@ -282,7 +281,7 @@ Last write wins is not enough. A queued run can land after a newer drag, and a r
 3. The Fact is voided: nothing happens. An unlink voids every Fact of that `(task, ref)` pair, so a Fact queued before an unlink dies with it, even if the user links the pair again before its run gets here. The relink writes a new Fact of its own.
 4. `fact.id <= stage_fact_fence`: nothing happens.
 5. With `onlyWhenLinkedWorkFinished`, the links are counted again in this transaction. Unless `openLinks` is 0 and `completedLinks` is above 0, nothing happens. The count on the event is a snapshot, and a link can arrive or leave between a Fact and its run, so the write checks again. A filter alone cannot.
-6. Otherwise the fence is set to `fact.id` and `stage_revision` rises. If the stage differs, it is written, the cause is set to the Fact, `task.updated` is emitted, and the card goes last in its new cell. If the Task already holds that stage, only the fence and the revision move: no event, no `updatedAt`, no move, and the cause stays as it is, because this Fact placed nothing. This is what stops an older queued Fact from moving the card afterwards.
+6. Otherwise the fence is set to `fact.id`. `stage_revision` does not rise, because a Fact is not a stage decision by a person or an agent, and the Undo of a handoff reads it ([A handoff from a card](#a-handoff-from-a-card)). If the stage differs, it is written, the cause is set to the Fact, `task.updated` is emitted, the card goes last in its new cell, and the Task's edit count (`revision`) does not rise either, so the Undo does not read the Task as edited. If the Task already holds that stage, only the fence moves: no event, no `updatedAt`, no move, and the cause stays as it is, because this Fact placed nothing. This is what stops an older queued Fact from moving the card afterwards.
 
 "Nothing happens" returns the Task as it is, with no error and no event, as a no-change update does. A run must not fail because a user dragged a card.
 
@@ -320,7 +319,7 @@ Agents use the same `task.update`. A session that passes `stageFactId` is held t
 
 ### The cause of a move
 
-`tasks.stage_cause_fact_id` holds the Fact that placed the current stage. The fence cannot say it: a person's write sets the fence to the table's maximum, which may be the Fact of another Task. The cause is set only by a Fact write that changes the stage (step 6 above). A Fact write whose stage the Task already holds moves the fence and `stage_revision` and leaves the cause as it is. Any stage decision with no `stageFactId` clears it:
+`tasks.stage_cause_fact_id` holds the Fact that placed the current stage. The fence cannot say it: a person's write sets the fence to the table's maximum, which may be the Fact of another Task. The cause is set only by a Fact write that changes the stage (step 6 above). A Fact write whose stage the Task already holds moves the fence and leaves the cause as it is. Any stage decision with no `stageFactId` clears it:
 
 - a `task.update` with a `stage`, even the same stage;
 - a `task.move` with a `stage`;
@@ -633,9 +632,9 @@ A stored summary clears the failure, resets `attempt_count`, writes the audit en
 
 1. **Nothing was dispatched.** Every step record of the run is still `pending` and the run has no session. A running plugin action can change the source long before its step completes, and no count of tool calls would see that. This is the caller's check, and it comes first.
 2. The Task exists, is not merged, is not at `done` or `dropped`, and still links the ref.
-3. Its `stage_revision` still equals the record's, so no stage decision came after the handoff, not even one that kept the stage: a drag, a `task.update` with a stage, or another handoff.
+3. Its `stage_revision` still equals the record's, so no stage decision came after the handoff, not even one that kept the stage: a drag, a `task.update` with a stage, or another handoff. A stage that a Fact placed is not one ([The fence](#the-fence)).
 4. Its `join_revision` still equals the record's. `join_revision` is a whole number on the Task that SQLite triggers raise whenever a run or a session gets a `task_id` or changes it, on insert or update, whatever code does it: a second workflow's run, a Thread started on it or moved onto it, another Task merged into it. A count of runs and sessions would miss a Thread moved off and another moved on. The triggers need no list of the paths that attach work to a Task, and a stage decision is not the only way a Task changes under an Undo. The handoff's own run is already counted in the value the record holds.
-5. For a Task the handoff made: it links no other ref and has not been edited since.
+5. For a Task the handoff made: it links no other ref and has not been edited since. A stage that a Fact placed is not an edit.
 
 When all hold, a Task the handoff made is deleted. A Task it continued goes back to its stage before, which is itself a stage decision. If the start of the run had ended a failure, `restoreRecoveredFailure` puts the failure back, but only while nothing newer handles it ([A failure and how it ends](#a-failure-and-how-it-ends)). So taking back a handoff that did nothing never erases a failure.
 

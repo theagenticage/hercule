@@ -24,6 +24,7 @@ import { NotifierLayer } from "../notifications";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { taskRepository } from "./repository";
 import { TaskService, TaskServiceLayer, type EntityHandoffReversal } from "./index";
+import { arrange, arrangeConnection, readFacts } from "./testing";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
@@ -335,9 +336,9 @@ describe("reverseEntityHandoff", () => {
   });
 
   /** Hands off a Task that exists already, at `stage`. */
-  const handOffContinuedTask = (stage: TaskStage) =>
+  const handOffContinuedTask = (stage: TaskStage, refs: ReadonlyArray<ExternalRef> = [REF]) =>
     Effect.gen(function* () {
-      const task = yield* createTask(stage);
+      const task = yield* createTask(stage, refs);
       const runId = newId();
       yield* insertRun(runId, task.id, HANDOFF_AT);
       const recorded = yield* recordHandoff({
@@ -425,6 +426,47 @@ describe("reverseEntityHandoff", () => {
     expectStays(result.reversal, reason);
     expect(result.gone).toBe(false);
   });
+
+  it.each([
+    ["new", handOffNewTask, true],
+    // The Task does not link the thing yet, so the handoff links it and writes a fact.
+    ["continued", handOffContinuedTask("planned", []), false],
+  ] as const)(
+    "takes a %s Task back after a fact has moved its card, because a fact is not a stage decision",
+    async (_name, handOff, taskRemoved) => {
+      const result = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          // The thing the handoff links is open, so linking it writes a fact.
+          yield* arrangeConnection;
+          yield* arrange({ ref: REF, lifecycle: "open" });
+          const handoff = yield* handOff;
+          const fact = (yield* readFacts).at(-1)!;
+          const revisionBefore = yield* readStageRevision(handoff.taskId);
+          const moved = yield* tasks.update({
+            id: handoff.taskId,
+            stage: "in-review",
+            stageFactId: fact.id,
+          });
+          const revisionAfter = yield* readStageRevision(handoff.taskId);
+          const reversal = yield* reverse(handoff);
+          const gone = yield* isGone(handoff.taskId);
+          const stageAfter = gone ? undefined : (yield* tasks.read(handoff.taskId)).stage;
+          return { moved, revisionBefore, revisionAfter, reversal, gone, stageAfter };
+        }),
+      );
+      expect(result.moved.stage).toBe("in-review");
+      expect(result.revisionAfter).toBe(result.revisionBefore);
+      expect(result.reversal).toEqual({
+        reversed: true,
+        taskRemoved,
+        stageRestored: !taskRemoved,
+        failureRestored: false,
+      });
+      expect(result.gone).toBe(taskRemoved);
+      expect(result.stageAfter).toBe(taskRemoved ? undefined : "planned");
+    },
+  );
 
   it("keeps a Task that was merged into another, and never touches the survivor", async () => {
     const result = await run(

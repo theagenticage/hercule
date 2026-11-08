@@ -37,7 +37,7 @@ import {
 type WriteKind =
   /** Nothing was written: not the stage, not the fence, no event. */
   | "nothing"
-  /** Only the fence and the stage revision moved. */
+  /** Only the fence moved. */
   | "fence-only"
   /** The stage changed, with its event and revision. */
   | "moved"
@@ -95,31 +95,23 @@ const readObservation = (taskId: string) =>
     } satisfies Observation;
   });
 
-/** Tells what happened to the Task between two observations of it. */
+/**
+ * Tells what happened to the Task between two observations of it. A write
+ * that comes from a fact never raises the stage revision or the revision,
+ * because a fact is not someone deciding or editing: any change of them is
+ * "something else".
+ */
 const classifyWrite = (before: Observation, after: Observation): WriteKind => {
   const sameRow = before.revision === after.revision && before.updatedAt === after.updatedAt;
   const noEvent = before.updatedEvents === after.updatedEvents;
-  if (
-    sameRow &&
-    noEvent &&
-    before.stage === after.stage &&
-    before.fence === after.fence &&
-    before.stageRevision === after.stageRevision
-  ) {
-    return "nothing";
+  const sameStageRevision = before.stageRevision === after.stageRevision;
+  if (sameRow && noEvent && sameStageRevision && before.stage === after.stage) {
+    return before.fence === after.fence ? "nothing" : "fence-only";
   }
   if (
-    sameRow &&
-    noEvent &&
-    before.stage === after.stage &&
-    after.stageRevision === before.stageRevision + 1
-  ) {
-    return "fence-only";
-  }
-  if (
+    sameStageRevision &&
     before.stage !== after.stage &&
-    after.revision === before.revision + 1 &&
-    after.stageRevision === before.stageRevision + 1 &&
+    after.revision === before.revision &&
     after.updatedEvents === before.updatedEvents + 1
   ) {
     return "moved";

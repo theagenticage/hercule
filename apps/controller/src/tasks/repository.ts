@@ -151,7 +151,7 @@ export interface TaskTraces {
   readonly merged: boolean;
   /** True when the Task links the ref that `readTraces` was asked about. */
   readonly linksRef: boolean;
-  /** True when `update` has written the Task since it was created (its `revision` is above 0). */
+  /** True when an edit has written the Task since it was created (its `revision` is above 0). A stage that a fact placed is not an edit. */
   readonly edited: boolean;
   /** True when a Thread (a session) belongs to the Task. */
   readonly hasSession: boolean;
@@ -280,6 +280,12 @@ export interface TaskEdit {
    * `stage` is a stage decision whether or not this is set.
    */
   readonly decidesStage?: boolean;
+  /**
+   * True when the stage write comes from a fact, which is not anyone deciding
+   * the stage. Such a write leaves the stage revision as it was, and the
+   * revision too when the stage is all it changes.
+   */
+  readonly stageFromFact?: boolean;
   /** Must be the coarse reading of `stage`; it is written only when it changed. */
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
@@ -1784,10 +1790,21 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
-        // The revision counts every write of `update`. Unlike `updated_at` it moves even
+        // The revision counts the edits of `update`. Unlike `updated_at` it moves even
         // when the clock has not, so it can tell a Task nobody has edited from one that
-        // was edited in the same millisecond it was created.
-        const sets = [sql`updated_at = ${at}`, sql`revision = revision + 1`];
+        // was edited in the same millisecond it was created. A stage that a fact placed
+        // is not an edit by anyone, so when it is all the write does, the revision stays
+        // and the Undo of a handoff does not read the Task as edited.
+        const editsMoreThanStage =
+          edit.title !== undefined ||
+          edit.description !== undefined ||
+          edit.priority !== undefined ||
+          edit.labels !== undefined ||
+          edit.projectId !== undefined ||
+          provenance.length > 0;
+        const sets = [sql`updated_at = ${at}`];
+        if (edit.stageFromFact !== true || editsMoreThanStage)
+          sets.push(sql`revision = revision + 1`);
         if (edit.title !== undefined) sets.push(sql`title = ${edit.title}`);
         if (edit.description !== undefined) sets.push(sql`description = ${edit.description}`);
         if (edit.priority !== undefined) sets.push(sql`priority = ${edit.priority}`);
@@ -1808,7 +1825,10 @@ const make = Effect.gen(function* () {
         }
         // Unlike `stage_changed_at`, the stage revision also moves for a decision that
         // kept the stage, which is what lets a handoff's Undo see that one was made.
-        if (edit.stage !== undefined || edit.decidesStage === true) {
+        if (
+          (edit.stage !== undefined || edit.decidesStage === true) &&
+          edit.stageFromFact !== true
+        ) {
           sets.push(sql`stage_revision = stage_revision + 1`);
         }
         if (edit.stageFactFence !== undefined) {

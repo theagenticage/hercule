@@ -575,7 +575,9 @@ const make = Effect.gen(function* () {
    * Every stage decision raises the Task's stage revision: a patch that names
    * a `stage` (even the one the Task has, which writes no event), and a
    * `status` that moves the stage. A patch that leaves the stage alone does
-   * not.
+   * not. Neither does a stage that comes from a fact (below): a fact is not a
+   * person or an agent deciding, and the Undo of a handoff reads the revision
+   * to learn whether someone did.
    *
    * A stage decision also settles which facts it overrules, through the
    * Task's fence (`stage_fact_fence`) and cause (`stage_cause_fact_id`):
@@ -586,10 +588,11 @@ const make = Effect.gen(function* () {
    * - With a `stageFactId`, the decision comes from that fact, and
    *   `judgeStageFact` decides whether it may go on. When it is refused, the
    *   stage of the patch is dropped and nothing about the stage happens: no
-   *   event, no revision. When it is accepted, the fence becomes the fact's
+   *   event, no fence. When it is accepted, the fence becomes the fact's
    *   id. If the stage differs, it is written and the cause becomes the fact.
-   *   If the Task holds that stage already, only the fence and the revision
-   *   move, and the cause stays: the fact placed nothing.
+   *   If the Task holds that stage already, only the fence moves, and the
+   *   cause stays: the fact placed nothing. Either way the stage revision
+   *   stays as it was.
    *
    * The other fields of a patch with a `stageFactId` are not guarded by the
    * fact: they apply whether the fact is accepted or refused. The workflows
@@ -643,8 +646,13 @@ const make = Effect.gen(function* () {
           (patch.status === undefined
             ? undefined
             : chooseStageForStatus(before.stage, patch.status));
-        // Asking for a stage is a stage decision even when the Task is there already.
-        if (requestedStage !== undefined) edit.decidesStage = true;
+        // Asking for a stage is a stage decision even when the Task is there
+        // already. A stage that comes from a fact is not anyone deciding it, so
+        // it leaves `stage_revision` alone.
+        if (requestedStage !== undefined) {
+          if (acceptedFactId === undefined) edit.decidesStage = true;
+          else edit.stageFromFact = true;
+        }
         if (isNewValue(stage, before.stage)) {
           changes.stage = { old: before.stage, new: stage };
           edit.stage = stage;
@@ -654,7 +662,7 @@ const make = Effect.gen(function* () {
             edit.status = status;
           }
         }
-        if (edit.decidesStage === true || edit.stage !== undefined) {
+        if (requestedStage !== undefined || edit.stage !== undefined) {
           if (acceptedFactId === undefined) {
             edit.stageFactFence = yield* facts.readHighestFactId();
             edit.stageCauseFactId = null;
@@ -727,10 +735,11 @@ const make = Effect.gen(function* () {
         // If nothing changes, the task is returned as it is, with no row
         // written and no event recorded. The one exception is a stage decision
         // that kept the stage: it raises the stage revision and nothing else,
-        // because an Undo of a handoff has to see that someone decided.
+        // because an Undo of a handoff has to see that someone decided. A fact
+        // is not someone deciding, so a fact only moves the fence.
         if (Object.keys(changes).length === 0) {
-          if (edit.decidesStage === true) {
-            yield* tasks.raiseStageRevision(id);
+          if (requestedStage !== undefined) {
+            if (edit.decidesStage === true) yield* tasks.raiseStageRevision(id);
             yield* facts.setFence(id, edit.stageFactFence!);
             if (edit.stageCauseFactId !== undefined)
               yield* facts.setCause(id, edit.stageCauseFactId);
