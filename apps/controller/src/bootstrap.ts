@@ -46,13 +46,15 @@ import {
   IngestExecutorLayer,
   EntityObservationsLayer,
   OpenSignalsLayer,
+  installShippedWorkflowsOrLog,
   ProviderAccountProbingLayer,
   revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
   DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
   SessionObserverLayer,
-  TaskServiceWithLinkOwnersLayer,
+  TaskServiceWithPortsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkflowValidityObserversLayer,
   type ProviderAccountProbing,
   type RunServiceReference,
@@ -133,7 +135,7 @@ import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
 import { AccountUsage, AccountUsageLayer } from "./usage";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { RunWorkspaceStepActivityLayer } from "./runs";
-import type { WorkflowValidity } from "./workflows";
+import { SHIPPED_WORKFLOWS, type WorkflowValidity } from "./workflows";
 import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
 import type { AgentObserver } from "./agents";
 
@@ -434,7 +436,7 @@ export const bootWith = <A, E>(
       Layer.provide(SessionEditObserverLayer),
       Layer.provide(ConversationMessagesLayer),
       // A reopened Thread joins a Task through the task service.
-      Layer.provide(TaskServiceWithLinkOwnersLayer),
+      Layer.provide(TaskServiceWithPortsLayer),
     );
 
     /**
@@ -458,7 +460,9 @@ export const bootWith = <A, E>(
      * workflows domain's `WorkflowValidity` implements. The workflows domain
      * depends on both domains, so they are joined here too. The observers are
      * merged, so the agent service, built with the operations, finds its own
-     * observer, and the boot finds `WorkflowValidity`.
+     * observer, and the boot finds `WorkflowValidity`. The boot step that
+     * installs the shipped workflows needs the workflow service and the task
+     * service, which the HTTP routes build again for themselves.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -470,6 +474,8 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
       Layer.provideMerge(WorkflowValidityObserversLayer),
+      Layer.provideMerge(WorkflowServiceWithPortsLayer),
+      Layer.provideMerge(TaskServiceWithPortsLayer),
       Layer.provideMerge(HarnessReleasesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(withFleet),
     );
@@ -521,6 +527,12 @@ export const bootWith = <A, E>(
         // plugins. A plugin may have changed while the controller was stopped.
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
+        // After the plugins start, because a shipped source is validated
+        // against their actions and event kinds, and after the stored
+        // workflows were validated again, so a source that cannot be
+        // installed is reported on its own. Before ingest starts, which
+        // happens with the server. A failure is logged and the boot goes on.
+        yield* installShippedWorkflowsOrLog(SHIPPED_WORKFLOWS);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);

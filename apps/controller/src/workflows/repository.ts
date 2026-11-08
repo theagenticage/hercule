@@ -696,23 +696,52 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Inserts a new workflow, disabled, and returns it. */
-    insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
+    /**
+     * Inserts a new workflow and returns it. The workflow is disabled unless
+     * `enabled` is true.
+     */
+    insert: (
+      parsedSource: ParsedSource,
+      savedAt: string,
+      enabled = false,
+    ): Effect.Effect<Workflow, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
           VALUES (${id}, ${bindExactText(parsedSource.source)},
-                  ${JSON.stringify(parsedSource.definition)}, 0, ${savedAt}, ${savedAt})
+                  ${JSON.stringify(parsedSource.definition)}, ${enabled ? 1 : 0}, ${savedAt}, ${savedAt})
         `;
         return {
           id: uuidToString(id),
-          enabled: false,
+          enabled,
           source: parsedSource.source,
           createdAt: savedAt,
           updatedAt: savedAt,
         };
       }),
+
+    /**
+     * Returns the keys of the shipped workflows that were installed once. A
+     * key stays after the user deletes its workflow, so a deleted one is not
+     * installed again.
+     */
+    listShippedKeys: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly key: string }>`SELECT key FROM shipped_workflows`,
+        (rows) => new Set(rows.map((row) => row.key)),
+      ),
+
+    /** Records that the shipped workflow `key` was installed, as the workflow `workflowId`. */
+    insertShippedKey: (
+      key: string,
+      workflowId: string,
+      installedAt: string,
+    ): Effect.Effect<void, SqlError> =>
+      sql`
+        INSERT INTO shipped_workflows (key, workflow_id, installed_at)
+        VALUES (${key}, ${uuidFromString(workflowId)}, ${installedAt})
+      `.pipe(Effect.asVoid),
 
     /**
      * Updates a workflow. Returns the updated workflow and the fields that
