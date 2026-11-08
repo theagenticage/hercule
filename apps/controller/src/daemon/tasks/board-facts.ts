@@ -17,27 +17,19 @@ import { PluginHost } from "../../plugins";
 import { runRepository } from "../../runs";
 import { sessionRepository } from "../../sessions";
 import {
+  describeStageCause,
+  entityFactRepository,
+  groupByTask,
   TaskBoardFacts,
   taskRepository,
   type BoardCardFacts,
   type BoardEntityContext,
   type BoardFacts,
   type BoardFactsRequest,
+  type EntityFact,
+  type StageCauseThing,
 } from "../../tasks";
 import { readEntityEnvironment } from "./entity-environment";
-
-/** Groups the items by their Task id, keeping their order. */
-const groupByTask = <Item extends { readonly taskId: string }>(
-  items: ReadonlyArray<Item>,
-): ReadonlyMap<string, ReadonlyArray<Item>> => {
-  const byTask = new Map<string, Array<Item>>();
-  for (const item of items) {
-    const group = byTask.get(item.taskId);
-    if (group === undefined) byTask.set(item.taskId, [item]);
-    else group.push(item);
-  }
-  return byTask;
-};
 
 /** Orders text by code unit, which is how refs sort in the database. */
 const compareText = (left: string, right: string): number =>
@@ -110,6 +102,26 @@ const buildEntityContext = (
 };
 
 /**
+ * Builds a card's stage cause from the cause fact read for it and the stored
+ * words of its thing. Returns `undefined` for a Task whose stage no fact
+ * placed. Facts are never deleted, so a cause id always has its row.
+ */
+const buildStageCause = (
+  causes: ReadonlyMap<number, EntityFact>,
+  words: ReadonlyMap<string, StageCauseThing>,
+  factId: number | undefined,
+): BoardCardFacts["stageCause"] => {
+  const cause = factId === undefined ? undefined : causes.get(factId);
+  return cause === undefined
+    ? undefined
+    : {
+        factId: cause.id,
+        ref: cause.ref,
+        text: describeStageCause({ ...cause, thing: words.get(cause.ref) }),
+      };
+};
+
+/**
  * Answers the tasks domain's `TaskBoardFacts` port from the sessions and runs
  * repositories, and from the entity records. Each read covers all the listed
  * Tasks at once, so the number of statements is the same for ten Tasks and
@@ -118,6 +130,7 @@ const buildEntityContext = (
  * - the sessions' counts and times, and the sessions the board looks into;
  * - when the latest run of each Task ended;
  * - the workflow name and cause of each failed run a Task shows;
+ * - the fact that placed each Task's stage, with the stored words of its thing;
  * - the refs every Task links, one walk up `part of` from all of them, and
  *   the records and observations of the refs found, which tell whether each
  *   place can be read now.
@@ -142,6 +155,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
     const runs = yield* runRepository;
     const tasksRepository = yield* taskRepository;
     const entities = yield* externalEntityRepository;
+    const factRows = yield* entityFactRepository;
     const host = yield* PluginHost;
 
     return {
@@ -155,6 +169,14 @@ export const TaskBoardFactsLayer: Layer.Layer<
             (yield* runs.listFailures(
               tasks.flatMap((task) => (task.failedRunId === undefined ? [] : [task.failedRunId])),
             )).map((failure) => [failure.runId, failure] as const),
+          );
+          const causes = yield* factRows.listFacts(
+            tasks.flatMap((task) =>
+              task.stageCauseFactId === undefined ? [] : [task.stageCauseFactId],
+            ),
+          );
+          const causeWords = yield* entities.listEntityWords(
+            [...causes.values()].map((cause) => cause.ref),
           );
           const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
           const linkedRefs = [...new Set([...linksByTask.values()].flat())];
@@ -178,6 +200,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
                 lastRunEndedAt: lastRunEndings.get(task.id),
                 failure:
                   task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
+                stageCause: buildStageCause(causes, causeWords, task.stageCauseFactId),
                 linkedRefs: linksByTask.get(task.id) ?? [],
                 entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
                 contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],

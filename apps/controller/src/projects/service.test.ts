@@ -12,7 +12,7 @@ import { NotifierLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput } from "./index";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 type Deps = ProjectService | TaskService | SqlClient.SqlClient;
 
@@ -20,7 +20,7 @@ const layer = ProjectServiceLayer.pipe(
   Layer.provideMerge(ModelProfileLookupLayer),
   Layer.provideMerge(TaskServiceLayer),
   Layer.provideMerge(NotifierLayer),
-  Layer.provideMerge(TaskLinkOwnersLayer),
+  Layer.provideMerge(TaskServicePortsLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

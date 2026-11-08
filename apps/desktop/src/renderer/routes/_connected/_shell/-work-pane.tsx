@@ -21,7 +21,7 @@ import {
 } from "../../../app/pending-intents";
 import { controllerQuery, pluginsQuery } from "../../../app/queries";
 import { useWindowVisible } from "../../../app/window-visibility";
-import { OpeningSheet, type SheetPlaces } from "../../../screens/desk";
+import { LinkSearch, OpeningSheet, type SheetPlaces } from "../../../screens/desk";
 import { markCardDent, readSheetOrigin } from "../../../screens/work/pane-anchor";
 import { computeTaskPaneRect } from "../../../screens/work/task-pane-rect";
 import {
@@ -331,6 +331,16 @@ function PresentedTask({
         read={read}
         plugins={plugins}
         threadPromptWords={threadPromptWords}
+        linkSearch={
+          read.status === "ready" ? (
+            <LinkSearch
+              client={client}
+              size="tall"
+              excludedRefs={read.detail.entities.map((entity) => entity.ref)}
+              onPick={changes.onLinkEntity}
+            />
+          ) : null
+        }
         actions={actions}
       />
     </OpeningSheet>

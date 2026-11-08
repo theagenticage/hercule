@@ -9,8 +9,10 @@ import {
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import { fadeInCards, returnCard, riseArrival } from "./board-flights";
-import { flipBoard } from "./flip-board";
+import { useChangeNote } from "./use-change-note";
 import { useHeldChanges } from "./use-held-changes";
+import { REPLAY_GAP_MS, useMorningReplay, useRememberDrawnBoard } from "./use-morning-replay";
+import { useSelfMoves } from "./use-self-moves";
 import "./motion.css";
 
 const NOTHING_RELEASED: ReadonlySet<string> = new Set();
@@ -40,6 +42,15 @@ export interface BoardReads {
    * that arrived by itself does.
    */
   readonly noteReturnedTask: (taskId: string, how: EndStage) => void;
+  /**
+   * What changed since the user last looked, such as "Since you last looked:
+   * two landed, one new", once the morning replay has played (at once under
+   * Reduce motion, where nothing plays). `null` when nothing changed, or
+   * while the replay still plays.
+   */
+  readonly sinceLastLook: string | null;
+  /** Plays the morning replay again, or `null` when there was none to play. */
+  readonly playReplayAgain: (() => void) | null;
 }
 
 /** What the board has drawn, the read it was made from, and the changes released when it was made. */
@@ -55,23 +66,39 @@ interface Picture {
 interface Inputs {
   readonly logicalBoard: WorkBoard | undefined;
   readonly hiddenIds: ReadonlySet<string>;
+  readonly movedIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
   readonly picture: Picture | undefined;
+  readonly playedKeys: ReadonlySet<string>;
+  readonly isCarrying: boolean;
 }
 
-/** Returns the picture to draw next, and the changes it holds back until the hand is still. */
+/** What `decidePicture` reads of the screen's inputs. */
+type PictureInputs = Omit<Inputs, "logicalBoard" | "picture" | "isCarrying">;
+
+/**
+ * Returns the picture to draw next, and the changes it holds back until the
+ * hand is still. The first picture is `logicalBoard` itself, unless the
+ * morning replay starts from `replayStart`, the board it plays forward from.
+ */
 const decidePicture = (
   picture: Picture | undefined,
+  replayStart: WorkBoard | undefined,
   logicalBoard: WorkBoard,
-  hiddenIds: ReadonlySet<string>,
-  serverBoard: WorkBoard | undefined,
-  released: ReadonlySet<string>,
+  inputs: PictureInputs,
 ): { readonly next: Picture; readonly held: readonly HeldChange[] } => {
+  const { hiddenIds, movedIds, serverBoard, released, playedKeys } = inputs;
+  const shown = picture?.board ?? replayStart;
   const decided =
-    picture === undefined
+    shown === undefined
       ? { board: logicalBoard, held: [] }
-      : holdBackBoardChanges(picture.board, logicalBoard, released, picture.hidden);
+      : holdBackBoardChanges(shown, logicalBoard, {
+          released,
+          hiddenBefore: picture?.hidden ?? hiddenIds,
+          playedKeys,
+          movedByUser: movedIds,
+        });
   return {
     next: { board: decided.board, server: serverBoard, released, hidden: hiddenIds },
     held: decided.held,
@@ -84,6 +111,7 @@ const decidePicture = (
  * (`buildLogicalBoard`), `hiddenIds` the Tasks it left out on purpose, and
  * `serverBoard` the board as the last read gave it; a change of the last is a
  * read, and a change of only the logical board is the user's own change.
+ * `snapshotKey` is where the board as the user last saw it is kept, if the app kept one.
  * Returns the drawn board.
  *
  * - A user's own move is drawn at once, in the render: the code that makes it
@@ -91,26 +119,35 @@ const decidePicture = (
  * - A read is drawn right after the render that brought it. The board is
  *   measured then, before and after, and everything that moved glides on
  *   `self`, because nobody here caused it (`flipBoard`).
- * - A Task that arrives, and a run that fails, wait for a still hand
- *   (`useHeldChanges`), eight seconds at most. Until then the card is not
- *   drawn (an arrival) or keeps the look it had, so it does not rise to the
- *   top of its cell under the pointer (`holdBackBoardChanges`). Then the Task
- *   rises at the end of its cell on `self`, or the failing card takes the top
- *   of its cell, and the toolbar's line shows what happened. A Task that lies past what
- *   its cell shows, or under a folded lane, moves nothing: only the counts
- *   change.
+ * - A Task that arrives, a run that fails, and a card that a fact moves wait
+ *   for a still hand (`useHeldChanges`), eight seconds at most. Until then the
+ *   card is not drawn (an arrival) or keeps the look it had, so it does not
+ *   rise to the top of its cell, or cross the board, under the pointer
+ *   (`holdBackBoardChanges`). Then the Task rises at the end of its cell on
+ *   `self`, or the failing card takes the top of its cell, or the card that a
+ *   fact moved shows its cause and crosses to the end of its new cell
+ *   (`useSelfMoves`), and the toolbar's line shows what happened. A Task
+ *   that lies past what its cell shows, or under a folded lane, moves
+ *   nothing: only the counts change.
  * - While a card is in the hand (`isCarrying`), nothing that nobody caused is
  *   drawn. It all shows when the card is let go, in the same change as the
  *   drop.
  * - A Task the user added (`noteAddedTask`) fades in on `travel` and waits
  *   for nothing.
+ * - The first picture of a visit starts from `snapshot` when it differs from
+ *   the first read, and the changes between them play in turn as above, 1.5
+ *   seconds apart (the morning replay, `planMorningReplay`). Under Reduce
+ *   motion nothing plays: the board is drawn at once and `sinceLastLook`
+ *   says what changed.
  *
  * Nothing is measured unless a read changes what is drawn.
  */
 export const useBoardReads = ({
   logicalBoard,
   hiddenIds,
+  movedIds,
   serverBoard,
+  snapshotKey,
   projects,
   groupBy,
   isCarrying,
@@ -118,7 +155,11 @@ export const useBoardReads = ({
 }: {
   readonly logicalBoard: WorkBoard | undefined;
   readonly hiddenIds: ReadonlySet<string>;
+  /** The Tasks whose stage the user moved and the controller has not answered yet. They are never held back (`LogicalBoard.movedIds`). */
+  readonly movedIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
+  /** Where the board the user last saw is stored (`buildBoardSnapshotKey`), for the morning replay. */
+  readonly snapshotKey: string;
   readonly projects: readonly WorkProject[];
   /** How the board is grouped, as the view saved it. */
   readonly groupBy: string;
@@ -129,6 +170,9 @@ export const useBoardReads = ({
   const [released, setReleased] = useState(NOTHING_RELEASED);
   const [wasCarrying, setWasCarrying] = useState(false);
   if (wasCarrying !== isCarrying) setWasCarrying(isCarrying);
+  const replay = useMorningReplay({ snapshotKey, logicalBoard, isStarting: picture === undefined });
+  const selfMoves = useSelfMoves({ isCarrying });
+  const { playedKeys } = replay;
 
   // The drawn board is derived while rendering, and the picture is kept to
   // compare the next render with.
@@ -136,7 +180,13 @@ export const useBoardReads = ({
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
   if (logicalBoard !== undefined) {
-    const decided = decidePicture(picture, logicalBoard, hiddenIds, serverBoard, released);
+    const decided = decidePicture(picture, replay.startBoard, logicalBoard, {
+      hiddenIds,
+      movedIds,
+      serverBoard,
+      released,
+      playedKeys,
+    });
     held = decided.held;
     const isRead =
       picture !== undefined && (serverBoard !== picture.server || released !== picture.released);
@@ -153,12 +203,31 @@ export const useBoardReads = ({
       drawn = picture.board;
     }
   }
+  useRememberDrawnBoard(snapshotKey, drawn, replay.hasSaved);
 
-  const latest = useRef<Inputs>({ logicalBoard, hiddenIds, serverBoard, released, picture });
+  const latest = useRef<Inputs>({
+    logicalBoard,
+    hiddenIds,
+    movedIds,
+    serverBoard,
+    released,
+    picture,
+    playedKeys,
+    isCarrying,
+  });
   const ownTaskIds = useRef(new Set<string>());
   const returnedTasks = useRef(new Map<string, EndStage>());
   useLayoutEffect(() => {
-    latest.current = { logicalBoard, hiddenIds, serverBoard, released, picture };
+    latest.current = {
+      logicalBoard,
+      hiddenIds,
+      movedIds,
+      serverBoard,
+      released,
+      picture,
+      playedKeys,
+      isCarrying,
+    };
   });
 
   // Draws a read: measures the board, commits the new picture, and plays what
@@ -172,17 +241,18 @@ export const useBoardReads = ({
       const {
         logicalBoard: latestBoard,
         hiddenIds: latestHidden,
+        movedIds: latestMoved,
         serverBoard: latestServer,
         picture: shown,
       } = latest.current;
       if (latestBoard === undefined || shown === undefined) return;
-      const { next } = decidePicture(
-        shown,
-        latestBoard,
-        latestHidden,
-        latestServer,
-        latest.current.released,
-      );
+      const { next } = decidePicture(shown, undefined, latestBoard, {
+        hiddenIds: latestHidden,
+        movedIds: latestMoved,
+        serverBoard: latestServer,
+        released: latest.current.released,
+        playedKeys: latest.current.playedKeys,
+      });
       const commit = (): void => {
         flushSync(() => {
           setPicture(next);
@@ -199,7 +269,13 @@ export const useBoardReads = ({
           !shownIds.has(card.id) &&
           (ownTaskIds.current.has(card.id) || returnedTasks.current.has(card.id)),
       );
-      const { born } = flipBoard(scroller, isCausedByUser ? "travel" : "self", commit);
+      // A card the board released crosses by itself, with its cause and its dent.
+      const { born } = selfMoves.draw(
+        scroller,
+        { shown: shown.board, next: next.board },
+        isCausedByUser ? "travel" : "self",
+        commit,
+      );
       for (const card of born) {
         const id = card.dataset["cardId"];
         if (id === undefined) continue;
@@ -217,17 +293,22 @@ export const useBoardReads = ({
     return () => {
       isCancelled = true;
     };
-  }, [isDeferred, serverBoard, released, scrollRef]);
+  }, [isDeferred, serverBoard, released, scrollRef, selfMoves]);
 
-  const note = useHeldChanges({
+  const { note, say } = useChangeNote(logicalBoard);
+  useHeldChanges({
     held,
     board: logicalBoard,
     projects,
     groupBy,
     isCarrying,
     scrollRef,
-    release: (key) => {
-      setReleased((before) => new Set(before).add(key));
+    startDelays: replay.startDelays,
+    beforeRelease: selfMoves.announce,
+    release: (change) => {
+      selfMoves.noteReleased(change);
+      setReleased((before) => new Set(before).add(change.key));
+      say(change, replay.startDelays.has(change.key) ? REPLAY_GAP_MS : undefined);
     },
   });
 
@@ -241,5 +322,18 @@ export const useBoardReads = ({
     setReleased((before) => new Set(before).add(buildArrivalKey(taskId)));
   }, []);
 
-  return { drawnBoard: drawn, note, noteAddedTask, noteReturnedTask };
+  // Starting again from the first picture draws the replay from the snapshot.
+  const playReplayAgain = useCallback((): void => {
+    setPicture(undefined);
+    setReleased(NOTHING_RELEASED);
+  }, []);
+
+  return {
+    drawnBoard: drawn,
+    note,
+    noteAddedTask,
+    noteReturnedTask,
+    sinceLastLook: replay.summarize(held),
+    playReplayAgain: replay.canPlayAgain ? playReplayAgain : null,
+  };
 };

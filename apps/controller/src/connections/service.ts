@@ -113,6 +113,7 @@ import {
 } from "./oauth";
 import { buildDefaultLabel } from "./default-label";
 import { PluginConfigs } from "./plugin-configs";
+import { ConnectionEntityFacts } from "./entity-facts";
 import { ConnectionObserver } from "./observer";
 import { ConnectionReferences, type ConnectionReference } from "./references";
 import {
@@ -410,6 +411,7 @@ const make = Effect.gen(function* () {
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const references = yield* ConnectionReferences;
+  const entityFacts = yield* ConnectionEntityFacts;
   const observer = yield* ConnectionObserver;
   const activePlugins = yield* ActivePlugins;
   const pluginIntake = yield* PluginIntake;
@@ -1525,7 +1527,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes the connection and every secret it owns, in one transaction,
-     * and records the deletion in the audit log. Fails with `NotFound` when
+     * and records the deletion in the audit log. Records the facts that
+     * losing what the connection read makes about the things Tasks link
+     * (`ConnectionEntityFacts`). Fails with `NotFound` when
      * no connection has the id, and with `InvalidState` while a resource, a
      * trigger or a workflow step still names the connection, because
      * deleting it would break that record.
@@ -1561,7 +1565,7 @@ const make = Effect.gen(function* () {
             yield* Effect.forEach(names, (name) => secrets.delete(owner, name), {
               discard: true,
             });
-            yield* connections.delete(id);
+            yield* entityFacts.recordFactsOfDeletion(id, connections.delete(id));
             yield* audit.append({
               kind: "connection.deleted",
               actor: yield* currentStamp,
@@ -1598,6 +1602,7 @@ export const ConnectionServiceLayer: Layer.Layer<
   | PluginConfigs
   | PluginIntake
   | ConnectionReferences
+  | ConnectionEntityFacts
   | ConnectionObserver
   | ActivePlugins
 > = Layer.effect(ConnectionService)(make);

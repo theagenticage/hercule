@@ -11,7 +11,7 @@ import { useRef, type JSX } from "react";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
 import { buildArrivalKey, type HeldChange } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { useHeldChanges } from "./use-held-changes";
+import { useHeldChanges, type HeldContext } from "./use-held-changes";
 
 const RETURNS = buildPlace("acme:project:returns", "Returns at the depots");
 const PRICING = buildPlace("acme:project:pricing", "Pricing rules");
@@ -23,10 +23,16 @@ const buildPlaceBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   groupings: [{ kind: "acme/project", caption: "Acme project" }],
 });
 
+const NO_DELAYS: ReadonlyMap<string, number> = new Map();
+
 /** The `data-testid` of the element the pointer rests on, or `null` while it rests on none. */
 let hoveredTestId: string | null = null;
 
-const release = vi.fn<(key: string) => void>();
+const release = vi.fn<(change: HeldChange) => void>();
+const beforeRelease = vi.fn<(change: HeldChange, context: HeldContext) => Promise<boolean>>();
+
+/** Returns the keys of the changes released so far, in order. */
+const releasedKeys = (): string[] => release.mock.calls.map(([change]) => change.key);
 
 /**
  * Draws lanes, each holding the cards of `lanes` in its Exploring cell (the
@@ -37,10 +43,14 @@ function Harness({
   held,
   board,
   lanes,
+  isCarrying = false,
+  startDelays = NO_DELAYS,
 }: {
   readonly held: readonly HeldChange[];
   readonly board: WorkBoard;
   readonly lanes: Readonly<Record<string, readonly string[]>>;
+  readonly isCarrying?: boolean;
+  readonly startDelays?: ReadonlyMap<string, number>;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   useHeldChanges({
@@ -48,8 +58,10 @@ function Harness({
     board,
     projects: [],
     groupBy: "acme/project",
-    isCarrying: false,
+    isCarrying,
     scrollRef,
+    startDelays,
+    beforeRelease,
     release,
   });
   return (
@@ -70,6 +82,7 @@ function Harness({
 beforeEach(() => {
   vi.useFakeTimers();
   hoveredTestId = null;
+  beforeRelease.mockResolvedValue(true);
   // The mock calls the real method with the element it was called on, so it needs no binding.
   // oxlint-disable-next-line typescript/unbound-method
   const matches = Element.prototype.matches;
@@ -79,10 +92,18 @@ beforeEach(() => {
       : matches.call(this, selector);
   });
 });
+/** Hides or shows the window the way the browser does. */
+const setVisibility = (state: DocumentVisibilityState): void => {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+};
+
 afterEach(() => {
+  setVisibility("visible");
   vi.useRealTimers();
   vi.restoreAllMocks();
   release.mockReset();
+  beforeRelease.mockReset();
 });
 
 /** Renders the harness, then lets the clock run for `ms` milliseconds. */
@@ -108,7 +129,7 @@ describe("a Task that arrives while the board is grouped by an outside place", (
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_000);
     });
-    expect(release).toHaveBeenCalledWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toContain(buildArrivalKey("arriving"));
   });
 
   it("goes ahead at once when the pointer rests elsewhere", async () => {
@@ -116,7 +137,50 @@ describe("a Task that arrives while the board is grouped by an outside place", (
 
     await renderAndWait(props, 0);
 
-    expect(release).toHaveBeenCalledWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toContain(buildArrivalKey("arriving"));
+  });
+});
+
+describe("a window that hides while a change waits", () => {
+  const arrival = buildCard("arriving", { contextRefs: [RETURNS.ref] });
+  const held = [{ kind: "arrival", cardId: "arriving", key: buildArrivalKey("arriving") } as const];
+  const props = {
+    held,
+    board: buildPlaceBoard(arrival),
+    lanes: { [`place:${RETURNS.ref}`]: ["other"] },
+  };
+
+  it("releases nothing while it is hidden, and waits for a still hand again when it shows", async () => {
+    hoveredTestId = `cell:place:${RETURNS.ref}`;
+    await renderAndWait(props, 1_000);
+
+    setVisibility("hidden");
+    hoveredTestId = null;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+    // A hidden window does not poll for the hand either.
+    expect(vi.getTimerCount()).toBe(0);
+
+    setVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
+  });
+
+  it("releases nothing that has no cause to show while it is hidden", async () => {
+    setVisibility("hidden");
+
+    await renderAndWait(props, 10_000);
+    expect(release).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 });
 
@@ -143,5 +207,81 @@ describe("a run that fails on a Task drawn in two lanes", () => {
     await renderAndWait(props, 5_000);
 
     expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe("a change that waits for something before it is released", () => {
+  const arrival = buildCard("arriving");
+  const held = [{ kind: "arrival", cardId: "arriving", key: buildArrivalKey("arriving") } as const];
+  const props = { held, board: buildBoard(arrival), lanes: { here: ["other"] } };
+
+  it("gives beforeRelease the change and its card, and releases once it resolves true", async () => {
+    let finish: (isReady: boolean) => void = () => undefined;
+    beforeRelease.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    await renderAndWait(props, 0);
+    expect(beforeRelease).toHaveBeenCalledOnce();
+    expect(beforeRelease.mock.calls[0]![0]).toBe(held[0]);
+    expect(beforeRelease.mock.calls[0]![1].card).toBe(arrival);
+    expect(release).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finish(true);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith(held[0]);
+  });
+
+  it("never releases a change whose beforeRelease resolves false", async () => {
+    beforeRelease.mockResolvedValue(false);
+
+    await renderAndWait(props, 5_000);
+
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("aborts the signal beforeRelease got when the change is no longer held", async () => {
+    beforeRelease.mockImplementation(() => new Promise<boolean>(() => undefined));
+    const { rerender } = render(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const { signal } = beforeRelease.mock.calls[0]![1];
+    expect(signal.aborted).toBe(false);
+
+    rerender(<Harness {...props} held={[]} />);
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("starts the wait after its delay", async () => {
+    const delays = new Map([[buildArrivalKey("arriving"), 1_500]]);
+
+    await renderAndWait({ ...props, startDelays: delays }, 1_499);
+    expect(beforeRelease).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
+  });
+
+  it("waits for the drop of a drag, and releases after it", async () => {
+    const { rerender } = render(<Harness {...props} isCarrying />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+
+    rerender(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 });

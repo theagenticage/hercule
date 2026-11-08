@@ -42,7 +42,7 @@ Four designs were prototyped. The one chosen, Round Trip, brought each result ba
 - **Workflows create the Task and raise the follow-up signal.** Rejected, for the coupling described in Context.
 - **Runs only: each run records the signal it came from, and Intake lists those runs.** Rejected. The runs of one chain would show as unrelated rows, and nothing would record that the user has accepted the result.
 - **"In-progress Tasks with a linked run" as the rule for Tracking.** Rejected for an explicit fact, the provenance entry naming the signal. A stand-in rule would pick up any other path that links a run to a Task.
-- **Matching an agent's PR to its Task by the run's branch name.** Rejected. An agent may rename its branch. A PR reaches its Task through the session that made it, once Hercule knows which PR a session's work became.
+- **Matching an agent's PR to its Task by the run's branch name.** Rejected. An agent may rename its branch. A PR reaches its Task through the session that made it, once Hercule knows which PR a session's work became. *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), [ADR 0055](./0055-facts-move-cards-through-editable-workflows.md): the rejection stands for a name the run was given. A controller step now links a pull request to a Task by the branch the Task's ephemeral checkout really has now, against the pull request's head `(remote, branch)`. It follows a rename, matches on the head's remote and not the target's, and links nothing when two live Tasks share a branch. A person can unlink, and the unlink sticks. Everything else here stands.)*
 
 ## Consequences
 

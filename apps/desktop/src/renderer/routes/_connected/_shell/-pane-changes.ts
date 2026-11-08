@@ -6,9 +6,12 @@
  *   shows the question as answered meanwhile (`answerFromPane`).
  * - Try again sends `run.rerun`, closes the pane, and plays the hand-off on
  *   the card once the board shows the failure gone (`useTryAgain`).
+ * - Link and Unlink on Linked send `task.linkEntity` and `task.unlinkEntity`
+ *   for the Task the pane shows, with an Undo (`useTaskLinks`).
  */
 import { useEffect, useRef, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { nameLinkedThing } from "@hercule/client-core/desk";
 import {
   describeEndWhileTryingAgain,
   type EndStage,
@@ -25,6 +28,7 @@ import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import type { CardMoves } from "./-card-moves";
 import { answerFromPane } from "./-pane-answers";
 import { useSettleUnsentAnswers } from "./-settle-unsent-answers";
+import { useTaskLinks } from "./-task-links";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
 /**
@@ -37,7 +41,13 @@ const RETURN_QUIET_MS = 250;
 /** The buttons of the pane that `usePaneChanges` wires. */
 export type PaneChanges = Pick<
   TaskPaneChanges,
-  "onTryAgain" | "onAnswer" | "onSendAnswerAgain" | "onDiscardAnswer" | "onReturn"
+  | "onTryAgain"
+  | "onAnswer"
+  | "onSendAnswerAgain"
+  | "onDiscardAnswer"
+  | "onReturn"
+  | "onLinkEntity"
+  | "onUnlinkEntity"
 >;
 
 /** What `usePaneChanges` returns. */
@@ -101,7 +111,10 @@ export const usePaneChanges = ({
   readonly isBoardRead: boolean;
   /** When the board was last read, in milliseconds, which tells an unsent answer's Task to be looked up again. */
   readonly boardReadAt: number;
-  readonly moves: Pick<CardMoves, "sayWithUndo" | "sayWithoutUndo">;
+  readonly moves: Pick<
+    CardMoves,
+    "sayWithUndo" | "sayWithoutUndo" | "reserveGesture" | "sayWithReservedUndo"
+  >;
   readonly openTaskId: string | null;
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly closePane: () => void;
@@ -136,6 +149,8 @@ export const usePaneChanges = ({
       if (element != null) playHandOffBack(element);
     },
   });
+
+  const taskLinks = useTaskLinks({ client, scope, moves });
 
   // When the pane started to show this Task, for the Return key's quiet moment.
   const shownAt = useRef(0);
@@ -214,6 +229,27 @@ export const usePaneChanges = ({
       },
       onDiscardAnswer: (intentId) => {
         store.discard(intentId);
+      },
+      onLinkEntity: (row) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        taskLinks.link({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          ref: row.ref,
+          // A search row always has an identifier, so this names it the way a linked row is named.
+          thingName: nameLinkedThing({ ...row, noun: row.title }),
+        });
+      },
+      onUnlinkEntity: (row) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        taskLinks.unlink({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          ref: row.ref,
+          thingName: nameLinkedThing(row),
+        });
       },
     },
   };

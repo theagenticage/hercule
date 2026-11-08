@@ -226,7 +226,7 @@ describe("buildLinkedRows", () => {
       claimWords: "Found in the description of PO-2",
       canUnlink: false,
     });
-    expect(fromSelf.hints[0]?.link?.claimWords).toBe("Found in the description");
+    expect(fromSelf.hints[0]?.link).toMatchObject({ claimWords: "Found in the description" });
   });
 
   it("draws the far end from a peer when no place holds it, and a restricted peer as a locked row", () => {

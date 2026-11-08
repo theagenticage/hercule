@@ -10,7 +10,11 @@ import {
   readAncestorRows,
   type AncestorRow,
   type PlaceRow,
+  type RowLink,
 } from "../desk/relation-rows";
+
+/** What a row knows of a link the Task holds itself: no one's words explain it, and the user may remove it. */
+const OWN_LINK: RowLink = { kind: "own", canUnlink: true };
 
 /** What `task.readDetail` carries about the Task's linked things, which is all the rows are built from. */
 export type TaskContext = Pick<TaskDetail, "entities" | "places" | "edges">;
@@ -32,7 +36,8 @@ export interface TaskContextRows {
  *   were linked in.
  * - `linked` is a row per linked thing. An open row's title starts with its
  *   identifier ("SHOP-123 Serve smaller photos"). A thing no Connection can
- *   read is a locked row with neither.
+ *   read is a locked row with neither. Every row is a link of the Task
+ *   itself, so the user can remove it (`canUnlink`).
  */
 export const buildTaskContextRows = (context: TaskContext): TaskContextRows => {
   const index = indexRelationGraph(context);
@@ -47,7 +52,7 @@ export const buildTaskContextRows = (context: TaskContext): TaskContextRows => {
     // `toSorted` is stable, so equal distances keep the order they were found in.
     partOf: [...nearest.values()].toSorted((a, b) => a.depth - b.depth),
     linked: context.entities.map((entity) => {
-      const row = buildPlaceRow(entity);
+      const row: PlaceRow = { ...buildPlaceRow(entity), link: OWN_LINK };
       return row.isLocked || entity.identifier === undefined
         ? row
         : { ...row, title: `${entity.identifier} ${row.title}` };

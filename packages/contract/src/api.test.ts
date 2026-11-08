@@ -151,6 +151,18 @@ const NEW_OPERATIONS = [
   { id: "task.move", requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
   { id: "task.merge", requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },
   {
+    id: "task.linkEntity",
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/link",
+  },
+  {
+    id: "task.unlinkEntity",
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/unlink",
+  },
+  {
     id: "task.undoTryAgain",
     requires: "task.update",
     method: "POST",

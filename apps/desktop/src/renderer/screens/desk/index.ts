@@ -8,6 +8,8 @@
  * - `Card`, `Colleague`: the card sheet, and the colleague standing behind
  *   its top edge. `copyCardForMotion`: a copy of a drawn card to move or to
  *   show where the card was.
+ * - `showCauseLabel`, `openDent`: the label that tells why a card is about
+ *   to move by itself, and the dent that keeps its place open after it left.
  * - `Toolbar`, `ToolButton`, `IconPill`, `FilterChip`, `ClearChipsButton`,
  *   `FindBox`, `ToolMenu` and the menu rows: the toolbar's row, its controls
  *   and its menus.
@@ -17,8 +19,12 @@
  *   chips of what is chosen, for any list of items.
  * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
  * - `useEntitySearch`: the search of things at a source, as Work's Add sheet
- *   and the open card's "Link something" both run it. These two hooks are the
- *   only parts here that read something (the clock, the query cache).
+ *   and the "Link something" search both run it. These two hooks are the only
+ *   parts here that read something (the clock, the query cache).
+ * - `LinkSearch`: the "Link something" button and the search it opens, which
+ *   reaches every source and reads a pasted link. It sits at the foot of the
+ *   Linked section of the details pane and of the Inbox's open card. It reads
+ *   the plugins when the search opens, and the search through `useEntitySearch`.
  * - `useFocusPageOnArrival`: gives the page that scrolls the keyboard focus as
  *   it opens, so its keys act after a click on the sidebar.
  * - `ViewPill`: the pill that names a place and switches between its views.
@@ -40,11 +46,14 @@
  *   done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
+export { showCauseLabel, type CauseLabels } from "./cause-label";
 export { ChoiceMenu, type ChoiceMenuEntry } from "./choice-menu";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";
+export { openDent } from "./dent";
 export { FilterChips, FilterControl } from "./filter-control";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
+export { LinkSearch, type LinkSearchSize } from "./link-search";
 export { LedgerAnswer } from "./ledger-answer";
 export { ProgressBar } from "./progress-bar";
 export { ReadFailure } from "./read-failure";

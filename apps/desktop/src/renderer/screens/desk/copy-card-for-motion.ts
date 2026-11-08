@@ -9,6 +9,7 @@ const LOOK_ATTRIBUTES = [
   "data-access",
   "data-level",
   "data-tone",
+  "data-cause",
 ];
 
 /**

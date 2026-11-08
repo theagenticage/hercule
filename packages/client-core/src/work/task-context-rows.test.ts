@@ -93,6 +93,23 @@ describe("buildTaskContextRows", () => {
     ]);
   });
 
+  it("lets the user remove each linked thing, a locked one too, and never a place above them", () => {
+    const { partOf, linked } = buildTaskContextRows({
+      entities: [
+        TICKET_PLACE,
+        { ref: "tracker:ticket:secret", kind: "tracker/ticket", noun: "Ticket", restricted: true },
+      ],
+      places: [TICKET_PLACE, place(PROJECT, "Pages under a second")],
+      edges: [{ fromRef: TICKET, toRef: PROJECT }],
+    });
+
+    expect(linked.map((row) => row.link)).toEqual([
+      { kind: "own", canUnlink: true },
+      { kind: "own", canUnlink: true },
+    ]);
+    expect(partOf.map((row) => row.link)).toEqual([undefined]);
+  });
+
   it("has no rows for a Task that links nothing", () => {
     expect(buildTaskContextRows({ entities: [], places: [], edges: [] })).toEqual({
       partOf: [],

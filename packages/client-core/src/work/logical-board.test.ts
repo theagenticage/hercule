@@ -113,6 +113,17 @@ describe("buildLogicalBoard", () => {
     expect(board.cards.find((card) => card.id === "b")).toBe(B);
   });
 
+  it("names the Tasks whose stage the user moved, and no other", () => {
+    const reorder: CardChange = { kind: "move", move: { taskId: "b", afterTaskId: null } };
+    const { movedIds } = buildLogicalBoard(SERVER, {
+      ...NOTHING_PENDING,
+      changes: [MOVE_A_BUILDING, reorder],
+    });
+
+    expect([...movedIds]).toEqual(["a"]);
+    expect(buildLogicalBoard(SERVER, NOTHING_PENDING).movedIds.size).toBe(0);
+  });
+
   it("keeps the truncated flag of the server board", () => {
     const truncated = { ...SERVER, truncated: true };
 

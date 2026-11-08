@@ -47,7 +47,7 @@ import {
 } from "../../workflows";
 import { WorkspaceServiceLayer } from "../../workspaces";
 import { RunExecutorLayer, TaskTrackingRunsLayer } from "../runs";
-import { TaskLinkOwnersLayer } from "./link-owners";
+import { TaskServicePortsLayer } from "./task-service";
 
 type Deps = RunService | TaskService | TaskSummaries | TaskTracking | SqlClient.SqlClient;
 
@@ -65,7 +65,7 @@ const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor:
         Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(TaskSummariesLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer))),

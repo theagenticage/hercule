@@ -14,6 +14,7 @@ import type {
   EntityObservation,
   PluginError,
   QualifiedEntityKindDeclaration,
+  TrackedBranch,
 } from "@hercule/plugin-host";
 import type { RecognizeText } from "./entity-recognition";
 
@@ -68,6 +69,19 @@ export class EntityObservations extends Context.Service<
       kind: string,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<string>>;
+    /**
+     * Returns up to `limit` branches, as `(remote, branch)` pairs on remotes
+     * that start with `remotePrefix`, that the Connection should look up pull
+     * requests for now: branches of ephemeral checkouts on live Tasks, not the
+     * default branch, existing on the remote, and not already the head of an
+     * entity that Task links. Each call moves on in a durable rotation per
+     * Connection.
+     */
+    readonly listTrackedBranches: (
+      reporter: EntityReporter,
+      remotePrefix: string,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<TrackedBranch>>;
     /** Records that a ref could not be read. Fails with a `PluginError` when no declared kind owns the ref. */
     readonly reportMissing: (
       reporter: EntityReporter,

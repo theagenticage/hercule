@@ -30,6 +30,7 @@ import { atMost, bounded } from "../strings";
 import {
   EntityEdge,
   EntityGrouping,
+  EntityLifecycle,
   EntityMark,
   EntityPlace,
   MAX_BOARD_GROUPINGS,
@@ -290,6 +291,49 @@ export const TaskUpdatedEventPayload = Schema.Struct({
 export type TaskUpdatedEventPayload = Schema.Schema.Type<typeof TaskUpdatedEventPayload>;
 
 /**
+ * The payload of `task.entityChanged`, which the controller emits when a fact
+ * about a linked External Entity is recorded for a live Task: once per Task
+ * that links the entity. The fact is a stored row, so the event carries its
+ * id.
+ *
+ * A fact is recorded when the entity's lifecycle changed, when a link to it
+ * was added, when a linked ref was observed for the first time, when the last
+ * open link was removed, or when a change to what can be read made the Task's
+ * link counts differ. Nothing else records one: a new title, status or owner
+ * does not.
+ *
+ * `previousLifecycle` is `null` when the entity was only just linked or only
+ * just observed, so there is no earlier lifecycle to report. The event's
+ * `actor` is the system.
+ */
+export const TaskEntityChangedEventPayload = Schema.Struct({
+  taskId: Id,
+  /** The linked entity the fact is about. */
+  ref: ExternalRef,
+  /** The entity's qualified kind, such as `github/pull-request`. */
+  entityKind: Schema.String,
+  lifecycle: EntityLifecycle,
+  /** The lifecycle before this fact, or `null` when the entity was only just linked or observed. */
+  previousLifecycle: Schema.NullOr(EntityLifecycle),
+  /** The fact's id. A stage write that comes from this fact passes it as `stageFactId`. */
+  factId: Schema.Int,
+  /**
+   * How many of the Task's links were open, or could not be read, when this
+   * fact was written. A link to something that cannot be read counts as
+   * open, because what cannot be read cannot be called finished.
+   */
+  openLinks: Schema.Int,
+  /** How many of the Task's links were completed when this fact was written. */
+  completedLinks: Schema.Int,
+  /** When the entity was observed in this state. For display: it is never compared. */
+  observedAt: Timestamp,
+});
+
+export type TaskEntityChangedEventPayload = Schema.Schema.Type<
+  typeof TaskEntityChangedEventPayload
+>;
+
+/**
  * The filters of `task.query`. Within one field, a task matches any of the
  * values; across fields, a task must match every field. There is no `or`
  * across fields and no negation. `text` is a full-text search over the title
@@ -358,6 +402,29 @@ const TASK_UPDATE_FIELDS = {
   removeLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   /** Entries to append. Provenance is never edited and never removed. */
   provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
+  /**
+   * For a workflow that moves a Task because of a fact: the id of the
+   * `task.entityChanged` fact it acts on, from `event.payload.factId`. It
+   * needs `stage`. The write is a fence, so that a late or repeated run never
+   * undoes a move the user made after the fact. It does nothing, and returns
+   * the Task as it is, when:
+   *
+   * - the Task is Done or Dropped;
+   * - the fact was voided because the user unlinked the thing;
+   * - the Task already accounts for this fact or a newer one, because someone
+   *   set a stage by hand or an earlier run used it.
+   *
+   * Otherwise the Task moves to `stage`, and a newer fact is needed to move it
+   * again. The fact must exist and belong to this Task, or the call is refused.
+   */
+  stageFactId: Schema.optionalKey(Schema.Int),
+  /**
+   * With `stageFactId`: moves the Task only if nothing linked to it is still
+   * open and at least one linked thing completed. The links are counted again
+   * when the write happens, because a link can arrive or leave between a fact
+   * and its run. A workflow that lands a card when work finishes sets it.
+   */
+  onlyWhenLinkedWorkFinished: Schema.optionalKey(Schema.Boolean),
 };
 
 /**
@@ -394,12 +461,48 @@ export const refuseStageWithStatus = Schema.makeFilter(
 );
 
 /**
+ * Rejects a task update that sends `stageFactId` without `stage`. The fact
+ * only says why a stage is being written, so with no stage there is nothing
+ * for it to guard. The task update operation, a workflow step and a bound
+ * answer all use this check.
+ */
+export const refuseStageFactWithoutStage = Schema.makeFilter(
+  (update: { readonly [Field in keyof typeof TASK_UPDATE_FIELDS]?: unknown }) =>
+    update.stageFactId !== undefined && update.stage === undefined
+      ? {
+          path: ["stageFactId"],
+          issue:
+            "A task update cannot send stageFactId without stage, because the fact only guards a stage write. Send the stage the fact should move the Task to, or remove stageFactId.",
+        }
+      : undefined,
+);
+
+/**
+ * Rejects a task update that sends `onlyWhenLinkedWorkFinished` without
+ * `stageFactId`. The count is only meaningful for a move that comes from a
+ * fact, and a stage written by hand must not be held back by it. The task
+ * update operation, a workflow step and a bound answer all use this check.
+ */
+export const refuseFinishedCheckWithoutStageFact = Schema.makeFilter(
+  (update: { readonly [Field in keyof typeof TASK_UPDATE_FIELDS]?: unknown }) =>
+    update.onlyWhenLinkedWorkFinished !== undefined && update.stageFactId === undefined
+      ? {
+          path: ["onlyWhenLinkedWorkFinished"],
+          issue:
+            "A task update cannot send onlyWhenLinkedWorkFinished without stageFactId, because it only limits a move that comes from a fact. Send stageFactId as well, or remove onlyWhenLinkedWorkFinished.",
+        }
+      : undefined,
+);
+
+/**
  * The input of a task update. Every field is optional and an absent field is
  * left unchanged, but at least one field must be set.
  */
 export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(
   refuseEmptyTaskUpdate,
   refuseStageWithStatus,
+  refuseStageFactWithoutStage,
+  refuseFinishedCheckWithoutStageFact,
 );
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
@@ -434,6 +537,8 @@ export type TaskMoveInput = Schema.Schema.Type<typeof TaskMoveInput>;
 export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS }).check(
   refuseEmptyTaskUpdate,
   refuseStageWithStatus,
+  refuseStageFactWithoutStage,
+  refuseFinishedCheckWithoutStageFact,
 );
 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
@@ -766,6 +871,13 @@ export const TaskSummary = Schema.Struct({
 export type TaskSummary = Schema.Schema.Type<typeof TaskSummary>;
 
 /**
+ * The most characters of `WorkCard.stageCause.text`. It is built from the
+ * thing's noun (at most 40), its identifier (at most 64) and a short verb, so
+ * 160 is never tighter than what it is built from.
+ */
+export const MAX_STAGE_CAUSE_TEXT = 160;
+
+/**
  * One Task as a card on Work: the Task's place and the three facts a card
  * shows, each worked out on the controller from real rows. The facts are
  * independent: a card can have all three, and none hides another.
@@ -831,6 +943,24 @@ export const WorkCard = Schema.Struct({
    * `MAX_ENTITY_MARKS`.
    */
   entityMarks: atMost(EntityMark, MAX_ENTITY_MARKS),
+  /**
+   * Why the card is in its stage, set only when the current stage came from a
+   * fact about a linked thing. Any other write of the stage clears it: a
+   * drag, an edit, an agent. `text` says what happened in the thing's words,
+   * such as "PR #6221 merged".
+   */
+  stageCause: Schema.optionalKey(
+    Schema.Struct({
+      /**
+       * The id of the fact that placed the stage. A client uses it to tell one
+       * move by a fact from the next: `stageChangedAt` can repeat, when two
+       * writes share a millisecond or the clock steps back.
+       */
+      factId: Schema.Int,
+      ref: ExternalRef,
+      text: bounded(1, MAX_STAGE_CAUSE_TEXT),
+    }),
+  ),
   /**
    * The refs the Task links and everything above them by `part of`, for
    * Group by and Filter. A peer's ancestors are never included: a `linked`
@@ -956,6 +1086,31 @@ export const TaskMergeInput = Schema.Struct({
 });
 
 export type TaskMergeInput = Schema.Schema.Type<typeof TaskMergeInput>;
+
+/**
+ * The input of `task.linkEntity` and `task.unlinkEntity`, beside the Task's id
+ * in the path. The ref travels in the body because it holds `:`, `/` and `#`.
+ */
+export const TaskEntityLinkInput = Schema.Struct({
+  /** The outside thing to link to the Task, or to take away from it. */
+  ref: ExternalRef,
+});
+
+export type TaskEntityLinkInput = Schema.Schema.Type<typeof TaskEntityLinkInput>;
+
+/**
+ * What `task.linkEntity` and `task.unlinkEntity` return: the Task as stored,
+ * and whether the call changed anything. `changed` is false when there was
+ * nothing to do (the Task linked the thing already, or did not link it), so a
+ * client can tell a call that did something from one that did not, and offer
+ * an Undo only for the first.
+ */
+export const TaskEntityLinkResult = Schema.Struct({
+  task: Task,
+  changed: Schema.Boolean,
+});
+
+export type TaskEntityLinkResult = Schema.Schema.Type<typeof TaskEntityLinkResult>;
 
 /** The input of `task.undoTryAgain`, beside the Task's id in the path. */
 export const TaskUndoTryAgainInput = Schema.Struct({
@@ -1109,6 +1264,32 @@ export const task = HttpApiGroup.make("task")
       payload: TaskMergeInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Links an outside thing to a Task by hand. Returns the Task and whether
+     * anything changed. A thing the Task links already changes nothing
+     * (`changed` is false). Linking clears an earlier unlink of the same
+     * thing, so scans may link it again.
+     */
+    // `/tasks/:id/entities/link` has more segments than `/tasks/:id`, so the
+    // router never takes it for that route.
+    HttpApiEndpoint.post("linkEntity", "/tasks/:id/entities/link", {
+      params: { id: Id },
+      payload: TaskEntityLinkInput,
+      success: TaskEntityLinkResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Takes the link to an outside thing away from a Task, and keeps it away:
+     * no scan links it again until someone links it by hand. Returns the Task
+     * and whether anything changed. A thing the Task does not link changes
+     * nothing (`changed` is false).
+     */
+    HttpApiEndpoint.post("unlinkEntity", "/tasks/:id/entities/unlink", {
+      params: { id: Id },
+      payload: TaskEntityLinkInput,
+      success: TaskEntityLinkResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
      * Undoes a Try again: asks the run it started to stop, and puts the

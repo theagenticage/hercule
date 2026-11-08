@@ -25,8 +25,12 @@ A unit of human intent: a described piece of work someone wants done. Work-type-
 _Avoid_: ticket, issue (reserved for external trackers)
 
 **Stage**:
-Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
+Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A shipped workflow may write the stage when a Fact arrives, and the Task's fence makes a person's drag win until a newer Fact arrives. No shipped workflow sets `done`. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
 _Avoid_: step (a workflow's, see Step), status (the coarse reading of the stage, not the stage itself), column (how a board draws a stage), reviewing (the stage is `in-review`)
+
+**Fact (Stage)**:
+A record that a thing a live Task links changed its lifecycle (`open`, `completed` or `abandoned`), or was just linked or first observed with a link. It comes from the External Entity kept true by polls, not from a raw event, so a merge that no event reported is still a Fact. A Fact is a row with an integer id, and that id is its order: never a time. The core writes it, in the transaction of the change, with the Platform Event `task.entityChanged`, and decides nothing about the stage. A workflow acts on it by passing its id to `task.update` as `stageFactId`; the Task's fence refuses a Fact at or below the highest one already accounted for, so a late or repeated Fact never undoes a drag. An unlink voids the Facts of that Task and ref. A Fact is not an outside change shown on a timeline, and not a Runner Fact.
+_Avoid_: event (the Platform Event is what carries a Fact, not the Fact), signal (a **Signal** asks the user for a move), update, change (bare), fence (bare: it is the Task's counter, not the Fact)
 
 **Provenance**:
 A task's record of what created or touched it: entries pointing at events, runs, external refs, the signals handed off onto it, and the Tasks merged into it. Entries are only appended, and an entry is never edited or removed; the one thing that can happen to one is that a Merge moves it, unchanged, to the surviving Task. What lets a later event about the same thing find its existing task.
@@ -510,7 +514,7 @@ An origin of external events. GitHub and Gmail are event-source plugins in v1; c
 _Avoid_: integration, provider
 
 **Platform Event**:
-An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`). Flows through the same pipeline as external events and is routed like them, so triggers and subscriptions can wait on it. An audit entry sits in the same log but is never routed, and is not a platform event.
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`, `task.entityChanged`). `task.entityChanged` carries a Fact: it is emitted once for each live Task that links a thing whose lifecycle changed, and it is the one platform event about a linked thing rather than about a row. Flows through the same pipeline as external events and is routed like them, so triggers and subscriptions can wait on it. An audit entry sits in the same log but is never routed, and is not a platform event.
 _Avoid_: internal event, system event
 
 **Core Kind**:
@@ -553,6 +557,10 @@ _Avoid_: rule, predicate string
 **Workflow**:
 A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. It declares typed inputs, and one may take an External Entity (an *entity input*: the value is its External Ref, with the signal kinds the workflow answers), so the workflow can be handed a card from the Inbox. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
 _Avoid_: recipe
+
+**Shipped Workflow**:
+A workflow the core installs at boot with its source written in code, such as `card-in-review` and `card-landed`, which move a card when a Fact arrives. It is an ordinary workflow once installed: listed, editable, and it can be disabled or deleted. It is installed once per key (`shipped_workflows`) and never upgraded: an edit is never overwritten, and a deleted one never comes back. Who owns a shipped workflow is still open (#502).
+_Avoid_: default workflow, template, built-in (a **Built-in Action** is an operation a step calls), system workflow, preset
 
 **Trigger**:
 A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). What a trigger fires on is its `on`: an Event Selector, or for a start trigger a Schedule. A start trigger whose `on` is a Schedule is a **cron trigger**. Lives inside the workflow, not as a standalone routing entity.

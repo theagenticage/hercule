@@ -35,6 +35,7 @@ import {
   MAX_LIVE_WORKFLOWS,
   type EntityChange,
   type EntityConflict,
+  type EntityLifecycle,
   type EntityEdge,
   type EntityPlace,
   type EntityStatus,
@@ -50,10 +51,16 @@ import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { runRepository } from "../runs";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
-import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
+import {
+  LIVE_TASK_LINKS_SQL,
+  makeSummaryDirtyMarker,
+  taskRepository,
+  type StageCauseThing,
+} from "../tasks";
 import {
   buildEntityFields,
   buildPlace,
+  buildWorkRecordCondition,
   decideContextComplete,
   deriveAccess,
   deriveStale,
@@ -168,6 +175,22 @@ export interface TaskableEntity {
   readonly hasConcern: boolean;
 }
 
+/**
+ * What the rules for a Task's linked work need of a stored record: how much of
+ * it Hercule holds, whether it is work, and whether anyone can read it now.
+ */
+export interface StoredRecordState {
+  /** The qualified kind. A partial record may have none yet, and then this is the empty string. */
+  readonly kind: string;
+  readonly completeness: "full" | "partial";
+  /** True when the record is a full record of a work kind (see `TaskableEntity.isWorkRecord`). */
+  readonly isWorkRecord: boolean;
+  /** Null when the record has no lifecycle yet. */
+  readonly lifecycle: EntityLifecycle | null;
+  /** What any Connection can read of the thing, as `buildEntityFields` derives it. */
+  readonly access: "ok" | "inaccessible" | "deleted";
+}
+
 /** One thing the sheet lists before the user types, as the rows hold it. */
 export interface SuggestionRow {
   readonly ref: string;
@@ -244,6 +267,7 @@ const buildIncomingValues = ({
         observation.progress === undefined ? undefined : JSON.stringify(observation.progress),
       target_date: observation.targetDate,
       source_updated_at: observation.sourceUpdatedAt,
+      source_created_at: observation.sourceCreatedAt,
       source_revision: observation.sourceRevision,
     });
   }
@@ -274,6 +298,7 @@ const buildIncomingValues = ({
     target_date: observation.targetDate ?? null,
     waiting_since: observation.waitingSince ?? null,
     source_updated_at: observation.sourceUpdatedAt,
+    source_created_at: observation.sourceCreatedAt ?? null,
     source_revision: observation.sourceRevision ?? null,
   };
 };
@@ -1497,6 +1522,127 @@ const make = Effect.gen(function* () {
           const row = rows.get(ref);
           return row === undefined ? [] : [readLinkedEntityFacts(row)];
         }),
+      ),
+
+    /**
+     * Returns the stored state (`StoredRecordState`) of each of `refs` that
+     * has a record, by ref. A ref with no record is left out. One statement
+     * however many refs there are, reading only the columns the state needs;
+     * the access is derived in the statement (`deriveAccess`: one good read
+     * is enough, else a deleted one, else none). No Connection or plugin is
+     * consulted: it answers from the rows alone.
+     */
+    readStoredRecordStates: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StoredRecordState>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly kind: string | null;
+              readonly completeness: "full" | "partial";
+              readonly is_work_record: number;
+              readonly lifecycle: EntityLifecycle | null;
+              readonly access: "ok" | "inaccessible" | "deleted";
+            }>`
+              SELECT e.ref, e.kind, e.completeness, e.lifecycle,
+                     CASE WHEN ${sql.literal(buildWorkRecordCondition("e"))}
+                          THEN 1 ELSE 0 END AS is_work_record,
+                     CASE
+                       WHEN EXISTS (SELECT 1 FROM external_entity_observations o
+                                    WHERE o.ref = e.ref AND o.access = 'ok') THEN 'ok'
+                       WHEN EXISTS (SELECT 1 FROM external_entity_observations o
+                                    WHERE o.ref = e.ref AND o.access = 'deleted') THEN 'deleted'
+                       ELSE 'inaccessible'
+                     END AS access
+              FROM external_entities e
+              WHERE e.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) =>
+              new Map(
+                rows.map((row): [string, StoredRecordState] => [
+                  row.ref,
+                  {
+                    kind: row.kind ?? "",
+                    completeness: row.completeness,
+                    isWorkRecord: row.is_work_record === 1,
+                    lifecycle: row.lifecycle,
+                    access: row.access,
+                  },
+                ]),
+              ),
+          ),
+
+    /**
+     * Returns the id of the record of each of `refs`, by ref. A ref with no
+     * record is left out. One statement however many refs there are.
+     */
+    readRecordIds: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly ref: string; readonly id: Uint8Array }>`
+              SELECT ref, id FROM external_entities
+              WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) => new Map(rows.map((row) => [row.ref, uuidToString(row.id)])),
+          ),
+
+    /**
+     * Returns the stored words of each of `refs` that has a record (the noun
+     * and identifier of its kind, its lifecycle and the label of its status),
+     * by ref. A ref with no record is left out. One statement however many
+     * refs there are. A card's stage cause is written from these.
+     */
+    listEntityWords: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StageCauseThing>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly noun: string;
+              readonly identifier: string | null;
+              readonly lifecycle: EntityLifecycle | null;
+              readonly status_label: string | null;
+            }>`
+              SELECT ref, noun, identifier, lifecycle,
+                     json_extract(status, '$.label') AS status_label
+              FROM external_entities
+              WHERE noun IS NOT NULL
+                AND ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) =>
+              new Map(
+                rows.map((row): [string, StageCauseThing] => [
+                  row.ref,
+                  {
+                    noun: row.noun,
+                    identifier: row.identifier,
+                    lifecycle: row.lifecycle,
+                    statusWord: row.status_label,
+                  },
+                ]),
+              ),
+          ),
+
+    /**
+     * Returns the refs the Connection holds a row for (what it reads, and what
+     * it tried to read and could not) that a live Task links. Deleting the
+     * Connection deletes these rows. Only linked refs are returned, because
+     * only they can make a fact, and a Connection may hold thousands of rows.
+     * One statement.
+     */
+    listLinkedObservedRefs: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          SELECT DISTINCT o.ref FROM external_entity_observations o
+          WHERE o.connection_id = ${uuidFromString(connectionId)}
+            AND o.ref IN (SELECT ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}))`,
+        (rows) => rows.map((row) => row.ref),
       ),
 
     /**

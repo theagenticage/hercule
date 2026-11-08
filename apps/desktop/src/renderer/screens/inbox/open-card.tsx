@@ -8,8 +8,10 @@ import {
 } from "@hercule/client-core";
 import {
   buildLinkedRows,
+  listRefsNotToOffer,
   nameLinkedThing,
   readEntityPluginId,
+  type EntityLinkMove,
   type OpenPlaceRow,
   type PlaceRow,
 } from "@hercule/client-core/desk";
@@ -22,7 +24,6 @@ import {
   findFirstOpenLine,
   readOpenCardHandOff,
   readPlaceView,
-  type EntityLinkMove,
   type PlaceView,
 } from "@hercule/client-core/inbox";
 import type { AddRow } from "@hercule/client-core/work";
@@ -30,12 +31,11 @@ import type { EntityRecord, Inbox } from "@hercule/contract";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { entityQuery, userQuery } from "../../app/queries";
 import { ArrowIcon } from "../../icons/arrow";
-import { OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
+import { LinkSearch, OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
 import { OpenCardBody, OpenPlaceBody } from "./open-card-body";
 import { OpenCardHandRows } from "./open-card-hand";
 import { OpenCardLine } from "./open-card-line";
 import { OpenCardLinked } from "./open-card-linked";
-import { OpenCardLinkSearch } from "./open-card-link-search";
 import { readOpenCardPlaces } from "./open-card-places";
 import { OpenCardTimeline } from "./open-card-timeline";
 import type { OpenCard, OpenTarget } from "./use-open-card";
@@ -208,10 +208,10 @@ function OpenCardContents({
         }}
         search={
           words.moves._tag === "off" ? null : (
-            <OpenCardLinkSearch
+            <LinkSearch
               client={client}
-              selfRef={record.ref}
-              links={detail.data.links}
+              size="compact"
+              excludedRefs={listRefsNotToOffer(record.ref, detail.data.links)}
               ownPluginId={readEntityPluginId(record.kind)}
               onPick={(row: AddRow) => {
                 moves.onLink(buildMove(row.ref, row.identifier));

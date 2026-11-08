@@ -8,6 +8,7 @@ import {
 } from "../../connections";
 import { resourceRepository } from "../../resources";
 import { workflowRepository } from "../../workflows";
+import { ConnectionEntityFactsLayer } from "./entity-facts";
 
 /**
  * Provides the connections domain's `ConnectionReferences` from the resources
@@ -49,9 +50,10 @@ const ConnectionReferencesLayer: Layer.Layer<ConnectionReferences, never, SqlCli
 
 /**
  * The connection service with the `ConnectionReferences` it asks before it
- * deletes a Connection. The controller's boot and the test controller both
- * use this one layer, so the two cannot be wired differently.
+ * deletes a Connection, and the `ConnectionEntityFacts` it records the facts
+ * of the delete with. The controller's boot and the test controller both use
+ * this one layer, so the two cannot be wired differently.
  */
 export const ConnectionServiceWithReferencesLayer = ConnectionServiceLayer.pipe(
-  Layer.provide(ConnectionReferencesLayer),
+  Layer.provide(Layer.mergeAll(ConnectionReferencesLayer, ConnectionEntityFactsLayer)),
 );

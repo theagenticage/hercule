@@ -164,12 +164,14 @@ export {
 } from "./sessions";
 export {
   checkSchedulerInterval,
+  installCardWorkflowsOrLog,
   revalidateStoredWorkflowsOrLog,
   runScheduler,
   SchedulerInterval,
   TriggeredRunsLayer,
   WorkflowEntitiesLayer,
   WorkflowRunsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,
 } from "./workflows";
@@ -177,8 +179,10 @@ export {
   runTaskSummaryLoop,
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
+  LinkedEntitiesLayer,
   TaskLinkOwnersLayer,
-  TaskServiceWithLinkOwnersLayer,
+  TaskServicePortsLayer,
+  TaskServiceWithPortsLayer,
 } from "./tasks";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {

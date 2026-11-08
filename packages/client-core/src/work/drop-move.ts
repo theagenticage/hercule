@@ -48,6 +48,11 @@ export interface DropRequest {
  * shows and sends the move; a move that changes nothing is dropped there.
  *
  * - The stage is the request's, or the card's own for a drop on a lane's head.
+ *   The move names it only when the card changes stage: a drop that reorders
+ *   a column must not claim the stage, because the controller reads a stage
+ *   in a move as the user's decision about it (it overrules any later-arriving
+ *   fact about a linked thing). `targetStage` always carries it, for the cards
+ *   dropped along.
  * - `projectId` is named only when the drop is in another lane than the one
  *   the card stands in, and it is `null` for the "No project" lane. A drop in
  *   the card's own lane never touches its Project.
@@ -66,19 +71,20 @@ export interface DropRequest {
 export const buildDropMove = (request: DropRequest): DropMove => {
   const { movingCard, lane, beforeCardId } = request;
   const stage = request.stage ?? movingCard.stage;
+  const stageField = stage === movingCard.stage ? {} : { stage };
   if (lane.lane.outside !== undefined) {
-    return { move: { taskId: movingCard.id, stage } };
+    return { move: { taskId: movingCard.id, ...stageField }, targetStage: stage };
   }
   const isOwnLane = lane.lane.cells.some((cell) =>
     cell.cards.some((card) => card.id === movingCard.id),
   );
   const move: CardMove = {
     taskId: movingCard.id,
-    stage,
+    ...stageField,
     ...(isOwnLane ? {} : { projectId: lane.lane.projectId }),
   };
   const targetProjectId = lane.lane.projectId;
-  if (lane.isFolded) return { move, targetProjectId };
+  if (lane.isFolded) return { move, targetProjectId, targetStage: stage };
 
   const leavingIds = new Set([movingCard.id, ...(request.followerIds ?? [])]);
   const storedCell = (lane.lane.cells.find((cell) => cell.stage === stage)?.cards ?? []).filter(
@@ -91,7 +97,7 @@ export const buildDropMove = (request: DropRequest): DropMove => {
     nextVisibleCardId: beforeCardId ?? firstHiddenCardId,
     movingCardFailed: movingCard.failure !== undefined,
   });
-  return { move: { ...move, afterTaskId }, targetProjectId };
+  return { move: { ...move, afterTaskId }, targetProjectId, targetStage: stage };
 };
 
 /**
@@ -101,19 +107,20 @@ export const buildDropMove = (request: DropRequest): DropMove => {
  * order. On a folded lane the lead card has no card to follow, and each
  * follower goes last in the cell in turn, which gives the same order.
  *
- * A follower names a Project (`targetProjectId`) only when it stands in
- * another one, as the lead card's move does. A drop with no `targetProjectId`
+ * A follower names the stage (`targetStage`) only when it stands in another
+ * one, and a Project (`targetProjectId`) only when it stands in another one,
+ * as the lead card's move does. A drop with no `targetProjectId`
  * (an outside lane) changes the stage only, so no follower names a Project.
  */
 export const buildFollowerMoves = (
-  { move: leadMove, targetProjectId }: DropMove,
+  { move: leadMove, targetProjectId, targetStage = leadMove.stage }: DropMove,
   followers: readonly WorkCard[],
 ): readonly CardMove[] => {
   let previousId = leadMove.taskId;
   return followers.map((card) => {
     const move: CardMove = {
       taskId: card.id,
-      ...(leadMove.stage === undefined ? {} : { stage: leadMove.stage }),
+      ...(targetStage === undefined || card.stage === targetStage ? {} : { stage: targetStage }),
       ...(targetProjectId === undefined || (card.projectId ?? null) === targetProjectId
         ? {}
         : { projectId: targetProjectId }),

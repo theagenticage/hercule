@@ -511,6 +511,16 @@ export const buildDescribe: Effect.Effect<
         if (changes.stage !== undefined) {
           described.push([buildTextPart(`stage → ${changes.stage}`)]);
         }
+        if (changes.stageFactId !== undefined) {
+          described.push([
+            buildTextPart(
+              `only if fact ${changes.stageFactId} is newer than the last stage decision`,
+            ),
+          ]);
+        }
+        if (changes.onlyWhenLinkedWorkFinished === true) {
+          described.push([buildTextPart("only when all linked work is finished")]);
+        }
         if (changes.priority !== undefined) {
           described.push([buildTextPart(`priority → ${changes.priority}`)]);
         }

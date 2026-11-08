@@ -14,6 +14,8 @@
  * - A pull request with a review request and a mention is offered the
  *   workflow. Handing it off makes a Task at `building`, starts one run on
  *   it, ends the review request ("Handed to ...") and leaves the mention open.
+ *   The pull request is open, so the shipped `card-in-review` workflow moves
+ *   the Task's card to In review a moment later.
  *   A step of the run reads `run.taskId` and records a provenance ref on that
  *   Task.
  * - The same workflow is refused while its run is live. A second workflow is
@@ -122,6 +124,18 @@ const readRun = (runId: string): Promise<Run> => readAsUser<Run>(["run", "read",
 const readTask = (taskId: string): Promise<Task> => readAsUser<Task>(["task", "read", taskId]);
 const readSignal = (signalId: string): Promise<Signal> =>
   readAsUser<Signal>(["signal", "read", signalId]);
+
+/**
+ * Waits until the shipped `card-in-review` workflow has moved the Task's card
+ * to In review. Linking an open pull request writes a fact, and the workflow
+ * turns it into that move a moment after the hand-off answers.
+ */
+const waitForCardInReview = (taskId: string): Promise<Task> =>
+  waitFor(
+    `the card of task ${taskId} moving to In review`,
+    () => readTask(taskId),
+    (task) => task.stage === "in-review",
+  );
 
 /** Waits until the step `stepId` of the run is `running`, and returns the run. */
 const waitForStepRunning = (runId: string, stepId: string): Promise<Run> =>
@@ -598,8 +612,9 @@ describe("handing a pull request to a workflow from its card", () => {
     taskId = handed.taskId;
     reviewRunId = handed.runId;
 
-    const task = await readTask(taskId);
-    expect(task).toMatchObject({ title: REVIEWED.title, stage: "building" });
+    // The Task starts at building, and the shipped workflow then moves its card.
+    const task = await waitForCardInReview(taskId);
+    expect(task).toMatchObject({ title: REVIEWED.title });
     expect(task.provenance).toContainEqual(
       expect.objectContaining({ ref: buildPullRequestRef(REVIEWED), runId: reviewRunId }),
     );
@@ -663,7 +678,7 @@ describe("handing a pull request to a workflow from its card", () => {
     expect(await undoHandOff(second.runId)).toEqual(stopped);
     expect(await readRun(second.runId)).toMatchObject({ status: "cancelled" });
     expect(await readRun(reviewRunId)).toMatchObject({ status: "running" });
-    expect(await readTask(taskId)).toMatchObject({ stage: "building" });
+    expect(await readTask(taskId)).toMatchObject({ stage: "in-review" });
   }, 60_000);
 
   it("answers too-late to an Undo after the run ended, and changes nothing", async () => {
@@ -678,7 +693,7 @@ describe("handing a pull request to a workflow from its card", () => {
       stageRestored: false,
       failureRestored: false,
     });
-    expect(await readTask(taskId)).toMatchObject({ stage: "building" });
+    expect(await readTask(taskId)).toMatchObject({ stage: "in-review" });
     expect(await undoHandOff(reviewRunId)).toEqual(late);
   }, 60_000);
 });
@@ -690,7 +705,9 @@ describe("taking a handoff back before its first step started", () => {
     assertSucceeded(await runAsUser(["runner", "drain", runnerId]));
     try {
       const handed = await handOff(HELD_UP.id, workflowIds[HELD]!);
-      expect(await readTask(handed.taskId)).toMatchObject({ stage: "building" });
+      // The shipped workflow moves the card before the Undo, so this takes
+      // back a Task whose stage a fact has set: that is not a stage decision.
+      await waitForCardInReview(handed.taskId);
       expect((await readRun(handed.runId)).steps).toEqual([
         expect.objectContaining({ stepId: "commit", status: "pending" }),
       ]);

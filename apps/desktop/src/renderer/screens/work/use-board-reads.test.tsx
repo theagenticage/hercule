@@ -7,20 +7,23 @@
  * during a drag is tested in `app/motion/still-hand.test.ts`, and the screen
  * as a whole in `work.integration.test.tsx`.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { useRef, type JSX } from "react";
-import { PROJECT_FACET_ID } from "@hercule/client-core/work";
+import { buildBoardSnapshot, PROJECT_FACET_ID } from "@hercule/client-core/work";
 import { buildBoard, buildCard, FAILURE } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
+import { writeSavedBoardSnapshot } from "./board-snapshot-storage";
 import { useBoardReads } from "./use-board-reads";
+
+const SNAPSHOT_KEY = "work-board-snapshot:http://controller.test:noa";
 
 /** Ends the waits that have started, in the order they started. */
 const endWaits: (() => void)[] = [];
 
 vi.mock("../../app/motion", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/motion")>()),
-  waitForStillHand: vi.fn(
+  waitForVisibleStillHand: vi.fn(
     () =>
       new Promise<boolean>((resolve) => {
         endWaits.push(() => {
@@ -42,11 +45,13 @@ function Harness({
   board,
   serverBoard = board,
   hiddenIds = NOTHING_HIDDEN,
+  movedIds = NOTHING_HIDDEN,
   isCarrying = false,
 }: {
   readonly board: WorkBoard;
   readonly serverBoard?: WorkBoard;
   readonly hiddenIds?: ReadonlySet<string>;
+  readonly movedIds?: ReadonlySet<string>;
   readonly isCarrying?: boolean;
   readonly unrelated?: number;
 }): JSX.Element {
@@ -54,7 +59,9 @@ function Harness({
   const reads = useBoardReads({
     logicalBoard: board,
     hiddenIds,
+    movedIds,
     serverBoard,
+    snapshotKey: SNAPSHOT_KEY,
     projects: [],
     groupBy: PROJECT_FACET_ID,
     isCarrying,
@@ -69,6 +76,7 @@ function Harness({
               key={card.id}
               className="desk-card"
               data-card-id={card.id}
+              data-stage={card.stage}
               data-failed={card.failure === undefined ? undefined : ""}
             />
           ))}
@@ -95,6 +103,7 @@ const settle = async (): Promise<void> => {
 };
 
 afterEach(() => {
+  localStorage.clear();
   endWaits.length = 0;
   vi.restoreAllMocks();
 });
@@ -194,5 +203,52 @@ describe("a read while a card is in the hand", () => {
 
     rerender(<Harness board={failed} />);
     expect(findCard("b")!.hasAttribute("data-failed")).toBe(true);
+  });
+});
+
+describe("the morning replay", () => {
+  // A page with no stylesheet counts as Reduce motion, which plays no replay.
+  beforeEach(() => {
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+  });
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--dur-2");
+  });
+
+  it("starts from the snapshot's stage, and leaves a card the user moves where the user put it", async () => {
+    const left = buildBoard(buildCard("a", { stage: "in-review" }), buildCard("b"));
+    const read = buildBoard(
+      buildCard("a", { stage: "landed", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
+      buildCard("b"),
+    );
+    writeSavedBoardSnapshot(SNAPSHOT_KEY, buildBoardSnapshot(left));
+    const { rerender } = render(<Harness board={read} />);
+    expect(findCard("a")!.dataset["stage"]).toBe("in-review");
+
+    // The user drags the card, which is drawn in Review, on to Building. The controller has not
+    // answered, so the card still has the time of the move that the replay plays.
+    const dragged = buildBoard(
+      buildCard("a", { stage: "building", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
+      buildCard("b"),
+    );
+    rerender(<Harness board={dragged} serverBoard={read} movedIds={new Set(["a"])} />);
+    await settle();
+
+    expect(findCard("a")!.dataset["stage"]).toBe("building");
+  });
+
+  it("holds the card back at its snapshot stage without that move", async () => {
+    const left = buildBoard(buildCard("a", { stage: "in-review" }), buildCard("b"));
+    const read = buildBoard(
+      buildCard("a", { stage: "landed", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
+      buildCard("b"),
+    );
+    writeSavedBoardSnapshot(SNAPSHOT_KEY, buildBoardSnapshot(left));
+    const { rerender } = render(<Harness board={read} />);
+
+    rerender(<Harness board={read} unrelated={1} />);
+    await settle();
+
+    expect(findCard("a")!.dataset["stage"]).toBe("in-review");
   });
 });

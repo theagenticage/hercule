@@ -7,6 +7,9 @@
  * that transaction commits. A call that breaks a rule is refused whole, with a
  * `PluginError` that says what was wrong, so a failed poll stores nothing.
  *
+ * A write that changes what a Task counts of a thing it links also writes the
+ * Task's facts, in the same transaction (see `recordingEntityFacts`).
+ *
  * The plugins domain cannot import this one (it declares the Entity
  * Observations port instead), so the host passes the reporter, with the kind
  * declarations of its plugin, into every call.
@@ -35,6 +38,7 @@ import {
   type RecognizedTarget,
   type RecognizeText,
 } from "../plugins";
+import { TaskService } from "../tasks";
 import { announceEntityChanges } from "./announce";
 import {
   buildConflictWarning,
@@ -54,7 +58,7 @@ import { renderEntitySlots, type EntitySlots, type FullEntityObservation } from 
 const MAX_LISTED_ISSUES = 5;
 
 /** The observation fields that hold a time, which the core stores as UTC with milliseconds. */
-const TIME_FIELDS = ["sourceUpdatedAt", "waitingSince", "targetDate"] as const;
+const TIME_FIELDS = ["sourceUpdatedAt", "waitingSince", "targetDate", "sourceCreatedAt"] as const;
 
 const decodeObservations = Schema.decodeUnknownEffect(Schema.Array(EntityObservation), {
   errors: "all",
@@ -350,6 +354,21 @@ const make = Effect.gen(function* () {
   const repository = yield* externalEntityRepository;
   const claims = yield* claimRepository;
   const connections = yield* connectionRepository;
+  const tasks = yield* TaskService;
+
+  /**
+   * Runs `write`, which changes what is stored of `refs`, and records the
+   * facts that change makes about the things Tasks link (a lifecycle change,
+   * a first sight of a linked ref, a change of access that changes what a Task
+   * counts). The repository stays SQL: the rules live in the Task service.
+   *
+   * It costs one statement when no live Task links any of `refs`, which is
+   * the usual poll.
+   */
+  const recordingEntityFacts = <A, E>(
+    refs: ReadonlyArray<string>,
+    write: Effect.Effect<A, E | SqlError>,
+  ): Effect.Effect<A, E | SqlError> => tasks.recordEntityFactsAround(refs, write);
 
   /**
    * Runs `write` in one transaction on behalf of the reporter's Connection,
@@ -401,7 +420,10 @@ const make = Effect.gen(function* () {
     environment: EntityEnvironment,
   ) =>
     Effect.flatMap(
-      repository.refresh({ connectionId, observed, environment }),
+      recordingEntityFacts(
+        observed.map(({ observation }) => observation.ref),
+        repository.refresh({ connectionId, observed, environment }),
+      ),
       announceEntityChanges,
     );
 
@@ -458,14 +480,17 @@ const make = Effect.gen(function* () {
         );
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
-            const changes = yield* repository.reconcile({
-              connectionId: reporter.connectionId,
-              kind: declaration.word,
-              complete: inventory.complete,
-              observed,
-              actor: `plugin:${reporter.pluginId}`,
-              environment,
-            });
+            const changes = yield* recordingEntityFacts(
+              observed.map((entry) => entry.observation.ref),
+              repository.reconcile({
+                connectionId: reporter.connectionId,
+                kind: declaration.word,
+                complete: inventory.complete,
+                observed,
+                actor: `plugin:${reporter.pluginId}`,
+                environment,
+              }),
+            );
             const warningChanged = yield* syncConnectionWarning({
               connectionId: reporter.connectionId,
               kind: declaration.word,
@@ -594,12 +619,15 @@ const make = Effect.gen(function* () {
         }
         yield* writeAsReporter(reporter, (environment) =>
           Effect.gen(function* () {
-            const changes = yield* repository.reportMissing({
-              connectionId: reporter.connectionId,
-              ref,
-              reason,
-              environment,
-            });
+            const changes = yield* recordingEntityFacts(
+              [ref],
+              repository.reportMissing({
+                connectionId: reporter.connectionId,
+                ref,
+                reason,
+                environment,
+              }),
+            );
             yield* announceEntityChanges(changes);
           }),
         );
@@ -607,7 +635,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Stores what a plugin's poll read of External Entities. Used only by the Entity Observations port. */
+/** Stores what a plugin's poll read of External Entities, and records the facts that the change makes about the things Tasks link. Used only by the Entity Observations port. */
 export class ExternalEntityIngest extends Context.Service<
   ExternalEntityIngest,
   Effect.Success<typeof make>
@@ -616,5 +644,5 @@ export class ExternalEntityIngest extends Context.Service<
 export const ExternalEntityIngestLayer: Layer.Layer<
   ExternalEntityIngest,
   never,
-  SqlClient.SqlClient
+  SqlClient.SqlClient | TaskService
 > = Layer.effect(ExternalEntityIngest)(make);

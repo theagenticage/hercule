@@ -347,8 +347,9 @@ describe("a boot after a plugin changed while the controller was stopped", () =>
         bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file", plugins }, () => use),
       );
     const readMark = () =>
-      query<{ invalid_since: string | null }>("SELECT invalid_since FROM workflows")[0]
-        ?.invalid_since;
+      query<{ invalid_since: string | null }>(
+        "SELECT invalid_since FROM workflows WHERE definition ->> 'name' = 'Notes'",
+      )[0]?.invalid_since;
 
     // The workflow calls the action of the `notes` plugin, which is installed.
     await bootWithPlugins(
@@ -419,6 +420,25 @@ describe("a second boot", () => {
     await serve();
     expect(query("SELECT name FROM permission_profiles")).toHaveLength(3);
     expect(query("SELECT key FROM settings")).toHaveLength(6);
+  });
+
+  it("installs the shipped workflows on the first boot only", async () => {
+    const readShippedWorkflows = () =>
+      query<{ key: string; enabled: number }>(
+        `SELECT shipped_workflows.key, workflows.enabled FROM shipped_workflows
+         JOIN workflows ON workflows.id = shipped_workflows.workflow_id ORDER BY key`,
+      );
+
+    await serve();
+    const first = readShippedWorkflows();
+    await serve();
+
+    expect(first).toEqual([
+      { key: "card-in-review", enabled: 1 },
+      { key: "card-landed", enabled: 1 },
+    ]);
+    expect(readShippedWorkflows()).toEqual(first);
+    expect(query("SELECT id FROM workflows")).toHaveLength(2);
   });
 });
 

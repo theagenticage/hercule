@@ -28,7 +28,7 @@ import {
 import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
-import type { NewContribution } from "./repository";
+import type { CatalogEntityKind, NewContribution } from "./repository";
 import { decodeEntityKinds } from "./entity-kinds";
 import { decodeSignalKinds, type RegisteredSignalKind } from "./signal-kinds";
 
@@ -44,6 +44,16 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
   readonly availableToTriage: boolean;
   readonly schema: Schema.Top;
 }
+
+/** Builds the catalog projection of a source's entity kinds. */
+const buildCatalogEntityKinds = (
+  declarations: ReadonlyArray<QualifiedEntityKindDeclaration>,
+): ReadonlyArray<CatalogEntityKind> =>
+  declarations.map(({ word, refPrefix, pace }) => ({
+    kind: word,
+    refPrefix,
+    classification: pace === "context" ? "context" : "work",
+  }));
 
 /**
  * An event source a plugin registered at boot: what the ingest loops need to
@@ -367,7 +377,12 @@ export const registerEventSourceContribution = (
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,
       id,
-      definition: { connectionType: names.connectionType, kinds: catalogued, feeds },
+      definition: {
+        connectionType: names.connectionType,
+        kinds: catalogued,
+        feeds,
+        entityKinds: buildCatalogEntityKinds(entityKinds),
+      },
     });
     sources.push({
       id,

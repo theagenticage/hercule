@@ -60,6 +60,8 @@ import { useViewMotion } from "../../../screens/work/use-view-motion";
 import { useFailedArrival } from "../../../screens/work/use-failed-arrival";
 import { useWorkView } from "../../../screens/work/use-work-view";
 import type { PressedKeys } from "../../../screens/work/work-card";
+import { buildBoardSnapshotKey } from "../../../screens/work/board-snapshot-storage";
+import { SinceLine } from "../../../screens/work/since-line";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
 import { WorkToolbar } from "../../../screens/work/work-toolbar";
 import { useCardMoves } from "./-card-moves";
@@ -165,10 +167,13 @@ export function WorkScreen({
   // The board's motion: what the user does to the view plays as motion, a
   // Task that arrives or a run that fails waits for a still hand, and a
   // working colleague whose card is scrolled out of view stops tapping.
+  const snapshotKey = buildBoardSnapshotKey(url, username);
   const reads = useBoardReads({
     logicalBoard: logical.board,
     hiddenIds: logical.hiddenIds,
+    movedIds: logical.movedIds,
     serverBoard: board.data,
+    snapshotKey,
     projects,
     groupBy: savedView.groupBy,
     isCarrying,
@@ -637,7 +642,14 @@ export function WorkScreen({
           onAdd={() => {
             openAddSheet(chooseAddLane());
           }}
-          line={offlineSince === null ? reads.note : describeOffline(offlineSince)}
+          line={
+            offlineSince !== null
+              ? describeOffline(offlineSince)
+              : (reads.note ??
+                (reads.sinceLastLook === null ? null : (
+                  <SinceLine text={reads.sinceLastLook} onReplay={reads.playReplayAgain} />
+                )))
+          }
         />
       }
       overlays={

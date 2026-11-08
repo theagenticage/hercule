@@ -16,3 +16,47 @@
 .work-toolbar-line:empty {
   display: none;
 }
+
+/* The line that stays after the morning replay: its words, and a 20px button
+   that plays the replay again. The words give up their room first. From the
+   drawing's `.since`. */
+.since {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.since-item {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.since-replay {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--faint);
+}
+.since-replay:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.since-replay:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* The words fade in when the replay ends, by opacity alone. */
+@media (prefers-reduced-motion: no-preference) {
+  .since {
+    animation: since-in var(--m-slow) var(--m-ease) both;
+  }
+}
+@keyframes since-in {
+  from {
+    opacity: 0;
+  }
+}

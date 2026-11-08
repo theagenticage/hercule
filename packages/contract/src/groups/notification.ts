@@ -132,7 +132,10 @@ export const CORE_KIND_PREFIX = "core.";
  * its spawn bound and pauses, and `core.workflow-invalid` is raised when a
  * stored workflow stops validating. `core.account-expiring` and
  * `core.account-failed` are informational: a Provider Account's credential
- * is about to expire, or the provider refused it. Spec 10 §7.2 owns the list.
+ * is about to expire, or the provider refused it. `core.shipped-workflow-failed`
+ * is raised when a workflow that ships with Hercule fails validation at boot
+ * and so is not installed. It names the workflow by its shipped key, and the
+ * next boot that installs it withdraws it. Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
@@ -148,6 +151,7 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.workflow-invalid",
   "core.account-expiring",
   "core.account-failed",
+  "core.shipped-workflow-failed",
 ] as const;
 
 export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];
@@ -198,7 +202,9 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
  * decisions about the same session. A Permission Request has its own kind,
  * so its id is never read as an approval's. A signal kind is named by its
  * qualified name, such as `github/review-requested`. A Provider Account is
- * named by its id, for the notifications about its credential.
+ * named by its id, for the notifications about its credential. A workflow
+ * that ships with Hercule is named by its stable shipped key, such as
+ * `card-landed`, because it may have no workflow row to name.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -213,6 +219,7 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("permissionRequest", Id),
   buildIdSubject("providerAccount", Id),
   buildIdSubject("signalKind", Schema.String),
+  buildIdSubject("shippedWorkflow", Schema.String),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),
 ]);

@@ -377,6 +377,36 @@ describe("task.update stage", () => {
   });
 });
 
+describe("task.update stage fact", () => {
+  it("lists the fact that guards the stage and the finished-work condition, so an approval hides neither", async () => {
+    const line = await run(
+      Effect.gen(function* () {
+        const taskId = yield* insertTask("Fix the login page");
+        return yield* describeOperation({
+          op: "task.update",
+          input: {
+            taskId,
+            stage: "landed",
+            stageFactId: 12,
+            onlyWhenLinkedWorkFinished: true,
+          },
+        });
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("stage → landed"),
+      text(", "),
+      text("only if fact 12 is newer than the last stage decision"),
+      text(", "),
+      text("only when all linked work is finished"),
+    ]);
+  });
+});
+
 describe("task.update provenance", () => {
   it("lists what each entry records", async () => {
     const runId = mintId();

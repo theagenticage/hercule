@@ -7,10 +7,13 @@
  * - the observer ports through which the plugins, agents and connections
  *   domains report the changes that can make a stored workflow invalid, and
  *   the boot step that validates the stored workflows again;
+ * - the boot step that installs the shipped workflows, once;
  * - the Scheduler, the loop that fires cron triggers.
  */
 export { TriggeredRunsLayer, WorkflowRunsLayer } from "./runs";
 export { WorkflowEntitiesLayer } from "./entities";
+export { WorkflowServiceWithPortsLayer } from "./workflow-service";
 export { WorkflowSignalsLayer } from "./signals";
 export { revalidateStoredWorkflowsOrLog, WorkflowValidityObserversLayer } from "./validity";
+export { installCardWorkflows, installCardWorkflowsOrLog } from "./card-workflows";
 export { checkSchedulerInterval, runScheduler, SchedulerInterval } from "./scheduler";

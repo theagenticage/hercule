@@ -317,6 +317,18 @@ const TASK_BOARD_RANK_MIGRATION = 112;
 const ENTITY_LINKS_MIGRATION = 114;
 
 /**
+ * The migration that adds the facts about linked things, the stage fence and
+ * `shipped_workflows`. It only adds tables and columns, so it needs no
+ * fixture of its own. The first boot after it installs the two shipped
+ * workflows and writes a fact for every link to a thing that exists, so
+ * `persistOpenPullRequestRows` seeds the rows that boot works on.
+ */
+const STAGE_FACTS_MIGRATION = 117;
+
+/** The stable keys of the workflows that ship with Hercule. */
+const SHIPPED_WORKFLOW_KEYS = ["card-in-review", "card-landed"] as const;
+
+/**
  * The Tasks whose provenance names a ref, which migration 114 turns into links:
  * one through a handoff entry (it names a signal as well) and one through a plain
  * `ref` entry. Both stay `open`, so Tracking leaves them out.
@@ -334,6 +346,16 @@ const LINKED_TASKS = [
     ref: "github:issue:northwind/market#513",
   },
 ] as const;
+
+/**
+ * The Task that links an open pull request. Its card is at Building, so the
+ * first boot of the upgraded binary has to move it to In review.
+ */
+const PULL_REQUEST_TASK = {
+  id: "0199e0e7-0000-7000-8000-000000000a41",
+  title: "Add a refund button to Northwind Market's order page",
+  ref: "github:pr:northwind/market#842",
+} as const;
 
 /** The project of the board fixture's Tasks. */
 const BOARD_PROJECT_ID = "0199e0e7-0000-7000-8000-000000000b00";
@@ -1711,6 +1733,127 @@ function persistLinkedTaskRows(home: string): boolean {
   }
 }
 
+/**
+ * Writes `PULL_REQUEST_TASK`, an open pull request it links, and the link into
+ * the database the edge binary created. Returns true when it wrote them.
+ *
+ * Runs only for an edge database that has the link tables (migration 114) and
+ * has not run migration 117, the one whose first boot works on these rows. The
+ * rows go straight into the database because the edge binary cannot read
+ * GitHub offline. The Task is at Building, with the rank and stage time that
+ * migrations 110 and 112 require.
+ */
+function persistOpenPullRequestRows(home: string): boolean {
+  const version = readMigrationVersion(home);
+  if (version < ENTITY_LINKS_MIGRATION || version >= STAGE_FACTS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    database
+      .query(
+        `INSERT INTO tasks (id, title, description, status, priority, labels, created_at,
+                            updated_at, status_changed_at, stage, stage_changed_at, board_rank)
+         VALUES (?, ?, '', 'in-progress', 'normal', '[]', ?, ?, ?, 'building', ?, 'V')`,
+      )
+      .run(
+        uuidBlob(PULL_REQUEST_TASK.id),
+        PULL_REQUEST_TASK.title,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+      );
+    database
+      .query(
+        `INSERT INTO external_entities
+           (id, ref, kind, noun, pace, completeness, title, lifecycle, identifier, repository,
+            first_observed_at, updated_at)
+         VALUES (?, ?, 'github/pull-request', 'Pull request', 'fast', 'full', ?, 'open', '#842', ?, ?, ?)`,
+      )
+      .run(
+        uuidBlob(Bun.randomUUIDv7()),
+        PULL_REQUEST_TASK.ref,
+        "Add a refund button",
+        JSON.stringify({
+          target: { remote: "github.com/northwind/market" },
+          head: { remote: "github.com/northwind/market", branch: "add-refund-button" },
+        }),
+        SEEDED_TASK_CREATED,
+        SEEDED_TASK_CREATED,
+      );
+    database
+      .query(
+        `INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+         VALUES (?, ?, ?, 'user', 0)`,
+      )
+      .run(uuidBlob(PULL_REQUEST_TASK.id), PULL_REQUEST_TASK.ref, SEEDED_TASK_CREATED);
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/** Formats the 32 hex digits of a stored id as the dashed UUID the API prints. */
+function formatUuid(hex: string): string {
+  const digits = hex.toLowerCase();
+  return [
+    digits.slice(0, 8),
+    digits.slice(8, 12),
+    digits.slice(12, 16),
+    digits.slice(16, 20),
+    digits.slice(20),
+  ].join("-");
+}
+
+/** A row of `shipped_workflows`, with whether its workflow exists and is enabled (0 when it does not exist). */
+interface ShippedWorkflowRow {
+  readonly key: string;
+  readonly enabled: number;
+}
+
+/** Lists the shipped workflows by key, with whether each workflow is enabled now. */
+function readShippedWorkflows(database: Database): ReadonlyArray<ShippedWorkflowRow> {
+  return database
+    .query(
+      `SELECT s.key AS key, coalesce(w.enabled, 0) AS enabled
+       FROM shipped_workflows s LEFT JOIN workflows w ON w.id = s.workflow_id
+       ORDER BY s.key`,
+    )
+    .all() as ReadonlyArray<ShippedWorkflowRow>;
+}
+
+/** Lists the status and inputs of the runs of a shipped workflow, oldest first. */
+function readRunsOfShippedWorkflow(
+  database: Database,
+  key: (typeof SHIPPED_WORKFLOW_KEYS)[number],
+): ReadonlyArray<{ readonly status: string; readonly inputs: string }> {
+  return database
+    .query(
+      `SELECT r.status AS status, r.inputs AS inputs
+       FROM runs r JOIN shipped_workflows s ON s.workflow_id = r.workflow_id
+       WHERE s.key = ? ORDER BY r.created_at, r.rowid`,
+    )
+    .all(key) as ReadonlyArray<{ readonly status: string; readonly inputs: string }>;
+}
+
+/**
+ * Calls `read` every 250 ms until it returns a value, and returns that value.
+ * Fails, naming `what`, when `deadlineMs` passes first. The answer is read
+ * from the controller's state each time, so no fixed wait decides the result.
+ */
+async function waitUntil<A>(
+  what: string,
+  read: () => Promise<A | undefined>,
+  deadlineMs = 30_000,
+): Promise<A> {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}.`);
+    await sleep(250);
+  }
+}
+
 /** Lists the ids of the Tasks that `hercule task list --ref` finds, in the order it prints them. */
 async function readTaskIdsOnRef(
   ref: string,
@@ -2701,6 +2844,7 @@ describe("upgrading from the previous edge release", () => {
       });
       const taskBoardRowsSeeded = persistTaskBoardRows(home);
       const linkedTaskRowsSeeded = persistLinkedTaskRows(home);
+      const openPullRequestSeeded = persistOpenPullRequestRows(home);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -3464,6 +3608,49 @@ describe("upgrading from the previous edge release", () => {
         }
       }
 
+      // The first boot of this binary installed the two shipped workflows, once
+      // each, enabled. It did so whatever the edge database held.
+      const shippedReader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+      try {
+        const shipped = readShippedWorkflows(shippedReader);
+        expect(shipped.map((row) => row.key)).toEqual([...SHIPPED_WORKFLOW_KEYS]);
+        expect(shipped.map((row) => row.enabled)).toEqual([1, 1]);
+      } finally {
+        shippedReader.close();
+      }
+
+      if (openPullRequestSeeded) {
+        // The Task linked an open pull request, so the first install wrote a fact
+        // for it and the shipped workflow moved its card from Building to In
+        // review. The workflow ran once for the Task, and finished.
+        const inReview = await waitUntil("the card to reach In review", async () => {
+          const task = expectJson<ReadTask>(
+            await runCli(["task", "read", PULL_REQUEST_TASK.id, "--json"], upgraded),
+          );
+          return task.stage === "in-review" ? task : undefined;
+        });
+        expect(inReview.title).toBe(PULL_REQUEST_TASK.title);
+        const runReader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          const runs = await waitUntil("the shipped run to finish", () => {
+            const rows = readRunsOfShippedWorkflow(runReader, "card-in-review");
+            return Promise.resolve(
+              rows.every((row) => row.status === "completed") ? rows : undefined,
+            );
+          });
+          expect(runs.map((row) => JSON.parse(row.inputs) as unknown)).toMatchObject([
+            { task_id: PULL_REQUEST_TASK.id },
+          ]);
+          expect(readRunsOfShippedWorkflow(runReader, "card-landed")).toEqual([]);
+        } finally {
+          runReader.close();
+        }
+      } else {
+        console.log(
+          `Skipping the pull request fixture: the edge database has no link tables, or already ran migration ${String(STAGE_FACTS_MIGRATION)}.`,
+        );
+      }
+
       if (taskStageRows !== undefined) {
         const readTask = async (id: string) =>
           expectJson<ReadTask>(await runCli(["task", "read", id, "--json"], upgraded));
@@ -3893,6 +4080,7 @@ describe("upgrading from the previous edge release", () => {
               1 +
               (taskBoardRowsSeeded ? BOARD_TASKS.length : 0) +
               (linkedTaskRowsSeeded ? LINKED_TASKS.length : 0) +
+              (openPullRequestSeeded ? 1 : 0) +
               created,
           });
           expect(
@@ -3936,6 +4124,71 @@ describe("upgrading from the previous edge release", () => {
         ).toEqual({ count: 0 });
       } finally {
         accountReader.close();
+      }
+
+      // A restart installs nothing more, and a workflow the user deleted does not
+      // come back. Delete one shipped workflow, restart, and read both tables.
+      const shippedBefore = (() => {
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          return reader
+            .query(
+              "SELECT key, hex(workflow_id) AS workflow_id, installed_at FROM shipped_workflows ORDER BY key",
+            )
+            .all() as ReadonlyArray<{ key: string; workflow_id: string; installed_at: string }>;
+        } finally {
+          reader.close();
+        }
+      })();
+      expect(shippedBefore.map((row) => row.key)).toEqual([...SHIPPED_WORKFLOW_KEYS]);
+      const deletedKey = "card-landed";
+      const deletedWorkflowId = shippedBefore.find((row) => row.key === deletedKey)!.workflow_id;
+      controller = await startOnPort({
+        home,
+        binary: newBinary,
+        port,
+        env: { PATH: `${standIns.folder}${delimiter}${process.env["PATH"] ?? ""}` },
+      });
+      const deleted = await runCli(
+        ["workflow", "delete", formatUuid(deletedWorkflowId), "--json"],
+        upgraded,
+      );
+      expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
+      expect(await controller.stop()).toBe(0);
+      controller = await startOnPort({
+        home,
+        binary: newBinary,
+        port,
+        env: { PATH: `${standIns.folder}${delimiter}${process.env["PATH"] ?? ""}` },
+      });
+      expect(await controller.stop()).toBe(0);
+      controller = undefined;
+      const restartReader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+      try {
+        // Both rows are as they were: the deleted key kept its row, so it was not
+        // installed again, and the kept workflow was not installed a second time.
+        expect(
+          restartReader
+            .query(
+              "SELECT key, hex(workflow_id) AS workflow_id, installed_at FROM shipped_workflows ORDER BY key",
+            )
+            .all(),
+        ).toEqual(shippedBefore);
+        expect(readShippedWorkflows(restartReader)).toEqual([
+          { key: "card-in-review", enabled: 1 },
+          { key: "card-landed", enabled: 0 },
+        ]);
+        expect(
+          restartReader
+            .query("SELECT count(*) AS count FROM workflows WHERE hex(id) = ?")
+            .get(deletedWorkflowId),
+        ).toEqual({ count: 0 });
+        if (openPullRequestSeeded) {
+          // The restart started no second run for the Task.
+          expect(readRunsOfShippedWorkflow(restartReader, "card-in-review")).toHaveLength(1);
+        }
+      } finally {
+        restartReader.close();
       }
     } finally {
       await controller?.stop().catch(() => -1);

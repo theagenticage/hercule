@@ -1,0 +1,121 @@
+/* The "Link something" search under a Linked section, on the pane and on the
+   Inbox's open card: the drawing's `.o-add`, `.o-find` and `.o-found`. */
+.link-search {
+  position: relative;
+  margin-top: 2px;
+}
+.link-search-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.link-search-open:hover {
+  color: var(--ink);
+}
+.link-search-sources {
+  margin: 2px 0 6px;
+}
+.link-search-input {
+  width: 100%;
+  min-height: calc(28px + var(--text-size-step));
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.link-search-input::placeholder {
+  color: var(--faint);
+}
+.link-search-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.link-search-found {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.link-search-go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 24px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  color: inherit;
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+  text-align: left;
+}
+.link-search-go:hover,
+.link-search-go:focus-visible {
+  background: var(--hover);
+}
+.link-search-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--mark-ink);
+}
+.link-search-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-search-go small {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: var(--line-16);
+}
+.link-search-state {
+  flex: none;
+  color: var(--muted);
+}
+
+/* The tall rows of the details pane: the button and what the search finds are
+   as tall as the pane's other rows (32px). The icon and the mark are 13px with
+   4px beside them and the gap is 8px, which puts the words where the titles
+   above start, and every value is on the 4px grid. */
+.link-search.is-tall {
+  margin-top: 0;
+}
+.is-tall .link-search-open,
+.is-tall .link-search-go {
+  gap: 8px;
+  width: calc(100% + 16px);
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.is-tall .link-search-open {
+  display: flex;
+  color: var(--muted-firm);
+}
+.is-tall .link-search-open:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.is-tall .link-search-open svg {
+  margin: 0 4px;
+  color: var(--faint);
+}
+.is-tall .link-search-mark {
+  margin: 0 4px;
+}

@@ -36,7 +36,7 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
@@ -179,7 +179,10 @@ export const buildPluginStack = () => {
         Layer.provide(IngestExecutorLayer),
         // Merged, so a test can build an ingest context of its own.
         Layer.provideMerge(OpenSignalsLayer),
-        Layer.provideMerge(EntityObservationsLayer),
+        // The ingest records Task facts, which are Platform Events. Only the
+        // ingest gets the writer: a service of its own in the stack's output
+        // changes how the layers above it are built.
+        Layer.provideMerge(EntityObservationsLayer.pipe(Layer.provide(PlatformEventsLayer))),
       ),
     ),
     Layer.provideMerge(ConnectionTypesLayer),

@@ -4,12 +4,12 @@
  * before any frame is sent, so no runner needs to answer.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { Duration, Effect, Layer, Option, Redacted } from "effect";
+import { Deferred, Effect, Layer, Option, Redacted } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ProbeResult } from "@hercule/protocol";
 import { CurrentActor } from "../../actor";
 import { AssistantService } from "../../assistants";
-import { withTransaction } from "../../db";
+import { AfterCommit, withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
 import {
   ModelCatalogs,
@@ -217,6 +217,33 @@ const withStubbedRunner = <A, E>(
   );
 };
 
+/**
+ * Runs `body` with a `Deferred` that completes when a Model Catalog read has
+ * been stored. The operations under test read the catalog on a fiber of their
+ * own and return without waiting, so a test waits on this instead of sleeping.
+ *
+ * The signal is the commit of the transaction that stores the read: after every
+ * commit the listener checks whether any catalog has been read. A catalog read
+ * is the last frame these operations send, so once it is stored the requests
+ * the stubbed runner received are all there will be.
+ */
+const withCatalogReadStored = <A, E, R>(
+  body: (catalogReadStored: Deferred.Deferred<void>) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const catalogs = yield* ModelCatalogs;
+    const catalogReadStored = yield* Deferred.make<void>();
+    const listener = {
+      publish: () =>
+        Effect.flatMap(catalogs.listSummaries(), (summaries) =>
+          [...summaries.values()].some((summary) => summary.readAt !== null)
+            ? Deferred.succeed(catalogReadStored, undefined)
+            : Effect.void,
+        ).pipe(Effect.asVoid, Effect.orDie),
+    };
+    return yield* body(catalogReadStored).pipe(Effect.provideService(AfterCommit, listener));
+  });
+
 const SIGNED_IN_RESULT: ProbeResult = {
   harnessVersion: "1.0.0",
   auth: { status: "ok", identity: "someone@example.com" },
@@ -298,20 +325,19 @@ describe("providerAccount.submitSignInCode for a token account", () => {
     const outcome = await withStubbedRunner(
       answerWith({ ok: true, token: "tok-secret" }),
       (service, sent) =>
-        Effect.gen(function* () {
-          const catalogs = yield* ModelCatalogs;
-          const runner = yield* addRunner("laptop");
-          const added = yield* addAccount({ kind: TOKEN_KIND });
-          yield* service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" });
-          // The read runs on a fiber of its own; wait for its outcome.
-          let catalog = yield* catalogs.read(added.id);
-          for (let attempt = 0; attempt < 200 && catalog.readAt === null; attempt++) {
-            yield* Effect.sleep(Duration.millis(5));
-            catalog = yield* catalogs.read(added.id);
-          }
-          yield* Effect.sleep(Duration.millis(30));
-          return { catalog, probes: sent.filter((one) => one._tag === "probeRequest") };
-        }),
+        withCatalogReadStored((catalogReadStored) =>
+          Effect.gen(function* () {
+            const catalogs = yield* ModelCatalogs;
+            const runner = yield* addRunner("laptop");
+            const added = yield* addAccount({ kind: TOKEN_KIND });
+            yield* service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" });
+            yield* Deferred.await(catalogReadStored);
+            return {
+              catalog: yield* catalogs.read(added.id),
+              probes: sent.filter((one) => one._tag === "probeRequest"),
+            };
+          }),
+        ),
     );
 
     // The check, and the read.
@@ -556,21 +582,19 @@ describe("a device sign-in that the runner reports as ended", () => {
 describe("providerAccount.create", () => {
   it("probes the new account on the runners and reads its catalog without waiting, when it came with a key", async () => {
     const outcome = await withStubbedRunner(answerWith({ ok: true }), (service, sent) =>
-      Effect.gen(function* () {
-        const catalogs = yield* ModelCatalogs;
-        yield* addRunner("laptop");
-        const created = yield* service.create({
-          providerId: "acme/acme",
-          kind: KEY_KIND,
-          credentials: { apiKey: "sk-1" },
-        });
-        // The sweep runs on a fiber of its own; wait until its read is stored.
-        for (let attempt = 0; attempt < 50; attempt++) {
-          if ((yield* catalogs.read(created.id)).readAt !== null) break;
-          yield* Effect.sleep("20 millis");
-        }
-        return { created, sent: [...sent] };
-      }),
+      withCatalogReadStored((catalogReadStored) =>
+        Effect.gen(function* () {
+          yield* addRunner("laptop");
+          const created = yield* service.create({
+            providerId: "acme/acme",
+            kind: KEY_KIND,
+            credentials: { apiKey: "sk-1" },
+          });
+          // The sweep runs on a fiber of its own; wait until its read is stored.
+          yield* Deferred.await(catalogReadStored);
+          return { created, sent: [...sent] };
+        }),
+      ),
     );
 
     // The probe of the pair, and the catalog read.
@@ -589,8 +613,9 @@ describe("providerAccount.create", () => {
     const outcome = await withStubbedRunner(answerWith({ ok: true }), (service, sent) =>
       Effect.gen(function* () {
         yield* addRunner("laptop");
+        // Nothing is forked for an account without credentials, so there is
+        // nothing to wait for before looking at what was sent.
         const created = yield* service.create({ providerId: "acme/acme", kind: MACHINE_KIND });
-        yield* Effect.sleep("100 millis");
         return { created, sent: [...sent] };
       }),
     );
@@ -604,23 +629,23 @@ describe("providerAccount.create", () => {
 describe("providerAccount.refresh", () => {
   it("answers the account at once, then reads its Model Catalog with one probe, however many runners it could probe", async () => {
     const outcome = await withStubbedRunner(answerWith({ ok: true }), (service, sent) =>
-      Effect.gen(function* () {
-        const catalogs = yield* ModelCatalogs;
-        const added = yield* addAccount({ kind: KEY_KIND });
-        yield* storeCredential(added.id, "apiKey");
-        yield* addRunner("laptop");
-        yield* addRunner("server");
-        const answered = yield* service.refresh(added.id);
-        // The read runs on a fiber of its own; wait for its outcome.
-        let catalog = yield* catalogs.read(added.id);
-        while (catalog.readAt === null) {
-          yield* Effect.sleep(Duration.millis(5));
-          catalog = yield* catalogs.read(added.id);
-        }
-        // A refresh sweep would still be probing the second runner; give it time.
-        yield* Effect.sleep(Duration.millis(50));
-        return { answered, catalog, probes: sent.filter((one) => one._tag === "probeRequest") };
-      }),
+      withCatalogReadStored((catalogReadStored) =>
+        Effect.gen(function* () {
+          const catalogs = yield* ModelCatalogs;
+          const added = yield* addAccount({ kind: KEY_KIND });
+          yield* storeCredential(added.id, "apiKey");
+          yield* addRunner("laptop");
+          yield* addRunner("server");
+          const answered = yield* service.refresh(added.id);
+          // The read runs on a fiber of its own; wait for its outcome.
+          yield* Deferred.await(catalogReadStored);
+          return {
+            answered,
+            catalog: yield* catalogs.read(added.id),
+            probes: sent.filter((one) => one._tag === "probeRequest"),
+          };
+        }),
+      ),
     );
 
     expect(outcome.answered).toMatchObject({ modelCount: 0, catalogReadAt: null });

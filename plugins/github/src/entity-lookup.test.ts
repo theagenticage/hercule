@@ -26,6 +26,7 @@ const pullRequest = (number: number) => ({
   bodyText: "",
   isDraft: false,
   state: "OPEN",
+  createdAt: "2026-10-30T08:00:00Z",
   updatedAt: "2026-11-01T10:00:00Z",
   author: { login: "marta-vos" },
   repository: REPOSITORY,

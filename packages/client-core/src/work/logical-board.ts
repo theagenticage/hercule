@@ -33,6 +33,12 @@ export interface LogicalBoard {
    * board shows it at once instead of holding it back as an arrival.
    */
   readonly hiddenIds: ReadonlySet<string>;
+  /**
+   * The Tasks whose stage the user moved and the controller has not answered
+   * yet. The drawn board never holds such a card back at the stage it had
+   * (`holdBackBoardChanges`): the user chose where it is.
+   */
+  readonly movedIds: ReadonlySet<string>;
 }
 
 /**
@@ -58,5 +64,10 @@ export const buildLogicalBoard = (
   const hiddenIds = new Set(
     heldMerges.map((merge) => merge.taskId).filter((id) => answered.some((card) => card.id === id)),
   );
-  return { board, hiddenIds };
+  const movedIds = new Set(
+    changes.flatMap((change) =>
+      change.kind === "move" && change.move.stage !== undefined ? [change.move.taskId] : [],
+    ),
+  );
+  return { board, hiddenIds, movedIds };
 };

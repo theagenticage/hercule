@@ -171,6 +171,23 @@ button.task-pane-note:hover {
 .task-pane-context .relation-row.is-locked .relation-title {
   color: var(--muted);
 }
+/* The button that removes a link stands over the end of its row while the row is reached for, and the state gives way to it. In the shared rows the button sits beside the state, which would push the states of Linked 30px short of the column the rows of Part of end in. */
+.task-pane-context .relation-row.has-unlink .relation-unlink {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+}
+.task-pane-context .relation-row.has-unlink:hover .relation-end,
+.task-pane-context .relation-row.has-unlink:focus-within .relation-end {
+  opacity: 0;
+}
+/* What changed at the source, under the title: the two lines fill the row, so the row needs no padding of its own. */
+.task-pane-context .relation-text {
+  padding: 0;
+}
 .task-pane-left {
   margin: 0;
   line-height: 19px;

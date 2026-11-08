@@ -740,6 +740,14 @@ export const CLI = {
         flag: "provenance",
         help: "A JSON entry to append to the record of what has touched this task; provenance is never edited and never removed.",
       },
+      stageFactId: {
+        flag: "stage-fact",
+        help: "For workflows: the id of the fact a stage write comes from, with --stage. The write does nothing if the task is done or dropped, the fact was voided by an unlink, or the task already accounts for this fact or a newer one because someone set a stage by hand. A person at a terminal has no use for it.",
+      },
+      onlyWhenLinkedWorkFinished: {
+        flag: "only-when-linked-work-finished",
+        help: "For workflows, with --stage-fact: true moves the task only if nothing linked to it is still open and at least one linked thing completed. The links are counted again when the write happens.",
+      },
     },
   },
   "task.move": {
@@ -796,6 +804,38 @@ export const CLI = {
         "one of the tasks is done or dropped; reopen it with `hercule task update --stage` first. Merging a task into itself, or a task already merged, is refused as invalid input",
       validation:
         "the merged task would hold more labels or a longer description than a task may; shorten one of them first, or leave the merge",
+    },
+  },
+  "task.linkEntity": {
+    command: "task link",
+    help: "Links an outside thing, such as a pull request or a ticket, to a task by hand. The task then shows it, and its card follows what happens to it. A thing the task links already changes nothing. If you unlinked the thing before, linking it again lets scans link it once more. Says whether anything changed; with `--json` it returns the task and `changed`.",
+    examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      ref: {
+        flag: "ref",
+        help: "The thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it. A flag, not an argument, because a ref holds characters a shell treats as special: quote it.",
+      },
+    },
+  },
+  "task.unlinkEntity": {
+    command: "task unlink",
+    help: "Takes an outside thing away from a task and keeps it away. No scan links it again, and changes it had queued for the task's card do nothing. Linking it by hand again undoes this. Nothing is changed at the source, and the task's record of where it came from is kept. A thing the task does not link changes nothing. Says whether anything changed; with `--json` it returns the task and `changed`.",
+    examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      ref: {
+        flag: "ref",
+        help: "The external ref of the linked thing to take away. A flag, not an argument, because a ref holds characters a shell treats as special: quote it.",
+      },
     },
   },
   // Exists only for the sidebar's failed-run dot, which reads it on every

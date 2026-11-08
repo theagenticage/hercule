@@ -74,8 +74,9 @@ import {
   ProviderAccountSignInDeadline,
   SessionEditObserverLayer,
   SessionObserverLayer,
-  TaskServiceWithLinkOwnersLayer,
+  TaskServiceWithPortsLayer,
   revalidateStoredWorkflowsOrLog,
+  WorkflowServiceWithPortsLayer,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -89,7 +90,9 @@ import {
   type AuditKind,
   type PlatformEventKind,
 } from "../events";
-import { NotifierLayer } from "../notifications";
+import { Notifier, NotifierLayer } from "../notifications";
+import { TaskService } from "../tasks";
+import { WorkflowService } from "../workflows";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
@@ -185,7 +188,7 @@ const buildServices = (
           Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
           // As in the real boot: a reopened Thread joins a Task.
-          Layer.provide(TaskServiceWithLinkOwnersLayer),
+          Layer.provide(TaskServiceWithPortsLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.
@@ -203,6 +206,10 @@ const buildServices = (
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),
+        // As in the real boot: the step that installs the shipped workflows
+        // uses the workflow service and the task service.
+        Layer.provideMerge(WorkflowServiceWithPortsLayer),
+        Layer.provideMerge(TaskServiceWithPortsLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
             Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
@@ -453,6 +460,23 @@ export type LiveSessionsServices =
   | TextGeneration
   | SqlClient.SqlClient;
 
+/**
+ * Runs an effect against the running controller's workflow service, its
+ * task service, its notifier and its database, as the boot does, and returns the effect's
+ * `Exit`. Tests use it to run the boot step that installs the shipped
+ * workflows with a list of sources of their own.
+ */
+export type ShippedWorkflowServicesRunner = <A, E>(
+  effect: Effect.Effect<A, E, ShippedWorkflowServices>,
+) => Promise<Exit.Exit<A, E>>;
+
+/** What `ShippedWorkflowServicesRunner` provides. */
+export type ShippedWorkflowServices =
+  | WorkflowService
+  | Notifier
+  | TaskService
+  | SqlClient.SqlClient;
+
 /** The user that `LiveSessionsRunner` runs an effect as. */
 const TEST_USER: Actor = {
   _tag: "user",
@@ -479,6 +503,7 @@ export interface ServerHarness {
   readonly joinToken: JoinTokenArranger;
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
+  readonly runWithShippedWorkflowServices: ShippedWorkflowServicesRunner;
   /**
    * The controller's secrets repository. A test uses it to arrange a secret
    * the public API refuses to write, such as a connection's credentials.
@@ -685,6 +710,9 @@ export const withServer = (
               TEST_USER,
             ),
           );
+        const shippedWorkflowServices = yield* Effect.context<ShippedWorkflowServices>();
+        const runWithShippedWorkflowServices: ShippedWorkflowServicesRunner = (effect) =>
+          Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
         const tokens = yield* JoinTokens;
@@ -708,6 +736,7 @@ export const withServer = (
             joinToken,
             reboot,
             runWithLiveSessions,
+            runWithShippedWorkflowServices,
             secrets,
             promotion,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),

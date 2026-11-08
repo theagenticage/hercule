@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import {
   chooseLaneId,
   listContextLaneIds,
@@ -6,10 +6,7 @@ import {
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { waitForStillHand } from "../../app/motion";
-
-/** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
-const NOTE_SHOWN_MS = 10_000;
+import { pauseFor, waitForVisibleStillHand } from "../../app/motion";
 
 /** Returns the ids of the lanes the board draws `card` in, given how it is grouped. */
 const listDrawnLaneIds = (
@@ -37,7 +34,7 @@ const findChangeTargets = (
   groupBy: string,
 ): readonly Element[] => {
   if (scroller === null) return [];
-  if (change.kind === "failure")
+  if (change.kind === "failure" || change.kind === "move")
     return [...scroller.querySelectorAll(`[data-card-id="${CSS.escape(change.cardId)}"]`)];
   if (card === undefined || board === undefined) return [];
   const cells = listDrawnLaneIds(card, board, projects, groupBy).map(
@@ -46,21 +43,29 @@ const findChangeTargets = (
   return [...scroller.querySelectorAll(cells.join(","))];
 };
 
-/** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */
-const describeChange = (change: HeldChange, card: WorkCard | undefined): string | null => {
-  if (card === undefined) return null;
-  return change.kind === "arrival"
-    ? `New: ${card.title}`
-    : `${card.failure?.workflowName ?? "A run"} failed`;
-};
+/** What a held change is about, handed to `beforeRelease` to show it before it happens. */
+export interface HeldContext {
+  /** The change's card as the board was last read (the logical board), or `undefined` when it is gone. */
+  readonly card: WorkCard | undefined;
+  /** Returns every element the change would happen at (see `findChangeTargets`), as the page is now. */
+  readonly findTargets: () => readonly Element[];
+  /** Aborts when the change is no longer held, or the screen goes. */
+  readonly signal: AbortSignal;
+}
 
 /**
- * Waits for a still hand (`waitForStillHand`) for each change in `held`, and
- * calls `release` with its key once the hand is still. A change that is no
- * longer held stops waiting. Returns the sentence for the toolbar's line that
- * names what the board did by itself last, such as "Review PR failed", or
- * `null` when there is nothing to show. The sentence goes away after ten
- * seconds.
+ * Waits for a still hand (`waitForVisibleStillHand`) for each change in
+ * `held`, then calls `release` with the change. A change that is no longer
+ * held stops waiting.
+ *
+ * - `startDelays` holds back the start of the wait for a change, in
+ *   milliseconds after it is first held, by key. The morning replay uses it to
+ *   start its changes 1.5 seconds apart.
+ * - `beforeRelease`, when given, runs once the hand is still and before the
+ *   change is released. It resolves `true` to go ahead and `false` when the
+ *   change must not happen (its signal aborted). A card that moves by itself
+ *   shows its cause there.
+ * - Nothing is waited for or released while the window is hidden.
  *
  * `board` is the board as read, not as drawn: a held card is only in this one.
  * `groupBy` is how the board is grouped, so that a change is waited for at
@@ -75,6 +80,8 @@ export const useHeldChanges = ({
   groupBy,
   isCarrying,
   scrollRef,
+  startDelays,
+  beforeRelease,
   release,
 }: {
   readonly held: readonly HeldChange[];
@@ -83,12 +90,31 @@ export const useHeldChanges = ({
   readonly groupBy: string;
   readonly isCarrying: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
-  readonly release: (key: string) => void;
-}): string | null => {
-  const [note, setNote] = useState<{ readonly text: string } | null>(null);
-  const latest = useRef({ held, board, projects, groupBy, isCarrying, release });
+  readonly startDelays: ReadonlyMap<string, number>;
+  readonly beforeRelease: (change: HeldChange, context: HeldContext) => Promise<boolean>;
+  readonly release: (change: HeldChange) => void;
+}): void => {
+  const latest = useRef({
+    held,
+    board,
+    projects,
+    groupBy,
+    isCarrying,
+    release,
+    startDelays,
+    beforeRelease,
+  });
   useEffect(() => {
-    latest.current = { held, board, projects, groupBy, isCarrying, release };
+    latest.current = {
+      held,
+      board,
+      projects,
+      groupBy,
+      isCarrying,
+      release,
+      startDelays,
+      beforeRelease,
+    };
   });
   const waits = useRef(new Map<string, AbortController>());
 
@@ -103,28 +129,37 @@ export const useHeldChanges = ({
     for (const [key, change] of wanted) {
       if (waits.current.has(key)) continue;
       const controller = new AbortController();
+      const { signal } = controller;
       waits.current.set(key, controller);
       const findCard = (): WorkCard | undefined =>
         latest.current.board?.cards.find((each) => each.id === change.cardId);
-      void waitForStillHand({
-        targets: () =>
-          findChangeTargets(
-            scrollRef.current,
-            change,
-            findCard(),
-            latest.current.board,
-            latest.current.projects,
-            latest.current.groupBy,
-          ),
-        isDragging: () => latest.current.isCarrying,
-        signal: controller.signal,
-      }).then((isStill) => {
+      const findTargets = (): readonly Element[] =>
+        findChangeTargets(
+          scrollRef.current,
+          change,
+          findCard(),
+          latest.current.board,
+          latest.current.projects,
+          latest.current.groupBy,
+        );
+      void (async () => {
+        const delay = latest.current.startDelays.get(key);
+        if (delay !== undefined && !(await pauseFor(delay, signal))) return;
+        const isStill = await waitForVisibleStillHand({
+          targets: findTargets,
+          isDragging: () => latest.current.isCarrying,
+          signal,
+        });
         if (!isStill) return;
+        const isReady = await latest.current.beforeRelease(change, {
+          card: findCard(),
+          findTargets,
+          signal,
+        });
+        if (!isReady) return;
         waits.current.delete(key);
-        latest.current.release(key);
-        const text = describeChange(change, findCard());
-        if (text !== null) setNote({ text });
-      });
+        latest.current.release(change);
+      })();
     }
   }, [heldKeys, scrollRef]);
   useEffect(() => {
@@ -134,16 +169,4 @@ export const useHeldChanges = ({
       running.clear();
     };
   }, []);
-
-  useEffect(() => {
-    if (note === null) return;
-    const timer = setTimeout(() => {
-      setNote(null);
-    }, NOTE_SHOWN_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [note]);
-
-  return note?.text ?? null;
 };

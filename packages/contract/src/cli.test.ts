@@ -105,6 +105,8 @@ const COMMANDS: Record<string, string> = {
   "task.update": "task update",
   "task.move": "task move",
   "task.merge": "task merge",
+  "task.linkEntity": "task link",
+  "task.unlinkEntity": "task unlink",
   "task.delete": "task delete",
 
   "notification.query": "notification list",
@@ -368,6 +370,8 @@ const RESOLVES: Record<string, string> = {
   "task.readTracking id": "task.query",
   "task.update id": "task.query",
   "task.readDetail id": "task.query",
+  "task.linkEntity id": "task.query",
+  "task.unlinkEntity id": "task.query",
   "task.merge id": "task.query",
   "task.merge intoTaskId": "task.query",
   "task.move id": "task.query",

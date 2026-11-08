@@ -45,12 +45,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
 import {
-  invalidateWithoutCancelling,
-  queryKeys,
-  readErrorMessage,
-  type HerculeClient,
-} from "@hercule/client-core";
+  reverseLinkDirection,
+  type EntityLinkMove,
+  type LinkDirection,
+} from "@hercule/client-core/desk";
 import {
   describeDismissal,
   describeHandOffRefusal,
@@ -62,7 +62,6 @@ import {
   planLink,
   planUnlink,
   reapplyInboxEdits,
-  type EntityLinkMove,
   type InboxEdit,
   type RidingMove,
 } from "@hercule/client-core/inbox";
@@ -73,7 +72,8 @@ import type {
   LiveWorkflow,
   WorkflowOffer,
 } from "@hercule/contract";
-import type { AccountScope } from "../../../app/account-scope";
+import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
+import { readReason } from "../../../app/read-reason";
 import {
   buildCachedCardMover,
   buildCachedEndedCardMover,
@@ -109,14 +109,6 @@ const NO_EDITS: readonly PendingEdit[] = [];
 
 const NOTHING_TO_PUT_BACK = "That move changed nothing, so there is nothing to put back.";
 
-const SIGNED_OUT = "You signed out before this was sent.";
-
-/** Removes the full stops at the end of an error's words, so a sentence can go on after them. */
-const readReason = (error: unknown): string => readErrorMessage(error).replace(/\.+$/, "");
-
-/** Which way a change to a link goes. */
-type LinkDirection = "link" | "unlink";
-
 /** Whether `move` may be sent: it resolves to false when the move it reverses changed nothing. */
 type MoveIsWanted = Promise<boolean>;
 
@@ -127,10 +119,6 @@ interface LinkAnswer {
   /** The firmest claim that still joins the two after an Unlink. */
   readonly remaining: EntityUnlinkResult["remaining"];
 }
-
-/** Returns the direction that reverses `direction`. */
-const reverseDirection = (direction: LinkDirection): LinkDirection =>
-  direction === "link" ? "unlink" : "link";
 
 /** What the undo line says about a Link or Unlink: the gesture, and what a refusal says. */
 const LINK_WORDS = {
@@ -244,10 +232,6 @@ export const useInboxMoves = ({
 }): InboxMoves => {
   const queryClient = useQueryClient();
   const { undoStack, isCurrent } = scope;
-  /** Throws when the user who made the move has signed out, so nothing goes to the controller as the next account. */
-  const requireSignedIn = (): void => {
-    if (!isCurrent()) throw new Error(SIGNED_OUT);
-  };
   const pendingRef = useRef<readonly PendingEdit[]>(NO_EDITS);
   const [pendingEdits, setPendingEdits] = useState(NO_EDITS);
   const changePending = (change: (edits: readonly PendingEdit[]) => readonly PendingEdit[]) => {
@@ -397,7 +381,7 @@ export const useInboxMoves = ({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
     mutationFn: (card: InboxCard) => {
-      requireSignedIn();
+      requireSignedIn(scope);
       return client.externalEntity.takeOn({ params: { id: card.id } });
     },
   });
@@ -413,7 +397,7 @@ export const useInboxMoves = ({
       readonly workflowId: string;
       readonly connectionId: string | undefined;
     }) => {
-      requireSignedIn();
+      requireSignedIn(scope);
       return client.externalEntity.handOff({
         params: { id: entityId },
         payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
@@ -424,7 +408,7 @@ export const useInboxMoves = ({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
     mutationFn: (card: InboxCard) => {
-      requireSignedIn();
+      requireSignedIn(scope);
       return client.externalEntity.dismiss({ params: { id: card.id } });
     },
   });
@@ -442,9 +426,9 @@ export const useInboxMoves = ({
       readonly isWanted: MoveIsWanted | undefined;
     }): Promise<LinkAnswer> => {
       // Checked when the move reaches the front of the line, so a move that changed nothing is never reversed.
-      requireSignedIn();
+      requireSignedIn(scope);
       if (isWanted !== undefined && !(await isWanted)) throw new Error(NOTHING_TO_PUT_BACK);
-      requireSignedIn();
+      requireSignedIn(scope);
       return sendLinkChange(client, move, direction);
     },
   });
@@ -455,7 +439,7 @@ export const useInboxMoves = ({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
     mutationFn: (reverse: () => Promise<UndoAnswer | undefined>) => {
-      requireSignedIn();
+      requireSignedIn(scope);
       return reverse();
     },
   });
@@ -474,7 +458,7 @@ export const useInboxMoves = ({
         return reverseMove.mutateAsync(async () => {
           if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
           const { taskId } = await request;
-          requireSignedIn();
+          requireSignedIn(scope);
           // The Task was touched since, so it stays and the line says why.
           await undoAddedTask(client, card.id, taskId);
           if (!isCurrent()) return undefined;
@@ -534,7 +518,7 @@ export const useInboxMoves = ({
         reverseMove.mutateAsync(async () => {
           if (!(await wasHanded)) throw new Error(NOTHING_TO_PUT_BACK);
           const { runId, taskId } = await request;
-          requireSignedIn();
+          requireSignedIn(scope);
           const result = await client.externalEntity.undoHandOff({ params: { runId } });
           // The answer belongs to the user who signed out: the caches and the line are the next one's.
           if (!isCurrent()) return undefined;
@@ -609,7 +593,7 @@ export const useInboxMoves = ({
       undo: async (page) => {
         return reverseMove.mutateAsync(async () => {
           if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
-          requireSignedIn();
+          requireSignedIn(scope);
           await client.externalEntity.restore({ params: { id: card.id } });
           if (!isCurrent()) return undefined;
           await page.writeInboxEdit({ kind: "put-back", card });
@@ -694,7 +678,7 @@ export const useInboxMoves = ({
       undo: async () => {
         const { remaining } = await changeLinkRef.current(
           move,
-          reverseDirection(direction),
+          reverseLinkDirection(direction),
           wasChanged,
         );
         return describeLinkRemaining(remaining);

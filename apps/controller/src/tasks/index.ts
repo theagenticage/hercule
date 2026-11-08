@@ -13,7 +13,15 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
-export { LIVE_TASK_LINKS_SQL, taskRepository, type BoardTask, type NewTask } from "./repository";
+export { groupByTask } from "./lists";
+export type { EntityLinkPair } from "./entity-facts";
+export {
+  LIVE_TASK_LINKS_SQL,
+  JOINABLE_TASK_SQL,
+  taskRepository,
+  type BoardTask,
+  type NewTask,
+} from "./repository";
 export {
   SUMMARY_CONCURRENCY,
   SUMMARY_MIN_INTERVAL_SECONDS,
@@ -24,6 +32,9 @@ export {
   type SummaryText,
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
+export { entityFactRepository, type EntityFact } from "./entity-facts";
+export { describeStageCause, type StageCauseThing } from "./stage-cause";
+export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {

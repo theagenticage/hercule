@@ -43,6 +43,9 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
   - **Direct calls:** reading usage or identity by calling Anthropic with the stored token is outside Anthropic's terms and Hercule's own rule. Nothing found needs it.
   - **Open, for Rogier to decide (option b):** a short probe session on a runner, to read the first `rate_limit_event` when no session runs. It needs a live check with a real token first: whether the event arrives with no turn, and whether it costs quota. The Claude token's refusal signal is [#953](https://github.com/theagenticage/hercule/issues/953).
 
+- *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)* 10 §2.7, [#502](https://github.com/theagenticage/hercule/issues/502): **who owns a shipped workflow, and how one is upgraded.** `card-in-review` and `card-landed` are the first shipped workflows in code. They are installed once per key and never upgraded: a changed source reaches no one who has the key, an edit is never overwritten, and a deleted one never comes back. Open: who owns a shipped workflow, and how an upgrade could reach a user. #502 stays open and this slice decides none of it. Release note: at first install a Task with a pull request linked before this build can move once, because fences did not exist.
+- *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* 09 §Facts, 20 §14: **left out of slice 7 on purpose.** An agent's report moving a stage (the agent report tool, later, which will use the same `stageFactId` check); finding a ticket from a pull request's text; linking a fork's pull request by itself (the user links it by hand); and any automation beyond the two shipped workflows (auto-pickup, policies).
+
 ## B. Implementer's choices
 
 Not design questions. The constraint is stated where one exists.
