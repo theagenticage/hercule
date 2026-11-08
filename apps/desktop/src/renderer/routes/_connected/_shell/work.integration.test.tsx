@@ -486,22 +486,28 @@ describe("the Work screen", () => {
   });
 
   it("shows the failure, with a way to try again, when it cannot tell whether any Task exists", async () => {
-    let answers = 0;
-    await openWork({
+    // The controller stays down until the test says it is back. A count of
+    // failed answers would not do: the controller's first push on each live
+    // topic reads the Tasks again, on its own timing, and an answer it took
+    // would clear the failure before the user could press Try again.
+    let isControllerDown = true;
+    const { live } = await openWork({
       board: () => buildBoard(),
       retryFailedReads: false,
       handlers: {
         "GET /api/v1/tasks": () => {
-          answers += 1;
-          if (answers === 1) throw new Error("connection refused");
+          if (isControllerDown) throw new Error("connection refused");
           return { body: { items: [buildCreatedTask("Any", undefined)] } };
         },
       },
     });
     const user = userEvent.setup();
+    await live.waitForFirstPushes();
 
     expect(await screen.findByRole("alert")).toBeTruthy();
-    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    isControllerDown = false;
+    await user.click(retry);
 
     expect(await screen.findByText("All clear.")).toBeTruthy();
   });
@@ -523,21 +529,25 @@ describe("the Work screen", () => {
   });
 
   it("shows the read's failure with a way to try again when the board cannot be read", async () => {
-    let answers = 0;
-    await openWork({
+    // The controller stays down until the test says it is back, because the
+    // controller's first pushes read the board again on their own timing (see
+    // the test of the Task check above).
+    let isControllerDown = true;
+    const { live } = await openWork({
       retryFailedReads: false,
       handlers: {
         [BOARD_PATH]: () => {
-          answers += 1;
-          // The loader reads once, and the screen reads again as it opens.
-          if (answers <= 2) throw new Error("connection refused");
+          if (isControllerDown) throw new Error("connection refused");
           return { body: buildBoard(CARDS[2]!) };
         },
       },
     });
     const user = userEvent.setup();
+    await live.waitForFirstPushes();
 
-    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    isControllerDown = false;
+    await user.click(retry);
 
     expect(
       await screen.findByRole("button", { name: /^Order history hides cancelled items/ }),
