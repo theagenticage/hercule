@@ -38,10 +38,31 @@ wait_for "Xvfb" /tmp/xvfb.log xprop -root
 # session's bus address in its environment. A command that needs the window
 # manager, such as one that maximizes a window, must not start before openbox
 # has claimed the screen, so the script waits for it.
+#
+# Once openbox is up, the real pointer moves to the bottom right corner of the
+# screen, and the script reads the position back. Xvfb starts with the pointer
+# in the middle of the screen (a move made before openbox starts is undone),
+# and every app window opens there too (centred, 1440 by 900). The test files
+# run at the same time on this one screen, so each time one app opens, closes
+# or raises a window, X sends the
+# windows under the pointer real "pointer left" and "pointer moved" events
+# with no button pressed. A drag a test sends with Playwright is simulated, and
+# such an event makes the page lose the pointer in the middle of it, so the
+# drag changes nothing. No window reaches the corner, and the tests never use
+# the real pointer.
 exec dbus-run-session -- sh -c '
   openbox >/tmp/openbox.log 2>&1 &
   for _ in $(seq 100); do
-    xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id" && exec "$@"
+    if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id"; then
+      xdotool mousemove 1919 1079
+      if ! xdotool getmouselocation --shell | grep -qx "X=1919" ||
+         ! xdotool getmouselocation --shell | grep -qx "Y=1079"; then
+        echo "entry.sh: the pointer did not move to the corner; it is at:" >&2
+        xdotool getmouselocation >&2
+        exit 1
+      fi
+      exec "$@"
+    fi
     sleep 0.1
   done
   echo "entry.sh: openbox did not start; its log:" >&2
