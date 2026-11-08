@@ -93,7 +93,11 @@ export function InitiativeSection({
               }}
             >
               <span className="task-pane-initiative-mark">
-                {shown === undefined ? <FlagIcon size={14} /> : <HueFlag hue={shown.hue} />}
+                {shown === undefined ? (
+                  <FlagIcon size={13} />
+                ) : (
+                  <HueFlag hue={shown.hue} size={13} />
+                )}
               </span>
               <span className="task-pane-row-text">{shown?.name ?? "No initiative"}</span>
               <ChevronDownIcon size={12} />

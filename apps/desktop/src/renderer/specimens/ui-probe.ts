@@ -714,6 +714,35 @@ function blursBackdrop(backdropFilter: string): boolean {
 /** How an element sitting above a point of text affects that point. */
 type Coverage = "hidden" | "partly" | "clear";
 
+/** The answers of `paintsSolidPaperOverBox` for the current pass of `readPaintedTextFragments`, which forgets them at its start because the page may have changed. */
+const paperAnswers = new Map<Element, boolean>();
+
+/**
+ * Returns whether the `::before` of an element is a solid paper over the
+ * element's whole box. `document.elementsFromPoint` never lists a
+ * pseudo-element, so without this check the opening sheet's paper (its
+ * `::before`, drawn behind its words) would not hide the board text it lies
+ * over, and that text would be measured as if it were visible.
+ *
+ * The paper counts when it is absolutely positioned, as large as the
+ * element's box, and paints a background colour with alpha of at least 0.95.
+ */
+function paintsSolidPaperOverBox(element: Element, readFacts: ReadFacts): boolean {
+  let paintsPaper = paperAnswers.get(element);
+  if (paintsPaper === undefined) {
+    const paper = getComputedStyle(element, "::before");
+    const box = element.getBoundingClientRect();
+    paintsPaper =
+      paper.content !== "none" &&
+      paper.position === "absolute" &&
+      resolveColour(paper.backgroundColor)[3] >= HIDING_ALPHA &&
+      Math.abs(Number.parseFloat(paper.width) - box.width) < 1 &&
+      Math.abs(Number.parseFloat(paper.height) - box.height) < 1;
+    paperAnswers.set(element, paintsPaper);
+  }
+  return paintsPaper && readEffectiveOpacity(element, readFacts) >= HIDING_ALPHA;
+}
+
 /**
  * Returns how an element that lies over a point affects the text at that
  * point, from what the element paints and the opacity it is drawn with (its
@@ -727,7 +756,9 @@ type Coverage = "hidden" | "partly" | "clear";
  *
  * - "hidden": the effective opacity is at least 0.95 and the element has a
  *   background colour with alpha of at least 0.95, or a backdrop filter that
- *   blurs (a frosted layer blurs what is behind it past reading).
+ *   blurs (a frosted layer blurs what is behind it past reading), or its
+ *   `::before` is a solid paper over its whole box
+ *   (`paintsSolidPaperOverBox`).
  * - "partly": the element does not hide the point, but its paint alpha is
  *   above 0.05. A wash of 50 % is an example. A background image or replaced
  *   content is never taken as hiding, because whether it is transparent at
@@ -745,6 +776,7 @@ function readCoverageOfPoint(element: Element, readFacts: ReadFacts): Coverage {
   if (opacity >= HIDING_ALPHA && (blurs || backgroundAlpha >= HIDING_ALPHA)) {
     return "hidden";
   }
+  if (paintsSolidPaperOverBox(element, readFacts)) return "hidden";
   const paintAlpha = (paintsOtherwise ? 1 : backgroundAlpha) * opacity;
   return paintAlpha > PARTLY_COVERING_ALPHA ? "partly" : "clear";
 }
@@ -1024,6 +1056,7 @@ function readTextFragments(readFacts: ReadFacts): CollectedFragment[] {
  */
 function readPaintedTextFragments(): CollectedFragment[] {
   const readFacts = createFactsReader();
+  paperAnswers.clear();
   const painted: CollectedFragment[] = [];
   for (const collected of readTextFragments(readFacts)) {
     const coverage = readCoverage(readFacts, collected);

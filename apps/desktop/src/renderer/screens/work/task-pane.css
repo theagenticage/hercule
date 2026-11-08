@@ -397,8 +397,7 @@ button.task-pane-note:hover {
   padding: 0;
   list-style: none;
 }
-.task-pane-blocker > .task-pane-row-open > svg,
-.task-pane-initiative-mark {
+.task-pane-blocker > .task-pane-row-open > svg {
   flex: none;
   margin: 0 3px;
   color: var(--muted);
@@ -457,7 +456,9 @@ button.task-pane-note:hover {
   line-height: var(--line-16);
 }
 /* The Initiative row is one button: the flag, the name, and a chevron that says it opens a menu. */
+/* Its values are on the 4px grid: a 13px flag with 4px beside it and an 8px gap put the words where a Thread's row puts them (37px from the edge). */
 .task-pane-initiative-row {
+  gap: 8px;
   color: var(--ink);
   text-align: left;
 }
@@ -474,10 +475,13 @@ button.task-pane-note:hover {
 }
 .task-pane-initiative-row > svg {
   flex: none;
-  margin: 0 3px;
+  margin: 0 4px;
   color: var(--faint);
 }
 .task-pane-initiative-mark {
+  flex: none;
+  margin: 0 4px;
+  color: var(--muted);
   display: grid;
   place-items: center;
   line-height: 0;
