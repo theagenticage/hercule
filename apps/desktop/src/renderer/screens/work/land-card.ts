@@ -88,26 +88,25 @@ const findLandedCard = (scroller: HTMLElement, carry: EndedCarry): HTMLElement |
  * Sends `ghost`, the copy of a card, to the line that now stands for the
  * card, and fades it there: the count of the folded lane it went into, or the
  * "3 landed" line of a cell that hides it (`findHidingPlace`). A card with no
- * such place fades where it is. `spring` is `travel` for a card the user
- * dropped, and `self` for one that moved by itself.
+ * such place fades where it is. Both go on `travel`, because the user dropped
+ * the card.
  */
-export const flyAway = (
+const flyAway = (
   scroller: HTMLElement,
   ghost: HTMLElement,
   place: DropPlace | null,
   cardStage: BoardStage,
-  spring: SpringName,
 ): void => {
   const target = findHidingPlace(scroller, place, cardStage);
   if (target === null) {
-    trackBody(ghost).to({ s: 0.96, o: 0 }, spring, {
+    trackBody(ghost).to({ s: 0.96, o: 0 }, "travel", {
       done: () => {
         removeFlight(ghost);
       },
     });
     return;
   }
-  flyFlightsTo([{ ghost, delay: 0 }], () => target, INTO_PLACE, spring);
+  flyFlightsTo([{ ghost, delay: 0 }], () => target, INTO_PLACE);
 };
 
 /**
@@ -129,7 +128,7 @@ export const landCard = (
 ): void => {
   const card = findLandedCard(scroller, carry);
   if (card === null) {
-    flyAway(scroller, carry.ghost, carry.place, carry.card.stage, "travel");
+    flyAway(scroller, carry.ghost, carry.place, carry.card.stage);
     return;
   }
   const place = measureLayoutRect(card);

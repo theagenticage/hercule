@@ -1,8 +1,10 @@
-import type { JSX, KeyboardEvent } from "react";
+import type { JSX, KeyboardEvent, ReactNode } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
+import type { PlaceRow } from "@hercule/client-core/desk";
 import {
   chooseCardColleaguePose,
   STAGE_NAMES,
+  type AddRow,
   type PaneAnswer,
   type SummaryStanding,
   type TaskActionId,
@@ -53,6 +55,10 @@ export interface TaskPaneChanges {
   readonly onDiscardAnswer: (intentId: string) => void;
   /** Asks the run `runId`, which runs the workflow `workflowName`, to stop. */
   readonly onStopRun: (runId: string, workflowName: string) => void;
+  /** Links the thing a search row found to the Task, as the user's own link. */
+  readonly onLinkEntity: (row: AddRow) => void;
+  /** Removes the link from the Task to the thing a row of Linked draws. */
+  readonly onUnlinkEntity: (row: PlaceRow) => void;
 }
 
 /** Everything the pane's buttons do: the changes above, and where the others lead. */
@@ -155,6 +161,8 @@ export function TaskPaneColleague({
  * - `threadPromptWords` turns the foot into the line that asks what a new
  *   Thread should do, with those words in it to start with (empty for a new
  *   line). `null` leaves the foot as it is.
+ * - `linkSearch` is the "Link something" search that stands at the foot of
+ *   Linked, which the caller builds because it reads. `null` leaves it out.
  * - `actions` is what its buttons do.
  *
  * From the top: the crumb, the title, the stage path, where it stands with
@@ -172,6 +180,7 @@ export function TaskPane({
   read,
   plugins,
   threadPromptWords,
+  linkSearch,
   actions,
 }: {
   readonly pane: TaskPaneContent;
@@ -180,6 +189,7 @@ export function TaskPane({
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /** The words the line that asks what a new Thread should do starts with, or `null` when the foot is not that line. */
   readonly threadPromptWords: string | null;
+  readonly linkSearch: ReactNode;
   readonly actions: TaskPaneActions;
 }): JSX.Element {
   const { card, question, actions: taskActions } = pane;
@@ -323,6 +333,8 @@ export function TaskPane({
               detail={read.detail}
               plugins={plugins}
               onFilterByPlace={actions.onFilterByPlace}
+              onUnlink={actions.onUnlinkEntity}
+              linkSearch={linkSearch}
             />
             <RunsSection
               detail={read.detail}

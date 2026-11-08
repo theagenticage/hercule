@@ -174,7 +174,8 @@ button.relation-go:hover {
 }
 .relation-change {
   color: var(--faint);
-  font: var(--type-meta);
+  font-size: var(--t-11);
+  line-height: var(--line-16);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

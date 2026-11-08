@@ -147,6 +147,22 @@ describe("RelationRows for linked things", () => {
     expect(onUnlink).toHaveBeenCalledExactlyOnceWith(confirmed[0]);
   });
 
+  it("draws a remove button, and no words over the row, for a link nobody's words explain", async () => {
+    const onUnlink = vi.fn();
+    const row = {
+      ...buildPlaceRow(place()),
+      link: { kind: "confirmed", canUnlink: true },
+    } as const;
+    render(<RelationRows rows={[row]} plugins={PLUGINS} onUnlink={onUnlink} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove the link to Rotterdam depot" }),
+    );
+
+    expect(onUnlink).toHaveBeenCalledExactlyOnceWith(row);
+    expect(document.querySelector(".relation-claim")).toBeNull();
+  });
+
   it("ignores the second click of a double click on the remove button, which a Link button may have just made appear under the pointer", () => {
     const onUnlink = vi.fn();
     const { confirmed } = build({ type: "person" });

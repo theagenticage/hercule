@@ -1,5 +1,6 @@
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { buildArrivalKey, buildFactKey } from "./hold-back-board";
+import { withoutStageCause } from "./card-move";
+import { buildArrivalKey, buildStageMoveKey } from "./hold-back-board";
 import { listCardMoves, type CardStageChange, type PlacedCard } from "./list-card-moves";
 
 /**
@@ -70,12 +71,11 @@ export interface MorningReplay {
   readonly shown: WorkBoard;
   /**
    * The keys of the changes that play, oldest first: `buildArrivalKey` for a
-   * Task that arrived, `buildFactKey` for a card that moved. Pass `shown` and
-   * `heldMoveKeys` to `holdBackBoardChanges` and it holds exactly these back.
+   * Task that arrived, `buildStageMoveKey` for a card that moved. Pass `shown`
+   * as the shown board and the keys as `HoldBackOptions.playedKeys` to
+   * `holdBackBoardChanges`, and it holds exactly these changes back.
    */
-  readonly order: readonly string[];
-  /** The keys of the moves in `order`, for `holdBackBoardChanges` to hold though they have no cause. */
-  readonly heldMoveKeys: ReadonlySet<string>;
+  readonly playedKeys: readonly string[];
 }
 
 /** A change that can play, with the card it is about as the new read has it. */
@@ -129,11 +129,9 @@ export const planMorningReplay = (
     const card = latestById.get(placed.id);
     if (card === undefined) return [];
     if (!movedIds.has(card.id)) return [card];
-    const { stageCause, ...withoutCause } = card;
-    void stageCause;
     return [
       {
-        ...withoutCause,
+        ...withoutStageCause(card),
         stage: placed.stage,
         ...(placed.stageCause === undefined ? {} : { stageCause: placed.stageCause }),
       },
@@ -143,17 +141,8 @@ export const planMorningReplay = (
     (card) => !snapshotById.has(card.id) && !arrivedIds.has(card.id),
   );
 
-  const keys = playable.map(({ change, card }) =>
-    change.kind === "moved" ? buildFactKey(card) : buildArrivalKey(card.id),
+  const playedKeys = playable.map(({ change, card }) =>
+    change.kind === "moved" ? buildStageMoveKey(card) : buildArrivalKey(card.id),
   );
-  return {
-    summary,
-    shown: { ...latest, cards: [...remembered, ...others] },
-    order: keys,
-    heldMoveKeys: new Set(
-      playable
-        .filter(({ change }) => change.kind === "moved")
-        .map(({ card }) => buildFactKey(card)),
-    ),
-  };
+  return { summary, shown: { ...latest, cards: [...remembered, ...others] }, playedKeys };
 };

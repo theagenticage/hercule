@@ -23,7 +23,7 @@ export interface PlacedCards {
  * - `arrived`: the card is on the new board and was not on the old one.
  * - `moved`: the card changed stage. `cause` is the card's `stageCause` on the
  *   new board, so a move that a fact about a linked thing made carries its
- *   words ("PR #6221 merged") and a drag from another client carries none.
+ *   words ("Pull request #6221 merged") and a drag from another client carries none.
  * - `left`: the card was on the old board and is not on the new one (it ended,
  *   or it was merged into another Task).
  */

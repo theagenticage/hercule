@@ -171,6 +171,56 @@ button.task-pane-note:hover {
 .task-pane-context .relation-row.is-locked .relation-title {
   color: var(--muted);
 }
+/* The button that removes a link stands over the end of its row while the row is reached for, and the state gives way to it. In the shared rows the button sits beside the state, which would push the states of Linked 30px short of the column the rows of Part of end in. */
+.task-pane-context .relation-row.has-unlink .relation-unlink {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+}
+.task-pane-context .relation-row.has-unlink:hover .relation-end,
+.task-pane-context .relation-row.has-unlink:focus-within .relation-end {
+  opacity: 0;
+}
+/* What changed at the source, under the title: the two lines fill the row, so the row needs no padding of its own. */
+.task-pane-context .relation-text {
+  padding: 0;
+}
+/* Link something: the button and what the search finds are rows of the same size. The icon is 13px with 4px beside it and the gap is 8px, which puts the words where the titles above start and keeps every value on the 4px grid. Its words are a step stronger than muted: muted fails the contrast target in the Orient Express theme. */
+.task-pane-context .link-search {
+  margin-top: 0;
+}
+.task-pane-context .link-search-open,
+.task-pane-context .link-search-go {
+  width: calc(100% + 16px);
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.task-pane-context .link-search-go {
+  gap: 9px;
+}
+.task-pane-context .link-search-open {
+  display: flex;
+  gap: 8px;
+  color: color-mix(in oklab, var(--ink) 40%, var(--muted));
+}
+.task-pane-context .link-search-open:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+.task-pane-context .link-search-open svg {
+  width: 13px;
+  height: 13px;
+  margin: 0 4px;
+  color: var(--faint);
+}
+.task-pane-context .link-search-mark {
+  margin: 0 3px;
+}
 .task-pane-left {
   margin: 0;
   line-height: 19px;

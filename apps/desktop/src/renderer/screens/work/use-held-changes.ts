@@ -6,10 +6,9 @@ import {
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { isMotionReduced, pauseFor } from "../../app/motion";
+import { isMotionReduced, pauseFor, waitForVisibleStillHand } from "../../app/motion";
 import { showCauseLabel } from "../desk";
 import { REPLAY_GAP_MS } from "./morning-replay";
-import { waitForVisibleStillHand } from "./wait-for-visible-still-hand";
 
 /** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
 const NOTE_SHOWN_MS = 10_000;
@@ -44,7 +43,7 @@ const findChangeTargets = (
   groupBy: string,
 ): readonly Element[] => {
   if (scroller === null) return [];
-  if (change.kind === "failure" || change.kind === "fact")
+  if (change.kind === "failure" || change.kind === "move")
     return [...scroller.querySelectorAll(`[data-card-id="${CSS.escape(change.cardId)}"]`)];
   if (card === undefined || board === undefined) return [];
   const cells = listDrawnLaneIds(card, board, projects, groupBy).map(
@@ -57,7 +56,7 @@ const findChangeTargets = (
 const describeChange = (change: HeldChange, card: WorkCard | undefined): string | null => {
   if (card === undefined) return null;
   if (change.kind === "arrival") return `New: ${card.title}`;
-  if (change.kind === "fact") return card.stageCause?.text ?? `Moved: ${card.title}`;
+  if (change.kind === "move") return card.stageCause?.text ?? `Moved: ${card.title}`;
   return `${card.failure?.workflowName ?? "A run"} failed`;
 };
 
@@ -152,7 +151,7 @@ export const useHeldChanges = ({
           signal,
         });
         if (!isStill) return;
-        const cause = change.kind === "fact" ? findCard()?.stageCause : undefined;
+        const cause = change.kind === "move" ? findCard()?.stageCause : undefined;
         if (cause !== undefined) {
           const labelled = findTargets().filter((each) => each instanceof HTMLElement);
           const removeLabel = showCauseLabel(labelled, cause.text, true);

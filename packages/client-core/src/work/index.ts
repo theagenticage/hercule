@@ -5,7 +5,8 @@
  * and the snapshot and plan of the morning replay that plays them back,
  * the changes the board holds back until the user's hand is still, the keyboard walk, which cards are selected, the
  * words and the pose of a card, the lanes and facets of the outside places a
- * Task stands under, and what the Add sheet opens on and says. It is the
+ * Task stands under, what the Add sheet opens on and says, the "Link something"
+ * search's rows, and the words of linking a thing to a Task. It is the
  * subpath `@hercule/client-core/work`, not part of the
  * library's index, so that its code stays out of the shell's chunk. The
  * filter itself is in `@hercule/client-core/desk`.
@@ -28,6 +29,7 @@ export * from "./find";
 export * from "./held-answers";
 export * from "./hold-back-board";
 export * from "./lanes";
+export * from "./link-search";
 export * from "./list-card-moves";
 export * from "./logical-board";
 export * from "./merge";
@@ -35,6 +37,7 @@ export * from "./question-answers";
 export * from "./selection";
 export * from "./summary-standing";
 export * from "./task-context-rows";
+export * from "./task-links";
 export * from "./task-pane";
 export * from "./task-run";
 export * from "./task-thread";

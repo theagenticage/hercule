@@ -205,13 +205,13 @@ describe("a run that fails on a Task drawn in two lanes", () => {
 });
 
 describe("a card that a fact moves", () => {
-  const MERGED = { factId: 4, ref: "acme:pull-request:6221", text: "PR #6221 merged" };
+  const MERGED = { factId: 4, ref: "acme:pull-request:6221", text: "Pull request #6221 merged" };
   const merged = buildCard("merging", {
     stage: "landed",
     stageCause: MERGED,
     stageChangedAt: "2026-11-02T12:00:00.000Z",
   });
-  const held = [{ kind: "fact", cardId: "merging", key: "fact:merging:fact-4" } as const];
+  const held = [{ kind: "move", cardId: "merging", key: "move:merging:fact-4" } as const];
   const props = { held, board: buildBoard(merged), lanes: { here: ["merging"] } };
   const findLabel = (): HTMLElement | null => document.querySelector<HTMLElement>(".card-cause");
 
@@ -226,7 +226,7 @@ describe("a card that a fact moves", () => {
   it("shows its cause on the card, holds it for 760ms, and only then lets the card move", async () => {
     await renderAndWait(props, 0);
 
-    expect(findLabel()?.textContent).toBe("PR #6221 merged");
+    expect(findLabel()?.textContent).toBe("Pull request #6221 merged");
     expect(document.querySelector("[data-card-id]")?.hasAttribute("data-cause")).toBe(true);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(759);
@@ -236,8 +236,8 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
-    expect(document.querySelector("output")?.textContent).toBe("PR #6221 merged");
+    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
+    expect(document.querySelector("output")?.textContent).toBe("Pull request #6221 merged");
   });
 
   it("waits for the drop when a drag begins during the hold", async () => {
@@ -256,7 +256,7 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
+    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
   });
 
   it("holds the move while the window is hidden at the end of the hold, and plays it when it shows", async () => {
@@ -275,7 +275,7 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
+    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
   });
 
   it("takes its label away when the change is no longer held", async () => {
@@ -301,12 +301,12 @@ describe("a card that a fact moves", () => {
     await renderAndWait({ ...props, board: buildBoard(plain) }, 0);
 
     expect(findLabel()).toBeNull();
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
+    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
     expect(document.querySelector("output")?.textContent).toBe("Moved: Cache slots");
   });
 
   it("starts the wait after its delay, and its words stay for 1.5 seconds only", async () => {
-    const delays = new Map([["fact:merging:fact-4", 1_500]]);
+    const delays = new Map([["move:merging:fact-4", 1_500]]);
 
     await renderAndWait({ ...props, startDelays: delays }, 1_499);
     expect(findLabel()).toBeNull();
@@ -314,7 +314,7 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1 + 760);
     });
-    expect(document.querySelector("output")?.textContent).toBe("PR #6221 merged");
+    expect(document.querySelector("output")?.textContent).toBe("Pull request #6221 merged");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });

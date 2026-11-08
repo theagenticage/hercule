@@ -45,11 +45,16 @@ export interface RelationProgress {
  *   its status.
  * - `hint`: a reference found in text. It proves nothing, so it shows with
  *   the words that say where it was found, and a button to link the two.
+ * - `own`: the Task the pane is open for holds the link itself. It draws like
+ *   a place, with its status in words, and the user can remove it.
  */
 export interface RowLink {
-  readonly kind: "confirmed" | "hint";
-  /** Who says the two are linked, in words, such as "Linear reports this". */
-  readonly claimWords: string;
+  readonly kind: "confirmed" | "hint" | "own";
+  /**
+   * Who says the two are linked, in words, such as "Linear reports this".
+   * Absent on a Task's own link, which no claim explains.
+   */
+  readonly claimWords?: string;
   /**
    * True when the user has made a claim on the link, so they can remove it,
    * even when a source reports the same link as well. A source's own claim is

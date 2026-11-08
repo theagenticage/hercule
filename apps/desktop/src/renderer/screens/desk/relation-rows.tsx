@@ -29,10 +29,30 @@ const describePlace = (row: OpenPlaceRow, isKindShown: boolean): string =>
     .join(" · ");
 
 /**
+ * Returns the class names of a row's `<li>`: `has-claim` when the row has
+ * words that say who linked its thing, and `has-unlink` when it has the button
+ * that removes the link.
+ */
+const buildRowClass = (
+  row: PlaceRow,
+  onUnlink: ((row: PlaceRow) => void) | undefined,
+  base: string,
+): string =>
+  [
+    base,
+    row.link?.claimWords !== undefined && "has-claim",
+    row.link?.canUnlink === true && onUnlink !== undefined && "has-unlink",
+  ]
+    .filter((name) => name !== false)
+    .join(" ");
+
+/**
  * Renders the words of who says a row's thing is linked, which stand over the
  * row's end while the row is hovered or has the focus, and the button that
- * removes the link when the user made it. The button ignores the second click
- * of a double click, so a double click on a Link button cannot undo itself.
+ * removes the link when the user made it. A link nobody's words explain, such
+ * as one the Task holds itself, has no words. The button ignores the second
+ * click of a double click, so a double click on a Link button cannot undo
+ * itself.
  */
 function ClaimAndUnlink({
   row,
@@ -45,7 +65,7 @@ function ClaimAndUnlink({
   if (link === undefined) return null;
   return (
     <>
-      <small className="relation-claim">{link.claimWords}</small>
+      {link.claimWords !== undefined && <small className="relation-claim">{link.claimWords}</small>}
       {link.canUnlink && onUnlink !== undefined && (
         <button
           type="button"
@@ -76,11 +96,7 @@ function LockedRow({
   readonly onUnlink?: ((row: PlaceRow) => void) | undefined;
 }): JSX.Element {
   return (
-    <li
-      className={
-        row.link === undefined ? "relation-row is-locked" : "relation-row is-locked has-claim"
-      }
-    >
+    <li className={buildRowClass(row, onUnlink, "relation-row is-locked")}>
       <div className="relation-go">
         <LockIcon size={13} />
         <span className="relation-title">
@@ -140,7 +156,8 @@ function HintRow({
  * - A row that draws a linked thing (`row.link`) shows its status shape and
  *   word in place of its kind, and the words of who says it is linked over
  *   that end while the row is hovered. A link the user made has a button that
- *   removes it, and a hint has a button that links the two.
+ *   removes it, and a hint has a button that links the two. A link the Task
+ *   itself holds (`own`) keeps the plain end of a place and has the button.
  * - A thing that changed at its source shows the change under its title.
  * - `plugins` is what `plugin.query` returns, for the marks and the names.
  */
@@ -160,7 +177,7 @@ function RelationRow({
   readonly onUnlink?: ((row: PlaceRow) => void) | undefined;
 }): JSX.Element {
   if (row.isLocked) return <LockedRow row={row} plugins={plugins} onUnlink={onUnlink} />;
-  const isLinked = row.link !== undefined;
+  const isLinked = row.link !== undefined && row.link.kind !== "own";
   const title = <span className="relation-title">{row.title}</span>;
   const words = (
     <>
@@ -209,7 +226,7 @@ function RelationRow({
     <div className="relation-go">{words}</div>
   );
   return (
-    <li className={isLinked ? "relation-row has-claim" : "relation-row"}>
+    <li className={buildRowClass(row, onUnlink, "relation-row")}>
       {go}
       <ClaimAndUnlink row={row} onUnlink={onUnlink} />
     </li>

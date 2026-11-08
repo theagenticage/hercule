@@ -23,6 +23,7 @@ import { listHeldAnswers, listHeldMerges, type PendingIntent } from "../../../ap
 import { usePendingIntents } from "../../../app/use-pending-intents";
 
 const NOTHING_HIDDEN: ReadonlySet<string> = new Set();
+const NOTHING_MOVED: ReadonlySet<string> = new Set();
 
 /** What `useLogicalBoard` returns. */
 export interface LogicalBoardState {
@@ -72,7 +73,7 @@ export const useLogicalBoard = ({
   return {
     board: logical?.board,
     hiddenIds: logical?.hiddenIds ?? NOTHING_HIDDEN,
-    movedIds: logical?.movedIds ?? NOTHING_HIDDEN,
+    movedIds: logical?.movedIds ?? NOTHING_MOVED,
     readBoardNow: () => {
       const cached = queryClient.getQueryData<WorkBoard>(queryKeys.workBoard());
       return cached === undefined

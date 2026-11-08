@@ -1,5 +1,5 @@
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { applyCardMove, buildMoveToPlacement, readPlacement } from "./card-move";
+import { applyCardMove, buildMoveToPlacement, readPlacement, withoutStageCause } from "./card-move";
 
 /**
  * A change the board shows only once the user's hand is still, because
@@ -8,12 +8,13 @@ import { applyCardMove, buildMoveToPlacement, readPlacement } from "./card-move"
  * - `arrival`: a Task that was not on the board before.
  * - `failure`: a Task whose run just failed. The card would take the top of
  *   its cell, so a card under the pointer could be sorted away from under it.
- * - `fact`: a card that changed stage because of a fact about a linked thing
- *   (a pull request merged), so nobody here moved it. It would cross the board
- *   under the pointer.
+ * - `move`: a card that changed stage though nobody here moved it: because of
+ *   a fact about a linked thing (a pull request merged), or, in the morning
+ *   replay, because of anything that happened while the app was closed. It
+ *   would cross the board under the pointer.
  */
 export interface HeldChange {
-  readonly kind: "arrival" | "failure" | "fact";
+  readonly kind: "arrival" | "failure" | "move";
   readonly cardId: string;
   /** Names this one change, so that releasing it once does not release the next failure of the same Task. */
   readonly key: string;
@@ -35,12 +36,27 @@ const buildFailureKey = (runId: string): string => `failure:${runId}`;
  * client, which the morning replay also plays) is named by the time the stage
  * changed.
  */
-export const buildFactKey = (card: WorkCard): string =>
+export const buildStageMoveKey = (card: WorkCard): string =>
   card.stageCause === undefined
-    ? `fact:${card.id}:${card.stageChangedAt}`
-    : `fact:${card.id}:fact-${String(card.stageCause.factId)}`;
+    ? `move:${card.id}:${card.stageChangedAt}`
+    : `move:${card.id}:fact-${String(card.stageCause.factId)}`;
 
 const NO_KEYS: ReadonlySet<string> = new Set();
+
+/** Which changes of a read `holdBackBoardChanges` holds back, besides those it finds on its own. */
+export interface HoldBackOptions {
+  /** The keys of the changes already released: they are drawn. */
+  readonly released: ReadonlySet<string>;
+  /** The Tasks the user's own gesture took off the board; one that comes back is not new. */
+  readonly hiddenBefore: ReadonlySet<string>;
+  /**
+   * The keys of the changes the morning replay plays (`MorningReplay.playedKeys`).
+   * A stage move whose key is in it is held though it has no new cause.
+   */
+  readonly playedKeys?: ReadonlySet<string>;
+  /** The Tasks whose stage the user moved and the controller has not answered (`LogicalBoard.movedIds`). They are never held. */
+  readonly movedByUser?: ReadonlySet<string>;
+}
 
 /** Returns the key of the failure that `card` shows, or `undefined` when it shows none. */
 const readFailureKey = (card: WorkCard): string | undefined =>
@@ -51,29 +67,28 @@ const isSameValue = (a: unknown, b: unknown): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * Returns the key of the fact that moved `card` since the board showed
- * `before`, or `undefined` when no fact did. A stage change counts as a fact's
- * only when it comes with a `stageCause` that `before` did not have: a drag from
- * another client or an undo changes the stage and leaves the cause out.
+ * Returns the key of the move that put `card` in the stage it is in since the
+ * board showed `before`, or `undefined` when the move is not held. A stage
+ * change is held when it comes with a `stageCause` that `before` did not have
+ * (a fact moved it), or when its key is in `playedKeys` (the morning replay
+ * plays it). A drag from another client or an undo changes the stage and
+ * leaves the cause out, so it is shown at once.
  *
- * The key holds the id of the fact (`buildFactKey`), so that each move by a
+ * The key holds the id of the fact (`buildStageMoveKey`), so that each move by a
  * fact has a key of its own: releasing one does not release the next fact for
- * the same card, even when its words are the same ("PR #6221 merged" after a
+ * the same card, even when its words are the same ("Pull request #6221 merged" after a
  * relink).
- *
- * A stage change whose key is in `alsoHeld` counts too, with or without words:
- * the morning replay holds every move it plays.
  */
-const readFactKey = (
+const readStageMoveKey = (
   card: WorkCard,
   before: WorkCard,
-  alsoHeld: ReadonlySet<string>,
+  playedKeys: ReadonlySet<string>,
 ): string | undefined => {
   if (card.stage === before.stage) return undefined;
-  const key = buildFactKey(card);
+  const key = buildStageMoveKey(card);
   const hasNewCause =
     card.stageCause !== undefined && !isSameValue(card.stageCause, before.stageCause);
-  return hasNewCause || alsoHeld.has(key) ? key : undefined;
+  return hasNewCause || playedKeys.has(key) ? key : undefined;
 };
 
 /** Returns whether every field of the two boards other than `cards` is equal. */
@@ -117,8 +132,7 @@ const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string)
     ...moved,
     cards: moved.cards.map((card) => {
       if (card.id !== cardId) return card;
-      const { stageCause, ...withoutCause } = card;
-      void stageCause;
+      const withoutCause = withoutStageCause(card);
       const shownStage = { stageChangedAt: before.stageChangedAt };
       return before.stageCause === undefined
         ? { ...withoutCause, ...shownStage }
@@ -144,16 +158,17 @@ const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string)
  *   yet. Its stage, project and order are the latest: a card the user moved
  *   stays where the user put it.
  * - A card that changed stage by a fact (its `stageCause` is new, see
- *   `readFactKey`) stays in the stage and place `shown` has until its `fact`
- *   key is in `released`. A stage change with no new cause (a drag from
+ *   `readStageMoveKey`) stays in the stage and place `shown` has until its
+ *   `move` key is in `released`. A stage change with no new cause (a drag from
  *   another client, an undo) is shown at once, and so is a card the user's
  *   own move changed, because `applyCardMove` clears its cause. Whether a card
  *   is in the user's hand is not decided here: the caller releases a held
- *   change only when the hand is still. A stage change whose `buildFactKey`
- *   is in `alsoHeldFactKeys` is held the same way though it has no new cause,
- *   which is how the morning replay holds the moves it plays.
- * - A card in `movedByUser` has a stage move of the user's own that the
- *   controller has not answered yet (`LogicalBoard.movedIds`). Its move is
+ *   change only when the hand is still. A stage change whose
+ *   `buildStageMoveKey` is in `options.playedKeys` is held the same way though
+ *   it has no new cause, which is how the morning replay holds the moves it
+ *   plays.
+ * - A card in `options.movedByUser` has a stage move of the user's own that the
+ *   controller has not answered yet. Its move is
  *   never held and never put back: the user put the card there, and whatever
  *   waited for it (a fact's cause, a replayed move) leaves with it.
  *
@@ -163,15 +178,13 @@ const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string)
 export const holdBackBoardChanges = (
   shown: WorkBoard,
   latest: WorkBoard,
-  released: ReadonlySet<string>,
-  hiddenBefore: ReadonlySet<string>,
-  alsoHeldFactKeys: ReadonlySet<string> = NO_KEYS,
-  movedByUser: ReadonlySet<string> = NO_KEYS,
+  options: HoldBackOptions,
 ): HeldBoard => {
+  const { released, hiddenBefore, playedKeys = NO_KEYS, movedByUser = NO_KEYS } = options;
   const shownById = new Map(shown.cards.map((card) => [card.id, card]));
   const held: HeldChange[] = [];
   const cards: WorkCard[] = [];
-  const factCardIds: string[] = [];
+  const movedCardIds: string[] = [];
   for (const card of latest.cards) {
     const before = shownById.get(card.id);
     if (before === undefined) {
@@ -188,22 +201,22 @@ export const holdBackBoardChanges = (
         drawn = keepShownFailure(card, before);
       }
     }
-    const factKey = movedByUser.has(card.id)
+    const moveKey = movedByUser.has(card.id)
       ? undefined
-      : readFactKey(card, before, alsoHeldFactKeys);
-    if (factKey !== undefined && !released.has(factKey)) {
-      held.push({ kind: "fact", cardId: card.id, key: factKey });
-      factCardIds.push(card.id);
+      : readStageMoveKey(card, before, playedKeys);
+    if (moveKey !== undefined && !released.has(moveKey)) {
+      held.push({ kind: "move", cardId: card.id, key: moveKey });
+      movedCardIds.push(card.id);
     }
     cards.push(drawn);
   }
-  const withFactsHeld = factCardIds.reduce<WorkBoard>(
+  const withMovesHeld = movedCardIds.reduce<WorkBoard>(
     (board, cardId) => putBackInShownPlace(board, shown, cardId),
     { ...latest, cards },
   );
   const isUnchanged =
-    withFactsHeld.cards.length === shown.cards.length &&
-    withFactsHeld.cards.every((card, index) => isSameValue(card, shown.cards[index])) &&
+    withMovesHeld.cards.length === shown.cards.length &&
+    withMovesHeld.cards.every((card, index) => isSameValue(card, shown.cards[index])) &&
     isSameBoardExceptCards(shown, latest);
-  return { board: isUnchanged ? shown : withFactsHeld, held };
+  return { board: isUnchanged ? shown : withMovesHeld, held };
 };

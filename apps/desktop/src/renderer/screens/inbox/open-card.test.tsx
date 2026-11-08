@@ -859,7 +859,7 @@ describe("Link something in the open card", () => {
       "source=relay",
     );
     expect(within(sheet).queryByText("The thing itself")).toBeNull();
-    const results = within(sheet.querySelector<HTMLElement>(".open-card-found")!);
+    const results = within(sheet.querySelector<HTMLElement>(".link-search-found")!);
     expect(results.queryByRole("button", { name: /Already linked/ })).toBeNull();
     await user.click(row);
     expect(onLink).toHaveBeenCalledExactlyOnceWith({

@@ -269,6 +269,11 @@ const LINKED_ISSUE: EntityPlace = {
   identifier: "#412",
   status: { shape: "ring", tone: "active", label: "In progress" },
   restricted: false,
+  latestChange: {
+    reason: "reassigned",
+    sentence: { say: "Now with Tessa", tone: "plain" },
+    at: hoursAgo(5),
+  },
 };
 const HIDDEN_ISSUE: EntityPlace = {
   ref: "github:issue:acme/platform-core#1204",
@@ -321,8 +326,8 @@ const FAILED_CARD = WORK_RECORDS.board.cards.find(
 
 /**
  * The Work specimen with the details of the Task that asks open beside the
- * board: its summary and what is left, the question with two answers, and two
- * Threads, one of which asks.
+ * board: its summary and what is left, the question with two answers, the
+ * Thread that asks, and what it links, with the way to link something else.
  */
 export const WORK_DETAILS_RECORDS: WorkRecords = {
   ...WORK_RECORDS,
@@ -378,17 +383,8 @@ export const WORK_DETAILS_RECORDS: WorkRecords = {
           ],
           done: false,
         },
-        {
-          id: sessionId(4),
-          title: "Merge the two baskets",
-          role: null,
-          kind: "thread",
-          status: "idle",
-          openRequests: [],
-          done: true,
-        },
       ],
-      sessionCount: 2,
+      sessionCount: 1,
       runs: [
         buildRun(2, "Review PR", "running", 1),
         buildRun(3, "Check the refund rules", "completed", 5),

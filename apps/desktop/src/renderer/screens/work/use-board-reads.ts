@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "
 import { flushSync } from "react-dom";
 import {
   buildArrivalKey,
-  buildFactKey,
+  buildStageMoveKey,
   holdBackBoardChanges,
   planMorningReplay,
   type BoardSnapshot,
@@ -21,7 +21,7 @@ import "./motion.css";
 
 const NOTHING_RELEASED: ReadonlySet<string> = new Set();
 const NO_KEYS: readonly string[] = [];
-const NO_MOVE_KEYS: ReadonlySet<string> = new Set();
+const NO_PLAYED_KEYS: ReadonlySet<string> = new Set();
 
 /** The board the screen draws, and what the reads did to it. */
 export interface BoardReads {
@@ -50,7 +50,7 @@ export interface BoardReads {
   readonly noteReturnedTask: (taskId: string, how: EndStage) => void;
   /**
    * What changed since the user last looked, such as "Since you last looked:
-   * 2 landed, 1 new", once the morning replay has played (at once under
+   * two landed, one new", once the morning replay has played (at once under
    * Reduce motion, where nothing plays). `null` when nothing changed, or
    * while the replay still plays.
    */
@@ -73,18 +73,9 @@ interface Picture {
  * changed, and the keys of the changes it plays, oldest first (empty when
  * nothing plays, as under Reduce motion).
  */
-interface Morning {
+interface VisitReplay {
   readonly summary: string;
-  readonly order: readonly string[];
-  /** The moves it plays that carry no cause, which are held like a card moved by a fact. */
-  readonly heldMoveKeys: ReadonlySet<string>;
-}
-
-/** What the first picture of a visit starts from, when the morning replay plays. */
-interface Start {
-  /** The board the replay starts from. */
-  readonly shown: WorkBoard;
-  readonly heldMoveKeys: ReadonlySet<string>;
+  readonly playedKeys: readonly string[];
 }
 
 /** What the screen gave `useBoardReads` at its last render. */
@@ -95,37 +86,35 @@ interface Inputs {
   readonly serverBoard: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
   readonly picture: Picture | undefined;
-  readonly heldMoveKeys: ReadonlySet<string>;
+  readonly playedKeys: ReadonlySet<string>;
   readonly isCarrying: boolean;
 }
 
+/** What `decidePicture` reads of the screen's inputs. */
+type PictureInputs = Omit<Inputs, "logicalBoard" | "picture" | "isCarrying">;
+
 /**
  * Returns the picture to draw next, and the changes it holds back until the
- * hand is still. The first picture is the logical board itself, unless the
- * morning replay starts from `start`.
+ * hand is still. The first picture is `logicalBoard` itself, unless the
+ * morning replay starts from `replayStart`, the board it plays forward from.
  */
 const decidePicture = (
   picture: Picture | undefined,
-  start: Start | undefined,
+  replayStart: WorkBoard | undefined,
   logicalBoard: WorkBoard,
-  hiddenIds: ReadonlySet<string>,
-  movedIds: ReadonlySet<string>,
-  serverBoard: WorkBoard | undefined,
-  released: ReadonlySet<string>,
-  heldMoveKeys: ReadonlySet<string>,
+  inputs: PictureInputs,
 ): { readonly next: Picture; readonly held: readonly HeldChange[] } => {
-  const shown = picture?.board ?? start?.shown;
+  const { hiddenIds, movedIds, serverBoard, released, playedKeys } = inputs;
+  const shown = picture?.board ?? replayStart;
   const decided =
     shown === undefined
       ? { board: logicalBoard, held: [] }
-      : holdBackBoardChanges(
-          shown,
-          logicalBoard,
+      : holdBackBoardChanges(shown, logicalBoard, {
           released,
-          picture?.hidden ?? hiddenIds,
-          heldMoveKeys,
-          movedIds,
-        );
+          hiddenBefore: picture?.hidden ?? hiddenIds,
+          playedKeys,
+          movedByUser: movedIds,
+        });
   return {
     next: { board: decided.board, server: serverBoard, released, hidden: hiddenIds },
     held: decided.held,
@@ -193,7 +182,7 @@ export const useBoardReads = ({
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): BoardReads => {
   const [picture, setPicture] = useState<Picture | undefined>(undefined);
-  const [morning, setMorning] = useState<Morning | undefined>(undefined);
+  const [visitReplay, setVisitReplay] = useState<VisitReplay | undefined>(undefined);
   const [released, setReleased] = useState(NOTHING_RELEASED);
   const [wasCarrying, setWasCarrying] = useState(false);
   if (wasCarrying !== isCarrying) setWasCarrying(isCarrying);
@@ -203,32 +192,29 @@ export const useBoardReads = ({
   let drawn = logicalBoard;
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
-  let heldMoveKeys = morning?.heldMoveKeys ?? NO_MOVE_KEYS;
+  let playedKeys = visitReplay === undefined ? NO_PLAYED_KEYS : new Set(visitReplay.playedKeys);
   if (logicalBoard !== undefined) {
     // The first picture of a visit, which is also the first one after the
     // replay is asked for again, may start from how the board looked.
-    let start: Start | undefined;
+    let replayStart: WorkBoard | undefined;
     if (picture === undefined) {
       const plan = snapshot === undefined ? undefined : planMorningReplay(snapshot, logicalBoard);
       const isPlayed = plan !== undefined && !isMotionReduced();
-      start = isPlayed ? { shown: plan.shown, heldMoveKeys: plan.heldMoveKeys } : undefined;
-      heldMoveKeys = start?.heldMoveKeys ?? NO_MOVE_KEYS;
-      setMorning(
+      replayStart = isPlayed ? plan.shown : undefined;
+      playedKeys = isPlayed ? new Set(plan.playedKeys) : NO_PLAYED_KEYS;
+      setVisitReplay(
         plan === undefined
           ? undefined
-          : { summary: plan.summary, order: isPlayed ? plan.order : NO_KEYS, heldMoveKeys },
+          : { summary: plan.summary, playedKeys: isPlayed ? plan.playedKeys : NO_KEYS },
       );
     }
-    const decided = decidePicture(
-      picture,
-      start,
-      logicalBoard,
+    const decided = decidePicture(picture, replayStart, logicalBoard, {
       hiddenIds,
       movedIds,
       serverBoard,
       released,
-      heldMoveKeys,
-    );
+      playedKeys,
+    });
     held = decided.held;
     const isRead =
       picture !== undefined && (serverBoard !== picture.server || released !== picture.released);
@@ -253,7 +239,7 @@ export const useBoardReads = ({
     serverBoard,
     released,
     picture,
-    heldMoveKeys,
+    playedKeys,
     isCarrying,
   });
   const ownTaskIds = useRef(new Set<string>());
@@ -277,7 +263,7 @@ export const useBoardReads = ({
       serverBoard,
       released,
       picture,
-      heldMoveKeys,
+      playedKeys,
       isCarrying,
     };
   });
@@ -298,16 +284,13 @@ export const useBoardReads = ({
         picture: shown,
       } = latest.current;
       if (latestBoard === undefined || shown === undefined) return;
-      const { next } = decidePicture(
-        shown,
-        undefined,
-        latestBoard,
-        latestHidden,
-        latestMoved,
-        latestServer,
-        latest.current.released,
-        latest.current.heldMoveKeys,
-      );
+      const { next } = decidePicture(shown, undefined, latestBoard, {
+        hiddenIds: latestHidden,
+        movedIds: latestMoved,
+        serverBoard: latestServer,
+        released: latest.current.released,
+        playedKeys: latest.current.playedKeys,
+      });
       const commit = (): void => {
         flushSync(() => {
           setPicture(next);
@@ -327,7 +310,7 @@ export const useBoardReads = ({
       // A card whose move was released by this read crosses by itself, with
       // its cause and its dent.
       const selfMoves = next.board.cards.flatMap((card): SelfMovingCard[] => {
-        const key = buildFactKey(card);
+        const key = buildStageMoveKey(card);
         const before = shownCards.get(card.id);
         return before !== undefined &&
           before.stage !== card.stage &&
@@ -374,7 +357,7 @@ export const useBoardReads = ({
     release: (key) => {
       setReleased((before) => new Set(before).add(key));
     },
-    startDelays: buildReplayDelays(morning?.order ?? NO_KEYS),
+    startDelays: buildReplayDelays(visitReplay?.playedKeys ?? NO_KEYS),
   });
 
   const noteAddedTask = useCallback((taskId: string): void => {
@@ -394,13 +377,14 @@ export const useBoardReads = ({
   }, []);
 
   const isReplaying =
-    morning !== undefined && held.some((change) => morning.order.includes(change.key));
+    visitReplay !== undefined && held.some((change) => visitReplay.playedKeys.includes(change.key));
   return {
     drawnBoard: drawn,
     note,
     noteAddedTask,
     noteReturnedTask,
-    sinceLastLook: morning === undefined || isReplaying ? null : morning.summary,
-    playReplayAgain: morning !== undefined && morning.order.length > 0 ? playReplayAgain : null,
+    sinceLastLook: visitReplay === undefined || isReplaying ? null : visitReplay.summary,
+    playReplayAgain:
+      visitReplay !== undefined && visitReplay.playedKeys.length > 0 ? playReplayAgain : null,
   };
 };

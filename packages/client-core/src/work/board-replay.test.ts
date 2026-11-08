@@ -11,7 +11,7 @@ import { holdBackBoardChanges } from "./hold-back-board";
 import { listCardMoves } from "./list-card-moves";
 
 const NOTHING = new Set<string>();
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "PR #6221 merged" };
+const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
 
 /** Returns a card that landed at the given time of 2 November 2026. */
 const buildLanded = (id: string, hour: number) =>
@@ -112,23 +112,25 @@ describe("planMorningReplay", () => {
     const plan = planMorningReplay(buildBoardSnapshot(before), read)!;
 
     expect(plan.summary).toBe("Since you last looked: one landed, one new");
-    expect(plan.order).toEqual(["fact:b:fact-4", "arrival:new"]);
+    expect(plan.playedKeys).toEqual(["move:b:fact-4", "arrival:new"]);
 
-    const start = holdBackBoardChanges(plan.shown, read, NOTHING, NOTHING, plan.heldMoveKeys);
+    const start = holdBackBoardChanges(plan.shown, read, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+      playedKeys: new Set(plan.playedKeys),
+    });
     expect(start.board.cards.map((card) => [card.id, card.stage])).toEqual([
       ["a", "in-review"],
       ["b", "in-review"],
       ["c", "in-review"],
     ]);
-    expect(start.held.map((change) => change.key)).toEqual(plan.order);
+    expect(start.held.map((change) => change.key)).toEqual(plan.playedKeys);
 
-    const end = holdBackBoardChanges(
-      plan.shown,
-      read,
-      new Set(plan.order),
-      NOTHING,
-      plan.heldMoveKeys,
-    );
+    const end = holdBackBoardChanges(plan.shown, read, {
+      released: new Set(plan.playedKeys),
+      hiddenBefore: NOTHING,
+      playedKeys: new Set(plan.playedKeys),
+    });
     expect(end.board.cards.map((card) => [card.id, card.stage])).toEqual([
       ["a", "in-review"],
       ["b", "landed"],
@@ -152,7 +154,11 @@ describe("planMorningReplay", () => {
     );
 
     const plan = planMorningReplay(buildBoardSnapshot(before), read)!;
-    const start = holdBackBoardChanges(plan.shown, read, NOTHING, NOTHING, plan.heldMoveKeys);
+    const start = holdBackBoardChanges(plan.shown, read, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+      playedKeys: new Set(plan.playedKeys),
+    });
 
     expect(listIds(start.board.cards.filter((card) => card.stage === "in-review"))).toEqual([
       "x",
@@ -170,7 +176,7 @@ describe("planMorningReplay", () => {
     const plan = planMorningReplay(buildBoardSnapshot(before), read)!;
 
     expect(plan.summary).toBe("Since you last looked: one moved");
-    expect(plan.order).toEqual(["fact:a:2026-11-02T03:00:00.000Z"]);
+    expect(plan.playedKeys).toEqual(["move:a:2026-11-02T03:00:00.000Z"]);
   });
 
   it("plays the newest changes in the order they happened and draws the older ones at once", () => {
@@ -182,14 +188,18 @@ describe("planMorningReplay", () => {
     const plan = planMorningReplay(buildBoardSnapshot(before), read)!;
 
     expect(plan.summary).toBe("Since you last looked: six landed");
-    expect(plan.order).toHaveLength(MOST_REPLAYED_CHANGES);
-    expect(plan.order).toEqual([
-      "fact:d:fact-4",
-      "fact:c:fact-4",
-      "fact:b:fact-4",
-      "fact:a:fact-4",
+    expect(plan.playedKeys).toHaveLength(MOST_REPLAYED_CHANGES);
+    expect(plan.playedKeys).toEqual([
+      "move:d:fact-4",
+      "move:c:fact-4",
+      "move:b:fact-4",
+      "move:a:fact-4",
     ]);
-    const start = holdBackBoardChanges(plan.shown, read, NOTHING, NOTHING, plan.heldMoveKeys);
+    const start = holdBackBoardChanges(plan.shown, read, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+      playedKeys: new Set(plan.playedKeys),
+    });
     const inStage = (stage: string): readonly string[] =>
       listIds(start.board.cards.filter((card) => card.stage === stage));
     expect(inStage("in-review")).toEqual(["a", "b", "c", "d"]);

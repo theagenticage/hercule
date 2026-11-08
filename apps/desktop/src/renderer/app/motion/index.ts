@@ -44,3 +44,4 @@ export type { SpringName } from "./springs";
 export { animateValue, type MotionValue } from "./value";
 export { pauseFor } from "./pause";
 export { waitForStillHand, type StillHandOptions } from "./still-hand";
+export { waitForVisibleStillHand } from "./visible-still-hand";

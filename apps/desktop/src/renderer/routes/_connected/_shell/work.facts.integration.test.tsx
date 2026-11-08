@@ -38,7 +38,7 @@ afterEach(() => {
 
 const WEBSHOP = SIDEBAR_FIXTURE.projects[0]!;
 const buildTaskId = (n: number): string => `01a06d02-7e00-7000-8000-${String(n).padStart(12, "0")}`;
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "PR #6221 merged" };
+const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
 const SNAPSHOT_KEY = buildBoardSnapshotKey(CONTROLLER_URL, SIDEBAR_FIXTURE.username);
 
 const SLOTS = buildCard(buildTaskId(1), {
@@ -126,7 +126,7 @@ describe("a card that a fact moves", () => {
     // The cause lands first, on the card, where it still stands.
     await waitFor(() => {
       expect(getCard("Cache delivery slot lookups").querySelector(".card-cause")?.textContent).toBe(
-        "PR #6221 merged",
+        "Pull request #6221 merged",
       );
     });
     expect(getCard("Cache delivery slot lookups").dataset["stage"]).toBe("in-review");
@@ -143,7 +143,7 @@ describe("a card that a fact moves", () => {
       ),
     ).toEqual([BUILDING.id, SLOTS.id]);
     expect(getCard("Cache delivery slot lookups").querySelector(".card-cause")).not.toBeNull();
-    expect(readLine()).toBe("PR #6221 merged");
+    expect(readLine()).toBe("Pull request #6221 merged");
   });
 
   it("keeps the place it left open as a dent, so nothing below it jumps, and closes it later", async () => {
@@ -190,7 +190,7 @@ describe("a card that a fact moves", () => {
 
     expect(await screen.findByRole("button", { name: "1 landed" })).toBeTruthy();
     expect(queryCard("Cache delivery slot lookups")).toBeNull();
-    expect(readLine()).toBe("PR #6221 merged");
+    expect(readLine()).toBe("Pull request #6221 merged");
   });
 
   it("shows the label and then the card in its new place under Reduce motion", async () => {
@@ -209,12 +209,12 @@ describe("a card that a fact moves", () => {
     live.pushInvalidation("task", [SLOTS.id]);
 
     await waitFor(() => {
-      expect(document.querySelector(".card-cause")?.textContent).toBe("PR #6221 merged");
+      expect(document.querySelector(".card-cause")?.textContent).toBe("Pull request #6221 merged");
     });
     await waitFor(() => {
       expect(getCard("Cache delivery slot lookups").dataset["stage"]).toBe("building");
     });
-    expect(readLine()).toBe("PR #6221 merged");
+    expect(readLine()).toBe("Pull request #6221 merged");
   });
 
   it("says only the cause on the line for a card that lies past what its cell shows", async () => {
@@ -240,7 +240,7 @@ describe("a card that a fact moves", () => {
 
     expect(await screen.findByRole("button", { name: "3 more" })).toBeTruthy();
     expect(queryCard("Cache delivery slot lookups")).toBeNull();
-    expect(readLine()).toBe("PR #6221 merged");
+    expect(readLine()).toBe("Pull request #6221 merged");
   });
 });
 
@@ -269,7 +269,7 @@ describe("the morning replay", () => {
       },
       { timeout: 4_000 },
     );
-    expect(readLine()).toBe("PR #6221 merged");
+    expect(readLine()).toBe("Pull request #6221 merged");
 
     // One quiet line stays afterwards.
     const replay = await screen.findByRole(

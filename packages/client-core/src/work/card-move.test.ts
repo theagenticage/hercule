@@ -16,6 +16,7 @@ import {
   readPlacement,
   reapplyCardMoves,
   settleDropMove,
+  withoutStageCause,
 } from "./card-move";
 import { buildBoard, buildCard, FAILURE, listIds } from "./cards.testing";
 import { buildLanes } from "./lanes";
@@ -76,7 +77,7 @@ describe("applyCardMove", () => {
   });
 
   it("drops the cause of the stage when the move names a stage, and keeps it for a reorder", () => {
-    const cause = { factId: 4, ref: "github:pull-request:6221", text: "PR #6221 merged" };
+    const cause = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
     const board = buildBoard(
       buildCard("a", { projectId: "depots", stage: "landed", stageCause: cause }),
       buildCard("b", { projectId: "depots", stage: "landed" }),
@@ -408,5 +409,18 @@ describe("settleDropMove", () => {
       kind: "refuse",
       reason: "The Project it was dropped on has gone, so the card was not moved.",
     });
+  });
+});
+
+describe("withoutStageCause", () => {
+  it("takes the cause away and keeps everything else", () => {
+    const cause = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+    const card = buildCard("a", { stage: "landed", stageCause: cause });
+
+    const cleared = withoutStageCause(card);
+
+    expect(cleared).not.toHaveProperty("stageCause");
+    expect(cleared).toMatchObject({ id: "a", stage: "landed" });
+    expect(withoutStageCause(buildCard("b"))).toEqual(buildCard("b"));
   });
 });

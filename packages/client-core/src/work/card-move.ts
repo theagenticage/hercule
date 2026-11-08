@@ -100,6 +100,13 @@ export const applyCardMove = (board: WorkBoard, move: CardMove): WorkBoard => {
   return { ...board, cards: [...others.slice(0, insertAt), moved, ...others.slice(insertAt)] };
 };
 
+/** Returns `card` without its `stageCause`, whatever else it has. */
+export const withoutStageCause = (card: WorkCard): WorkCard => {
+  const { stageCause, ...rest } = card;
+  void stageCause;
+  return rest;
+};
+
 /**
  * Returns the board with every pending move applied over it, in order. Call it
  * on each fresh board from the controller, with the moves it has not yet

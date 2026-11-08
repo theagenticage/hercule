@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient, PluginIdentity } from "@hercule/client-core";
-import { listLinkableRows } from "@hercule/client-core/inbox";
 import {
   decideAddList,
   listAddSources,
+  listLinkableRows,
   type AddRow,
   type AddSource,
 } from "@hercule/client-core/work";
-import type { EntityLink } from "@hercule/contract";
 import { pluginsQuery } from "../../app/queries";
 import { LinkIcon } from "../../icons/link";
 import { PluginMark } from "../../marks";
-import { useEntitySearch } from "../desk";
 import { ViewSwitch } from "../view-switch";
+import { useEntitySearch } from "./use-entity-search";
+import "./link-search.css";
 
 const PLACEHOLDER = "Search by title or number";
 
@@ -22,14 +22,13 @@ const PLACEHOLDER = "Search by title or number";
  * it finds. It runs Work's Add search (`useEntitySearch`, the same words for
  * each outcome): a source is chosen on a tab, and Return links the first row.
  */
-function SourceLinkSearch({
+function SourceSearch({
   client,
   sources,
   names,
   plugins,
   initialSource,
-  selfRef,
-  links,
+  excludedRefs,
   onPick,
   onClose,
 }: {
@@ -38,8 +37,7 @@ function SourceLinkSearch({
   readonly names: ReadonlyMap<string, string>;
   readonly plugins: readonly PluginIdentity[];
   readonly initialSource: string;
-  readonly selfRef: string;
-  readonly links: readonly EntityLink[];
+  readonly excludedRefs: readonly string[];
   readonly onPick: (row: AddRow) => void;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -68,7 +66,7 @@ function SourceLinkSearch({
     scope: undefined,
     search: search.state,
   });
-  const rows = list.kind === "results" ? listLinkableRows(list.rows, selfRef, links) : [];
+  const rows = list.kind === "results" ? listLinkableRows(list.rows, excludedRefs) : [];
   const note =
     list.kind === "searching" || list.kind === "message"
       ? list.text
@@ -89,10 +87,10 @@ function SourceLinkSearch({
   };
 
   return (
-    <div className="open-card-find" onKeyDown={closeOnEscape}>
+    <div className="link-search-find" onKeyDown={closeOnEscape}>
       {sources.length > 1 && (
         <ViewSwitch
-          className="seg open-card-sources"
+          className="seg link-search-sources"
           label="Source"
           choices={sources.map((source) => ({
             view: source.id,
@@ -115,7 +113,7 @@ function SourceLinkSearch({
       >
         <input
           ref={inputRef}
-          className="open-card-find-input"
+          className="link-search-input"
           value={search.text}
           placeholder={PLACEHOLDER}
           aria-label="Link something"
@@ -126,27 +124,27 @@ function SourceLinkSearch({
         />
       </form>
       {note !== undefined && (
-        <p className="open-card-found-note" aria-live="polite">
+        <p className="link-search-note" aria-live="polite">
           {note}
         </p>
       )}
       {rows.length > 0 && (
-        <ul className="open-card-found">
+        <ul className="link-search-found">
           {rows.map((row) => (
             <li key={row.ref}>
               <button
                 type="button"
-                className="open-card-found-go"
+                className="link-search-go"
                 onClick={() => {
                   onPick(row);
                 }}
               >
-                <span className="open-card-found-mark">
+                <span className="link-search-mark">
                   <PluginMark pluginId={reply?.source ?? tab} plugins={plugins} size={14} />
                 </span>
-                <span className="open-card-found-title">{row.title}</span>
+                <span className="link-search-title">{row.title}</span>
                 <small>{row.identifier}</small>
-                {row.state !== "" && <span className="open-card-found-state">{row.state}</span>}
+                {row.state !== "" && <span className="link-search-state">{row.state}</span>}
               </button>
             </li>
           ))}
@@ -157,39 +155,37 @@ function SourceLinkSearch({
 }
 
 /**
- * Renders the way to link something to the open thing, at the foot of the
- * Linked section: a "Link something" button that opens a search. Choosing a
- * row calls `onPick` with it and closes the search.
+ * Renders the way to link something to the open thing, at the foot of its
+ * Linked section: a "Link something" button that opens a search of the
+ * sources, which reads a pasted link too. Choosing a row calls `onPick` with
+ * it and closes the search.
  *
- * - `selfRef` and `links` decide which results can be linked: not the thing
- *   itself, and not what is already linked (`listLinkableRows`).
- * - `ownPluginId` is the plugin that owns the open thing. The search starts
- *   on another source when there is one, because a link between two sources
- *   is the usual one: a ticket and its pull request.
+ * - `excludedRefs` are the refs the search never offers: what is linked
+ *   already, and the thing itself when it has a ref.
+ * - `ownPluginId` is the plugin that owns the open thing, if any. The search
+ *   starts on another source when there is one, because a link between two
+ *   sources is the usual one: a ticket and its pull request.
  *
  * The plugins are read only once the search opens.
  */
-export function OpenCardLinkSearch({
+export function LinkSearch({
   client,
-  selfRef,
-  links,
+  excludedRefs,
   ownPluginId,
   onPick,
 }: {
   readonly client: HerculeClient;
-  readonly selfRef: string;
-  readonly links: readonly EntityLink[];
-  readonly ownPluginId: string;
+  readonly excludedRefs: readonly string[];
+  readonly ownPluginId?: string;
   readonly onPick: (row: AddRow) => void;
 }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   return (
-    <div className="open-card-add">
+    <div className="link-search">
       {isOpen ? (
         <OpenSearch
           client={client}
-          selfRef={selfRef}
-          links={links}
+          excludedRefs={excludedRefs}
           ownPluginId={ownPluginId}
           onPick={(row) => {
             setIsOpen(false);
@@ -202,7 +198,7 @@ export function OpenCardLinkSearch({
       ) : (
         <button
           type="button"
-          className="open-card-add-go"
+          className="link-search-open"
           onClick={() => {
             setIsOpen(true);
           }}
@@ -218,16 +214,14 @@ export function OpenCardLinkSearch({
 /** Reads the plugins and draws the search on the first source that can be searched, or says there is none. */
 function OpenSearch({
   client,
-  selfRef,
-  links,
+  excludedRefs,
   ownPluginId,
   onPick,
   onClose,
 }: {
   readonly client: HerculeClient;
-  readonly selfRef: string;
-  readonly links: readonly EntityLink[];
-  readonly ownPluginId: string;
+  readonly excludedRefs: readonly string[];
+  readonly ownPluginId: string | undefined;
   readonly onPick: (row: AddRow) => void;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -235,19 +229,16 @@ function OpenSearch({
   const sources = listAddSources(plugins);
   const start = sources.find((source) => source.id !== ownPluginId) ?? sources[0];
   if (start === undefined) {
-    return (
-      <p className="open-card-found-note">No source can be searched. Add a Connection first.</p>
-    );
+    return <p className="link-search-note">No source can be searched. Add a Connection first.</p>;
   }
   return (
-    <SourceLinkSearch
+    <SourceSearch
       client={client}
       sources={sources}
       names={new Map(plugins.map((plugin) => [plugin.id, plugin.displayName]))}
       plugins={plugins}
       initialSource={start.id}
-      selfRef={selfRef}
-      links={links}
+      excludedRefs={excludedRefs}
       onPick={onPick}
       onClose={onClose}
     />

@@ -24,7 +24,7 @@ const endWaits: (() => void)[] = [];
 
 vi.mock("../../app/motion", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../app/motion")>()),
-  waitForStillHand: vi.fn(
+  waitForVisibleStillHand: vi.fn(
     () =>
       new Promise<boolean>((resolve) => {
         endWaits.push(() => {

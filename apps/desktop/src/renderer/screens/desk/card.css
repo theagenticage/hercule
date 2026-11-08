@@ -181,7 +181,7 @@
   font: var(--type-meta);
   color: var(--faint);
 }
-/* Why a card is about to move by itself, such as "PR #6221 merged": a small
+/* Why a card is about to move by itself, such as "Pull request #6221 merged": a small
    label on the card's foot, where its age usually is. The card hides its age,
    marks and "also" line meanwhile, so nothing reads under the label. The
    motion kernel rises and fades it in. From the drawing's `.card-signal`. */
@@ -190,16 +190,22 @@
   z-index: 3;
   left: 8px;
   bottom: 7px;
-  display: inline-flex;
-  align-items: center;
+  /* A block, so a long cause ends in an ellipsis before the card's edge, 8px
+     in as at the left, where the drawing's label would run past it. */
+  display: block;
+  box-sizing: border-box;
+  max-width: calc(100% - 16px);
   height: 18px;
   padding: 0 7px;
+  overflow: hidden;
   border-radius: 6px;
   background: var(--stock);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 60%, transparent);
   font: var(--type-meta);
   font-weight: var(--w-medium);
+  line-height: 18px;
   color: var(--ink);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .desk-card[data-cause] :is(.card-meta, .card-also) {

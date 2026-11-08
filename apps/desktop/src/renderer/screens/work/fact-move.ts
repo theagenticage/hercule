@@ -7,7 +7,7 @@
  */
 import type { BoardStage } from "@hercule/contract";
 import type { DropPlace } from "@hercule/client-core/work";
-import { isMotionReduced, pauseFor } from "../../app/motion";
+import { isMotionReduced, pauseFor, waitForVisibleStillHand } from "../../app/motion";
 import { openDent, showCauseLabel } from "../desk";
 import {
   fadeInCards,
@@ -19,7 +19,6 @@ import {
 import { findCardElement } from "./card-in-lane";
 import { flipBoard } from "./flip-board";
 import { findHidingPlace } from "./land-card";
-import { waitForVisibleStillHand } from "./wait-for-visible-still-hand";
 
 /**
  * How long a card keeps its cause label and stands above the cards it passes
@@ -39,7 +38,7 @@ export interface SelfMovingCard {
   readonly cardId: string;
   /** The stage the card moves to. */
   readonly stage: BoardStage;
-  /** The words of why it moves ("PR #6221 merged"), or `undefined` when nothing says why. */
+  /** The words of why it moves ("Pull request #6221 merged"), or `undefined` when nothing says why. */
   readonly cause: string | undefined;
 }
 

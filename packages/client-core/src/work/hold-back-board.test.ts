@@ -14,7 +14,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a"), buildCard("b"));
     const latest = buildBoard(buildCard("a"), buildCard("b"));
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.board).toBe(shown);
     expect(result.held).toEqual([]);
@@ -24,7 +27,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a"));
     const latest = buildBoard(buildCard("a"), buildCard("new"));
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(listIds(result.board.cards)).toEqual(["a"]);
     expect(result.held).toEqual([{ kind: "arrival", cardId: "new", key: "arrival:new" }]);
@@ -35,7 +41,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a"));
     const latest = buildBoard(buildCard("a"), buildCard("b"));
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, new Set(["b"]));
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: new Set(["b"]),
+    });
 
     expect(listIds(result.board.cards)).toEqual(["a", "b"]);
     expect(result.held).toEqual([]);
@@ -45,7 +54,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a"));
     const latest = buildBoard(buildCard("a"), buildCard("new"));
 
-    const result = holdBackBoardChanges(shown, latest, new Set([buildArrivalKey("new")]), NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: new Set([buildArrivalKey("new")]),
+      hiddenBefore: NOTHING,
+    });
 
     expect(listIds(result.board.cards)).toEqual(["a", "new"]);
     expect(result.held).toEqual([]);
@@ -55,12 +67,18 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a"), buildCard("b"));
     const latest = buildBoard(buildCard("a"), buildCard("b", { failure: FAILURE }));
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.board.cards[1]!.failure).toBeUndefined();
     expect(result.held).toEqual([{ kind: "failure", cardId: "b", key: "failure:run-1" }]);
 
-    const released = holdBackBoardChanges(shown, latest, new Set(["failure:run-1"]), NOTHING);
+    const released = holdBackBoardChanges(shown, latest, {
+      released: new Set(["failure:run-1"]),
+      hiddenBefore: NOTHING,
+    });
     expect(released.board.cards[1]!.failure).toEqual(FAILURE);
     expect(released.held).toEqual([]);
   });
@@ -75,7 +93,10 @@ describe("holdBackBoardChanges", () => {
       buildCard("b", { stage: "in-review", failure: FAILURE }),
     );
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.board.cards[1]).toMatchObject({ id: "b", stage: "in-review" });
     expect(result.board.cards[1]!.failure).toBeUndefined();
@@ -86,7 +107,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("b"));
     const latest = buildBoard(buildCard("b", { failure: { ...FAILURE, runId: "run-2" } }));
 
-    const result = holdBackBoardChanges(shown, latest, new Set(["failure:run-1"]), NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: new Set(["failure:run-1"]),
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.held.map((change) => change.key)).toEqual(["failure:run-2"]);
   });
@@ -98,7 +122,10 @@ describe("holdBackBoardChanges", () => {
       buildCard("b", { failure: FAILURE }),
     );
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.board.cards[0]!.stage).toBe("building");
     expect(result.board.cards[1]!.failure).toBeUndefined();
@@ -108,7 +135,10 @@ describe("holdBackBoardChanges", () => {
     const shown = buildBoard(buildCard("a", { failure: FAILURE }), buildCard("gone"));
     const latest = buildBoard(buildCard("a", { failure: FAILURE }));
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(listIds(result.board.cards)).toEqual(["a"]);
     expect(result.held).toEqual([]);
@@ -122,7 +152,10 @@ describe("holdBackBoardChanges", () => {
       contextComplete: false,
     };
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(result.board.places[0]!.title).toBe("New");
     expect(result.board.contextComplete).toBe(false);
@@ -135,7 +168,10 @@ describe("holdBackBoardChanges", () => {
       places: [buildPlace("acme:r", "New")],
     };
 
-    const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+    const result = holdBackBoardChanges(shown, latest, {
+      released: NOTHING,
+      hiddenBefore: NOTHING,
+    });
 
     expect(listIds(result.board.cards)).toEqual(["a"]);
     expect(result.board.places[0]!.title).toBe("New");
@@ -143,12 +179,20 @@ describe("holdBackBoardChanges", () => {
   });
 
   describe("a card moved by a fact", () => {
-    const OPENED = { factId: 1, ref: "github:pull-request:6221", text: "PR #6221 opened" };
-    const MERGED = { factId: 2, ref: "github:pull-request:6221", text: "PR #6221 merged" };
+    const OPENED = {
+      factId: 1,
+      ref: "github:pull-request:6221",
+      text: "Pull request #6221 opened",
+    };
+    const MERGED = {
+      factId: 2,
+      ref: "github:pull-request:6221",
+      text: "Pull request #6221 merged",
+    };
     const AT_NOON = "2026-11-02T12:00:00.000Z";
-    const FACT_KEY = "fact:b:fact-2";
+    const FACT_KEY = "move:b:fact-2";
     // A move with no cause is named by the time the stage changed.
-    const NO_CAUSE_KEY = `fact:b:${AT_NOON}`;
+    const NO_CAUSE_KEY = `move:b:${AT_NOON}`;
 
     /** Returns the cards of one stage of a board, in the order the lanes would draw them. */
     const listStage = (board: ReturnType<typeof buildBoard>, stage: string): readonly string[] =>
@@ -166,12 +210,18 @@ describe("holdBackBoardChanges", () => {
         buildCard("b", { stage: "landed", stageCause: MERGED, stageChangedAt: AT_NOON }),
       );
 
-      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
 
       expect(result.board).toBe(shown);
-      expect(result.held).toEqual([{ kind: "fact", cardId: "b", key: FACT_KEY }]);
+      expect(result.held).toEqual([{ kind: "move", cardId: "b", key: FACT_KEY }]);
 
-      const released = holdBackBoardChanges(shown, latest, new Set([FACT_KEY]), NOTHING);
+      const released = holdBackBoardChanges(shown, latest, {
+        released: new Set([FACT_KEY]),
+        hiddenBefore: NOTHING,
+      });
       expect(released.board).toEqual(latest);
       expect(released.held).toEqual([]);
     });
@@ -187,7 +237,10 @@ describe("holdBackBoardChanges", () => {
         }),
       );
 
-      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
 
       expect(result.board.cards[0]).toEqual({
         ...shown.cards[0],
@@ -207,7 +260,10 @@ describe("holdBackBoardChanges", () => {
         buildCard("b", { stage: "landed", stageCause: MERGED, stageChangedAt: AT_NOON }),
       );
 
-      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
 
       expect(listStage(result.board, "building")).toEqual(["x", "b", "y"]);
       expect(listStage(result.board, "landed")).toEqual([]);
@@ -219,11 +275,15 @@ describe("holdBackBoardChanges", () => {
       const dragged = buildBoard(buildCard("b", { stage: "building", stageCause: OPENED }));
       const cleared = buildBoard(buildCard("b", { stage: "building" }));
 
-      expect(holdBackBoardChanges(shown, dragged, NOTHING, NOTHING)).toEqual({
+      expect(
+        holdBackBoardChanges(shown, dragged, { released: NOTHING, hiddenBefore: NOTHING }),
+      ).toEqual({
         board: dragged,
         held: [],
       });
-      expect(holdBackBoardChanges(shown, cleared, NOTHING, NOTHING)).toEqual({
+      expect(
+        holdBackBoardChanges(shown, cleared, { released: NOTHING, hiddenBefore: NOTHING }),
+      ).toEqual({
         board: cleared,
         held: [],
       });
@@ -233,7 +293,9 @@ describe("holdBackBoardChanges", () => {
       const shown = buildBoard(buildCard("b", { stage: "in-review", stageCause: OPENED }));
       const latest = buildBoard(buildCard("b", { stage: "in-review", stageCause: MERGED }));
 
-      expect(holdBackBoardChanges(shown, latest, NOTHING, NOTHING).held).toEqual([]);
+      expect(
+        holdBackBoardChanges(shown, latest, { released: NOTHING, hiddenBefore: NOTHING }).held,
+      ).toEqual([]);
     });
 
     it("shows at once the move the user made over a card that has a cause", () => {
@@ -241,7 +303,10 @@ describe("holdBackBoardChanges", () => {
       const shown = buildBoard(buildCard("b", { stage: "landed", stageCause: MERGED }));
       const latest = applyCardMove(shown, { taskId: "b", stage: "building" });
 
-      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
 
       expect(result.board.cards[0]!.stage).toBe("building");
       expect(result.held).toEqual([]);
@@ -252,9 +317,12 @@ describe("holdBackBoardChanges", () => {
       const latest = buildBoard(
         buildCard("b", { stage: "landed", stageCause: MERGED, stageChangedAt: AT_NOON }),
       );
-      const others = new Set([buildArrivalKey("b"), "failure:run-1", "fact:b:other"]);
+      const others = new Set([buildArrivalKey("b"), "failure:run-1", "move:b:other"]);
 
-      const result = holdBackBoardChanges(shown, latest, others, new Set(["b"]));
+      const result = holdBackBoardChanges(shown, latest, {
+        released: others,
+        hiddenBefore: new Set(["b"]),
+      });
 
       expect(result.held.map((change) => change.key)).toEqual([FACT_KEY]);
     });
@@ -270,10 +338,13 @@ describe("holdBackBoardChanges", () => {
       );
       const latest = buildBoard(buildCard("b", reopened));
 
-      const result = holdBackBoardChanges(shown, latest, new Set([FACT_KEY]), NOTHING);
+      const result = holdBackBoardChanges(shown, latest, {
+        released: new Set([FACT_KEY]),
+        hiddenBefore: NOTHING,
+      });
 
       expect(result.board).toBe(shown);
-      expect(result.held).toEqual([{ kind: "fact", cardId: "b", key: "fact:b:fact-3" }]);
+      expect(result.held).toEqual([{ kind: "move", cardId: "b", key: "move:b:fact-3" }]);
     });
 
     it("holds a move with no cause too when its key is asked for, until it is released", () => {
@@ -281,11 +352,19 @@ describe("holdBackBoardChanges", () => {
       const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
       const asked = new Set([NO_CAUSE_KEY]);
 
-      const held = holdBackBoardChanges(shown, latest, NOTHING, NOTHING, asked);
+      const held = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+        playedKeys: asked,
+      });
       expect(held.board).toBe(shown);
-      expect(held.held).toEqual([{ kind: "fact", cardId: "b", key: NO_CAUSE_KEY }]);
+      expect(held.held).toEqual([{ kind: "move", cardId: "b", key: NO_CAUSE_KEY }]);
 
-      const released = holdBackBoardChanges(shown, latest, asked, NOTHING, asked);
+      const released = holdBackBoardChanges(shown, latest, {
+        released: asked,
+        hiddenBefore: NOTHING,
+        playedKeys: asked,
+      });
       expect(released.board.cards[0]).toMatchObject({ stage: "landed" });
       expect(released.held).toEqual([]);
     });
@@ -294,7 +373,11 @@ describe("holdBackBoardChanges", () => {
       const shown = buildBoard(buildCard("b", { stage: "in-review" }));
       const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
 
-      const result = holdBackBoardChanges(shown, latest, NOTHING, NOTHING, new Set(["fact:x:y"]));
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+        playedKeys: new Set(["move:x:y"]),
+      });
 
       expect(result.board.cards[0]).toMatchObject({ stage: "landed" });
       expect(result.held).toEqual([]);
@@ -307,7 +390,12 @@ describe("holdBackBoardChanges", () => {
       const dragged = buildBoard(buildCard("b", { stage: "building", stageChangedAt: AT_NOON }));
       const asked = new Set([NO_CAUSE_KEY]);
 
-      const result = holdBackBoardChanges(shown, dragged, NOTHING, NOTHING, asked, new Set(["b"]));
+      const result = holdBackBoardChanges(shown, dragged, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+        playedKeys: asked,
+        movedByUser: new Set(["b"]),
+      });
 
       expect(result.board.cards[0]).toMatchObject({ stage: "building" });
       expect(result.held).toEqual([]);
@@ -317,14 +405,12 @@ describe("holdBackBoardChanges", () => {
       const shown = buildBoard(buildCard("b", { stage: "in-review", stageCause: OPENED }));
       const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
 
-      const result = holdBackBoardChanges(
-        shown,
-        latest,
-        NOTHING,
-        NOTHING,
-        new Set([NO_CAUSE_KEY]),
-        new Set(["b"]),
-      );
+      const result = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+        playedKeys: new Set([NO_CAUSE_KEY]),
+        movedByUser: new Set(["b"]),
+      });
 
       expect(result.board.cards[0]).toMatchObject({ stage: "landed" });
       expect(result.held).toEqual([]);
@@ -340,9 +426,12 @@ describe("holdBackBoardChanges", () => {
         }),
       );
 
-      const result = holdBackBoardChanges(shown, later, new Set([FACT_KEY]), NOTHING);
+      const result = holdBackBoardChanges(shown, later, {
+        released: new Set([FACT_KEY]),
+        hiddenBefore: NOTHING,
+      });
 
-      expect(result.held).toEqual([{ kind: "fact", cardId: "b", key: "fact:b:fact-9" }]);
+      expect(result.held).toEqual([{ kind: "move", cardId: "b", key: "move:b:fact-9" }]);
     });
 
     it("holds both the fact and the failure of a card, and releases them apart", () => {
@@ -356,13 +445,19 @@ describe("holdBackBoardChanges", () => {
         }),
       );
 
-      const both = holdBackBoardChanges(shown, latest, NOTHING, NOTHING);
-      expect(both.held.map((change) => change.kind)).toEqual(["failure", "fact"]);
+      const both = holdBackBoardChanges(shown, latest, {
+        released: NOTHING,
+        hiddenBefore: NOTHING,
+      });
+      expect(both.held.map((change) => change.kind)).toEqual(["failure", "move"]);
       expect(both.board).toBe(shown);
 
-      const failureShown = holdBackBoardChanges(shown, latest, new Set(["failure:run-1"]), NOTHING);
+      const failureShown = holdBackBoardChanges(shown, latest, {
+        released: new Set(["failure:run-1"]),
+        hiddenBefore: NOTHING,
+      });
       expect(failureShown.board.cards[0]).toMatchObject({ stage: "in-review", failure: FAILURE });
-      expect(failureShown.held.map((change) => change.kind)).toEqual(["fact"]);
+      expect(failureShown.held.map((change) => change.kind)).toEqual(["move"]);
     });
   });
 });

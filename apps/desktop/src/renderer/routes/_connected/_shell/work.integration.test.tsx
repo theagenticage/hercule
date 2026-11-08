@@ -3347,11 +3347,13 @@ describe("the details pane's outside things", () => {
     expect(within(plainPartOf).queryByRole("button")).toBeNull();
   });
 
-  it("draws neither section for a Task that links nothing", async () => {
+  it("draws no Part of, and only the way to link something under Linked, for a Task that links nothing", async () => {
     const pane = await openPaneWith({});
 
     await within(pane).findByRole("button", { name: /^Done/ });
     expect(within(pane).queryByRole("region", { name: "Part of" })).toBeNull();
-    expect(within(pane).queryByRole("region", { name: "Linked" })).toBeNull();
+    const linked = within(pane).getByRole("region", { name: "Linked" });
+    expect(within(linked).getByRole("button", { name: "Link something" })).toBeTruthy();
+    expect(within(linked).queryByRole("listitem")).toBeNull();
   });
 });

@@ -12,9 +12,9 @@ export const REPLAY_GAP_MS = 1500;
 /**
  * Returns when each change of the replay starts waiting for a still hand, in
  * milliseconds after the board is drawn: the first after `REPLAY_LEAD_MS`, the
- * next ones `REPLAY_GAP_MS` apart. `order` is the keys of the changes, oldest
- * first (`MorningReplay.order`). Each change then still waits for the hand, so
+ * next ones `REPLAY_GAP_MS` apart. `playedKeys` is the keys of the changes, oldest
+ * first (`MorningReplay.playedKeys`). Each change then still waits for the hand, so
  * a change can start later than this, and the ones after it do not wait for it.
  */
-export const buildReplayDelays = (order: readonly string[]): ReadonlyMap<string, number> =>
-  new Map(order.map((key, index) => [key, REPLAY_LEAD_MS + index * REPLAY_GAP_MS]));
+export const buildReplayDelays = (playedKeys: readonly string[]): ReadonlyMap<string, number> =>
+  new Map(playedKeys.map((key, index) => [key, REPLAY_LEAD_MS + index * REPLAY_GAP_MS]));

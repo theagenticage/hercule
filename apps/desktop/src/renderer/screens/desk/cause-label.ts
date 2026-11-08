@@ -5,7 +5,7 @@ const CAUSE_CLASS = "card-cause";
 
 /**
  * Puts a small label on each of `cards` that says why the card is about to
- * move, such as "PR #6221 merged". It sits at the bottom left, where the
+ * move, such as "Pull request #6221 merged". It sits at the bottom left, where the
  * card's age usually is, and the card hides its age and marks while the label
  * is on (`data-cause`, which React never rewrites).
  *
