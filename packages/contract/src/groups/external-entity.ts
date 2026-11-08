@@ -140,6 +140,9 @@ export const MAX_ENTITY_OFFERS = 100;
  */
 export const MAX_ACTING_CONNECTIONS = 16;
 
+/** The most live workflows one card lists. A person has a few workflows running on one Task at once. */
+export const MAX_LIVE_WORKFLOWS = 8;
+
 /** The longest id of an offer set. The server makes the ids, and the client only compares them. */
 export const MAX_OFFER_SET_ID_LENGTH = 64;
 
@@ -343,6 +346,14 @@ export const WorkflowOffer = Schema.Struct({
 
 export type WorkflowOffer = Schema.Schema.Type<typeof WorkflowOffer>;
 
+/** A workflow with a live run on a card's active Task: its id, and its name for "<name> has it". */
+export const LiveWorkflow = Schema.Struct({
+  workflowId: Id,
+  name: bounded(1, MAX_WORKFLOW_NAME_LENGTH),
+});
+
+export type LiveWorkflow = Schema.Schema.Type<typeof LiveWorkflow>;
+
 /** A Connection that can act on a thing: its id, and its label for the menu ("as northwind-bot"). */
 export const ActingConnection = Schema.Struct({
   id: Id,
@@ -486,6 +497,11 @@ export const InboxCard = Schema.Struct({
    * list: the handoff checks the account it uses itself.
    */
   actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
+  /**
+   * The workflows with a live run on this card's active Task, newest run
+   * first. Empty when none.
+   */
+  liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
 });
 
 export type InboxCard = Schema.Schema.Type<typeof InboxCard>;

@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { HandOffUndo, Inbox, InboxCard, WorkflowOffer } from "@hercule/contract";
+import type { HandOffUndo, Inbox, InboxCard, LiveWorkflow, WorkflowOffer } from "@hercule/contract";
 import {
   buildInbox,
   buildInboxCard,
@@ -114,15 +114,16 @@ const undoPath = `POST /api/v1/external-entities/handoffs/${RUN_ID}/undo`;
 
 /**
  * Opens the Inbox, which the controller answers with `cards`. A card whose
- * hand-off the controller answered has the Task from then on, as the real
- * controller holds it: the page reads the Inbox again after the answer, and a
- * stub that kept the old cards would take the Task away again.
+ * hand-off the controller answered has the Task and the workflow it was handed
+ * to as a live workflow from then on, as the real controller holds it: the
+ * page reads the Inbox again after the answer, and a stub that kept the old
+ * cards would take both away again.
  */
 const openInbox = async (
   handlers: Readonly<Record<string, Handler>>,
   cards: readonly InboxCard[] = [REFUNDS, SLOTS, BASKET, REVIEW],
 ) => {
-  const handedIds = new Set<string>();
+  const handedTo = new Map<string, LiveWorkflow>();
   const holdHandOffs = Object.fromEntries(
     cards.flatMap((card): [string, Handler][] => {
       const answer = handlers[handOffPath(card)];
@@ -132,7 +133,13 @@ const openInbox = async (
           handOffPath(card),
           async (call) => {
             const reply = typeof answer === "function" ? await answer(call) : answer;
-            if (reply.status === undefined) handedIds.add(card.id);
+            const { workflowId } = call.body as { readonly workflowId: string };
+            const offer = [REVIEW_OFFER, REPAIR_OFFER].find(
+              (each) => each.workflowId === workflowId,
+            );
+            if (reply.status === undefined && offer !== undefined) {
+              handedTo.set(card.id, { workflowId, name: offer.name });
+            }
             return reply;
           },
         ],
@@ -147,14 +154,17 @@ const openInbox = async (
       : {
           [undoPath]: async (call) => {
             const reply = typeof undoAnswer === "function" ? await undoAnswer(call) : undoAnswer;
-            if ((reply.body as HandOffUndo).outcome === "undone") handedIds.clear();
+            if ((reply.body as HandOffUndo).outcome === "undone") handedTo.clear();
             return reply;
           },
         };
   const heldCards = (): readonly InboxCard[] =>
-    cards.map((card) =>
-      handedIds.has(card.id) ? { ...card, side: "with-someone-else", taskId: TASK_ID } : card,
-    );
+    cards.map((card) => {
+      const workflow = handedTo.get(card.id);
+      return workflow === undefined
+        ? card
+        : { ...card, side: "with-someone-else", taskId: TASK_ID, liveWorkflows: [workflow] };
+    });
   const calls = stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
     [INBOX_PATH]: () => ({ body: buildPageInbox(heldCards()) }),
@@ -255,6 +265,50 @@ describe("handing a card to a workflow", () => {
     expect(card.hasAttribute("data-has-task")).toBe(true);
     expect(within(card).getByRole("button", { name: "On Work", hidden: true })).toBeTruthy();
     expect(within(card).queryByRole("button", { name: "Take it", hidden: true })).toBeNull();
+  });
+
+  it("shows the colleague from the read when the user leaves the Inbox and comes back", async () => {
+    const user = userEvent.setup();
+    const { router } = await openInbox({ [handOffPath(REFUNDS)]: { body: HANDED } });
+    await handRefunds(user);
+
+    await router.navigate({ to: "/settings" });
+    await waitFor(() => {
+      expect(document.querySelector(".inbox-scroll")).toBeNull();
+    });
+    await router.navigate({ to: "/inbox" });
+
+    // A card with a Task lies under With someone else on the next visit.
+    await user.click(await screen.findByRole("button", { name: /^With someone else/ }));
+    const card = getCard("Refund a returned order");
+    expect(within(card).getByRole("img", { name: "Agent review has it" })).toBeTruthy();
+    expect(card.textContent).toContain("Agent review has it");
+  });
+
+  it("shows the colleague of the newest run on a card the read says a workflow is working on, and the monogram once the run ended", async () => {
+    const working = ticket(5, "Reprice the loyalty tiers", {
+      taskId: TASK_ID,
+      side: "with-someone-else",
+      liveWorkflows: [
+        { workflowId: REPAIR_OFFER.workflowId, name: REPAIR_OFFER.name },
+        { workflowId: REVIEW_OFFER.workflowId, name: REVIEW_OFFER.name },
+      ],
+    });
+    const finished = ticket(6, "Hold the depot door", {
+      taskId: buildId(903),
+      side: "with-someone-else",
+    });
+    await openInbox({}, [working, finished]);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: /^With someone else/ }));
+    const busyCard = getCard("Reprice the loyalty tiers");
+    expect(within(busyCard).getByRole("img", { name: "Repair the build has it" })).toBeTruthy();
+    expect(busyCard.querySelector(".monogram")).toBeNull();
+    const doneCard = getCard("Hold the depot door");
+    expect(doneCard.querySelector(".monogram")).not.toBeNull();
+    expect(within(doneCard).queryByRole("img", { name: /has it/ })).toBeNull();
   });
 
   it("hands on H when one workflow fits, and says why when none does", async () => {
@@ -429,6 +483,32 @@ describe("handing a card from its open sheet", () => {
     expect(await screen.findByText(HAND_OFF_LINE)).toBeTruthy();
     expect(listCallsTo(calls, handOffPath(REFUNDS))[0]?.body).toEqual({
       workflowId: REVIEW_OFFER.workflowId,
+    });
+  });
+
+  it("acts as the account the user picked in the sheet", async () => {
+    const user = userEvent.setup();
+    const two = ticket(8, "Pause the courier feed", { actingConnections: [BOT, AVA] });
+    const { calls } = await openInbox(
+      {
+        ...buildDetailAnswer(two, { actingConnections: [BOT, AVA] }),
+        [handOffPath(two)]: { body: HANDED },
+      },
+      [two],
+    );
+    await screen.findByText("Pause the courier feed");
+    const sheet = await openSheetOf(user, "Pause the courier feed");
+    await within(sheet).findByRole("button", { name: /^Agent review/ });
+
+    await user.selectOptions(within(sheet).getByRole("combobox"), AVA.id);
+    await user.click(within(sheet).getByRole("button", { name: /^Agent review/ }));
+
+    await waitFor(() => {
+      expect(listCallsTo(calls, handOffPath(two))).toHaveLength(1);
+    });
+    expect(listCallsTo(calls, handOffPath(two))[0]?.body).toEqual({
+      workflowId: REVIEW_OFFER.workflowId,
+      connectionId: AVA.id,
     });
   });
 

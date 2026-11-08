@@ -4,8 +4,8 @@ import { describeClaim, describeLockedRow } from "@hercule/client-core/desk";
 import {
   decideAskingSentence,
   decideCardFace,
+  decideCardHolder,
   decideHandedSentence,
-  listCardOffers,
   type AskingPart,
   type LockedPart,
   type QuietPart,
@@ -16,7 +16,6 @@ import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
 import { CardColleague, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
-import type { CardHandOffs } from "./card-props";
 import { useCardTime } from "./use-card-time";
 
 /**
@@ -27,27 +26,27 @@ import { useCardTime } from "./use-card-time";
  * identifier with the title of its first home. It is a card of its own
  * (`data-card-id`), so it has Take it, Dismiss and Hand to like any card, a
  * click opens it, and the keys stop on it. The words of the link are its
- * tooltip. Once the user hands it off, the colleague who has it stands where
- * its wait was, and what it asks reads "Agent review has it".
+ * tooltip. While a workflow is working on it, the colleague stands where its
+ * wait was, and what it asks reads "Agent review has it".
  */
 function AskingPartRow({
   part,
   leadId,
   plugins,
   isFresh,
-  handOffs,
 }: {
   readonly part: AskingPart;
   readonly leadId: string;
   readonly plugins: readonly PluginIdentity[];
   readonly isFresh: boolean;
-  readonly handOffs: CardHandOffs;
 }): JSX.Element {
   const { card } = part;
   const { wait } = useCardTime(card);
-  const handed = handOffs.handed.get(card.id);
+  const holder = decideCardHolder(card);
+  const colleague = holder?.kind === "colleague" ? holder.workflow : undefined;
   const face = decideCardFace(card);
-  const sentence = handed === undefined ? decideAskingSentence(card) : decideHandedSentence(handed);
+  const sentence =
+    colleague === undefined ? decideAskingSentence(card) : decideHandedSentence(colleague);
   const claimWords = part.claim === undefined ? undefined : describeClaim(part.claim, plugins);
   const where = [face.identifier, part.homeName].filter((each) => each !== undefined).join(" ");
   return (
@@ -59,7 +58,7 @@ function AskingPartRow({
       data-card-id={card.id}
       data-lead-id={leadId}
       data-access={card.access === "ok" ? undefined : card.access}
-      data-has-task={handed === undefined ? undefined : ""}
+      data-has-task={holder === undefined ? undefined : ""}
       title={claimWords}
       aria-description={claimWords}
     >
@@ -74,8 +73,8 @@ function AskingPartRow({
           </span>
         )}
       </span>
-      {handed !== undefined ? (
-        <CardColleague workflow={handed} />
+      {colleague !== undefined ? (
+        <CardColleague workflow={colleague} />
       ) : (
         wait !== null && <CardWaitFigure wait={wait} />
       )}
@@ -91,7 +90,7 @@ function AskingPartRow({
           {card.yours ? " · yours" : ""}
         </span>
       </span>
-      <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
+      <CardMoves card={card} offers={part.offers} />
     </div>
   );
 }
@@ -182,7 +181,6 @@ function LockedPartRow({
  * - `leadId` is the id of the lead's card, which the parts carry so the page's
  *   motion can tell one lead's parts from another's.
  * - `freshIds` are the cards a signal just landed on, which show the new mark.
- * - `handOffs` are what the parts that ask need to draw a hand-off.
  */
 export function TuckedParts({
   leadId,
@@ -190,14 +188,12 @@ export function TuckedParts({
   parts,
   plugins,
   freshIds,
-  handOffs,
 }: {
   readonly leadId: string;
   readonly leadTitle: string;
   readonly parts: readonly TuckedPart[];
   readonly plugins: readonly PluginIdentity[];
   readonly freshIds: ReadonlySet<string>;
-  readonly handOffs: CardHandOffs;
 }): JSX.Element {
   return (
     <div className="inbox-tucked" role="group" aria-label={`Riding on ${leadTitle}`}>
@@ -211,7 +207,6 @@ export function TuckedParts({
                 leadId={leadId}
                 plugins={plugins}
                 isFresh={freshIds.has(part.card.id)}
-                handOffs={handOffs}
               />
             );
           case "quiet":

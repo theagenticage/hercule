@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type JSX, type RefObject } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildInitials,
@@ -38,7 +38,6 @@ import { OpenCardLinked } from "./open-card-linked";
 import { OpenCardLinkSearch } from "./open-card-link-search";
 import { readOpenCardPlaces } from "./open-card-places";
 import { OpenCardTimeline } from "./open-card-timeline";
-import type { HandOffCandidate } from "./use-inbox-page";
 import type { OpenCard, OpenTarget } from "./use-open-card";
 import { useOpenCardClock } from "./use-open-card-clock";
 
@@ -49,18 +48,15 @@ export interface OpenCardMoveHandlers {
   /** Dismisses the card. The page folds the sheet and plays the move on the card. */
   readonly onDismiss: (cardId: string) => void;
   /**
-   * Hands the thing in `candidate`, the one the sheet shows, to the workflow
-   * `workflowId`. `by` is how the user asked: by pointer, the page folds the
-   * sheet and plays the move on the card where it lies; by keys, the sheet
-   * walks on to the next card and the move plays behind it. The keys H and 1
-   * to 3 are the page's, not the sheet's: it hears them through
-   * `OpenCardContents`' `handRef`.
+   * Hands the thing the sheet shows to the workflow `workflowId`. `by` is how
+   * the user asked: by pointer, the page folds the sheet and plays the move on
+   * the card where it lies; by keys, the sheet walks on to the next card and
+   * the move plays behind it. The keys H and 1 to 3 are the page's, not the
+   * sheet's.
    */
-  readonly onHand: (
-    candidate: HandOffCandidate,
-    workflowId: string,
-    by: "keys" | "pointer",
-  ) => void;
+  readonly onHand: (workflowId: string, by: "keys" | "pointer") => void;
+  /** Picks the account the hand-off acts as. */
+  readonly onChooseConnection: (connectionId: string) => void;
   /** Goes to the card's Task on Work. Called with the Task's id. */
   readonly onSeeTask: (taskId: string) => void;
   /** Links two things as the user's own claim. The page plays the move and offers Undo. */
@@ -119,7 +115,7 @@ function OpenCardContents({
   onWalk,
   onWalkCard,
   moves,
-  handRef,
+  chosenConnectionId,
 }: {
   readonly id: string;
   readonly inbox: Inbox | undefined;
@@ -131,8 +127,8 @@ function OpenCardContents({
   readonly onWalk: (ref: string) => void;
   readonly onWalkCard: (id: string) => void;
   readonly moves: OpenCardMoveHandlers;
-  /** Where the sheet keeps what it can hand to a workflow, for the page's keys. */
-  readonly handRef: RefObject<HandOffCandidate | null>;
+  /** The account the user picked for the hand-off, or `undefined` for none. */
+  readonly chosenConnectionId: string | undefined;
 }): JSX.Element {
   const detail = useQuery(entityQuery(client, id));
   const listed = inbox?.cards.find((card) => card.id === id);
@@ -145,16 +141,6 @@ function OpenCardContents({
 
   // What the card can be handed to: the read of the card once it has answered, else the Inbox's own sets.
   const { offers, actingConnections, openKinds } = readOpenCardHandOff(detail.data, listed, inbox);
-  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
-  // The page hears H and 1 to 3 for the sheet, so it reads what the sheet can hand from here.
-  const handOffCandidate: HandOffCandidate | null =
-    record === undefined ? null : { target: { ...record, openKinds }, offers, chosenConnectionId };
-  useLayoutEffect(() => {
-    handRef.current = handOffCandidate;
-    return () => {
-      handRef.current = null;
-    };
-  });
 
   // The card opens one line by itself, the first time it has one to open.
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
@@ -244,17 +230,14 @@ function OpenCardContents({
       timeline={timeline}
       linked={linked}
       hand={
-        handOffCandidate === null ||
         offers.available.length + offers.unavailable.length === 0 ? null : (
           <OpenCardHandRows
             offers={offers}
             openKinds={openKinds}
             actingConnections={actingConnections}
             chosenConnectionId={chosenConnectionId}
-            onChooseConnection={setChosenConnectionId}
-            onHand={(workflowId, by) => {
-              moves.onHand(handOffCandidate, workflowId, by);
-            }}
+            onChooseConnection={moves.onChooseConnection}
+            onHand={moves.onHand}
           />
         )
       }
@@ -300,10 +283,11 @@ export function InboxOpenCard({
   inbox,
   plugins,
   platform,
-  handRef,
+  chosenConnectionId,
   onTake,
   onDismiss,
   onHand,
+  onChooseConnection,
   onSeeTask,
   onLink,
   onUnlink,
@@ -314,8 +298,8 @@ export function InboxOpenCard({
   readonly inbox: Inbox | undefined;
   readonly plugins: readonly PluginIdentity[];
   readonly platform: DesktopPlatform;
-  /** Where the open sheet keeps what it can hand to a workflow, which the page's keys H and 1 to 3 read. */
-  readonly handRef: RefObject<HandOffCandidate | null>;
+  /** The account the user picked for the hand-off of the card the sheet shows, or `undefined` for none. */
+  readonly chosenConnectionId: string | undefined;
 } & OpenCardMoveHandlers): JSX.Element | null {
   const { sheet } = openCard;
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -408,8 +392,17 @@ export function InboxOpenCard({
             onClose={openCard.close}
             onWalk={walkToPlace}
             onWalkCard={walkToCard}
-            moves={{ onTake, onDismiss, onHand, onSeeTask, onLink, onUnlink, onSeeInIntake }}
-            handRef={handRef}
+            moves={{
+              onTake,
+              onDismiss,
+              onHand,
+              onChooseConnection,
+              onSeeTask,
+              onLink,
+              onUnlink,
+              onSeeInIntake,
+            }}
+            chosenConnectionId={chosenConnectionId}
           />
         ) : placeView === undefined ? (
           <p className="open-card-trust">This place is not on the Inbox now.</p>

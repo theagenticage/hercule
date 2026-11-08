@@ -3,10 +3,11 @@
  * a click on one would end, what the card looks like once it is handed, and
  * the undo line after a hand-off is taken back.
  *
- * The screen holds a hand-off for the rest of the visit, beside the Inbox and
- * not in it: an Inbox card has no field for the colleague who has it, and the
- * Task a hand-off makes has no id until the controller answers. The reply's
- * Task id goes into the Inbox as a `set-task` edit like any other.
+ * The colleague who has a card is a fact the controller reports on the card
+ * (`InboxCard.liveWorkflows`), so a card drawn after leaving the Inbox and
+ * coming back still shows who has it. A hand-off the user has just made
+ * shows at once as an `InboxEdit` (see `card-moves.ts`) that puts the workflow
+ * into that list before the controller answers.
  */
 import type {
   ActingConnection,
@@ -15,6 +16,7 @@ import type {
   HandOffUndo,
   Inbox,
   InboxCard,
+  LiveWorkflow,
   WorkflowOffer,
 } from "@hercule/contract";
 import { nameSignalKind } from "../intake";
@@ -40,14 +42,29 @@ export const partitionOffers = (offers: readonly WorkflowOffer[]): CardOffers =>
   unavailable: offers.filter((offer) => offer.unavailable !== undefined),
 });
 
+/** The split of each offer set already made, so one set is split once and every card of it shares the result. */
+const partitionedSets = new WeakMap<readonly WorkflowOffer[], CardOffers>();
+
 /**
  * Returns the offers of `card`, read from the set the Inbox holds under its
  * `offerSetId`. A card whose set is missing has no offers.
+ *
+ * The same set always gives the same `CardOffers` object, so a card that
+ * compares its offers by identity draws again only when its own set changed.
  */
 export const listCardOffers = (
   card: Pick<InboxCard, "offerSetId">,
   offerSets: Readonly<Record<string, readonly WorkflowOffer[]>>,
-): CardOffers => partitionOffers(offerSets[card.offerSetId] ?? []);
+): CardOffers => {
+  const set = offerSets[card.offerSetId];
+  if (set === undefined) return NO_OFFERS;
+  let offers = partitionedSets.get(set);
+  if (offers === undefined) {
+    offers = partitionOffers(set);
+    partitionedSets.set(set, offers);
+  }
+  return offers;
+};
 
 /**
  * The Hand to move of a card on hover:
@@ -104,27 +121,33 @@ export const listOpenSignalKinds = (
   ...new Set(lines.filter((line) => line.status === "open").map((line) => line.kind)),
 ];
 
-/** The colleague who has a card the user handed off: the workflow, named as the menu names it. */
-export interface HandedWorkflow {
-  readonly workflowId: string;
-  readonly name: string;
-}
-
 /**
  * Returns the sentence a handed card draws: "Agent review has it", in a plain
  * tone. The card's colleague names itself with the same words.
  */
 export const decideHandedSentence = (
-  workflow: HandedWorkflow,
+  workflow: LiveWorkflow,
 ): { readonly text: string; readonly tone: "plain" } => ({
   text: `${workflow.name} has it`,
   tone: "plain",
 });
 
-/** Who stands where a card's wait was: the colleague the user handed it to, or the user, who holds its Task. */
+/** Who stands where a card's wait was: the workflow working on it, or the user, who holds its Task. */
 export type CardHolder =
-  | { readonly kind: "colleague"; readonly workflow: HandedWorkflow }
+  | { readonly kind: "colleague"; readonly workflow: LiveWorkflow }
   | { readonly kind: "you" };
+
+/**
+ * Returns who holds `card`: the first of its live workflows, which is the one
+ * with the newest run, else the user when a Task holds it, else nobody.
+ */
+export const decideCardHolder = (
+  card: Pick<InboxCard, "taskId" | "liveWorkflows">,
+): CardHolder | undefined => {
+  const [workflow] = card.liveWorkflows;
+  if (workflow !== undefined) return { kind: "colleague", workflow };
+  return card.taskId === undefined ? undefined : { kind: "you" };
+};
 
 /** What a card of the Inbox draws: its face and time, and who holds it. */
 export interface CardDraw extends CardTime {
@@ -134,31 +157,26 @@ export interface CardDraw extends CardTime {
 }
 
 /**
- * Returns what `card` draws, given its `time` and the colleague it was handed
- * to in this visit (`handed`, `undefined` if none).
+ * Returns what `card` draws, given its `time`.
  *
- * - A handed card has its sentence replaced by `decideHandedSentence`, and no
- *   wait and no sentence age: the colleague stands in the wait's place, and
- *   the sentence's age would be about a signal the hand-off ended. A screen
- *   reader reads the sentence through `describeCardAloud`.
- * - A card a Task holds is held by the user. A handed card is held by its
- *   colleague even when it has a Task, because a hand-off continues the Task.
+ * - A card with a live workflow has its sentence replaced by
+ *   `decideHandedSentence`, and no wait and no sentence age: the colleague
+ *   stands in the wait's place, and the sentence's age would be about a
+ *   signal the hand-off ended. A screen reader reads the sentence through
+ *   `describeCardAloud`.
+ * - A card a Task holds is held by the user, unless a workflow is working on
+ *   it: a hand-off continues the Task, and the colleague holds the card then.
  */
-export const decideCardDraw = (
-  card: InboxCard,
-  time: CardTime,
-  handed: HandedWorkflow | undefined,
-): CardDraw => {
+export const decideCardDraw = (card: InboxCard, time: CardTime): CardDraw => {
   const face = decideCardFace(card);
-  if (handed === undefined) {
-    return { ...time, face, holder: card.taskId === undefined ? undefined : { kind: "you" } };
-  }
+  const holder = decideCardHolder(card);
+  if (holder?.kind !== "colleague") return { ...time, face, holder };
   return {
     ...time,
     wait: null,
     signalAge: undefined,
-    face: { ...face, sentence: decideHandedSentence(handed) },
-    holder: { kind: "colleague", workflow: handed },
+    face: { ...face, sentence: decideHandedSentence(holder.workflow) },
+    holder,
   };
 };
 

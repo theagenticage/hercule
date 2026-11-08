@@ -4,7 +4,7 @@
  * a move into the Inbox as the screen draws it, before the next read
  * confirms it.
  */
-import type { Inbox, InboxCard } from "@hercule/contract";
+import type { Inbox, InboxCard, LiveWorkflow } from "@hercule/contract";
 import { endSentence, lowerFirst } from "../text";
 import { NO_OFFERS, type CardOffers } from "./card-hand-off";
 import { applySetLink, type SetLinkEdit } from "./card-links";
@@ -69,14 +69,10 @@ const MOST_RAIL_HANDS = 5;
  * workflow in `offers.available`, up to `MOST_RAIL_HANDS`, then a `more`
  * target when there are others, then Take and Dismiss. A card that is held
  * can be handed on but not taken or dismissed: a live Task holds it
- * (`describeMoveRefusal` refuses Take), or the user handed it off in this
- * visit (`isHanded`) and the Inbox does not know the Task yet.
+ * (`describeMoveRefusal` refuses Take), or a workflow is working on it and
+ * the Inbox does not know the Task yet.
  */
-export const listRailTargets = (
-  card: InboxCard,
-  offers: CardOffers,
-  isHanded: boolean,
-): readonly RailTarget[] => {
+export const listRailTargets = (card: InboxCard, offers: CardOffers): readonly RailTarget[] => {
   const hands: RailTarget[] = offers.available.slice(0, MOST_RAIL_HANDS).map((offer) => ({
     kind: "hand",
     workflowId: offer.workflowId,
@@ -86,7 +82,7 @@ export const listRailTargets = (
   if (left.length > 0) {
     hands.push({ kind: "more", workflowIds: left.slice(0, 2).map((offer) => offer.workflowId) });
   }
-  const isHeld = isHanded || describeMoveRefusal(card, "take") !== undefined;
+  const isHeld = card.liveWorkflows.length > 0 || describeMoveRefusal(card, "take") !== undefined;
   return isHeld ? hands : [...hands, { kind: "take" }, { kind: "dismiss" }];
 };
 
@@ -134,6 +130,19 @@ export type InboxEdit =
    * and the next read puts a card with a Task under With someone else.
    */
   | { readonly kind: "set-task"; readonly id: string; readonly taskId: string | undefined }
+  /** The user handed the card to `workflow`, which is now the card's first live workflow. */
+  | { readonly kind: "hand-off"; readonly id: string; readonly workflow: LiveWorkflow }
+  /**
+   * The user took a hand-off back: the workflow `workflowId` is no longer
+   * working on the card, and the card has this active Task, or none when
+   * `taskId` is `undefined` (the Task the hand-off made is gone).
+   */
+  | {
+      readonly kind: "take-back-hand-off";
+      readonly id: string;
+      readonly workflowId: string;
+      readonly taskId: string | undefined;
+    }
   /** The user linked two things, or took the link back. See `planLink` and `planUnlink`. */
   | SetLinkEdit;
 
@@ -143,6 +152,35 @@ const withTask = (card: InboxCard, taskId: string | undefined): InboxCard => {
   void before;
   return taskId === undefined ? rest : { ...rest, taskId };
 };
+
+/** Returns `inbox` with the card `id` replaced by what `change` makes of it. */
+const mapCard = (inbox: Inbox, id: string, change: (card: InboxCard) => InboxCard): Inbox => ({
+  ...inbox,
+  cards: inbox.cards.map((card) => (card.id === id ? change(card) : card)),
+});
+
+/** Returns `card` with `workflow` as its first live workflow, once. */
+const withLiveWorkflow = (card: InboxCard, workflow: LiveWorkflow): InboxCard => ({
+  ...card,
+  liveWorkflows: [
+    workflow,
+    ...card.liveWorkflows.filter((each) => each.workflowId !== workflow.workflowId),
+  ],
+});
+
+/** Returns `card` without the live workflow `workflowId`, and with its active Task set to `taskId`. */
+const withoutLiveWorkflow = (
+  card: InboxCard,
+  workflowId: string,
+  taskId: string | undefined,
+): InboxCard =>
+  withTask(
+    {
+      ...card,
+      liveWorkflows: card.liveWorkflows.filter((each) => each.workflowId !== workflowId),
+    },
+    taskId,
+  );
 
 /**
  * Returns `inbox` with `edit` made. The counts stay as the controller gave
@@ -159,12 +197,13 @@ export const applyInboxEdit = (inbox: Inbox, edit: InboxEdit): Inbox => {
         ? inbox
         : { ...inbox, cards: [...inbox.cards, edit.card] };
     case "set-task":
-      return {
-        ...inbox,
-        cards: inbox.cards.map((card) =>
-          card.id === edit.id ? withTask(card, edit.taskId) : card,
-        ),
-      };
+      return mapCard(inbox, edit.id, (card) => withTask(card, edit.taskId));
+    case "hand-off":
+      return mapCard(inbox, edit.id, (card) => withLiveWorkflow(card, edit.workflow));
+    case "take-back-hand-off":
+      return mapCard(inbox, edit.id, (card) =>
+        withoutLiveWorkflow(card, edit.workflowId, edit.taskId),
+      );
     case "set-link":
       return applySetLink(inbox, edit);
   }

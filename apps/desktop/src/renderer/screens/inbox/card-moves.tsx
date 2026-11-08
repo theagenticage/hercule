@@ -5,9 +5,8 @@ import {
   NO_OFFERS,
   type CardHolder,
   type CardOffers,
-  type HandedWorkflow,
 } from "@hercule/client-core/inbox";
-import type { InboxCard } from "@hercule/contract";
+import type { InboxCard, LiveWorkflow } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import { ArrowIcon } from "../../icons/arrow";
 import { CloseIcon } from "../../icons/close";
@@ -147,7 +146,7 @@ export function CardMonogram({ monogram }: { readonly monogram: string }): JSX.E
  * `data-hand-off-colleague`). A card shows this where it shows `CardMonogram`
  * for the user.
  */
-export function CardColleague({ workflow }: { readonly workflow: HandedWorkflow }): JSX.Element {
+export function CardColleague({ workflow }: { readonly workflow: LiveWorkflow }): JSX.Element {
   const name = decideHandedSentence(workflow).text;
   return (
     <span className="card-colleague" role="img" aria-label={name} title={name}>

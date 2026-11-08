@@ -2,7 +2,6 @@ import type { JSX, ReactNode } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import { STATUS_GROUPING, type InboxLayout } from "@hercule/client-core/inbox";
 import { SectionHeading } from "../desk";
-import type { CardHandOffs } from "./card-props";
 import { PlaceSurface } from "./place-surface";
 
 /**
@@ -19,7 +18,6 @@ import { PlaceSurface } from "./place-surface";
  * - `plugins` is what `plugin.query` returns, for the marks.
  * - `monogram` is the user's, for the rows that a Task holds.
  * - `freshIds` are the cards a signal just landed on, which show the new mark.
- * - `handOffs` are what the rows need to draw a hand-off (`CardHandOffs`).
  *
  * The surfaces stand as `.inbox-place` elements keyed by their place's ref.
  */
@@ -28,14 +26,12 @@ export function OngoingSide({
   plugins,
   monogram,
   freshIds,
-  handOffs,
   note,
 }: {
   readonly layout: InboxLayout;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly freshIds: ReadonlySet<string>;
-  readonly handOffs: CardHandOffs;
   readonly note: ReactNode;
 }): JSX.Element {
   const { ongoing, grouping } = layout;
@@ -52,7 +48,6 @@ export function OngoingSide({
           showStatus={grouping !== STATUS_GROUPING}
           monogram={monogram}
           freshIds={freshIds}
-          handOffs={handOffs}
           block={index + 2}
         />
       ))}

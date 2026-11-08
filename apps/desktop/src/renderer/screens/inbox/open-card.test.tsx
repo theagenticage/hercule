@@ -3,7 +3,7 @@
  * says (every place above it, why its facts may be old), what its moves do
  * and when they are off, and walking to a place inside the sheet and back.
  */
-import { createRef, Suspense, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -28,7 +28,6 @@ import type { EntityLinkMove } from "@hercule/client-core/inbox";
 import { createQueryClient } from "../../app/query-client";
 import { CONTROLLER_URL, stubApi, type Call, type Handler } from "../../app/testing";
 import { InboxOpenCard } from "./open-card";
-import type { HandOffCandidate } from "./use-inbox-page";
 import { useOpenCard } from "./use-open-card";
 
 const ORDER_ID = "01a06d02-7e00-7000-8000-000000000a01";
@@ -83,23 +82,20 @@ const buildDetail = (
 };
 
 /** What the sheet calls to hand its card on. */
-type HandHandler = (
-  candidate: HandOffCandidate,
-  workflowId: string,
-  by: "keys" | "pointer",
-) => void;
+type HandHandler = (workflowId: string, by: "keys" | "pointer") => void;
 
 /** Returns what the newest call of `onHand` was given. */
 const readLastHand = (onHand: ReturnType<typeof vi.fn<HandHandler>>) => {
   const call = onHand.mock.calls.at(-1);
   if (call === undefined) throw new Error("The sheet handed nothing.");
-  const [candidate, workflowId, by] = call;
-  return { candidate, workflowId, by };
+  const [workflowId, by] = call;
+  return { workflowId, by };
 };
 
 interface Rendered {
   readonly onTake: ReturnType<typeof vi.fn<(cardId: string) => void>>;
   readonly onHand: ReturnType<typeof vi.fn<HandHandler>>;
+  readonly onChooseConnection: ReturnType<typeof vi.fn<(connectionId: string) => void>>;
   readonly onSeeTask: ReturnType<typeof vi.fn<(taskId: string) => void>>;
   readonly onLink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
   readonly onUnlink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
@@ -125,14 +121,16 @@ const renderPage = (
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
   const onTake = vi.fn<(cardId: string) => void>();
   const onHand = vi.fn<HandHandler>();
+  const onChooseConnection = vi.fn<(connectionId: string) => void>();
   const onSeeTask = vi.fn<(taskId: string) => void>();
   const onLink = vi.fn<(move: EntityLinkMove) => void>();
   const onUnlink = vi.fn<(move: EntityLinkMove) => void>();
   const onSeeInIntake = vi.fn<(entityId: string) => void>();
   const inbox = options.inbox ?? buildInboxOf(card);
-  const handRef = createRef<HandOffCandidate | null>();
   function Page(): JSX.Element {
     const openCard = useOpenCard();
+    // The screen owns the account choice (`useHandOff`); the sheet shows it and reports a pick.
+    const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
     return (
       <div className="inbox-desk">
         <div className="inbox-row" data-card-id={card.id}>
@@ -150,10 +148,14 @@ const renderPage = (
           inbox={inbox}
           plugins={[]}
           platform="linux"
-          handRef={handRef}
+          chosenConnectionId={chosenConnectionId}
           onTake={onTake}
           onDismiss={vi.fn()}
           onHand={onHand}
+          onChooseConnection={(connectionId) => {
+            onChooseConnection(connectionId);
+            setChosenConnectionId(connectionId);
+          }}
           onSeeTask={onSeeTask}
           onLink={onLink}
           onUnlink={onUnlink}
@@ -169,7 +171,7 @@ const renderPage = (
       </Suspense>
     </QueryClientProvider>,
   );
-  return { onTake, onHand, onSeeTask, onLink, onUnlink, onSeeInIntake, calls };
+  return { onTake, onHand, onChooseConnection, onSeeTask, onLink, onUnlink, onSeeInIntake, calls };
 };
 
 /** Opens the card and waits until the moves take a pointer, which they do not for the first moment. */
@@ -299,8 +301,7 @@ describe("InboxOpenCard", () => {
       await userEvent.setup().click(row);
 
       expect(onHand).toHaveBeenCalledOnce();
-      const { candidate, workflowId, by } = readLastHand(onHand);
-      expect(candidate.target.id).toBe(ORDER_ID);
+      const { workflowId, by } = readLastHand(onHand);
       expect([workflowId, by]).toEqual([REVIEW.workflowId, "pointer"]);
     });
 
@@ -342,38 +343,19 @@ describe("InboxOpenCard", () => {
       expect(within(sheet).queryByRole("button", { name: /^Agent review/ })).toBeNull();
     });
 
-    it("acts as the account the user picks when there are several", async () => {
-      const { onHand } = renderPage(
+    it("reports the account the user picks when there are several, and shows it as picked", async () => {
+      const { onChooseConnection } = renderPage(
         ORDER,
         buildDetail(ORDER, { offers: [REVIEW, REPAIR], actingConnections: [BOT, AVA] }),
       );
       const sheet = await openTheCard();
-      const user = userEvent.setup();
 
-      await user.selectOptions(within(sheet).getByRole("combobox"), AVA.id);
-      await user.click(within(sheet).getByRole("button", { name: /^Repair the build/ }));
+      const account = within(sheet).getByRole<HTMLSelectElement>("combobox");
+      expect(account.selectedOptions[0]?.textContent).toBe(BOT.label);
+      await userEvent.setup().selectOptions(account, AVA.id);
 
-      expect(onHand).toHaveBeenCalledOnce();
-      const { candidate, workflowId } = readLastHand(onHand);
-      expect(candidate.chosenConnectionId).toBe(AVA.id);
-      expect(workflowId).toBe(REPAIR.workflowId);
-    });
-
-    it("passes up no account when the user chose none, so the controller picks the default", async () => {
-      const { onHand } = renderPage(
-        ORDER,
-        buildDetail(ORDER, { offers: [REVIEW], actingConnections: [BOT, AVA] }),
-      );
-      const sheet = await openTheCard();
-
-      await userEvent
-        .setup()
-        .click(await within(sheet).findByRole("button", { name: /^Agent review/ }));
-
-      expect(onHand).toHaveBeenCalledOnce();
-      const { candidate, workflowId } = readLastHand(onHand);
-      expect(candidate.chosenConnectionId).toBeUndefined();
-      expect(workflowId).toBe(REVIEW.workflowId);
+      expect(onChooseConnection).toHaveBeenCalledExactlyOnceWith(AVA.id);
+      expect(account.selectedOptions[0]?.textContent).toBe(AVA.label);
     });
 
     it("counts Return on a focused Hand to row as keys, so the sheet walks on, and a click as pointer", async () => {

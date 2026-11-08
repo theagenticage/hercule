@@ -44,6 +44,7 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   signals: { openCount: 0, kinds: [] },
   offerSetId: "none",
   actingConnections: [],
+  liveWorkflows: [],
   ...overrides,
 });
 

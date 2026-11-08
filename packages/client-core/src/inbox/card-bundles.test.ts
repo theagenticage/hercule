@@ -15,6 +15,7 @@ import {
   buildInboxLink,
   buildInboxPeer,
   buildRequestCard,
+  buildWorkflowOffer,
 } from "./cards.testing";
 import { HOME_GROUPING } from "./inbox-place";
 import { layOutInbox, listRiders, type InboxLayout, type InboxView } from "./lay-out";
@@ -97,6 +98,17 @@ describe("what rides on a lead", () => {
     expect(bundle.riders).toEqual([REVIEW]);
     expect(requestIds(layout)).toEqual([]);
     expect(layout.requests.isEmpty).toBe(true);
+  });
+
+  it("gives an asking part the offers of its own set, shared with the card's row", () => {
+    const review = buildRequestCard("3", { ridesOn: TICKET.ref, offerSetId: "reviews" });
+    const offer = buildWorkflowOffer("Review PR");
+    const inbox = buildInbox([TICKET, review], {
+      links: [buildInboxLink(TICKET.ref, review.ref)],
+      offerSets: { reviews: [offer] },
+    });
+    const [part] = bundleOf(layOut(inbox), TICKET.id).parts;
+    expect(part).toMatchObject({ _tag: "asking", offers: { available: [offer], unavailable: [] } });
   });
 
   it("draws a card a Task holds as a quiet part that says so", () => {

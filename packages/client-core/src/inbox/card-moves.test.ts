@@ -16,6 +16,7 @@ import {
 const TASK_ID = "01a1b576-c999-7000-8000-0000000000aa";
 const waiting = buildInboxCard("1");
 const held = buildInboxCard("2", { taskId: TASK_ID });
+const AGENT = { workflowId: "wf-agent-review", name: "Agent review" };
 
 describe("describeMoveRefusal", () => {
   it("lets take and dismiss through on a card that waits, and see-task through on one with a Task", () => {
@@ -115,6 +116,41 @@ describe("applyInboxEdit", () => {
   });
 });
 
+describe("applyInboxEdit for a hand-off", () => {
+  const other = { workflowId: "wf-other", name: "Other" };
+
+  it("puts the workflow first among the card's live workflows, once", () => {
+    const busy = buildInboxCard("3", { liveWorkflows: [other] });
+    const inbox = buildInbox([waiting, busy]);
+    const handed = applyInboxEdit(inbox, { kind: "hand-off", id: busy.id, workflow: AGENT });
+    expect(handed.cards[1]?.liveWorkflows).toEqual([AGENT, other]);
+    expect(handed.cards[0]).toBe(waiting);
+    expect(
+      applyInboxEdit(handed, { kind: "hand-off", id: busy.id, workflow: AGENT }).cards[1]
+        ?.liveWorkflows,
+    ).toEqual([AGENT, other]);
+  });
+
+  it("takes the workflow away and sets the Task the card has after a hand-off is taken back", () => {
+    const handed = buildInboxCard("3", { taskId: TASK_ID, liveWorkflows: [AGENT, other] });
+    const inbox = buildInbox([handed]);
+    const kept = applyInboxEdit(inbox, {
+      kind: "take-back-hand-off",
+      id: handed.id,
+      workflowId: AGENT.workflowId,
+      taskId: TASK_ID,
+    });
+    expect(kept.cards[0]).toMatchObject({ taskId: TASK_ID, liveWorkflows: [other] });
+    const gone = applyInboxEdit(inbox, {
+      kind: "take-back-hand-off",
+      id: handed.id,
+      workflowId: AGENT.workflowId,
+      taskId: undefined,
+    });
+    expect("taskId" in (gone.cards[0] ?? {})).toBe(false);
+  });
+});
+
 describe("reapplyInboxEdits", () => {
   it("makes the edits in order, so a card dropped and put back is there once", () => {
     const inbox = buildInbox([waiting]);
@@ -156,25 +192,21 @@ describe("listRailTargets", () => {
   const hand = { kind: "hand", workflowId: review.workflowId, name: "Review PR" };
 
   it("offers a card that waits the workflows that can take it, then Take and Dismiss", () => {
-    expect(listRailTargets(waiting, offers, false)).toEqual([
-      hand,
-      { kind: "take" },
-      { kind: "dismiss" },
-    ]);
+    expect(listRailTargets(waiting, offers)).toEqual([hand, { kind: "take" }, { kind: "dismiss" }]);
   });
 
   it.each([
-    ["a Task holds", held, false],
-    ["the user handed off in this visit", waiting, true],
-  ])("offers only the workflows for a card %s", (_name, card, isHanded) => {
-    expect(listRailTargets(card, offers, isHanded)).toEqual([hand]);
+    ["a Task holds", held],
+    ["a workflow is working on", buildInboxCard("3", { liveWorkflows: [AGENT] })],
+  ])("offers only the workflows for a card %s", (_name, card) => {
+    expect(listRailTargets(card, offers)).toEqual([hand]);
   });
 
   it("names the first five workflows and stands for the rest with a target that shows two of them", () => {
     const many = Array.from({ length: 8 }, (_unused, index) =>
       buildWorkflowOffer(`Agent ${index}`),
     );
-    const targets = listRailTargets(waiting, partitionOffers(many), false);
+    const targets = listRailTargets(waiting, partitionOffers(many));
 
     expect(targets.map((target) => target.kind)).toEqual([
       ...Array.from({ length: 5 }, () => "hand"),
@@ -192,11 +224,17 @@ describe("listRailTargets", () => {
     const five = Array.from({ length: 5 }, (_unused, index) =>
       buildWorkflowOffer(`Agent ${index}`),
     );
-    expect(listRailTargets(waiting, partitionOffers(five), false).map((each) => each.kind)).toEqual(
-      ["hand", "hand", "hand", "hand", "hand", "take", "dismiss"],
-    );
+    expect(listRailTargets(waiting, partitionOffers(five)).map((each) => each.kind)).toEqual([
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "take",
+      "dismiss",
+    ]);
     const six = [...five, buildWorkflowOffer("Agent 5")];
-    expect(listRailTargets(held, partitionOffers(six), false).map((each) => each.kind)).toEqual([
+    expect(listRailTargets(held, partitionOffers(six)).map((each) => each.kind)).toEqual([
       "hand",
       "hand",
       "hand",

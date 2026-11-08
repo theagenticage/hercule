@@ -5,14 +5,14 @@ import { formatTargetDate } from "@hercule/client-core/desk";
 import {
   decideCardDraw,
   describeCardAloud,
-  listCardOffers,
   type CardBundle,
+  type CardOffers,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
-import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
+import { buildCardPropsComparer } from "./card-props";
 import { LinkLines } from "./link-lines";
 import { TuckedParts } from "./tucked-parts";
 import { useCardTime } from "./use-card-time";
@@ -23,7 +23,7 @@ interface CardRowProps {
   readonly bundle: CardBundle;
   /** The cards a signal just landed on. The row and the cards that ride on it show the new mark. */
   readonly freshIds: ReadonlySet<string>;
-  readonly handOffs: CardHandOffs;
+  readonly offers: CardOffers;
   readonly plugins: readonly PluginIdentity[];
   readonly showMark: boolean;
   readonly showStatus: boolean;
@@ -60,10 +60,9 @@ const arePropsEqual = buildCardPropsComparer<CardRowProps>({
  *   `showStatus` is false when the surface is a status, whose head already
  *   says it, so the column closes up.
  * - `monogram` is the user's, which takes the place of the wait once a Task
- *   holds the card. A card the user handed off in this visit shows the
- *   colleague who has it there instead, and its sentence reads "Agent review
- *   has it" (`handOffs.handed`). `handOffs.offerSets` are the workflows its
- *   Hand to move offers.
+ *   holds the card. A card a workflow is working on (`card.liveWorkflows`)
+ *   shows the colleague there instead, and its sentence reads "Agent review
+ *   has it". `offers` are the workflows its Hand to move offers.
  * - `bundle` is what rides on the card and the hints under it. Parts and hints
  *   stand as siblings of the row inside one `.inbox-bundle`, under the row's
  *   title, so what the row says and where it lies never depend on them. The
@@ -86,18 +85,14 @@ function CardRowView({
   near,
   bundle,
   freshIds,
-  handOffs,
+  offers,
   plugins,
   showMark,
   showStatus,
   monogram,
   step,
 }: CardRowProps): JSX.Element {
-  const { face, wait, trust, signalAge, holder } = decideCardDraw(
-    card,
-    useCardTime(card),
-    handOffs.handed.get(card.id),
-  );
+  const { face, wait, trust, signalAge, holder } = decideCardDraw(card, useCardTime(card));
   return (
     <div className="inbox-bundle" style={{ "--arrive-step": step }}>
       <div
@@ -156,7 +151,7 @@ function CardRowView({
             {wait !== null && <CardWaitFigure wait={wait} />}
             <CardHolderMark holder={holder} monogram={monogram} />
           </span>
-          <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
+          <CardMoves card={card} offers={offers} />
         </span>
       </div>
       {bundle.parts.length > 0 && (
@@ -166,7 +161,6 @@ function CardRowView({
           parts={bundle.parts}
           plugins={plugins}
           freshIds={freshIds}
-          handOffs={handOffs}
         />
       )}
       <LinkLines

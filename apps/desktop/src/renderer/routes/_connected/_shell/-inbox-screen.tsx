@@ -35,9 +35,11 @@ import { OngoingSide } from "../../../screens/inbox/ongoing-side";
 import { InboxOpenCard } from "../../../screens/inbox/open-card";
 import { Rail } from "../../../screens/inbox/rail";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
+import { useRunAndMoveOn } from "../../../screens/inbox/use-run-and-move-on";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
+import { useHandOff } from "../../../screens/inbox/use-hand-off";
 import { useInboxCarry } from "../../../screens/inbox/use-inbox-carry";
-import { useInboxPage, type HandOffCandidate } from "../../../screens/inbox/use-inbox-page";
+import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
 import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
 import { useOpenCard } from "../../../screens/inbox/use-open-card";
@@ -54,16 +56,6 @@ const KEY_ROWS: readonly KeyRow[] = [
   ["E", "Dismiss"],
   ["G", "See its Task on Work"],
 ];
-
-/** The offers of an Inbox that has none, so the cards have the same object to compare each time. */
-const NO_OFFER_SETS = {};
-
-/** The Hand to menu while it is open: the card it is for, what it opens under, and how the user asked. */
-interface HandMenuTarget {
-  readonly cardId: string;
-  readonly anchor: HTMLElement;
-  readonly by: "keys" | "pointer";
-}
 
 /** Returns the line that says since when the controller cannot be reached, and what that means for moves. */
 const describeOffline = (since: Date): string =>
@@ -89,9 +81,9 @@ const describeOffline = (since: Date): string =>
  * - The user's moves are here: Take it, Hand to, Dismiss and Undo
  *   (`useInboxMoves`), the pointer and the keys that drive them
  *   (`useCurrentCard`, `useInboxPage`), the open card, and See its Task, which
- *   goes to Work. Hand to hands a card to the one workflow that can take it,
- *   or opens a menu of them; the offers follow the workflows, so the screen
- *   holds the `workflow` topic.
+ *   goes to Work. Hand to (`useHandOff`) hands a card to the one workflow that
+ *   can take it, or opens a menu of them; the offers follow the workflows, so
+ *   the screen holds the `workflow` topic.
  * - Carrying a card with the pointer raises the rail, whose targets are the
  *   workflows that can take it, Take it and Dismiss. Letting go on another
  *   card links the two, as `Link them` does. A card that arrives meanwhile
@@ -184,9 +176,6 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   }, [openedId, clearFresh]);
   const findCard = (id: string): InboxCard | undefined =>
     inbox?.cards.find((card) => card.id === id);
-  const readOffers = (card: InboxCard) =>
-    inbox === undefined ? NO_OFFERS : listCardOffers(card, inbox.offerSets);
-  const handOffs = { offerSets: inbox?.offerSets ?? NO_OFFER_SETS, handed: moves.handed };
   const seeTask = (card: InboxCard): void => {
     if (card.taskId === undefined) return;
     void navigate({ to: "/work", search: { task: card.taskId } });
@@ -204,29 +193,30 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       toName: nameLinkEnd(inbox, toRef),
     });
   };
-  const [handMenu, setHandMenu] = useState<HandMenuTarget | null>(null);
-  // What the open sheet can hand to a workflow, which the sheet keeps up to date and the page's keys read.
-  const sheetHand = useRef<HandOffCandidate | null>(null);
+  const runAndMoveOn = useRunAndMoveOn({ scrollRef, current, open: openCard });
+  const handOff = useHandOff({
+    client,
+    inbox,
+    open: openCard,
+    hand: moves.handOff,
+    say: moves.sayWithoutUndo,
+    runAndMoveOn,
+  });
   const page = useInboxPage({
     scrollRef,
     current,
     findCard,
     open: openCard,
-    sheetHand,
+    runAndMoveOn,
+    handOff,
     moves: {
       take: moves.take,
       dismiss: dismissWithRiders,
       seeTask,
       link: linkCards,
       say: moves.sayWithoutUndo,
-      readOffers,
-      hand: moves.handOff,
-      openHandMenu: (card, anchor, by) => {
-        setHandMenu({ cardId: card.id, anchor, by });
-      },
     },
   });
-  const handMenuCard = handMenu === null ? undefined : findCard(handMenu.cardId);
 
   // ---------- Carrying a card ----------
   const { rail, attachRail, readIsCarrying } = useInboxCarry({
@@ -236,17 +226,20 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     readRailTargets: (cardId) => {
       const card = findCard(cardId);
       if (card === undefined) return [];
-      return listRailTargets(card, readOffers(card), moves.handed.has(card.id));
+      return listRailTargets(
+        card,
+        inbox === undefined ? NO_OFFERS : listCardOffers(card, inbox.offerSets),
+      );
     },
     onDropOnTarget: (cardId, target) => {
       const card = findCard(cardId);
       if (card === undefined) return;
-      if (target.kind === "hand") page.handCard(card, target.workflowId, undefined, "pointer");
+      if (target.kind === "hand") handOff.handCard(card, target.workflowId, "pointer");
       else if (target.kind === "more") {
         // The same menu the card's own Hand to… button opens, under the card the drop sent home.
         const scroller = scrollRef.current;
         const anchor = scroller === null ? null : findCardElement(scroller, card.id);
-        if (anchor !== null) setHandMenu({ cardId: card.id, anchor, by: "pointer" });
+        if (anchor !== null) handOff.openMenu(card, anchor, "pointer");
       } else if (target.kind === "take") moves.take(card);
       else dismissWithRiders(card, false);
     },
@@ -287,7 +280,6 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           plugins={plugins}
           monogram={monogram}
           freshIds={freshIds}
-          handOffs={handOffs}
           note={truncated === undefined ? null : <p className="inbox-note">{truncated}</p>}
         />
         <RequestsSide
@@ -297,7 +289,6 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           plugins={plugins}
           monogram={monogram}
           freshIds={freshIds}
-          handOffs={handOffs}
           isSunriseStill={!emptiedByMove.requests}
         />
       </>
@@ -388,34 +379,24 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
                 });
               }
             }}
-            handRef={sheetHand}
-            onHand={(candidate, workflowId, by) => {
-              // By keys the sheet walks on to the next card and the chain plays behind it. By pointer it folds home first.
-              if (by === "keys") page.handFromSheet(candidate, workflowId, by);
-              else {
-                openCard.closeThen(() => {
-                  page.handFromSheet(candidate, workflowId, by);
-                });
-              }
-            }}
+            chosenConnectionId={handOff.chosenConnectionId}
+            onChooseConnection={handOff.chooseConnection}
+            onHand={handOff.handFromSheet}
             onSeeTask={(taskId) => {
               openCard.close();
               void navigate({ to: "/work", search: { task: taskId } });
             }}
           />
-          {handMenu !== null && handMenuCard !== undefined && (
+          {handOff.menu !== null && (
             <HandToMenu
-              offers={readOffers(handMenuCard)}
-              openKinds={handMenuCard.signals.kinds}
-              actingConnections={handMenuCard.actingConnections}
-              onHand={(workflowId, connectionId) => {
-                setHandMenu(null);
-                page.handCard(handMenuCard, workflowId, connectionId, handMenu.by);
-              }}
-              onClose={() => {
-                setHandMenu(null);
-              }}
-              anchor={handMenu.anchor}
+              offers={handOff.menu.offers}
+              openKinds={handOff.menu.card.signals.kinds}
+              actingConnections={handOff.menu.card.actingConnections}
+              chosenConnectionId={handOff.chosenConnectionId}
+              onChooseConnection={handOff.chooseConnection}
+              onHand={handOff.pickFromMenu}
+              onClose={handOff.closeMenu}
+              anchor={handOff.menu.anchor}
             />
           )}
           {rail !== null && <Rail ref={attachRail} targets={rail.targets} monogram={monogram} />}

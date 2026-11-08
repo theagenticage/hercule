@@ -1,6 +1,7 @@
 /**
  * The motion of handing a card to a colleague, and of Undo, which plays it
- * backwards. One click is one chain, cause before effect:
+ * backwards. `playHandOffChange` is the one way in. One click is one chain,
+ * cause before effect:
  *
  * - At once, the wait fades away over 120ms (a copy of it, as the wait is no
  *   longer drawn), and the colleague rises 22px into its place on `hand`.
@@ -9,12 +10,12 @@
  * - Undo flies the mark home in 240ms. Then the card stands up with an upward
  *   knock, the sentence rolls back, and the colleague sinks away on `travel`.
  *
- * These functions animate a card that React has already drawn in its new
- * state, like `riseMonogram` does, so the caller reads what the old state
- * looked like first (`holdHandOff`) and plays the move in the same frame it
- * commits the change. Nothing here uses a timer: the chain is delays on Web
- * Animations and on bodies, so cancelling stops all of it and a late callback
- * cannot play a hand-off that was reversed.
+ * The chain animates a card that React has already drawn in its new state,
+ * like `riseMonogram` does, so `playHandOffChange` looks at the card before the
+ * change and plays the chain in the same frame it commits the change. Nothing
+ * here uses a timer: the chain is delays on Web Animations and on bodies, so
+ * cancelling stops all of it and a late callback cannot play a hand-off that
+ * was reversed.
  *
  * The page marks what the chain moves with attributes: the colleague's face
  * is `data-hand-off-colleague`, the card's plugin mark (the thing that flies)
@@ -22,6 +23,7 @@
  * head), the wait is the figure with `data-level`, and the
  * sentence is the landing's `data-landing-sentence`.
  */
+import { flushSync } from "react-dom";
 import {
   copyElementWithoutIds,
   findBody,
@@ -32,6 +34,7 @@ import {
   trackBody,
 } from "../../app/motion";
 import { riseHolder } from "./inbox-motion";
+import { findCardElement } from "./inbox-page-dom";
 import { holdSentence, rollSentence, type HeldSentence } from "./landing";
 
 const COLLEAGUE = "[data-hand-off-colleague]";
@@ -61,7 +64,7 @@ interface HeldPart {
 }
 
 /** What a card looked like before a hand-off or an Undo changed it. */
-export interface HeldHandOff {
+interface HeldHandOff {
   /** The old sentence, to roll away. Absent when the card has none. */
   readonly sentence: HeldSentence | undefined;
   /** The colleague the card had, to sink away on Undo. Absent when it had none. */
@@ -85,12 +88,8 @@ const holdPart = (card: HTMLElement, part: HTMLElement, keepData: readonly strin
   return { copy, left: partRect.left - cardRect.left, top: partRect.top - cardRect.top };
 };
 
-/**
- * Records how `card` looks now: its sentence, its colleague and its wait, with
- * where each lies. Call it just before the change that hands the card on or
- * takes it back, then give the result to `playCardHandOff` or `playCardHandOffBack`.
- */
-export const holdHandOff = (card: HTMLElement): HeldHandOff => {
+/** Records how `card` looks now: its sentence, its colleague and its wait, with where each lies. */
+const holdHandOff = (card: HTMLElement): HeldHandOff => {
   const box = card.querySelector(COLLEAGUE)?.parentElement ?? null;
   const wait = card.querySelector<HTMLElement>(WAIT);
   return {
@@ -176,7 +175,7 @@ const sinkColleague = (card: HTMLElement, held: HeldPart, delay: number): (() =>
  * The card's neighbours do not move, and the signal landing's rim and knock
  * are not played: a hand-off is the user's own move, not news.
  */
-export const playCardHandOff = (card: HTMLElement, held: HeldHandOff): (() => void) => {
+const playCardHandOff = (card: HTMLElement, held: HeldHandOff): (() => void) => {
   const cancels: (() => void)[] = [];
   const mark = findMark(card);
   if (mark !== null) cancels.push(flyToSidebarTarget(mark, "overview", WEIGHT_DELAY).cancel);
@@ -211,7 +210,7 @@ export const playCardHandOff = (card: HTMLElement, held: HeldHandOff): (() => vo
  *   When the sidebar shows no Overview, the flight is skipped and the rest
  *   starts at once.
  */
-export const playCardHandOffBack = (card: HTMLElement, held: HeldHandOff): (() => void) => {
+const playCardHandOffBack = (card: HTMLElement, held: HeldHandOff): (() => void) => {
   const cancels: (() => void)[] = [];
   const mark = findMark(card);
   const home = mark === null ? undefined : flyHomeFromSidebarTarget(mark, "overview");
@@ -228,4 +227,42 @@ export const playCardHandOffBack = (card: HTMLElement, held: HeldHandOff): (() =
   return () => {
     for (const cancel of cancels) cancel();
   };
+};
+
+/** The chains that are playing, by the element of the card they play on, and the function that cuts each short. */
+const runningChains = new Map<HTMLElement, () => void>();
+
+/**
+ * Makes `commit`, a change that hands the card `cardId` on (`forwards`) or
+ * takes the hand-off back (`backwards`), and plays the hand-off chain on the
+ * card in the same frame. The change is committed at once (`flushSync`),
+ * because the card is drawn in its new state right after it. With no such card
+ * under `page`, only commits.
+ *
+ * A chain still playing on the card is cut short first. A chain has no end to
+ * wait for, so one is let go once its card has left the page.
+ */
+export const playHandOffChange = (
+  page: ParentNode | null,
+  cardId: string,
+  direction: "forwards" | "backwards",
+  commit: () => void,
+): void => {
+  for (const [card, stop] of runningChains) {
+    if (card.isConnected) continue;
+    stop();
+    runningChains.delete(card);
+  }
+  const card = page === null ? null : findCardElement(page, cardId);
+  if (card === null) {
+    commit();
+    return;
+  }
+  runningChains.get(card)?.();
+  const held = holdHandOff(card);
+  flushSync(commit);
+  runningChains.set(
+    card,
+    direction === "forwards" ? playCardHandOff(card, held) : playCardHandOffBack(card, held),
+  );
 };

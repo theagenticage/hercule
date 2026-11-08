@@ -11,15 +11,6 @@ const FACE_SIZE = 22;
 const NUMBERED_ROWS = 3;
 
 /**
- * Focuses the first Hand to row inside `root`, or does nothing when there is
- * none. The key H uses it when several workflows can take the card: the user
- * then chooses with the arrow keys or a number.
- */
-export const focusFirstHandRow = (root: ParentNode): void => {
-  root.querySelector<HTMLElement>("[data-sheet-hand-row]")?.focus({ preventScroll: true });
-};
-
-/**
  * Renders the Hand to rows of the open card's moves, to sit in its ledger
  * before Take it:
  *

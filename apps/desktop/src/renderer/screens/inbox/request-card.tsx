@@ -3,8 +3,8 @@ import type { PluginIdentity } from "@hercule/client-core";
 import {
   decideCardDraw,
   describeCardAloud,
-  listCardOffers,
   type CardBundle,
+  type CardOffers,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
@@ -12,7 +12,7 @@ import { StatusShape } from "../desk";
 import "../desk/card.css";
 import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
-import { buildCardPropsComparer, type CardHandOffs } from "./card-props";
+import { buildCardPropsComparer } from "./card-props";
 import { LinkLines } from "./link-lines";
 import { useCardTime } from "./use-card-time";
 
@@ -22,7 +22,7 @@ interface RequestCardProps {
   readonly bundle: CardBundle;
   /** The cards a signal just landed on. The request shows the new mark when its id is in it. */
   readonly freshIds: ReadonlySet<string>;
-  readonly handOffs: CardHandOffs;
+  readonly offers: CardOffers;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly step: number;
@@ -42,10 +42,9 @@ const arePropsEqual = buildCardPropsComparer<RequestCardProps>();
  *   its kind (`decideCardFace` leaves it out otherwise). `yours` shows beside
  *   the place.
  * - `monogram` is the user's, which takes the place of the wait once a Task
- *   holds the card. A card the user handed off in this visit shows the
- *   colleague who has it there instead, and its sentence reads "Agent review
- *   has it" (`handOffs.handed`). `handOffs.offerSets` are the workflows its
- *   Hand to move offers.
+ *   holds the card. A card a workflow is working on (`card.liveWorkflows`)
+ *   shows the colleague there instead, and its sentence reads "Agent review
+ *   has it". `offers` are the workflows its Hand to move offers.
  * - `bundle` holds the lines under the card: a reference found in text that
  *   the user can link ("Mentions OPS-47"), and what it is linked to ("Linked to
  *   #6263"). They stand under the card in one `.inbox-bundle`, and are not part
@@ -67,16 +66,12 @@ function RequestCardView({
   homeName,
   bundle,
   freshIds,
-  handOffs,
+  offers,
   plugins,
   monogram,
   step,
 }: RequestCardProps): JSX.Element {
-  const { face, wait, trust, holder } = decideCardDraw(
-    card,
-    useCardTime(card),
-    handOffs.handed.get(card.id),
-  );
+  const { face, wait, trust, holder } = decideCardDraw(card, useCardTime(card));
   const where = [homeName, card.card === "compact" ? face.whose : undefined]
     .filter((part) => part !== undefined)
     .join(" · ");
@@ -116,7 +111,7 @@ function RequestCardView({
             {where !== "" && <span className="request-where">{where}</span>}
           </span>
           {trust !== undefined && <span className="request-trust">{trust}</span>}
-          <CardMoves card={card} offers={listCardOffers(card, handOffs.offerSets)} />
+          <CardMoves card={card} offers={offers} />
         </span>
       </div>
       <LinkLines

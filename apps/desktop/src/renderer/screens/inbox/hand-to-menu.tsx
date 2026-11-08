@@ -48,10 +48,9 @@ const placeMenu = (menu: HTMLElement, anchor: HTMLElement): void => {
  *   1 to 3 that picks it. The ones that cannot take the card now follow,
  *   dimmed, each saying why.
  * - With more than one acting account the menu names the one the hand-off
- *   acts as, "as northwind-bot", and lets the user pick another. The menu
- *   holds the pick itself, and a menu that opens again starts with none.
- *   `onHand` is called with the pick, or with `undefined` when the user
- *   picked none, which leaves the choice of account to the controller.
+ *   acts as, "as northwind-bot", and lets the user pick another. The pick is
+ *   the parent's (`chosenConnectionId`, `onChooseConnection`), who uses it
+ *   when `onHand` is called. With no pick, the controller chooses the account.
  * - The open menu owns the keyboard: 1 to 3 and Return pick, the arrow keys
  *   move, and Esc calls `onClose`. No key reaches the page behind it. A click
  *   outside the menu calls `onClose` too.
@@ -63,6 +62,8 @@ export function HandToMenu({
   offers,
   openKinds,
   actingConnections,
+  chosenConnectionId,
+  onChooseConnection,
   onHand,
   onClose,
   anchor,
@@ -70,13 +71,15 @@ export function HandToMenu({
   readonly offers: CardOffers;
   readonly openKinds: readonly string[];
   readonly actingConnections: readonly ActingConnection[];
-  readonly onHand: (workflowId: string, connectionId: string | undefined) => void;
+  /** The account the user picked, or `undefined` when they picked none. */
+  readonly chosenConnectionId: string | undefined;
+  readonly onChooseConnection: (connectionId: string) => void;
+  readonly onHand: (workflowId: string) => void;
   readonly onClose: () => void;
   readonly anchor: HTMLElement;
 }): JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
-  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
   const { available, unavailable } = offers;
 
   useLayoutEffect(() => {
@@ -123,7 +126,7 @@ export function HandToMenu({
           ? available[Number(event.key) - 1]
           : undefined;
     if (event.key === "Enter" || /^\d$/.test(event.key)) event.preventDefault();
-    if (picked !== undefined) onHand(picked.workflowId, chosenConnectionId);
+    if (picked !== undefined) onHand(picked.workflowId);
   };
 
   return (
@@ -151,7 +154,7 @@ export function HandToMenu({
             setActive(index);
           }}
           onClick={() => {
-            onHand(offer.workflowId, chosenConnectionId);
+            onHand(offer.workflowId);
           }}
         >
           <Face look={buildLook(offer.workflowId)} pose="idle" size={FACE_SIZE} />
@@ -165,7 +168,7 @@ export function HandToMenu({
       <HandAccount
         actingConnections={actingConnections}
         chosenConnectionId={chosenConnectionId}
-        onChoose={setChosenConnectionId}
+        onChoose={onChooseConnection}
       />
       {unavailable.length > 0 && <i className="hand-menu-line" />}
       {unavailable.map((offer) => (

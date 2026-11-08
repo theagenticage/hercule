@@ -12,7 +12,7 @@ import {
   removeFakeAnimations,
   type FakeAnimation,
 } from "../../app/motion/testing-animations";
-import { holdHandOff, playCardHandOff, playCardHandOffBack } from "./hand-off-motion";
+import { playHandOffChange } from "./hand-off-motion";
 
 let played: FakeAnimation[];
 
@@ -46,14 +46,16 @@ interface DrawnCard {
   readonly mark: HTMLElement;
 }
 
+const CARD_ID = "card-1";
+
 /**
- * Draws a card with a mark, a line with a sentence, and, when `handed`, the
+ * Fills `card` with a mark, a line with a sentence, and, when `handed`, the
  * colleague that has it in the wait's place. A card that is not handed shows
- * its wait (`3d`) there instead.
+ * its wait (`3d`) there instead. Filling a card again is how React redraws it
+ * in place.
  */
-const drawCard = (sentence: string, handed: boolean): DrawnCard => {
-  const card = document.body.appendChild(document.createElement("div"));
-  place(card, 300, 200, 600, 40);
+const fillCard = (card: HTMLElement, sentence: string, handed: boolean): DrawnCard => {
+  card.replaceChildren();
   const mark = card.appendChild(document.createElement("span"));
   mark.dataset["handOffMark"] = "";
   place(mark, 320, 210, 15);
@@ -82,6 +84,14 @@ const drawCard = (sentence: string, handed: boolean): DrawnCard => {
   return { card, colleague, mark };
 };
 
+/** Draws a card on the page. */
+const drawCard = (sentence: string, handed: boolean, parent: HTMLElement = document.body) => {
+  const card = parent.appendChild(document.createElement("div"));
+  card.dataset["cardId"] = CARD_ID;
+  place(card, 300, 200, 600, 40);
+  return fillCard(card, sentence, handed);
+};
+
 /**
  * Draws a card that has no mark of its own, as a row does when the head of its
  * place already shows the plugin's mark, inside that place. Returns the card
@@ -93,10 +103,25 @@ const drawCardUnderPlaceMark = (sentence: string, handed: boolean) => {
   const placeMark = surface.appendChild(document.createElement("span"));
   placeMark.className = "place-mark";
   place(placeMark, 330, 120, 16);
-  const { card } = drawCard(sentence, handed);
+  const { card } = drawCard(sentence, handed, surface);
   card.querySelector("[data-hand-off-mark]")?.remove();
-  surface.append(card);
   return { card, placeMark };
+};
+
+/**
+ * Plays a change on the card the way the Inbox does: the page draws the card
+ * again, in place, inside the call, and the chain plays on it.
+ */
+const change = (
+  card: HTMLElement,
+  direction: "forwards" | "backwards",
+  sentence: string,
+  handed: boolean,
+): void => {
+  playHandOffChange(document.body, CARD_ID, direction, () => {
+    fillCard(card, sentence, handed);
+    if (card.closest(".inbox-place") !== null) card.querySelector("[data-hand-off-mark]")?.remove();
+  });
 };
 
 /** Returns the animations that were started and not cancelled. */
@@ -113,17 +138,17 @@ afterEach(() => {
   document.documentElement.style.removeProperty("--dur-2");
 });
 
+const readColleague = (card: HTMLElement): HTMLElement | null =>
+  card.querySelector<HTMLElement>("[data-hand-off-colleague]");
+
 describe("handing a card on", () => {
   it("lifts the colleague at once, then takes the weight, rolls the sentence and flies the mark at 170ms", () => {
     drawOverview();
-    const before = drawCard("Opened by Sam", false);
-    const held = holdHandOff(before.card);
-    before.card.remove();
-    const after = drawCard("Agent review has it", true);
+    const { card } = drawCard("Opened by Sam", false);
 
-    playCardHandOff(after.card, held);
+    change(card, "forwards", "Agent review has it", true);
 
-    expect(after.colleague?.style.transform).toContain("translate3d(0.00px,22.00px,0)");
+    expect(readColleague(card)?.style.transform).toContain("translate3d(0.00px,22.00px,0)");
     const delays = played.map((animation) => animation.options.delay);
     // The knock of the colleague, the flight of the mark and the dimming of the mark all wait for 170ms.
     expect(delays.filter((delay) => delay === 170).length).toBeGreaterThanOrEqual(3);
@@ -131,138 +156,114 @@ describe("handing a card on", () => {
 
   it("flies the mark of the place's head when the card has none of its own", () => {
     drawOverview();
-    const before = drawCardUnderPlaceMark("Opened by Sam", false);
-    const held = holdHandOff(before.card);
-    before.card.remove();
-    const after = drawCardUnderPlaceMark("Agent review has it", true);
+    const { card, placeMark } = drawCardUnderPlaceMark("Opened by Sam", false);
 
-    playCardHandOff(after.card, held);
+    change(card, "forwards", "Agent review has it", true);
 
     // The place's mark is dimmed where it stands while its copy flies.
-    expect(played.some((animation) => animation.element === after.placeMark)).toBe(true);
+    expect(played.some((animation) => animation.element === placeMark)).toBe(true);
     expect(played.some((animation) => animation.element.closest(".motion-flights"))).toBe(true);
   });
 
   it("fades a copy of the wait away over 120ms, and removes it when the fade ends", () => {
     drawOverview();
-    const before = drawCard("Opened by Sam", false);
-    const held = holdHandOff(before.card);
-    before.card.remove();
-    const after = drawCard("Agent review has it", true);
+    const { card } = drawCard("Opened by Sam", false);
 
-    playCardHandOff(after.card, held);
+    change(card, "forwards", "Agent review has it", true);
 
-    const copy = after.card.querySelector("[data-level]");
+    const copy = card.querySelector("[data-level]");
     expect(copy?.textContent).toBe("3d");
     expect(copy?.getAttribute("aria-hidden")).toBe("true");
     expect(copy?.hasAttribute("title")).toBe(false);
     const fade = played.find((animation) => animation.element === copy);
     expect(fade?.options.duration).toBe(120);
     fade?.finish();
-    expect(after.card.querySelector("[data-level]")).toBeNull();
-  });
-
-  it("stops everything when it is cancelled, and a flight that ends late plays no receipt", () => {
-    const icon = drawOverview();
-    const before = drawCard("Opened by Sam", false);
-    const held = holdHandOff(before.card);
-    before.card.remove();
-    const { card, colleague } = drawCard("Agent review has it", true);
-    const cancel = playCardHandOff(card, held);
-    const copyFlight = played.find((animation) => animation.element.closest(".motion-flights"));
-
-    cancel();
-    copyFlight?.finish();
-
-    expect(listRunning()).toEqual([]);
-    expect(played.some((animation) => animation.element === icon)).toBe(false);
-    expect(colleague?.style.transform).toBe("");
-    expect(document.querySelector(".motion-flights")).toBeNull();
+    expect(card.querySelector("[data-level]")).toBeNull();
   });
 
   it("shows the colleague at once and fades Overview's row under Reduce motion", () => {
     setReduced(true);
     const icon = drawOverview();
-    const { card, colleague } = drawCard("Agent review has it", true);
+    const { card } = drawCard("Opened by Sam", false);
 
-    playCardHandOff(card, { sentence: undefined, colleague: undefined, wait: undefined });
+    change(card, "forwards", "Agent review has it", true);
 
-    expect(colleague?.style.transform).toBe("");
+    expect(readColleague(card)?.style.transform).toBe("");
     expect(played).toHaveLength(1);
     expect(played[0]?.options.duration).toBe(400);
     expect(played.some((animation) => animation.element === icon)).toBe(false);
   });
+
+  it("only commits when the page has no such card", () => {
+    let committed = false;
+    playHandOffChange(document.body, "missing", "forwards", () => {
+      committed = true;
+    });
+
+    expect(committed).toBe(true);
+    expect(played).toEqual([]);
+  });
 });
 
 describe("taking a hand-off back", () => {
-  /** Holds a handed card, then draws it again as Undo leaves it. */
-  const undo = () => {
-    const handed = drawCard("Agent review has it", true);
-    const held = holdHandOff(handed.card);
-    handed.card.remove();
-    const back = drawCard("Opened by Sam", false);
-    return { held, back };
-  };
-
   it("waits for the mark to be home before the card stands up, the sentence rolls back and the colleague sinks", () => {
     drawOverview();
-    const { held, back } = undo();
+    const { card } = drawCard("Agent review has it", true);
 
-    playCardHandOffBack(back.card, held);
+    change(card, "backwards", "Opened by Sam", false);
 
-    const standUp = played.find((animation) => animation.element === back.card);
+    const standUp = played.find((animation) => animation.element === card);
     expect(standUp?.options.delay).toBe(240);
     // The colleague's copy lies over the card until it has sunk, and is no second "has it" for a screen reader.
-    const copy = back.card.querySelector("[aria-hidden]");
+    const copy = card.querySelector("[aria-hidden]");
     expect(copy).not.toBeNull();
     expect(copy?.hasAttribute("role")).toBe(false);
-    expect(back.card.querySelector("[data-hand-off-colleague]")).toBeNull();
+    expect(readColleague(card)).toBeNull();
   });
 
   it("flies the place's mark home when the card has none of its own", () => {
     drawOverview();
-    const handed = drawCardUnderPlaceMark("Agent review has it", true);
-    const held = holdHandOff(handed.card);
-    handed.card.remove();
-    const back = drawCardUnderPlaceMark("Opened by Sam", false);
+    const { card } = drawCardUnderPlaceMark("Agent review has it", true);
 
-    playCardHandOffBack(back.card, held);
+    change(card, "backwards", "Opened by Sam", false);
 
     expect(played.some((animation) => animation.element.closest(".motion-flights"))).toBe(true);
-    expect(played.find((animation) => animation.element === back.card)?.options.delay).toBe(240);
+    expect(played.find((animation) => animation.element === card)?.options.delay).toBe(240);
   });
 
   it("starts the rest at once when the sidebar shows no Overview to fly from", () => {
-    const { held, back } = undo();
+    const { card } = drawCard("Agent review has it", true);
 
-    playCardHandOffBack(back.card, held);
+    change(card, "backwards", "Opened by Sam", false);
 
-    expect(played.find((animation) => animation.element === back.card)?.options.delay).toBe(0);
-  });
-
-  it("removes the colleague's copy and stops everything when it is cancelled", () => {
-    drawOverview();
-    const { held, back } = undo();
-    const before = back.card.childElementCount;
-
-    const cancel = playCardHandOffBack(back.card, held);
-    expect(back.card.querySelector("[aria-hidden]")).not.toBeNull();
-    cancel();
-
-    expect(back.card.querySelector("[aria-hidden]")).toBeNull();
-    expect(back.card.childElementCount).toBe(before);
-    expect(listRunning()).toEqual([]);
-    expect(document.querySelector(".motion-flights")).toBeNull();
+    expect(played.find((animation) => animation.element === card)?.options.delay).toBe(0);
   });
 
   it("plays nothing under Reduce motion", () => {
     drawOverview();
-    const { held, back } = undo();
+    const { card } = drawCard("Agent review has it", true);
     setReduced(true);
 
-    playCardHandOffBack(back.card, held);
+    change(card, "backwards", "Opened by Sam", false);
 
     expect(played).toEqual([]);
-    expect(back.card.querySelector("[aria-hidden]")).toBeNull();
+    expect(card.querySelector("[aria-hidden]")).toBeNull();
+  });
+});
+
+describe("a second change on the same card", () => {
+  it("cuts the chain still playing short: every piece stops, and a flight that ends late plays no receipt", () => {
+    const icon = drawOverview();
+    const { card } = drawCard("Opened by Sam", false);
+    change(card, "forwards", "Agent review has it", true);
+    const copyFlight = played.find((animation) => animation.element.closest(".motion-flights"));
+    const before = played.length;
+
+    change(card, "forwards", "Agent review has it", true);
+    copyFlight?.finish();
+
+    // Everything the first chain started is stopped. What is running was started by the second.
+    expect(listRunning().every((animation) => played.indexOf(animation) >= before)).toBe(true);
+    expect(played.some((animation) => animation.element === icon)).toBe(false);
   });
 });

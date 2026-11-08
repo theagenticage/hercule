@@ -3,7 +3,6 @@ import type { PluginIdentity } from "@hercule/client-core";
 import type { InboxLayout, RequestsOrder } from "@hercule/client-core/inbox";
 import { ChevronDownIcon } from "../../icons/chevron-down";
 import { ChoiceMenu, SectionHeading, Sunrise } from "../desk";
-import type { CardHandOffs } from "./card-props";
 import { RequestCard } from "./request-card";
 import { WithSomeoneElse } from "./with-someone-else";
 
@@ -76,7 +75,6 @@ function NoRequests({
  * - `plugins` is what `plugin.query` returns, for the marks.
  * - `monogram` is the user's, for the cards that a Task holds.
  * - `freshIds` are the cards a signal just landed on, which show the new mark.
- * - `handOffs` are what the cards need to draw a hand-off (`CardHandOffs`).
  * - `isSunriseStill` is false when the user's own move just left no request,
  *   so the small sunrise plays.
  *
@@ -90,7 +88,6 @@ export function RequestsSide({
   plugins,
   monogram,
   freshIds,
-  handOffs,
   isSunriseStill,
 }: {
   readonly layout: InboxLayout;
@@ -99,7 +96,6 @@ export function RequestsSide({
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
   readonly freshIds: ReadonlySet<string>;
-  readonly handOffs: CardHandOffs;
   readonly isSunriseStill: boolean;
 }): JSX.Element {
   const { requests, withSomeoneElse } = layout;
@@ -124,7 +120,7 @@ export function RequestsSide({
                   homeName={row.homeName}
                   bundle={row.bundle}
                   freshIds={freshIds}
-                  handOffs={handOffs}
+                  offers={row.offers}
                   plugins={plugins}
                   monogram={monogram}
                   step={stepOfCard.get(row.card.id) ?? 0}
@@ -145,7 +141,6 @@ export function RequestsSide({
         plugins={plugins}
         monogram={monogram}
         freshIds={freshIds}
-        handOffs={handOffs}
       />
     </aside>
   );

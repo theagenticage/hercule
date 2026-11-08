@@ -16,6 +16,7 @@ import {
   type BundleSources,
   type CardBundle,
 } from "./card-bundles";
+import { listCardOffers, NO_OFFERS, type CardOffers } from "./card-hand-off";
 import { buildInboxFacets } from "./facets";
 import {
   buildPlaceContext,
@@ -41,6 +42,8 @@ export interface InboxView extends PlacementChoice {
 /** A card on a surface. */
 export interface OngoingRow {
   readonly card: InboxCard;
+  /** The workflows the card's Hand to move offers. None for a pointer. */
+  readonly offers: CardOffers;
   /**
    * Set when the card lies on this surface only as a plain pointer ("Also in
    * ..."): it is drawn in full on this other surface.
@@ -61,6 +64,8 @@ export interface InboxSurface {
 /** A card in the narrow column. */
 export interface ColumnRow {
   readonly card: InboxCard;
+  /** The workflows the card's Hand to move offers. */
+  readonly offers: CardOffers;
   /** The title of the card's first home that has one. */
   readonly homeName: string | undefined;
   /** The lines under the card ("Mentions OPS-47", "Linked to #6263"). A request carries no parts. */
@@ -111,6 +116,7 @@ const buildColumnRow = (
   side: InboxSide,
 ): ColumnRow => ({
   card,
+  offers: listCardOffers(card, sources.offerSets),
   homeName: findHomeName(card, context),
   bundle: side === "requests" ? buildCardBundle(card, sources) : EMPTY_BUNDLE,
 });
@@ -166,10 +172,18 @@ const buildSurfaces = (
       if (index === 0) {
         surface.full.push({
           card,
+          offers: listCardOffers(card, sources.offerSets),
           near: listNearPlaces(card, head.id, context),
           bundle: buildCardBundle(card, sources),
         });
-      } else surface.pointers.push({ card, alsoIn: first, near: [], bundle: EMPTY_BUNDLE });
+      } else
+        surface.pointers.push({
+          card,
+          offers: NO_OFFERS,
+          alsoIn: first,
+          near: [],
+          bundle: EMPTY_BUNDLE,
+        });
     }
   }
   return [...surfaces.values()]
@@ -214,7 +228,9 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
  * The layout returns what the visit holds now, as `placement`, to pass as `held`
  * with the next read, and the `bundles` it drew, to pass as `previousBundles`.
  * A bundle that has not changed keeps its identity, so what compares it by
- * identity does not draw it again. The user's own Link and Unlink that wait for
+ * identity does not draw it again. Each row, and each asking part of a
+ * bundle, carries the offers of its own card (`offers`): cards of one offer
+ * set share one object, so a change to one set redraws only its cards. The user's own Link and Unlink that wait for
  * an answer are in `held.pendingMoves`.
  *
  * - A card lies in the column of its held side.

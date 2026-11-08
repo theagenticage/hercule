@@ -5,6 +5,7 @@ import { describeCardAloud } from "./card-aloud";
 import type { CardTime } from "./card-wait";
 import {
   decideCardDraw,
+  decideCardHolder,
   decideHandedSentence,
   decideHandMove,
   describeHandOffEnds,
@@ -36,6 +37,20 @@ describe("listCardOffers", () => {
 
   it("gives a card whose set is missing no offers", () => {
     expect(listCardOffers(buildInboxCard("1", { offerSetId: "gone" }), {})).toEqual(NO_OFFERS);
+  });
+
+  it("gives every card of one set the same offers, so a card draws again only when its own set changes", () => {
+    const set = [review, fix];
+    const first = listCardOffers(buildInboxCard("1", { offerSetId: "set-a" }), { "set-a": set });
+    const second = listCardOffers(buildInboxCard("2", { offerSetId: "set-a" }), {
+      "set-a": set,
+      "set-b": [sameRepoOnly],
+    });
+    const changed = listCardOffers(buildInboxCard("2", { offerSetId: "set-a" }), {
+      "set-a": [review],
+    });
+    expect(second).toBe(first);
+    expect(changed).not.toBe(first);
   });
 });
 
@@ -102,19 +117,23 @@ describe("decideCardDraw", () => {
   };
 
   it("draws the face and the time of a card nobody holds, with no holder", () => {
-    const draw = decideCardDraw(buildInboxCard("1", { title: "Fix the basket" }), time, undefined);
+    const draw = decideCardDraw(buildInboxCard("1", { title: "Fix the basket" }), time);
     expect(draw).toMatchObject({ ...time, holder: undefined });
     expect(draw.face.title).toBe("Fix the basket");
   });
 
   it("holds a card a Task has for the user", () => {
     const card = buildInboxCard("1", { taskId: "task-1" });
-    expect(decideCardDraw(card, time, undefined).holder).toEqual({ kind: "you" });
+    expect(decideCardDraw(card, time).holder).toEqual({ kind: "you" });
   });
 
-  it("gives a handed card its colleague in the wait's place, and a sentence a screen reader reads", () => {
-    const card = buildInboxCard("1", { title: "Fix the basket", taskId: "task-1" });
-    const draw = decideCardDraw(card, time, agent);
+  it("gives a card a workflow is working on its colleague in the wait's place, and a sentence a screen reader reads", () => {
+    const card = buildInboxCard("1", {
+      title: "Fix the basket",
+      taskId: "task-1",
+      liveWorkflows: [agent],
+    });
+    const draw = decideCardDraw(card, time);
     expect(draw).toMatchObject({
       wait: null,
       signalAge: undefined,
@@ -125,6 +144,32 @@ describe("decideCardDraw", () => {
     expect(describeCardAloud(draw.face, draw.wait, 0)).toBe(
       "Ticket, ACME-1, Fix the basket, Agent review has it",
     );
+  });
+});
+
+describe("decideCardHolder", () => {
+  const agent = { workflowId: "wf-agent-review", name: "Agent review" };
+  const other = { workflowId: "wf-other", name: "Other" };
+
+  it.each([
+    ["no Task and no live workflow", {}, undefined],
+    [
+      "a Task and no live workflow, such as a card whose run ended",
+      { taskId: "task-1" },
+      { kind: "you" },
+    ],
+    [
+      "a live workflow before the Task is known",
+      { liveWorkflows: [agent] },
+      { kind: "colleague", workflow: agent },
+    ],
+    [
+      "several live workflows, the newest run first",
+      { taskId: "task-1", liveWorkflows: [agent, other] },
+      { kind: "colleague", workflow: agent },
+    ],
+  ])("holds a card with %s", (_name, overrides, holder) => {
+    expect(decideCardHolder(buildInboxCard("1", overrides))).toEqual(holder);
   });
 });
 
