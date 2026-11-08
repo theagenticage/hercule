@@ -5,7 +5,7 @@
  * beads and progress are worked out is tested in client-core.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import type { Initiative, Task, WorkCard } from "@hercule/contract";
@@ -176,6 +176,26 @@ describe("Initiatives on the Work board", () => {
 
     expect(head.getAttribute("aria-expanded")).toBe("false");
     expect(queryCard(EXPRESS_PAY.id)).toBeNull();
+  });
+
+  it("moves a card of an open row to Landed when 5 is pressed on the card with focus", async () => {
+    const user = userEvent.setup();
+    const { calls } = await openWork();
+    await user.click(await screen.findByRole("button", { name: /^Checkout rework/ }));
+    const card = queryCard(EXPRESS_PAY.id)!;
+
+    act(() => {
+      card.focus();
+    });
+    await user.keyboard("5");
+
+    await waitFor(() => {
+      expect(
+        calls.filter((call) => call.method === "POST" && call.path.endsWith("/move")),
+      ).toMatchObject([
+        { path: `/api/v1/tasks/${EXPRESS_PAY.id}/move`, body: { stage: "landed" } },
+      ]);
+    });
   });
 
   it("keeps a row open across a reload", async () => {

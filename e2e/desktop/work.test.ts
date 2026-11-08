@@ -478,20 +478,12 @@ describe("Work", () => {
 
     // Open in place, the Initiative shows its card. Moved to Landed, the
     // card lets go of the one that waited on it, and the row's words follow.
-    // Keys reach the board only when the focus is on the card or the page,
-    // so each try puts the focus on the card first, and 5 is harmless again.
+    // The key is pressed once: the card leaves the row when it lands, so a
+    // second try would wait for a card that is no longer there.
     await head.click();
-    const blocker = findCard(page, refundButton.id);
-    await expect
-      .poll(
-        async () => {
-          await blocker.focus();
-          await page.keyboard.press("5");
-          return (await readCard(refundButton.id)).stage;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe("landed");
+    await findCard(page, refundButton.id).focus();
+    await page.keyboard.press("5");
+    await expect.poll(async () => (await readCard(refundButton.id)).stage).toBe("landed");
     await expect.poll(() => blockedCard.getAttribute("data-blocked-by")).toBeNull();
     expect(await blockedCard.textContent()).not.toContain("Waits on");
     expect((await readCard(refundEmails.id)).blockedByCount).toBe(0);
