@@ -66,6 +66,10 @@
   margin: 0 4px;
   background: var(--divider);
 }
+/* The two faces of the `more` target overlap by 8px, so together they are as wide as a single face. */
+.inbox-rail-face > .cr + .cr {
+  margin-inline-start: -8px;
+}
 .inbox-rail-cross {
   display: inline-grid;
   place-items: center;

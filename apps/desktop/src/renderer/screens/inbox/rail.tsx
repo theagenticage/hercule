@@ -9,13 +9,17 @@ export type { RailTarget };
 /** The size of the face, the monogram and the cross of a target, in pixels. */
 const TARGET_SIZE = 40;
 
+/** The size of each of the two faces of the `more` target, in pixels. Two overlap to fill the target's picture. */
+const MORE_FACE_SIZE = 24;
+
 /**
  * Renders the rail that rises while a card is carried: one target for each of
  * `targets`, in order, with a hairline before `dismiss`. The rail is as wide as
  * its targets, up to the width of the desk. Past that the targets wrap into a
  * second row, centred, and the hairline stays with `dismiss`. A `hand` target shows
  * the workflow's colleague, `take` shows the user's `monogram` (its first
- * letter), and `dismiss` a cross.
+ * letter), `more` the faces of two more workflows with "Hand to…", and
+ * `dismiss` a cross.
  *
  * The rail takes no pointer and is hidden from assistive technology: the
  * carry reads the geometry of each target (`data-rail-target` is its index in
@@ -50,6 +54,20 @@ export function Rail({
 const buildRailTargetKey = (target: RailTarget): string =>
   target.kind === "hand" ? `hand:${target.workflowId}` : target.kind;
 
+/** Returns the words under a target. */
+const describeTargetLabel = (target: RailTarget): string => {
+  switch (target.kind) {
+    case "hand":
+      return target.name;
+    case "more":
+      return "Hand to…";
+    case "take":
+      return "Take it";
+    case "dismiss":
+      return "Dismiss";
+  }
+};
+
 function RailTargetView({
   target,
   index,
@@ -65,6 +83,10 @@ function RailTargetView({
         {target.kind === "hand" && (
           <Face look={buildLook(target.workflowId)} pose="idle" size={TARGET_SIZE} />
         )}
+        {target.kind === "more" &&
+          target.workflowIds.map((workflowId) => (
+            <Face key={workflowId} look={buildLook(workflowId)} pose="idle" size={MORE_FACE_SIZE} />
+          ))}
         {target.kind === "take" && <UserAvatar name={monogram} size={TARGET_SIZE} />}
         {target.kind === "dismiss" && (
           <span className="inbox-rail-cross">
@@ -72,9 +94,7 @@ function RailTargetView({
           </span>
         )}
       </span>
-      <span>
-        {target.kind === "hand" ? target.name : target.kind === "take" ? "Take it" : "Dismiss"}
-      </span>
+      <span>{describeTargetLabel(target)}</span>
     </div>
   );
   return target.kind === "dismiss" ? (

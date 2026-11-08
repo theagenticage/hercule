@@ -49,17 +49,25 @@ export const describeMoveRefusal = (
  * Who can take a carried card, as the rail offers it:
  *
  * - `hand` hands it to the workflow `workflowId`, shown as a colleague named `name`;
+ * - `more` stands for the workflows the rail has no room for: letting go on it
+ *   opens the menu of every workflow, and it shows the faces of `workflowIds`,
+ *   the first two of the workflows left out;
  * - `take` makes it the user's own;
  * - `dismiss` sets it aside.
  */
 export type RailTarget =
   | { readonly kind: "hand"; readonly workflowId: string; readonly name: string }
+  | { readonly kind: "more"; readonly workflowIds: readonly string[] }
   | { readonly kind: "take" }
   | { readonly kind: "dismiss" };
 
+/** The most workflows the rail names. More than a handful would run off the window, and the menu lists them all. */
+const MOST_RAIL_HANDS = 5;
+
 /**
  * Returns the rail targets of a carried `card`: one `hand` target for each
- * workflow in `offers.available`, then Take and Dismiss. A card that is held
+ * workflow in `offers.available`, up to `MOST_RAIL_HANDS`, then a `more`
+ * target when there are others, then Take and Dismiss. A card that is held
  * can be handed on but not taken or dismissed: a live Task holds it
  * (`describeMoveRefusal` refuses Take), or the user handed it off in this
  * visit (`isHanded`) and the Inbox does not know the Task yet.
@@ -69,11 +77,15 @@ export const listRailTargets = (
   offers: CardOffers,
   isHanded: boolean,
 ): readonly RailTarget[] => {
-  const hands: RailTarget[] = offers.available.map((offer) => ({
+  const hands: RailTarget[] = offers.available.slice(0, MOST_RAIL_HANDS).map((offer) => ({
     kind: "hand",
     workflowId: offer.workflowId,
     name: offer.name,
   }));
+  const left = offers.available.slice(MOST_RAIL_HANDS);
+  if (left.length > 0) {
+    hands.push({ kind: "more", workflowIds: left.slice(0, 2).map((offer) => offer.workflowId) });
+  }
   const isHeld = isHanded || describeMoveRefusal(card, "take") !== undefined;
   return isHeld ? hands : [...hands, { kind: "take" }, { kind: "dismiss" }];
 };

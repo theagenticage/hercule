@@ -169,4 +169,40 @@ describe("listRailTargets", () => {
   ])("offers only the workflows for a card %s", (_name, card, isHanded) => {
     expect(listRailTargets(card, offers, isHanded)).toEqual([hand]);
   });
+
+  it("names the first five workflows and stands for the rest with a target that shows two of them", () => {
+    const many = Array.from({ length: 8 }, (_unused, index) =>
+      buildWorkflowOffer(`Agent ${index}`),
+    );
+    const targets = listRailTargets(waiting, partitionOffers(many), false);
+
+    expect(targets.map((target) => target.kind)).toEqual([
+      ...Array.from({ length: 5 }, () => "hand"),
+      "more",
+      "take",
+      "dismiss",
+    ]);
+    expect(targets[5]).toEqual({
+      kind: "more",
+      workflowIds: [many[5]!.workflowId, many[6]!.workflowId],
+    });
+  });
+
+  it("has no target for the rest when every workflow fits, and keeps it on a held card", () => {
+    const five = Array.from({ length: 5 }, (_unused, index) =>
+      buildWorkflowOffer(`Agent ${index}`),
+    );
+    expect(listRailTargets(waiting, partitionOffers(five), false).map((each) => each.kind)).toEqual(
+      ["hand", "hand", "hand", "hand", "hand", "take", "dismiss"],
+    );
+    const six = [...five, buildWorkflowOffer("Agent 5")];
+    expect(listRailTargets(held, partitionOffers(six), false).map((each) => each.kind)).toEqual([
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "more",
+    ]);
+  });
 });

@@ -16,6 +16,7 @@ const TARGETS: readonly RailTarget[] = [
   { kind: "hand", workflowId: "review", name: "Agent review" },
   { kind: "take" },
   { kind: "dismiss" },
+  { kind: "more", workflowIds: ["triage", "review"] },
 ];
 
 /** Where the middle of the rail's target `index` is. The targets lie in a row at the bottom of the window. */
@@ -230,7 +231,7 @@ describe("pressing a card", () => {
     expect(host.card("b").hasAttribute("data-carried")).toBe(true);
     expect(
       [...host.rail()!.querySelectorAll("[data-rail-target]")].map((each) => each.textContent),
-    ).toEqual(["Agent review", "RTake it", "Dismiss"]);
+    ).toEqual(["Agent review", "RTake it", "Dismiss", "Hand to…"]);
   });
 
   it.each([
@@ -363,6 +364,17 @@ describe("letting go", () => {
 
     expect(measuredTransforms).toHaveLength(TARGETS.length);
     expect(measuredTransforms.every((each) => each.rail === "" && each.target === "")).toBe(true);
+  });
+
+  it("on the target for the workflows the rail has no room for calls for it 200ms into the landing", () => {
+    const host = renderHost();
+    lift(host, "b");
+    const { x, y } = targetCenter(3);
+    moveTo(host.page, x, y);
+    release(host.page, x, y);
+    play(210);
+
+    expect(host.onDropOnTarget).toHaveBeenCalledExactlyOnceWith("b", TARGETS[3]);
   });
 
   it("on Dismiss calls for it at once, and the card is back in the page for it to leave from", () => {

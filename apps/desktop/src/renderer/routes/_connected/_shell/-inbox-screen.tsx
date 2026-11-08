@@ -30,6 +30,7 @@ import { InboxPill } from "../../../screens/inbox/inbox-pill";
 import { AllClear, FirstRun } from "../../../screens/inbox/inbox-states";
 import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
 import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
+import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
 import { OngoingSide } from "../../../screens/inbox/ongoing-side";
 import { InboxOpenCard } from "../../../screens/inbox/open-card";
 import { Rail } from "../../../screens/inbox/rail";
@@ -241,7 +242,12 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
       const card = findCard(cardId);
       if (card === undefined) return;
       if (target.kind === "hand") page.handCard(card, target.workflowId, undefined, "pointer");
-      else if (target.kind === "take") moves.take(card);
+      else if (target.kind === "more") {
+        // The same menu the card's own Hand to… button opens, under the card the drop sent home.
+        const scroller = scrollRef.current;
+        const anchor = scroller === null ? null : findCardElement(scroller, card.id);
+        if (anchor !== null) setHandMenu({ cardId: card.id, anchor, by: "pointer" });
+      } else if (target.kind === "take") moves.take(card);
       else dismissWithRiders(card, false);
     },
     onDropOnCard: (cardId, ontoCardId) => {
