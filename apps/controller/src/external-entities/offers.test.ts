@@ -4,7 +4,12 @@
  * the offers and the offer set ids.
  */
 import { describe, expect, it } from "vitest";
-import type { WorkflowDefinition, WorkflowOffer } from "@hercule/contract";
+import {
+  MAX_ENTITY_OFFERS,
+  MAX_OFFER_MESSAGE_LENGTH,
+  type WorkflowDefinition,
+  type WorkflowOffer,
+} from "@hercule/contract";
 import {
   buildOfferSetId,
   evaluateOffer,
@@ -146,7 +151,7 @@ describe("evaluateOffer", () => {
       "names every repository it works on",
       workflow(undefined, checkouts("api-resource", "web-resource")),
       { targetRemote: "github.com/acme/docs" },
-      unavailable("repository", "Review PR works on acme/api or acme/web only"),
+      unavailable("repository", "Review PR works on acme/api and 1 more only"),
     ],
     [
       "fits when one of its checkouts is the repository the work lands in",
@@ -164,6 +169,12 @@ describe("evaluateOffer", () => {
       "runs anywhere with a workspace that checks nothing out",
       workflow(undefined, checkouts()),
       { targetRemote: "github.com/acme/docs" },
+      AVAILABLE,
+    ],
+    [
+      "runs anywhere when its workspace names only Resources that are not repositories",
+      workflow(undefined, primary("folder-resource")),
+      {},
       AVAILABLE,
     ],
     [
@@ -229,7 +240,62 @@ describe("evaluateOffer", () => {
   });
 });
 
+describe("the length of a message", () => {
+  it("names the first repository and counts the rest, and never passes the contract's bound", () => {
+    const many = Array.from({ length: 40 }, (_, index) => `resource-${String(index)}`);
+    const remotes = new Map(
+      many.map((id, index): [string, string] => [
+        id,
+        `github.com/acme/${"r".repeat(30)}-${String(index)}`,
+      ]),
+    );
+    const offer = evaluateOffer(workflow(undefined, checkouts(...many)), PULL_REQUEST, remotes);
+    expect(offer?.unavailable?.message).toBe(
+      `Review PR works on acme/${"r".repeat(30)}-0 and 39 more only`,
+    );
+
+    const longRemote = new Map([["long", `github.com/acme/${"x".repeat(800)}`]]);
+    const cut = evaluateOffer(workflow(undefined, primary("long")), PULL_REQUEST, longRemote);
+    expect(cut?.unavailable?.reason).toBe("repository");
+    expect(cut!.unavailable!.message.length).toBeLessThanOrEqual(MAX_OFFER_MESSAGE_LENGTH);
+
+    const longInput = workflow([
+      ENTITY,
+      { name: "i".repeat(900), schema: { type: "string" }, required: true },
+    ]);
+    const needs = evaluateOffer(longInput, PULL_REQUEST, RESOURCES);
+    expect(needs?.unavailable?.reason).toBe("needs-input");
+    expect(needs!.unavailable!.message.length).toBeLessThanOrEqual(MAX_OFFER_MESSAGE_LENGTH);
+  });
+});
+
 describe("evaluateOffers", () => {
+  it("cuts the list to the contract's bound and keeps the available offers first", () => {
+    const needsBranch: ReadonlyArray<Input> = [
+      ENTITY,
+      { name: "base_branch", schema: { type: "string" }, required: true },
+    ];
+    const many = (count: number, prefix: string, inputs?: ReadonlyArray<Input>) =>
+      Array.from({ length: count }, (_, index): OfferableWorkflow => ({
+        id: `${prefix}-${String(index)}`,
+        definition: {
+          ...workflow(inputs).definition,
+          name: `${prefix} ${String(index).padStart(3, "0")}`,
+        },
+      }));
+    const offers = evaluateOffers(
+      [...many(MAX_ENTITY_OFFERS + 20, "unavailable", needsBranch), ...many(5, "available")],
+      PULL_REQUEST,
+      RESOURCES,
+    );
+    expect(offers).toHaveLength(MAX_ENTITY_OFFERS);
+    expect(offers.slice(0, 5).every((offer) => offer.unavailable === undefined)).toBe(true);
+    expect(offers[5]!.name).toBe("unavailable 000");
+    expect(offers.at(-1)!.name).toBe(
+      `unavailable ${String(MAX_ENTITY_OFFERS - 6).padStart(3, "0")}`,
+    );
+  });
+
   it("lists the available offers first, then the unavailable ones, each by name", () => {
     const named = (id: string, name: string, inputs?: ReadonlyArray<Input>): OfferableWorkflow => ({
       id,

@@ -9,7 +9,13 @@
  * what a menu offers and what a handoff accepts can never disagree.
  */
 import { createHash } from "node:crypto";
-import type { WorkflowDefinition, WorkflowOffer } from "@hercule/contract";
+import {
+  MAX_ENTITY_OFFERS,
+  MAX_OFFER_MESSAGE_LENGTH,
+  type WorkflowDefinition,
+  type WorkflowOffer,
+} from "@hercule/contract";
+import { cutTextAtWord } from "../text";
 
 /**
  * What the offers need to know of an entity kind's plugin: the type of the
@@ -64,6 +70,26 @@ export const buildOfferSetId = (subject: OfferSubject): string =>
     .digest("hex")
     .slice(0, 24);
 
+/**
+ * Builds the `unavailable` part of an offer. The message is cut at a word to
+ * the length the contract allows, so a long workflow name or input name can
+ * never make a read fail.
+ */
+const buildUnavailable = (
+  reason: NonNullable<WorkflowOffer["unavailable"]>["reason"],
+  message: string,
+): NonNullable<WorkflowOffer["unavailable"]> => ({
+  reason,
+  message: cutTextAtWord(message, MAX_OFFER_MESSAGE_LENGTH),
+});
+
+/**
+ * Names the repositories a workflow works on for a message: the first one,
+ * then how many more there are ("acme/web and 2 more").
+ */
+const describeRepositories = ([first, ...rest]: ReadonlyArray<string>): string =>
+  rest.length === 0 ? first! : `${first!} and ${String(rest.length)} more`;
+
 /** Returns the repository as `owner/name`, the way the user knows it, from a canonical remote such as `github.com/acme/web`. */
 const describeRemote = (canonicalRemote: string): string =>
   canonicalRemote.slice(canonicalRemote.indexOf("/") + 1);
@@ -71,19 +97,23 @@ const describeRemote = (canonicalRemote: string): string =>
 /**
  * Returns the repositories a workflow works on, as `acme/web`, when none of
  * them is the one the work lands in. Returns nothing when the workflow runs
- * anywhere: it has no workspace, or no checkout, or the thing names no
- * repository to compare. A repository is compared by its canonical remote,
- * so a fork compares its target.
+ * anywhere: it has no workspace, or its workspace checks out no repository
+ * (`resourceRemotes` holds only Resources that have a canonical remote, so a
+ * folder or a mailbox is not one), or the thing names no repository to
+ * compare. A repository is compared by its canonical remote, so a fork
+ * compares its target. The list is never empty when it is returned.
  */
 const findOtherRepositories = (
   definition: WorkflowDefinition,
   targetRemote: string | undefined,
   resourceRemotes: ReadonlyMap<string, string>,
 ): ReadonlyArray<string> | undefined => {
-  const resourceIds = listWorkspaceResourceIds(definition);
-  if (targetRemote === undefined || resourceIds.length === 0) return undefined;
-  const remotes = resourceIds.flatMap((id) => resourceRemotes.get(id) ?? []);
-  if (remotes.includes(targetRemote)) return undefined;
+  const remotes = listWorkspaceResourceIds(definition).flatMap(
+    (id) => resourceRemotes.get(id) ?? [],
+  );
+  if (targetRemote === undefined || remotes.length === 0 || remotes.includes(targetRemote)) {
+    return undefined;
+  }
   return [...new Set(remotes.map(describeRemote))];
 };
 
@@ -122,10 +152,10 @@ export const evaluateOffer = (
           workflowId,
           name,
           answers: [],
-          unavailable: {
-            reason: "needs-workflow-change",
-            message: `${name} needs a workflow change: replace its signal input with an entity input`,
-          },
+          unavailable: buildUnavailable(
+            "needs-workflow-change",
+            `${name} needs a workflow change: replace its signal input with an entity input`,
+          ),
         }
       : undefined;
   }
@@ -153,27 +183,25 @@ export const evaluateOffer = (
   if (unfillable !== undefined) {
     return {
       ...offer,
-      unavailable: {
-        reason: "needs-input",
-        message: `${name} needs ${unfillable.name}, which a card cannot fill`,
-      },
+      unavailable: buildUnavailable(
+        "needs-input",
+        `${name} needs ${unfillable.name}, which a card cannot fill`,
+      ),
     };
   }
   if (otherRepositories !== undefined) {
-    const where =
-      otherRepositories.length === 0 ? "another repository" : otherRepositories.join(" or ");
     return {
       ...offer,
-      unavailable: { reason: "repository", message: `${name} works on ${where} only` },
+      unavailable: buildUnavailable(
+        "repository",
+        `${name} works on ${describeRepositories(otherRepositories)} only`,
+      ),
     };
   }
   if (!subject.hasAccount) {
     return {
       ...offer,
-      unavailable: {
-        reason: "no-account",
-        message: "No connected account can act on this",
-      },
+      unavailable: buildUnavailable("no-account", "No connected account can act on this"),
     };
   }
   return offer;
@@ -181,7 +209,10 @@ export const evaluateOffer = (
 
 /**
  * Evaluates every workflow for a subject and returns the offers: the
- * available ones first, then the unavailable ones, each group by name.
+ * available ones first, then the unavailable ones, each group by name, cut
+ * to `MAX_ENTITY_OFFERS`. The cut keeps the available ones before any
+ * unavailable one. The list is for a menu; whether a workflow can be handed
+ * a thing is decided by `evaluateOffer`, never by this list.
  */
 export const evaluateOffers = (
   workflows: ReadonlyArray<OfferableWorkflow>,
@@ -195,7 +226,8 @@ export const evaluateOffers = (
         Number(a.unavailable !== undefined) - Number(b.unavailable !== undefined) ||
         a.name.localeCompare(b.name) ||
         a.workflowId.localeCompare(b.workflowId),
-    );
+    )
+    .slice(0, MAX_ENTITY_OFFERS);
 
 /**
  * Lists what the offers need of each entity kind that an active event source

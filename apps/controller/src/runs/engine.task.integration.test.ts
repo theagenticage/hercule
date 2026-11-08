@@ -351,7 +351,7 @@ describe("the card of a Task, when a run of it starts or ends", () => {
     ]);
   });
 
-  it("is announced only as derived changes when a run fails and the next run ends the failure", async () => {
+  it("is announced as a plain change when a failure starts and when it ends, and as a derived one when the retry's run ends", async () => {
     const published: Array<Change> = [];
     const taskId = await runTest(
       Effect.gen(function* () {
@@ -362,20 +362,18 @@ describe("the card of a Task, when a run of it starts or ends", () => {
         yield* waitForRunToEnd(failing.runId);
         const retry = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
         yield* waitForRunToEnd(retry.runId);
-        // The failure and the start that ended it.
-        yield* waitForAnnouncements(published, task.id, 2);
+        // The failure starting (plain), the first run ending (derived), the
+        // retry starting and ending the failure (plain), and the retry ending (derived).
+        yield* waitForAnnouncements(published, task.id, 4);
         return task.id;
       }),
       published,
     );
 
+    // The sidebar's failure dot follows plain pushes only, so a failure
+    // starting or ending must send one. The rest of the card stays derived.
     const changes = cardChanges(published, taskId);
-    expect(changes.length).toBeGreaterThanOrEqual(2);
-    expect(
-      changes.every(
-        (change) => change._tag === "record" && change.topic === "task" && change.derived === true,
-      ),
-    ).toBe(true);
+    expect(changes.map((change) => "derived" in change)).toEqual([false, true, false, true]);
   });
 
   it("is not announced when a run that cannot start is refused", async () => {

@@ -993,6 +993,17 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
 );
 
 /**
+ * The signal service, with the claims on signals it takes. The handoff of an
+ * External Entity ends signals through it too, so both are provided this one
+ * layer and share one instance. It still needs `BoundOperations`, which the
+ * group that holds both provides.
+ */
+const SignalServiceDomainLayer = SignalServiceLayer.pipe(
+  Layer.provide(SignalClaimsLayer),
+  Layer.provide(SignalEntitiesLayer),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -1054,8 +1065,6 @@ const operationServices = Layer.mergeAll(
     Layer.provide(EntityLookupsLayer),
     Layer.provide(TaskServiceWithLinkOwnersLayer),
   ),
-  // TODO(#1034): the handoff will need the run and workflow services.
-  ExternalEntityHandoffsLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
@@ -1103,7 +1112,16 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer), Layer.provide(SignalEntitiesLayer)),
+      SignalServiceDomainLayer,
+      // A handoff of an External Entity starts a run, writes a Task, and ends
+      // signals through the signal service, under the one set of claims the
+      // signal service and the Ignore Rule service share.
+      ExternalEntityHandoffsLayer.pipe(
+        Layer.provide(RunDomainLayer),
+        Layer.provide(TaskServiceWithLinkOwnersLayer),
+        Layer.provide(SignalServiceDomainLayer),
+        Layer.provide(SignalClaimsLayer),
+      ),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,

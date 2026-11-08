@@ -1305,7 +1305,10 @@ const make = Effect.gen(function* () {
           rows.map(({ row }) => row.ref),
           environment.now,
         );
-        const openKinds = yield* signals.listOpenKindsByThread(rows.map(({ row }) => row.ref));
+        const openKinds = yield* signals.listOpenKindsByThread(
+          rows.map(({ row }) => row.ref),
+          MAX_ENTITY_SIGNALS,
+        );
         const offers = yield* offerReads.readOffers(
           rows.map(({ row }) => buildOfferTarget(row)),
           environment.offeredKinds ?? [],
@@ -1371,11 +1374,24 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the offers and acting Connections of things, as the Inbox and
-     * the detail show them (see `makeOfferReads`). The handoff reads one
-     * thing through it inside its transaction, so a click is checked by the
-     * rules the menu used.
+     * the detail show them, with their lists cut to the contract's bounds
+     * (see `makeOfferReads`). They are for display only.
      */
     readOffers: offerReads.readOffers,
+
+    /**
+     * Returns the offer of one workflow for one thing, by the rules of the
+     * menu but without any cut. The handoff checks its workflow through it
+     * inside its transaction.
+     */
+    readOfferOfWorkflow: offerReads.readOfferOfWorkflow,
+
+    /**
+     * Returns the Connection that acts for a handoff on one thing: the chosen
+     * one when it can act, else none; with no choice, the oldest that can.
+     * Not cut by any bound.
+     */
+    findActingConnection: offerReads.findActingConnection,
 
     /**
      * Reads what lies above `starts`, as places and edges, cut by one rule

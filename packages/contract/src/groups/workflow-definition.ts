@@ -458,10 +458,19 @@ const buildSignalKindList = (subject: string, maximum: number) =>
 /** The signal kinds a `signal` input accepts. */
 const InputSignalKinds = buildSignalKindList("A signal input", MAX_INPUT_SIGNAL_KINDS);
 
-/** The signal kinds an `entity` input answers: the open signals a handoff ends. */
-const InputAnsweredSignalKinds = buildSignalKindList(
-  "The answers of an entity input",
+/**
+ * The qualified signal kinds an `entity` input answers, such as
+ * `github/review-requested`: the open signals a handoff ends. A core kind
+ * such as `proposal` or `fyi` has no plugin to qualify it, so a card's
+ * handoff can never answer one. The list holds at least one kind.
+ */
+const InputAnsweredSignalKinds = atMost(
+  QualifiedContributionId,
   MAX_INPUT_ANSWERED_SIGNAL_KINDS,
+).check(
+  Schema.isMinLength(1, {
+    message: "The answers of an entity input must list at least one qualified signal kind.",
+  }),
 );
 
 /**

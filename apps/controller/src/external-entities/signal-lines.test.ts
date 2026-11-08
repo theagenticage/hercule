@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import type { Signal } from "@hercule/contract";
+import { MAX_ENTITY_SIGNALS, type Signal } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { signalRepository } from "../signals/repository";
@@ -620,6 +620,24 @@ describe("Inbox membership and arrivals", () => {
       inbox.cards.find((card) => card.ref === ticketRef(name))!.signals.kinds;
     expect(kindsOf("two")).toEqual(["acme-tracker/assigned", "acme-tracker/mentioned"]);
     expect(kindsOf("three")).toEqual([]);
+  });
+
+  it("cuts the open kinds of a card to the bound, keeping the first ones in order", async () => {
+    const inbox = await run(({ repository, refresh }) =>
+      Effect.gen(function* () {
+        yield* refresh(ACCOUNT_A, [ticket("two")], 1);
+        for (let index = MAX_ENTITY_SIGNALS + 5; index > 0; index--) {
+          yield* raiseSignal(ticketRef("two"), {
+            kind: `acme-tracker/kind-${String(index).padStart(3, "0")}`,
+          });
+        }
+        return yield* readInbox(repository, 5);
+      }),
+    );
+    const kinds = inbox.cards[0]!.signals.kinds;
+    expect(kinds).toHaveLength(MAX_ENTITY_SIGNALS);
+    expect(kinds[0]).toBe("acme-tracker/kind-001");
+    expect(kinds.at(-1)).toBe(`acme-tracker/kind-0${String(MAX_ENTITY_SIGNALS)}`);
   });
 
   it("picks the latest signal by creation time, then id", async () => {

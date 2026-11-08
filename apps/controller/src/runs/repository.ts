@@ -1049,6 +1049,23 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns true when anything of the run has been handed to an executor:
+     * a step record that is not `pending`, or a session. A running action may
+     * already have changed the source, and a session may already have acted,
+     * long before any step completes, so only a run where this is false can
+     * be taken back as if it never started.
+     */
+    hasDispatchedWork: (runId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly dispatched: number }>`
+          SELECT EXISTS (SELECT 1 FROM run_steps
+                         WHERE run_id = ${uuidFromString(runId)} AND status <> 'pending')
+              OR EXISTS (SELECT 1 FROM sessions WHERE run_id = ${uuidFromString(runId)})
+              AS dispatched`,
+        (rows) => rows[0]?.dispatched === 1,
+      ),
+
+    /**
      * Points every run of the Task `sourceId` at the Task `targetId`, for a
      * merge. One statement on `runs_task_id`.
      */

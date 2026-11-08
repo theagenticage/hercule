@@ -177,10 +177,8 @@ export interface EntityHandoffRecorded {
   readonly stageBefore: TaskStage | undefined;
   /** The Task's `stage_revision` right after the handoff wrote it. */
   readonly stageRevision: number;
-  /** The runs the Task holds right after the handoff wrote it, the handoff's own run included. */
-  readonly runsOnTask: number;
-  /** The sessions the Task holds right after the handoff wrote it. */
-  readonly sessionsOnTask: number;
+  /** The Task's `join_revision` right after the handoff wrote it. */
+  readonly joinRevision: number;
 }
 
 /** What `reverseEntityHandoff` needs to know of the handoff, from its record. */
@@ -194,10 +192,8 @@ export interface EntityHandoffToReverse {
   readonly stageBefore: TaskStage | undefined;
   /** The `stageRevision` that `recordEntityHandoff` returned. */
   readonly stageRevision: number;
-  /** The `runsOnTask` that `recordEntityHandoff` returned. */
-  readonly runsOnTask: number;
-  /** The `sessionsOnTask` that `recordEntityHandoff` returned. */
-  readonly sessionsOnTask: number;
+  /** The `joinRevision` that `recordEntityHandoff` returned. */
+  readonly joinRevision: number;
 }
 
 /** The result of `reverseEntityHandoff`. */
@@ -224,8 +220,7 @@ const HANDOFF_STAYS = {
   finished: "The task was finished since.",
   notLinked: "The task no longer links this.",
   stageDecided: "The task was moved or its stage was set since.",
-  otherRun: "Another run joined the task since.",
-  thread: "A thread joined the task since.",
+  joined: "Another run or thread joined the task since.",
   otherLink: "The task links something else too.",
   edited: "The task was edited since.",
 } as const;
@@ -411,9 +406,10 @@ const chooseWhyHandoffStays = (
   if (since.merged) return HANDOFF_STAYS.merged;
   if (isFinishedStage(since.stage)) return HANDOFF_STAYS.finished;
   if (!since.linksRef) return HANDOFF_STAYS.notLinked;
+  // Work that joined is named before a stage decision, because a handoff of
+  // another workflow is a stage decision too and the work is the cause.
+  if (since.joinRevision !== handoff.joinRevision) return HANDOFF_STAYS.joined;
   if (since.stageRevision !== handoff.stageRevision) return HANDOFF_STAYS.stageDecided;
-  if (since.holdings.runs !== handoff.runsOnTask) return HANDOFF_STAYS.otherRun;
-  if (since.holdings.sessions !== handoff.sessionsOnTask) return HANDOFF_STAYS.thread;
   // A Task the handoff made has only the ref it was made for, and no edit.
   if (handoff.stageBefore === undefined) {
     if (since.linkCount > 1) return HANDOFF_STAYS.otherLink;
@@ -981,26 +977,20 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads what a handoff must remember of the Task it just wrote: the stage
-   * revision, and the runs and sessions the Task holds. The Task was written a
-   * moment ago in the same transaction, so the row is there.
+   * revision and the join revision. The Task was written a moment ago in the
+   * same transaction, so the row is there.
    *
-   * The counts are how a later Undo sees that anything joined the Task, by any
-   * path: a new run or Thread, a Thread moved onto it, or another Task merged
-   * into it. `tasks.revision` cannot do that, because starting or moving a
-   * Thread does not write the Task row. A snapshot of the counts needs no
-   * list of the paths that attach work to a Task.
+   * The join revision is raised by database triggers whenever a run or a
+   * session gets the Task or is moved onto it, so a later Undo sees any work
+   * that joined, by any path, without a list of those paths. A count of the
+   * Task's runs and sessions would miss a Thread that joins while another
+   * one is moved away, and `tasks.revision` does not move when a Thread is
+   * started or moved.
    */
   const readHandoffMemory = (
     id: string,
-  ): Effect.Effect<
-    Pick<EntityHandoffRecorded, "stageRevision" | "runsOnTask" | "sessionsOnTask">,
-    SqlError
-  > =>
-    Effect.gen(function* () {
-      const stageRevision = Option.getOrThrow(yield* tasks.readStageRevision(id));
-      const holdings = yield* tasks.countTaskHoldings(id);
-      return { stageRevision, runsOnTask: holdings.runs, sessionsOnTask: holdings.sessions };
-    });
+  ): Effect.Effect<Pick<EntityHandoffRecorded, "stageRevision" | "joinRevision">, SqlError> =>
+    Effect.map(tasks.readRevisions(id), Option.getOrThrow);
 
   /**
    * Puts back the failure that the start of the run `runId` ended, if nothing
@@ -1380,13 +1370,11 @@ const make = Effect.gen(function* () {
      *   links `ref`;
      * - its stage revision is still `stageRevision`, so no stage decision came
      *   after the handoff, not even one that kept the stage;
-     * - it holds the same number of runs and of sessions as right after the
-     *   handoff (`runsOnTask`, `sessionsOnTask`). So a second workflow, a
+     * - its join revision is still `joinRevision`. So a second workflow, a
      *   Thread that joined or was moved onto it, or another Task merged into
      *   it, keeps the Task even when the stage stayed the same. A session of
      *   the handoff's own run counts too: whether the run dispatched anything
-     *   is the caller's check, made first. A Thread moved off and another
-     *   moved on in between would go unseen;
+     *   is the caller's check, made first;
      * - for a Task the handoff made, it also links no other ref and was not
      *   edited since.
      *

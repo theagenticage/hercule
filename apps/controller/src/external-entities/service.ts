@@ -72,6 +72,7 @@ import { announceEntityChanges } from "./announce";
 import { buildActiveEntityKind } from "./entity-records";
 import { listOfferedKinds, type OfferedKind } from "./offers";
 import { isPendingTarget } from "./pending-target";
+import { findProjectOfRemote } from "./project-of-remote";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import {
@@ -355,22 +356,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the Project for the Task of an entity: the only Project that is
-   * not deleted and that the Resource whose canonical remote is the repository
-   * the work lands in is filed under. With no repository, no such Resource, or
-   * a Resource in no live Project or in several, there is none. A GitHub
-   * repository or a Linear project is never a Project.
-   */
-  const findProjectOfRemote = (
-    remote: string | undefined,
-  ): Effect.Effect<string | undefined, SqlError> =>
-    Effect.gen(function* () {
-      if (remote === undefined) return undefined;
-      const projects = yield* resources.listLiveProjectsOfRemote(remote);
-      return projects.length === 1 ? projects[0] : undefined;
-    });
-
-  /**
    * Returns the active Task of an entity, or makes one, in one transaction.
    *
    * 1. When a thing was read, checks that its Connection can still read, and
@@ -438,7 +423,8 @@ const make = Effect.gen(function* () {
         }
         const stage = chooseStageForEntity(record);
         const followed = input.followIfUnconcerned && !record.hasConcern;
-        const projectId = input.projectId ?? (yield* findProjectOfRemote(record.targetRemote));
+        const projectId =
+          input.projectId ?? (yield* findProjectOfRemote(resources, record.targetRemote));
         const task = yield* tasks.createTaskLinkedToRef({
           ref,
           title: record.title,

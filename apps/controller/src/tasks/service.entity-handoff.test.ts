@@ -104,7 +104,7 @@ const insertSession = (taskId: string, createdAt: string, runId?: string) =>
 const readStageRevision = (taskId: string) =>
   Effect.gen(function* () {
     const repository = yield* taskRepository;
-    return Option.getOrThrow(yield* repository.readStageRevision(taskId));
+    return Option.getOrThrow(yield* repository.readRevisions(taskId)).stageRevision;
   });
 
 const createTask = (stage: TaskStage, refs: ReadonlyArray<ExternalRef> = [REF]) =>
@@ -324,7 +324,7 @@ describe("reverseEntityHandoff", () => {
     readonly runId: string;
     readonly recorded: Pick<
       EntityHandoffRecorded,
-      "stageBefore" | "stageRevision" | "runsOnTask" | "sessionsOnTask"
+      "stageBefore" | "stageRevision" | "joinRevision"
     >;
   }) =>
     Effect.flatMap(TaskService, (tasks) =>
@@ -334,8 +334,7 @@ describe("reverseEntityHandoff", () => {
         ref: REF,
         stageBefore: handoff.recorded.stageBefore,
         stageRevision: handoff.recorded.stageRevision,
-        runsOnTask: handoff.recorded.runsOnTask,
-        sessionsOnTask: handoff.recorded.sessionsOnTask,
+        joinRevision: handoff.recorded.joinRevision,
       }),
     );
 
@@ -348,8 +347,8 @@ describe("reverseEntityHandoff", () => {
     const result = await run(
       Effect.gen(function* () {
         const handoff = yield* handOffNewTask;
-        // The run's own row was counted when the handoff wrote the Task.
-        expect(handoff.recorded).toMatchObject({ runsOnTask: 1, sessionsOnTask: 0 });
+        // The run's own insert came before the Task row, so the Task starts at 0.
+        expect(handoff.recorded.joinRevision).toBe(0);
         return { reversal: yield* reverse(handoff), gone: yield* isGone(handoff.taskId) };
       }),
     );
@@ -363,11 +362,23 @@ describe("reverseEntityHandoff", () => {
   });
 
   it.each([
-    ["a Thread joined it", (taskId: string) => insertSession(taskId, AFTER_HANDOFF), "thread"],
+    ["a Thread joined it", (taskId: string) => insertSession(taskId, AFTER_HANDOFF), "joined"],
     [
       "a second run joined it",
       (taskId: string) => insertRun(newId(), taskId, AFTER_HANDOFF),
-      "run",
+      "joined",
+    ],
+    [
+      // The second handoff also decides the stage again. The work that joined is the cause named.
+      "a second workflow was handed the same thing",
+      (taskId: string) =>
+        Effect.gen(function* () {
+          const runId = newId();
+          yield* insertRun(runId, taskId, AFTER_HANDOFF);
+          const tasks = yield* TaskService;
+          yield* tasks.recordEntityHandoff({ taskId, entry: { ref: REF, runId } });
+        }),
+      "joined",
     ],
     [
       "it was edited",
@@ -490,7 +501,7 @@ describe("reverseEntityHandoff", () => {
     expect(result.kept).toMatchObject({ reversed: true, stageRestored: true });
     expect(result.refused).toMatchObject({
       reversed: false,
-      reason: expect.stringContaining("thread"),
+      reason: expect.stringContaining("joined"),
     });
   });
 
@@ -519,12 +530,50 @@ describe("reverseEntityHandoff", () => {
     );
     expect(result.moved).toMatchObject({
       reversed: false,
-      reason: expect.stringContaining("thread"),
+      reason: expect.stringContaining("joined"),
     });
     expect(result.merged).toMatchObject({
       reversed: false,
-      reason: expect.stringContaining("run joined"),
+      reason: expect.stringContaining("joined"),
     });
+  });
+
+  it("keeps a continued Task when a Thread joined and another was moved away, so the number of Threads is the same", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const task = yield* createTask("planned");
+        yield* insertSession(task.id, BEFORE_HANDOFF);
+        const runId = newId();
+        yield* insertRun(runId, task.id, HANDOFF_AT);
+        const recorded = yield* tasks.recordEntityHandoff({
+          taskId: task.id,
+          entry: { ref: REF, runId },
+        });
+        yield* insertSession(task.id, AFTER_HANDOFF);
+        // The Thread that was there before the handoff leaves for another Task.
+        const elsewhere = yield* createTask("planned", [OTHER_REF]);
+        yield* withTransaction(
+          sql,
+          sql`UPDATE sessions SET task_id = ${uuidFromString(elsewhere.id)}
+              WHERE task_id = ${uuidFromString(task.id)} AND created_at = ${BEFORE_HANDOFF}`,
+        );
+        const sessions = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM sessions WHERE task_id = ${uuidFromString(task.id)}`;
+        return {
+          sessions: sessions[0]!.n,
+          reversal: yield* reverse({ taskId: task.id, runId, recorded }),
+          task: yield* tasks.read(task.id),
+        };
+      }),
+    );
+    expect(result.sessions).toBe(1);
+    expect(result.reversal).toMatchObject({
+      reversed: false,
+      reason: expect.stringContaining("joined"),
+    });
+    expect(result.task.stage).toBe("building");
   });
 
   it("keeps a continued Task that was dragged since", async () => {
@@ -609,8 +658,7 @@ describe("reverseEntityHandoff", () => {
               ref: REF,
               stageBefore: undefined,
               stageRevision: 0,
-              runsOnTask: 1,
-              sessionsOnTask: 0,
+              joinRevision: 0,
             }),
             CurrentActor,
             buildSessionActor(["task.update", "task.delete", "task.read"]),

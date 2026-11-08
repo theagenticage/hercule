@@ -1023,6 +1023,60 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Ends the signals that a handoff of an External Entity answered, as the
+     * user, and returns the ids it ended. Each signal is resolved as decided
+     * with the Hand to an agent action of the workflow, the outcome "Handed to
+     * <workflow name>" and the run the handoff started, with a
+     * `signal.decided` audit entry, as `act` does for Hand to an agent.
+     *
+     * A signal that is no longer open, because its source ended it a moment
+     * ago, is skipped and left as it is. It runs no plugin action, tells the
+     * source nothing, and offers no Ignore Rule: handing a thing off is not
+     * Done. The caller has claimed the signals (`SignalClaims`) and checked
+     * that the workflow answers their kind. Runs in the caller's
+     * transaction, or opens one.
+     *
+     * Fails with `Forbidden` for any caller but the user.
+     */
+    resolveAnswered: (input: {
+      readonly signalIds: ReadonlyArray<string>;
+      readonly workflowId: string;
+      readonly workflowName: string;
+      readonly runId: string;
+    }): Effect.Effect<ReadonlyArray<string>, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        const caller = yield* requireUserActor("signal.handOff", ONLY_THE_USER_HANDS_OFF);
+        const actor = buildActorStamp(caller);
+        const at = yield* nowIso;
+        const resolution: SignalResolution = {
+          kind: "decided",
+          actionId: `${HAND_TO_ACTION_PREFIX}${input.workflowId}`,
+          outcome: `Handed to ${input.workflowName}`,
+          runId: input.runId,
+          actor,
+          origin: buildResolutionOrigin(caller),
+          at,
+        };
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const resolved = yield* signals.resolveMany(input.signalIds, resolution);
+            const ended = input.signalIds.filter((id) => resolved.has(id));
+            for (const signalId of ended) {
+              yield* audit.append({
+                kind: "signal.decided",
+                actor,
+                record: { topic: "signal", id: signalId },
+                payload: { signalId, actionId: resolution.actionId, op: "externalEntity.handOff" },
+                at,
+              });
+            }
+            return ended;
+          }),
+        );
+      }),
+
+    /**
      * Snoozes open signals until `until`, and returns the ids it snoozed and
      * the ones it skipped because they had already resolved. A signal that
      * is already snoozed gets the new time. Any holder of `signal.write` may

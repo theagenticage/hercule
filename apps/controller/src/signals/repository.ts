@@ -705,21 +705,27 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns, for each of `threadRefs` that holds an open signal (snoozed
-     * ones too), the distinct kinds of those signals, sorted. A ref with no
-     * open signal is left out. One statement however many refs there are,
+     * ones too), the distinct kinds of those signals, sorted, at most
+     * `limitPerRef` for each ref (the first ones in that order). A ref with
+     * no open signal is left out. One statement however many refs there are,
      * none for no refs.
      */
     listOpenKindsByThread: (
       threadRefs: ReadonlyArray<string>,
+      limitPerRef: number,
     ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
       threadRefs.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
             sql<{ readonly ref: string; readonly kind: string }>`
-              SELECT DISTINCT thread_ref AS ref, kind FROM signals
-              WHERE status = 'open'
-                AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))
-              ORDER BY thread_ref, kind`,
+              SELECT ref, kind FROM (
+                SELECT ref, kind, ROW_NUMBER() OVER (PARTITION BY ref ORDER BY kind) AS position
+                FROM (
+                  SELECT DISTINCT thread_ref AS ref, kind FROM signals
+                  WHERE status = 'open'
+                    AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))))
+              WHERE position <= ${limitPerRef}
+              ORDER BY ref, position`,
             (rows) => {
               const kinds = new Map<string, Array<string>>();
               for (const row of rows) {
@@ -745,6 +751,25 @@ const make = Effect.gen(function* () {
               SELECT id FROM signals
               WHERE status = 'open'
                 AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))`,
+            (rows) => rows.map((row) => uuidToString(row.id)).sort(),
+          ),
+
+    /**
+     * Returns the ids of the open signals (snoozed ones too) on exactly the
+     * thread `threadRef` whose kind is one of `kinds`, sorted. It is the set
+     * of signals a handoff of that thread may end. None for no kinds.
+     */
+    listOpenSignalIdsOfKinds: (
+      threadRef: string,
+      kinds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      kinds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM signals
+              WHERE status = 'open' AND thread_ref = ${threadRef}
+                AND kind IN (SELECT value FROM json_each(${JSON.stringify(kinds)}))`,
             (rows) => rows.map((row) => uuidToString(row.id)).sort(),
           ),
 

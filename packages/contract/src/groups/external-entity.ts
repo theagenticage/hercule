@@ -23,6 +23,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
+  CapExceeded,
   Conflict,
   Forbidden,
   Internal,
@@ -460,8 +461,10 @@ export const InboxCard = Schema.Struct({
     openCount: Schema.Int,
     /**
      * The distinct kinds of the card's open signals, snoozed ones included,
-     * sorted. A handoff ends the open signals of the kinds its workflow
-     * answers, so this lets the menu name what a click would end.
+     * sorted, cut to the first `MAX_ENTITY_SIGNALS`. A handoff ends the open
+     * signals of the kinds its workflow answers, so this lets the menu name
+     * what a click would end. It is a presentation list: the handoff reads
+     * the signals itself.
      */
     kinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
   }),
@@ -477,7 +480,11 @@ export const InboxCard = Schema.Struct({
    * card, so cards that share those share one set.
    */
   offerSetId: bounded(1, MAX_OFFER_SET_ID_LENGTH),
-  /** The Connections that can act on this thing, oldest first. The first is the default. */
+  /**
+   * The Connections that can act on this thing, oldest first, cut to the
+   * first `MAX_ACTING_CONNECTIONS`. The first is the default. A presentation
+   * list: the handoff checks the account it uses itself.
+   */
   actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
 });
 
@@ -527,7 +534,10 @@ export const Inbox = Schema.Struct({
   /**
    * The workflows each card can be handed to, by `InboxCard.offerSetId`. One
    * set serves every card that shares a kind, target repository and
-   * acting-account state, so 300 cards do not repeat their offers.
+   * acting-account state, so 300 cards do not repeat their offers. Each set
+   * lists available workflows first, then unavailable ones, each by name,
+   * cut to the first `MAX_ENTITY_OFFERS`. A presentation list: the handoff
+   * checks its workflow itself.
    */
   offerSets: Schema.Record(
     bounded(1, MAX_OFFER_SET_ID_LENGTH),
@@ -572,9 +582,18 @@ export const ExternalEntityDetail = Schema.Struct({
   timeline: atMost(EntityChange, MAX_ENTITY_TIMELINE),
   /** The records at the far end of this thing's links and hints that have no card of their own. */
   peers: atMost(EntityPeer, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
-  /** The workflows this thing can be handed to, as `Inbox.offerSets` holds them for a card. */
+  /**
+   * The workflows this thing can be handed to, as `Inbox.offerSets` holds
+   * them for a card: available ones first, then unavailable ones, each by
+   * name, cut to the first `MAX_ENTITY_OFFERS`. A presentation list: the
+   * handoff checks its workflow itself.
+   */
   offers: atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
-  /** The Connections that can act on this thing, oldest first. The first is the default. */
+  /**
+   * The Connections that can act on this thing, oldest first, cut to the
+   * first `MAX_ACTING_CONNECTIONS`. The first is the default. A presentation
+   * list: the handoff checks the account it uses itself.
+   */
   actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
 });
 
@@ -899,7 +918,16 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       params: { id: Id },
       payload: EntityHandOffInput,
       success: EntityHandOffResult,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Conflict,
+        Internal,
+      ],
     }),
     /**
      * Takes back a handoff as far as is safe: cancels its run, and deletes

@@ -160,12 +160,6 @@ export interface TaskTraces {
   readonly linkCount: number;
 }
 
-/** How many runs and sessions point at a Task by `task_id` (`countTaskHoldings`). */
-export interface TaskHoldings {
-  readonly runs: number;
-  readonly sessions: number;
-}
-
 /**
  * What a Task is now, for the check that decides whether a handoff can be
  * taken back (`readHandoffTraces`).
@@ -183,8 +177,8 @@ export interface HandoffTraces {
   readonly linkCount: number;
   /** True when `update` has written the Task since it was created. */
   readonly edited: boolean;
-  /** The runs and sessions the Task holds now. */
-  readonly holdings: TaskHoldings;
+  /** How many times work has joined the Task (`join_revision`). */
+  readonly joinRevision: number;
 }
 
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
@@ -594,14 +588,6 @@ const make = Effect.gen(function* () {
    */
   const taskCanBeSummarized = sql`${buildLiveTaskSql("t")}
                                   AND t.stage NOT IN ${sql.in(FINISHED_STAGES)}`;
-
-  const countTaskHoldings = (id: string): Effect.Effect<TaskHoldings, SqlError> =>
-    Effect.map(
-      sql<{ readonly runs: number; readonly sessions: number }>`
-        SELECT (SELECT count(*) FROM runs WHERE task_id = ${uuidFromString(id)}) AS runs,
-               (SELECT count(*) FROM sessions WHERE task_id = ${uuidFromString(id)}) AS sessions`,
-      (rows) => ({ runs: rows[0]?.runs ?? 0, sessions: rows[0]?.sessions ?? 0 }),
-    );
 
   /**
    * Builds the expression for the id a Task id stands for: the id of the Task
@@ -1547,59 +1533,62 @@ const make = Effect.gen(function* () {
      * Returns the facts about the Task `id` that decide whether a handoff can
      * be taken back, or none when there is no such Task or it is deleted.
      * Reads the Task by its own id, so a merged Task is returned as itself.
-     * The run and session counts use the partial indexes on `runs.task_id` and
-     * `sessions.task_id`.
      */
     readHandoffTraces: (
       id: string,
       ref: ExternalRef,
     ): Effect.Effect<Option.Option<HandoffTraces>, SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{
+      Effect.map(
+        sql<{
           readonly stage: string;
           readonly merged: number;
           readonly stage_revision: number;
+          readonly join_revision: number;
           readonly links_ref: number;
           readonly link_count: number;
           readonly edited: number;
         }>`
           SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged, tasks.stage_revision,
+                 tasks.join_revision,
                  EXISTS (SELECT 1 FROM task_entity_links
                          WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
                  (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count,
                  tasks.revision > 0 AS edited
-          FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`;
-        const row = rows[0];
-        if (row === undefined) return Option.none();
-        return Option.some({
-          stage: row.stage as TaskStage,
-          merged: row.merged === 1,
-          stageRevision: row.stage_revision,
-          linksRef: row.links_ref === 1,
-          linkCount: row.link_count,
-          edited: row.edited === 1,
-          holdings: yield* countTaskHoldings(id),
-        });
-      }),
+          FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`,
+        (rows) => {
+          const row = rows[0];
+          return row === undefined
+            ? Option.none()
+            : Option.some({
+                stage: row.stage as TaskStage,
+                merged: row.merged === 1,
+                stageRevision: row.stage_revision,
+                joinRevision: row.join_revision,
+                linksRef: row.links_ref === 1,
+                linkCount: row.link_count,
+                edited: row.edited === 1,
+              });
+        },
+      ),
 
     /**
-     * Returns how many runs and sessions the Task `id` holds, whoever put them
-     * there: a run started on it, a Thread that joined or was moved onto it,
-     * or the runs and Threads of a Task merged into it all show up as a higher
-     * count. A handoff keeps these counts to see, when it is taken back, that
-     * nothing joined the Task since.
+     * Returns the stage revision and the join revision of the Task with that
+     * id, whether or not it is deleted or merged, or none when there is no row.
      */
-    countTaskHoldings,
-
-    /**
-     * Returns the stage revision of the Task with that id, whether or not it is
-     * deleted or merged, or none when there is no row.
-     */
-    readStageRevision: (id: string): Effect.Effect<Option.Option<number>, SqlError> =>
+    readRevisions: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly stageRevision: number; readonly joinRevision: number }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly stage_revision: number }>`
-          SELECT stage_revision FROM tasks WHERE id = ${uuidFromString(id)}`,
-        (rows) => Option.fromNullishOr(rows[0]?.stage_revision),
+        sql<{ readonly stage_revision: number; readonly join_revision: number }>`
+          SELECT stage_revision, join_revision FROM tasks WHERE id = ${uuidFromString(id)}`,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            stageRevision: row.stage_revision,
+            joinRevision: row.join_revision,
+          })),
       ),
 
     /**

@@ -131,6 +131,13 @@ describe("a workflow input that takes an entity", () => {
     }
   });
 
+  it("refuses answers that are not qualified signal kinds", () => {
+    for (const answers of [["nonsense"], ["fyi"], ["proposal"], ["github/review-requested", "x"]]) {
+      const entity = { kinds: ["github/pull-request"], answers };
+      expect(Result.isFailure(define({ entity })), JSON.stringify(answers)).toBe(true);
+    }
+  });
+
   it("refuses an input that sets an entity and another type", () => {
     const result = define({
       entity: { kinds: ["github/pull-request"] },

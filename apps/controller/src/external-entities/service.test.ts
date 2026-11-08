@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ExternalRef } from "@hercule/contract";
+import { MAX_ACTING_CONNECTIONS, type ExternalRef } from "@hercule/contract";
 import {
   HOST_API,
   registerConnectionType,
@@ -1554,6 +1554,26 @@ describe("what a card offers", () => {
     expect(offers.map((offer) => offer.unavailable)).toEqual([undefined]);
   });
 
+  it("offers a workflow whose workspace names only a folder on a thing with a repository", async () => {
+    const offers = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1", { repository: { target: { remote: API } } }),
+        ]);
+        const folder = uuidToString(mintUuid());
+        const at = new Date().toISOString();
+        yield* withTransaction(
+          sql,
+          sql`INSERT INTO resources (id, kind, workspace_include, created_at, updated_at)
+              VALUES (${uuidFromString(folder)}, 'folder', 0, ${at}, ${at})`,
+        );
+        yield* insertWorkflow(sql, "Notes", { workspace: { kind: "primary", resourceId: folder } });
+        return (yield* service.read(yield* entityId(ticketRef("1")))).offers;
+      }),
+    );
+    expect(offers.map((offer) => offer.unavailable)).toEqual([undefined]);
+  });
+
   it("says no account can act when the only Connection is disabled", async () => {
     const detail = await run(({ service, sql, report, connectionId, entityId }) =>
       Effect.gen(function* () {
@@ -1567,5 +1587,72 @@ describe("what a card offers", () => {
     expect(detail.offers.map((offer) => offer.unavailable)).toEqual([
       { reason: "no-account", message: "No connected account can act on this" },
     ]);
+  });
+
+  it("cuts the accounts of a card to the bound, while the handoff checks still see every account", async () => {
+    const result = await run(({ service, sql, report, connectionId, insertAccount, entityId }) =>
+      Effect.gen(function* () {
+        const entities = yield* externalEntityRepository;
+        const ids = [connectionId];
+        for (let index = 2; index <= MAX_ACTING_CONNECTIONS + 1; index++) {
+          ids.push(yield* insertAccount(`acme-${String(index)}`));
+        }
+        for (const id of ids) yield* report(id, [buildObservation("1")]);
+        const review = yield* insertWorkflow(sql, "Review");
+        const detail = yield* service.read(yield* entityId(ticketRef("1")));
+        const target = { ref: ticketRef("1"), kind: KIND, targetRemote: undefined };
+        const kinds = [{ kind: KIND, connectionType: "acme/acme", signalKinds: [] }];
+        const shown = new Set(detail.actingConnections.map((account) => account.id));
+        const cutOff = ids.filter((id) => !shown.has(id));
+        return {
+          detail,
+          shown,
+          cutOff,
+          review,
+          chosen: yield* entities.findActingConnection(target, cutOff[0], kinds),
+          oldest: yield* entities.findActingConnection(target, undefined, kinds),
+          unknown: yield* entities.findActingConnection(target, uuidToString(mintUuid()), kinds),
+          offer: yield* entities.readOfferOfWorkflow(target, review, kinds),
+          missing: yield* entities.readOfferOfWorkflow(target, uuidToString(mintUuid()), kinds),
+        };
+      }),
+    );
+    expect(result.detail.actingConnections).toHaveLength(MAX_ACTING_CONNECTIONS);
+    expect(result.cutOff).toHaveLength(1);
+    expect(Option.map(result.chosen, (account) => account.id)).toEqual(
+      Option.some(result.cutOff[0]),
+    );
+    expect(Option.map(result.oldest, (account) => account.id)).toEqual(
+      Option.some(result.detail.actingConnections[0]!.id),
+    );
+    expect(Option.isNone(result.unknown)).toBe(true);
+    expect(Option.getOrThrow(result.offer)).toEqual(result.detail.offers[0]);
+    expect(Option.isNone(result.missing)).toBe(true);
+  });
+
+  it("answers for a workflow the same way the menu does, whether it is unavailable, disabled or invalid", async () => {
+    const result = await run(({ sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        const entities = yield* externalEntityRepository;
+        yield* report(connectionId, [
+          buildObservation("1", { repository: { target: { remote: API } } }),
+        ]);
+        const webOnly = yield* insertWorkflow(sql, "Web only", {
+          workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
+        });
+        const disabled = yield* insertWorkflow(sql, "Disabled", { enabled: false });
+        const invalid = yield* insertWorkflow(sql, "Invalid", { invalid: true });
+        const target = { ref: ticketRef("1"), kind: KIND, targetRemote: API };
+        const kinds = [{ kind: KIND, connectionType: "acme/acme", signalKinds: [] }];
+        return {
+          webOnly: yield* entities.readOfferOfWorkflow(target, webOnly, kinds),
+          disabled: yield* entities.readOfferOfWorkflow(target, disabled, kinds),
+          invalid: yield* entities.readOfferOfWorkflow(target, invalid, kinds),
+        };
+      }),
+    );
+    expect(Option.getOrThrow(result.webOnly).unavailable?.reason).toBe("repository");
+    expect(Option.isNone(result.disabled)).toBe(true);
+    expect(Option.isNone(result.invalid)).toBe(true);
   });
 });
