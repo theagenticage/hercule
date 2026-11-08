@@ -119,28 +119,33 @@
 
 /* ---------- A place: one raised surface ---------- */
 .inbox-place {
+  /* The row's first column. What rides on a row is set in under its title, so the tucked sheet and the hints
+     read it too, and cannot drift from it. */
+  --row-lead: 124px;
   position: relative;
   isolation: isolate;
   margin: 0 0 16px;
   color: var(--ink);
 }
-/* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink. */
-[data-theme="orient-express"] .inbox-place,
-[data-theme="dark"] .inbox-place,
-[data-theme="nile"] .inbox-place,
-[data-theme="end-house"] .inbox-place,
-[data-theme="blue-train"] .inbox-place,
-[data-theme="orient-express"] .inbox-welcome,
-[data-theme="dark"] .inbox-welcome,
-[data-theme="nile"] .inbox-welcome,
-[data-theme="end-house"] .inbox-welcome,
-[data-theme="blue-train"] .inbox-welcome {
+/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
+.inbox-place[data-by-status] {
+  --row-lead: 18px;
+}
+/* The sheet is lighter than --faint was set for on the dark themes, so the words of a place take a step more ink.
+   The two quietest waits are redeclared here: a token that names --faint takes its value where it is declared, so
+   it does not see this one. */
+.inbox-place,
+.inbox-welcome {
   --faint: var(--faint-on-stock);
 }
+.inbox-place {
+  --wait-fresh: var(--faint-on-stock);
+  --wait-recent: var(--faint-on-stock);
+}
 /* Blue Train's stock is lighter still, so a failure takes a lighter tomato. */
-[data-theme="blue-train"] .inbox-place,
-[data-theme="blue-train"] .inbox-request {
-  --fail-ink: oklch(0.82 0.11 30);
+.inbox-place,
+.inbox-request {
+  --fail-ink: var(--fail-ink-on-stock);
 }
 .inbox-place-head {
   position: relative;
@@ -213,7 +218,7 @@
   scroll-margin-block: 10px 72px;
   position: relative;
   display: grid;
-  grid-template-columns: 124px minmax(0, 1fr) auto;
+  grid-template-columns: var(--row-lead) minmax(0, 1fr) auto;
   column-gap: 12px;
   padding: 11px 16px;
   color: var(--ink);
@@ -231,14 +236,10 @@
 .inbox-row:focus-visible {
   box-shadow: inset 0 0 0 1.5px var(--focus);
 }
-/* The last row's corners follow the sheet's, so its fill never shows square corners over them. */
-.inbox-row:last-child {
+/* The last row's corners follow the sheet's, so its fill never shows square corners over them. A row with
+   parts or hints under it is not the end of its bundle, so it keeps its own corners square. */
+.inbox-place-rows > :last-child > .inbox-row:last-child {
   border-radius: 0 0 var(--card-r) var(--card-r);
-}
-/* Grouped by status, the head of each group already says it, so the rows do not repeat it. */
-.inbox-place[data-by-status] .inbox-row,
-.inbox-place[data-by-status] .inbox-pointer {
-  grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 .row-rail {
   display: flex;
@@ -283,7 +284,7 @@
 }
 .row-context {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0 10px;
   min-width: 0;
   margin-top: 2px;
@@ -295,17 +296,33 @@
 .row-context > span {
   flex: none;
 }
+/* The new mark is level with the middle of the first line, also when the sentence wraps under it. */
+.row-context > .card-fresh,
+.request-under > .card-fresh {
+  margin-top: calc((var(--line-16) - 6px) / 2);
+}
+/* The sentence is the one part that gives way, and it wraps to a second line before it is cut: a narrow window
+   must not hide what the signal said. */
 .row-context > .row-news {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
 }
 .row-context > span:not(:last-child)::after {
   content: "\00b7";
   flex: none;
   margin-left: 10px;
   color: var(--faint);
+}
+/* How long ago the signal landed, quiet and in even figures. */
+.row-news small {
+  color: var(--faint);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 .row-news[data-tone="bad"] {
   color: var(--fail-ink);
@@ -347,6 +364,7 @@
   flex: none;
   font: var(--w-medium) var(--t-12) / var(--line-16) var(--font-ui);
   font-variant-numeric: tabular-nums;
+  transition: opacity var(--m-quick) var(--m-ease);
 }
 .card-wait[data-level="fresh"] {
   color: var(--wait-fresh);
@@ -377,7 +395,7 @@
 /* A pointer to a card that lies under another place too: one card, drawn in full once. */
 .inbox-pointer {
   display: grid;
-  grid-template-columns: 124px minmax(0, 1fr) auto;
+  grid-template-columns: var(--row-lead) minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   width: 100%;
@@ -485,10 +503,10 @@
   grid-column: 2 / -1;
   grid-row: 2;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   min-width: 0;
-  height: var(--line-16);
+  min-height: var(--line-16);
   margin-top: 1px;
   color: var(--muted);
   font: var(--type-summary);
@@ -497,17 +515,22 @@
   grid-column: 2 / -1;
   grid-row: 3;
 }
+/* A line tall, so the shape sits level with the first line of the sentence when the sentence wraps. */
 .request-shape {
   display: inline-flex;
   flex: none;
+  align-items: center;
+  height: var(--line-16);
 }
+/* The sentence wraps to a second line before it is cut: a narrow window must not hide what the signal said. */
 .request-said {
   position: relative;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .request-said[data-tone="bad"] {
   color: var(--fail-ink);
@@ -698,6 +721,7 @@
 .inbox-copies .is-ghost {
   pointer-events: none;
 }
-.inbox-copies .inbox-row {
+.inbox-copies .inbox-row,
+.inbox-copies .inbox-part {
   background: var(--stock);
 }

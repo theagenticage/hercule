@@ -1,7 +1,7 @@
 /**
- * Tests that opening and closing the rest of a cell keeps the button that was
- * pressed where it is on screen, by scrolling the board to make up for the
- * cards that appear or leave above it.
+ * Tests that opening and closing the rest of a cell, or a stack, keeps the
+ * button that was pressed where it is on screen, by scrolling the board to
+ * make up for the cards that appear or leave above it.
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
@@ -62,5 +62,74 @@ describe("useViewMotion toggleCell", () => {
     const before = button.getBoundingClientRect().top;
     fireEvent.click(button);
     expect(button.getBoundingClientRect().top).toBe(before);
+  });
+});
+
+/** The id of the stack in the board below. */
+const STACK_ID = "lane/ticket";
+
+/** A board of one lane with a stack. Pressing its sheet opens or closes the members. */
+function StackBoard(): JSX.Element {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const view = {
+    openedStackIds: new Set(isOpen ? [STACK_ID] : []),
+    foldedLaneIds: new Set<string>(),
+    isFiltering: false,
+    toggleStack: () => {
+      setIsOpen((open) => !open);
+    },
+  } as unknown as WorkView;
+  const { toggleStack } = useViewMotion(view, scrollRef);
+  return (
+    <div ref={scrollRef} data-testid="scroller">
+      <section className="board-lane" data-lane-id="lane" data-open={isOpen}>
+        <div className="board-cell" data-cell-id="lane/exploring" data-stage="exploring">
+          <div className="board-stack" data-stack-lead="ticket">
+            <div data-card-id="ticket" data-stage="exploring" />
+            <button
+              type="button"
+              className="board-stack-bar"
+              data-stack-bar={STACK_ID}
+              onClick={() => {
+                toggleStack(STACK_ID);
+              }}
+            >
+              2 pull requests
+            </button>
+            {isOpen && (
+              <div className="board-stack-members">
+                <div data-card-id="pr-one" data-stage="exploring" />
+                <div data-card-id="pr-two" data-stage="exploring" />
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+describe("useViewMotion toggleStack", () => {
+  it.each(["opens", "closes"])("keeps the sheet still on screen when the stack %s", (action) => {
+    const { getByTestId, container } = render(<StackBoard />);
+    const scroller = getByTestId("scroller");
+    const lane = container.querySelector<HTMLElement>(".board-lane")!;
+    const sheet = container.querySelector<HTMLElement>(".board-stack-bar")!;
+    const rect = (top: number): DOMRect => ({ top, bottom: top, height: 0 }) as DOMRect;
+    // The lane's top never moves, but the sheet sits 400px lower while the stack is open.
+    lane.getBoundingClientRect = () => rect(100 - scroller.scrollTop);
+    sheet.getBoundingClientRect = () =>
+      rect(300 - scroller.scrollTop + (lane.dataset["open"] === "true" ? 400 : 0));
+    if (action === "closes") {
+      fireEvent.click(sheet);
+      scroller.scrollTop = 400;
+    }
+    const before = sheet.getBoundingClientRect().top;
+    fireEvent.click(sheet);
+    expect(sheet.getBoundingClientRect().top).toBe(before);
+    expect(container.querySelectorAll(".board-stack-members")).toHaveLength(
+      action === "opens" ? 1 : 0,
+    );
   });
 });

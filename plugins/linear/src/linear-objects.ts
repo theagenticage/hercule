@@ -13,9 +13,8 @@ const ApiUser = Schema.Struct({ id: Schema.String, name: Schema.String });
 /** Something Linear names by id: a label, a project, a project milestone. */
 const ApiNamed = Schema.Struct({ id: Schema.String, name: Schema.String });
 
-/** The fields of an issue every query reads, as one fragment. */
-export const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
-  id identifier title url description priority priorityLabel dueDate estimate
+/** The fields of an issue every query reads. Both issue fragments select exactly these. */
+const ISSUE_FIELDS = `id identifier title url description priority priorityLabel dueDate estimate
   createdAt updatedAt completedAt canceledAt archivedAt trashed
   state { id name type }
   assignee { id name }
@@ -23,7 +22,20 @@ export const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
   labels(first: 250) { nodes { id name } }
   project { id name }
   projectMilestone { id name }
-  team { id key name }
+  team { id key name }`;
+
+/** The fields of an issue every query reads, as one fragment. */
+export const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
+  ${ISSUE_FIELDS}
+}`;
+
+/**
+ * The same fields as `ISSUE_FRAGMENT`, for the results of Linear's issue
+ * search. A search returns `IssueSearchResult`, a type of its own, so a
+ * fragment on `Issue` cannot be spread there. `ApiIssue` decodes both.
+ */
+export const ISSUE_SEARCH_FRAGMENT = `fragment IssueSearchFields on IssueSearchResult {
+  ${ISSUE_FIELDS}
 }`;
 
 /** An issue as `ISSUE_FRAGMENT` selects it. */

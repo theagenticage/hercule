@@ -1,6 +1,9 @@
 import type { JSX, ReactNode, RefObject } from "react";
+import { joinClassNames } from "../../app/join-class-names";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import "./inbox.css";
+import "./inbox-bundle.css";
+import "./landing.css";
 import "./inbox-states.css";
 
 /** What the desk is showing, which the stylesheet reads from `data-state`. */
@@ -21,6 +24,8 @@ export type InboxDeskState = "loading" | "board" | "first-run" | "clear";
  *   cards wait for a read, and `isArriving` fades the words in, block by
  *   block, once the first read of a visit arrived.
  * - `isOffline` is whether the controller cannot be reached.
+ * - `announcement` is what a signal that just landed on a card says, for a
+ *   screen reader's polite region.
  * - `scrollRef` is the element that scrolls, which keys and moves scroll and
  *   measure.
  *
@@ -35,6 +40,7 @@ export function InboxDesk({
   isHolding,
   isArriving,
   isOffline,
+  announcement,
   scrollRef,
 }: {
   readonly toolbar: ReactNode;
@@ -44,24 +50,26 @@ export function InboxDesk({
   readonly isHolding: boolean;
   readonly isArriving: boolean;
   readonly isOffline: boolean;
+  readonly announcement: string;
   readonly scrollRef: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
   const hasScrollbar = useShowsClassicScrollbar(scrollRef);
-  const classes = [
+  const classes = joinClassNames(
     "inbox-desk",
-    isHolding ? "is-holding" : null,
-    isArriving ? "is-arriving" : null,
-    isOffline ? "is-offline" : null,
-    hasScrollbar ? "has-scrollbar" : null,
-  ]
-    .filter((each) => each !== null)
-    .join(" ");
+    isHolding && "is-holding",
+    isArriving && "is-arriving",
+    isOffline && "is-offline",
+    hasScrollbar && "has-scrollbar",
+  );
   return (
     <div className={classes} data-state={state}>
       {toolbar}
       <div ref={scrollRef} className="inbox-scroll" tabIndex={-1}>
         <div className="inbox-page">{children}</div>
       </div>
+      <p className="inbox-sr" role="status">
+        {announcement}
+      </p>
       {overlays}
     </div>
   );

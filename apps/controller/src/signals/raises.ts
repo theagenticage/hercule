@@ -23,7 +23,9 @@
  *    the older open signals of the same kind on the same thread, which the
  *    new one replaces. The transaction checks the Ignore Rules again, because
  *    the user may have created one while `build` ran, and records the catch
- *    in place of the signal when one matches.
+ *    in place of the signal when one matches. When it writes the signal, it
+ *    also records the signal's arrival on the External Entity of its thread,
+ *    in the same transaction.
  *
  * The controller daemon's signal raise delivery calls it for each pending
  * raise, oldest event first.
@@ -63,6 +65,7 @@ import { PluginHost, signalBuilds, type RegisteredSignalKind } from "../plugins"
 import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { signalRepository, type PendingRaise } from "./repository";
+import { SignalEntities } from "./signal-entities";
 
 /** The outcome a replaced signal keeps. */
 const REPLACED_OUTCOME = "Replaced by a newer one";
@@ -182,6 +185,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
   const ignoreRules = yield* ignoreRuleRepository;
+  const entities = yield* SignalEntities;
 
   /**
    * Returns the oldest Ignore Rule of `kind` that matches `match`, a
@@ -328,6 +332,10 @@ const make = Effect.gen(function* () {
    *   The rule's catch is recorded instead;
    * - an open signal on the thread was raised from a later event. That
    *   signal is newer, so it stays, and the raise is dropped.
+   *
+   * It writes the signal through the signal entities port, which sees whether
+   * an open signal landing on the thread puts the entity of that thread onto
+   * the Inbox, so the entity can become an arrival.
    */
   const writeSignal = (
     raise: PendingRaise,
@@ -364,7 +372,11 @@ const make = Effect.gen(function* () {
         )).includes(true);
         const written: Signal =
           lowered && signal.priority === "urgent" ? { ...signal, priority: "high" } : signal;
-        yield* signals.insert(written, [raise.eventId], { priorityLowered: lowered });
+        // The entity decides what an arrival is, so this only reports the raise.
+        yield* entities.recordArrivalAfter(
+          raise.threadRef,
+          signals.insert(written, [raise.eventId], { priorityLowered: lowered }),
+        );
         yield* audit.append({
           kind: "signal.raised",
           actor: SYSTEM_ACTOR,
@@ -581,5 +593,11 @@ export class SignalRaises extends Context.Service<SignalRaises, Effect.Success<t
 export const SignalRaisesLayer: Layer.Layer<
   SignalRaises,
   never,
-  SqlClient.SqlClient | PluginHost | ConnectionTypes | BoundOperations | Notifier | AuditLog
+  | SqlClient.SqlClient
+  | PluginHost
+  | ConnectionTypes
+  | BoundOperations
+  | Notifier
+  | AuditLog
+  | SignalEntities
 > = Layer.effect(SignalRaises)(make);

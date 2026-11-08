@@ -3,11 +3,13 @@
  * Northwind Market world, as `externalEntity.queryInbox` would return it at the
  * specimen's clock, Tuesday 29 September 2026, 09:41 UTC.
  *
- * Two plugins feed it: GitHub, whose pull requests lie in Requests and whose
- * issues lie under Ongoing on the surface of their repository, and the
- * invented Quayside, whose purchase orders lie on the surface of their
- * delivery round, with the round's status, its reported progress, its target
- * date and the site it is part of.
+ * Three plugins feed it: GitHub, whose pull requests lie in Requests and whose
+ * issues lie under Ongoing on the surface of their repository, the invented
+ * Quayside, whose purchase orders lie on the surface of their delivery round,
+ * with the round's status, its reported progress, its target date and the
+ * site it is part of, and the invented Tidewatch, a planning tracker whose
+ * tickets lie on the surface of their project, in the section of their
+ * milestone.
  *
  * - Ongoing: three surfaces. Storefront web holds issues, one of them under a
  *   second repository too (a pointer there), one with facts that may be old, and
@@ -16,19 +18,36 @@
  *   usual reason, a reason with a tone, a status that is not the usual one, and
  *   one of the user's own.
  * - With someone else: two pull requests that have a Task.
+ * - Tidewatch: three tickets under the Checkout revamp project (at risk, with
+ *   its progress and its target date) in two milestones, one ticket in none, and
+ *   a pull request that rides on the first ticket because Tidewatch reports it.
+ *   The first ticket is the one the open card specimen opens: it has a resolved
+ *   and an open signal, two changes at the source, and a hint from a pull request.
+ * - Links: one issue carries a pull request that rides on it (an asking part), a
+ *   pull request that has no card of its own (a quiet part) and a Sentry issue
+ *   nobody here can read (a locked part), and says how long ago its latest
+ *   signal landed. A pull request that mentions another issue in its text shows
+ *   a hint, and one that is linked to a pull request with no card says so.
  */
 import type {
   Connection,
+  EntityChange,
   EntityEdge,
+  EntityHint,
+  EntityLink,
+  EntityPeer,
   EntityPlace,
+  EntitySignalLine,
+  ExternalEntityDetail,
   Inbox,
   InboxCard,
   PluginDetail,
+  Signal,
 } from "@hercule/contract";
 import { buildInbox, buildInboxCard, buildRequestCard } from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN } from "./plugins-fixture";
-import type { SidebarRecords } from "./shell-page";
+import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN, TIDEWATCH_PLUGIN } from "./plugins-fixture";
+import type { InboxOpenCardRecords, SidebarRecords } from "./shell-page";
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -44,6 +63,10 @@ const CORE = "github:repository:acme/platform-core";
 const SITE = "quayside:site:rotterdam";
 const WINTER = "quayside:round:winter-stock";
 const RETURNS = "quayside:round:returns";
+const CHECKOUT = "tidewatch:project:checkout-revamp";
+const BETA = "tidewatch:milestone:beta";
+const LAUNCH = "tidewatch:milestone:launch";
+const CONNECTION_TIDEWATCH = "c-tidewatch";
 
 const repository = (ref: string, title: string): EntityPlace => ({
   ref,
@@ -85,6 +108,36 @@ const PLACES: readonly EntityPlace[] = [
     progress: { fraction: 8 / 13, done: 8, total: 13 },
     targetDate: "2026-11-28T00:00:00.000Z",
   }),
+  {
+    ref: CHECKOUT,
+    kind: "tidewatch/project",
+    noun: "Project",
+    caption: "Tidewatch project",
+    title: "Checkout revamp",
+    status: { shape: "hold", tone: "attention", label: "At risk" },
+    progress: { fraction: 9 / 20, done: 9, total: 20 },
+    targetDate: "2026-10-30T00:00:00.000Z",
+    restricted: false,
+  },
+  {
+    ref: BETA,
+    kind: "tidewatch/milestone",
+    noun: "Milestone",
+    caption: "Tidewatch milestone",
+    title: "Beta",
+    progress: { fraction: 0.5 },
+    targetDate: "2026-10-14T00:00:00.000Z",
+    restricted: false,
+  },
+  {
+    ref: LAUNCH,
+    kind: "tidewatch/milestone",
+    noun: "Milestone",
+    caption: "Tidewatch milestone",
+    title: "Launch",
+    targetDate: "2026-10-30T00:00:00.000Z",
+    restricted: false,
+  },
 ];
 
 const issue = (n: number, title: string, overrides: Partial<InboxCard> = {}): InboxCard =>
@@ -127,6 +180,29 @@ const order = (
     ...overrides,
   });
 
+const ticket = (
+  n: number,
+  title: string,
+  milestoneRef: string | undefined,
+  overrides: Partial<InboxCard> = {},
+): InboxCard =>
+  buildInboxCard(`${n}`, {
+    ref: `tidewatch:ticket:SHOP-${String(n)}`,
+    kind: "tidewatch/ticket",
+    noun: "Ticket",
+    home: "tidewatch/project",
+    section: "tidewatch/milestone",
+    pace: "slow",
+    patience: 336,
+    identifier: `SHOP-${String(n)}`,
+    title,
+    status: { shape: "ring", tone: "quiet", label: "Todo" },
+    yours: true,
+    ancestors: milestoneRef === undefined ? [CHECKOUT] : [milestoneRef, CHECKOUT],
+    firstObservedAt: daysAgo(12 - n / 1000),
+    ...overrides,
+  });
+
 const review = (
   n: number,
   title: string,
@@ -150,6 +226,42 @@ const review = (
     ...overrides,
   });
 
+const ISSUE_412 = "github:issue:acme/storefront-web#412";
+const ISSUE_398 = "github:issue:acme/storefront-web#398";
+const TICKET_142 = "tidewatch:ticket:SHOP-142";
+const TICKET_150 = "tidewatch:ticket:SHOP-150";
+const TICKET_142_ID = "142";
+/** The signal the open card specimen opens: Mei's comment on the first ticket. */
+const COMMENT_SIGNAL_ID = "01a0d1c0-6e80-7000-8000-000000000b02";
+const EARLIER_SIGNAL_ID = "01a0d1c0-6e80-7000-8000-000000000b01";
+
+/** The signal lines of the first ticket, oldest first: an earlier one answered, and Mei's comment open. */
+const TICKET_142_SIGNALS: readonly EntitySignalLine[] = [
+  {
+    id: EARLIER_SIGNAL_ID,
+    kind: "tidewatch/assigned",
+    title: "Assigned to you",
+    asker: "Noa",
+    priority: "normal",
+    status: "resolved",
+    createdAt: daysAgo(4),
+    say: { say: "Noa assigned it to you", tone: "plain" },
+    snoozed: false,
+    outcome: "Taken on",
+  },
+  {
+    id: COMMENT_SIGNAL_ID,
+    kind: "tidewatch/commented",
+    title: "Mei commented",
+    asker: "Mei",
+    priority: "normal",
+    status: "open",
+    createdAt: hoursAgo(5),
+    say: { say: "Mei commented", tone: "plain" },
+    snoozed: false,
+  },
+];
+
 const CARDS: readonly InboxCard[] = [
   // Ongoing: Storefront web.
   issue(412, "Basket total rounds the wrong way on multi-buy offers", {
@@ -157,6 +269,20 @@ const CARDS: readonly InboxCard[] = [
     yours: false,
     facts: [{ form: "bars", level: 3 }],
     reason: { say: "Tessa commented", tone: "plain" },
+    signals: {
+      openCount: 2,
+      latest: {
+        id: "01a0d1c0-6e80-7000-8000-000000000a01",
+        kind: "github/commented",
+        title: "Tessa commented",
+        asker: "Tessa",
+        priority: "normal",
+        status: "open",
+        createdAt: hoursAgo(26),
+        say: { say: "Tessa commented", tone: "plain" },
+        snoozed: false,
+      },
+    },
   }),
   issue(398, "Keep card numbers out of the gateway debug log", {
     status: { shape: "half", tone: "active", label: "In progress" },
@@ -194,6 +320,19 @@ const CARDS: readonly InboxCard[] = [
   order(2310, "Pallet wrap for the returns bay", RETURNS, {
     facts: [{ form: "money", text: "€240" }],
   }),
+  // Ongoing: the Checkout revamp project, in two milestones and none.
+  ticket(142, "Show the delivery cost before the payment step", BETA, {
+    person: { name: "Mei" },
+    yours: false,
+    status: { shape: "half", tone: "active", label: "In progress" },
+    reason: { say: "Mei commented", tone: "plain" },
+    signals: { openCount: 1, latest: TICKET_142_SIGNALS[1]! },
+  }),
+  ticket(150, "Remember the last address a shopper used", BETA),
+  ticket(163, "Retry a failed card payment once", LAUNCH, {
+    status: { shape: "most", tone: "active", label: "In review" },
+  }),
+  ticket(171, "Audit the wording of the checkout errors", undefined),
   // Requests.
   review(6241, "Cache delivery slot lookups for five minutes", 120, { person: { name: "Juno" } }),
   review(
@@ -202,6 +341,7 @@ const CARDS: readonly InboxCard[] = [
     118,
     {
       person: { name: "Felix" },
+      ridesOn: ISSUE_412,
     },
   ),
   review(6230, "Show unit prices on multi-buy offers", 100, {
@@ -223,6 +363,11 @@ const CARDS: readonly InboxCard[] = [
     reason: { say: "Checks failed", tone: "bad" },
   }),
   review(6190, "Log the reason when a coupon is refused", 2, { person: { name: "Ines" } }),
+  review(6244, "Show the delivery cost on the payment step", 3, {
+    person: { name: "Mei" },
+    reason: { say: "Mei asked for your review", tone: "plain" },
+    ridesOn: TICKET_142,
+  }),
   // With someone else.
   review(6180, "Stop sending duplicate order emails", 30, {
     side: "with-someone-else",
@@ -236,22 +381,111 @@ const CARDS: readonly InboxCard[] = [
   }),
 ];
 
-/**
- * The `part of` edges of the specimen: each delivery round is part of its
- * site, and each card is part of the places nearest to it, which are all of
- * its ancestors except the site (a round already reaches the site).
- */
-const EDGES: readonly EntityEdge[] = [
+/** The `part of` edges between places: each delivery round is part of its site, and each milestone of its project. */
+const PLACE_EDGES: readonly EntityEdge[] = [
   { fromRef: WINTER, toRef: SITE },
   { fromRef: RETURNS, toRef: SITE },
+  { fromRef: BETA, toRef: CHECKOUT },
+  { fromRef: LAUNCH, toRef: CHECKOUT },
+];
+
+/**
+ * The `part of` edges of the specimen: the edges between places, and from each
+ * card to the places nearest to it, which are all of its ancestors except those
+ * that another of its ancestors already reaches (a round reaches its site, a
+ * milestone its project).
+ */
+const EDGES: readonly EntityEdge[] = [
+  ...PLACE_EDGES,
   ...CARDS.flatMap((card) =>
-    card.ancestors.filter((ref) => ref !== SITE).map((toRef) => ({ fromRef: card.ref, toRef })),
+    card.ancestors
+      .filter(
+        (ref) =>
+          !card.ancestors.some((above) =>
+            PLACE_EDGES.some((edge) => edge.fromRef === above && edge.toRef === ref),
+          ),
+      )
+      .map((toRef) => ({ fromRef: card.ref, toRef })),
   ),
+];
+
+const pullRequestRef = (n: number): string =>
+  `github:pull-request:acme/storefront-web#${String(n)}`;
+
+/** Pull requests with no card of their own, and a Sentry issue nobody here can read: what the links reach that is not on the page. */
+const PEERS: readonly EntityPeer[] = [
+  {
+    ref: pullRequestRef(6101),
+    kind: "github/pull-request",
+    noun: "Pull request",
+    identifier: "#6101",
+    title: "Round multi-buy totals in the basket summary",
+    status: { shape: "join", tone: "good", label: "Merged" },
+    yours: true,
+    restricted: false,
+  },
+  {
+    ref: pullRequestRef(6100),
+    kind: "github/pull-request",
+    noun: "Pull request",
+    identifier: "#6100",
+    title: "Add the promo banner slot",
+    yours: false,
+    restricted: false,
+  },
+  {
+    ref: "sentry:issue:4471",
+    kind: "sentry/issue",
+    noun: "Issue",
+    yours: false,
+    restricted: true,
+  },
+];
+
+/** The links between the specimen's things: a source's and a person's. */
+const LINKS: readonly EntityLink[] = [
+  {
+    fromRef: ISSUE_412,
+    toRef: pullRequestRef(6238),
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "github" },
+  },
+  {
+    fromRef: ISSUE_412,
+    toRef: pullRequestRef(6101),
+    hasPersonClaim: true,
+    claim: { type: "person", actor: "user" },
+  },
+  {
+    fromRef: ISSUE_412,
+    toRef: "sentry:issue:4471",
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "github" },
+  },
+  {
+    fromRef: pullRequestRef(6207),
+    toRef: pullRequestRef(6100),
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "github" },
+  },
+  // Tidewatch reports the pull request, so it rides on the ticket.
+  {
+    fromRef: TICKET_142,
+    toRef: pullRequestRef(6244),
+    hasPersonClaim: false,
+    claim: { type: "source", plugin: "tidewatch" },
+  },
+];
+
+/** The references found in text between the specimen's things: a pull request that only names a ticket in its description. */
+const HINTS: readonly EntityHint[] = [
+  { fromRef: pullRequestRef(6219), toRef: ISSUE_398, evidenceKey: "description" },
+  { fromRef: pullRequestRef(6203), toRef: TICKET_150, evidenceKey: "description" },
 ];
 
 /** What `externalEntity.queryInbox` answers in the specimen. */
 export const INBOX: Inbox = {
-  ...buildInbox(CARDS, { places: PLACES, edges: EDGES }),
+  ...buildInbox(CARDS, { places: PLACES, edges: EDGES, links: LINKS, hints: HINTS, peers: PEERS }),
   counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
 };
 
@@ -293,6 +527,17 @@ const PLUGINS: readonly PluginDetail[] = [
     ],
   },
   {
+    ...TIDEWATCH_PLUGIN,
+    entityKinds: [
+      kind("tidewatch/ticket", "Ticket", {
+        identifier: "SHOP-{number}",
+        connect: "Tickets assigned to you",
+      }),
+      kind("tidewatch/project", "Project", { pace: "context" }),
+      kind("tidewatch/milestone", "Milestone", { pace: "context" }),
+    ],
+  },
+  {
     ...QUAYSIDE_PLUGIN,
     entityKinds: [
       kind("quayside/purchase-order", "Purchase order", {
@@ -326,5 +571,81 @@ export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
   connections: [
     connect("c-github", "github/github", "acme"),
     connect("c-quayside", "quayside/quayside", "rotterdam"),
+    connect(CONNECTION_TIDEWATCH, "tidewatch/tidewatch", "shop"),
   ],
 };
+
+/** The things the first Tidewatch ticket's open card changed at the source, oldest first. */
+const TICKET_142_CHANGES: readonly EntityChange[] = [
+  { reason: "reassigned", sentence: { say: "Now with Mei", tone: "plain" }, at: daysAgo(3) },
+  { reason: "moved", sentence: { say: "Moved to In progress", tone: "plain" }, at: hoursAgo(30) },
+];
+
+/** What the open card of the first Tidewatch ticket reads: its detail, and the signal of its open line. */
+export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
+  const card = CARDS.find((each) => each.id === TICKET_142_ID)!;
+  const detail: ExternalEntityDetail = {
+    ...card,
+    kindAvailable: true,
+    // The places above the ticket, and the target of its link: a link's far end is a place of the detail, drawn with its title and status.
+    places: [
+      ...PLACES.filter((place) => [BETA, CHECKOUT].includes(place.ref)),
+      {
+        ref: pullRequestRef(6244),
+        kind: "github/pull-request",
+        noun: "Pull request",
+        identifier: "#6244",
+        title: "Show the delivery cost on the payment step",
+        status: { shape: "fork", tone: "active", label: "Open", norm: true },
+        restricted: false,
+      },
+    ],
+    edges: EDGES.filter((edge) => edge.fromRef === card.ref || edge.fromRef === BETA),
+    links: LINKS.filter((link) => link.fromRef === card.ref),
+    hints: HINTS.filter((hint) => hint.fromRef === card.ref),
+    conflicts: [],
+    signals: TICKET_142_SIGNALS,
+    openCount: 1,
+    signalCount: 2,
+    timeline: TICKET_142_CHANGES,
+    peers: [],
+  };
+  const signal: Signal = {
+    id: COMMENT_SIGNAL_ID,
+    kind: "tidewatch/commented",
+    origin: {
+      type: "event",
+      eventId: 9001,
+      connectionId: "01a0d1c0-6e80-7000-8000-0000000000c3",
+      threadRef: card.ref,
+    },
+    title: "Mei commented",
+    asker: "Mei",
+    place: "Checkout revamp",
+    priority: "normal",
+    blocks: [],
+    actions: [
+      {
+        id: "reply",
+        label: "Reply",
+        operation: null,
+        primary: true,
+        field: { name: "body", placeholder: "Write a reply" },
+        describeLine: [{ kind: "text", text: "Replies on SHOP-142 in Tidewatch" }],
+      },
+      {
+        id: "done",
+        label: "Mark done",
+        operation: null,
+        describeLine: [{ kind: "text", text: "Takes it off your list. Tidewatch is not told" }],
+      },
+    ],
+    match: {},
+    status: "open",
+    createdAt: TICKET_142_SIGNALS[1]!.createdAt,
+  };
+  return { detail, signals: [signal] };
+})();
+
+/** The id of the card the open card specimen opens. */
+export const INBOX_OPEN_CARD_ID = TICKET_142_ID;

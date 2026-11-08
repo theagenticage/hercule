@@ -875,6 +875,16 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * Returns the event sources of every active plugin, in registry order. The
+   * ingest loops open these sources only: a plugin that is disabled, or that
+   * failed to start, ingests nothing.
+   */
+  const listActiveEventSources = (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
+    Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
+      sources.filter((source) => active.has(source.pluginId)),
+    );
+
   return {
     /**
      * Loads the registry in four steps: check each manifest, register, write
@@ -1042,15 +1052,7 @@ const make = Effect.gen(function* () {
         [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
       ),
 
-    /**
-     * Returns the event sources of every active plugin, in registry order. The
-     * ingest loops open these sources only: a plugin that is disabled, or that
-     * failed to start, ingests nothing.
-     */
-    listActiveEventSources: (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
-      Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
-        sources.filter((source) => active.has(source.pluginId)),
-      ),
+    listActiveEventSources,
 
     readDefaultIntakeSettings,
 

@@ -1,0 +1,64 @@
+/* The answers of one signal, drawn by `SignalAnswers`: Intake's pane and the
+   Inbox's open card both draw them. The ledger rows themselves (`.ledger`,
+   `.ans`) are global, in `styles/controls.css`. Class names keep the `ad-`
+   they had in Intake's pane. */
+.signal-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* A failed answer's error, under its button, as a failed save in Settings. */
+.ad-err {
+  margin: 0 0 4px 8px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ad-compose-err {
+  margin: 6px 0 0 10px;
+}
+
+/* The Reply box. The drawing draws it as a `.card`; the app's `.card` is
+   the step page's, so the card's look is written out here. */
+.ad-compose {
+  padding: 4px 8px 8px 4px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+}
+.ad-compose-input {
+  display: block;
+  width: 100%;
+  min-height: 66px;
+  padding: 10px 10px 4px;
+  border: 0;
+  background: transparent;
+  resize: none;
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+/* The placeholder is a prompt the user reads, at the field's 14px, so it is
+   muted: faint is for metadata of 12px or smaller. */
+.ad-compose-input::placeholder {
+  color: var(--muted);
+}
+.ad-compose-input:focus {
+  outline: none;
+}
+.ad-compose-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding-left: 10px;
+}
+.ad-compose-desc {
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ad-compose-desc b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}

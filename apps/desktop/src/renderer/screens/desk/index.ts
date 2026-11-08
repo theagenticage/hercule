@@ -16,7 +16,9 @@
  * - `FilterControl`, `FilterChips`: the Filter button with its menu, and the
  *   chips of what is chosen, for any list of items.
  * - `useDeskAgeLabel`: the age a card shows, kept current by the age clock.
- *   It is the one part here that reads something (the clock).
+ * - `useEntitySearch`: the search of things at a source, as Work's Add sheet
+ *   and the open card's "Link something" both run it. These two hooks are the
+ *   only parts here that read something (the clock, the query cache).
  * - `useFocusPageOnArrival`: gives the page that scrolls the keyboard focus as
  *   it opens, so its keys act after a click on the sidebar.
  * - `ViewPill`: the pill that names a place and switches between its views.
@@ -25,6 +27,9 @@
  * - `RelationRows`, `ProgressBar`: the rows that draw the places above a
  *   thing, and the 4px bar of a source's reported progress. A place the user
  *   cannot open is a locked row with no title.
+ * - `SignalAnswers`, `LedgerAnswer`: the answers of a signal as ledger rows,
+ *   with their describe lines and Reply boxes. Intake's pane and the Inbox's
+ *   open card both draw them.
  * - `ReadFailure`: the line that says a read failed, with a button to read it
  *   again.
  * - `KeysSheet`: the sheet that lists a page's keys, with Undo and Esc after
@@ -40,6 +45,7 @@ export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";
 export { FilterChips, FilterControl } from "./filter-control";
 export { KeysSheet, type KeyRow } from "./keys-sheet";
+export { LedgerAnswer } from "./ledger-answer";
 export { ProgressBar } from "./progress-bar";
 export { ReadFailure } from "./read-failure";
 export { RelationRows } from "./relation-rows";
@@ -47,6 +53,7 @@ export { SectionHeading } from "./section-heading";
 export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-sheet";
 export type { SheetRect } from "./opening-sheet-geometry";
 export { SideSheet } from "./side-sheet";
+export { SignalAnswers } from "./signal-answers";
 export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
 export { Sunrise } from "./sunrise";
 export {
@@ -72,5 +79,6 @@ export {
 } from "./tool-menu";
 export { UndoLine } from "./undo-line";
 export { useDeskAgeLabel } from "./use-desk-age-label";
+export { useEntitySearch } from "./use-entity-search";
 export { useFocusPageOnArrival } from "./use-focus-page-on-arrival";
 export { ViewPill } from "./view-pill";

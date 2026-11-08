@@ -44,6 +44,8 @@ const buildDrop = (
   const lane = arrangeLanes(buildLanes({ cards }, PROJECTS), {
     foldedLaneIds: new Set(foldedLaneId === undefined ? [] : [foldedLaneId]),
     openedCellIds: new Set(),
+    openedStackIds: new Set(),
+    stackCandidates: [],
     isFiltering: false,
   }).find((each) => each.lane.id === laneId)!;
   return buildDropMove({
@@ -202,6 +204,8 @@ describe("buildDropMove", () => {
       const lane = arrangeLanes(groupBoardByContext(board, "acme/project"), {
         foldedLaneIds: new Set(folded ? [laneId] : []),
         openedCellIds: new Set(),
+        openedStackIds: new Set(),
+        stackCandidates: [],
         isFiltering: false,
       }).find((each) => each.lane.id === laneId)!;
       return buildDropMove({ movingCard: board.cards[0]!, lane, stage: "building", beforeCardId });

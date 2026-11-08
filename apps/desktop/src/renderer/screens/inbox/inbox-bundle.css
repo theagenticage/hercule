@@ -1,0 +1,208 @@
+/* What rides on a card, and what is said under it: the parts set in under a
+   row's title, the quiet lines under a card, and the new mark. It is the drawing's
+   `css/card.css` (`.bundle`, `.tucked`, `.part`, `.hint`) and `css/open.css`
+   (`.c-fresh`), value for value, on the app's tokens (`docs/design/inbox/` on the
+   branch `prototype/inbox-hifi`). The drawing's `.part` is `.inbox-part`, its
+   `.tucked` is `.inbox-tucked`, and its `.p-*` are `.part-*`. */
+
+/* ---------- The bundle: a card with what is under it ---------- */
+/* A plain wrapper: the hairline between bundles is the place's (`.inbox-place-rows > * + *`). */
+.inbox-bundle {
+  position: relative;
+  min-width: 0;
+}
+
+/* ---------- The new mark ---------- */
+/* A signal landed on the card. One 6px dot in the user's ink, first in the line it belongs to. */
+.card-fresh {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--you-ink);
+}
+
+/* ---------- The tucked sheet: what rides on a row ---------- */
+/* Set in under the row's title: --row-lead is the row's first column, 12px of gap and 16px of padding put
+   the parts' marks where the title starts. */
+.inbox-tucked {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -5px 0 0 calc(var(--row-lead) + 12px);
+  padding: 0 12px 10px 16px;
+}
+.inbox-part {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  margin-left: -4px;
+  border-radius: var(--r-xs);
+  text-align: left;
+  color: var(--muted);
+  font: var(--type-summary);
+  outline: none;
+  cursor: default;
+}
+/* A part that asks is a card, so the page marks it as the current card. A quiet part that opens answers the pointer itself. */
+.inbox-part[data-card-id][data-current],
+.inbox-part[data-open-id]:hover {
+  background: var(--hover);
+}
+.inbox-part:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+.part-mark {
+  display: inline-grid;
+  place-items: center;
+  height: var(--line-16);
+  color: var(--mark-ink);
+}
+.part-title {
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What it asks of the user, first. */
+.part-ask {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.part-said {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.part-said[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.part-said[data-tone="good"] {
+  color: var(--ok);
+}
+/* Then what it is: the status shape (when it is not the usual one), the title, and where it lies. */
+.part-line {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--line-16);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.inbox-part.is-asking .part-line .part-title {
+  flex: 0 1 auto;
+  color: var(--muted);
+}
+.part-id {
+  flex: 0 1000 auto;
+  min-width: 0;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-part .card-wait {
+  grid-column: 3;
+  grid-row: 1;
+}
+/* A part that does not ask: one quiet line, its status at the end. */
+.inbox-part.is-quiet .part-title {
+  color: var(--muted);
+}
+.inbox-part.is-quiet .part-said {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+/* A thing the user cannot read: a lock and its noun, and no title. */
+.inbox-part.is-locked,
+.inbox-part.is-locked .part-title {
+  color: var(--faint);
+}
+/* The moves of a part that asks lie over the end of its first line. The row's gradient is the row's own. */
+.inbox-part .card-moves {
+  top: 0;
+  right: 4px;
+}
+.inbox-part[data-current] .card-moves {
+  opacity: 1;
+  pointer-events: auto;
+}
+.inbox-part[data-current] .card-wait {
+  opacity: 0;
+}
+.inbox-part[data-current] .part-ask {
+  margin-right: 92px;
+}
+.inbox-part[data-access] .part-title {
+  color: var(--muted);
+}
+
+/* ---------- Hints and lines: said quietly under a card ---------- */
+/* A reference found in text joins nothing, and says so: "Mentions OPS-47". `Link them` shows on hover. */
+.inbox-hint {
+  /* Positioned, so that it lies over the bottom padding of the row above it, which its negative margin reaches into. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin: -5px 0 0 calc(var(--row-lead) + 12px);
+  padding: 0 16px 10px;
+  color: var(--faint);
+  font: var(--type-meta);
+  text-align: left;
+}
+/* A request has no first column: its hint lines up with its title, 10px of padding, a 16px mark and 8px of gap in.
+   The line is 16px tall and the button 24px: the 5px under the words is hit area that reaches into the gap
+   between two cards, which is 6px at least, so the words stay where they are and no card loses its edge. */
+.inbox-requests-group .inbox-hint,
+.inbox-else-cards .inbox-hint {
+  margin: 0 0 -5px;
+  padding: 3px 12px 5px 34px;
+}
+.inbox-hint > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-hint b {
+  flex: none;
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--m-quick);
+}
+.inbox-hint:hover,
+.inbox-hint:focus-visible {
+  color: var(--muted);
+}
+.inbox-hint:hover b,
+.inbox-hint:focus-visible b {
+  opacity: 1;
+  color: var(--ink);
+}
+/* A line that opens something answers the pointer as a row of a place does. */
+.inbox-hint[data-open-id]:hover > span {
+  color: var(--ink);
+}

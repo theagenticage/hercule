@@ -28,6 +28,8 @@ export const buildBoard = (...cards: readonly WorkCard[]): WorkBoard => ({
   edges: [],
   groupings: [],
   contextComplete: true,
+  stackCandidates: [],
+  stackCandidatesTruncated: false,
 });
 
 /**

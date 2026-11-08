@@ -1,6 +1,6 @@
 /** Tests the wait of a card and the line that says its facts may be old. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCard, buildRequestCard } from "./cards.testing";
+import { buildInboxCard, buildRequestCard, buildSignalLine } from "./cards.testing";
 import {
   describeCardTime,
   describeCardTrust,
@@ -159,5 +159,35 @@ describe("findNextCardTimeChange", () => {
   it("is never for a card that does not depend on the time", () => {
     const change = findNextCardTimeChange(buildInboxCard("1"), NOW);
     expect(change.getTime()).toBeGreaterThan(NOW.getTime() + 1e12);
+  });
+});
+
+describe("the age of a row's sentence", () => {
+  const landed = (minutesAgo: number) =>
+    buildSignalLine("s1", "Tessa commented", {
+      createdAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
+    });
+  const row = (overrides = {}) =>
+    buildInboxCard("1", { signals: { openCount: 2, latest: landed(4) }, ...overrides });
+
+  it("is drawn on a row whose sentence comes from a signal", () => {
+    expect(describeCardTime(row(), NOW).signalAge).toBe("4m");
+    expect(isCardTimeDependent(row())).toBe(true);
+  });
+
+  it.each([
+    [
+      "a request, which has its wait",
+      buildRequestCard("1", { signals: { openCount: 1, latest: landed(4) } }),
+    ],
+    ["a row a Task holds", row({ taskId: "task-1" })],
+    ["a row with no signal", buildInboxCard("1")],
+  ])("is not drawn on %s", (_name, card) => {
+    expect(describeCardTime(card, NOW).signalAge).toBeUndefined();
+  });
+
+  it("sets the next change of a row at the next minute while the signal is young", () => {
+    const change = findNextCardTimeChange(row(), NOW);
+    expect(change.getTime() - NOW.getTime()).toBe(60_000);
   });
 });

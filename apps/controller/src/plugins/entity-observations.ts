@@ -15,6 +15,7 @@ import type {
   PluginError,
   QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
+import type { RecognizeText } from "./entity-recognition";
 
 /**
  * Who is reporting: one Connection of one plugin, and the entity kinds that
@@ -39,16 +40,23 @@ export class EntityObservations extends Context.Service<
     /**
      * Replaces what the reporter's Connection says about one kind, in one
      * transaction. Fails with a `PluginError`, before writing anything, when
-     * the inventory breaks a rule of the contract.
+     * the inventory breaks a rule of the contract. `recognize` reads the web
+     * addresses and texts of the observations over the plugins that are
+     * active now, because only the plugins domain can reach their lookups. It
+     * is pure and fetches nothing; the ingest calls it after it checked the
+     * observations and before it opens its transaction. Leave it out to
+     * recognize nothing.
      */
     readonly reconcile: (
       reporter: EntityReporter,
       inventory: EntityInventory,
+      recognize?: RecognizeText,
     ) => Effect.Effect<void, PluginError>;
     /** Updates what is known of entities without touching any concern. Fails like `reconcile`. */
     readonly refresh: (
       reporter: EntityReporter,
       observations: ReadonlyArray<EntityObservation>,
+      recognize?: RecognizeText,
     ) => Effect.Effect<void, PluginError>;
     /**
      * Returns up to `limit` refs of the unqualified kind that the Connection

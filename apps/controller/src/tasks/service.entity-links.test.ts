@@ -161,6 +161,7 @@ describe("the active Task of a ref", () => {
         return { rows, olderId: older.id, otherId: other.id };
       }),
     );
+    expect(result.rows.every((row) => row.updatedAt !== "")).toBe(true);
     expect(result.rows.map((row) => [row.ref, row.id, row.stage]).toSorted()).toEqual(
       [
         [REF, result.olderId, "planned"],

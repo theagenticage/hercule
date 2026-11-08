@@ -1,7 +1,8 @@
 /**
  * Walking the board with the arrow keys, `[` and `]`. The walk is over what is
- * on screen, not over the stored cards: a card hidden behind "13 more", or in
- * a folded lane, is not on it. Each lane has a column for each board stage,
+ * on screen, not over the stored cards: a card hidden behind "13 more", in a
+ * folded lane, or in a stack that is closed, is not on it. The members of an
+ * open stack are stops, right after their lead. Each lane has a column for each board stage,
  * left to right, and a folded lane has only empty columns.
  */
 import type { WorkCard } from "@hercule/contract";
@@ -35,7 +36,7 @@ interface Spot {
 
 /** Returns the cards one column of `lane` shows, top to bottom. A folded lane shows none. */
 const readColumn = (lane: ArrangedLane, column: number): readonly WorkCard[] =>
-  lane.isFolded ? [] : (lane.cells[column]?.arrangement.cards ?? []);
+  lane.isFolded ? [] : (lane.cells[column]?.shownCards ?? []);
 
 /** Returns where `from` stands on screen, or `undefined` when its lane does not show it. */
 const findSpot = (lanes: readonly ArrangedLane[], from: CardInLane): Spot | undefined => {
@@ -65,8 +66,7 @@ export const listShownCards = (lanes: readonly ArrangedLane[]): readonly CardInL
 const findLaneStop = (lane: ArrangedLane | undefined): WalkStop | undefined => {
   if (lane === undefined) return undefined;
   if (lane.isFolded) return { kind: "lane", laneId: lane.lane.id };
-  const cardId = lane.cells.find((cell) => cell.arrangement.cards.length > 0)?.arrangement.cards[0]
-    ?.id;
+  const cardId = lane.cells.find((cell) => cell.shownCards.length > 0)?.shownCards[0]?.id;
   return cardId === undefined ? undefined : { kind: "card", laneId: lane.lane.id, cardId };
 };
 

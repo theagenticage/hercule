@@ -27,6 +27,7 @@ import {
   type EntityObservation,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
+import { fillSentence, listPlaceholders } from "./sentences";
 
 /**
  * A status as it is stored: what a card draws, plus the Task stage the kind's
@@ -64,6 +65,17 @@ const WorkEntitySlots = Schema.Struct({
    * of its own.
    */
   concernReasons: Schema.optionalKey(Schema.Record(Schema.String, EntityReason)),
+  /**
+   * The kind's `reasons` table as declared, unfilled, by reason key. The
+   * Inbox builds a signal's sentence and a timeline line from it long after
+   * the plugin is gone, so it is copied here rather than read from the catalog.
+   */
+  reasonTemplates: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({ say: Schema.String, tone: EntityReason.fields.tone }),
+    ),
+  ),
 });
 
 /** The slots of a kind that is a place, such as a repository: no card, no clock, no facts. */
@@ -87,8 +99,6 @@ export type FullEntityObservation = Exclude<EntityObservation, { readonly partia
 
 const decodeSlots = Schema.decodeUnknownEffect(EntitySlots, { errors: "all" });
 
-const PLACEHOLDER = /\{([A-Za-z0-9_-]+)\}/g;
-
 /** Matches the text of a `delta` fact: `+120 -30`. */
 const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
 
@@ -98,7 +108,8 @@ const DELTA_TEXT = /^\+(\d+) -(\d+)$/;
  * - A kind with cards gets noun, card (`rich` when the declaration leaves it
  *   out), pace, patience, identifier, person, owner, status, facts and reason.
  *   It also gets `concernReasons`: each reason of the declaration that is named
- *   like a concern, filled in, unless a field it needs is missing.
+ *   like a concern, filled in, unless a field it needs is missing. And it gets
+ *   `reasonTemplates`: the declaration's whole `reasons` table, unfilled.
  * - A kind with cards or a place also gets the `home` and `section` its
  *   declaration names, as qualified kinds.
  * - A status keeps its `norm` flag, and a kind with cards also keeps the
@@ -138,18 +149,17 @@ export const renderEntitySlots = (
       extra: Readonly<Record<string, string | undefined>> = {},
     ) =>
       Effect.gen(function* () {
-        const names = Array.from(template.matchAll(PLACEHOLDER), (match) => match[1]!);
-        const values = new Map<string, string>();
-        for (const name of names) {
+        const values: Record<string, string | undefined> = {};
+        for (const name of listPlaceholders(template)) {
           const value = name in extra ? extra[name] : readText(name);
           if (value === undefined) {
             return yield* refuse(
               `the ${purpose} "${template}" needs the field "${name}", which the observation did not report.`,
             );
           }
-          values.set(name, value);
+          values[name] = value;
         }
-        return template.replace(PLACEHOLDER, (_, name: string) => values.get(name)!);
+        return fillSentence(template, values)!;
       });
 
     const renderStatus = Effect.gen(function* () {
@@ -267,6 +277,9 @@ export const renderEntitySlots = (
       facts,
       ...(reason === undefined ? {} : { reason }),
       ...(Object.keys(concernReasons).length === 0 ? {} : { concernReasons }),
+      ...(Object.keys(declaration.reasons).length === 0
+        ? {}
+        : { reasonTemplates: declaration.reasons }),
     }).pipe(Effect.catch(refuseDecode(refuse)));
   });
 

@@ -8,6 +8,7 @@
  * functions decide what they mean, so a card, a detail and a place agree.
  */
 import type {
+  EntityChange,
   EntityConcern,
   EntityPlace,
   EntityRecord,
@@ -38,6 +39,7 @@ export const SHARED_COLUMNS = [
   "title",
   "url",
   "status",
+  "status_key",
   "lifecycle",
   "person",
   "owner",
@@ -45,6 +47,7 @@ export const SHARED_COLUMNS = [
   "repository",
   "reason",
   "concern_reasons",
+  "reason_templates",
   "progress",
   "target_date",
   "waiting_since",
@@ -111,7 +114,39 @@ export interface EntityEnvironment {
   readonly now: string;
   /** The plugins that are active in this process right now. */
   readonly activePluginIds: ReadonlyArray<string>;
+  /**
+   * The entity kinds of those plugins. A read uses them to name a linked
+   * thing that has no record, by the `refPrefix` its ref starts with. Reads
+   * that name no such thing do not need them; absent means none.
+   */
+  readonly activeEntityKinds?: ReadonlyArray<ActiveEntityKind>;
 }
+
+/** What a read needs to know of an active entity kind: which refs it owns and what to call one. */
+export interface ActiveEntityKind {
+  /** The qualified kind, such as `acme-tracker/ticket`. */
+  readonly kind: string;
+  /** The singular noun, such as "Pull request". */
+  readonly noun: string;
+  readonly refPrefix: string;
+}
+
+/** Builds the active kind of a plugin's declaration of an entity kind. */
+export const buildActiveEntityKind = (declaration: {
+  readonly word: string;
+  readonly noun: string;
+  readonly refPrefix: string;
+}): ActiveEntityKind => ({
+  kind: declaration.word,
+  noun: declaration.noun,
+  refPrefix: declaration.refPrefix,
+});
+
+/** Returns the active kind that owns `ref`, or undefined when no active kind's `refPrefix` starts it. */
+export const findActiveKind = (
+  kinds: ReadonlyArray<ActiveEntityKind> | undefined,
+  ref: string,
+): ActiveEntityKind | undefined => kinds?.find((entry) => ref.startsWith(entry.refPrefix));
 
 /** Checks that the Connection of an observation can poll now. */
 export const canPoll = (
@@ -141,15 +176,18 @@ export const unionConcerns = (
  * told so, else `inaccessible`. One account's refusal never hides another
  * account's good read.
  */
-export const deriveAccess = (observations: ReadonlyArray<ObservationRow>): EntityAccess => {
+export const deriveAccess = (
+  observations: ReadonlyArray<Pick<ObservationRow, "access">>,
+): EntityAccess => {
   if (observations.some((observation) => observation.access === "ok")) return "ok";
   if (observations.some((observation) => observation.access === "deleted")) return "deleted";
   return "inaccessible";
 };
 
 /** Checks that any Connection reports the thing as the user's own. */
-export const deriveYours = (observations: ReadonlyArray<ObservationRow>): boolean =>
-  observations.some((observation) => observation.owned_by_you === 1);
+export const deriveYours = (
+  observations: ReadonlyArray<Pick<ObservationRow, "owned_by_you">>,
+): boolean => observations.some((observation) => observation.owned_by_you === 1);
 
 /** Checks that no Connection with a good read of the thing can poll now. */
 export const deriveStale = (
@@ -287,9 +325,20 @@ export const buildPlace = (
   };
 };
 
+/** The paces of a work kind. A `context` pace is a place, which never has a card. */
+const WORK_PACES = ["fast", "slow"];
+
 /** Checks that a record is a full record of a work kind: the only kind of record a card is made from. */
 export const isWorkRecord = (row: EntityRow): boolean =>
-  row.completeness === "full" && (row.pace === "fast" || row.pace === "slow");
+  row.completeness === "full" && WORK_PACES.includes(row.pace as string);
+
+/**
+ * Builds the SQL condition that the row `entityAlias` of `external_entities` is
+ * a work record. It is the SQL form of `isWorkRecord`, built from the same
+ * paces, so the two cannot disagree.
+ */
+export const buildWorkRecordCondition = (entityAlias: string): string =>
+  `${entityAlias}.completeness = 'full' AND ${entityAlias}.pace IN (${WORK_PACES.map((pace) => `'${pace}'`).join(", ")})`;
 
 /** What a card or a detail adds to the row it draws. */
 export interface EntityReadInputs {
@@ -302,6 +351,8 @@ export interface EntityReadInputs {
   readonly following: boolean;
   readonly ancestors: ReadonlyArray<string>;
   readonly contextComplete: boolean;
+  /** The latest change at the source, in words, when the thing has one. */
+  readonly latestChange: EntityChange | undefined;
 }
 
 /**
@@ -355,5 +406,6 @@ export const buildEntityFields = (input: EntityReadInputs): EntityRecord => {
     ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
     ancestors: input.ancestors,
     contextComplete: input.contextComplete,
+    ...(input.latestChange === undefined ? {} : { latestChange: input.latestChange }),
   };
 };

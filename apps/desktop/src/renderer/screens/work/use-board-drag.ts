@@ -38,6 +38,7 @@ import { createMergeGesture, type MergeChoice } from "./board-drag-merge";
 import { copyCardForMotion } from "../desk";
 import { playMergeIn } from "./board-flights";
 import { findCardElement, readCardInLane } from "./card-in-lane";
+import { findCellRow, hideDraggedCard, showDraggedCard } from "./dragged-card";
 import { flipBoard } from "./flip-board";
 import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
@@ -390,16 +391,20 @@ const createBoardDrag = (
     if (c.markedLane !== null) delete c.markedLane.dataset["dropTarget"];
   };
 
+  /** Shows the card of a follower again, once it has left the hand. */
+  const showFollower = (cardId: string): void => {
+    const element = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
+    if (element !== null) showDraggedCard(element);
+  };
+
   /** Ends a carry at once, with no motion, and puts the page as it was. Used when the screen goes away. */
   const abandonCarry = (c: Carry): void => {
     endCarry(c);
     readOptions().onCarryingChange(false);
     c.slot.remove();
-    delete c.source.dataset["dragged"];
+    showDraggedCard(c.source);
     for (const follower of c.followers) {
-      scroller
-        .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
-        ?.removeAttribute("data-dragged");
+      showFollower(follower.card.id);
       follower.body.clear();
     }
     clearMarks(c);
@@ -420,11 +425,9 @@ const createBoardDrag = (
     endCarry(c);
     flipBoard(scroller, spring, () => {
       c.slot.remove();
-      delete c.source.dataset["dragged"];
+      showDraggedCard(c.source);
       for (const follower of c.followers) {
-        scroller
-          .querySelector<HTMLElement>(`[data-card-id="${follower.card.id}"]`)
-          ?.removeAttribute("data-dragged");
+        showFollower(follower.card.id);
       }
       clearMarks(c);
       flushSync(() => {
@@ -465,7 +468,7 @@ const createBoardDrag = (
     let isHeld = false;
     flipBoard(scroller, "hand", () => {
       c.slot.remove();
-      delete c.source.dataset["dragged"];
+      showDraggedCard(c.source);
       clearMarks(c);
       flushSync(() => {
         options.onCarryingChange(false);
@@ -584,8 +587,9 @@ const createBoardDrag = (
     slot.className = "board-slot";
     slot.setAttribute("aria-hidden", "true");
     slot.style.height = `${String(home.height)}px`;
-    cell.insertBefore(slot, source);
-    source.dataset["dragged"] = "";
+    // A card in a stack leaves its slot where the stack stands, so only that one card is in the hand.
+    cell.insertBefore(slot, findCellRow(source));
+    hideDraggedCard(source);
     const followers = liftFollowers(scroller, layer, card, options);
     if (followers.length > 0) {
       // A count on the card in the hand: itself and the cards behind it.

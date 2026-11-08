@@ -44,10 +44,9 @@ import {
   buildMentionComment,
   buildUser,
   NOTIFICATION_FRAGMENT,
-  VIEWER_FIELDS,
-  ViewerFields,
 } from "../linear-objects";
 import { buildNotificationEvent, buildNotificationTopic } from "./events";
+import { readIdentity } from "./identity";
 import {
   commitPoll,
   emitStoredOutbox,
@@ -76,11 +75,6 @@ const MAX_INBOX_PAGES = 8;
 
 /** The most new notifications one poll emits. The rest wait for the next poll. */
 const MAX_NEW_PER_POLL = 250;
-
-/** The query that reads the workspace and the signed-in user. */
-const IDENTITY_QUERY = `query LinearIdentity { ${VIEWER_FIELDS} }`;
-
-const IdentityAnswer = Schema.Struct(ViewerFields);
 
 /** The query the first poll reads where the inbox stands with: the newest notifications, ids and times only. */
 const INBOX_START_QUERY = `query LinearInboxStart($first: Int, $after: String) {
@@ -344,13 +338,7 @@ export const pollLinearNotifications = (
       return {};
     }
     const state = stored.value;
-    const identity = yield* callLinear(
-      authorization,
-      { name: "LinearIdentity", text: IDENTITY_QUERY },
-      IdentityAnswer,
-    );
-    const workspace = identity.organization;
-    const userId = identity.viewer.id;
+    const { workspace, userId } = yield* readIdentity(authorization);
     const inbox = yield* readPages(
       authorization,
       {

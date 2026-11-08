@@ -1,8 +1,8 @@
 /**
  * One answer of a pane, drawn as a row of the answers ledger: the button, what
- * pressing it does, and the key that presses it. The signal pane and the
- * Tracking pane both draw their answers with it, so the two panes look and
- * read the same (spec 17 §The pane).
+ * pressing it does, and the key that presses it. The signal pane, the
+ * Tracking pane and the Inbox's open card all draw their answers with it, so
+ * they look and read the same (spec 17 §The pane).
  */
 import type { JSX, ReactNode } from "react";
 

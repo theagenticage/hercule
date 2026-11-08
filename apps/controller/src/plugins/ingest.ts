@@ -56,6 +56,7 @@ import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
+import type { ListActiveSources } from "./entity-recognition";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
 import type { EntityObservations } from "./entity-observations";
@@ -164,6 +165,7 @@ const make = Effect.gen(function* () {
   const superviseConnection = (
     source: RegisteredEventSource,
     connection: StoredConnection,
+    listActiveSources: ListActiveSources,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       const type = Option.getOrUndefined(yield* connectionTypes.named(connection.type));
@@ -366,7 +368,7 @@ const make = Effect.gen(function* () {
               };
               return source.open(
                 ingestConnection,
-                contexts.buildIngestContext(source, ingestConnection),
+                contexts.buildIngestContext(source, ingestConnection, listActiveSources),
               );
             }),
           ),
@@ -531,8 +533,15 @@ const make = Effect.gen(function* () {
      * the loop is started, not once the handle is open. The first poll of
      * each feed runs right after the open. Does nothing when the Connection
      * is already open; close it first to open it with a new config.
+     * `listActiveSources` tells the handle which plugins are active whenever
+     * it reports entities, so it recognizes web addresses and texts over the
+     * plugins of that moment.
      */
-    open: (source: RegisteredEventSource, connection: StoredConnection): Effect.Effect<void> =>
+    open: (
+      source: RegisteredEventSource,
+      connection: StoredConnection,
+      listActiveSources: ListActiveSources,
+    ): Effect.Effect<void> =>
       Effect.gen(function* () {
         // The check and the new entry are one update, so two opens of one
         // Connection at the same time start one supervisor, not two.
@@ -549,7 +558,10 @@ const make = Effect.gen(function* () {
               ],
         );
         if (!added) return;
-        yield* executor.execute(connection.id, superviseConnection(source, connection));
+        yield* executor.execute(
+          connection.id,
+          superviseConnection(source, connection, listActiveSources),
+        );
       }),
 
     /**

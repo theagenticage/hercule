@@ -46,6 +46,7 @@ import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
 import { closedStruct } from "../closed";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
+import { EntityStatus } from "./entity-context";
 import { EventId } from "./event-record";
 import {
   BoundAction,
@@ -452,6 +453,24 @@ export const SignalSnooze = Schema.Struct({ until: Timestamp, snoozedAt: Timesta
 export type SignalSnooze = Schema.Schema.Type<typeof SignalSnooze>;
 
 /**
+ * The outside thing a signal is about, when a signal's `threadRef` is the ref
+ * of a full record of a work kind. It is enough to name the thing on Intake's
+ * group; the card is read with `externalEntity.read`.
+ */
+export const SignalEntity = Schema.Struct({
+  id: Id,
+  /** The qualified kind word, such as `github/pull-request`. */
+  kind: Schema.String,
+  /** How the source names it, such as `#87`. */
+  identifier: bounded(1, 64),
+  title: bounded(1, 512),
+  /** Absent for a kind with no status. */
+  status: Schema.optionalKey(EntityStatus),
+});
+
+export type SignalEntity = Schema.Schema.Type<typeof SignalEntity>;
+
+/**
  * A signal as a read returns it: what is asked of the user, where it came
  * from, its body, the actions the user may take, and, once it is resolved,
  * how.
@@ -483,6 +502,12 @@ export const Signal = Schema.Struct({
   createdAt: Timestamp,
   /** Read beside the record, never stored on it: set while the signal is snoozed. */
   snooze: Schema.optionalKey(SignalSnooze),
+  /**
+   * Read beside the record, never stored on it: the card this signal is about.
+   * Present when the signal's thread ref is the ref of a full record of a work
+   * kind. A signal about a place, a document or a notification has none.
+   */
+  entity: Schema.optionalKey(SignalEntity),
 });
 
 export type Signal = Schema.Schema.Type<typeof Signal>;

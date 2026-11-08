@@ -3,19 +3,21 @@ import {
   describeCardTime,
   findNextCardTimeChange,
   isCardTimeDependent,
+  type CardRecord,
   type CardTime,
 } from "@hercule/client-core/inbox";
-import type { EntityRecord } from "@hercule/contract";
 import { ageClock, useClockValue } from "../../app/age-clock";
 
 /**
- * Returns the wait of `card` and the line about the age of its facts, and
- * draws the card again only when one of them changes, which is at most once an
- * hour. The age clock sets one timer for the earliest such change of any card
- * on screen. A card whose words do not depend on the time registers nothing,
+ * Returns the wait of `card`, the line about the age of its facts and how long
+ * ago its sentence's signal landed, and draws the card again only when one of
+ * them changes: once an hour for a wait, but each minute while a signal is under
+ * an hour old, which reads in minutes. The age clock sets one timer for the
+ * earliest such change of any card on screen, so many young signals still
+ * cost one timer. A card whose words do not depend on the time registers nothing,
  * so a quiet Inbox wakes the app no more than the age clock's single timer does.
  */
-export const useCardTime = (card: EntityRecord): CardTime => {
+export const useCardTime = (card: CardRecord): CardTime => {
   const findNextChange = useCallback(
     (_moment: string, now: Date) => findNextCardTimeChange(card, now),
     [card],

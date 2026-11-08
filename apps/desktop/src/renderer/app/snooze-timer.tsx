@@ -10,7 +10,12 @@
  *
  * When the timer fires, it reads To do again, and with it the soonest
  * `until`. Once that read returns a different `until`, the snooze has left
- * Later, and the timer reads Later and Done again too (spec 17 §Intake).
+ * Later, and the timer reads Later and Done again too (spec 17 §Intake), and
+ * the Inbox, its count and the open entity panes: a card held only by that
+ * snoozed signal belongs to the Inbox again from that moment, and an open
+ * card shows the signal as no longer snoozed. Nothing else announces it. The
+ * Inbox is read only then, not at each try, because only the `until` read
+ * shows that the controller's clock has passed the snooze.
  *
  * The controller decides with its own clock, which may run behind this
  * Mac's. While the `until` read still returns the `until` that ran out, the
@@ -84,8 +89,14 @@ export function SnoozeTimer({ client }: { readonly client: HerculeClient }): nul
       window.removeEventListener("focus", readIfRunOut);
       // The `until` changed after it ran out: the snoozed signal has left
       // Later, so Later and Done are read again now. This reads To do once
-      // more too, which returns what it just did.
-      if (Date.now() >= runsOutAt) invalidateWithoutCancelling(queryClient, queryKeys.signals());
+      // more too, which returns what it just did. So are the Inbox and its
+      // count, whose card the signal's end brings back, and the open entity
+      // panes, which draw the signal as snoozed until they read again.
+      if (Date.now() < runsOutAt) return;
+      invalidateWithoutCancelling(queryClient, queryKeys.signals());
+      invalidateWithoutCancelling(queryClient, queryKeys.inbox());
+      invalidateWithoutCancelling(queryClient, queryKeys.inboxCount());
+      invalidateWithoutCancelling(queryClient, queryKeys.externalEntity());
     };
   }, [client, queryClient, until]);
 

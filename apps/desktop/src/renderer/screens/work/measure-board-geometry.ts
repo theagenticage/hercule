@@ -2,6 +2,7 @@ import type { ArrangedLane } from "@hercule/client-core/work";
 import { BOARD_STAGES, type BoardStage } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect } from "../../app/motion";
 import type { BoardGeometry, BoardView, CellBox, LaneBox, StageEdge } from "./board-drag-geometry";
+import { findStackLead } from "./dragged-card";
 import { buildCardKeys } from "./flip-board";
 
 /** The measurements of the board a carry needs: the geometry, and the scroller it was measured in. */
@@ -60,18 +61,24 @@ export const measureBoardGeometry = (
       for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
         const stage = readStage(cell.dataset["stage"]);
         if (stage === undefined) continue;
-        const shownCards = [...cell.children].filter(
-          (child): child is HTMLElement =>
-            child instanceof HTMLElement && child.dataset["cardId"] !== undefined,
+        // A row of the cell is a card alone, or the lead of a stack: the stack's members stand
+        // inside it and are not places a drop may take.
+        const shownCards = [...cell.children].flatMap(
+          (child): { card: HTMLElement; row: HTMLElement }[] => {
+            if (!(child instanceof HTMLElement)) return [];
+            if (child.dataset["cardId"] !== undefined) return [{ card: child, row: child }];
+            const lead = findStackLead(child);
+            return lead === null ? [] : [{ card: lead, row: child }];
+          },
         );
-        const rows = shownCards.flatMap((child) => {
-          const { cardId, dragged } = child.dataset;
+        const rows = shownCards.flatMap(({ card, row }) => {
+          const { cardId, dragged } = card.dataset;
           if (cardId === undefined || dragged !== undefined) return [];
-          const place = places?.get(cardKeys?.get(child) ?? "") ?? measureLayoutRect(child);
+          const place = places?.get(cardKeys?.get(card) ?? "") ?? measureLayoutRect(card);
           return [
             {
               id: cardId,
-              element: child,
+              element: row,
               left: toBoardLeft(place.left),
               right: toBoardLeft(place.left + place.width),
               top: toBoardTop(place.top),

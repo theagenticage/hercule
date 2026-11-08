@@ -45,6 +45,7 @@ import {
   type Unauthenticated,
   type WorkBoard,
   type WorkCard,
+  type WorkStackCandidate,
   WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
@@ -142,6 +143,22 @@ export class TaskBoardFacts extends Context.Service<
     readonly readFacts: (
       tasks: ReadonlyArray<BoardFactsRequest>,
     ) => Effect.Effect<BoardFacts, SqlError>;
+
+    /**
+     * Returns the pairs of Tasks among `taskIds` that may be drawn as a stack,
+     * at most `MAX_BOARD_STACK_CANDIDATES`, and whether more exist. A pair is
+     * a lead Task that links a rich thing and a member Task that links a
+     * compact thing with a confirmed link to it. A Task is never paired with
+     * itself and a pair appears once. One statement, whatever the number of
+     * Tasks. The task detail does not call it.
+     */
+    readonly readStackCandidates: (taskIds: ReadonlyArray<string>) => Effect.Effect<
+      {
+        readonly candidates: ReadonlyArray<WorkStackCandidate>;
+        readonly truncated: boolean;
+      },
+      SqlError
+    >;
   }
 >()("hercule/controller/tasks/TaskBoardFacts") {}
 
@@ -281,6 +298,7 @@ const make = Effect.gen(function* () {
         const read = yield* tasks.listBoardTasks(MAX_BOARD_CARDS);
         const listed = read.slice(0, MAX_BOARD_CARDS);
         const { cards, context } = yield* facts.readFacts(listed);
+        const stackRead = yield* facts.readStackCandidates(listed.map((task) => task.id));
         return {
           cards: listed.map((task, index) => buildWorkCard(task, cards[index]!)),
           truncated: read.length > MAX_BOARD_CARDS,
@@ -290,6 +308,8 @@ const make = Effect.gen(function* () {
           contextComplete:
             context.contextComplete &&
             cards.every((card) => card.contextRefs.length <= MAX_CARD_CONTEXTS),
+          stackCandidates: stackRead.candidates,
+          stackCandidatesTruncated: stackRead.truncated,
         };
       }),
   };

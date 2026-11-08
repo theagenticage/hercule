@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import {
+  buildStackId,
   STAGE_NAMES,
   type ArrangedLaneCell,
   type CardInLane,
@@ -31,6 +32,13 @@ const describeFoot = (cell: ArrangedLaneCell): string => {
  * bottom, and under them the line that opens the rest in place ("13 more",
  * "3 landed") or closes it again ("Show fewer").
  *
+ * A lead card of a stack stands in a `.board-stack` with the sheet under it
+ * (`.board-stack-bar`, "2 pull requests"). Pressing the sheet calls
+ * `onToggleStack` and opens the members as cards under the sheet, in place.
+ * A stack with a question or a failure inside is open and its sheet is not a
+ * button. Nothing stores a stack: the members are cards of the cell, and
+ * leave the stack when the Task or the link changes.
+ *
  * The cell carries `data-cell-id`, `data-lane-id` and `data-stage`, which drag
  * and keyboard code find it by. `tabStop` is the one card on the board that
  * Tab leads onto. `cardPlaces` holds, by Task id, what a card says when its
@@ -49,6 +57,7 @@ export function BoardCell({
   canWriteSummaries,
   selectedIds,
   onToggleCell,
+  onToggleStack,
   onPressCard,
   onFocusCard,
 }: {
@@ -62,12 +71,31 @@ export function BoardCell({
   readonly isStill: boolean;
   readonly canWriteSummaries: boolean;
   readonly onToggleCell: (cellId: string) => void;
+  /** Called with the id of a stack (`buildStackId`) when its sheet is pressed. */
+  readonly onToggleStack: (stackId: string) => void;
   readonly selectedIds: ReadonlySet<string>;
   readonly onPressCard: (card: WorkCard, keys: PressedKeys) => void;
   readonly onFocusCard: (at: CardInLane) => void;
 }): JSX.Element {
   const { arrangement, stage, cellId } = cell;
   const isOpen = arrangement.foot === "fewer";
+  const drawCard = (card: WorkCard): JSX.Element => (
+    <WorkCardView
+      key={card.id}
+      card={card}
+      laneId={laneId}
+      plugins={plugins}
+      alsoWords={cardPlaces?.[card.id]?.summary}
+      alsoNames={cardPlaces?.[card.id]?.names.join(", ")}
+      isTabStop={tabStop?.laneId === laneId && tabStop.cardId === card.id}
+      isStill={isStill}
+      canWriteSummaries={canWriteSummaries}
+      isSelected={selectedIds.has(card.id)}
+      isSelecting={selectedIds.size > 0}
+      onPress={onPressCard}
+      onFocus={onFocusCard}
+    />
+  );
   return (
     <div
       className="board-cell"
@@ -77,23 +105,39 @@ export function BoardCell({
       data-lane-id={laneId}
       data-stage={stage}
     >
-      {arrangement.cards.map((card) => (
-        <WorkCardView
-          key={card.id}
-          card={card}
-          laneId={laneId}
-          plugins={plugins}
-          alsoWords={cardPlaces?.[card.id]?.summary}
-          alsoNames={cardPlaces?.[card.id]?.names.join(", ")}
-          isTabStop={tabStop?.laneId === laneId && tabStop.cardId === card.id}
-          isStill={isStill}
-          canWriteSummaries={canWriteSummaries}
-          isSelected={selectedIds.has(card.id)}
-          isSelecting={selectedIds.size > 0}
-          onPress={onPressCard}
-          onFocus={onFocusCard}
-        />
-      ))}
+      {arrangement.cards.map((card) => {
+        const stack = arrangement.stacks.get(card.id);
+        if (stack === undefined) return drawCard(card);
+        const stackId = buildStackId(laneId, card.id);
+        const isStackOpen = cell.openStackLeadIds.has(card.id);
+        return (
+          <div
+            key={card.id}
+            className={isStackOpen ? "board-stack is-open" : "board-stack"}
+            data-stack-lead={card.id}
+          >
+            {drawCard(card)}
+            <button
+              type="button"
+              className="board-stack-bar"
+              aria-expanded={isStackOpen}
+              disabled={stack.opensItself}
+              data-stack-bar={stackId}
+              onClick={() => {
+                onToggleStack(stackId);
+              }}
+            >
+              <span>{stack.reason}</span>
+              {!stack.opensItself && <ChevronDownIcon size={12} />}
+            </button>
+            {isStackOpen && (
+              <div className="board-stack-members">
+                {stack.members.map((member) => drawCard(member))}
+              </div>
+            )}
+          </div>
+        );
+      })}
       {arrangement.foot !== "none" && (
         <button
           type="button"

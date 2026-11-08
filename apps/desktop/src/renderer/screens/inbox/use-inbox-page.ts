@@ -41,6 +41,8 @@ export interface InboxPageInput {
     readonly take: (card: InboxCard) => void;
     readonly dismiss: (card: InboxCard) => void;
     readonly seeTask: (card: InboxCard) => void;
+    /** Links the two things, as `Link them` on a hint does: one move, with one Undo. */
+    readonly link: (fromRef: string, toRef: string) => void;
     /** Says `text` on the undo line, with no Undo. */
     readonly say: (text: string) => void;
   };
@@ -65,9 +67,12 @@ export interface InboxPage {
  * - The current card (`useCurrentCard`) is the card every key acts on. After
  *   a Take or a Dismiss the current card moves on to the next that waits,
  *   chosen by the order of the page and never by what lies under the pointer.
- * - A click on a move button runs the move. A click on a card opens it. After
- *   a dismissal by the pointer, a click at the same spot dismisses the next
- *   card, the way closing a tab brings the next under the pointer.
+ * - A click on a move button runs the move. A click on a card, or on a part
+ *   that asks, opens it. A click on a quiet part, or on a line that says what a
+ *   request is linked to, opens the thing it names. A click on `Link them`
+ *   links the two things the hint is about. After a dismissal by the pointer, a
+ *   click at the same spot dismisses the next card, the way closing a tab
+ *   brings the next under the pointer; a part has no next card.
  * - While a card is open, the sheet holds the focus: J and K walk it through
  *   the page, T and E act on the card the sheet shows and walk it on, and G
  *   closes it and goes to the Task. A sheet that shows a place has no moves,
@@ -261,6 +266,21 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     }
     if (element !== null && cardId !== undefined) {
       open.open({ kind: "card", id: cardId }, element);
+      return;
+    }
+    // A hint is a reference found in text, and `Link them` makes it a link.
+    const hint = target.closest<HTMLElement>("[data-link-from]");
+    const linkFrom = hint?.dataset["linkFrom"];
+    const linkTo = hint?.dataset["linkTo"];
+    if (hint !== null && linkFrom !== undefined && linkTo !== undefined) {
+      input.moves.link(linkFrom, linkTo);
+      return;
+    }
+    // A quiet part, or a line that says what a request is linked to, opens the thing it names.
+    const named = target.closest<HTMLElement>("[data-open-id]");
+    const namedId = named?.dataset["openId"];
+    if (named !== null && namedId !== undefined) {
+      open.open({ kind: "card", id: namedId }, named);
       return;
     }
     // A place's head opens the place, and a pointer ("Also in ...") opens the card it points to.

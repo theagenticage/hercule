@@ -21,10 +21,19 @@ export {
   EntityLookupsLayer,
   type DecidedResolution,
   type LookupObservation,
-  type PluginRecognition,
   type SearchOutcome,
 } from "./entity-lookups";
 export { EntityObservations, type EntityReporter } from "./entity-observations";
+export {
+  buildRecognizedTarget,
+  buildScopedRecognition,
+  findUrlTarget,
+  type ListActiveSources,
+  type PluginRecognition,
+  type RecognizedTarget,
+  type RecognizeText,
+  type ScopedTarget,
+} from "./entity-recognition";
 export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";

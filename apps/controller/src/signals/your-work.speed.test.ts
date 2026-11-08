@@ -9,20 +9,22 @@
  * is seeded with a migrated schema and no statistics, as a controller starts.
  *
  * It times `signal.queryYourWork`, the whole read, and its two statements.
- * Each case has 200 open signals, and 1,000 open Tasks that each carry 50
- * provenance entries, one for each of 50 refs. Task `i` carries the refs of
- * the signals `i` to `i + 49`, so the Tasks 1 to 200 each match one or more
- * open signals, and the read returns 200 rows.
+ * Each case has 200 open signals, and 1,000 open Tasks that each link 50
+ * refs, one for each of 50 refs. Task `i` links the refs of the signals `i` to
+ * `i + 49`. Every link has the same time, so the active Task of a ref is the
+ * lowest Task id that links it: the ref of the signal `r` has the Task
+ * `max(1, r - 49)`. So the Tasks 1 to 151 are each the active Task of one or
+ * more open signals, and the read returns 151 rows.
  * Three more cases add one kind of history each, because the read must follow
  * the open signals and the Tasks that match them, not the signals and Tasks ever
  * written:
  *
  * - 20,000 resolved signals;
  * - 20,000 open Tasks that match no signal;
- * - 20,000 done Tasks that carry the refs of the open signals.
+ * - 20,000 done Tasks that link the refs of the open signals.
  *
  * What it guards is an order of magnitude: the ceiling is far above what the
- * read takes and far below a read of every Task or every provenance entry.
+ * read takes and far below a read of every Task or every link.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -46,6 +48,8 @@ const WARM_UP_RUNS = 5;
 const OPEN_SIGNALS = 200;
 const TASKS = 1000;
 const REFS_PER_TASK = 50;
+/** The Tasks that are the active Task of at least one open signal; see the module comment. */
+const ACTIVE_TASKS = OPEN_SIGNALS - REFS_PER_TASK + 1;
 const AT = "2026-10-20T10:00:00.000Z";
 
 const USER: Actor = {
@@ -65,7 +69,7 @@ interface History {
   readonly resolvedSignals?: number;
   /** Open Tasks that carry refs no signal has. */
   readonly unrelatedOpenTasks?: number;
-  /** Done Tasks that carry the refs of the open signals. */
+  /** Done Tasks that link the refs of the open signals. */
   readonly doneTasksOnRefs?: number;
 }
 
@@ -96,7 +100,8 @@ const insertSignals = (
 
 /**
  * Writes `count` Tasks from the number `first` on, with `status`, and for
- * each Task 50 provenance entries. The refs of the Task `first + j` are
+ * each Task 50 links. A done Task is at the stage `done`, which is not live.
+ * The refs of the Task `first + j` are
  * `github:pr:acme/api#(refBase + j + k)` for k from 0 to 49.
  */
 const insertTasks = (first: number, count: number, status: "open" | "done", refBase: number) =>
@@ -105,16 +110,16 @@ const insertTasks = (first: number, count: number, status: "open" | "done", refB
     const sql = yield* SqlClient.SqlClient;
     yield* sql`
       WITH RECURSIVE n(i) AS (SELECT ${first} UNION ALL SELECT i + 1 FROM n WHERE i < ${first + count - 1})
-      INSERT INTO tasks (id, title, description, status, priority, labels, created_at, updated_at,
-                         status_changed_at)
+      INSERT INTO tasks (id, title, description, status, stage, priority, labels, created_at,
+                         updated_at, status_changed_at)
       SELECT ${sql.literal(`unhex(${TASK_ID})`)}, 'Task ' || i, 'A long description ' || i,
-             ${status}, 'normal', '[]', ${AT}, strftime('%Y-%m-%dT%H:%M:%fZ', ${AT}, '+' || i || ' seconds'), ${AT}
+             ${status}, ${status === "done" ? "done" : "planned"}, 'normal', '[]', ${AT}, strftime('%Y-%m-%dT%H:%M:%fZ', ${AT}, '+' || i || ' seconds'), ${AT}
       FROM n`;
     yield* sql`
       WITH RECURSIVE n(i) AS (SELECT ${first} UNION ALL SELECT i + 1 FROM n WHERE i < ${first + count - 1}),
            m(k) AS (SELECT 0 UNION ALL SELECT k + 1 FROM m WHERE k < ${REFS_PER_TASK - 1})
-      INSERT INTO task_provenance (id, task_id, ref, event_id, at, actor)
-      SELECT randomblob(16), ${sql.literal(`unhex(${TASK_ID})`)}, 'github:pr:acme/api#' || (${refBase} + i - ${first} + k), 1, ${AT}, 'user'
+      INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+      SELECT ${sql.literal(`unhex(${TASK_ID})`)}, 'github:pr:acme/api#' || (${refBase} + i - ${first} + k), ${AT}, 'user', 0
       FROM n JOIN m`;
   });
 
@@ -151,7 +156,7 @@ const CASES: ReadonlyArray<readonly [string, History]> = [
 ];
 
 describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
-  it.each(CASES)("with %s, each with 50 provenance entries", async (name, history) => {
+  it.each(CASES)("with %s, each with 50 links", async (name, history) => {
     const medians = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seed(history);
@@ -166,7 +171,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
           replyBytes: JSON.stringify(rows).length,
           queryYourWork: yield* measureMedian(yourWork.query()),
           openThreads: yield* measureMedian(signals.listOpenThreads()),
-          openTasks: yield* measureMedian(tasks.listOpenOnRefs(refs)),
+          openTasks: yield* measureMedian(tasks.listActiveTasksForRefs(refs)),
         };
       }).pipe(
         Effect.provideService(CurrentActor, USER),
@@ -183,7 +188,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
         `  open Tasks on those refs          ${format(medians.openTasks)}`,
       ].join("\n") + "\n",
     );
-    expect(medians.rows).toBe(OPEN_SIGNALS);
+    expect(medians.rows).toBe(ACTIVE_TASKS);
     expect(medians.queryYourWork).toBeLessThan(CEILING_MS);
   });
 });

@@ -29,6 +29,7 @@ import {
 import { GITHUB_ENTITY_KINDS } from "../entity-kinds";
 import { buildItemRef, buildRepoRef } from "../subject";
 import { pollGithubFeed } from "./index";
+import { pollNotifications } from "./notifications";
 
 const OPENED = "is:pr is:open archived:false author:@me";
 const REVIEW_REQUESTED = "is:pr is:open archived:false review-requested:@me";
@@ -42,6 +43,7 @@ const pullRequestNode = (number: number, overrides: Record<string, unknown> = {}
   number,
   title: `Pull request ${String(number)}`,
   url: `https://github.com/acme/storefront-web/pull/${String(number)}`,
+  bodyText: "",
   isDraft: false,
   state: "OPEN",
   updatedAt: "2026-11-01T10:00:00Z",
@@ -63,6 +65,7 @@ const issueNode = (number: number, overrides: Record<string, unknown> = {}) => (
   number,
   title: `Issue ${String(number)}`,
   url: `https://github.com/acme/storefront-web/issues/${String(number)}`,
+  bodyText: "",
   state: "OPEN",
   stateReason: null,
   updatedAt: "2026-11-01T10:00:00Z",
@@ -319,6 +322,39 @@ describe("the entities feed's inventory", () => {
         linked: [],
       });
     }
+  });
+
+  it("reports an item's description as a text for the host to search, and an empty text for an empty one", async () => {
+    const stub = stubGraphql({
+      [OPENED]: searchPages([
+        {
+          nodes: [
+            pullRequestNode(1, { bodyText: "Part of SHOP-123, see the ticket." }),
+            pullRequestNode(2, { bodyText: "   " }),
+          ],
+        },
+      ]),
+      [ASSIGNED]: searchPages([{ nodes: [issueNode(3, { bodyText: "Blocked by SHOP-9" })] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const [described, empty] = reconciledKind(reported, "pull-request").observations.map(full);
+    expect(described?.texts).toEqual([
+      {
+        evidenceKey: "description",
+        text: "Part of SHOP-123, see the ticket.",
+        revision: "2026-11-01T10:00:00Z",
+      },
+    ]);
+    expect(empty?.texts).toEqual([
+      { evidenceKey: "description", text: "", revision: "2026-11-01T10:00:00Z" },
+    ]);
+    expect(full(reconciledKind(reported, "issue").observations[0]).texts).toMatchObject([
+      { evidenceKey: "description", text: "Blocked by SHOP-9" },
+    ]);
+    expect(reconciledKind(reported, "repository").observations[0]).not.toHaveProperty("texts");
+    expectValidGraphqlFragments(stub);
   });
 
   it("reports each repository seen once, as a context record with no concerns", async () => {
@@ -743,5 +779,56 @@ describe("the entities feed's refresh", () => {
     expect(Result.isFailure(result)).toBe(true);
     expect(reported.reconciled).toHaveLength(3);
     expect(reported.refreshed).toEqual([]);
+  });
+});
+
+describe("the entities feed and the notifications feed", () => {
+  it("name a pull request and an issue by the same ref, whatever case GitHub spells the repository in", async () => {
+    const harness = buildIngestHarness();
+    const notified = (id: string, updatedAt: string, subject: string, type: string) => ({
+      id,
+      reason: "mention",
+      updated_at: updatedAt,
+      subject: {
+        title: `Thread ${id}`,
+        url: `https://api.github.com/repos/acme/storefront-web/${subject}`,
+        type,
+      },
+      repository: { full_name: "acme/storefront-web" },
+    });
+    // The first poll only records where the feed stands, so the threads come with the second.
+    const notifications = [
+      { status: 200, body: [], headers: { "last-modified": "Sun, 01 Nov 2026 09:00:00 GMT" } },
+      {
+        status: 200,
+        body: [
+          notified("1", "2026-11-01T10:00:00Z", "pulls/87", "PullRequest"),
+          notified("2", "2026-11-01T10:01:00Z", "issues/42", "Issue"),
+        ],
+        headers: { "last-modified": "Sun, 01 Nov 2026 10:02:00 GMT" },
+      },
+    ];
+    for (const answer of notifications) {
+      await Effect.runPromise(
+        pollNotifications("token", harness.context).pipe(
+          Effect.provide(stubGithub(() => answer).layer),
+        ),
+      );
+    }
+    const stub = stubGraphql({
+      [OPENED]: searchPages([{ nodes: [pullRequestNode(87)] }]),
+      [ASSIGNED]: searchPages([{ nodes: [issueNode(42)] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const events = harness.events.filter((event) => event.kind === "github.notification");
+    const eventRefs = events.map((event) => event.refs[0]);
+    expect(eventRefs).toEqual([
+      "github:pr:acme/storefront-web#87",
+      "github:issue:acme/storefront-web#42",
+    ]);
+    expect(reconciledKind(reported, "pull-request").observations[0]?.ref).toBe(eventRefs[0]);
+    expect(reconciledKind(reported, "issue").observations[0]?.ref).toBe(eventRefs[1]);
   });
 });

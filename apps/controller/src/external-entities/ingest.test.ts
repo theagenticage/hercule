@@ -6,20 +6,25 @@
  * - what is refused, and that a refusal writes nothing
  * - what a poll writes and announces, and that a poll that changes nothing
  *   writes one row and announces nothing
+ * - what is recognized in the addresses and texts of a call, and when
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Layer } from "effect";
+import type { Signal } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   MAX_ENTITY_OBSERVATIONS,
+  MAX_ENTITY_TEXT_LENGTH,
   type EntityObservation,
+  type EntityRecognition,
   type PluginError,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
 import { ConnectionNotIngesting } from "../connections";
 import { uuidFromString, uuidToString } from "../db";
 import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
-import type { EntityReporter } from "../plugins";
+import type { EntityReporter, RecognizeText } from "../plugins";
+import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
 import type { FullEntityObservation } from "./slots";
@@ -525,5 +530,282 @@ describe("the Connection's warning", () => {
       }),
     );
     expect(warning).toContain("part of itself");
+  });
+});
+
+describe("the signals a new work record puts in front of Intake", () => {
+  const AT = "2026-03-01T00:01:00.000Z";
+
+  /** Raises a signal from an event on the thread `threadRef` and returns its id. */
+  const raiseSignal = (id: string, threadRef: string, status: "open" | "resolved" = "open") =>
+    Effect.gen(function* () {
+      const signals = yield* signalRepository;
+      const signal: Signal = {
+        id,
+        kind: "acme-tracker/mentioned",
+        origin: { type: "event", eventId: 1, connectionId: CONNECTION, threadRef },
+        title: "Marta mentioned you",
+        priority: "normal",
+        blocks: [],
+        actions: [],
+        match: {},
+        status,
+        ...(status === "resolved"
+          ? {
+              resolution: {
+                kind: "decided" as const,
+                actionId: "done",
+                outcome: "Marked done",
+                actor: "user" as const,
+                origin: "web",
+                at: AT,
+              },
+            }
+          : {}),
+        createdAt: AT,
+      };
+      yield* inTransaction(signals.insert(signal, []));
+    });
+
+  const SIGNAL_A = "0199e0e7-0005-7000-8000-000000000001";
+  const SIGNAL_B = "0199e0e7-0005-7000-8000-000000000002";
+  const SIGNAL_DONE = "0199e0e7-0005-7000-8000-000000000003";
+  const SIGNAL_ELSEWHERE = "0199e0e7-0005-7000-8000-000000000004";
+
+  const signalPushes = (announced: ReadonlyArray<unknown>) =>
+    announced
+      .filter((change) => (change as { topic?: string }).topic === "signal")
+      .map((change) => (change as { id: string }).id)
+      .sort();
+
+  it("announces the open signals of a ref when a poll creates its full record, and nothing when the poll repeats", async () => {
+    const result = await run(({ ingest, announced }) =>
+      Effect.gen(function* () {
+        yield* raiseSignal(SIGNAL_A, ticketRef("a"));
+        yield* raiseSignal(SIGNAL_B, ticketRef("a"));
+        yield* raiseSignal(SIGNAL_DONE, ticketRef("a"), "resolved");
+        yield* raiseSignal(SIGNAL_ELSEWHERE, ticketRef("other"));
+        yield* ingest.reconcile(reporter, complete([ticket("a")]));
+        const first = signalPushes(announced);
+        yield* ingest.reconcile(reporter, complete([ticket("a")]));
+        yield* ingest.reconcile(reporter, complete([ticket("a", { title: "Renamed" })]));
+        return { first, afterRepeat: signalPushes(announced) };
+      }),
+    );
+    expect(result.first).toEqual([SIGNAL_A, SIGNAL_B]);
+    expect(result.afterRepeat).toEqual([SIGNAL_A, SIGNAL_B]);
+  });
+
+  it("announces them when a partial record becomes full", async () => {
+    const result = await run(({ ingest, announced }) =>
+      Effect.gen(function* () {
+        yield* raiseSignal(SIGNAL_A, ticketRef("a"));
+        yield* ingest.refresh(reporter, [
+          { kind: "ticket", ref: ticketRef("a"), title: "Ticket a", partial: true },
+        ]);
+        const whilePartial = signalPushes(announced);
+        yield* ingest.refresh(reporter, [ticket("a")]);
+        return { whilePartial, whenFull: signalPushes(announced) };
+      }),
+    );
+    expect(result.whilePartial).toEqual([]);
+    expect(result.whenFull).toEqual([SIGNAL_A]);
+  });
+});
+
+describe("recognizing the addresses and texts of a call", () => {
+  const AS_REF: EntityRecognition = {
+    recognized: "ref",
+    form: "url",
+    ref: "acme-forge:change:7",
+    kind: "acme-forge/change",
+  };
+
+  /** Builds a recognizer over one fake plugin, and records every text it was asked about. */
+  const buildRecognizer = (answer: (text: string) => ReadonlyArray<EntityRecognition>) => {
+    const asked: Array<string> = [];
+    const recognize: RecognizeText = (text) => {
+      asked.push(text);
+      return Effect.succeed(
+        answer(text).map((recognition) => ({ pluginId: "acme-forge", recognition })),
+      );
+    };
+    return { asked, recognize };
+  };
+
+  const withRelations = (linkedUrls: ReadonlyArray<string>) => ({
+    relations: { complete: true, partOf: [], linked: [], linkedUrls },
+  });
+
+  const readClaimTargets = (sql: SqlClient.SqlClient) =>
+    Effect.map(
+      sql<{ readonly to_ref: string; readonly evidence_key: string; readonly claim_type: string }>`
+        SELECT to_ref, evidence_key, claim_type FROM external_entity_relation_claims ORDER BY id`,
+      (rows) => rows.map((row) => [row.claim_type, row.evidence_key, row.to_ref]),
+    );
+
+  it("gives an address the first recognition of form url, and a pending target when nobody knows it", async () => {
+    const claims = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const { recognize } = buildRecognizer((text) =>
+          text.includes("forge") ? [{ ...AS_REF, form: "identifier" }, AS_REF] : [],
+        );
+        yield* ingest.reconcile(
+          reporter,
+          complete([
+            ticket("a", withRelations(["https://forge.example/7", "https://nobody.example/x"])),
+          ]),
+          recognize,
+        );
+        return yield* readClaimTargets(sql);
+      }),
+    );
+
+    expect(claims).toEqual([
+      ["source", "https://forge.example/7", "acme-forge:change:7"],
+      ["source", "https://nobody.example/x", "unresolved:url:https://nobody.example/x"],
+    ]);
+  });
+
+  it("recognizes nothing in a call that breaks a bound, and refuses it whole", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const { asked, recognize } = buildRecognizer(() => [AS_REF]);
+        const fourTexts = [1, 2, 3, 4].map((n) => ({ evidenceKey: `k${n}`, text: "x" }));
+        const tooLong = [{ evidenceKey: "k", text: "x".repeat(MAX_ENTITY_TEXT_LENGTH + 1) }];
+        const messages: Array<string> = [];
+        for (const overrides of [
+          { texts: fourTexts },
+          { texts: tooLong },
+          withRelations(["javascript:1"]),
+        ]) {
+          const error = yield* Effect.flip(
+            ingest.reconcile(
+              reporter,
+              complete([ticket("ok"), ticket("bad", overrides)]),
+              recognize,
+            ),
+          );
+          messages.push(error._tag);
+        }
+        return { asked, messages, written: yield* countWrittenRows(sql) };
+      }),
+    );
+
+    expect(result.messages).toEqual(["PluginError", "PluginError", "PluginError"]);
+    expect(result.asked).toEqual([]);
+    expect(result.written).toEqual(NOTHING_WRITTEN);
+  });
+
+  it("searches a text that several observations carry once, and drops a ref that is not one", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const { asked, recognize } = buildRecognizer((text) =>
+          text === "same"
+            ? [AS_REF, { ...AS_REF, ref: "unresolved:sneaky" }, { ...AS_REF, ref: "has space" }]
+            : [],
+        );
+        yield* ingest.reconcile(
+          reporter,
+          complete(
+            ["a", "b"].map((name) =>
+              ticket(name, { texts: [{ evidenceKey: "description", text: "same" }] }),
+            ),
+          ),
+          recognize,
+        );
+        return { asked, claims: yield* readClaimTargets(sql) };
+      }),
+    );
+
+    expect(result.asked).toEqual(["same"]);
+    expect(result.claims).toEqual([
+      ["text", "description", "acme-forge:change:7"],
+      ["text", "description", "acme-forge:change:7"],
+    ]);
+  });
+
+  it("keeps at most the most things one text may name", async () => {
+    const claims = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const many: Array<EntityRecognition> = Array.from({ length: 25 }, (_, n) => ({
+          recognized: "scoped",
+          form: "identifier",
+          identifier: `OPS-${n}`,
+        }));
+        const { recognize } = buildRecognizer(() => many);
+        yield* ingest.reconcile(
+          reporter,
+          complete([ticket("a", { texts: [{ evidenceKey: "description", text: "x" }] })]),
+          recognize,
+        );
+        return yield* readClaimTargets(sql);
+      }),
+    );
+
+    expect(claims).toHaveLength(20);
+  });
+
+  it("does not search a text whose revision equals the one its stored claims were made from", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const first = buildRecognizer(() => [AS_REF]);
+        const texts = (notes: string) => [
+          { evidenceKey: "description", text: "unchanged", revision: "r1" },
+          { evidenceKey: "notes", text: notes, revision: notes },
+        ];
+        yield* ingest.reconcile(
+          reporter,
+          complete([ticket("a", { texts: texts("n1") })]),
+          first.recognize,
+        );
+        // The plugin that found the claims is gone, and only the notes changed.
+        const second = buildRecognizer(() => []);
+        yield* ingest.reconcile(
+          reporter,
+          complete([ticket("a", { texts: texts("n2") })]),
+          second.recognize,
+        );
+        return {
+          firstAsked: first.asked,
+          secondAsked: second.asked,
+          claims: yield* readClaimTargets(sql),
+        };
+      }),
+    );
+
+    expect(result.firstAsked).toEqual(["unchanged", "n1"]);
+    expect(result.secondAsked).toEqual(["n2"]);
+    // The description keeps its claim although nothing recognizes it now. The notes lost theirs.
+    expect(result.claims).toEqual([["text", "description", "acme-forge:change:7"]]);
+  });
+
+  it("writes nothing when the Connection stops ingesting while the texts are recognized", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const recognize: RecognizeText = () =>
+          Effect.orDie(
+            Effect.as(
+              inTransaction(
+                sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(CONNECTION)}`,
+              ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+              [{ pluginId: "acme-forge", recognition: AS_REF }],
+            ),
+          );
+        const exit = yield* Effect.exit(
+          ingest.reconcile(
+            reporter,
+            complete([ticket("a", { texts: [{ evidenceKey: "description", text: "x" }] })]),
+            recognize,
+          ),
+        );
+        return { exit, written: yield* countWrittenRows(sql) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.exit) && Cause.squash(result.exit.cause)).toBeInstanceOf(
+      ConnectionNotIngesting,
+    );
+    expect(result.written).toEqual(NOTHING_WRITTEN);
   });
 });

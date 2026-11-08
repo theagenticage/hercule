@@ -10,17 +10,22 @@
  * Nothing here knows a kind by name: a plugin's card draws from its record.
  */
 export * from "./card-aloud";
+export * from "./card-bundles";
 export * from "./card-face";
+export * from "./card-links";
 export * from "./card-wait";
 export * from "./empty-inbox";
 export * from "./facets";
 export * from "./groupings";
 export * from "./inbox-notes";
+export * from "./landed-signals";
+export * from "./link-search";
 export * from "./open-card";
+export * from "./open-timeline";
 export * from "./place-view";
 export { HOME_GROUPING, STATUS_GROUPING, type SurfaceHead } from "./inbox-place";
 export * from "./lay-out";
-export type { RequestsOrder } from "./visit-placement";
+export type { RequestsOrder, RidingMove, VisitPlacement } from "./visit-placement";
 export * from "./inbox-visit";
 export { isMarkShownByHead, listSurfaceAboveWords, nameSurface } from "./surface-words";
 export * from "./card-moves";

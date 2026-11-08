@@ -17,7 +17,7 @@ import {
 import type { ResolvedModelProfileEntry } from "@hercule/contract";
 import { GripIcon } from "../../../icons/grip";
 import { HarnessPill } from "./harness-pill";
-import { joinClassNames } from "./join-class-names";
+import { joinClassNames } from "../../../app/join-class-names";
 import { ModelRow } from "./model-row";
 import { SectionNewModel } from "./section-new-model";
 import { useDragReorder } from "./use-drag-reorder";

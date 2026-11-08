@@ -1,5 +1,5 @@
 /**
- * Tests the relation claims against a migrated database, with an invented
+ * Tests the claims module against a migrated database, with an invented
  * graph: a purchase order delivered in two rounds, both rounds under one site.
  *
  * - writing source claims: repeats, complete and partial reads, two reporters
@@ -15,7 +15,7 @@ import * as Statement from "effect/sql/Statement";
 import { MAX_CONTEXT_DEPTH, MAX_GRAPH_EDGES } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { relationClaimRepository } from "./relation-claims";
+import { claimRepository, type ObservedClaims } from "./claims";
 
 const AT = "2026-01-01T00:00:00.000Z";
 const LATER = "2026-01-02T00:00:00.000Z";
@@ -25,13 +25,16 @@ const ROUND_ONE = "acme-erp:delivery-round:R1";
 const ROUND_TWO = "acme-erp:delivery-round:R2";
 const SITE = "acme-erp:site:north";
 
+/** More links than any test here writes, so a read is never cut. */
+const NO_CUT = 100;
+
 const ERP_ACCOUNT = "0190c000-0000-7000-8000-0000000000c1";
 const OTHER_ERP_ACCOUNT = "0190c000-0000-7000-8000-0000000000c2";
 
 /** Runs `body` on a fresh migrated database with two Connections of one plugin. */
 const run = <A>(
   body: (
-    claims: Effect.Success<typeof relationClaimRepository>,
+    claims: Effect.Success<typeof claimRepository>,
     sql: SqlClient.SqlClient,
   ) => Effect.Effect<A, unknown, SqlClient.SqlClient>,
 ) =>
@@ -49,12 +52,27 @@ const run = <A>(
           VALUES (${uuidFromString(id)}, 'acme-erp', 'acme-erp/erp', ${account}, ${account},
             ${account}, 'connected', '[]', '{}', ${AT}, ${AT})`;
       }
-      const claims = yield* relationClaimRepository;
+      const claims = yield* claimRepository;
       return yield* body(claims, sql);
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
-type Claims = Effect.Success<typeof relationClaimRepository>;
+type Claims = Effect.Success<typeof claimRepository>;
+
+/** Applies a batch of observations that report parents and peers only. */
+const applyBatch = (
+  claims: Claims,
+  connectionId: string,
+  entries: ReadonlyArray<
+    Pick<ObservedClaims, "fromRef" | "relations" | "observedRevision" | "inBaseline">
+  >,
+  now: string,
+) =>
+  claims.applyObservedClaims({
+    connectionId,
+    entries: entries.map((entry) => ({ ...entry, texts: undefined, recognized: undefined })),
+    now,
+  });
 
 /** Reports `partOf` and `linked` from `fromRef` as a complete (default) or partial read. */
 const report = (
@@ -62,21 +80,32 @@ const report = (
   connectionId: string,
   fromRef: string,
   partOf: ReadonlyArray<string>,
-  options: { complete?: boolean; linked?: ReadonlyArray<string>; now?: string } = {},
+  options: {
+    complete?: boolean;
+    linked?: ReadonlyArray<string>;
+    inBaseline?: boolean;
+    now?: string;
+  } = {},
 ) =>
   Effect.map(
-    claims.applySourceRelations({
+    applyBatch(
+      claims,
       connectionId,
-      entries: [
+      [
         {
           fromRef,
           relations: { complete: options.complete ?? true, partOf, linked: options.linked ?? [] },
           observedRevision: undefined,
+          inBaseline: options.inBaseline ?? false,
         },
       ],
-      now: options.now ?? AT,
+      options.now ?? AT,
+    ),
+    (changes) => ({
+      // The ref's own claims changed: it is among the changed refs.
+      changed: changes.changedRefs.includes(fromRef),
+      conflicts: changes.conflicts,
     }),
-    ({ writes }) => writes.get(fromRef)!,
   );
 
 /** Reads the stored claims from `fromRef`, the way a test can see what was kept. */
@@ -150,17 +179,19 @@ describe("writing source claims", () => {
         yield* report(claims, ERP_ACCOUNT, ROUND_ONE, [ORDER]);
         yield* report(claims, ERP_ACCOUNT, SITE, [ROUND_ONE]);
         const apply = (partOf: ReadonlyArray<string>) =>
-          claims.applySourceRelations({
-            connectionId: ERP_ACCOUNT,
-            entries: [
+          applyBatch(
+            claims,
+            ERP_ACCOUNT,
+            [
               {
                 fromRef: ROUND_ONE,
                 relations: { complete: true, partOf, linked: [] },
                 observedRevision: undefined,
+                inBaseline: false,
               },
             ],
-            now: LATER,
-          });
+            LATER,
+          );
         const repeated = (yield* apply([ORDER])).refsBelowBefore;
         const changed = (yield* apply([])).refsBelowBefore;
         return { changed, repeated };
@@ -176,17 +207,19 @@ describe("writing source claims", () => {
       Effect.gen(function* () {
         yield* report(claims, ERP_ACCOUNT, ORDER, [ROUND_ONE, ROUND_TWO]);
         const partial = yield* report(claims, ERP_ACCOUNT, ORDER, [], { complete: false });
-        yield* claims.applySourceRelations({
-          connectionId: ERP_ACCOUNT,
-          entries: [
+        yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
             {
               fromRef: ORDER,
               relations: { complete: false, partOf: [], linked: [] },
               observedRevision: "7",
+              inBaseline: false,
             },
           ],
-          now: LATER,
-        });
+          LATER,
+        );
         return { partial, rows: yield* readStored(sql, ORDER) };
       }),
     );
@@ -202,14 +235,19 @@ describe("writing source claims", () => {
         yield* report(claims, OTHER_ERP_ACCOUNT, ORDER, [], { linked: [SITE] });
         return {
           rows: yield* readStored(sql, ORDER),
-          detail: yield* claims.readClaimsFor(ORDER),
+          detail: yield* claims.readClaimsFor(ORDER, NO_CUT),
         };
       }),
     );
 
     expect(rows).toHaveLength(2);
     expect(detail.links).toEqual([
-      { fromRef: ORDER, toRef: SITE, claim: { type: "source", plugin: "acme-erp" } },
+      {
+        fromRef: ORDER,
+        toRef: SITE,
+        claim: { type: "source", plugin: "acme-erp" },
+        hasPersonClaim: false,
+      },
     ]);
   });
 
@@ -223,18 +261,167 @@ describe("writing source claims", () => {
         yield* sql`INSERT INTO external_entity_relation_claims
           (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
           VALUES (${ORDER}, 'linked', ${SITE}, 'person', 'user', '', 'current', ${AT})`;
-        const withPerson = yield* claims.readClaimsFor(ORDER);
+        const withPerson = yield* claims.readClaimsFor(ORDER, NO_CUT);
         yield* report(claims, OTHER_ERP_ACCOUNT, SITE, [], { linked: [ORDER] });
-        return { withPerson, withSource: yield* claims.readClaimsFor(ORDER) };
+        return { withPerson, withSource: yield* claims.readClaimsFor(ORDER, NO_CUT) };
       }),
     );
 
     expect(detail.withPerson.links).toEqual([
-      { fromRef: ORDER, toRef: SITE, claim: { type: "person", actor: "user" } },
+      {
+        fromRef: ORDER,
+        toRef: SITE,
+        claim: { type: "person", actor: "user" },
+        hasPersonClaim: true,
+      },
     ]);
+    // The source's claim is the firmest now, and the person's claim is still there to remove.
     expect(detail.withSource.links).toEqual([
-      { fromRef: SITE, toRef: ORDER, claim: { type: "source", plugin: "acme-erp" } },
+      {
+        fromRef: SITE,
+        toRef: ORDER,
+        claim: { type: "source", plugin: "acme-erp" },
+        hasPersonClaim: true,
+      },
     ]);
+  });
+
+  it("reads a pair that only text mentions as a hint, and as a link once a source reports it too", async () => {
+    const read = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+          VALUES (${SITE}, 'linked', ${ORDER}, 'text', ${uuidFromString(ERP_ACCOUNT)}, 'note-1',
+                  'current', ${AT})`;
+        const hinted = yield* claims.readClaimsFor(ORDER, NO_CUT);
+        yield* report(claims, OTHER_ERP_ACCOUNT, ORDER, [], { linked: [SITE] });
+        return { hinted, linked: yield* claims.readClaimsFor(ORDER, NO_CUT) };
+      }),
+    );
+
+    expect(read.hinted.links).toEqual([]);
+    expect(read.hinted.hints).toEqual([{ fromRef: SITE, toRef: ORDER, evidenceKey: "note-1" }]);
+    expect(read.linked.hints).toEqual([]);
+    expect(read.linked.links.map((link) => link.claim.type)).toEqual(["source"]);
+  });
+
+  it("cuts links and hints apart, so a flood of hints never hides a link", async () => {
+    const read = await run((claims, sql) =>
+      Effect.gen(function* () {
+        for (const name of ["h1", "h2", "h3"]) {
+          yield* sql`INSERT INTO external_entity_relation_claims
+            (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+            VALUES (${ORDER}, 'linked', ${`acme-erp:site:${name}`}, 'text',
+                    ${uuidFromString(ERP_ACCOUNT)}, 'note', 'current', ${AT})`;
+        }
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], { linked: ["acme-erp:site:a"] });
+        return yield* claims.readClaimsFor(ORDER, 1);
+      }),
+    );
+
+    expect(read.links.map((link) => link.toRef)).toEqual(["acme-erp:site:a"]);
+    // One more than the limit, so the caller can tell that hints were cut.
+    expect(read.hints).toHaveLength(2);
+  });
+
+  it("cuts the links in the statement: one more than the limit, each pair under its firmest claim", async () => {
+    const links = await run((claims, sql) =>
+      Effect.gen(function* () {
+        // Three peers of the order. The first is claimed by a hint and then by a source.
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+          VALUES (${ORDER}, 'linked', 'acme-erp:site:a', 'text', ${uuidFromString(ERP_ACCOUNT)}, 'note',
+                  'current', ${AT})`;
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], {
+          linked: ["acme-erp:site:a", "acme-erp:site:b", "acme-erp:site:c"],
+        });
+        const all = yield* claims.readClaimsFor(ORDER, NO_CUT);
+        const cut = yield* claims.readClaimsFor(ORDER, 2);
+        return { all: all.links, cut: cut.links };
+      }),
+    );
+
+    expect(links.all.map((link) => [link.toRef, link.claim.type])).toEqual([
+      ["acme-erp:site:a", "source"],
+      ["acme-erp:site:b", "source"],
+      ["acme-erp:site:c", "source"],
+    ]);
+    // The caller sees the limit plus one: there is more than it asked for.
+    expect(links.cut).toHaveLength(3);
+    const noMoreThanLimit = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, ERP_ACCOUNT, ORDER, [], { linked: ["acme-erp:site:a"] });
+        return (yield* claims.readClaimsFor(ORDER, 1)).links;
+      }),
+    );
+    expect(noMoreThanLimit).toHaveLength(1);
+  });
+
+  it("reads a batch of new links with one question about joined pairs, however many there are", async () => {
+    const counts = await run((claims) =>
+      Effect.gen(function* () {
+        const count = (peers: number) =>
+          Effect.gen(function* () {
+            const statements: Array<string> = [];
+            yield* applyBatch(
+              claims,
+              ERP_ACCOUNT,
+              [
+                {
+                  fromRef: `acme-erp:purchase-order:batch-${peers}`,
+                  relations: {
+                    complete: true,
+                    partOf: [],
+                    linked: Array.from({ length: peers }, (_, n) => `acme-erp:site:${peers}-${n}`),
+                  },
+                  observedRevision: undefined,
+                  inBaseline: false,
+                },
+              ],
+              AT,
+            ).pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile()[0]);
+                  return statement;
+                }),
+              ),
+            );
+            return statements.filter((statement) => statement.includes("EXISTS")).length;
+          });
+        return { few: yield* count(2), many: yield* count(20) };
+      }),
+    );
+
+    expect(counts.few).toBe(1);
+    expect(counts.many).toBe(1);
+  });
+
+  it("leaves the pairs of a thing's baseline out of the new links", async () => {
+    const result = await run((claims) =>
+      Effect.gen(function* () {
+        const arriving = yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
+            {
+              fromRef: ORDER,
+              relations: { complete: true, partOf: [], linked: [SITE] },
+              observedRevision: undefined,
+              inBaseline: true,
+            },
+          ],
+          AT,
+        );
+        const later = yield* report(claims, OTHER_ERP_ACCOUNT, ROUND_ONE, [], {
+          linked: [ORDER],
+        });
+        return { arriving: arriving.newLinks, later };
+      }),
+    );
+
+    expect(result.arriving).toEqual([]);
+    expect(result.later.changed).toBe(true);
   });
 });
 
@@ -243,22 +430,25 @@ describe("loops in part-of", () => {
     const { write, rows } = await run((claims, sql) =>
       Effect.gen(function* () {
         yield* report(claims, ERP_ACCOUNT, ROUND_TWO, [ROUND_ONE]);
-        const { writes: write } = yield* claims.applySourceRelations({
-          connectionId: ERP_ACCOUNT,
-          entries: [
+        const write = yield* applyBatch(
+          claims,
+          ERP_ACCOUNT,
+          [
             {
               fromRef: ROUND_ONE,
               relations: { complete: true, partOf: [ROUND_TWO], linked: [] },
               observedRevision: undefined,
+              inBaseline: false,
             },
             {
               fromRef: ROUND_TWO,
               relations: { complete: true, partOf: [], linked: [] },
               observedRevision: undefined,
+              inBaseline: false,
             },
           ],
-          now: LATER,
-        });
+          LATER,
+        );
         const rows = yield* sql<{ readonly from_ref: string; readonly state: string }>`
           SELECT from_ref, state FROM external_entity_relation_claims`;
         return { write, rows };
@@ -266,8 +456,8 @@ describe("loops in part-of", () => {
     );
 
     expect(rows).toEqual([{ from_ref: ROUND_ONE, state: "current" }]);
-    expect(write.get(ROUND_ONE)).toEqual({ changed: true, conflicts: [] });
-    expect(write.get(ROUND_TWO)).toEqual({ changed: true, conflicts: [] });
+    expect(write.changedRefs).toEqual([ROUND_ONE, ROUND_TWO]);
+    expect(write.conflicts).toEqual([]);
   });
 
   it("stores a claim that closes a loop as conflicted, returns it, and applies the rest", async () => {
@@ -281,7 +471,7 @@ describe("loops in part-of", () => {
           write,
           again,
           rows: yield* readStored(sql, SITE),
-          detail: yield* claims.readClaimsFor(ROUND_ONE),
+          detail: yield* claims.readClaimsFor(ROUND_ONE, NO_CUT),
         };
       }),
     );

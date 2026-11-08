@@ -19,6 +19,7 @@ import {
   type PluginMark,
   type Signal,
   type SignalAction,
+  type SignalEntity,
   type SignalOrigin,
   type SignalView,
 } from "@hercule/contract";
@@ -70,6 +71,9 @@ export const lowerFirst = (text: string): string =>
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
 const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** Returns the word of a signal's kind: `review-requested` for `github/review-requested`, `proposal` for `proposal`. */
+export const readSignalWord = (kind: string): string => kind.slice(kind.indexOf("/") + 1);
+
 /**
  * Returns the label of a signal's kind: "Mentioned" for `github/mentioned`,
  * "Review requested" for `github/review-requested`, "Proposal" for
@@ -80,7 +84,7 @@ const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text
  * capital.
  */
 export const nameSignalKind = (kind: string): string =>
-  CORE_KIND_LABELS[kind] ?? upperFirst(kind.slice(kind.indexOf("/") + 1).replaceAll("-", " "));
+  CORE_KIND_LABELS[kind] ?? upperFirst(readSignalWord(kind).replaceAll("-", " "));
 
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
 export const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
@@ -263,6 +267,21 @@ export const buildIntakeTabs = (
   ];
 };
 
+/**
+ * One thing a section draws, in order: a signal on its own, or the signals
+ * about one outside thing under a header for that thing.
+ */
+type IntakeEntry =
+  | { readonly kind: "signal"; readonly signal: Signal }
+  | {
+      readonly kind: "entity";
+      readonly entity: SignalEntity;
+      /** The plugin whose mark the header shows, or `null` for a kind the core owns. */
+      readonly pluginId: string | null;
+      /** The signals about the entity, never empty, in the order the list draws them. */
+      readonly signals: ReadonlyArray<Signal>;
+    };
+
 /** One section of an Intake list, under its heading. */
 export interface IntakeSection {
   /**
@@ -273,9 +292,31 @@ export interface IntakeSection {
   readonly key: string;
   /** The heading: "Now", "Signals", "Back Monday", "Yesterday". */
   readonly label: string;
-  /** The section's signals, in the order the list draws them. Never empty. */
+  /**
+   * The section's signals, in the order the list draws their rows. Never
+   * empty. The signals of a group are next to each other, so this is also the
+   * order `J` and `K` walk: a header is no signal and is never walked.
+   */
   readonly signals: ReadonlyArray<Signal>;
+  /**
+   * The same signals, grouped for drawing: a header row per outside thing and
+   * its rows under it, or a row on its own. On Later and Done every entry is
+   * a signal on its own.
+   */
+  readonly entries: ReadonlyArray<IntakeEntry>;
 }
+
+/** Returns the section of `entries`, whose `signals` are theirs in drawing order. */
+const buildIntakeSection = (
+  key: string,
+  label: string,
+  entries: ReadonlyArray<IntakeEntry>,
+): IntakeSection => ({
+  key,
+  label,
+  entries,
+  signals: entries.flatMap((entry) => (entry.kind === "signal" ? [entry.signal] : entry.signals)),
+});
 
 /**
  * Compares two signals for the order inside a section: the signals back from
@@ -291,6 +332,34 @@ const compareInSection = (a: Signal, b: Signal): number => {
 };
 
 /**
+ * Groups `signals`, already in the order of a section, into the entries the
+ * list draws. The signals about one entity, found by `entity.id`, become one
+ * group, which sits where its first signal sits; inside it the signals keep
+ * their relative order, so `A1, B1, A2` becomes `[A1, A2], B1`. A signal with
+ * no entity is an entry of its own.
+ */
+const groupSignalsByEntity = (signals: ReadonlyArray<Signal>): ReadonlyArray<IntakeEntry> => {
+  const groups = new Map<string, Signal[]>();
+  const entries: IntakeEntry[] = [];
+  for (const signal of signals) {
+    const { entity } = signal;
+    if (entity === undefined) {
+      entries.push({ kind: "signal", signal });
+      continue;
+    }
+    const group = groups.get(entity.id);
+    if (group !== undefined) {
+      group.push(signal);
+      continue;
+    }
+    const first = [signal];
+    groups.set(entity.id, first);
+    entries.push({ kind: "entity", entity, pluginId: parsePluginId(entity.kind), signals: first });
+  }
+  return entries;
+};
+
+/**
  * Groups the signals on To do into the sections the list draws, for the tab
  * of `pluginId`, or for All when it is `null`:
  *
@@ -300,6 +369,10 @@ const compareInSection = (a: Signal, b: Signal): number => {
  * A section with no signal is left out. Inside each, the signals back from a
  * snooze come first, then the oldest first, so the one that waited longest
  * leads. `high` does not reorder the list.
+ *
+ * Inside a section, the signals about one outside thing are grouped under it
+ * (`IntakeSection.entries`). A group never crosses from Now to Signals: the
+ * same thing can head a group in each.
  */
 export const groupSignalsIntoSections = (
   signals: ReadonlyArray<Signal>,
@@ -311,8 +384,10 @@ export const groupSignalsIntoSections = (
   const now = shown.filter((signal) => signal.priority === "urgent");
   const rest = shown.filter((signal) => signal.priority !== "urgent");
   return [
-    ...(now.length > 0 ? [{ key: "now", label: "Now", signals: now } as const] : []),
-    ...(rest.length > 0 ? [{ key: "signals", label: "Signals", signals: rest } as const] : []),
+    ...(now.length > 0 ? [buildIntakeSection("now", "Now", groupSignalsByEntity(now))] : []),
+    ...(rest.length > 0
+      ? [buildIntakeSection("signals", "Signals", groupSignalsByEntity(rest))]
+      : []),
   ];
 };
 
@@ -371,7 +446,13 @@ export const groupSignalsByDay = (
     (day) => (view === "later" ? `Back ${day}` : upperFirst(day)),
     now,
     timezone,
-  ).map(({ key, label, items }) => ({ key, label, signals: items }));
+  ).map(({ key, label, items }) =>
+    buildIntakeSection(
+      key,
+      label,
+      items.map((signal) => ({ kind: "signal", signal })),
+    ),
+  );
 
 /**
  * Returns the second line of a signal's row: who asks, the kind and where,

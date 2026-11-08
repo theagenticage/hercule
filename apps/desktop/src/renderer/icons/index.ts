@@ -42,6 +42,7 @@ export { IdIcon } from "./id";
 export { IntakeIcon } from "./intake";
 export { KeyIcon } from "./key";
 export { LaptopIcon } from "./laptop";
+export { LinkIcon } from "./link";
 export { ListIcon } from "./list";
 export { MemoryIcon } from "./memory";
 export { MicIcon } from "./mic";

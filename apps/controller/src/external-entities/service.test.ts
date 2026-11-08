@@ -26,13 +26,14 @@ import {
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { connectionRepository } from "../connections";
-import { uuidFromString, withTransaction } from "../db";
+import { uuidFromString, uuidToString, withTransaction } from "../db";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { EntityLookups, PluginHost, type DecidedResolution, type SearchOutcome } from "../plugins";
 import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins/testing";
 import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
+import { signalRepository } from "../signals/repository";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { TaskLinkOwnersLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
@@ -1203,5 +1204,196 @@ describe("prune", () => {
       }),
     );
     expect(result).toEqual({ entities: 0, observations: 0 });
+  });
+});
+
+describe("acting on a card that holds signals", () => {
+  /** Writes an open signal raised from an event on the thread `threadRef`, and returns its id. */
+  const raiseSignalOn = (connectionId: string, threadRef: string, number: number) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const signals = yield* signalRepository;
+      const id = `0199e0e7-0005-7000-8000-${String(number).padStart(12, "0")}`;
+      yield* withTransaction(
+        sql,
+        signals.insert(
+          {
+            id,
+            kind: "acme/mentioned",
+            origin: { type: "event", eventId: number, connectionId, threadRef },
+            title: `Mention ${String(number)}`,
+            priority: "normal",
+            blocks: [],
+            actions: [],
+            match: {},
+            status: "open",
+            createdAt: "2026-03-01T00:00:00.000Z",
+          },
+          [],
+        ),
+      );
+      return id;
+    });
+
+  const listOpenSignalIds = (sql: SqlClient.SqlClient) =>
+    Effect.map(
+      sql<{ readonly id: Uint8Array }>`SELECT id FROM signals WHERE status = 'open' ORDER BY id`,
+      (rows) => rows.map((row) => uuidToString(row.id)),
+    );
+
+  it("ends no signal when the card is taken on, and the card keeps its signals", async () => {
+    const found = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const first = yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
+        const second = yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
+        yield* service.takeOn(yield* entityId(ticketRef("1")));
+        const inbox = yield* service.queryInbox();
+        return {
+          expected: [first, second],
+          open: yield* listOpenSignalIds(sql),
+          card: inbox.cards.find((candidate) => candidate.ref === ticketRef("1")),
+        };
+      }),
+    );
+    expect(found.open).toEqual(found.expected);
+    expect(found.card).toMatchObject({ side: "with-someone-else", signals: { openCount: 2 } });
+  });
+
+  it("ends no signal when the card is dismissed, and a new signal leaves it dismissed", async () => {
+    const found = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
+        yield* service.dismiss(yield* entityId(ticketRef("1")));
+        yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
+        const inbox = yield* service.queryInbox();
+        return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.cards.length };
+      }),
+    );
+    expect(found).toEqual({ open: 2, cards: 0 });
+  });
+});
+
+describe("link and unlink", () => {
+  const UNREAD = ticketRef("never-read");
+
+  it("links to a ref nobody has read, as the user's claim, and the next refresh asks for it", async () => {
+    const { claims, wanted } = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* service.link({ fromRef: ticketRef("1"), toRef: UNREAD });
+        const claims = yield* sql<{
+          readonly from_ref: string;
+          readonly to_ref: string;
+          readonly claim_type: string;
+          readonly actor: string | null;
+          readonly connection_id: Uint8Array | null;
+        }>`SELECT from_ref, to_ref, claim_type, actor, connection_id
+           FROM external_entity_relation_claims`;
+        const entities = yield* externalEntityRepository;
+        const wanted = yield* withTransaction(
+          sql,
+          entities.listWanted({
+            connectionId,
+            refPrefix: "acme:ticket:",
+            limit: 10,
+            now: new Date().toISOString(),
+            includesSignalRefs: false,
+          }),
+        );
+        return { claims, wanted };
+      }),
+    );
+
+    expect(claims).toEqual([
+      {
+        from_ref: ticketRef("1"),
+        to_ref: UNREAD,
+        claim_type: "person",
+        actor: "user",
+        connection_id: null,
+      },
+    ]);
+    expect(wanted).toContain(UNREAD);
+  });
+
+  it("writes no timeline row: a person's own link is not news from outside", async () => {
+    const rows = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        const timeline = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM external_entity_timeline`;
+        return timeline[0]!.n;
+      }),
+    );
+
+    expect(rows).toBe(0);
+  });
+
+  it("writes one claim for a pair however often and from whichever side it is linked", async () => {
+    const count = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
+        const rows = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM external_entity_relation_claims`;
+        return rows[0]!.n;
+      }),
+    );
+
+    expect(count).toBe(1);
+  });
+
+  it("removes only the person's claim, in either direction, and says what a source's claim leaves", async () => {
+    const result = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1", {
+            relations: { complete: true, partOf: [], linked: [ticketRef("2")] },
+          }),
+          buildObservation("2"),
+        ]);
+        yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
+        const removed = yield* service.unlink({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        const again = yield* service.unlink({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        const left = yield* sql<{ readonly claim_type: string }>`
+          SELECT claim_type FROM external_entity_relation_claims`;
+        return { removed, again, left: left.map((row) => row.claim_type) };
+      }),
+    );
+
+    expect(result.removed).toEqual({ removed: true, remaining: "source" });
+    expect(result.again).toEqual({ removed: false, remaining: "source" });
+    expect(result.left).toEqual(["source"]);
+  });
+
+  it("refuses a session, a link to itself, and a ref that is not one; and a thing Hercule never saw", async () => {
+    const errors = await run(({ service, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const input = { fromRef: ticketRef("1"), toRef: UNREAD };
+        return [
+          yield* Effect.flip(Effect.provideService(service.link(input), CurrentActor, A_SESSION)),
+          yield* Effect.flip(Effect.provideService(service.unlink(input), CurrentActor, A_SESSION)),
+          yield* Effect.flip(service.link({ fromRef: ticketRef("1"), toRef: ticketRef("1") })),
+          yield* Effect.flip(
+            service.link({ fromRef: ticketRef("1"), toRef: "unresolved:url:https://x.test" }),
+          ),
+          yield* Effect.flip(service.link({ fromRef: UNREAD, toRef: ticketRef("1") })),
+        ];
+      }),
+    );
+
+    expect(errors).toMatchObject([
+      { error: { code: "forbidden" } },
+      { error: { code: "forbidden" } },
+      { error: { code: "invalid_state" } },
+      { error: { code: "invalid_state" } },
+      { error: { code: "not_found" } },
+    ]);
   });
 });

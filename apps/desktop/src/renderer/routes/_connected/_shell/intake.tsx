@@ -35,6 +35,8 @@ const EverythingScreen = lazy(() =>
  *
  * - `view`: the view shown, Later, Done or Everything. With none, Intake shows To do.
  * - `signal`: the selected signal, whose pane is open, on To do, Later and Done.
+ * - `entity`: a thing whose group To do scrolls to, such as the Inbox's "and 12
+ *   more open" opens. It changes nothing else, and no loader reads it.
  * - `tracking`: set while Tracking is opened over the To do list. It lives in
  *   the address so that coming back from a run's page or a thread, which the
  *   pane of a Tracking row opens, finds Tracking open again.
@@ -48,6 +50,7 @@ const EverythingScreen = lazy(() =>
 export interface IntakeSearch {
   readonly view?: "later" | "done" | "everything" | undefined;
   readonly signal?: string | undefined;
+  readonly entity?: string | undefined;
   readonly tracking?: true | undefined;
   readonly task?: string | undefined;
   readonly event?: number | undefined;
@@ -66,7 +69,7 @@ const isBoundedText = (value: unknown, maxLength: number): value is string =>
 
 /**
  * Returns Intake's search params from the URL's. A `view` that is not Later,
- * Done or Everything, a `signal` or a `task` that is not an id, a `tracking`
+ * Done or Everything, a `signal`, an `entity` or a `task` that is not an id, a `tracking`
  * that is not `true`, an `event` that is not a whole number from 1, a `text` or a `source` that is empty or too long, and a
  * `handling` that is not one the controller filters on are dropped.
  *
@@ -80,6 +83,7 @@ const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => 
       ? search.view
       : undefined,
   signal: isId(search.signal) ? search.signal : undefined,
+  entity: isId(search.entity) ? search.entity : undefined,
   tracking: search.tracking === true ? true : undefined,
   task: isId(search.task) ? search.task : undefined,
   event:
@@ -186,7 +190,7 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
 });
 
 function IntakeRoute(): JSX.Element {
-  const { view, signal, tracking, task, event, text, handling, source } = Route.useSearch();
+  const { view, signal, entity, tracking, task, event, text, handling, source } = Route.useSearch();
   const { openedAt } = Route.useLoaderData();
   const navigate = Route.useNavigate();
   const [pluginId, setPluginId] = useState<string | null>(null);
@@ -252,6 +256,7 @@ function IntakeRoute(): JSX.Element {
       view={view ?? "to-do"}
       pluginId={pluginId}
       selectedId={signal ?? null}
+      entityId={entity ?? null}
       trackingOpen={tracking === true}
       selectedTaskId={task ?? null}
       onTrackingOpenChange={(open, taskId) => {

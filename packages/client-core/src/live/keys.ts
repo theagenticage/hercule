@@ -93,8 +93,9 @@ export const queryKeys = {
   /**
    * The Inbox's one read (`externalEntity.queryInbox`): its cards, places and
    * counts. Live topics: `externalEntity` reads it again on every push, and
-   * `task`, `connection` and `plugin` too, because each can move a card in or
-   * out, or change what a card shows (see `buildQueryKeys`).
+   * `task`, `signal`, `connection` and `plugin` too, because each can move a
+   * card in or out, or change what a card shows (see `buildQueryKeys`). A
+   * snooze running out is no push, so the snooze timer reads it again.
    */
   inbox: (): LiveQueryKey => ["inbox"],
   /**
@@ -108,8 +109,9 @@ export const queryKeys = {
    * One External Entity (`externalEntity.read`), as an open pane draws it;
    * without the id, the prefix of every entity read. Live topics: every
    * `externalEntity`, `connection` and `plugin` push reads the prefix, and a
-   * plain `task` push too (see `buildQueryKeys`). The prefix and not one id,
-   * because a pane embeds its parents' records.
+   * plain `task` push and a `signal` push too (a pane draws the entity's
+   * signals; see `buildQueryKeys`). The prefix and not one id, because a pane
+   * embeds its parents' records.
    */
   externalEntity: (id?: string): LiveQueryKey =>
     id === undefined ? ["external-entity"] : ["external-entity", id],
@@ -695,10 +697,19 @@ export const buildQueryKeys = (
   // raised or resolved signal moves in or out of them. A signal's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
   // Your work is read again too, because it follows the To do list.
+  //
+  // An open signal, or the end or snooze of one, also decides which cards the
+  // Inbox holds and how many lines a card shows, so the Inbox's reads and the
+  // open entity panes (which list the entity's signals) are read again. Not
+  // the Add sheet's suggestions or the Work board: a signal changes neither.
   if (topic === "signal") {
-    return ids.length === 0
-      ? [queryKeys.signals(), queryKeys.signal(), queryKeys.yourWork()]
-      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id)), queryKeys.yourWork()];
+    return [
+      queryKeys.signals(),
+      ...(ids.length === 0 ? [queryKeys.signal()] : ids.map((id) => queryKeys.signal(id))),
+      queryKeys.yourWork(),
+      ...INBOX_KEYS,
+      queryKeys.externalEntity(),
+    ];
   }
   // Any Discussion change refetches every page of the listing. A
   // Discussion's own page is refetched only when the push lists its id, or
@@ -748,6 +759,9 @@ export const buildQueryKeys = (
   // entities': a pane embeds its parents' records, so a change to a repository
   // changes the panes of the entities under it, and the push names only the
   // repository.
+  // The signal lists are not read again here: when a thing becomes a full
+  // record, which gives its open signals their `entity`, the controller
+  // announces a `signal` push naming those signals.
   if (topic === "externalEntity") {
     return [...INBOX_KEYS, ...ENTITY_SOURCE_KEYS];
   }

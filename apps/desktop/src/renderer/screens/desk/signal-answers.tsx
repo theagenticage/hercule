@@ -1,7 +1,9 @@
 /**
- * The answers of the open signal, at the foot of the pane (spec 17 §The
- * pane): a ledger row for each answer, and a Reply box in place of the row
- * of an answer with a text field while that box is open.
+ * The answers of one signal (spec 17 §The pane): a ledger row for each
+ * answer, and a Reply box in place of the row of an answer with a text field
+ * while that box is open. Intake's pane draws them at its foot, and the
+ * Inbox's open card draws them under an opened line, so a signal is answered
+ * the same way in both.
  */
 import type { JSX } from "react";
 import type { DescribeLine, SignalAction } from "@hercule/contract";
@@ -12,8 +14,10 @@ import {
 } from "@hercule/client-core";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { isPrimaryModifierHeld } from "../../app/primary-modifier";
+import type { AnswerFailure } from "../../app/use-answer-signal";
 import { buildLook, Face } from "../../faces";
 import { LedgerAnswer } from "./ledger-answer";
+import "./signal-answers.css";
 
 /** The classes of an answer's button, by how the pane draws the answer. */
 const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
@@ -22,12 +26,6 @@ const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
   quiet: "btn btn--quiet",
   plain: "btn",
 };
-
-/** An answer that failed, and why. */
-export interface AnswerFailure {
-  readonly actionId: string;
-  readonly message: string;
-}
 
 /**
  * Renders a describe line, with the parts the core marked, such as a branch
@@ -82,11 +80,15 @@ const groupAnswers = (
  *   Every other answer is a ledger row.
  * - A click on the row of an answer with a text field calls `onOpenReply`;
  *   a click on any other row calls `onAct`.
+ * - `shortcutFor` returns the key a row shows beside it, or `null` for none.
+ *   The caller decides, because the keys differ by page: on Intake `E` is
+ *   Done, and in the Inbox `E` is Dismiss.
  * - While `locked`, every answer keeps its place and its focus, and does
  *   nothing.
  * - A `failure` shows under the button of the answer that failed.
  *
- * `idPrefix` makes the ids of the describe lines unique on the page.
+ * `idPrefix` makes the ids of the describe lines unique on the page, and
+ * `className` is added to the root, for the spacing the caller wants around it.
  */
 export function SignalAnswers({
   answers,
@@ -95,6 +97,8 @@ export function SignalAnswers({
   locked,
   failure,
   idPrefix,
+  className,
+  shortcutFor,
   onOpenReply,
   onDraftChange,
   onAct,
@@ -107,6 +111,8 @@ export function SignalAnswers({
   readonly locked: boolean;
   readonly failure: AnswerFailure | null;
   readonly idPrefix: string;
+  readonly className?: string;
+  readonly shortcutFor: (answer: SignalAnswer) => string | null;
   readonly onOpenReply: (actionId: string) => void;
   readonly onDraftChange: (actionId: string, text: string) => void;
   readonly onAct: (actionId: string, text?: string) => void;
@@ -114,7 +120,7 @@ export function SignalAnswers({
   readonly platform: DesktopPlatform;
 }): JSX.Element {
   return (
-    <div className="ad-answers">
+    <div className={className === undefined ? "signal-answers" : `signal-answers ${className}`}>
       {groupAnswers(answers, openReplyId).map((group) =>
         group.kind === "compose" ? (
           <ReplyBox
@@ -137,6 +143,7 @@ export function SignalAnswers({
                 locked={locked}
                 error={failure?.actionId === answer.action.id ? failure.message : null}
                 idPrefix={idPrefix}
+                shortcut={shortcutFor(answer)}
                 onOpenReply={onOpenReply}
                 onAct={onAct}
               />
@@ -148,15 +155,13 @@ export function SignalAnswers({
   );
 }
 
-/**
- * Renders one answer as a ledger row. The key beside it is ↩ for the
- * suggested answer, R to open a reply, and E for Done.
- */
+/** Renders one answer as a ledger row, with `shortcut` as the key beside it, when it has one. */
 function AnswerRow({
   answer,
   locked,
   error,
   idPrefix,
+  shortcut,
   onOpenReply,
   onAct,
 }: {
@@ -164,6 +169,7 @@ function AnswerRow({
   readonly locked: boolean;
   readonly error: string | null;
   readonly idPrefix: string;
+  readonly shortcut: string | null;
   readonly onOpenReply: (actionId: string) => void;
   readonly onAct: (actionId: string) => void;
 }): JSX.Element {
@@ -179,7 +185,7 @@ function AnswerRow({
         )
       }
       describe={<DescribeLineText action={action} />}
-      shortcut={suggested ? "↩" : style === "reply" ? "R" : style === "done" ? "E" : null}
+      shortcut={shortcut}
       error={error}
       locked={locked}
       idPrefix={idPrefix}

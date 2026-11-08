@@ -50,6 +50,7 @@ import {
   parseIntakeListWidth,
   trimAnswerEllipsis,
   type EventHandlingLabel,
+  type IntakeSection,
 } from "./intake";
 
 const PLUGINS = [
@@ -369,6 +370,115 @@ describe("groupSignalsIntoSections", () => {
       "github",
     );
     expect(sections.map((section) => section.signals.map((s) => s.id))).toEqual([["a"]]);
+  });
+});
+
+describe("groupSignalsIntoSections: entities", () => {
+  const PR = {
+    id: "01a06d02-7a00-7000-8000-000000000001",
+    kind: "github/pull-request",
+    identifier: "#87",
+    title: "Fix the basket total",
+  };
+  const TICKET = {
+    id: "01a06d02-7a00-7000-8000-000000000002",
+    kind: "linear/issue",
+    identifier: "WEB-301",
+    title: "Basket total is off",
+  };
+  /** Builds a signal created `minute` minutes after nine, about `entity` when given. */
+  const aboutAt = (id: string, minute: number, entity?: Signal["entity"], priority?: "urgent") =>
+    buildSignal(id, {
+      createdAt: `2026-10-10T09:${String(minute).padStart(2, "0")}:00.000Z`,
+      ...(entity === undefined ? {} : { entity }),
+      ...(priority === undefined ? {} : { priority }),
+    });
+  /** Describes entries as "id" for a signal on its own and "[entity: ids]" for a group. */
+  const describeEntries = (section: Pick<IntakeSection, "entries">) =>
+    section.entries.map((entry) =>
+      entry.kind === "signal"
+        ? entry.signal.id
+        : `${entry.entity.identifier}: ${entry.signals.map((s) => s.id).join(",")}`,
+    );
+
+  it.each([
+    {
+      name: "no signal has an entity: every signal is an entry of its own, in today's order",
+      signals: [aboutAt("b", 2), aboutAt("a", 1), aboutAt("c", 3)],
+      entries: ["a", "b", "c"],
+    },
+    {
+      name: "the signals of one entity are one group, at the place of its first",
+      signals: [aboutAt("a1", 1, PR), aboutAt("b1", 2, TICKET), aboutAt("a2", 3, PR)],
+      entries: ["#87: a1,a2", "WEB-301: b1"],
+    },
+    {
+      name: "a signal with no entity stays its own row between groups",
+      signals: [aboutAt("a1", 1, PR), aboutAt("own", 2), aboutAt("a2", 3, PR)],
+      entries: ["#87: a1,a2", "own"],
+    },
+    {
+      name: "a signal alone on its entity is still a group, so the thing is named once",
+      signals: [aboutAt("a1", 1, PR)],
+      entries: ["#87: a1"],
+    },
+  ])("$name", ({ signals, entries }) => {
+    const sections = groupSignalsIntoSections(signals, null);
+    expect(sections).toHaveLength(1);
+    expect(describeEntries(sections[0]!)).toEqual(entries);
+  });
+
+  it("keeps a group of a section's signals next to each other, so J and K walk rows only", () => {
+    const sections = groupSignalsIntoSections(
+      [aboutAt("a1", 1, PR), aboutAt("b1", 2, TICKET), aboutAt("a2", 3, PR)],
+      null,
+    );
+    expect(sections[0]!.signals.map((s) => s.id)).toEqual(["a1", "a2", "b1"]);
+    expect(moveSignalSelection(sections, "a2", 1)).toBe("b1");
+    expect(moveSignalSelection(sections, "b1", -1)).toBe("a2");
+  });
+
+  it("never crosses the Now and Signals boundary: the entity heads a group in each", () => {
+    const sections = groupSignalsIntoSections(
+      [aboutAt("late", 1, PR), aboutAt("hot", 2, PR, "urgent"), aboutAt("later", 3, PR)],
+      null,
+    );
+    expect(sections.map((section) => [section.key, describeEntries(section)])).toEqual([
+      ["now", ["#87: hot"]],
+      ["signals", ["#87: late,later"]],
+    ]);
+  });
+
+  it("names the group's entity and the plugin of its kind for the mark", () => {
+    const [entry] = groupSignalsIntoSections([aboutAt("a1", 1, PR)], null)[0]!.entries;
+    expect(entry).toMatchObject({ kind: "entity", entity: PR, pluginId: "github" });
+  });
+
+  it("groups inside the tab of a plugin, leaving the other plugins' signals out", () => {
+    const sections = groupSignalsIntoSections(
+      [aboutAt("a1", 1, PR), buildSignal("slack-1", { kind: "slack/mentioned", entity: PR })],
+      "github",
+    );
+    expect(describeEntries(sections[0]!)).toEqual(["#87: a1"]);
+  });
+
+  it("does not group Later and Done, which sort by date", () => {
+    const sections = groupSignalsByDay(
+      [
+        buildSignal("a1", {
+          entity: PR,
+          snooze: { until: "2026-10-11T08:00:00.000Z", snoozedAt: "2026-10-10T08:00:00.000Z" },
+        }),
+        buildSignal("a2", {
+          entity: PR,
+          snooze: { until: "2026-10-11T09:00:00.000Z", snoozedAt: "2026-10-10T08:00:00.000Z" },
+        }),
+      ],
+      "later",
+      new Date("2026-10-10T12:00:00.000Z"),
+      "UTC",
+    );
+    expect(describeEntries(sections[0]!)).toEqual(["a1", "a2"]);
   });
 });
 

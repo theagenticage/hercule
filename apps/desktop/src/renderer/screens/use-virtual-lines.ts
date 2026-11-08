@@ -33,6 +33,8 @@ export interface VirtualLines<Item> {
   readonly selectedIndex: number;
   /** Scrolls the selected item into view, if it is not in view. Does nothing when none is selected. */
   readonly scrollToSelected: () => void;
+  /** Scrolls the item with the key `key` to the top of the view. Does nothing when no item has it. */
+  readonly scrollToKey: (key: string) => void;
 }
 
 /** What `useVirtualLines` draws and how. */
@@ -126,6 +128,14 @@ export const useVirtualLines = <Item extends { readonly key: string }>({
     if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
   }, [virtualizer, selectedIndex]);
 
+  const scrollToKey = useCallback(
+    (key: string): void => {
+      const index = items.findIndex((item) => item.key === key);
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: "start" });
+    },
+    [virtualizer, items],
+  );
+
   const lines: VirtualLine<Item>[] = [];
   const visible = virtualizer.range;
   let end = scrollMargin;
@@ -145,5 +155,6 @@ export const useVirtualLines = <Item extends { readonly key: string }>({
     lastDrawnIndex,
     selectedIndex,
     scrollToSelected,
+    scrollToKey,
   };
 };

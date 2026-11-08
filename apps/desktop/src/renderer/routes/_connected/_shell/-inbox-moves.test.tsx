@@ -10,9 +10,16 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
-import { buildInbox, buildRequestCard } from "@hercule/client-core/inbox/testing";
+import { advanceInboxVisit, decideDrawnRiding, HOME_GROUPING } from "@hercule/client-core/inbox";
+import {
+  buildInbox,
+  buildInboxCard,
+  buildInboxLink,
+  buildRequestCard,
+} from "@hercule/client-core/inbox/testing";
 import type { Inbox } from "@hercule/contract";
 import type { CardMover } from "../../../app/card-mover";
+import { useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
 import { inboxQuery } from "../../../app/queries";
 import { createUndoStack } from "../../../app/undo-stack";
 import { useInboxMoves } from "./-inbox-moves";
@@ -42,9 +49,14 @@ function holdCalls<Answer>() {
   return { calls, call };
 }
 
-const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) => {
+const setUp = (
+  readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX),
+  cachedInbox: Inbox = INBOX,
+) => {
   const takes = holdCalls<{ taskId: string; created: boolean }>();
   const dismissals = holdCalls<unknown>();
+  const links = holdCalls<unknown>();
+  const unlinks = holdCalls<{ removed: boolean; remaining?: "source" | "person" | "text" }>();
   // The requests in the order they reach the controller.
   const sent: string[] = [];
   const restore = vi.fn(() => {
@@ -67,12 +79,20 @@ const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) =
         sent.push("dismiss");
         return dismissals.call();
       },
+      link: () => {
+        sent.push("link");
+        return links.call();
+      },
+      unlink: () => {
+        sent.push("unlink");
+        return unlinks.call();
+      },
       restore,
       undoTakeOn,
     },
   } as unknown as HerculeClient;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(queryKeys.inbox(), INBOX);
+  queryClient.setQueryData(queryKeys.inbox(), cachedInbox);
   const undoStack = createUndoStack<CardMover>();
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -80,12 +100,29 @@ const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) =
   const view = renderHook(
     () => {
       const { data } = useQuery(inboxQuery(client));
-      return useInboxMoves({
+      const visit = useVisitHistory();
+      const moves = useInboxMoves({
         client,
         undoStack,
         serverInbox: data,
+        visit,
         scrollRef: { current: null },
       });
+      // The visit draws the page as the screen does, so the test can ask where each card rides.
+      const drawn = advanceInboxVisit(visit.history, {
+        received: moves.inbox,
+        view: { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" },
+        released: new Set(),
+        isFresh: true,
+        hasUserMove: moves.hasPendingEdits,
+        isMotionReduced: () => false,
+      });
+      if (drawn.history !== visit.history) visit.setHistory(drawn.history);
+      const riding =
+        moves.inbox === undefined
+          ? new Map<string, string>()
+          : decideDrawnRiding(moves.inbox.cards, drawn.history.placement);
+      return { ...moves, riding };
     },
     { wrapper },
   );
@@ -93,6 +130,8 @@ const setUp = (readInbox: () => Promise<Inbox> = () => Promise.resolve(INBOX)) =
     ...view,
     takes,
     dismissals,
+    links,
+    unlinks,
     restore,
     undoTakeOn,
     sent,
@@ -113,7 +152,7 @@ describe("the order of Undo", () => {
     // Take A is sent first and has not answered when the user dismisses B.
     act(() => {
       result.current.take(A);
-      result.current.dismiss(B);
+      result.current.dismiss(B, []);
     });
     await waitFor(() => {
       expect(takes.calls).toHaveLength(1);
@@ -153,7 +192,7 @@ describe("the order of Undo", () => {
     const { result, takes, dismissals, undoTakeOn } = setUp();
     act(() => {
       result.current.take(A);
-      result.current.dismiss(B);
+      result.current.dismiss(B, []);
     });
     await waitFor(() => {
       expect(takes.calls).toHaveLength(1);
@@ -231,14 +270,14 @@ describe("the order of requests around Undo", () => {
   it("sends the reversal of a slow dismissal before a dismissal made after Undo", async () => {
     const { result, dismissals, sent } = setUp();
     act(() => {
-      result.current.dismiss(A);
+      result.current.dismiss(A, []);
     });
     await waitFor(() => {
       expect(dismissals.calls).toHaveLength(1);
     });
     act(() => {
       result.current.undoLastMove();
-      result.current.dismiss(A);
+      result.current.dismiss(A, []);
     });
     await act(async () => {
       dismissals.calls[0]!.answer({});
@@ -272,7 +311,7 @@ describe("an answered move", () => {
       expect(queryInbox).toHaveBeenCalledOnce();
     });
     act(() => {
-      result.current.dismiss(A);
+      result.current.dismiss(A, []);
     });
     await waitFor(() => {
       expect(dismissals.calls).toHaveLength(1);
@@ -294,5 +333,162 @@ describe("an answered move", () => {
         "b",
       ]);
     });
+  });
+});
+
+describe("what rides on what after a Link or Unlink", () => {
+  const LEAD_A = buildInboxCard("lead-a");
+  const LEAD_B = buildInboxCard("lead-b");
+  const RIDER = buildRequestCard("rider");
+  /**
+   * The controller's reads still answer what the page opened with, as when a read raced the move: the
+   * visit must keep the card where the user's Link or Unlink put it, whatever that read says.
+   */
+  const setUpWithStaleRead = (opened: Inbox) => setUp(() => Promise.resolve(opened), opened);
+  const names = (to: { readonly ref: string; readonly identifier: string }) => ({
+    fromRef: RIDER.ref,
+    toRef: to.ref,
+    fromName: RIDER.identifier,
+    toName: to.identifier,
+  });
+
+  it("puts a card on the second lead when the first Link is refused and the second is accepted", async () => {
+    const { result, links } = setUpWithStaleRead(buildInbox([LEAD_A, LEAD_B, RIDER]));
+    act(() => {
+      result.current.link(names(LEAD_A));
+    });
+    act(() => {
+      result.current.link(names(LEAD_B));
+    });
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_A.ref);
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(1);
+    });
+
+    await act(async () => {
+      links.calls[0]!.refuse("The ticket is gone");
+      await settle();
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(2);
+    });
+    await act(async () => {
+      links.calls[1]!.answer({});
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_B.ref);
+  });
+
+  it("takes a card off the lead that was accepted when Undo removes that Link, though the Link was planned while another lead held the card", async () => {
+    // The read after the Link is still on its way when Undo is pressed, so the page shows the Link
+    // the answer wrote into the cache and the card without a lead.
+    const { result, links, unlinks } = setUp(
+      () => new Promise<Inbox>(() => undefined),
+      buildInbox([LEAD_A, LEAD_B, RIDER]),
+    );
+    act(() => {
+      result.current.link(names(LEAD_A));
+    });
+    act(() => {
+      result.current.link(names(LEAD_B));
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      links.calls[0]!.refuse("The ticket is gone");
+      await settle();
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(2);
+    });
+    await act(async () => {
+      links.calls[1]!.answer({});
+      await settle();
+    });
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_B.ref);
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toBeUndefined();
+  });
+
+  it("keeps a card on its lead when Undo removes a Link and a source still reports the pair", async () => {
+    const { result, links, unlinks } = setUpWithStaleRead(buildInbox([LEAD_A, RIDER]));
+    act(() => {
+      result.current.link(names(LEAD_A));
+    });
+    await waitFor(() => {
+      expect(links.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      links.calls[0]!.answer({});
+      await settle();
+    });
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_A.ref);
+
+    act(() => {
+      result.current.undoLastMove();
+    });
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true, remaining: "source" });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_A.ref);
+  });
+
+  it("keeps a card on its lead when an Unlink says a source still reports the link, and says so", async () => {
+    const riding = { ...RIDER, ridesOn: LEAD_A.ref };
+    const link = buildInboxLink(RIDER.ref, LEAD_A.ref, "person");
+    const { result, unlinks } = setUpWithStaleRead(buildInbox([LEAD_A, riding], { links: [link] }));
+    act(() => {
+      result.current.unlink(names(LEAD_A));
+    });
+    expect(result.current.riding.get(RIDER.id)).toBeUndefined();
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true, remaining: "source" });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toBe(LEAD_A.ref);
+    expect(result.current.line.text).toBe("Link removed. The source still reports the link.");
+  });
+
+  it("lets a card stand alone when an Unlink leaves nothing joining the two", async () => {
+    const riding = { ...RIDER, ridesOn: LEAD_A.ref };
+    const link = buildInboxLink(RIDER.ref, LEAD_A.ref, "person");
+    const { result, unlinks } = setUpWithStaleRead(buildInbox([LEAD_A, riding], { links: [link] }));
+    act(() => {
+      result.current.unlink(names(LEAD_A));
+    });
+    await waitFor(() => {
+      expect(unlinks.calls).toHaveLength(1);
+    });
+
+    await act(async () => {
+      unlinks.calls[0]!.answer({ removed: true });
+      await settle();
+    });
+
+    expect(result.current.riding.get(RIDER.id)).toBeUndefined();
+    expect(result.current.line.text).toBe("Link removed.");
   });
 });

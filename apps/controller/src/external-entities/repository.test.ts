@@ -733,6 +733,7 @@ describe("access and Connections that go away", () => {
         const wanted = yield* repository.listWanted({
           connectionId: ACCOUNT_A,
           refPrefix: TICKET_PREFIX,
+          includesSignalRefs: true,
           limit: 50,
           now: at(6),
         });
@@ -798,6 +799,7 @@ describe("a complete inventory is the whole kind", () => {
           repository.listWanted({
             connectionId: ACCOUNT_A,
             refPrefix: "acme-tracker:project:",
+            includesSignalRefs: false,
             limit: 50,
             now: at(minutes),
           });
@@ -1168,9 +1170,15 @@ describe("listSuggestions under a context", () => {
         const refsOf = (rows: ReadonlyArray<{ readonly ref: string }>) =>
           rows.map((row) => row.ref);
         return {
-          limited: refsOf(yield* repository.listSuggestions({ contextRef: PROJECT, limit: 3 })),
-          all: refsOf(yield* repository.listSuggestions({ contextRef: PROJECT, limit: 10 })),
-          unscoped: refsOf(yield* repository.listSuggestions({ contextRef: undefined, limit: 10 })),
+          limited: refsOf(
+            yield* repository.listSuggestions({ contextRef: PROJECT, limit: 3, now: at(3) }),
+          ),
+          all: refsOf(
+            yield* repository.listSuggestions({ contextRef: PROJECT, limit: 10, now: at(3) }),
+          ),
+          unscoped: refsOf(
+            yield* repository.listSuggestions({ contextRef: undefined, limit: 10, now: at(3) }),
+          ),
         };
       }),
     );
@@ -1224,7 +1232,7 @@ describe("the Inbox: membership, sides and counts", () => {
         yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
         const task = yield* linkTaskToRef(ticketRef("t1"), 2);
         const inbox = yield* readInbox(repository, 3);
-        const counts = yield* repository.countInbox();
+        const counts = yield* repository.countInbox(at(3));
         return { task, inbox, counts };
       }),
     );
@@ -1304,7 +1312,9 @@ describe("the Inbox: membership, sides and counts", () => {
     expect(small.inbox.cards).toHaveLength(10);
     expect(large.inbox.cards).toHaveLength(100);
     expect(large.statements).toHaveLength(small.statements.length);
-    expect(small.statements.length).toBeLessThanOrEqual(6);
+    // The counts, who rides, the cards, the walk up, the places, the observations, the
+    // signals, the latest changes and the links of the page.
+    expect(small.statements.length).toBeLessThanOrEqual(9);
   });
 });
 
@@ -1313,7 +1323,10 @@ describe("the arrival counter", () => {
     const newest = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         const read = (minutes: number) =>
-          Effect.map(repository.countInbox(), (counts) => [minutes, counts.newestArrival] as const);
+          Effect.map(
+            repository.countInbox(at(minutes)),
+            (counts) => [minutes, counts.newestArrival] as const,
+          );
         const steps: Array<readonly [number, number]> = [];
         yield* reconcile(ACCOUNT_A, [ticket("t1", { sourceUpdatedAt: at(1) })], { minutes: 1 });
         steps.push(yield* read(1));
@@ -1366,11 +1379,11 @@ describe("the arrival counter", () => {
         const id = inbox.cards[0]!.id;
         yield* repository.dismiss(id, "user", at(3));
         yield* repository.restore(id, "user", at(4));
-        const afterRestore = yield* repository.countInbox();
+        const afterRestore = yield* repository.countInbox(at(4));
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         yield* repository.pruneEntities(atDay(40));
         yield* reconcile(ACCOUNT_A, [ticket("t2")], { minutes: 41 * 24 * 60 });
-        return { afterRestore, last: yield* repository.countInbox() };
+        return { afterRestore, last: yield* repository.countInbox(at(41 * 24 * 60)) };
       }),
     );
     expect(steps.afterRestore.newestArrival).toBe(1);
@@ -1487,6 +1500,7 @@ describe("listWanted and failed reads", () => {
           repository.listWanted({
             connectionId: ACCOUNT_B,
             refPrefix: TICKET_PREFIX,
+            includesSignalRefs: true,
             limit: 50,
             now: at(minutes),
           });
@@ -1507,12 +1521,14 @@ describe("listWanted and failed reads", () => {
         const own = yield* repository.listWanted({
           connectionId: ACCOUNT_A,
           refPrefix: TICKET_PREFIX,
+          includesSignalRefs: true,
           limit: 50,
           now: at(2),
         });
         const other = yield* repository.listWanted({
           connectionId: ACCOUNT_B,
           refPrefix: TICKET_PREFIX,
+          includesSignalRefs: true,
           limit: 50,
           now: at(2),
         });
@@ -1532,6 +1548,7 @@ describe("listWanted and failed reads", () => {
           repository.listWanted({
             connectionId,
             refPrefix: "acme-tracker:project:",
+            includesSignalRefs: false,
             limit: 50,
             now: at(minutes),
           });
@@ -1564,6 +1581,7 @@ describe("listWanted and failed reads", () => {
           repository.listWanted({
             connectionId: ACCOUNT_A,
             refPrefix,
+            includesSignalRefs: refPrefix === TICKET_PREFIX,
             limit: 50,
             now: at(minutes),
           });
@@ -1601,6 +1619,7 @@ describe("listWanted and failed reads", () => {
         return yield* repository.listWanted({
           connectionId: ACCOUNT_A,
           refPrefix: "acme-tracker:project:",
+          includesSignalRefs: false,
           limit: 50,
           now: at(2),
         });
@@ -1634,6 +1653,7 @@ describe("listWanted and failed reads", () => {
             repository.listWanted({
               connectionId: ACCOUNT_B,
               refPrefix: TICKET_PREFIX,
+              includesSignalRefs: true,
               limit: 50,
               now: new Date(BASE + seconds * 1000).toISOString(),
             }),
@@ -1755,5 +1775,433 @@ describe("standings for a search", () => {
       [ticketRef("busy"), { standing: "on-work", taskId: standings.task.id }],
       [ticketRef("known"), { standing: "known", taskId: undefined }],
     ]);
+  });
+});
+
+describe("what changed outside", () => {
+  type WorkSlots = Extract<EntitySlots, { readonly card: string }>;
+  const STATUS_OPEN = { shape: "ring", tone: "quiet", label: "Open" } as const;
+  const STATUS_REVIEW = { shape: "ring", tone: "active", label: "In review" } as const;
+  /** The word the plugin later gives the status whose key is still `open`. */
+  const STATUS_RENAMED = { shape: "ring", tone: "quiet", label: "Raised" } as const;
+
+  /** Builds a ticket with an owner and a status, and the kind's own words for a move when `reasonTemplates` is given. */
+  const owned = (
+    name: string,
+    input: {
+      readonly owner?: string;
+      readonly status?: typeof STATUS_OPEN | typeof STATUS_REVIEW | typeof STATUS_RENAMED;
+      /** The key of the status in the kind's table. Defaults to the lower-cased word. */
+      readonly statusKey?: string;
+      readonly reasonTemplates?: NonNullable<WorkSlots["reasonTemplates"]>;
+      readonly sourceUpdatedAt?: string;
+    } = {},
+  ) => {
+    const { sourceUpdatedAt, statusKey, ...slots } = input;
+    return ticket(name, {
+      slots: { ...(TICKET_SLOTS(name) as WorkSlots), ...slots },
+      ...(slots.status === undefined
+        ? {}
+        : { status: statusKey ?? slots.status.label.toLowerCase().replace(" ", "_") }),
+      ...(sourceUpdatedAt === undefined ? {} : { sourceUpdatedAt }),
+    });
+  };
+
+  const readDetail = (
+    context: Pick<Parameters<Parameters<typeof run>[0]>[0], "repository" | "sql">,
+    name: string,
+    minutes: number,
+  ) =>
+    Effect.gen(function* () {
+      const rows = yield* context.sql<{ readonly id: Uint8Array }>`
+        SELECT id FROM external_entities WHERE ref = ${ticketRef(name)}`;
+      const found = yield* context.repository.readEntity(uuidToString(rows[0]!.id), {
+        ...environment(minutes),
+        activeKinds: new Set([TICKET_KIND]),
+      });
+      return Option.getOrThrow(found);
+    });
+
+  it("writes nothing for a first sight, then one change each for a new owner and a new status", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { reconcile, sql } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei", status: STATUS_OPEN })], {
+          minutes: 1,
+        });
+        const first = yield* countRows(sql, "external_entity_timeline");
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { owner: "Kofi", status: STATUS_OPEN, sourceUpdatedAt: at(2) })],
+          { minutes: 3 },
+        );
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { owner: "Kofi", status: STATUS_REVIEW, sourceUpdatedAt: at(4) })],
+          { minutes: 5 },
+        );
+        // The same facts again are not news.
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { owner: "Kofi", status: STATUS_REVIEW, sourceUpdatedAt: at(6) })],
+          { minutes: 7 },
+        );
+        return { first, detail: yield* readDetail(context, "t1", 8) };
+      }),
+    );
+    expect(outcome.first).toBe(0);
+    expect(outcome.detail.timeline).toEqual([
+      { reason: "reassigned", sentence: { say: "Now with Kofi", tone: "plain" }, at: at(3) },
+      { reason: "moved", sentence: { say: "Moved to In review", tone: "plain" }, at: at(5) },
+    ]);
+    expect(outcome.detail.latestChange).toEqual(outcome.detail.timeline[1]);
+  });
+
+  it("writes nothing when only the word of a status changes, and a move when its key changes to the same word", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { reconcile } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { status: STATUS_OPEN, statusKey: "open" })], {
+          minutes: 1,
+        });
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { status: STATUS_RENAMED, statusKey: "open", sourceUpdatedAt: at(2) })],
+          { minutes: 3 },
+        );
+        const renamed = (yield* readDetail(context, "t1", 4)).timeline;
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { status: STATUS_RENAMED, statusKey: "raised", sourceUpdatedAt: at(4) })],
+          { minutes: 5 },
+        );
+        return { renamed, moved: (yield* readDetail(context, "t1", 6)).timeline };
+      }),
+    );
+    expect(outcome.renamed).toEqual([]);
+    expect(outcome.moved.map((change) => change.sentence.say)).toEqual(["Moved to Raised"]);
+  });
+
+  it("writes a reassigned change with no person when the owner is cleared, and says Unassigned", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { reconcile, sql } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei" })], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [owned("t1", { sourceUpdatedAt: at(2) })], { minutes: 3 });
+        const stored = yield* sql<{ readonly reason: string; readonly person: string | null }>`
+          SELECT reason, person FROM external_entity_timeline`;
+        return { stored, detail: yield* readDetail(context, "t1", 4) };
+      }),
+    );
+    expect(outcome.stored).toEqual([{ reason: "reassigned", person: null }]);
+    expect(outcome.detail.timeline).toEqual([
+      { reason: "reassigned", sentence: { say: "Unassigned", tone: "plain" }, at: at(3) },
+    ]);
+  });
+
+  it("writes a change when a refresh brings it, and says it in the kind's own words", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { repository, reconcile } = context;
+        const reasonTemplates = {
+          moved: { say: "Now {value} at the tracker", tone: "good" },
+        } as const;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { status: STATUS_OPEN, reasonTemplates })], {
+          minutes: 1,
+        });
+        yield* repository.refresh({
+          connectionId: ACCOUNT_A,
+          observed: [
+            owned("t1", { status: STATUS_REVIEW, reasonTemplates, sourceUpdatedAt: at(2) }),
+          ],
+          environment: environment(3),
+        });
+        return yield* readInbox(repository, 4);
+      }),
+    );
+    expect(outcome.cards[0]!.latestChange).toEqual({
+      reason: "moved",
+      sentence: { say: "Now In review at the tracker", tone: "good" },
+      at: at(3),
+    });
+  });
+
+  it("writes nothing when an older observation from another Connection is refused", async () => {
+    const rows = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { owner: "Mei", status: STATUS_OPEN, sourceUpdatedAt: at(5) })],
+          { minutes: 6 },
+        );
+        yield* reconcile(
+          ACCOUNT_B,
+          [owned("t1", { owner: "Kofi", status: STATUS_REVIEW, sourceUpdatedAt: at(4) })],
+          { minutes: 7 },
+        );
+        return yield* countRows(sql, "external_entity_timeline");
+      }),
+    );
+    expect(rows).toBe(0);
+  });
+
+  it("moves no card, ends no signal, changes no Task and raises no event", async () => {
+    const outcome = await run((context) =>
+      Effect.gen(function* () {
+        const { repository, reconcile, sql } = context;
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei", status: STATUS_OPEN })], {
+          minutes: 1,
+        });
+        const task = yield* linkTaskToRef(ticketRef("t1"), 2);
+        const counts = Effect.all({
+          signals: countRows(sql, "signals"),
+          events: countRows(sql, "events"),
+          tasks: sql`SELECT * FROM tasks`,
+          claims: countRows(sql, "external_entity_relation_claims"),
+        });
+        const cardBefore = (yield* readInbox(repository, 3)).cards[0]!;
+        const before = yield* counts;
+        yield* reconcile(
+          ACCOUNT_A,
+          [owned("t1", { owner: "Kofi", status: STATUS_REVIEW, sourceUpdatedAt: at(4) })],
+          { minutes: 5 },
+        );
+        const after = yield* counts;
+        const cardAfter = (yield* readInbox(repository, 6)).cards[0]!;
+        return { task, before, after, cardBefore, cardAfter };
+      }),
+    );
+    expect(outcome.after).toEqual(outcome.before);
+    expect(outcome.cardAfter).toMatchObject({
+      side: outcome.cardBefore.side,
+      taskId: outcome.task.id,
+      concerns: outcome.cardBefore.concerns,
+      waitingSince: outcome.cardBefore.waitingSince,
+    });
+  });
+
+  it("shows the latest change on the place a Task's linked thing is drawn as, unless it is restricted", async () => {
+    const places = await run(({ repository, reconcile }) =>
+      Effect.gen(function* () {
+        const placeWith = (label: string, minutes: number) => ({
+          ...project({ sourceUpdatedAt: at(minutes), status: label.toLowerCase() }),
+          slots: {
+            ...PROJECT_SLOTS,
+            status: { shape: "ring", tone: "quiet", label },
+          } as EntitySlots,
+        });
+        yield* reconcile(ACCOUNT_A, [placeWith("Planned", 1)], { minutes: 1, kind: PROJECT_KIND });
+        yield* reconcile(ACCOUNT_A, [placeWith("Underway", 2)], { minutes: 2, kind: PROJECT_KIND });
+        const read = () =>
+          repository.readContext({
+            starts: [PROJECT],
+            alsoPlaces: [PROJECT],
+            maxAncestors: MAX_ENTITY_ANCESTORS,
+            maxPlaces: MAX_INBOX_PLACES,
+            environment: environment(3),
+          });
+        const readable = (yield* read()).places;
+        yield* repository.reportMissing({
+          connectionId: ACCOUNT_A,
+          ref: PROJECT,
+          reason: "inaccessible",
+          environment: environment(4),
+        });
+        const restricted = (yield* read()).places;
+        return { readable, restricted };
+      }),
+    );
+    expect(places.readable[0]!.latestChange).toEqual({
+      reason: "moved",
+      sentence: { say: "Moved to Underway", tone: "plain" },
+      at: at(2),
+    });
+    expect(places.restricted[0]).toMatchObject({ restricted: true });
+    expect(places.restricted[0]).not.toHaveProperty("latestChange");
+  });
+
+  it("reads the latest change of every card of the Inbox in the same number of statements for 10 cards as for 100", async () => {
+    const countStatements = (cards: number) =>
+      run(({ repository, reconcile }) =>
+        Effect.gen(function* () {
+          const names = Array.from({ length: cards }, (_, index) => `t${index}`);
+          yield* reconcile(
+            ACCOUNT_A,
+            names.map((name) => owned(name, { owner: "Mei" })),
+            { minutes: 1 },
+          );
+          yield* reconcile(
+            ACCOUNT_A,
+            names.map((name) => owned(name, { owner: "Kofi", sourceUpdatedAt: at(2) })),
+            { minutes: 3 },
+          );
+          const statements: Array<string> = [];
+          const inbox = yield* readInbox(repository, 4).pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+            ),
+          );
+          return { statements, inbox };
+        }),
+      );
+    const small = await countStatements(10);
+    const large = await countStatements(100);
+    expect(large.inbox.cards.every((card) => card.latestChange?.reason === "reassigned")).toBe(
+      true,
+    );
+    expect(large.statements).toHaveLength(small.statements.length);
+  });
+
+  it("deletes the changes of a pruned entity with it", async () => {
+    const rows = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei" })], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Kofi", sourceUpdatedAt: at(2) })], {
+          minutes: 3,
+        });
+        // The ticket leaves the inventory, and 30 days pass.
+        yield* reconcile(ACCOUNT_A, [], { minutes: 4 });
+        yield* repository.pruneEntities(atDay(31));
+        return yield* countRows(sql, "external_entity_timeline");
+      }),
+    );
+    expect(rows).toBe(0);
+  });
+});
+
+describe("a new link from a source as news", () => {
+  const linkedTo = (...refs: ReadonlyArray<string>) => ({
+    complete: true,
+    partOf: [],
+    linked: refs,
+  });
+
+  const readLinkedRows = (sql: SqlClient.SqlClient) =>
+    sql<{
+      readonly ref: string;
+      readonly target_ref: string | null;
+    }>`SELECT ref, target_ref FROM external_entity_timeline
+       WHERE reason = 'linked' ORDER BY id`;
+
+  it("writes one row on each end for a new source link, and none for a repeat or a second Connection", async () => {
+    const rows = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
+        yield* reconcile(
+          ACCOUNT_A,
+          [
+            ticket("t1", { relations: linkedTo(ticketRef("t2")), sourceUpdatedAt: at(2) }),
+            ticket("t2"),
+          ],
+          { minutes: 3 },
+        );
+        const first = yield* readLinkedRows(sql);
+        yield* reconcile(
+          ACCOUNT_A,
+          [
+            ticket("t1", { relations: linkedTo(ticketRef("t2")), sourceUpdatedAt: at(4) }),
+            ticket("t2"),
+          ],
+          { minutes: 5 },
+        );
+        yield* reconcile(
+          ACCOUNT_B,
+          [
+            ticket("t1", { relations: linkedTo(ticketRef("t2")), sourceUpdatedAt: at(6) }),
+            ticket("t2"),
+          ],
+          { minutes: 7 },
+        );
+        return { first, last: yield* readLinkedRows(sql) };
+      }),
+    );
+
+    expect(rows.first).toEqual([
+      { ref: ticketRef("t1"), target_ref: ticketRef("t2") },
+      { ref: ticketRef("t2"), target_ref: ticketRef("t1") },
+    ]);
+    expect(rows.last).toEqual(rows.first);
+  });
+
+  it("writes none for what a thing already carries when it is first seen", async () => {
+    const rows = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t2")], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [ticket("t1", { relations: linkedTo(ticketRef("t2")) })], {
+          minutes: 2,
+          complete: false,
+        });
+        return yield* readLinkedRows(sql);
+      }),
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  describe("an address that a plugin recognized as a ref", () => {
+    const url = "https://forge.example/changes/7";
+    const withUrl = (name: string, minutes: number): ObservedEntity => ({
+      ...ticket(name, {
+        relations: { complete: true, partOf: [], linked: [], linkedUrls: [url] },
+        sourceUpdatedAt: at(minutes),
+      }),
+      recognized: {
+        urlTargets: new Map([[url, { recognized: "ref", ref: ticketRef("t2") }]]),
+        textTargets: new Map(),
+      },
+    });
+
+    it("writes none when its thing is first seen carrying it", async () => {
+      const rows = await run(({ reconcile, sql }) =>
+        Effect.gen(function* () {
+          yield* reconcile(ACCOUNT_A, [ticket("t2")], { minutes: 1 });
+          yield* reconcile(ACCOUNT_A, [withUrl("t1", 2)], { minutes: 2, complete: false });
+          return yield* readLinkedRows(sql);
+        }),
+      );
+
+      expect(rows).toEqual([]);
+    });
+
+    it("writes one row on each end when a thing already known reports it later", async () => {
+      const rows = await run(({ reconcile, sql }) =>
+        Effect.gen(function* () {
+          yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
+          yield* reconcile(ACCOUNT_A, [withUrl("t1", 2)], { minutes: 3, complete: false });
+          yield* reconcile(ACCOUNT_A, [withUrl("t1", 4)], { minutes: 5, complete: false });
+          return yield* readLinkedRows(sql);
+        }),
+      );
+
+      expect(rows.map((row) => [row.ref, row.target_ref])).toEqual([
+        [ticketRef("t1"), ticketRef("t2")],
+        [ticketRef("t2"), ticketRef("t1")],
+      ]);
+    });
+  });
+
+  it("writes none when a person already linked the pair", async () => {
+    const rows = await run(({ reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
+        yield* sql`INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
+          VALUES (${ticketRef("t2")}, 'linked', ${ticketRef("t1")}, 'person', 'user', '', 'current', ${at(1)})`;
+        yield* reconcile(
+          ACCOUNT_A,
+          [
+            ticket("t1", { relations: linkedTo(ticketRef("t2")), sourceUpdatedAt: at(2) }),
+            ticket("t2"),
+          ],
+          { minutes: 3 },
+        );
+        return yield* readLinkedRows(sql);
+      }),
+    );
+
+    expect(rows).toEqual([]);
   });
 });

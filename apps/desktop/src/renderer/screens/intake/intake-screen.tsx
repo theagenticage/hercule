@@ -127,6 +127,7 @@ export function IntakeScreen({
   view,
   pluginId,
   selectedId: selectedIdParam,
+  entityId,
   trackingOpen: trackingOpenParam,
   selectedTaskId: selectedTaskIdParam,
   onSelect,
@@ -140,6 +141,8 @@ export function IntakeScreen({
   /** The pressed source tab, `null` for All. */
   readonly pluginId: string | null;
   readonly selectedId: string | null;
+  /** The thing whose group the To do list scrolls to when it opens, or `null` for none. */
+  readonly entityId: string | null;
   /** Whether Tracking is opened over the list. It shows on To do only. */
   readonly trackingOpen: boolean;
   readonly onSelect: (signalId: string | null) => void;
@@ -664,6 +667,7 @@ export function IntakeScreen({
                 highlight={highlight}
                 menuRowId={menu?.place === "row" ? (menu.signals[0]?.id ?? null) : null}
                 timezone={timezone}
+                scrollToEntityId={view === "to-do" ? entityId : null}
                 focusSelectedRow={focusSelectedRow}
                 empty={
                   toDoClear ? (

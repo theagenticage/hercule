@@ -66,6 +66,7 @@ import type {
   HandoffLeg,
   Harness,
   IgnoreRuleWithCatches,
+  ExternalEntityDetail,
   Inbox,
   Input,
   MemoryDocument,
@@ -136,6 +137,7 @@ import {
   harnessesQuery,
   inboxCountQuery,
   inboxQuery,
+  entityQuery,
   providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
@@ -476,9 +478,21 @@ interface OpenScreens {
   readonly work?: WorkRecords;
   /** What `externalEntity.queryInbox` returns. */
   readonly inbox?: Inbox;
+  /**
+   * What the Inbox's open card reads: the card's detail and the signals its
+   * timeline opens. Given with `inbox`, so the specimen can open the card
+   * without a controller.
+   */
+  readonly inboxOpenCard?: InboxOpenCardRecords;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
+}
+
+/** What the Inbox's open card reads besides the Inbox: the card's detail and the signals of its lines. */
+export interface InboxOpenCardRecords {
+  readonly detail: ExternalEntityDetail;
+  readonly signals: ReadonlyArray<Signal>;
 }
 
 /**
@@ -640,6 +654,7 @@ const seedQueryCache = (
     fleet,
     work,
     inbox,
+    inboxOpenCard,
     run,
     discussions,
     wiki,
@@ -898,6 +913,15 @@ const seedQueryCache = (
   );
   if (inbox !== undefined) {
     queryClient.setQueryData(inboxQuery(client).queryKey, inbox);
+  }
+  if (inboxOpenCard !== undefined) {
+    queryClient.setQueryData(
+      entityQuery(client, inboxOpenCard.detail.id).queryKey,
+      inboxOpenCard.detail,
+    );
+    for (const signal of inboxOpenCard.signals) {
+      queryClient.setQueryData(signalQuery(client, signal.id).queryKey, signal);
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1856,10 +1880,19 @@ export async function mountWorkSpecimen(
  * from `inbox`, with the grouping and the order of Requests the user has not
  * changed. Returns once a row is in the document. Fails when the page has no
  * `#root`, draws no sidebar row and no Inbox row, or tries to read a record the
- * cache does not hold.
+ * cache does not hold. `inboxOpenCard` holds what the open card reads, for a
+ * specimen that opens a card after this returns.
  */
-export async function mountInboxSpecimen(records: SidebarRecords, inbox: Inbox): Promise<void> {
-  await mountShellSpecimen(records, "/inbox", { inbox });
+export async function mountInboxSpecimen(
+  records: SidebarRecords,
+  inbox: Inbox,
+  inboxOpenCard?: InboxOpenCardRecords,
+): Promise<void> {
+  await mountShellSpecimen(
+    records,
+    "/inbox",
+    inboxOpenCard === undefined ? { inbox } : { inbox, inboxOpenCard },
+  );
 }
 
 /**

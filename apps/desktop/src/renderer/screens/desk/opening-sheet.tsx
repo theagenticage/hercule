@@ -35,6 +35,10 @@ export type { SheetOrigin, SheetPlaces } from "./opening-sheet-controller";
  *   destination and fades in and out, with `behind`.
  * - A new `contentKey` while open swaps the words for the new ones in a short
  *   fade and takes the places again, but the sheet stays where it is.
+ * - With `followsContent`, the sheet takes the places again whenever the
+ *   words change height while it is open (a read that answers late, a line
+ *   that opens), so its box is never shorter than its words. The words must
+ *   be one element, whose height is the sheet's height.
  *
  * Props:
  *
@@ -48,6 +52,8 @@ export type { SheetOrigin, SheetPlaces } from "./opening-sheet-controller";
  * - `onClosed`: called once the sheet has closed all the way. A sheet that is
  *   opened again while it closes never calls it.
  * - `className`: added to the sheet, so a page can style its head and parts.
+ * - `followsContent`: whether the sheet grows and shrinks with its words
+ *   (see above). Leave it out for a sheet whose height the page decides.
  * - `behind`: drawn in the layer under the sheet, such as a dimming of the page.
  * - `head`: stands on the sheet's top edge, such as a colleague.
  * - `children`: the words. Opening never takes the focus from the page,
@@ -62,6 +68,7 @@ export function OpeningSheet({
   readPlaces,
   onClosed,
   className,
+  followsContent,
   behind,
   head,
   children,
@@ -72,6 +79,7 @@ export function OpeningSheet({
   readonly readPlaces: () => SheetPlaces;
   readonly onClosed: () => void;
   readonly className?: string;
+  readonly followsContent?: boolean;
   readonly behind?: ReactNode;
   readonly head?: ReactNode;
   readonly children: ReactNode;
@@ -130,6 +138,22 @@ export function OpeningSheet({
     shownKey.current = contentKey;
     controllerRef.current?.swap();
   }, [contentKey]);
+
+  // The words can grow after the sheet was measured. The sheet measures again when they do.
+  useLayoutEffect(() => {
+    const words = contentRef.current?.firstElementChild;
+    if (followsContent !== true || !isOpen || !(words instanceof HTMLElement)) return;
+    let measuredHeight = words.offsetHeight;
+    const observer = new ResizeObserver(() => {
+      if (words.offsetHeight === measuredHeight) return;
+      measuredHeight = words.offsetHeight;
+      controllerRef.current?.remeasure();
+    });
+    observer.observe(words);
+    return () => {
+      observer.disconnect();
+    };
+  }, [followsContent, isOpen, contentKey]);
 
   return (
     <div ref={layerRef} className="opening-layer">

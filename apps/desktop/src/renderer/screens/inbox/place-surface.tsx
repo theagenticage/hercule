@@ -115,6 +115,7 @@ function PlaceHead({
  * - `showStatus` is false when the page is grouped by status, whose heads say
  *   it already.
  * - `monogram` is the user's, for the rows that a Task holds.
+ * - `freshIds` are the cards a signal just landed on, which show the new mark.
  * - `block` is the surface's place on the page, which sets when its words
  *   arrive after the first read.
  *
@@ -126,12 +127,14 @@ export function PlaceSurface({
   plugins,
   showStatus,
   monogram,
+  freshIds,
   block,
 }: {
   readonly surface: InboxSurface;
   readonly plugins: readonly PluginIdentity[];
   readonly showStatus: boolean;
   readonly monogram: string;
+  readonly freshIds: ReadonlySet<string>;
   readonly block: number;
 }): JSX.Element {
   const headingId = useId();
@@ -153,6 +156,8 @@ export function PlaceSurface({
               key={row.card.id}
               card={row.card}
               near={row.near}
+              bundle={row.bundle}
+              freshIds={freshIds}
               plugins={plugins}
               showMark={!isMarkShownByHead(head, readEntityPluginId(row.card.kind))}
               showStatus={showStatus}

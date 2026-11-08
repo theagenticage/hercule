@@ -3,7 +3,7 @@ import type { ModelProfileHarnessChoice, SectionHarness } from "@hercule/client-
 import { ChevronRightIcon } from "../../../icons/chevron-right";
 import { HarnessLogo } from "../../thread/harness-logo";
 import { usePopoverMenu } from "../../use-popover-menu";
-import { joinClassNames } from "./join-class-names";
+import { joinClassNames } from "../../../app/join-class-names";
 import "../../thread/menus.css";
 import "./models.css";
 

@@ -129,22 +129,14 @@ export interface LegHandoff {
   readonly next?: TrackedHandoff;
 }
 
-/** An open Task and one External Ref its provenance carries. */
-export interface OpenTaskOnRef {
-  readonly ref: ExternalRef;
-  readonly id: string;
-  readonly title: string;
-  readonly status: TaskStatus;
-  readonly updatedAt: string;
-}
-
-/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card shows. */
+/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card and Your work show. */
 export interface ActiveTaskOnRef {
   readonly ref: ExternalRef;
   readonly id: string;
   readonly title: string;
   readonly status: TaskStatus;
   readonly stage: TaskStage;
+  readonly updatedAt: string;
 }
 
 /**
@@ -1432,7 +1424,9 @@ const make = Effect.gen(function* () {
     /**
      * Returns the active Task of each of `refs` that has one, by the rule of
      * `findActiveTaskForRef`, in one statement however many refs there are.
-     * A ref with no active Task has no row.
+     * A ref with no active Task has no row, and a Task linking several of the
+     * refs has one row per ref. It reads only the columns of the row, never
+     * the description.
      */
     listActiveTasksForRefs: (
       refs: ReadonlyArray<ExternalRef>,
@@ -1446,8 +1440,9 @@ const make = Effect.gen(function* () {
               readonly title: string;
               readonly status: string;
               readonly stage: string;
+              readonly updated_at: string;
             }>`
-              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage
+              SELECT live.ref, tasks.id, tasks.title, tasks.status, tasks.stage, tasks.updated_at
               FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}) live
               JOIN tasks ON tasks.id = live.task_id
               WHERE live.position = 1 AND live.ref IN ${sql.in(refs)}`,
@@ -1458,6 +1453,7 @@ const make = Effect.gen(function* () {
                 title: row.title,
                 status: row.status as TaskStatus,
                 stage: row.stage as TaskStage,
+                updatedAt: row.updated_at,
               })),
           ),
 
@@ -1505,50 +1501,6 @@ const make = Effect.gen(function* () {
               });
         },
       ),
-
-    /**
-     * Returns, for each open task (status `open` or `in-progress`, not
-     * deleted or merged) whose provenance carries one of `refs`, one row per ref it
-     * carries. It reads only the columns of the row, never the description or
-     * the provenance.
-     *
-     * One statement that starts from the ref index `task_provenance_ref`, so
-     * its work follows the tasks that carry the refs, not the tasks or the
-     * provenance entries there are. The unary `+` on the status keeps SQLite
-     * from starting at the status index and scanning every open task.
-     *
-     * This is not the active Task of a ref (`findActiveTaskForRef`), on
-     * purpose. A handoff continues one Task per thread, the oldest linked.
-     * Your work lists every open Task that carries the thread, so a second
-     * Task made from the same thread still shows. Both rules count a Task as
-     * open exactly while its stage is not finished.
-     */
-    listOpenOnRefs: (
-      refs: ReadonlyArray<ExternalRef>,
-    ): Effect.Effect<ReadonlyArray<OpenTaskOnRef>, SqlError> =>
-      refs.length === 0
-        ? Effect.succeed([])
-        : Effect.map(
-            sql<{
-              readonly ref: string;
-              readonly id: Uint8Array;
-              readonly title: string;
-              readonly status: string;
-              readonly updated_at: string;
-            }>`
-              SELECT DISTINCT p.ref, t.id, t.title, t.status, t.updated_at
-              FROM task_provenance p JOIN tasks t ON t.id = p.task_id
-              WHERE p.ref IN ${sql.in(refs)}
-                AND +t.status IN ('open', 'in-progress') AND ${buildLiveTaskSql("t")}`,
-            (rows) =>
-              rows.map((row) => ({
-                ref: row.ref,
-                id: uuidToString(row.id),
-                title: row.title,
-                status: row.status as TaskStatus,
-                updatedAt: row.updated_at,
-              })),
-          ),
 
     /**
      * Returns the id of the Task that the workspace's row in `task_workspaces`

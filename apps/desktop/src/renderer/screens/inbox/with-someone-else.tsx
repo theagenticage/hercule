@@ -9,6 +9,8 @@ import { RequestCard } from "./request-card";
  * place, under the title, and the page simply gets longer. Nothing is drawn
  * for no cards.
  *
+ * `freshIds` are the cards a signal just landed on, which show the new mark.
+ *
  * The disclosure is a button that says whether it is open. Whether it is open
  * is this component's own client state: it closes when the user leaves the
  * Inbox.
@@ -17,10 +19,12 @@ export function WithSomeoneElse({
   rows,
   plugins,
   monogram,
+  freshIds,
 }: {
   readonly rows: readonly ColumnRow[];
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
+  readonly freshIds: ReadonlySet<string>;
 }): JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false);
   const listId = useId();
@@ -47,6 +51,8 @@ export function WithSomeoneElse({
               key={row.card.id}
               card={row.card}
               homeName={row.homeName}
+              bundle={row.bundle}
+              freshIds={freshIds}
               plugins={plugins}
               monogram={monogram}
               step={index}

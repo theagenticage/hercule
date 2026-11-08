@@ -74,6 +74,7 @@ function NoRequests({
  *   `requests` and `withSomeoneElse` parts.
  * - `plugins` is what `plugin.query` returns, for the marks.
  * - `monogram` is the user's, for the cards that a Task holds.
+ * - `freshIds` are the cards a signal just landed on, which show the new mark.
  * - `isSunriseStill` is false when the user's own move just left no request,
  *   so the small sunrise plays.
  *
@@ -86,6 +87,7 @@ export function RequestsSide({
   onOrderChange,
   plugins,
   monogram,
+  freshIds,
   isSunriseStill,
 }: {
   readonly layout: InboxLayout;
@@ -93,6 +95,7 @@ export function RequestsSide({
   readonly onOrderChange: (order: RequestsOrder) => void;
   readonly plugins: readonly PluginIdentity[];
   readonly monogram: string;
+  readonly freshIds: ReadonlySet<string>;
   readonly isSunriseStill: boolean;
 }): JSX.Element {
   const { requests, withSomeoneElse } = layout;
@@ -115,6 +118,8 @@ export function RequestsSide({
                   key={row.card.id}
                   card={row.card}
                   homeName={row.homeName}
+                  bundle={row.bundle}
+                  freshIds={freshIds}
                   plugins={plugins}
                   monogram={monogram}
                   step={stepOfCard.get(row.card.id) ?? 0}
@@ -130,7 +135,12 @@ export function RequestsSide({
           isSunriseStill={isSunriseStill}
         />
       )}
-      <WithSomeoneElse rows={withSomeoneElse.rows} plugins={plugins} monogram={monogram} />
+      <WithSomeoneElse
+        rows={withSomeoneElse.rows}
+        plugins={plugins}
+        monogram={monogram}
+        freshIds={freshIds}
+      />
     </aside>
   );
 }

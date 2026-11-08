@@ -169,6 +169,7 @@ describe("renderEntitySlots renders", () => {
           opened: { say: "You opened it", tone: "plain" },
           "review-requested": { say: "mei-tanaka asked for your review", tone: "plain" },
         },
+        reasonTemplates: PULL_REQUEST.reasons,
       },
     },
     {
@@ -192,6 +193,7 @@ describe("renderEntitySlots renders", () => {
           { form: "count", value: 1, unit: "file" },
         ],
         concernReasons: { opened: { say: "You opened it", tone: "plain" } },
+        reasonTemplates: PULL_REQUEST.reasons,
       },
     },
     {
@@ -212,6 +214,7 @@ describe("renderEntitySlots renders", () => {
         status: { shape: "ring", tone: "quiet", label: "Open", norm: true },
         facts: [],
         concernReasons: { assigned: { say: "Assigned to you", tone: "plain" } },
+        reasonTemplates: ISSUE.reasons,
       },
     },
     {
@@ -243,6 +246,7 @@ describe("renderEntitySlots renders", () => {
           { form: "bars", level: 2 },
         ],
         reason: { say: "Delivery moved to 5 Dec", tone: "attention" },
+        reasonTemplates: PURCHASE_ORDER.reasons,
       },
     },
     {

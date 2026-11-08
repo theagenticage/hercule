@@ -31,9 +31,22 @@
   }
 }
 
+/* A sheet whose words are taller than the window scrolls inside itself: the
+   drawing's `.o-in { max-height: calc(100vh - 32px); overflow: auto }`. The
+   sheet's height is capped at the window's when it is measured. */
+.open-card-sheet .opening-content {
+  overflow-y: auto;
+}
+
 /* The words of the sheet. Its width is set when the sheet is measured, and its
-   height is the sheet's. */
+   height is the sheet's. The sheet is lighter than --faint was set for on the
+   dark themes, so its words take a step more ink (the drawing's
+   `--faint-on-stock`, on `.open`): the timeline's ages, a linked row's claim
+   and a quiet row's words are faint. Blue Train's stock is lighter still, so a
+   failure takes a lighter tomato. */
 .open-card {
+  --faint: var(--faint-on-stock);
+  --fail-ink: var(--fail-ink-on-stock);
   display: flow-root;
   padding: 12px 0 8px;
   color: var(--ink);
@@ -265,13 +278,18 @@
   white-space: pre;
 }
 
-/* The moves share one grid, so the first column is as wide as the longest name on this card and no wider. */
+/* The moves and the answers of an opened line (`.open-card-answers`) share one column for their names,
+   `--open-card-name-column` wide, so every description starts at the same place down the sheet. */
+.open-card {
+  --open-card-name-column: 136px;
+}
 .open-card-ledger {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
+  grid-template-columns: var(--open-card-name-column) minmax(0, 1fr) auto;
   margin-top: 2px;
   padding: 6px 6px 0;
-  border-top: 1px solid var(--divider);
+  /* Not --divider: on the dark themes it is as dark as the stock, so on a sheet it would not show. */
+  border-top: 1px solid var(--line-soft);
 }
 .open-card-why {
   grid-column: 1 / -1;
@@ -348,4 +366,269 @@
   .open-card-row:focus-visible {
     outline: 2px solid Highlight;
   }
+}
+
+/* ---------- The timeline ---------- */
+/* What happened to the thing and to what is linked to it, oldest first. The
+   drawing's `.o-sec`, `.o-signals`, `.o-signal`, `.o-dot` and `.o-from`
+   (`css/open.css`). Each line has its dot on the rail, or the mark of the
+   linked thing it is about, set on a patch of paper that cuts the rail. */
+.open-card-timeline {
+  padding: 12px 12px 4px 42px;
+}
+.open-card-signals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.open-card-signal {
+  position: relative;
+  padding: 3px 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: var(--line-18);
+}
+/* A line that opens is a button, and one that does not is a div: both are one grid. */
+.open-card-signal-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.open-card-signal-row:hover .open-card-text {
+  color: var(--ink);
+}
+button.open-card-signal-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+.open-card-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.open-card-text small {
+  margin-left: 4px;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.open-card-text q {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  quotes: none;
+}
+.open-card-signal time,
+.open-card-snoozed {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.open-card-snoozed {
+  font: var(--type-meta);
+}
+.signal-dot {
+  position: absolute;
+  left: -14px;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+}
+/* The rail between the dots. */
+.open-card-signal::before {
+  content: "";
+  position: absolute;
+  left: -11.5px;
+  top: 15px;
+  bottom: -9px;
+  width: 1px;
+  background: var(--line-soft);
+}
+.open-card-signal:last-child::before {
+  display: none;
+}
+.open-card-signal.is-latest {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.open-card-signal.is-latest .signal-dot {
+  background: var(--ink);
+}
+/* Not in the drawing, whose lines are all live: a signal that has ended is faint and says what ended it. */
+.open-card-signal.is-resolved,
+.open-card-signal.is-resolved q {
+  color: var(--faint);
+}
+.open-card-signal.is-snoozed {
+  color: var(--muted);
+}
+/* After `.is-latest`, so a linked line is quiet unless a tone wins below. */
+.open-card-signal.is-linked {
+  color: var(--muted);
+}
+.open-card-signal[data-tone="bad"].is-latest {
+  color: var(--fail-ink);
+}
+.open-card-signal[data-tone="bad"].is-latest .signal-dot {
+  background: var(--fail-ink);
+}
+.open-card-signal[data-tone="good"].is-latest {
+  color: var(--ok);
+}
+.open-card-signal[data-tone="good"].is-latest .signal-dot {
+  background: var(--ok);
+}
+.signal-from {
+  position: absolute;
+  left: -18px;
+  top: 6px;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  background: var(--stock);
+  color: var(--mark-ink);
+}
+/* "and 12 more open" and "and 12 older" stand before the first line, with no dot and no rail. Not in the drawing. */
+.open-card-more {
+  padding: 3px 0;
+  color: var(--faint);
+  font-size: var(--t-13);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--line-18);
+}
+.open-card-more button {
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+}
+.open-card-more button:hover,
+.open-card-more button:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+/* The answers of the opened line, under it. They are the Intake ledger (`.ans`), drawn here as the
+   moves under them are: one column for the names, left-aligned, and the descriptions in the moves'
+   column. A row has 4px of padding before it, so the ledger starts 4px early and the name starts
+   where the words of the line do, which is where the text of "Take it" starts. The button that
+   carries the name reaches 6px further left, as the drawing's filled move does, and the ledger
+   reaches the sheet's 6px edge on the right, where the moves end. */
+.open-card-answers {
+  margin: 4px -6px 6px -4px;
+}
+/* 42px narrower than the moves' column: the answers' names start 28px further right (after the moves'
+   monogram), and the moves' column loses 14px to the ledger's and a row's padding. */
+.open-card-answers .ans {
+  grid-template-columns: calc(var(--open-card-name-column) - 42px) minmax(0, 1fr) auto;
+  column-gap: 12px;
+  min-height: 40px;
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--r-sm);
+}
+.open-card-answers .ans > .btn {
+  justify-content: flex-start;
+  justify-self: start;
+  width: auto;
+  max-width: calc(100% + 6px);
+  height: 32px;
+  margin-left: -6px;
+  padding: 0 12px 0 6px;
+}
+.open-card-line-note {
+  margin: 4px 0 6px;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+
+/* ---------- Link something ---------- */
+/* The search under the Linked section: the drawing's `.o-add`, `.o-find`
+   and `.o-found`. */
+.open-card-add {
+  position: relative;
+  margin-top: 2px;
+}
+.open-card-add-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 0 4px;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.open-card-add-go:hover {
+  color: var(--ink);
+}
+.open-card-sources {
+  margin: 2px 0 6px;
+}
+.open-card-find-input {
+  width: 100%;
+  min-height: calc(28px + var(--text-size-step));
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font: var(--type-summary);
+}
+.open-card-find-input::placeholder {
+  color: var(--faint);
+}
+.open-card-found-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.open-card-found {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.open-card-found-go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 24px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  color: inherit;
+  font: var(--type-summary);
+  text-align: left;
+}
+.open-card-found-go:hover,
+.open-card-found-go:focus-visible {
+  background: var(--hover);
+}
+.open-card-found-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--mark-ink);
+}
+.open-card-found-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-card-found-go small {
+  flex: none;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.open-card-found-state {
+  flex: none;
+  color: var(--muted);
 }

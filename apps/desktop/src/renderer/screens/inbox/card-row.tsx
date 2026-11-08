@@ -2,16 +2,22 @@ import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
-import { decideCardFace, describeCardAloud } from "@hercule/client-core/inbox";
+import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
 import { CardMonogram, CardMoves } from "./card-moves";
-import { CardFactText, CardStatus, CardWaitFigure } from "./card-parts";
+import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
+import { buildCardPropsComparer } from "./card-props";
+import { LinkLines } from "./link-lines";
+import { TuckedParts } from "./tucked-parts";
 import { useCardTime } from "./use-card-time";
 
 interface CardRowProps {
   readonly card: InboxCard;
   readonly near: readonly OpenPlaceRow[];
+  readonly bundle: CardBundle;
+  /** The cards a signal just landed on. The row and the cards that ride on it show the new mark. */
+  readonly freshIds: ReadonlySet<string>;
   readonly plugins: readonly PluginIdentity[];
   readonly showMark: boolean;
   readonly showStatus: boolean;
@@ -31,15 +37,10 @@ const isSameNear = (before: readonly OpenPlaceRow[], after: readonly OpenPlaceRo
     );
   });
 
-/**
- * Checks whether two sets of props draw the same row. The layout builds a new
- * `near` list on each read, so the lists are compared by what they draw, and
- * every other prop by identity.
- */
-const arePropsEqual = (before: CardRowProps, after: CardRowProps): boolean =>
-  (Object.keys(after) as (keyof CardRowProps)[]).every((key) =>
-    key === "near" ? isSameNear(before.near, after.near) : Object.is(before[key], after[key]),
-  );
+/** The layout builds a new `near` list on each read, so it is compared by what it draws. */
+const arePropsEqual = buildCardPropsComparer<CardRowProps>({
+  near: (before, after) => isSameNear(before.near, after.near),
+});
 
 /**
  * Renders a card of lasting work as a row on the surface of its place: its
@@ -54,6 +55,10 @@ const arePropsEqual = (before: CardRowProps, after: CardRowProps): boolean =>
  *   says it, so the column closes up.
  * - `monogram` is the user's, which takes the place of the wait once a Task
  *   holds the card.
+ * - `bundle` is what rides on the card and the hints under it. Parts and hints
+ *   stand as siblings of the row inside one `.inbox-bundle`, under the row's
+ *   title, so what the row says and where it lies never depend on them. The
+ *   row's hover fill covers the row only.
  * - `step` is the card's place in its surface, which sets when its words
  *   arrive after the first read.
  * - A card whose facts may be old says so in a quiet line, and a card that
@@ -70,65 +75,92 @@ const arePropsEqual = (before: CardRowProps, after: CardRowProps): boolean =>
 function CardRowView({
   card,
   near,
+  bundle,
+  freshIds,
   plugins,
   showMark,
   showStatus,
   monogram,
   step,
 }: CardRowProps): JSX.Element {
-  const { wait, trust } = useCardTime(card);
+  const { wait, trust, signalAge } = useCardTime(card);
   const face = decideCardFace(card);
   return (
-    <div
-      className="inbox-row"
-      role="listitem"
-      data-card-id={card.id}
-      data-access={card.access === "ok" ? undefined : card.access}
-      data-has-task={card.taskId === undefined ? undefined : ""}
-      tabIndex={-1}
-      aria-label={describeCardAloud(face, wait)}
-      style={{ "--arrive-step": step }}
-    >
-      <span className="card-body">
-        <span className="row-rail">
-          {showMark && (
-            <span className="row-mark">
-              <PluginMark pluginId={face.pluginId} plugins={plugins} size={15} />
-            </span>
-          )}
-          {showStatus && face.status !== undefined && <CardStatus status={face.status} size={15} />}
-        </span>
-        <span className="row-main">
-          <p className="row-title" title={face.title}>
-            {face.title}
-          </p>
-          <span className="row-context">
-            {face.whose !== undefined && <span>{face.whose}</span>}
-            {near.map((place) => (
-              <span key={place.ref}>
-                {place.targetDate === undefined
-                  ? place.title
-                  : `${place.title}, ${formatTargetDate(place.targetDate)}`}
-              </span>
-            ))}
-            {face.facts.map((fact, index) => (
-              <CardFactText key={index} fact={fact} />
-            ))}
-            {face.sentence !== undefined && (
-              <span className="row-news" data-tone={face.sentence.tone}>
-                {face.sentence.text}
+    <div className="inbox-bundle" style={{ "--arrive-step": step }}>
+      <div
+        className="inbox-row"
+        role="listitem"
+        data-card-id={card.id}
+        data-access={card.access === "ok" ? undefined : card.access}
+        data-has-task={card.taskId === undefined ? undefined : ""}
+        tabIndex={-1}
+        aria-label={describeCardAloud(face, wait, bundle.riders.length)}
+      >
+        <span className="card-body">
+          <span className="row-rail">
+            {showMark && (
+              <span className="row-mark">
+                <PluginMark pluginId={face.pluginId} plugins={plugins} size={15} />
               </span>
             )}
+            {showStatus && face.status !== undefined && (
+              <CardStatus status={face.status} size={15} />
+            )}
           </span>
-          {trust !== undefined && <span className="row-trust">{trust}</span>}
+          <span className="row-main">
+            <p className="row-title" title={face.title}>
+              {face.title}
+            </p>
+            <span className="row-context" data-landing-line>
+              {freshIds.has(card.id) && <NewMark />}
+              {face.whose !== undefined && <span>{face.whose}</span>}
+              {near.map((place) => (
+                <span key={place.ref}>
+                  {place.targetDate === undefined
+                    ? place.title
+                    : `${place.title}, ${formatTargetDate(place.targetDate)}`}
+                </span>
+              ))}
+              {face.facts.map((fact, index) => (
+                <CardFactText key={index} fact={fact} />
+              ))}
+              {face.sentence !== undefined && (
+                <span className="row-news" data-landing-sentence data-tone={face.sentence.tone}>
+                  {face.sentence.text}
+                  {signalAge !== undefined && (
+                    <>
+                      {" "}
+                      <small>{signalAge}</small>
+                    </>
+                  )}
+                </span>
+              )}
+            </span>
+            {trust !== undefined && <span className="row-trust">{trust}</span>}
+          </span>
+          <span className="row-end">
+            <span className="row-id">{face.identifier}</span>
+            {wait !== null && <CardWaitFigure wait={wait} />}
+            {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
+          </span>
+          <CardMoves card={card} />
         </span>
-        <span className="row-end">
-          <span className="row-id">{face.identifier}</span>
-          {wait !== null && <CardWaitFigure wait={wait} />}
-          {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
-        </span>
-        <CardMoves card={card} />
-      </span>
+      </div>
+      {bundle.parts.length > 0 && (
+        <TuckedParts
+          leadId={card.id}
+          leadTitle={face.title}
+          parts={bundle.parts}
+          plugins={plugins}
+          freshIds={freshIds}
+        />
+      )}
+      <LinkLines
+        leadId={card.id}
+        leadIdentifier={face.identifier}
+        lines={bundle.lines}
+        plugins={plugins}
+      />
     </div>
   );
 }

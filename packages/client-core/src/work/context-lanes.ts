@@ -52,7 +52,7 @@ export const readPlaceName = (place: EntityPlace): string =>
   place.title ?? describeLockedRow(place);
 
 /** Returns the plural of a noun of the kind table, such as "Project" or "Repository". */
-const pluralizeNoun = (noun: string): string => {
+export const pluralizeNoun = (noun: string): string => {
   if (/[^aeiou]y$/i.test(noun)) return `${noun.slice(0, -1)}ies`;
   return /(s|x|ch|sh)$/i.test(noun) ? `${noun}es` : `${noun}s`;
 };

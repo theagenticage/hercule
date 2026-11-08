@@ -255,9 +255,12 @@ const TABLE = {
   // An External Entity has no grant family of its own: the Inbox is the
   // user's view of what concerns them, and a card becomes a Task, so reading
   // uses `task.read` and every move uses `task.update`, as `modelProfile`
-  // reuses `infra.*`. Take on, undo, dismiss, restore, search and add are the
-  // user's only, which the service checks. Search also needs the Connection
-  // read grant, because it reads through the user's Connections.
+  // reuses `infra.*`. Take on, undo, dismiss, restore, search, add, link and
+  // unlink are the user's only, which the service checks. Search also needs the
+  // Connection read grant, because it reads through the user's Connections.
+  // The Inbox and the detail show the text of signals, so `queryInbox`,
+  // `countInbox` and `read` also need `signal.query`, which the service checks
+  // beside the `task.read` that this table checks.
   "externalEntity.queryInbox": {
     requires: "task.read",
     method: "GET",
@@ -307,6 +310,16 @@ const TABLE = {
     requires: "task.update",
     method: "POST",
     path: "/api/v1/external-entities/add-to-work",
+  },
+  "externalEntity.link": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/links",
+  },
+  "externalEntity.unlink": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/links/remove",
   },
   // An Ignore Rule has no grant family of its own: it is part of how signals
   // are raised. `create` and `delete` are the user's only, which the service

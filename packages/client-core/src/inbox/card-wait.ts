@@ -4,6 +4,8 @@
  */
 import type { EntityRecord } from "@hercule/contract";
 import { describeDeskAge, findNextDeskAgeChange } from "../desk/age";
+import { findNextAgeChange, formatAge } from "../threads/age";
+import { readSentenceSignal, type CardRecord } from "./card-face";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -79,24 +81,41 @@ const countsWait = (card: EntityRecord): boolean =>
   card.pace === "fast" && card.taskId === undefined;
 
 /**
- * Checks whether anything a card shows depends on the time, so that a screen
- * draws it again as time passes: a wait that counts hours and days, or the age
- * of facts that may be old. A card that shows neither never changes by itself.
+ * Returns when the latest signal of `card` landed, if the card draws how long
+ * ago: a row of lasting work, with a sentence from a signal, that no live Task
+ * holds. A request has its wait for that, and a card a Task holds says nothing new.
  */
-export const isCardTimeDependent = (card: EntityRecord): boolean =>
-  countsWait(card) || showsAgeOfFacts(card);
+const readSignalMoment = (card: CardRecord): string | undefined =>
+  card.card === "rich" && card.taskId === undefined
+    ? readSentenceSignal(card)?.createdAt
+    : undefined;
+
+/**
+ * Checks whether anything a card shows depends on the time, so that a screen
+ * draws it again as time passes: a wait that counts hours and days, the age of
+ * facts that may be old, or how long ago its sentence's signal landed. A card that
+ * shows none of them never changes by itself.
+ */
+export const isCardTimeDependent = (card: CardRecord): boolean =>
+  countsWait(card) || showsAgeOfFacts(card) || readSignalMoment(card) !== undefined;
 
 /** Everything a card shows that depends on the time. */
 export interface CardTime {
   readonly wait: CardWait | null;
   readonly trust: string | undefined;
+  /** How long ago the sentence's signal landed, as `formatAge` writes it ("4m"), or `undefined` when the card draws none. */
+  readonly signalAge: string | undefined;
 }
 
-/** Returns the wait and the trust line of `card` at `now`. */
-export const describeCardTime = (card: EntityRecord, now: Date): CardTime => ({
-  wait: describeCardWait(card, now),
-  trust: describeCardTrust(card, now),
-});
+/** Returns the wait, the trust line and the age of the sentence of `card` at `now`. */
+export const describeCardTime = (card: CardRecord, now: Date): CardTime => {
+  const moment = readSignalMoment(card);
+  return {
+    wait: describeCardWait(card, now),
+    trust: describeCardTrust(card, now),
+    signalAge: moment === undefined ? undefined : formatAge(moment, now),
+  };
+};
 
 /** A moment so far off that no timer reaches it: the next change of a card that never changes by itself. */
 const NEVER = new Date(8.64e15);
@@ -106,15 +125,17 @@ const NEVER = new Date(8.64e15);
  * something different for `card`, so a screen sets one timer for it and draws
  * the card only then. It is `NEVER` for a card that is not time dependent.
  *
- * A wait changes in three ways, and the earliest counts:
+ * Four things change over time, and the earliest counts:
  *
  * - its text: the hour figure goes up each whole hour from the second hour
  *   (a wait under two hours reads "1h"), and once past a day, each whole day;
  * - its level, at a quarter of the kind's patience, at the patience, and at
  *   three times it;
- * - the age of the facts in the trust line, which changes by the day or week.
+ * - the age of the facts in the trust line, which changes by the day or week;
+ * - the age of the sentence's signal (`findNextAgeChange`), which changes by
+ *   the minute while it is under an hour old.
  */
-export const findNextCardTimeChange = (card: EntityRecord, now: Date): Date => {
+export const findNextCardTimeChange = (card: CardRecord, now: Date): Date => {
   const changes: number[] = [];
   if (countsWait(card)) {
     const since = Date.parse(card.waitingSince ?? card.firstObservedAt);
@@ -127,5 +148,7 @@ export const findNextCardTimeChange = (card: EntityRecord, now: Date): Date => {
     changes.push(Math.ceil(since + Math.min(nextText, nextLevel ?? Infinity) * HOUR_MS));
   }
   if (showsAgeOfFacts(card)) changes.push(findNextDeskAgeChange(card.observedAt, now).getTime());
+  const moment = readSignalMoment(card);
+  if (moment !== undefined) changes.push(findNextAgeChange(moment, now).getTime());
   return changes.length === 0 ? NEVER : new Date(Math.min(...changes));
 };

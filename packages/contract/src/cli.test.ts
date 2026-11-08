@@ -132,6 +132,8 @@ const COMMANDS: Record<string, string> = {
   "externalEntity.search": "entity search",
   "externalEntity.listSuggestions": "entity suggestions",
   "externalEntity.addToWork": "entity add-to-work",
+  "externalEntity.link": "entity link",
+  "externalEntity.unlink": "entity unlink",
   "ignoreRule.query": "ignore-rule list",
   "ignoreRule.create": "ignore-rule create",
   "ignoreRule.delete": "ignore-rule delete",

@@ -26,7 +26,7 @@ import { useClockValue } from "../../app/age-clock";
 import { useTrackingRows } from "../../app/tracking";
 import { buildLook, Face } from "../../faces";
 import { ExternalIcon } from "../../icons/external";
-import { LedgerAnswer } from "./ledger-answer";
+import { LedgerAnswer } from "../desk";
 import { TrackingTrip } from "./tracking-trip";
 import type { RerunTracking } from "./use-rerun-tracking";
 import type { TakeOffStatus } from "./use-take-off-tracking";

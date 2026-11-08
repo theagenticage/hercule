@@ -1,7 +1,7 @@
 /** Tests walking the board with the keys, over what is on screen. */
 import { describe, expect, it } from "vitest";
 import type { BoardStage } from "@hercule/contract";
-import { arrangeLanes } from "./arrange-lanes";
+import { arrangeLanes, buildStackId } from "./arrange-lanes";
 import { buildBoard, buildCard, buildPlace } from "./cards.testing";
 import { groupBoardByContext } from "./context-lanes";
 import { buildLanes } from "./lanes";
@@ -52,6 +52,8 @@ const LANES = arrangeLanes(
   {
     foldedLaneIds: new Set(["delivery"]),
     openedCellIds: new Set<string>(),
+    openedStackIds: new Set<string>(),
+    stackCandidates: [],
     isFiltering: false,
   },
 );
@@ -66,6 +68,46 @@ const card = (cardId: string): WalkStop => ({
     )?.lane.id ?? "cart",
 });
 const head = (laneId: string): WalkStop => ({ kind: "lane", laneId });
+
+describe("walkBoard over stacks", () => {
+  const cards = [
+    buildCard("ticket", { projectId: "cart", stage: "exploring" }),
+    buildCard("pr1", { projectId: "cart", stage: "exploring" }),
+    buildCard("pr2", { projectId: "cart", stage: "exploring" }),
+    buildCard("after", { projectId: "cart", stage: "exploring" }),
+    buildCard("beside", { projectId: "cart", stage: "planned" }),
+  ];
+  const view = (isOpen: boolean) =>
+    arrangeLanes(buildLanes(buildBoard(...cards), PROJECTS), {
+      foldedLaneIds: new Set<string>(),
+      openedCellIds: new Set<string>(),
+      openedStackIds: new Set(isOpen ? [buildStackId("cart", "ticket")] : []),
+      stackCandidates: [
+        { leadTaskId: "ticket", memberTaskId: "pr1", noun: "pull request" },
+        { leadTaskId: "ticket", memberTaskId: "pr2", noun: "pull request" },
+      ],
+      isFiltering: false,
+    });
+  const stop = (cardId: string): WalkStop => ({ kind: "card", laneId: "cart", cardId });
+
+  it("goes down through the members of an open stack, then on to the next card", () => {
+    const lanes = view(true);
+
+    expect(walkBoard(lanes, stop("ticket"), "down")).toEqual(stop("pr1"));
+    expect(walkBoard(lanes, stop("pr1"), "down")).toEqual(stop("pr2"));
+    expect(walkBoard(lanes, stop("pr2"), "down")).toEqual(stop("after"));
+    expect(walkBoard(lanes, stop("after"), "up")).toEqual(stop("pr2"));
+  });
+
+  it("skips the members of a closed stack, which are not on screen", () => {
+    const lanes = view(false);
+
+    expect(walkBoard(lanes, stop("ticket"), "down")).toEqual(stop("after"));
+    expect(walkBoard(lanes, stop("after"), "up")).toEqual(stop("ticket"));
+    // A member that is not drawn is not a place to start from.
+    expect(walkBoard(lanes, stop("pr1"), "down")).toEqual(stop("ticket"));
+  });
+});
 
 describe("walkBoard", () => {
   it.each<[string, WalkStop, BoardWalk, WalkStop | undefined]>([
@@ -147,6 +189,8 @@ describe("walkBoard", () => {
     const shown = arrangeLanes(groupBoardByContext(board, "acme/project"), {
       foldedLaneIds: new Set<string>(),
       openedCellIds: new Set<string>(),
+      openedStackIds: new Set<string>(),
+      stackCandidates: [],
       isFiltering: false,
     });
     const inLane = (laneId: string, cardId: string): WalkStop => ({ kind: "card", laneId, cardId });

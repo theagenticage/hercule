@@ -640,7 +640,7 @@ describe("resetting a plugin's state", () => {
         const source = (yield* host.listActiveEventSources())[0];
         if (source === undefined) return yield* Effect.die("the fixture registered no source");
         const ingest = yield* IngestLoops;
-        yield* ingest.open(source, connection);
+        yield* ingest.open(source, connection, host.listActiveEventSources);
         yield* Deferred.await(opened);
         const handle = acme.opened[0];
         if (handle === undefined) return yield* Effect.die("the source was never opened");
@@ -945,7 +945,9 @@ describe("shutting the controller down", () => {
         const connection = yield* insertFixtureConnection();
         const source = (yield* host.listActiveEventSources())[0];
         if (source === undefined) return yield* Effect.die("the fixture registered no source");
-        yield* Effect.flatMap(IngestLoops, (ingest) => ingest.open(source, connection));
+        yield* Effect.flatMap(IngestLoops, (ingest) =>
+          ingest.open(source, connection, host.listActiveEventSources),
+        );
         yield* Deferred.await(opened);
       }),
     );

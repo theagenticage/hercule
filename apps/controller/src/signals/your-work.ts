@@ -22,10 +22,12 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns Your work: the open Tasks (status `open` or `in-progress`, not
-     * deleted) whose provenance carries the thread ref of a signal on To do
-     * (open, snoozed or not). Each Task appears once, with the ids of the
-     * open signals it belongs to, in ascending order. The Tasks are ordered by
+     * Returns Your work: the Tasks that are the active Task of the thread ref
+     * of a signal on To do (open, snoozed or not). The active Task of a ref is
+     * the oldest live Task that links it, so one signal belongs to one Task
+     * only, and a second Task that links the same thing shows no signal. Each
+     * Task appears once, with the ids of the open signals it belongs to, in
+     * ascending order. The Tasks are ordered by
      * `updatedAt`, newest first, then by id. It is worked out on every read
      * and never stored.
      *
@@ -41,8 +43,8 @@ const make = Effect.gen(function* () {
      * it can already read the same facts from `signal.query` and `task.query`.
      *
      * It is two statements: the thread refs of the open signals, then the
-     * open Tasks that carry those refs. Neither loads a signal's blocks or a
-     * Task's description or provenance, so the work follows the open signals
+     * active Tasks of those refs. Neither loads a signal's blocks or a
+     * Task's description, so the work follows the open signals
      * and the Tasks that match them, not the Tasks there are. It opens no
      * transaction, so both run on the read-only connection and never wait for a
      * writer. The two are not an atomic snapshot: a signal resolved between
@@ -57,7 +59,7 @@ const make = Effect.gen(function* () {
         for (const { signalId, threadRef } of openThreads) {
           signalIdsByRef.set(threadRef, [...(signalIdsByRef.get(threadRef) ?? []), signalId]);
         }
-        const found = yield* tasks.listOpenOnRefs([...signalIdsByRef.keys()]);
+        const found = yield* tasks.listActiveTasksForRefs([...signalIdsByRef.keys()]);
         const signalIdsByTask = new Map<string, Set<string>>();
         for (const task of found) {
           const signalIds = signalIdsByTask.get(task.id) ?? new Set<string>();

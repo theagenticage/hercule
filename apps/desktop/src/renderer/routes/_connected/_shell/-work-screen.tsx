@@ -29,6 +29,7 @@ import {
   type ControllerInfo,
   type EntityPlace,
   type WorkCard,
+  type WorkStackCandidate,
 } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
@@ -77,6 +78,7 @@ const LOADING_LANES = 3;
 
 const EMPTY_CARDS: readonly WorkCard[] = [];
 const EMPTY_PLACES: readonly EntityPlace[] = [];
+const EMPTY_STACK_CANDIDATES: readonly WorkStackCandidate[] = [];
 
 /** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
 const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
@@ -238,6 +240,8 @@ export function WorkScreen({
   const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds: view.foldedLaneIds,
     openedCellIds: view.openedCellIds,
+    openedStackIds: view.openedStackIds,
+    stackCandidates: drawnBoard?.stackCandidates ?? EMPTY_STACK_CANDIDATES,
     isFiltering: view.isFiltering,
   });
   const shownCards = listShownCards(arrangedLanes);
@@ -564,6 +568,7 @@ export function WorkScreen({
             selectedIds={selection.selectedIds}
             onToggleLane={view.toggleLane}
             onToggleCell={view.toggleCell}
+            onToggleStack={view.toggleStack}
             onAddTask={(laneId) => {
               openAddSheet(toAddLane(laneId), laneId);
             }}

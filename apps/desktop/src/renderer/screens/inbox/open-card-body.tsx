@@ -53,7 +53,7 @@ function OpenCardHead({
 }
 
 /** Renders a section of the sheet under a quiet heading, such as "Part of". */
-function OpenCardSection({
+export function OpenCardSection({
   heading,
   children,
 }: {
@@ -179,8 +179,10 @@ function OpenCardMoves({
  *   sheet says why.
  * - `onWalk` is called with a place's ref when a row of "Part of" is chosen.
  *
- * The sheet leaves a spot for the timeline of signals and for the linked
- * things, which a later slice draws between the facts and the places.
+ * - `timeline` is the timeline of signals, drawn between the facts and the
+ *   places. A card with no timeline says why it is here in one line instead.
+ * - `linked` is the section of the things linked to the card, drawn after
+ *   the places, or `null` before the card's read has answered.
  */
 export function OpenCardBody({
   url,
@@ -192,11 +194,15 @@ export function OpenCardBody({
   onTake,
   onDismiss,
   onSeeTask,
+  timeline,
+  linked,
 }: {
   readonly url: string;
   readonly words: OpenCardWords;
   readonly plugins: readonly PluginIdentity[];
   readonly userMonogram: string;
+  readonly timeline: ReactNode;
+  readonly linked: ReactNode;
   readonly onClose: () => void;
   readonly onWalk: (ref: string) => void;
   readonly onTake: () => void;
@@ -232,17 +238,18 @@ export function OpenCardBody({
         )}
       </div>
       {trust !== undefined && <p className="open-card-trust">{trust}</p>}
-      {words.reason !== undefined && (
-        <p className="open-card-said" data-tone={words.reason.tone}>
-          {words.reason.text}
-        </p>
-      )}
-      {/* Slice 5 draws the timeline of signals here, and the linked things after the places. */}
+      {timeline ??
+        (words.reason !== undefined && (
+          <p className="open-card-said" data-tone={words.reason.tone}>
+            {words.reason.text}
+          </p>
+        ))}
       {places.length > 0 && (
         <OpenCardSection heading="Part of">
           <RelationRows rows={places} plugins={plugins} onWalk={onWalk} />
         </OpenCardSection>
       )}
+      {linked}
       <OpenCardMoves
         words={words}
         pluginName={pluginName}

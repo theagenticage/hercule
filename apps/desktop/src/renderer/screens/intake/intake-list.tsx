@@ -16,7 +16,13 @@ import {
 } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { DONE_ACTION_ID, type HandoffLeg, type Signal, type SignalView } from "@hercule/contract";
+import {
+  DONE_ACTION_ID,
+  type HandoffLeg,
+  type Signal,
+  type SignalEntity,
+  type SignalView,
+} from "@hercule/contract";
 import {
   decideSignalRowControls,
   describeDoneRowOutcome,
@@ -43,7 +49,7 @@ import { AgeLabel } from "../age-label";
 import { HANDOFF_TRIP_SEPARATOR, HandoffTripLine } from "./handoff-trip-line";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
-import { SignalMark } from "./source-mark";
+import { SignalMark, SourceMark } from "./source-mark";
 import { useRowMotion, type RowExitHandler } from "./use-row-motion";
 import { useMeasuredAtTextSize } from "../../app/text-size";
 import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
@@ -60,9 +66,20 @@ export interface BulkHighlight {
   readonly keptIds: ReadonlySet<string>;
 }
 
-/** One drawn line of the list: a section's heading or a signal's row. */
+/**
+ * One drawn line of the list: a section's heading, the header over the
+ * signals about one outside thing, or a signal's row.
+ */
 type ListItem =
   | { readonly kind: "section"; readonly key: string; readonly section: IntakeSection }
+  | {
+      readonly kind: "group";
+      /** Includes the section's key, because the same thing can head a group in Now and in Signals. */
+      readonly key: string;
+      readonly entity: SignalEntity;
+      /** The plugin whose mark the header shows, or `null` for a kind the core owns. */
+      readonly pluginId: string | null;
+    }
   | {
       readonly kind: "row";
       readonly key: string;
@@ -74,35 +91,62 @@ type ListItem =
     };
 
 /**
- * Returns the height of a line, in pixels: a heading is 40px, and a row is
- * 52px with the 2px gap under it, except the last row of a section, which
- * has no gap. The heights are those of the default Text size; `heights` has
- * them at the Text size in use. The list never measures a row. A row's two
+ * Returns the height of a line, in pixels: a heading is 40px, a group's
+ * header 32px, and a row is 52px with the 2px gap under it, except the last
+ * row of a section, which has no gap. The gap under the row above a header
+ * separates the header from it; the header has none under it, so it sits
+ * against its rows. The heights are those of the default Text size;
+ * `heights` has them at the Text size in use. The list never measures a row. A row's two
  * lines never wrap, so these heights are close but not exact: the text's line
  * boxes make a row a fraction of a pixel taller, and the "Back" mark's icon
  * adds 2px more. Drawn rows take their own height, and the rows' box only
  * sets a minimum height, so the error reaches only the spacers that stand in
  * for undrawn rows, never the foot under the list.
  */
-const estimateItemHeight = (heights: IntakeListHeights, item: ListItem): number =>
-  item.kind === "section"
-    ? heights.section
-    : item.lastInSection
-      ? heights.signalRow
-      : heights.signalRow + ROW_GAP;
+const estimateItemHeight = (heights: IntakeListHeights, item: ListItem): number => {
+  switch (item.kind) {
+    case "section":
+      return heights.section;
+    case "group":
+      return heights.group;
+    case "row":
+      return item.lastInSection ? heights.signalRow : heights.signalRow + ROW_GAP;
+  }
+};
 
-/** Returns the sections' headings and rows as one list, in the order they are drawn. */
+/**
+ * Returns the sections' headings, the headers of their groups and their rows
+ * as one list, in the order they are drawn. A group's header comes right
+ * before its first row. The rows are in `section.signals` order, so the keys
+ * `J` and `K` walk are those of the rows alone.
+ */
 const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<ListItem> =>
-  sections.flatMap((section) => [
-    { kind: "section" as const, key: `section:${section.key}`, section },
-    ...section.signals.map((signal, index) => ({
-      kind: "row" as const,
+  sections.flatMap((section) => {
+    const lastSignalId = section.signals.at(-1)?.id;
+    const buildRow = (signal: Signal): ListItem => ({
+      kind: "row",
       key: signal.id,
       signal,
-      lastInSection: index === section.signals.length - 1,
+      lastInSection: signal.id === lastSignalId,
       inNow: section.key === "now",
-    })),
-  ]);
+    });
+    return [
+      { kind: "section" as const, key: `section:${section.key}`, section },
+      ...section.entries.flatMap((entry): ReadonlyArray<ListItem> =>
+        entry.kind === "signal"
+          ? [buildRow(entry.signal)]
+          : [
+              {
+                kind: "group",
+                key: `group:${section.key}:${entry.entity.id}`,
+                entity: entry.entity,
+                pluginId: entry.pluginId,
+              },
+              ...entry.signals.map(buildRow),
+            ],
+      ),
+    ];
+  });
 
 /**
  * Renders the list of `sections` in `view`, with the row of `selectedId`
@@ -119,6 +163,9 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  *   controls stay shown, and anchor the menu.
  * - `timezone` is the user's timezone setting, which the times on Later and
  *   Done rows are read in.
+ * - `scrollToEntityId`, when set, scrolls the list once to the header of the
+ *   group of the signals about that thing, as the Inbox's "and 12 more open"
+ *   asks. Nothing happens while no group is about it.
  * - `onNearEnd` is called while the last rows are drawn, so a paged view
  *   reads its next page before the user reaches the end.
  * - `empty` shows in place of the rows when there are none, and `foot`
@@ -163,6 +210,7 @@ export const IntakeList = memo(function IntakeList({
   highlight,
   menuRowId,
   timezone,
+  scrollToEntityId,
   focusSelectedRow,
   empty,
   foot,
@@ -187,6 +235,8 @@ export const IntakeList = memo(function IntakeList({
   readonly highlight: BulkHighlight | null;
   readonly menuRowId: string | null;
   readonly timezone: string;
+  /** The id of the thing whose group the list scrolls to, or `null` for none. */
+  readonly scrollToEntityId: string | null;
   /** Asks the list to put the focus on the selected row, as `J` and `K` do from the pane. */
   readonly focusSelectedRow: boolean;
   readonly empty: ReactNode;
@@ -224,12 +274,30 @@ export const IntakeList = memo(function IntakeList({
     (item: ListItem) => estimateItemHeight(heights, item),
     [heights],
   );
-  const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines({
-    items,
-    scrollRef,
-    estimateSize,
-    selectedKey: selectedId,
-  });
+  const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected, scrollToKey } =
+    useVirtualLines({
+      items,
+      scrollRef,
+      estimateSize,
+      selectedKey: selectedId,
+    });
+
+  // The entity whose group the list has scrolled to, so a change of the list
+  // afterwards does not scroll again under the user's hands.
+  const scrolledEntityIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (scrollToEntityId === null) {
+      scrolledEntityIdRef.current = null;
+      return;
+    }
+    if (scrolledEntityIdRef.current === scrollToEntityId) return;
+    const group = items.find(
+      (item) => item.kind === "group" && item.entity.id === scrollToEntityId,
+    );
+    if (group === undefined) return;
+    scrolledEntityIdRef.current = scrollToEntityId;
+    scrollToKey(group.key);
+  }, [items, scrollToEntityId, scrollToKey]);
 
   useEffect(() => {
     if (selectedIndex < 0) return;
@@ -255,6 +323,17 @@ export const IntakeList = memo(function IntakeList({
     const { item, onScreen } = line;
     if (item.kind === "section") {
       return <SectionHeading key={item.key} itemKey={item.key} section={item.section} />;
+    }
+    if (item.kind === "group") {
+      return (
+        <GroupHeader
+          key={item.key}
+          itemKey={item.key}
+          entity={item.entity}
+          pluginId={item.pluginId}
+          plugins={plugins}
+        />
+      );
     }
     const work = describeYourWorkOnRow(yourWork.get(item.signal.id)?.tasks ?? [], trackingRows);
     const runId = item.signal.resolution?.runId;
@@ -349,6 +428,38 @@ function SectionHeading({
     </h2>
   );
 }
+
+/**
+ * Renders the header over the signals about one outside thing: its source's
+ * mark, its title and how the source names it, such as `#87`. It is a label
+ * for the rows under it, so it has no actions and takes no pointer, focus or
+ * selection, and `J` and `K` pass over it.
+ */
+const GroupHeader = memo(function GroupHeader({
+  itemKey,
+  entity,
+  pluginId,
+  plugins,
+}: {
+  /** The header's key in the list, which its motion finds it by. */
+  readonly itemKey: string;
+  readonly entity: SignalEntity;
+  readonly pluginId: string | null;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
+}): JSX.Element {
+  return (
+    <h3 className="asks-group" data-item-key={itemKey}>
+      <span className="asks-group-mark">
+        <SourceMark pluginId={pluginId} plugins={plugins} size={16} />
+      </span>
+      <span className="asks-group-title">
+        <b>{entity.title}</b>
+        {/* The space is no layout (a flex container drops it); it keeps the two words apart for a screen reader. */}{" "}
+        <small>{entity.identifier}</small>
+      </span>
+    </h3>
+  );
+});
 
 /** Returns the text of the Done action's describe line, without its marks, for a tooltip. */
 const readDoneLineText = (signal: Signal): string | undefined =>

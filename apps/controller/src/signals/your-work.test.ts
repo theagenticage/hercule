@@ -1,8 +1,8 @@
 /**
  * Tests the Your work read against a migrated test database:
  *
- * - which Tasks it lists: open Tasks that carry the thread ref of an open
- *   signal, snoozed or not, and no other;
+ * - which Tasks it lists: the active Task of the thread ref of an open
+ *   signal, snoozed or not, and no other, so one signal shows on one Task;
  * - what a row holds, and the order of the rows;
  * - who may read it;
  * - the query plan of its two statements.
@@ -13,8 +13,9 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import type { Grant, Signal, TaskStatus } from "@hercule/contract";
+import type { Grant, Signal, TaskStage, TaskStatus } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
+import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository, type NewTask } from "../tasks";
 import { signalRepository } from "./repository";
@@ -28,6 +29,8 @@ const FAR_FUTURE = "9999-01-01T00:00:00.000Z";
 const SIGNAL_1 = "0199e0e7-0005-7000-8000-000000000001";
 const SIGNAL_2 = "0199e0e7-0005-7000-8000-000000000002";
 const SIGNAL_3 = "0199e0e7-0005-7000-8000-000000000003";
+/** The start of a signal id that a digit completes. */
+const SIGNAL_PREFIX = "0199e0e7-0005-7000-8000-00000000000";
 
 const USER: Actor = {
   _tag: "user",
@@ -100,7 +103,7 @@ const readRows = (
   );
 
 describe("signal.queryYourWork", () => {
-  it("lists an open Task that carries the thread ref of an open signal, with that signal's id", async () => {
+  it("lists the open Task that links the thread ref of an open signal, with that signal's id", async () => {
     const rows = await runYourWork(
       USER,
       Effect.gen(function* () {
@@ -109,18 +112,68 @@ describe("signal.queryYourWork", () => {
         yield* inTransaction(
           Effect.gen(function* () {
             yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
+            yield* signals.insert(buildEventSignal(SIGNAL_2, REF_B), []);
             yield* tasks.insert({ ...NEW_TASK, title: "open" });
-            yield* tasks.insert({ ...NEW_TASK, title: "working", status: "in-progress" });
+            yield* tasks.insert({
+              ...NEW_TASK,
+              title: "working",
+              status: "in-progress",
+              provenance: [{ ref: REF_B }],
+            });
           }),
         );
         return (yield* (yield* YourWork).query()).tasks;
       }),
     );
 
-    expect(rows.map((task) => [task.title, task.status, task.updatedAt, task.signalIds])).toEqual([
+    expect(
+      rows.map((task) => [task.title, task.status, task.updatedAt, task.signalIds]).toSorted(),
+    ).toEqual([
       ["open", "open", AT, [SIGNAL_1]],
-      ["working", "in-progress", AT, [SIGNAL_1]],
+      ["working", "in-progress", AT, [SIGNAL_2]],
     ]);
+  });
+
+  it("shows a signal on the active Task of its thread only, the oldest live Task that links the ref, and on the next Task once that one finishes", async () => {
+    const rowsWith = (finishFirst: boolean) =>
+      readRows(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const signals = yield* signalRepository;
+          const tasks = yield* taskRepository;
+          yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
+          const first = yield* tasks.insert({ ...NEW_TASK, title: "first", at: AT });
+          yield* tasks.insert({ ...NEW_TASK, title: "second", at: "2026-10-20T11:00:00.000Z" });
+          if (finishFirst) {
+            yield* sql`UPDATE tasks SET stage = 'done', status = 'done' WHERE id = ${uuidFromString(first.id)}`;
+          }
+        }),
+      );
+
+    expect(await rowsWith(false)).toEqual([`first: ${SIGNAL_1}`]);
+    expect(await rowsWith(true)).toEqual([`second: ${SIGNAL_1}`]);
+  });
+
+  it("follows the links of a Task, never its provenance", async () => {
+    const rows = await readRows(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const signals = yield* signalRepository;
+        const tasks = yield* taskRepository;
+        yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
+        yield* signals.insert(buildEventSignal(SIGNAL_2, REF_B), []);
+        const unlinked = yield* tasks.insert({ ...NEW_TASK, title: "provenance only" });
+        yield* sql`DELETE FROM task_entity_links WHERE task_id = ${uuidFromString(unlinked.id)}`;
+        const linked = yield* tasks.insert({
+          ...NEW_TASK,
+          title: "linked only",
+          provenance: [{ ref: REF_B }],
+        });
+        yield* sql`DELETE FROM task_provenance WHERE task_id = ${uuidFromString(linked.id)}`;
+      }),
+    );
+
+    expect(rows).toEqual([`linked only: ${SIGNAL_2}`]);
   });
 
   it("lists a Task once, with the ids of every open signal it belongs to, however many refs and signals match", async () => {
@@ -197,8 +250,11 @@ describe("signal.queryYourWork", () => {
         const signals = yield* signalRepository;
         const tasks = yield* taskRepository;
         yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
-        for (const status of ["done", "cancelled"] as const satisfies ReadonlyArray<TaskStatus>) {
-          yield* tasks.insert({ ...NEW_TASK, title: status, status });
+        for (const [status, stage] of [
+          ["done", "done"],
+          ["cancelled", "dropped"],
+        ] as const satisfies ReadonlyArray<readonly [TaskStatus, TaskStage]>) {
+          yield* tasks.insert({ ...NEW_TASK, title: status, status, stage });
         }
         const deleted = yield* tasks.insert({ ...NEW_TASK, title: "deleted" });
         yield* tasks.softDelete(deleted.id, AT);
@@ -227,10 +283,15 @@ describe("signal.queryYourWork", () => {
         const tasks = yield* taskRepository;
         yield* inTransaction(
           Effect.gen(function* () {
-            yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
-            yield* tasks.insert({ ...NEW_TASK, title: "oldest", at: "2026-10-20T09:00:00.000Z" });
-            yield* tasks.insert({ ...NEW_TASK, title: "newest", at: "2026-10-20T12:00:00.000Z" });
-            yield* tasks.insert({ ...NEW_TASK, title: "middle", at: "2026-10-20T11:00:00.000Z" });
+            for (const [n, title, at] of [
+              [1, "oldest", "2026-10-20T09:00:00.000Z"],
+              [2, "newest", "2026-10-20T12:00:00.000Z"],
+              [3, "middle", "2026-10-20T11:00:00.000Z"],
+            ] as const) {
+              const ref = `github:pr:acme/api#${String(n)}`;
+              yield* signals.insert(buildEventSignal(`${SIGNAL_PREFIX}${String(n)}`, ref), []);
+              yield* tasks.insert({ ...NEW_TASK, title, at, provenance: [{ ref }] });
+            }
           }),
         );
         return (yield* (yield* YourWork).query()).tasks;
@@ -248,8 +309,11 @@ describe("signal.queryYourWork", () => {
         const tasks = yield* taskRepository;
         yield* inTransaction(
           Effect.gen(function* () {
-            yield* signals.insert(buildEventSignal(SIGNAL_1, REF_A), []);
-            for (let n = 0; n < 5; n++) yield* tasks.insert({ ...NEW_TASK, title: `task ${n}` });
+            for (let n = 0; n < 5; n++) {
+              const ref = `github:pr:acme/api#${String(n)}`;
+              yield* signals.insert(buildEventSignal(`${SIGNAL_PREFIX}${String(n)}`, ref), []);
+              yield* tasks.insert({ ...NEW_TASK, title: `task ${n}`, provenance: [{ ref }] });
+            }
           }),
         );
         return (yield* (yield* YourWork).query()).tasks;
@@ -326,17 +390,19 @@ describe("the query plan of Your work's statements", () => {
 
     // Each of these indexes holds the open signals only, so the scan never
     // reads the resolved ones, which are the vast majority.
-    expect(plan.filter((step) => step.startsWith("SCAN signals"))).toEqual([
-      expect.stringMatching(/^SCAN signals USING (COVERING )?INDEX signals_open/),
+    // The planner may scan the open index in order, or search the open
+    // index on the thread ref (`thread_ref > ?`).
+    expect(plan.filter((step) => /^(SCAN|SEARCH) signals/.test(step))).toEqual([
+      expect.stringMatching(/^(SCAN|SEARCH) signals USING (COVERING )?INDEX signals_open/),
     ]);
     expect(plan.some((step) => step.includes("sqlite_autoindex_signals"))).toBe(false);
   });
 
-  it("starts the Task statement from the provenance ref index, not from the status index or a scan of the Tasks", async () => {
-    const plan = await planOf("FROM task_provenance");
+  it("starts the Task statement from the link ref index, not from the status index or a scan of the Tasks or the links", async () => {
+    const plan = await planOf("FROM task_entity_links");
 
-    expect(plan).toContain("SEARCH p USING INDEX task_provenance_ref (ref=?)");
+    expect(plan).toContain("SEARCH l USING INDEX task_entity_links_ref (ref=?)");
     expect(plan.some((step) => step.includes("tasks_status"))).toBe(false);
-    expect(plan.some((step) => step.startsWith("SCAN"))).toBe(false);
+    expect(plan.some((step) => /^SCAN (l|tasks|t)\b/.test(step))).toBe(false);
   });
 });

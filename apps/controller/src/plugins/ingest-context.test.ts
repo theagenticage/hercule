@@ -53,12 +53,16 @@ const runWithContext = <A, E>(
       if (source === undefined) return yield* Effect.die("the fixture registered no source");
       const contexts = yield* ingestContexts;
       return yield* body(
-        contexts.buildIngestContext(source, {
-          id: connection.id,
-          config: {},
-          accountId: connection.accountId,
-          displayName: connection.displayName,
-        }),
+        contexts.buildIngestContext(
+          source,
+          {
+            id: connection.id,
+            config: {},
+            accountId: connection.accountId,
+            displayName: connection.displayName,
+          },
+          host.listActiveEventSources,
+        ),
         connection.id,
       );
     }).pipe(Effect.provide(buildPluginStack()), asUser),

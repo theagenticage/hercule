@@ -1,5 +1,15 @@
 /** Test cards for the Inbox, in the invented Northwind Market world. */
-import type { Connection, EntityPlace, Inbox, InboxCard, PluginDetail } from "@hercule/contract";
+import type {
+  Connection,
+  EntityHint,
+  EntityLink,
+  EntityPeer,
+  EntityPlace,
+  EntitySignalLine,
+  Inbox,
+  InboxCard,
+  PluginDetail,
+} from "@hercule/contract";
 
 /**
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
@@ -30,6 +40,7 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   ancestors: [],
   contextComplete: true,
   side: "ongoing",
+  signals: { openCount: 0 },
   ...overrides,
 });
 
@@ -71,14 +82,83 @@ export const buildInboxPlace = (
   ...overrides,
 });
 
+/**
+ * Returns a link between two refs under the claim given: a `source` claim of
+ * the invented `acme` plugin, or a `person` claim of the user.
+ */
+export const buildInboxLink = (
+  fromRef: string,
+  toRef: string,
+  type: EntityLink["claim"]["type"] = "source",
+  hasPersonClaim: boolean = type === "person",
+): EntityLink => ({
+  fromRef,
+  toRef,
+  hasPersonClaim,
+  claim: type === "source" ? { type, plugin: "acme" } : { type, actor: "user" },
+});
+
+/** Returns a hint: `fromRef` mentions `toRef` in its description. */
+export const buildInboxHint = (fromRef: string, toRef: string): EntityHint => ({
+  fromRef,
+  toRef,
+  evidenceKey: "description",
+});
+
+/**
+ * Returns a peer: a linked record with no card of its own, named by an
+ * identifier made from its ref. `overrides` change any field, and
+ * `withoutIdentifier` leaves the identifier out, as a source that has none does.
+ */
+export const buildInboxPeer = (
+  ref: string,
+  overrides: Partial<EntityPeer> = {},
+  withoutIdentifier = false,
+): EntityPeer => {
+  const { identifier, ...rest } = {
+    ref,
+    kind: "acme/ticket",
+    noun: "Ticket",
+    identifier: ref.slice(ref.lastIndexOf(":") + 1).toUpperCase(),
+    title: `Peer ${ref}`,
+    yours: false,
+    restricted: false,
+    ...overrides,
+  };
+  return withoutIdentifier || identifier === undefined ? rest : { ...rest, identifier };
+};
+
+/**
+ * Returns a signal line landed at `createdAt`, whose sentence is `say`. The
+ * kind is the invented `acme/review-requested`. `overrides` change any field.
+ */
+export const buildSignalLine = (
+  id: string,
+  say: string,
+  overrides: Partial<EntitySignalLine> = {},
+): EntitySignalLine => ({
+  id,
+  kind: "acme/review-requested",
+  title: say,
+  priority: "normal",
+  status: "open",
+  createdAt: "2026-11-07T09:00:00.000Z",
+  say: { say, tone: "plain" },
+  snoozed: false,
+  ...overrides,
+});
+
 /** Returns an Inbox of these cards, in this order, with the places and edges given. */
 export const buildInbox = (
   cards: readonly InboxCard[],
-  context: Partial<Pick<Inbox, "places" | "edges">> = {},
+  context: Partial<Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers">> = {},
 ): Inbox => ({
   cards,
   places: [],
   edges: [],
+  links: [],
+  hints: [],
+  peers: [],
   counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
   truncated: false,
   ...context,

@@ -64,6 +64,7 @@ import {
   PipelineLayer,
   Placement,
   SignalBuildFailuresLayer,
+  SignalEntitiesLayer,
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
@@ -328,7 +329,9 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       )
       .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
       .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
-      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)));
+      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
+      .handle("link", ({ payload }) => withApiErrors(entities.link(payload)))
+      .handle("unlink", ({ payload }) => withApiErrors(entities.unlink(payload)));
   }),
 );
 
@@ -1085,7 +1088,7 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer)),
+      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer), Layer.provide(SignalEntitiesLayer)),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
@@ -1113,7 +1116,12 @@ const operationServices = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
-      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
+      Layer.provide(
+        SignalRaisesLayer.pipe(
+          Layer.provide(BoundOperationsDomainLayer),
+          Layer.provide(SignalEntitiesLayer),
+        ),
+      ),
       Layer.provide(RunDomainLayer),
     ),
   ).pipe(

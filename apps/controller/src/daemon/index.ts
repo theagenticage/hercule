@@ -91,9 +91,12 @@ export {
 export {
   EntityObservationsLayer,
   IngestExecutorLayer,
+  ClaimResolverInterval,
   EntityPruneInterval,
   IngestReconcileInterval,
   OpenSignalsLayer,
+  SignalEntitiesLayer,
+  runClaimResolverLoop,
   runEntityPruneLoop,
   runIngestReconciler,
 } from "./ingest";

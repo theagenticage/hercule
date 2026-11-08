@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { Signal } from "@hercule/contract";
+import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import { buildSignalAnswers } from "@hercule/client-core";
 import { SignalAnswers } from "./signal-answers";
 
@@ -49,6 +49,7 @@ describe("SignalAnswers", () => {
           locked={false}
           failure={null}
           idPrefix="test"
+          shortcutFor={() => null}
           onOpenReply={nothing}
           onDraftChange={nothing}
           onAct={nothing}
@@ -59,4 +60,34 @@ describe("SignalAnswers", () => {
       expect(container.querySelector(".ans .btn .cr")).not.toBeNull();
     },
   );
+
+  it("shows the key the caller gives beside an answer, and none when the caller gives none", () => {
+    const signal = buildSignal({
+      op: "signal.handOff",
+      input: { signalId: "s", workflowId: WORKFLOW_ID },
+    });
+    const withDone: Signal = {
+      ...signal,
+      actions: [...signal.actions, { id: DONE_ACTION_ID, label: "Mark done", operation: null }],
+    };
+    const { container } = render(
+      <SignalAnswers
+        answers={buildSignalAnswers(withDone)}
+        openReplyId={null}
+        drafts={{}}
+        locked={false}
+        failure={null}
+        idPrefix="test"
+        shortcutFor={(answer) => (answer.action.id === DONE_ACTION_ID ? "E" : null)}
+        onOpenReply={nothing}
+        onDraftChange={nothing}
+        onAct={nothing}
+        platform="mac"
+      />,
+    );
+
+    expect(
+      [...container.querySelectorAll(".ans")].map((row) => row.querySelector("kbd")?.textContent),
+    ).toEqual([undefined, "E"]);
+  });
 });

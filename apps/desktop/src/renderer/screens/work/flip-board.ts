@@ -4,9 +4,16 @@ import {
   type FlipByKeyOptions,
   type SpringName,
 } from "../../app/motion";
+import { findStack, findStackLead } from "./dragged-card";
 
-/** What moves when the board changes: cards, lane heads, the counts of folded lanes and the "13 more" lines. */
-const MOVABLE_SELECTOR = "[data-card-id], [data-lane-head], [data-fold-row], [data-more-cell-id]";
+/**
+ * What moves when the board changes: cards, lane heads, the counts of folded
+ * lanes, the "13 more" lines and the sheets of stacks. A sheet stands beside
+ * its lead card, not inside it, so it needs its own key or it would snap while
+ * its lead glides.
+ */
+const MOVABLE_SELECTOR =
+  "[data-card-id], [data-lane-head], [data-fold-row], [data-more-cell-id], [data-stack-bar]";
 
 /**
  * Returns the key of each card element under `root`, in the places
@@ -38,9 +45,18 @@ export const buildCardKeys = (root: ParentNode): ReadonlyMap<Element, string> =>
 const buildMotionKeyReader =
   (cardKeys: () => ReadonlyMap<Element, string>) =>
   (element: HTMLElement): string | null => {
-    if (element.hasAttribute("data-dragged")) return null;
-    const { laneHead, foldRow, moreCellId } = element.dataset;
+    // Also what stands in a stack that is hidden because its lead is in the hand: it has no place to move from.
+    if (element.closest("[data-dragged]") !== null) return null;
+    const { laneHead, foldRow, moreCellId, stackBar } = element.dataset;
     if (element.dataset["cardId"] !== undefined) return cardKeys().get(element) ?? null;
+    // The sheet is keyed by its lead card, which stands in the same stack. The
+    // lead's key tells copies of a Task in two lanes apart.
+    if (stackBar !== undefined) {
+      const stack = findStack(element);
+      const lead = stack === null ? null : findStackLead(stack);
+      const leadKey = lead === null ? undefined : cardKeys().get(lead);
+      return leadKey === undefined ? null : `stack:${leadKey}`;
+    }
     if (laneHead !== undefined) return `head:${laneHead}`;
     if (foldRow !== undefined) return `fold:${foldRow}`;
     if (moreCellId !== undefined) return `more:${moreCellId}`;

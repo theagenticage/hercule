@@ -1,6 +1,6 @@
 /**
  * The ingest handle of one Linear Connection: what the host calls to poll its
- * two feeds, `issues` and `notifications`.
+ * three feeds, `issues`, `notifications` and `entities`.
  *
  * Every poll reads the credentials afresh, so a refreshed token is used from
  * the next poll on.
@@ -17,6 +17,7 @@ import {
 } from "@hercule/plugin-host";
 import { buildAuthorization } from "../api";
 import { LinearConnectionConfig } from "../connection-type";
+import { pollLinearEntities } from "./entities";
 import { pollLinearIssues } from "./issues";
 import { pollLinearNotifications } from "./notifications";
 
@@ -48,6 +49,13 @@ export const pollWithConnection = (
         return yield* pollLinearIssues(authorization, config, context);
       case "notifications":
         return yield* pollLinearNotifications(authorization, context);
+      case "entities":
+        return context.entities === undefined
+          ? yield* new PluginError({
+              message:
+                "The host gave the Linear plugin no way to report entities, so the entities feed cannot run.",
+            })
+          : yield* pollLinearEntities(authorization, context.entities);
       default:
         return yield* new PluginError({
           message: `The Linear event source has no feed "${feed}".`,

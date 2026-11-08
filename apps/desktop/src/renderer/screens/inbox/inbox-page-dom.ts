@@ -6,8 +6,19 @@
 import type { InboxStop } from "@hercule/client-core/inbox";
 import type { OpenTarget } from "./use-open-card";
 
-/** Matches the element of a card that has moves: a row of lasting work or a request. Pointers ("Also in ...") are not cards. */
-export const CARD_SELECTOR = ".inbox-row[data-card-id], .inbox-request[data-card-id]";
+/**
+ * Matches the element of a card that has moves: a row of lasting work, a
+ * request, or a part that rides on a row and asks something of the user.
+ * Pointers ("Also in ..."), quiet and locked parts, and hints are not cards.
+ */
+export const CARD_SELECTOR =
+  ".inbox-row[data-card-id], .inbox-request[data-card-id], .inbox-part[data-card-id]";
+
+/** Matches what a row or a request is the first element of, the wrapper that holds the card with the parts and hints under it. */
+const BUNDLE_SELECTOR = ".inbox-bundle";
+
+/** Matches the card of a bundle that stands in a list of its own: a row or a request, never a part. */
+const LEAD_SELECTOR = ":scope > .inbox-row[data-card-id], :scope > .inbox-request[data-card-id]";
 
 /** Returns the element of the card `id` under `root`, or `null` when the page does not show it. */
 export const findCardElement = (root: ParentNode, id: string): HTMLElement | null =>
@@ -40,24 +51,35 @@ export const readCardId = (element: Element | null): string | null =>
   readCardElement(element)?.dataset["cardId"] ?? null;
 
 /**
+ * Returns the id of the card that rises into the place of `element` when it
+ * leaves: the card of the next bundle in the same list, or `undefined` when
+ * something else, or nothing, follows (a heading, a pointer row, the end of the
+ * list). A part has none: its neighbour is another part, which would not rise
+ * into its place, only close up under it.
+ */
+const readFollowingCardId = (element: HTMLElement): string | undefined => {
+  if (element.classList.contains("inbox-part")) return undefined;
+  const next = element.closest(BUNDLE_SELECTOR)?.nextElementSibling;
+  if (!(next instanceof HTMLElement) || !next.matches(BUNDLE_SELECTOR)) return undefined;
+  return next.querySelector<HTMLElement>(LEAD_SELECTOR)?.dataset["cardId"];
+};
+
+/**
  * Returns every card on the page as a stop, in the order the page draws them:
- * the wide side first, then the narrow column. A card with a live Task carries
- * `data-has-task` and no longer waits for the user. A card is followed by the
- * card that is its next sibling in the list, if the next sibling is a card:
- * headings stand outside the lists, and pointer rows are not cards.
+ * the wide side first, then the narrow column, and a part right after its
+ * lead. A card with a live Task carries `data-has-task` and no longer waits for
+ * the user. A row or a request is followed by the card of the next bundle of
+ * its list, if there is one: headings stand outside the lists, and pointer rows
+ * are not bundles. A part is followed by nothing.
  */
 export const readInboxStops = (root: ParentNode): readonly InboxStop[] =>
   Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR), (element) => {
     const rect = element.getBoundingClientRect();
-    const below = element.nextElementSibling;
     return {
       id: element.dataset["cardId"] ?? "",
       column: element.closest(".inbox-narrow") === null ? "wide" : "narrow",
       middle: rect.top + rect.height / 2,
       waits: !element.hasAttribute("data-has-task"),
-      followedBy:
-        below instanceof HTMLElement && below.matches(CARD_SELECTOR)
-          ? below.dataset["cardId"]
-          : undefined,
+      followedBy: readFollowingCardId(element),
     };
   });

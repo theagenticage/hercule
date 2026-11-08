@@ -5,6 +5,9 @@
  * lies. A visit holds, for each card:
  *
  * - its side (a card that gets a Task keeps its column);
+ * - the lead it rides on, if any (a read that says a card now rides on a
+ *   ticket does not move it out of Requests, and one that says it no longer
+ *   does not take it from under the ticket);
  * - its row: the order of the cards inside each list, which is the order they
  *   joined the visit in;
  * - on the wide side, the surfaces it lies on and which of them draws it in
@@ -14,10 +17,15 @@
  * A card new to the visit is placed as the read says. It joins the end of its
  * list, and its surface or group, if it is new too, joins at the end. The
  * user's own Group by or Requests order starts the surfaces or groups over, and
- * so does the next visit. The order of the rows inside a list is held until the
- * next visit even then: the user asked for other lists, not for other rows.
+ * so does the next visit. The user's own Link and Unlink are the one thing that
+ * changes what a card rides on during a visit, and the placement is where that
+ * is decided too: it holds the moves the controller has not answered yet
+ * (`pendingMoves`) and the steps that answer them (`startRidingMove`,
+ * `settleRidingMove`, `refuseRidingMove`). The order of the rows inside a list
+ * is held until the next visit even then: the user asked for other lists, not
+ * for other rows.
  */
-import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
+import type { EntityUnlinkResult, Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { PLACE_GROUPING, resolveGrouping, type InboxGrouping } from "./groupings";
 import {
   compareSurfaceHeads,
@@ -49,6 +57,15 @@ export interface HeldCard {
   /** The side the card was first seen on. */
   readonly side: InboxSide;
   /**
+   * The ref of the lead the card rode on when it was first seen, or where the
+   * last answered Link or Unlink of the user left it. `undefined` for a card
+   * that rides on nothing. The moves still waiting for an answer are not in it
+   * (`VisitPlacement.pendingMoves`; `readRidesOn` adds them). A card rides only
+   * while that lead is a card of the page, so a dismissed lead sets it free and
+   * the lead's return takes it back.
+   */
+  readonly ridesOn: string | undefined;
+  /**
    * The position of the card in the order the cards joined the visit, for
    * every list it can lie in. A card that is gone from the reads keeps its
    * position, so one the user dismissed and undid lies where it did.
@@ -67,6 +84,27 @@ export interface HeldCard {
    * orders the requests differently.
    */
   readonly requestGroup: string | undefined;
+}
+
+/**
+ * What a Link or Unlink does to the card that can ride on one end of the pair
+ * (a request) and the lead at the other end (a card of lasting work).
+ *
+ * - A link puts the card on `leadRef` when it rode on nothing. A card that
+ *   rides on another lead keeps it.
+ * - An unlink takes the card off `leadRef` when it rode on that lead. A card
+ *   that rides on another lead keeps it.
+ */
+export interface RidingMove {
+  readonly direction: "link" | "unlink";
+  readonly cardId: string;
+  readonly leadRef: string;
+}
+
+/** A `RidingMove` the controller has not answered yet. */
+export interface PendingRidingMove extends RidingMove {
+  /** Names the user's gesture, so its answer can find the move. */
+  readonly gesture: number;
 }
 
 /** What a visit holds of where cards lie. Build it with `placeInboxCards`. */
@@ -93,6 +131,14 @@ export interface VisitPlacement {
   readonly requestsOrder: RequestsOrder;
   /** The position of each group, by key, in the order the groups joined the visit. */
   readonly groupRank: ReadonlyMap<string, number>;
+  /**
+   * The Links and Unlinks the user made that the controller has not answered,
+   * in the order they were made. They show on the page at once, but they are
+   * never written into `HeldCard.ridesOn`: the card's place is worked out from
+   * the settled place and these moves each time (`readRidesOn`). That is why a
+   * refused move can be dropped without undoing a move made after it.
+   */
+  readonly pendingMoves: readonly PendingRidingMove[];
 }
 
 /** A visit that holds nothing yet. */
@@ -103,6 +149,87 @@ export const NO_PLACEMENT: VisitPlacement = {
   surfaceRank: new Map(),
   requestsOrder: "oldest",
   groupRank: new Map(),
+  pendingMoves: [],
+};
+
+/** Checks whether the visit has placed a read yet, which is when it starts to hold cards in place. */
+export const hasPlacedCards = (placement: VisitPlacement): boolean =>
+  placement.requestedGrouping !== undefined;
+
+/** Returns the ref of the lead a card rides on after `move`, given the ref it rode on before. */
+const playRidingMove = (ridesOn: string | undefined, move: RidingMove): string | undefined => {
+  if (move.direction === "link") return ridesOn ?? move.leadRef;
+  return ridesOn === move.leadRef ? undefined : ridesOn;
+};
+
+/**
+ * Returns the ref of the lead `card` is drawn riding on, or `undefined` when
+ * it stands alone: the place the visit holds, with the pending moves played in
+ * the order they were made. A card the visit has not placed yet rides as its
+ * read says. Link and Unlink are planned from this place, because a later read
+ * may say otherwise while a move waits for the controller's answer.
+ */
+export const readRidesOn = (placement: VisitPlacement, card: InboxCard): string | undefined => {
+  const held = placement.cards.get(card.id);
+  let ridesOn = held === undefined ? card.ridesOn : held.ridesOn;
+  for (const move of placement.pendingMoves) {
+    if (move.cardId === card.id) ridesOn = playRidingMove(ridesOn, move);
+  }
+  return ridesOn;
+};
+
+/** Returns `placement` with `move` waiting for the controller's answer, as part of `gesture`. */
+export const startRidingMove = (
+  placement: VisitPlacement,
+  gesture: number,
+  move: RidingMove,
+): VisitPlacement => ({
+  ...placement,
+  pendingMoves: [...placement.pendingMoves, { ...move, gesture }],
+});
+
+/**
+ * Returns `placement` once the controller has answered `gesture`, or
+ * `placement` itself when `gesture` has no move waiting. The move is played on
+ * the settled place of its card and leaves the pending moves. The exception is
+ * an unlink whose answer says a claim of a source still joins the pair
+ * (`remaining`): the card still rides, so its place stays. A move that waits
+ * behind it is not touched.
+ */
+export const settleRidingMove = (
+  placement: VisitPlacement,
+  gesture: number,
+  remaining: EntityUnlinkResult["remaining"],
+): VisitPlacement => {
+  const answered = placement.pendingMoves.find((move) => move.gesture === gesture);
+  if (answered === undefined) return placement;
+  const held = placement.cards.get(answered.cardId);
+  const didChangeRiding = !(answered.direction === "unlink" && remaining === "source");
+  const cards =
+    held === undefined || !didChangeRiding
+      ? placement.cards
+      : new Map(placement.cards).set(answered.cardId, {
+          ...held,
+          ridesOn: playRidingMove(held.ridesOn, answered),
+        });
+  return {
+    ...placement,
+    cards,
+    pendingMoves: placement.pendingMoves.filter((move) => move !== answered),
+  };
+};
+
+/**
+ * Returns `placement` once the controller has refused `gesture`, or
+ * `placement` itself when `gesture` has no move waiting. The move is dropped
+ * and the card stays where its settled place and the moves made after the
+ * refused one put it.
+ */
+export const refuseRidingMove = (placement: VisitPlacement, gesture: number): VisitPlacement => {
+  const kept = placement.pendingMoves.filter((move) => move.gesture !== gesture);
+  return kept.length === placement.pendingMoves.length
+    ? placement
+    : { ...placement, pendingMoves: kept };
 };
 
 /** Compares the keys of two request groups: the halves of "yours first" in order, places by name, and "Elsewhere" last. */
@@ -153,6 +280,9 @@ const appendRanks = <Key extends string>(
  *   Group by is resolved against what `inbox` offers only then, once, and the
  *   result is held with the choice, so a kind of place that leaves the replies
  *   later does not move cards. Sides and positions are never dropped.
+ * - What a card rides on is held like its side. Only an answered Link or
+ *   Unlink of the user changes it (`settleRidingMove`). `held.pendingMoves`
+ *   are carried over as they are.
  */
 export const placeInboxCards = (
   inbox: Inbox,
@@ -167,9 +297,11 @@ export const placeInboxCards = (
 
   // A card keeps its side and position always; its surfaces and its group only for the same choice.
   const cards = new Map<string, HeldCard>();
+  let isChanged = !keepsSurfaces || !keepsGroups;
   for (const [id, card] of held.cards) {
     cards.set(id, {
       side: card.side,
+      ridesOn: card.ridesOn,
       rank: card.rank,
       heads: keepsSurfaces ? card.heads : undefined,
       requestGroup: keepsGroups ? card.requestGroup : undefined,
@@ -177,7 +309,6 @@ export const placeInboxCards = (
   }
   const newHeads = new Map<string, SurfaceHead>();
   const newGroups = new Set<string>();
-  let isChanged = !keepsSurfaces || !keepsGroups;
 
   for (const card of oldestFirst) {
     const seen = cards.get(card.id);
@@ -197,7 +328,8 @@ export const placeInboxCards = (
       if (!(keepsGroups && held.groupRank.has(requestGroup))) newGroups.add(requestGroup);
       isChanged = true;
     }
-    cards.set(card.id, { side, rank: seen?.rank ?? cards.size, heads, requestGroup });
+    const ridesOn = seen === undefined ? card.ridesOn : seen.ridesOn;
+    cards.set(card.id, { side, ridesOn, rank: seen?.rank ?? cards.size, heads, requestGroup });
   }
   if (!isChanged) return held;
 
@@ -216,5 +348,6 @@ export const placeInboxCards = (
       [...newGroups],
       compareGroupKeys,
     ),
+    pendingMoves: held.pendingMoves,
   };
 };

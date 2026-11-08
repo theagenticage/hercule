@@ -100,6 +100,12 @@
   inherits: true;
   initial-value: 40px;
 }
+/* The header over the signals about one outside thing in Intake's list, one line. */
+@property --intake-height-group {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
 /* A signal's row in Intake's list, two lines. */
 @property --intake-height-row {
   syntax: "<length>";
@@ -180,6 +186,7 @@
   --list-height-column-row: calc(46px + 2 * var(--text-size-step));
 
   --intake-height-section: calc(40px + var(--text-size-step));
+  --intake-height-group: calc(32px + var(--text-size-step));
   --intake-height-row: calc(52px + 2 * var(--text-size-step));
   --tracking-height-row: calc(46px + 2 * var(--text-size-step));
 

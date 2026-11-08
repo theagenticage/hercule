@@ -68,7 +68,7 @@ describe("what the linear plugin registers", () => {
     expect(linear.manifest).toMatchObject({
       id: "linear",
       displayName: "Linear",
-      capabilities: ["connections", "event-sources", "events"],
+      capabilities: ["connections", "event-sources", "events", "entities"],
     });
     expect(linear.manifest.mark?.paths).toHaveLength(1);
   });
@@ -101,7 +101,7 @@ describe("what the linear plugin registers", () => {
     expect(type?.device).toBeUndefined();
   });
 
-  it("contributes one event source with both feeds and every kind", async () => {
+  it("contributes one event source with its three feeds and every kind", async () => {
     const [source, ...others] = (await collectContributions(linear)).sources;
 
     expect(others).toEqual([]);
@@ -110,6 +110,7 @@ describe("what the linear plugin registers", () => {
     expect(source?.feeds).toEqual({
       issues: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
       notifications: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+      entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     });
     expect(Object.keys(source?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
   });

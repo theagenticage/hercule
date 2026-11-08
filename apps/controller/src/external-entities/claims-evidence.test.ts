@@ -1,0 +1,675 @@
+/**
+ * Tests the claims a Connection makes from evidence, through the claims
+ * module and against a migrated database with an invented tracker: tickets
+ * that carry attachment links, and descriptions that mention other tickets.
+ *
+ * - web addresses: the first sight, the match by address alone, complete and
+ *   partial reads, a failed recognition
+ * - texts: no text is stored, a key is replaced or left alone, a revision skips
+ *   a text, a hint joins nothing
+ * - the cost of a poll that repeats what is stored: the same statements for 3 refs as for 300
+ * - person links: one claim for a pair, removal of only the person's claim
+ * - what the reads show: a pending claim is no link
+ */
+import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
+import { mintUuid, uuidFromString } from "../db";
+import { inTransaction, TestDatabase } from "../db/testing";
+import type { RecognizedTarget } from "../plugins";
+import { claimRepository, type RecognizedEvidence } from "./claims";
+import { encodePendingTarget } from "./pending-target";
+
+const AT = "2026-01-01T00:00:00.000Z";
+const LATER = "2026-01-02T00:00:00.000Z";
+
+const TICKET = "acme-tracker:ticket:T-1";
+const CHANGE = "acme-forge:change:7";
+const OTHER_CHANGE = "acme-forge:change:8";
+
+/** More links than any test here writes, so a read is never cut. */
+const NO_CUT = 100;
+
+const TRACKER_ACCOUNT = "0190c000-0000-7000-8000-0000000000d1";
+const OTHER_TRACKER_ACCOUNT = "0190c000-0000-7000-8000-0000000000d2";
+
+const CHANGE_URL = "https://forge.example/changes/7";
+const SCOPED_URL = "https://tracker.example/acme/ticket/OPS-47";
+const UNKNOWN_URL = "https://nobody.example/page";
+
+const SCOPED_OPS_47: RecognizedTarget = {
+  recognized: "scoped",
+  pluginId: "acme-tracker",
+  kind: "acme-tracker/ticket",
+  scopeHint: "acme",
+  identifier: "OPS-47",
+};
+const PENDING_OPS_47 = encodePendingTarget({
+  form: "scoped",
+  pluginId: "acme-tracker",
+  kind: "acme-tracker/ticket",
+  scopeHint: "acme",
+  identifier: "OPS-47",
+})!;
+
+type Claims = Effect.Success<typeof claimRepository>;
+
+/** Runs `body` on a fresh migrated database with two Connections of one plugin. */
+const run = <A>(
+  body: (
+    claims: Claims,
+    sql: SqlClient.SqlClient,
+  ) => Effect.Effect<A, unknown, SqlClient.SqlClient>,
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO plugins (id, enabled, config, created_at, updated_at)
+        VALUES ('acme-tracker', 1, '{}', ${AT}, ${AT})`;
+      for (const [id, account] of [
+        [TRACKER_ACCOUNT, "a-1"],
+        [OTHER_TRACKER_ACCOUNT, "a-2"],
+      ] as const) {
+        yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
+            status, labels, config, created_at, updated_at)
+          VALUES (${uuidFromString(id)}, 'acme-tracker', 'acme-tracker/tracker', ${account}, ${account},
+            ${account}, 'connected', '[]', '{}', ${AT}, ${AT})`;
+      }
+      const claims = yield* claimRepository;
+      return yield* body(claims, sql);
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+  );
+
+interface Report {
+  readonly connectionId?: string;
+  readonly fromRef?: string;
+  readonly complete?: boolean;
+  /** Leave out to report no `relations` at all. */
+  readonly urls?: ReadonlyArray<string>;
+  readonly texts?: ReadonlyArray<{ evidenceKey: string; text: string; revision?: string }>;
+  readonly recognized?: RecognizedEvidence;
+  /** Whether the thing was not yet a full record before this report. */
+  readonly inBaseline?: boolean;
+  readonly now?: string;
+}
+
+/** Reports the evidence of one observation, the way the ingest does after recognition. */
+const report = (claims: Claims, input: Report) =>
+  claims.applyObservedClaims({
+    connectionId: input.connectionId ?? TRACKER_ACCOUNT,
+    entries: [
+      {
+        fromRef: input.fromRef ?? TICKET,
+        relations:
+          input.urls === undefined
+            ? undefined
+            : { complete: input.complete ?? true, partOf: [], linked: [], linkedUrls: input.urls },
+        texts: input.texts,
+        recognized: input.recognized,
+        observedRevision: undefined,
+        inBaseline: input.inBaseline ?? false,
+      },
+    ],
+    now: input.now ?? AT,
+  });
+
+const recognizedUrls = (
+  ...entries: ReadonlyArray<readonly [string, RecognizedTarget | undefined]>
+): RecognizedEvidence => ({
+  urlTargets: new Map(
+    entries.flatMap(([url, target]) => (target === undefined ? [] : [[url, target] as const])),
+  ),
+  textTargets: new Map(),
+});
+
+const textClaims = (
+  key: string,
+  ...targets: ReadonlyArray<RecognizedTarget>
+): RecognizedEvidence => ({ urlTargets: new Map(), textTargets: new Map([[key, targets]]) });
+
+const asChange: RecognizedTarget = { recognized: "ref", ref: CHANGE };
+const asOtherChange: RecognizedTarget = { recognized: "ref", ref: OTHER_CHANGE };
+
+interface StoredClaim {
+  readonly id: number;
+  readonly from_ref: string;
+  readonly to_ref: string;
+  readonly claim_type: string;
+  readonly evidence_key: string;
+  readonly observed_revision: string | null;
+  readonly observed_at: string;
+  readonly is_pending: number;
+}
+
+const readStored = (sql: SqlClient.SqlClient, fromRef = TICKET) =>
+  sql<StoredClaim>`
+    SELECT id, from_ref, to_ref, claim_type, evidence_key, observed_revision, observed_at, is_pending
+    FROM external_entity_relation_claims WHERE from_ref = ${fromRef} ORDER BY id`;
+
+/** Returns true when a current claim of a source or a person, with a ref at both ends, links the two refs. */
+const joins = (sql: SqlClient.SqlClient, a: string, b: string) =>
+  Effect.map(
+    sql`SELECT id FROM external_entity_relation_claims
+      WHERE relation = 'linked' AND state = 'current' AND is_pending = 0
+        AND claim_type IN ('source', 'person')
+        AND ((from_ref = ${a} AND to_ref = ${b}) OR (from_ref = ${b} AND to_ref = ${a}))`,
+    (rows) => rows.length > 0,
+  );
+
+/** Inserts the least a record needs, so that a person can link from its ref. */
+const insertEntity = (sql: SqlClient.SqlClient, ref: string) =>
+  sql`INSERT INTO external_entities
+    (id, ref, kind, noun, completeness, title, first_observed_at, updated_at)
+    VALUES (${mintUuid()}, ${ref},
+            'acme-tracker/ticket', 'Ticket', 'full', 'A ticket', ${AT}, ${AT})`;
+
+describe("a web address a source reports", () => {
+  it("becomes a source claim at once: a ref for a thing a plugin names, a pending target for the rest", async () => {
+    const stored = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const write = yield* report(claims, {
+          urls: [CHANGE_URL, SCOPED_URL, UNKNOWN_URL],
+          recognized: recognizedUrls(
+            [CHANGE_URL, asChange],
+            [SCOPED_URL, SCOPED_OPS_47],
+            [UNKNOWN_URL, undefined],
+          ),
+        });
+        return { write, rows: yield* readStored(sql) };
+      }),
+    );
+
+    expect(stored.rows.map((row) => [row.evidence_key, row.to_ref, row.claim_type])).toEqual([
+      [CHANGE_URL, CHANGE, "source"],
+      [SCOPED_URL, PENDING_OPS_47, "source"],
+      [UNKNOWN_URL, `unresolved:url:${UNKNOWN_URL}`, "source"],
+    ]);
+    expect(stored.rows.map((row) => row.is_pending)).toEqual([0, 1, 1]);
+    // Only the claim with a ref changes what is drawn and joins a pair.
+    expect(stored.write.changedRefs).toEqual([TICKET, CHANGE].sort());
+    expect(stored.write.newLinks).toEqual([{ fromRef: TICKET, toRef: CHANGE }]);
+  });
+
+  it("keeps the canonical target, id and time of a stored address whatever is recognized later", async () => {
+    const { before, after } = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          urls: [SCOPED_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
+        });
+        // The resolver rewrote the target to the canonical ref.
+        yield* sql`UPDATE external_entity_relation_claims SET to_ref = ${OTHER_CHANGE}`;
+        const before = yield* readStored(sql);
+        // Identical complete read, then the same read when the recognizer is gone.
+        yield* report(claims, {
+          urls: [SCOPED_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
+          now: LATER,
+        });
+        yield* report(claims, { urls: [SCOPED_URL], recognized: recognizedUrls(), now: LATER });
+        yield* report(claims, { urls: [SCOPED_URL], now: LATER });
+        return { before, after: yield* readStored(sql) };
+      }),
+    );
+
+    expect(after).toEqual(before);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ to_ref: OTHER_CHANGE, observed_at: AT, is_pending: 0 });
+  });
+
+  it("is removed by a complete read that leaves it out, and by nothing else", async () => {
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          urls: [CHANGE_URL, SCOPED_URL],
+          recognized: recognizedUrls([CHANGE_URL, asChange], [SCOPED_URL, SCOPED_OPS_47]),
+        });
+        // A partial read that leaves both out removes nothing.
+        yield* report(claims, { urls: [], complete: false });
+        // A read with no `relations` at all removes nothing either.
+        yield* report(claims, {});
+        // Another Connection's complete read of the same ticket removes nothing of this one's.
+        yield* report(claims, { connectionId: OTHER_TRACKER_ACCOUNT, urls: [] });
+        const kept = yield* readStored(sql);
+        yield* report(claims, { urls: [SCOPED_URL], complete: true });
+        return { kept: kept.map((row) => row.evidence_key), left: yield* readStored(sql) };
+      }),
+    );
+
+    expect(rows.kept).toEqual([CHANGE_URL, SCOPED_URL]);
+    expect(rows.left.map((row) => row.evidence_key)).toEqual([SCOPED_URL]);
+  });
+
+  it("is not a new link when another Connection already joined the pair", async () => {
+    const second = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          urls: [CHANGE_URL],
+          recognized: recognizedUrls([CHANGE_URL, asChange]),
+        });
+        return yield* report(claims, {
+          connectionId: OTHER_TRACKER_ACCOUNT,
+          urls: [CHANGE_URL],
+          recognized: recognizedUrls([CHANGE_URL, asChange]),
+        });
+      }),
+    );
+
+    expect(second.newLinks).toEqual([]);
+  });
+
+  it("is no link while it is pending, and one once it holds a ref", async () => {
+    const { pending, resolved } = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          urls: [SCOPED_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
+        });
+        const pending = {
+          detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
+          joined: yield* joins(sql, TICKET, PENDING_OPS_47),
+        };
+        yield* sql`UPDATE external_entity_relation_claims SET to_ref = ${OTHER_CHANGE}`;
+        const resolved = {
+          detail: yield* claims.readClaimsFor(TICKET, NO_CUT),
+          joined: yield* joins(sql, TICKET, OTHER_CHANGE),
+        };
+        return { pending, resolved };
+      }),
+    );
+
+    expect(pending.detail.links).toEqual([]);
+    expect(pending.joined).toBe(false);
+    expect(resolved.detail.links).toMatchObject([{ fromRef: TICKET, toRef: OTHER_CHANGE }]);
+    expect(resolved.joined).toBe(true);
+  });
+});
+
+describe("the references in a text", () => {
+  it("stores the claims and never the text", async () => {
+    const description = "Blocked until OPS-47 ships, which is quite a long time away";
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: description, revision: "r1" }],
+          recognized: textClaims("description", SCOPED_OPS_47),
+        });
+        const stored = yield* readStored(sql);
+        const everything = yield* sql`SELECT * FROM external_entity_relation_claims`;
+        return { stored, dump: JSON.stringify(everything) };
+      }),
+    );
+
+    expect(rows.stored).toMatchObject([
+      {
+        claim_type: "text",
+        evidence_key: "description",
+        observed_revision: "r1",
+        to_ref: PENDING_OPS_47,
+      },
+    ]);
+    expect(rows.dump).not.toContain("Blocked until");
+  });
+
+  it("replaces the claims of a key on a new revision, and leaves a key it does not carry alone", async () => {
+    const keys = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          texts: [
+            { evidenceKey: "description", text: "x", revision: "r1" },
+            { evidenceKey: "notes", text: "y", revision: "n1" },
+          ],
+          recognized: {
+            urlTargets: new Map(),
+            textTargets: new Map([
+              ["description", [asChange]],
+              ["notes", [asOtherChange]],
+            ]),
+          },
+        });
+        const kept = yield* readStored(sql);
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "z", revision: "r2" }],
+          recognized: textClaims("description", SCOPED_OPS_47),
+          now: LATER,
+        });
+        return { kept, now: yield* readStored(sql) };
+      }),
+    );
+
+    expect(keys.kept.map((row) => row.to_ref)).toEqual([CHANGE, OTHER_CHANGE]);
+    expect(keys.now.map((row) => [row.evidence_key, row.to_ref, row.observed_revision])).toEqual([
+      ["notes", OTHER_CHANGE, "n1"],
+      ["description", PENDING_OPS_47, "r2"],
+    ]);
+  });
+
+  it("keeps a claim that was resolved while its text still says the same", async () => {
+    const { before, after } = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const text = { evidenceKey: "description", text: "x" };
+        yield* report(claims, {
+          texts: [text],
+          recognized: textClaims("description", SCOPED_OPS_47),
+        });
+        yield* sql`UPDATE external_entity_relation_claims SET to_ref = ${CHANGE}`;
+        const before = yield* readStored(sql);
+        // No revision, so the text is compared again each time.
+        yield* report(claims, {
+          texts: [text],
+          recognized: textClaims("description", SCOPED_OPS_47),
+          now: LATER,
+        });
+        return { before, after: yield* readStored(sql) };
+      }),
+    );
+
+    expect(after).toEqual(before);
+    expect(after[0]).toMatchObject({ to_ref: CHANGE, observed_at: AT });
+  });
+
+  it("skips a text whose revision it already holds, even when nothing is recognized now", async () => {
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const text = { evidenceKey: "description", text: "x", revision: "r1" };
+        yield* report(claims, { texts: [text], recognized: textClaims("description", asChange) });
+        yield* report(claims, { texts: [text], recognized: textClaims("description"), now: LATER });
+        return yield* readStored(sql);
+      }),
+    );
+
+    expect(rows.map((row) => row.to_ref)).toEqual([CHANGE]);
+  });
+
+  it("clears the claims of a key when its text names nothing, and a hint joins nothing", async () => {
+    const { joinedByHint, cleared } = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "x", revision: "r1" }],
+          recognized: textClaims("description", asChange),
+        });
+        const joinedByHint = yield* joins(sql, TICKET, CHANGE);
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "", revision: "r2" }],
+          recognized: textClaims("description"),
+          now: LATER,
+        });
+        return { joinedByHint, cleared: yield* readStored(sql) };
+      }),
+    );
+
+    expect(joinedByHint).toBe(false);
+    expect(cleared).toEqual([]);
+  });
+
+  it("never links a thing to itself", async () => {
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "x" }],
+          recognized: textClaims("description", { recognized: "ref", ref: TICKET }),
+        });
+        return yield* readStored(sql);
+      }),
+    );
+
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("a poll that repeats what is stored", () => {
+  /**
+   * Reports `count` observations twice, the second time unchanged, and returns
+   * the statements the second report sent. Each observation has an address and
+   * a description; `namesAThing` decides whether the description names a thing.
+   */
+  const countRepeatStatements = (count: number, namesAThing: boolean) =>
+    run((claims) =>
+      Effect.gen(function* () {
+        const entries = Array.from({ length: count }, (_, index) => {
+          const fromRef = `acme-tracker:ticket:P-${index}`;
+          return {
+            fromRef,
+            relations: { complete: true, partOf: [], linked: [], linkedUrls: [CHANGE_URL] },
+            texts: [{ evidenceKey: "description", text: namesAThing ? "x" : "", revision: "r1" }],
+            recognized: {
+              urlTargets: new Map([[CHANGE_URL, asChange]]),
+              textTargets: new Map([["description", namesAThing ? [asOtherChange] : []]]),
+            },
+            observedRevision: "v1",
+            inBaseline: false,
+          };
+        });
+        yield* claims.applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT });
+        const statements: Array<string> = [];
+        const write = yield* claims
+          .applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: LATER })
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+            ),
+          );
+        return { statements, write };
+      }),
+    );
+
+  it("sends the same statements for 3 observations as for 300, with descriptions that name a thing", async () => {
+    const small = await countRepeatStatements(3, true);
+    const large = await countRepeatStatements(300, true);
+    expect(small.write.changedRefs).toEqual([]);
+    expect(large.write.changedRefs).toEqual([]);
+    expect(large.statements).toHaveLength(small.statements.length);
+    expect(large.statements.length).toBeLessThanOrEqual(2);
+  });
+
+  it("sends the same statements for 3 observations as for 300, with empty descriptions", async () => {
+    const small = await countRepeatStatements(3, false);
+    const large = await countRepeatStatements(300, false);
+    expect(large.statements).toHaveLength(small.statements.length);
+    expect(large.statements.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("a person's link", () => {
+  const link = (claims: Claims, fromRef: string, toRef: string) =>
+    claims.changePersonLink({ change: "link", fromRef, toRef, actor: "user", now: AT });
+  const unlink = (claims: Claims, fromRef: string, toRef: string) =>
+    claims.changePersonLink({ change: "unlink", fromRef, toRef });
+
+  it("is one claim for a pair in either direction, and unlink removes only the person's claim", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* insertEntity(sql, TICKET);
+        yield* insertEntity(sql, CHANGE);
+        yield* report(claims, {
+          urls: [CHANGE_URL],
+          recognized: recognizedUrls([CHANGE_URL, asChange]),
+        });
+        const added = yield* link(claims, TICKET, CHANGE);
+        const repeated = yield* link(claims, CHANGE, TICKET);
+        const unread = yield* link(claims, TICKET, "acme-forge:change:never-read");
+        const removed = yield* unlink(claims, CHANGE, TICKET);
+        const again = yield* unlink(claims, CHANGE, TICKET);
+        const unreadRemoved = yield* unlink(claims, "acme-forge:change:never-read", TICKET);
+        return {
+          added,
+          repeated,
+          unread,
+          removed,
+          again,
+          unreadRemoved,
+          left: yield* readStored(sql),
+        };
+      }),
+    );
+
+    // A person's own link is no news from outside: it changes refs and adds no new link.
+    expect(result.added).toMatchObject({
+      changedRefs: [TICKET, CHANGE].sort(),
+      newLinks: [],
+      fromRefKnown: true,
+    });
+    expect(result.repeated).toMatchObject({ changedRefs: [], newLinks: [] });
+    expect(result.unread.changedRefs).toEqual([TICKET, "acme-forge:change:never-read"].sort());
+    expect(result.removed).toMatchObject({
+      changedRefs: [TICKET, CHANGE].sort(),
+      remaining: "source",
+    });
+    expect(result.again).toMatchObject({ changedRefs: [], remaining: "source" });
+    expect(result.unreadRemoved).toMatchObject({ remaining: undefined });
+    expect(result.unreadRemoved.changedRefs).toHaveLength(2);
+    expect(result.left.map((row) => row.claim_type)).toEqual(["source"]);
+  });
+
+  it("writes nothing when Hercule holds no record of the ref it links from", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const changes = yield* link(claims, TICKET, CHANGE);
+        return { changes, rows: yield* readStored(sql) };
+      }),
+    );
+
+    expect(result.changes).toMatchObject({ fromRefKnown: false, changedRefs: [] });
+    expect(result.rows).toEqual([]);
+  });
+
+  it("reports the hint that is left", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* insertEntity(sql, TICKET);
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "x" }],
+          recognized: textClaims("description", asChange),
+        });
+        yield* link(claims, TICKET, CHANGE);
+        return yield* unlink(claims, TICKET, CHANGE);
+      }),
+    );
+
+    expect(result).toMatchObject({ changedRefs: [TICKET, CHANGE].sort(), remaining: "text" });
+  });
+});
+
+describe("what a write reads and records about the thing's baseline", () => {
+  it("asks which of the added pairs already join in one statement, however many are added", async () => {
+    const countJoinQuestions = (count: number) =>
+      run((claims) =>
+        Effect.gen(function* () {
+          const entries = Array.from({ length: count }, (_, index) => ({
+            fromRef: `acme-tracker:ticket:N-${index}`,
+            relations: { complete: true, partOf: [], linked: [], linkedUrls: [CHANGE_URL] },
+            texts: undefined,
+            recognized: recognizedUrls([CHANGE_URL, asChange]),
+            observedRevision: undefined,
+            inBaseline: false,
+          }));
+          const statements: Array<string> = [];
+          const write = yield* claims
+            .applyObservedClaims({ connectionId: TRACKER_ACCOUNT, entries, now: AT })
+            .pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile()[0]);
+                  return statement;
+                }),
+              ),
+            );
+          return {
+            questions: statements.filter((statement) => statement.includes("EXISTS")).length,
+            newLinks: write.newLinks.length,
+          };
+        }),
+      );
+
+    expect(await countJoinQuestions(2)).toEqual({ questions: 1, newLinks: 2 });
+    expect(await countJoinQuestions(40)).toEqual({ questions: 1, newLinks: 40 });
+  });
+
+  it("records a claim of a thing that was not yet a full record as its baseline, and reports no new link", async () => {
+    const result = await run((claims, sql) =>
+      Effect.gen(function* () {
+        const write = yield* report(claims, {
+          urls: [SCOPED_URL, CHANGE_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47], [CHANGE_URL, asChange]),
+          inBaseline: true,
+        });
+        const later = yield* report(claims, {
+          connectionId: OTHER_TRACKER_ACCOUNT,
+          urls: [SCOPED_URL],
+          recognized: recognizedUrls([SCOPED_URL, SCOPED_OPS_47]),
+        });
+        const flags = yield* sql<{
+          readonly connection_id: Uint8Array;
+          readonly in_baseline: number;
+        }>`
+          SELECT connection_id, in_baseline FROM external_entity_relation_claims ORDER BY id`;
+        return { write, later, flags: flags.map((row) => row.in_baseline) };
+      }),
+    );
+
+    expect(result.write.newLinks).toEqual([]);
+    expect(result.write.changedRefs).toEqual([TICKET, CHANGE].sort());
+    expect(result.flags).toEqual([1, 1, 0]);
+  });
+});
+
+describe("the revisions the stored texts were made from", () => {
+  const named = (key: string, revision: string, target: RecognizedTarget) => ({
+    texts: [{ evidenceKey: key, text: "x", revision }],
+    recognized: textClaims(key, target),
+  });
+
+  it("lists a key only when all of its claims share one revision", async () => {
+    const result = await run((claims) =>
+      Effect.gen(function* () {
+        yield* report(claims, named("description", "r1", asChange));
+        yield* report(claims, {
+          texts: [{ evidenceKey: "notes", text: "y", revision: "n1" }],
+          recognized: textClaims("notes", asChange, asOtherChange),
+        });
+        yield* report(claims, {
+          texts: [{ evidenceKey: "bare", text: "z" }],
+          recognized: textClaims("bare", asChange),
+        });
+        const stored = yield* claims.readStoredTextRevisions(TRACKER_ACCOUNT, [
+          TICKET,
+          "other:x:1",
+        ]);
+        const otherConnection = yield* claims.readStoredTextRevisions(OTHER_TRACKER_ACCOUNT, [
+          TICKET,
+        ]);
+        return { stored: [...(stored.get(TICKET) ?? [])], otherConnection: otherConnection.size };
+      }),
+    );
+
+    expect(result.stored.sort()).toEqual([
+      ["description", "r1"],
+      ["notes", "n1"],
+    ]);
+    expect(result.otherConnection).toBe(0);
+  });
+
+  it("leaves the claims of a text alone when the plugins did not search it", async () => {
+    const rows = await run((claims, sql) =>
+      Effect.gen(function* () {
+        yield* report(claims, named("description", "r1", asChange));
+        // Same revision: the search was skipped.
+        yield* report(claims, {
+          texts: [{ evidenceKey: "description", text: "x", revision: "r1" }],
+          recognized: {
+            urlTargets: new Map(),
+            textTargets: new Map([["description", "unchanged"]]),
+          },
+          now: LATER,
+        });
+        return yield* readStored(sql);
+      }),
+    );
+
+    expect(rows.map((row) => [row.to_ref, row.observed_revision])).toEqual([[CHANGE, "r1"]]);
+  });
+});

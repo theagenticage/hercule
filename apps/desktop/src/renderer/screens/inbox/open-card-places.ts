@@ -62,8 +62,7 @@ export const readOpenCardPlaces = (
   const height = Math.min(content.offsetHeight, window.innerHeight - 2 * EDGE_MARGIN);
 
   const wantedLeft =
-    held?.left ??
-    (surface === null ? (from?.left ?? page.left) - 1 : measureElementRect(surface).left);
+    held?.left ?? (surface === null ? (from?.left ?? page.left) : measureElementRect(surface).left);
   const wantedTop = held?.top ?? from?.top ?? page.top;
   return {
     origin: { rect: from, words: drawnOrigin === null ? null : copyCardForMotion(drawnOrigin) },

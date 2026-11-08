@@ -7,6 +7,7 @@
 import {
   animateValue,
   isMotionReduced,
+  MOTION_EASE,
   MOVING_CLASS,
   trackBody,
   type MotionValue,
@@ -86,9 +87,6 @@ export interface SheetController {
 
 /** How far the sheet's words rise while they swap for another thing's, in pixels. */
 const SWAP_RISE = 6;
-
-/** The page's default ease out (`--m-ease`), which a Web Animation cannot read from the stylesheet. */
-const SWAP_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 
 /** Makes the controller of one sheet, which starts closed. */
 export const createSheetController = (parts: SheetParts, host: SheetHost): SheetController => {
@@ -195,7 +193,7 @@ export const createSheetController = (parts: SheetParts, host: SheetHost): Sheet
                 { opacity: 0, transform: `translateY(${String(SWAP_RISE)}px)` },
                 { opacity: 1, transform: "none" },
               ],
-          { duration: reduced ? 120 : 200, easing: SWAP_EASE },
+          { duration: reduced ? 120 : 200, easing: MOTION_EASE },
         );
       }
       // The focus must not be left on words that are gone.

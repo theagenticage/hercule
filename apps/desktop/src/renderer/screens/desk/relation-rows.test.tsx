@@ -4,8 +4,8 @@
  * words only when the source gives them, and the locked row with no title.
  */
 import type { EntityPlace } from "@hercule/contract";
-import { buildPlaceRow } from "@hercule/client-core/desk";
-import { render, screen } from "@testing-library/react";
+import { buildLinkedRows, buildPlaceRow } from "@hercule/client-core/desk";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RelationRows } from "./relation-rows";
@@ -95,5 +95,100 @@ describe("RelationRows", () => {
       expect.stringContaining("Round A"),
       expect.stringContaining("Round B"),
     ]);
+  });
+});
+
+describe("RelationRows for linked things", () => {
+  const ORDER = "quayside:order:po-1";
+  const OTHER = "quayside:order:po-2";
+  const other = place({
+    ref: OTHER,
+    kind: "quayside/order",
+    noun: "Order",
+    title: "Chilled crates",
+    status: { shape: "fork", tone: "active", label: "Checks failed" },
+  });
+  const build = (claim: { type: "source" | "person" }, extra: object = {}) =>
+    buildLinkedRows({
+      ref: ORDER,
+      hints: [],
+      links: [
+        {
+          fromRef: ORDER,
+          toRef: OTHER,
+          hasPersonClaim: claim.type === "person",
+          claim: { ...claim, ...extra },
+        },
+      ],
+      places: [other],
+      peers: [],
+      plugins: PLUGINS,
+    });
+
+  it("shows a linked thing's status in place of its kind, and who says it is linked", () => {
+    const { confirmed } = build({ type: "source" }, { plugin: "quayside" });
+    render(<RelationRows rows={confirmed} plugins={PLUGINS} isKindShown={false} />);
+
+    expect(screen.getByText("Checks failed")).toBeTruthy();
+    expect(screen.queryByText("Order")).toBeNull();
+    expect(screen.getByText("Quayside reports this")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+  });
+
+  it("removes a link the user made when the remove button is pressed", async () => {
+    const onUnlink = vi.fn();
+    const { confirmed } = build({ type: "person" });
+    render(<RelationRows rows={confirmed} plugins={PLUGINS} onUnlink={onUnlink} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove the link to Chilled crates" }),
+    );
+
+    expect(onUnlink).toHaveBeenCalledExactlyOnceWith(confirmed[0]);
+  });
+
+  it("ignores the second click of a double click on the remove button, which a Link button may have just made appear under the pointer", () => {
+    const onUnlink = vi.fn();
+    const { confirmed } = build({ type: "person" });
+    render(<RelationRows rows={confirmed} plugins={PLUGINS} onUnlink={onUnlink} />);
+    const remove = screen.getByRole("button", { name: "Remove the link to Chilled crates" });
+
+    fireEvent.click(remove, { detail: 2 });
+    expect(onUnlink).not.toHaveBeenCalled();
+
+    fireEvent.click(remove, { detail: 1 });
+    expect(onUnlink).toHaveBeenCalledOnce();
+  });
+
+  it("offers a hint a Link button, with the words of where the reference was found", async () => {
+    const onLink = vi.fn();
+    const { hints } = buildLinkedRows({
+      ref: ORDER,
+      links: [],
+      hints: [{ fromRef: ORDER, toRef: OTHER, evidenceKey: "description" }],
+      places: [other],
+      peers: [],
+      plugins: PLUGINS,
+    });
+    render(<RelationRows rows={hints} plugins={PLUGINS} onLink={onLink} />);
+
+    expect(screen.getByText("Found in the description")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Link" }));
+    expect(onLink).toHaveBeenCalledExactlyOnceWith(hints[0]);
+  });
+
+  it("shows what changed at the source under the title of any row", () => {
+    const row = buildPlaceRow(
+      place({
+        latestChange: {
+          reason: "reassigned",
+          sentence: { say: "Now with Tessa", tone: "plain" },
+          at: "2026-11-05T09:00:00.000Z",
+        },
+      }),
+    );
+    render(<RelationRows rows={[row]} plugins={PLUGINS} />);
+
+    expect(screen.getByText("Now with Tessa")).toBeTruthy();
   });
 });

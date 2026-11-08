@@ -11,6 +11,7 @@ import {
   recordGrowthOrigins,
   TO_BUTTON,
 } from "./board-flights";
+import { findStack, findStackMembers } from "./dragged-card";
 import { flipBoard } from "./flip-board";
 import type { WorkView } from "./use-work-view";
 
@@ -151,9 +152,11 @@ const listCardIds = (element: Element): Set<string> =>
 /**
  * Returns the cards of `cell` that a closed cell does not show: all of them
  * in the Landed cell, and the ones past the first rows in the other cells.
+ * A row is a card alone, or a lead with its stack, so the members of an open
+ * stack go with their lead's row.
  */
 const listCardsPastTheLimit = (cell: HTMLElement): HTMLElement[] =>
-  listCards([cell]).slice(cell.dataset["stage"] === "landed" ? 0 : ROWS_BEFORE_HIDING);
+  listCards([...cell.children].slice(cell.dataset["stage"] === "landed" ? 0 : ROWS_BEFORE_HIDING));
 
 /** Fades in, from 6px above, every card under `root` that is not in `before`: a card the change brought in. */
 const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
@@ -175,6 +178,8 @@ const fadeInCardsNotIn = (root: Element, before: ReadonlySet<string>): void => {
  * - "13 more" and "3 landed": the cards fade in from 6px above, under the last
  *   one, and everything below glides down. "Show fewer" sends each card back to
  *   the button.
+ * - A stack's sheet works like "13 more": its members fade in from 6px above,
+ *   under their lead, and closing it sends each member back to the sheet.
  * - Filter and Find: one change. What stays glides from where it was; what
  *   leaves just goes; what comes back fades in.
  * - A new grouping is the same change, and the page returns to its top,
@@ -283,6 +288,45 @@ export const useViewMotion = (
     });
   };
 
+  const toggleStack = (stackId: string): void => {
+    const scroller = scrollRef.current;
+    const findBar = (): HTMLElement | null =>
+      scroller?.querySelector<HTMLElement>(`[data-stack-bar="${CSS.escape(stackId)}"]`) ?? null;
+    const bar = findBar();
+    const stack = bar === null ? null : findStack(bar);
+    if (scroller === null || bar === null || stack === null) {
+      view.toggleStack(stackId);
+      return;
+    }
+    const isClosing = view.openedStackIds.has(stackId);
+    // The page keeps the pressed bar still, so the pointer stays on it.
+    playChange(scroller, {
+      commit: () => {
+        view.toggleStack(stackId);
+      },
+      anchor: bar,
+      prepare: () => {
+        const flights = isClosing
+          ? launchFlights(
+              scroller,
+              listCards([findStackMembers(stack)].filter((members) => members !== null)),
+              0,
+            )
+          : [];
+        const before = listCardIds(stack);
+        return () => {
+          if (isClosing) {
+            flyFlightsTo(flights, findBar, TO_BUTTON);
+            return;
+          }
+          const openedBar = findBar();
+          const opened = openedBar === null ? null : findStack(openedBar);
+          if (opened !== null) fadeInCardsNotIn(opened, before);
+        };
+      },
+    });
+  };
+
   /**
    * Plays a change of what the board filters by: nothing flies and the page
    * does not scroll. A card the change brings back fades in; one it takes away
@@ -326,6 +370,7 @@ export const useViewMotion = (
     toggleLane,
     foldEverything,
     toggleCell,
+    toggleStack,
     setFilter: (filter) => {
       playFilterChange(() => {
         view.setFilter(filter);

@@ -12,7 +12,7 @@ import { SqlClient } from "effect/sql";
 import type { Signal } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { signalRepository, type PendingRaise } from "./repository";
+import { OPEN_THREAD_REFS_SQL, signalRepository, type PendingRaise } from "./repository";
 
 const CONNECTION_ID = "0199e0e7-0000-7000-8000-00000000c001";
 const OTHER_CONNECTION_ID = "0199e0e7-0000-7000-8000-00000000c002";
@@ -232,5 +232,38 @@ describe("open signals of a Connection", () => {
         raisedAt: "2026-10-13T09:02:00.000Z",
       },
     ]);
+  });
+});
+
+describe("the refs of open signals", () => {
+  it("lists the thread refs of open signals only, and reads them through the index of open signals", async () => {
+    const { refs, plan } = await run(
+      Effect.gen(function* () {
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000b001",
+          connectionId: CONNECTION_ID,
+          threadRef: "t-open",
+          dedupKey: "open",
+          createdAt: "2026-10-13T09:01:00.000Z",
+        });
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000b002",
+          connectionId: CONNECTION_ID,
+          threadRef: "t-resolved",
+          dedupKey: "resolved",
+          createdAt: "2026-10-13T09:02:00.000Z",
+          status: "resolved",
+        });
+        const sql = yield* SqlClient.SqlClient;
+        const refs = yield* sql<{ readonly ref: string }>`${sql.literal(OPEN_THREAD_REFS_SQL)}`;
+        const plan = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${OPEN_THREAD_REFS_SQL}`,
+        );
+        return { refs: refs.map((row) => row.ref), plan: plan.map((row) => row.detail).join("\n") };
+      }),
+    );
+
+    expect(refs).toEqual(["t-open"]);
+    expect(plan).toMatch(/SCAN signals USING (COVERING )?INDEX signals_open_thread/);
   });
 });

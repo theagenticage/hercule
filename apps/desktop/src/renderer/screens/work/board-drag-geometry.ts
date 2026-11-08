@@ -35,7 +35,12 @@ export interface StageEdge {
   readonly left: number;
 }
 
-/** A card standing in a cell: its id, the element, the place the layout gave it, and the vertical middle of that place. */
+/**
+ * A row of a cell: a card alone, or the lead of a stack. It has the id of the
+ * card, the child of the cell that holds it (`element`: the card, or the stack
+ * the card leads), the place the layout gave the card, and the vertical middle
+ * of that place.
+ */
 export interface CellRow {
   readonly id: string;
   readonly element: HTMLElement;

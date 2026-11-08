@@ -1143,7 +1143,7 @@ export const CLI = {
 
   "externalEntity.queryInbox": {
     command: "entity list",
-    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Also gives the places above the cards and the counts. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
+    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Each card also gives its signals: the newest open one that is not snoozed, and how many are open. Also gives the places above the cards, the links between them, the records at the far end of those links, and the counts. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Needs the grants `task.read` and `signal.query`, because cards show signal text. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -1152,7 +1152,7 @@ export const CLI = {
   "externalEntity.countInbox": { hidden: true },
   "externalEntity.read": {
     command: "entity read",
-    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, and any claim the graph refused. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
+    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, and the linked things that have no card. Needs the grants `task.read` and `signal.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
     examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
     fields: {
       id: {
@@ -1240,7 +1240,13 @@ export const CLI = {
     help: "Adds a thing from another system to Work as a Task, one at a time. A thing Hercule never saw is read from its source and followed. Returns the entity's id (left out when the Task exists and Hercule holds no record of the thing), the Task's id, whether this call created the Task, its stage, and whether Hercule now follows the thing. A thing that already has a live Task returns that Task and creates none.",
     examples: [
       { args: ["github:pr:acme/webshop#87"] },
-      { args: ["linear:issue:SHOP-123", "--project", "1f3a9c2e"] },
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--project",
+          "1f3a9c2e",
+        ],
+      },
     ],
     fields: {
       ref: {
@@ -1251,6 +1257,57 @@ export const CLI = {
         flag: "project",
         help: "The Hercule Project for the Task, by id or a tail of eight or more characters. Left out, the Project is picked from the thing's repository when exactly one matches.",
         resolves: "project.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+
+  "externalEntity.link": {
+    command: "entity link",
+    help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing. Remove it with `hercule entity unlink`.",
+    examples: [
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+        ],
+      },
+    ],
+    fields: {
+      fromRef: {
+        positional: true,
+        placeholder: "ref",
+        help: "The first thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it.",
+      },
+      toRef: {
+        flag: "to",
+        help: "The second thing's external ref.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.unlink": {
+    command: "entity unlink",
+    help: "Removes your own link between two things, in either direction. Returns whether one was removed, and the firmest claim that still joins them, if a source or a mention is left: only your own link can be removed here. Nothing is written on either source.",
+    examples: [
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+        ],
+      },
+    ],
+    fields: {
+      fromRef: {
+        positional: true,
+        placeholder: "ref",
+        help: "The first thing's external ref.",
+      },
+      toRef: {
+        flag: "to",
+        help: "The second thing's external ref.",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
