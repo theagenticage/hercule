@@ -6,6 +6,7 @@ export {
   type CreatedTaskUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
+  type EntityLinkPair,
   type EntityLinkInput,
   type FailureRestoration,
   type FailureRestoreRefusal,
@@ -14,7 +15,13 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
-export { LIVE_TASK_LINKS_SQL, taskRepository, type BoardTask, type NewTask } from "./repository";
+export {
+  LIVE_TASK_LINKS_SQL,
+  LIVE_TASK_SQL,
+  taskRepository,
+  type BoardTask,
+  type NewTask,
+} from "./repository";
 export {
   SUMMARY_CONCURRENCY,
   SUMMARY_MIN_INTERVAL_SECONDS,

@@ -64,7 +64,7 @@ const make = Effect.gen(function* () {
           yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              const settled = yield* workspaces.reported(runnerId, {
+              const { settled } = yield* workspaces.reported(runnerId, {
                 _tag: "workspaceReport",
                 workspaceId: frame.workspaceId,
                 status: "failed",

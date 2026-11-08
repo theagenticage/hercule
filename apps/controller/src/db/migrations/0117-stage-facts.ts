@@ -21,12 +21,17 @@
  *   Connection was last asked about, so that a fair rotation survives a
  *   restart. Branches have no rows of their own: they are a JSON list on a
  *   checkout.
+ * - `external_entities_head` serves the branch link step and the tracked
+ *   branches: it finds the entities whose `repository.head` is a given
+ *   `(remote, branch)` without reading every entity. It is an index on the two
+ *   JSON expressions, and only entities that have a head are in it. A query
+ *   uses it only when it writes the expressions exactly as written here.
  * - `tasks.stage_fact_fence` is the highest fact id the Task already accounts
  *   for. A stage write that comes from a fact at or below it does nothing.
  *   `tasks.stage_cause_fact_id` is the fact that placed the Task's current
  *   stage, or null when a person, an agent or the status placed it.
  *
- * The migration only adds tables, columns and an index, so the upgrade test
+ * The migration only adds tables, columns and indexes, so the upgrade test
  * needs no fixture for it.
  */
 import * as Effect from "effect/Effect";
@@ -75,6 +80,13 @@ export default Effect.gen(function* () {
       last_attempted_at TEXT NOT NULL,
       PRIMARY KEY (connection_id, remote, branch)
     ) WITHOUT ROWID
+  `;
+
+  yield* sql`
+    CREATE INDEX external_entities_head ON external_entities (
+      json_extract(repository, '$.head.remote'),
+      json_extract(repository, '$.head.branch')
+    ) WHERE json_extract(repository, '$.head.branch') IS NOT NULL
   `;
 
   yield* sql`ALTER TABLE tasks ADD COLUMN stage_fact_fence INTEGER NOT NULL DEFAULT 0`;

@@ -140,6 +140,12 @@ const EntityLinkInput = Schema.Struct({ id: Id, ...TaskEntityLinkInput.fields })
 
 export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
 
+/** A Task and the outside thing that the branch link step matched to it. */
+export interface EntityLinkPair {
+  readonly taskId: string;
+  readonly ref: string;
+}
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
@@ -1630,6 +1636,43 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+
+    /**
+     * Links each matched `(Task, ref)` pair that is still free to link, in one
+     * transaction, as the system, and returns the pairs it linked. It is the
+     * write of the branch link step (`daemon/tasks/entity-links.ts`), not an
+     * operation: no grant is checked and no request carries it.
+     *
+     * Each pair is checked again here, because the match was read before this
+     * transaction began. A pair is skipped when the Task is deleted, merged or
+     * finished, when it links the ref already, or when the user unlinked the
+     * ref and nobody linked it again. Skipping is how a suppression holds: the
+     * owner of the suppressions decides, not the caller's read. A linked pair is
+     * written as `linkEntity` writes it: a provenance entry stamped `system`, a
+     * `task.updated` event, a Fact when the thing has a lifecycle, the summary
+     * marked out of date, and a `task` and an `externalEntity` announcement.
+     */
+    linkMatchedEntities: (
+      pairs: ReadonlyArray<EntityLinkPair>,
+    ): Effect.Effect<ReadonlyArray<EntityLinkPair>, NotFound | Validation | SqlError> =>
+      pairs.length === 0
+        ? Effect.succeed([])
+        : withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const linkedPairs: Array<EntityLinkPair> = [];
+              for (const pair of pairs) {
+                const found = yield* tasks.live(pair.taskId);
+                if (Option.isNone(found) || isFinishedStage(found.value.stage)) continue;
+                if (yield* tasks.hasLink(pair.taskId, pair.ref)) continue;
+                if (yield* facts.isSuppressed(pair.taskId, pair.ref)) continue;
+                yield* updateTask(pair.taskId, { provenance: [{ ref: pair.ref }] }, SYSTEM_ACTOR);
+                yield* announceEntityOfRef(pair.ref);
+                linkedPairs.push(pair);
+              }
+              return linkedPairs;
+            }),
+          ),
 
     /**
      * Moves a Task on the Work board and returns it as stored: to another

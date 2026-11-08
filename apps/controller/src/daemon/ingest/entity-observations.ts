@@ -4,17 +4,49 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "../../external-entities";
 import { AuditLog, PlatformEvents } from "../../events";
 import { Notifier } from "../../notifications";
+import type { EntityObservation } from "@hercule/plugin-host";
 import { EntityObservations } from "../../plugins";
-import { TaskServiceWithPortsLayer } from "../tasks";
+import { absorbFailures } from "../../absorbing";
+import { EntityLinks, EntityLinksLayer, TaskServiceWithPortsLayer } from "../tasks";
+
+/** Tells whether an observation names the branch its work comes from, so it may belong to a Task's branch. */
+const hasHead = (observation: EntityObservation): boolean =>
+  observation.repository?.head !== undefined;
 
 const make = Effect.gen(function* () {
   const ingest = yield* ExternalEntityIngest;
+  const entityLinks = yield* EntityLinks;
+
+  // The scan or refresh is committed when this runs, and the plugin must not
+  // see it fail because the link step did: the next scan runs the step again.
+  const linkEntitiesAfter = (
+    observations: ReadonlyArray<EntityObservation>,
+  ): Effect.Effect<void> =>
+    observations.some(hasHead)
+      ? absorbFailures(
+          "Linking the pull requests on a Task's branch failed",
+          Effect.asVoid(entityLinks.linkEntitiesByBranch()),
+        )
+      : Effect.void;
+
   return EntityObservations.of({
-    reconcile: ingest.reconcile,
-    refresh: ingest.refresh,
+    reconcile: (reporter, inventory, recognize) =>
+      Effect.tap(ingest.reconcile(reporter, inventory, recognize), () =>
+        inventory.complete ? linkEntitiesAfter(inventory.observations) : Effect.void,
+      ),
+    refresh: (reporter, observations, recognize) =>
+      Effect.tap(ingest.refresh(reporter, observations, recognize), () =>
+        linkEntitiesAfter(observations),
+      ),
     listWanted: (reporter, kind, limit) => Effect.orDie(ingest.listWanted(reporter, kind, limit)),
-    // TODO(#1035 phase 3): answer from the tracked branches of live Tasks. Until then no branch is tracked.
-    listTrackedBranches: () => Effect.succeed([]),
+    listTrackedBranches: (reporter, remotePrefix, limit) =>
+      Effect.orDie(
+        entityLinks.listTrackedBranches({
+          connectionId: reporter.connectionId,
+          remotePrefix,
+          limit,
+        }),
+      ),
     reportMissing: ingest.reportMissing,
   });
 });
@@ -31,11 +63,19 @@ const make = Effect.gen(function* () {
  * alone (its `LinkedEntities` port is answered from stored rows), so this
  * layer still cannot reach back into the plugin host, which requires this
  * layer.
+ *
+ * After a complete scan or a refresh that wrote entities with a head, it also
+ * links the entities that sit on a Task's branch (`EntityLinks`), and it
+ * answers which branches a plugin should look up pull requests for.
  */
 export const EntityObservationsLayer: Layer.Layer<
   EntityObservations,
   never,
   SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier
 > = Layer.effect(EntityObservations)(make).pipe(
-  Layer.provide(ExternalEntityIngestLayer.pipe(Layer.provide(TaskServiceWithPortsLayer))),
+  Layer.provide(
+    Layer.mergeAll(ExternalEntityIngestLayer, EntityLinksLayer).pipe(
+      Layer.provide(TaskServiceWithPortsLayer),
+    ),
+  ),
 );

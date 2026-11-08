@@ -382,10 +382,33 @@ const make = Effect.gen(function* () {
       if (changed) yield* announceChange(id);
     });
 
+  /**
+   * Returns true when a reported checkout of the workspace is on a branch other
+   * than the one stored. A report that cannot read a branch (null) is not a
+   * change. Read it before the report is written.
+   */
+  const reportsOtherBranch = (
+    id: string,
+    checkouts: ReadonlyArray<CheckoutReport>,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      if (checkouts.length === 0) return false;
+      const rows = yield* sql<{ readonly id: Uint8Array; readonly branch: string | null }>`
+        SELECT id, branch FROM checkouts WHERE workspace_id = ${uuidFromString(id)}`;
+      const stored = new Map(rows.map((row) => [uuidToString(row.id), row.branch]));
+      return checkouts.some(
+        (checkout) =>
+          checkout.branch !== null &&
+          stored.has(checkout.checkoutId) &&
+          stored.get(checkout.checkoutId) !== checkout.branch,
+      );
+    });
+
   return {
     one,
     listCheckouts,
     recordCreationFacts,
+    reportsOtherBranch,
 
     /** Returns the frozen removal instruction and its initiating actor, including retained refusals. */
     readRemoval: (id: string): Effect.Effect<Option.Option<StoredRemoval>, SqlError> =>

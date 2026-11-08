@@ -272,6 +272,17 @@ interface Settled {
   readonly moved: "ready" | "failed" | "deleted";
 }
 
+/**
+ * What the controller daemon learns from `reported`: the status change the
+ * report made, if any, and whether it moved a checkout to another branch.
+ */
+interface ReportOutcome {
+  readonly settled: Settled | undefined;
+  readonly branchChanged: boolean;
+}
+
+const NOTHING_REPORTED: ReportOutcome = { settled: undefined, branchChanged: false };
+
 /** What `openFor` is given. */
 interface OpenInput {
   /** The session or run that works in the workspace, and so takes a lease on it. */
@@ -1451,28 +1462,37 @@ const make = Effect.gen(function* () {
      * dispose of. A report about a workspace that is not on this runner is
      * ignored, because a runner may only report on its own workspaces.
      *
-     * Returns the status change the report made, or `undefined` if it changed
-     * nothing, for example a repeated report or one about a workspace that
-     * became ready in the meantime. What happens to the sessions waiting on the
-     * workspace is not decided here: the controller daemon tells the sessions
-     * domain. That keeps this domain from depending on the sessions domain.
+     * Returns the status change the report made (`settled`), which is
+     * `undefined` if it changed nothing, for example a repeated report or one
+     * about a workspace that became ready in the meantime, and whether it moved
+     * a checkout to another branch (`branchChanged`). What happens to the
+     * sessions waiting on the workspace is not decided here: the controller
+     * daemon tells the sessions domain. That keeps this domain from depending
+     * on the sessions domain. The same goes for what a new branch means for the
+     * Tasks that work on it.
      */
-    reported: (
-      runnerId: string,
-      report: WorkspaceReport,
-    ): Effect.Effect<Settled | undefined, SqlError> =>
+    reported: (runnerId: string, report: WorkspaceReport): Effect.Effect<ReportOutcome, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const current = yield* workspaces.one(report.workspaceId);
-          if (Option.isNone(current) || current.value.runnerId !== runnerId) return undefined;
+          if (Option.isNone(current) || current.value.runnerId !== runnerId)
+            return NOTHING_REPORTED;
           const fresh =
             current.value.observedAt === null ||
             (report.observedAt !== undefined && report.observedAt >= current.value.observedAt);
           const at = yield* nowIso;
           if (current.value.status === "disposing")
-            return yield* recordRemovalOutcome(runnerId, report, { fresh, at });
-          if (report.requestId !== undefined || report.status === "deleted") return undefined;
+            return {
+              settled: yield* recordRemovalOutcome(runnerId, report, { fresh, at }),
+              branchChanged: false,
+            };
+          if (report.requestId !== undefined || report.status === "deleted")
+            return NOTHING_REPORTED;
+          // Read before anything below writes the report's branches.
+          const branchChanged =
+            fresh &&
+            (yield* workspaces.reportsOtherBranch(report.workspaceId, report.checkouts ?? []));
           yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
           if (report.warnings !== undefined && (fresh || current.value.status === "provisioning"))
             yield* workspaces.recordWarnings(report.workspaceId, report.warnings);
@@ -1537,14 +1557,18 @@ const make = Effect.gen(function* () {
           }
           if (fresh && report.status === "ready" && report.path !== undefined)
             yield* workspaces.recordAttachmentPath(report.workspaceId, report.path);
-          if (!changed) return undefined;
-          const settled = yield* workspaces.one(report.workspaceId);
-          return Option.isSome(settled) &&
-            (settled.value.status === "ready" ||
-              settled.value.status === "failed" ||
-              settled.value.status === "deleted")
-            ? { workspaceId: report.workspaceId, moved: settled.value.status }
-            : undefined;
+          if (!changed) return { settled: undefined, branchChanged };
+          const stored = yield* workspaces.one(report.workspaceId);
+          return {
+            settled:
+              Option.isSome(stored) &&
+              (stored.value.status === "ready" ||
+                stored.value.status === "failed" ||
+                stored.value.status === "deleted")
+                ? { workspaceId: report.workspaceId, moved: stored.value.status }
+                : undefined,
+            branchChanged,
+          };
         }),
       ),
 

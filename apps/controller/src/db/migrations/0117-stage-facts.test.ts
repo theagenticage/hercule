@@ -3,7 +3,8 @@
  * head: existing Tasks start with no fence and no cause, a fact keeps the
  * lifecycles the contract allows and takes its ids in order, a Task has one
  * suppression per ref, a shipped key is installed once, and a lookup of one
- * Task's facts for one ref uses the index.
+ * Task's facts for one ref uses the index, and so does a lookup of the entities
+ * whose head is one branch.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -151,5 +152,21 @@ describe("the stage facts migration", () => {
       /SEARCH task_entity_facts USING (COVERING )?INDEX task_entity_facts_task_ref/,
     );
     expect(plan).not.toContain("TEMP B-TREE");
+  });
+
+  it("finds the entities whose head is a branch through the external_entities_head index", async () => {
+    const plan = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations(UP_TO_STAGE_FACTS);
+        const rows = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN SELECT ref FROM external_entities
+           WHERE json_extract(repository, '$.head.remote') = 'github.com/acme/api'
+             AND json_extract(repository, '$.head.branch') = 'fix-login'`,
+        );
+        return rows.map((row) => row.detail).join("\n");
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
+    );
+    expect(plan).toMatch(/SEARCH external_entities USING INDEX external_entities_head/);
   });
 });

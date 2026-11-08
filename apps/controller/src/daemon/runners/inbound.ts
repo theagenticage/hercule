@@ -41,11 +41,13 @@ import { RunService, WorkspaceSteps } from "../../runs";
 import { Settings } from "../../settings";
 import { Secrets } from "../../secrets";
 import { SessionService } from "../../sessions";
+import type { TaskService } from "../../tasks";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../../absorbing";
 import { DiscussionInputs } from "../discussions";
 import { ProviderAccountProbing } from "../provider-accounts";
 import { Dispatch, Live, makeGithubTokenAnswers } from "../sessions";
+import { EntityLinks, EntityLinksLayer } from "../tasks";
 import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
@@ -63,6 +65,7 @@ const make = Effect.gen(function* () {
   const { sendClaimed, deliverQueuedInput } = yield* Live;
   const { tellSession } = yield* DiscussionInputs;
   const { answerGithubTokenRequest } = yield* makeGithubTokenAnswers;
+  const entityLinks = yield* EntityLinks;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -78,11 +81,12 @@ const make = Effect.gen(function* () {
           // writes, and never applied once it is sealed. A report applied
           // after the copy would be missing on the new machine, which sends
           // the runner what it still waits on when the runner connects.
-          const settled = yield* promotion.whenServing(
+          const { settled, branchChanged } = yield* promotion.whenServing(
             withTransaction(
               sql,
               Effect.gen(function* () {
-                const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
+                const outcome = yield* workspaces.reported(traffic.runnerId, traffic.report);
+                const { settled } = outcome;
                 // A workspace that failed to provision ends the sessions waiting
                 // on it, with the runner's error message as the reason, and
                 // fails the runs working in it.
@@ -94,10 +98,19 @@ const make = Effect.gen(function* () {
                     message ?? "The runner could not provision the workspace, and gave no reason.",
                   );
                 }
-                return settled;
+                return outcome;
               }),
             ),
           );
+          // A checkout on a new branch may now be the branch of a pull request
+          // that Hercule already holds. The link is a database write of its
+          // own, after the report is committed.
+          if (branchChanged) {
+            yield* absorbFailures(
+              "Linking the pull requests on a Task's branch failed",
+              promotion.whenServing(Effect.asVoid(entityLinks.linkEntitiesByBranch())),
+            );
+          }
           // A workspace that became ready lets its waiting sessions start. The
           // dispatch sends frames to the runner, so it runs after the commit,
           // on its own fiber.
@@ -353,7 +366,9 @@ export const InboundLayer: Layer.Layer<
   | Secrets
   | TextGenerationTargetChanges
   | DiscussionInputs
+  | TaskService
 > = Layer.effect(Inbound)(make).pipe(
+  Layer.provide(EntityLinksLayer),
   // The runner service is built here from the same layer the HTTP routes use, so
   // the controller keeps one runner service and the boot offers it to nobody
   // else.
