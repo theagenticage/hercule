@@ -188,6 +188,8 @@ export interface BoardTask {
   readonly stageChangedAt: string;
   /** The run whose failure the Task shows, if any. */
   readonly failedRunId: string | undefined;
+  /** The fact that placed the Task's stage, or `undefined` when a person or an agent did. */
+  readonly stageCauseFactId: number | undefined;
   /** What the Task's summary says, or `undefined` while it has no written summary. */
   readonly summary: TaskSummary | undefined;
 }
@@ -285,6 +287,13 @@ export interface TaskEdit {
   readonly labels?: ReadonlyArray<string>;
   /** The rank in the Task's cell after the edit; see `chooseLastRankOfCell`. */
   readonly boardRank?: string;
+  /** The Task's fence after the edit: the highest fact id its stage accounts for. */
+  readonly stageFactFence?: number;
+  /**
+   * The fact that placed the stage after the edit, or null when a person or an
+   * agent did. Absent leaves the cause as it was.
+   */
+  readonly stageCauseFactId?: number | null;
 }
 
 interface TaskRow {
@@ -320,6 +329,16 @@ const COLUMNS =
   "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
+ * The SQL condition that a row of `tasks` is live: not deleted, not merged
+ * into another Task and not finished (`done` or `dropped`). It is the one
+ * definition of a joinable Task, shared by `LIVE_TASK_LINKS_SQL` and by reads
+ * that need the links of a single Task and so cannot go through its ranking.
+ */
+export const LIVE_TASK_SQL = `tasks.deleted_at IS NULL
+    AND tasks.merged_into_id IS NULL
+    AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
+
+/**
  * The SQL of a `SELECT` that lists the live links of Tasks to refs, one row per
  * link: `task_id`, `ref`, `linked_at`, `following`, and `position`, the link's
  * place among the live links of its ref, oldest first by `(linked_at,
@@ -333,9 +352,7 @@ export const LIVE_TASK_LINKS_SQL = `
   SELECT l.task_id, l.ref, l.linked_at, l.following,
          ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
   FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
-  WHERE tasks.deleted_at IS NULL
-    AND tasks.merged_into_id IS NULL
-    AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
+  WHERE ${LIVE_TASK_SQL}`;
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -484,7 +501,7 @@ const readBoardSummary = (row: BoardSummaryColumns): TaskSummary | undefined =>
  */
 const BOARD_TASK_COLUMNS =
   "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.board_rank, " +
-  "t.created_at, t.stage_changed_at, t.failed_run_id, " +
+  "t.created_at, t.stage_changed_at, t.failed_run_id, t.stage_cause_fact_id, " +
   BOARD_SUMMARY_COLUMNS;
 
 interface BoardTaskRow extends BoardSummaryColumns {
@@ -497,6 +514,7 @@ interface BoardTaskRow extends BoardSummaryColumns {
   readonly created_at: string;
   readonly stage_changed_at: string;
   readonly failed_run_id: Uint8Array | null;
+  readonly stage_cause_fact_id: number | null;
 }
 
 /**
@@ -526,6 +544,7 @@ const readBoardTaskRow = (row: BoardTaskRow): BoardTask => ({
   createdAt: row.created_at,
   stageChangedAt: row.stage_changed_at,
   failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
+  stageCauseFactId: row.stage_cause_fact_id ?? undefined,
   summary: readBoardSummary(row),
 });
 
@@ -702,24 +721,24 @@ const make = Effect.gen(function* () {
    * Links the Task to each ref its new provenance entries carry. A pair that
    * is already linked keeps its row, so the oldest `linked_at` stays and the
    * active Task of a ref does not change when the Task is updated. Returns
-   * true when at least one link is new.
+   * the refs that are new links, in the order the entries name them.
    */
   const insertLinks = (
     taskId: Uint8Array,
     entries: ReadonlyArray<ProvenanceInput>,
     link: { readonly at: string; readonly actor: string; readonly following: boolean },
-  ): Effect.Effect<boolean, SqlError> =>
+  ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.map(
       Effect.forEach(
         entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
-        (ref) => sql`
+        (ref) => sql<{ readonly ref: string }>`
           INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
           VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0})
           ON CONFLICT (task_id, ref) DO NOTHING
           RETURNING ref
         `,
       ),
-      (inserted) => inserted.some((rows) => rows.length > 0),
+      (inserted) => inserted.flatMap((rows) => rows.map((row) => row.ref)),
     );
 
   const insertProvenance = (
@@ -1053,6 +1072,40 @@ const make = Effect.gen(function* () {
           LIMIT 1`,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
       ),
+
+    /**
+     * Returns the id of the entity record of `ref`, or none when Hercule holds
+     * no record of the thing. One lookup by the unique `ref`.
+     */
+    findEntityIdOfRef: (ref: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`SELECT id FROM external_entities WHERE ref = ${ref}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /** Returns true when the Task, taken as it is, links `ref`. */
+    hasLink: (taskId: string, ref: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`SELECT 1 FROM task_entity_links
+            WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Removes the Task's link to `ref` and records the write on the Task
+     * (`updated_at` and `revision`), like any other edit. Returns false and
+     * writes nothing when the Task does not link the ref. It never touches
+     * provenance, which stays the history.
+     */
+    removeLink: (taskId: string, ref: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const removed = yield* sql`
+          DELETE FROM task_entity_links WHERE task_id = ${key} AND ref = ${ref} RETURNING ref`;
+        if (removed.length === 0) return false;
+        yield* sql`UPDATE tasks SET updated_at = ${at}, revision = revision + 1 WHERE id = ${key}`;
+        return true;
+      }),
 
     /**
      * Ends the failure the Task shows, because a Thread was started on it by
@@ -1718,8 +1771,9 @@ const make = Effect.gen(function* () {
     /**
      * Applies an edit and appends provenance. Only the columns in the edit are
      * written, which also means that a change to anything other than the title
-     * or the description does not touch the full-text index. Returns true when
-     * the provenance linked the Task to a ref it did not link before.
+     * or the description does not touch the full-text index. Returns the refs
+     * the provenance linked the Task to for the first time, in the order the
+     * entries name them.
      */
     update: (
       id: string,
@@ -1727,7 +1781,7 @@ const make = Effect.gen(function* () {
       provenance: ReadonlyArray<ProvenanceInput>,
       at: string,
       actor: string,
-    ): Effect.Effect<boolean, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
         // The revision counts every write of `update`. Unlike `updated_at` it moves even
@@ -1756,6 +1810,12 @@ const make = Effect.gen(function* () {
         // kept the stage, which is what lets a handoff's Undo see that one was made.
         if (edit.stage !== undefined || edit.decidesStage === true) {
           sets.push(sql`stage_revision = stage_revision + 1`);
+        }
+        if (edit.stageFactFence !== undefined) {
+          sets.push(sql`stage_fact_fence = ${edit.stageFactFence}`);
+        }
+        if (edit.stageCauseFactId !== undefined) {
+          sets.push(sql`stage_cause_fact_id = ${edit.stageCauseFactId}`);
         }
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;

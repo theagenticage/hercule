@@ -29,12 +29,12 @@ import {
   TaskSummaryWake,
   makeSummaryWake,
 } from "./index";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const layer = Layer.mergeAll(TaskServiceLayer, TaskSummariesLayer).pipe(
   Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(NotifierLayer),
-  Layer.provideMerge(TaskLinkOwnersLayer),
+  Layer.provideMerge(TaskServicePortsLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

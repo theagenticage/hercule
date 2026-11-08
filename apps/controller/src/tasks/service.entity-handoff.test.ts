@@ -21,13 +21,13 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 import { taskRepository } from "./repository";
 import { TaskService, TaskServiceLayer, type EntityHandoffReversal } from "./index";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
-  Layer.provideMerge(TaskLinkOwnersLayer),
+  Layer.provideMerge(TaskServicePortsLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

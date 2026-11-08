@@ -993,6 +993,25 @@ describe("the event kinds the shipped github plugin declares", () => {
     );
   });
 
+  it("stores the entity kinds beside them, with only what classifying a linked thing needs", async () => {
+    await withServer(
+      async ({ sql }) => {
+        const rows = await readContributionRows(sql, "event-source", "github");
+        const definition = JSON.parse(rows[0]!.definition) as {
+          readonly entityKinds: ReadonlyArray<{ kind: string; refPrefix: string; work: boolean }>;
+        };
+        expect(definition.entityKinds).toEqual(
+          expect.arrayContaining([
+            { kind: "github/pull-request", refPrefix: "github:pr:", work: true },
+            { kind: "github/issue", refPrefix: "github:issue:", work: true },
+            { kind: "github/repository", refPrefix: "github:repo:", work: false },
+          ]),
+        );
+      },
+      { plugins: shipped },
+    );
+  });
+
   it("declares each kind with a description and a payload schema that includes the subject", async () => {
     await withServer(
       async ({ sql }) => {

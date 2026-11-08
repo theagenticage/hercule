@@ -65,6 +65,7 @@ const TASK: BoardTask = {
   createdAt: AT,
   stageChangedAt: AT,
   failedRunId: undefined,
+  stageCauseFactId: undefined,
   summary: undefined,
 };
 
@@ -74,6 +75,7 @@ const NO_FACTS: BoardCardFacts = {
   lastTurnEndedAt: undefined,
   lastRunEndedAt: undefined,
   failure: undefined,
+  stageCause: undefined,
   linkedRefs: [],
   entityMarks: [],
   contextRefs: [],

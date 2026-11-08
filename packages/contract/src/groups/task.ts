@@ -950,7 +950,16 @@ export const WorkCard = Schema.Struct({
    * such as "PR #6221 merged".
    */
   stageCause: Schema.optionalKey(
-    Schema.Struct({ ref: ExternalRef, text: bounded(1, MAX_STAGE_CAUSE_TEXT) }),
+    Schema.Struct({
+      /**
+       * The id of the fact that placed the stage. A client uses it to tell one
+       * move by a fact from the next: `stageChangedAt` can repeat, when two
+       * writes share a millisecond or the clock steps back.
+       */
+      factId: Schema.Int,
+      ref: ExternalRef,
+      text: bounded(1, MAX_STAGE_CAUSE_TEXT),
+    }),
   ),
   /**
    * The refs the Task links and everything above them by `part of`, for
@@ -1077,6 +1086,17 @@ export const TaskMergeInput = Schema.Struct({
 });
 
 export type TaskMergeInput = Schema.Schema.Type<typeof TaskMergeInput>;
+
+/**
+ * The input of `task.linkEntity` and `task.unlinkEntity`, beside the Task's id
+ * in the path. The ref travels in the body because it holds `:`, `/` and `#`.
+ */
+export const TaskEntityLinkInput = Schema.Struct({
+  /** The outside thing to link to the Task, or to take away from it. */
+  ref: ExternalRef,
+});
+
+export type TaskEntityLinkInput = Schema.Schema.Type<typeof TaskEntityLinkInput>;
 
 /** The input of `task.undoTryAgain`, beside the Task's id in the path. */
 export const TaskUndoTryAgainInput = Schema.Struct({
@@ -1230,6 +1250,30 @@ export const task = HttpApiGroup.make("task")
       payload: TaskMergeInput,
       success: Task,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    /**
+     * Links an outside thing to a Task by hand. Returns the Task. A thing the
+     * Task links already changes nothing. Linking clears an earlier unlink of
+     * the same thing, so scans may link it again.
+     */
+    // `/tasks/:id/entities/link` has more segments than `/tasks/:id`, so the
+    // router never takes it for that route.
+    HttpApiEndpoint.post("linkEntity", "/tasks/:id/entities/link", {
+      params: { id: Id },
+      payload: TaskEntityLinkInput,
+      success: Task,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Takes the link to an outside thing away from a Task, and keeps it away:
+     * no scan links it again until someone links it by hand. Returns the Task.
+     * A thing the Task does not link changes nothing.
+     */
+    HttpApiEndpoint.post("unlinkEntity", "/tasks/:id/entities/unlink", {
+      params: { id: Id },
+      payload: TaskEntityLinkInput,
+      success: Task,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
      * Undoes a Try again: asks the run it started to stop, and puts the

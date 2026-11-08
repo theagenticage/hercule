@@ -41,6 +41,20 @@ export interface NewContribution {
   readonly definition: unknown;
 }
 
+/**
+ * One entity kind as the catalog stores it in an event source's definition:
+ * only what the tasks domain needs to classify a linked thing without the
+ * live plugin.
+ */
+export interface CatalogEntityKind {
+  /** The qualified kind, such as `github/pull-request`. */
+  readonly kind: string;
+  /** Every ref of this kind starts with it. */
+  readonly refPrefix: string;
+  /** True for a kind of work (a card), false for a kind of context (a place). */
+  readonly work: boolean;
+}
+
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
@@ -191,6 +205,32 @@ const make = Effect.gen(function* () {
         }
         return byOwner;
       }),
+
+    /**
+     * Returns the entity kinds that the catalog holds for plugins that are
+     * enabled, in a fixed order. The catalog is rewritten at every boot and
+     * keeps the contributions of a disabled plugin, so a kind of a disabled
+     * plugin is left out here and a kind of a removed plugin is gone.
+     */
+    listEnabledEntityKinds: (): Effect.Effect<ReadonlyArray<CatalogEntityKind>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly kind: string;
+          readonly ref_prefix: string;
+          readonly work: number;
+        }>`
+          SELECT json_extract(k.value, '$.kind') AS kind,
+                 json_extract(k.value, '$.refPrefix') AS ref_prefix,
+                 json_extract(k.value, '$.work') AS work
+          FROM plugin_contributions c
+          LEFT JOIN plugins p ON p.id = c.owner
+          JOIN json_each(c.definition, '$.entityKinds') k
+          WHERE c.extension_point = 'event-source' AND COALESCE(p.enabled, 1) = 1
+          ORDER BY kind
+        `,
+        (rows) =>
+          rows.map((row) => ({ kind: row.kind, refPrefix: row.ref_prefix, work: row.work === 1 })),
+      ),
 
     /** Returns one plugin's stored value under a key, or `none` when nothing is stored. */
     kvGet: (

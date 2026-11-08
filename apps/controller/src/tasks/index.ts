@@ -6,6 +6,7 @@ export {
   type CreatedTaskUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
+  type EntityLinkInput,
   type FailureRestoration,
   type FailureRestoreRefusal,
   type QueryInput,
@@ -24,6 +25,11 @@ export {
   type SummaryText,
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
+export { entityFactRepository, type StageCauseRecord } from "./entity-facts";
+export { describeStageCause } from "./stage-cause";
+export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
+export type { LinkedEntitySnapshot } from "./linked-facts";
+export type { LinkedWorkCounts } from "./linked-work";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {

@@ -29,13 +29,13 @@ import { NotifierLayer } from "../notifications";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { subscribeSkippingFirstPush } from "./testing";
 import { LiveTopics, LiveTopicsLayer, type LiveQueue } from "./topics";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 type Deps = TaskService | AuditLog | LiveTopics | SqlClient.SqlClient;
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
-  Layer.provideMerge(TaskLinkOwnersLayer),
+  Layer.provideMerge(TaskServicePortsLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(LiveTopicsLayer),
   Layer.provideMerge(TestDatabase),

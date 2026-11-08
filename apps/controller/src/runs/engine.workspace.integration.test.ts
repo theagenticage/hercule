@@ -44,7 +44,7 @@ import {
   type WorkspaceStepToStart,
   type WorkspaceStepToSettle,
 } from "./workspace-steps";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const at = "2026-09-25T10:00:00.000Z";
 
@@ -137,7 +137,7 @@ const runTest = <A, E>(
         Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       hookedWorkspaces.pipe(
         Layer.provide(

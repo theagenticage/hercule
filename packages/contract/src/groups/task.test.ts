@@ -7,6 +7,7 @@ import {
   MAX_LEG_QUERY_RUNS,
   TASK_STAGES,
   TaskCreateInput,
+  TaskEntityLinkInput,
   TaskFilter,
   TaskMoveInput,
   TaskUpdateCall,
@@ -193,5 +194,21 @@ describe("a stage write that comes from a fact", () => {
         decodeOutcome(schema, { ...base, stage: "landed", onlyWhenLinkedWorkFinished: true }),
       ).toBe("Failure");
     }
+  });
+});
+
+describe("the input of linking a thing by hand", () => {
+  it("takes one external ref, and refuses a ref with whitespace and a missing ref", () => {
+    expect(decodeOutcome(TaskEntityLinkInput, { ref: "github:pr:acme/webshop#87" })).toBe(
+      "Success",
+    );
+    expect(decodeOutcome(TaskEntityLinkInput, { ref: "a pull request" })).toBe("Failure");
+    expect(decodeOutcome(TaskEntityLinkInput, {})).toBe("Failure");
+  });
+
+  it("serves both operations on paths of their own below the Task", () => {
+    const paths = Object.values(task.endpoints).map((endpoint) => endpoint.path);
+    expect(paths).toContain("/tasks/:id/entities/link");
+    expect(paths).toContain("/tasks/:id/entities/unlink");
   });
 });

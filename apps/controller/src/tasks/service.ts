@@ -48,6 +48,7 @@ import {
   MAX_TASK_LABELS,
   TASK_SORT_FIELDS,
   TaskCreateInput,
+  TaskEntityLinkInput,
   TaskFilter,
   TaskMoveInput,
   TaskUpdateInput,
@@ -87,6 +88,9 @@ import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
+import { entityFactRepository } from "./entity-facts";
+import { LinkedEntities } from "./linked-entities";
+import { makeLinkedFacts } from "./linked-facts";
 import { TaskLinkOwners } from "./link-owners";
 import { makeSummaryDirtyMarker } from "./summary-dirty";
 import {
@@ -131,10 +135,16 @@ const MoveInput = Schema.Struct({ id: Id, ...TaskMoveInput.fields });
 
 export type MoveInput = Schema.Schema.Type<typeof MoveInput>;
 
+/** The input of `task.linkEntity` and `task.unlinkEntity`: the Task's id and the outside thing's ref. */
+const EntityLinkInput = Schema.Struct({ id: Id, ...TaskEntityLinkInput.fields });
+
+export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeMove = Schema.decodeUnknownEffect(MoveInput);
+const decodeEntityLink = Schema.decodeUnknownEffect(EntityLinkInput);
 
 /** The fields `updateTask` changes: an update after decoding. */
 interface TaskPatch {
@@ -153,6 +163,10 @@ interface TaskPatch {
   readonly addLabels?: ReadonlyArray<string>;
   readonly removeLabels?: ReadonlyArray<string>;
   readonly provenance?: ReadonlyArray<ProvenanceInput>;
+  /** The fact this stage write comes from. See `updateTask`. */
+  readonly stageFactId?: number;
+  /** With `stageFactId`: write the stage only if the Task's linked work is finished now. */
+  readonly onlyWhenLinkedWorkFinished?: boolean;
 }
 
 /** The provenance entry of a handoff of a signal: the signal handed off and the run it started. */
@@ -443,6 +457,8 @@ const make = Effect.gen(function* () {
   const platformEvents = yield* PlatformEvents;
 
   const linkOwners = yield* TaskLinkOwners;
+  const linked = yield* makeLinkedFacts;
+  const facts = yield* entityFactRepository;
 
   /**
    * Reads the live Task `id` stands for. When `id` was merged into another
@@ -515,6 +531,18 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Records, for the transaction it runs in, an `externalEntity` change for the
+   * record of `ref`, so clients read its Inbox card again after a link or an
+   * unlink. Does nothing when Hercule holds no record of the thing.
+   */
+  const announceEntityOfRef = (ref: string): Effect.Effect<void, SqlError> =>
+    Effect.flatMap(tasks.findEntityIdOfRef(ref), (entityId) =>
+      Option.isSome(entityId)
+        ? announce({ _tag: "record", topic: "externalEntity", id: entityId.value, kind: "updated" })
+        : Effect.void,
+    );
+
+  /**
    * Checks that the project a task points at exists. Fails with `NotFound` if
    * it does not. Does nothing for an absent or null id.
    */
@@ -542,6 +570,24 @@ const make = Effect.gen(function* () {
    * a `stage` (even the one the Task has, which writes no event), and a
    * `status` that moves the stage. A patch that leaves the stage alone does
    * not.
+   *
+   * A stage decision also settles which facts it overrules, through the
+   * Task's fence (`stage_fact_fence`) and cause (`stage_cause_fact_id`):
+   *
+   * - With no `stageFactId`, the decision is a person's or an agent's. The
+   *   fence becomes the highest fact id there is, so every fact recorded so
+   *   far is overruled, and the cause is cleared.
+   * - With a `stageFactId`, the decision comes from that fact, and
+   *   `judgeStageFact` decides whether it may go on. When it is refused, the
+   *   stage of the patch is dropped and nothing about the stage happens: no
+   *   event, no revision. When it is accepted, the fence becomes the fact's
+   *   id. If the stage differs, it is written and the cause becomes the fact.
+   *   If the Task holds that stage already, only the fence and the revision
+   *   move, and the cause stays: the fact placed nothing.
+   *
+   * The other fields of a patch with a `stageFactId` are not guarded by the
+   * fact: they apply whether the fact is accepted or refused. The workflows
+   * that ship with the product send the stage alone.
    */
   const updateTask = (
     requestedId: string,
@@ -555,6 +601,19 @@ const make = Effect.gen(function* () {
         const before = yield* readLiveTaskOrFail(requestedId);
         // A merged id lands on the survivor, and everything below is about it.
         const id = before.id;
+        let requestedStage = patch.stage;
+        let acceptedFactId: number | undefined;
+        if (patch.stageFactId !== undefined) {
+          const verdict = yield* linked.judgeStageFact(before, {
+            factId: patch.stageFactId,
+            onlyWhenLinkedWorkFinished: patch.onlyWhenLinkedWorkFinished === true,
+            alsoLinking: (patch.provenance ?? []).flatMap((entry) =>
+              entry.ref === undefined ? [] : [entry.ref],
+            ),
+          });
+          if (verdict._tag === "accepted") acceptedFactId = verdict.factId;
+          else requestedStage = undefined;
+        }
         yield* ensureProjectExists(patch.projectId);
 
         // Each field is compared on its own, rather than in a loop over
@@ -574,12 +633,12 @@ const make = Effect.gen(function* () {
           edit.priority = patch.priority;
         }
         const stage =
-          patch.stage ??
+          requestedStage ??
           (patch.status === undefined
             ? undefined
             : chooseStageForStatus(before.stage, patch.status));
         // Asking for a stage is a stage decision even when the Task is there already.
-        if (patch.stage !== undefined) edit.decidesStage = true;
+        if (requestedStage !== undefined) edit.decidesStage = true;
         if (isNewValue(stage, before.stage)) {
           changes.stage = { old: before.stage, new: stage };
           edit.stage = stage;
@@ -587,6 +646,15 @@ const make = Effect.gen(function* () {
           if (status !== before.status) {
             changes.status = { old: before.status, new: status };
             edit.status = status;
+          }
+        }
+        if (edit.decidesStage === true || edit.stage !== undefined) {
+          if (acceptedFactId === undefined) {
+            edit.stageFactFence = yield* facts.readHighestFactId();
+            edit.stageCauseFactId = null;
+          } else {
+            edit.stageFactFence = acceptedFactId;
+            if (edit.stage !== undefined) edit.stageCauseFactId = acceptedFactId;
           }
         }
         const project = before.projectId ?? null;
@@ -655,18 +723,27 @@ const make = Effect.gen(function* () {
         // that kept the stage: it raises the stage revision and nothing else,
         // because an Undo of a handoff has to see that someone decided.
         if (Object.keys(changes).length === 0) {
-          if (edit.decidesStage === true) yield* tasks.raiseStageRevision(id);
+          if (edit.decidesStage === true) {
+            yield* tasks.raiseStageRevision(id);
+            yield* facts.setFence(id, edit.stageFactFence!);
+            if (edit.stageCauseFactId !== undefined)
+              yield* facts.setCause(id, edit.stageCauseFactId);
+          }
           return before;
         }
 
-        const linkedNewRef = yield* tasks.update(id, edit, appended, at, actor);
+        const newRefs = yield* tasks.update(id, edit, appended, at, actor);
+        // Naming a ref is asking for the link, so an earlier unlink of it no longer holds.
+        for (const entry of appended) {
+          if (entry.ref !== undefined) yield* facts.unsuppress(id, entry.ref);
+        }
         // A finished Task waits for no summary. Taking it back to a live stage,
         // changing the words a summary reads, or linking a new outside thing
         // makes the summary out of date.
         if (edit.stage !== undefined && isFinishedStage(edit.stage)) {
           yield* tasks.clearSummaryDirty(id);
         } else if (
-          linkedNewRef ||
+          newRefs.length > 0 ||
           edit.title !== undefined ||
           edit.description !== undefined ||
           (edit.stage !== undefined && isFinishedStage(before.stage))
@@ -680,6 +757,7 @@ const make = Effect.gen(function* () {
           at,
         });
         yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
+        yield* linked.recordLinkFacts(id, newRefs);
         // Read back rather than merged in memory, so the caller gets the
         // row that was written, whatever the edit changed.
         return yield* readLiveTaskOrFail(id);
@@ -863,9 +941,11 @@ const make = Effect.gen(function* () {
         yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
         yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
         // A new Task has no links yet, so every ref its provenance names is a new link.
-        if (fields.provenance.some((entry) => entry.ref !== undefined)) {
-          yield* markSummaryDirty(task.id);
-        }
+        const linkedRefs = fields.provenance.flatMap((entry) =>
+          entry.ref === undefined ? [] : [entry.ref],
+        );
+        if (linkedRefs.length > 0) yield* markSummaryDirty(task.id);
+        yield* linked.recordLinkFacts(task.id, linkedRefs);
         return task;
       }),
     );
@@ -1445,6 +1525,12 @@ const make = Effect.gen(function* () {
      * revision, when it names a `stage`: naming a stage is a decision, and the
      * Undo of a handoff must be able to see it (it moves no timestamp and
      * writes no event).
+     *
+     * `stageFactId` says the stage comes from a fact (`task.entityChanged`),
+     * and the Task's fence decides whether the fact still counts. A stage
+     * written without one overrules every fact recorded so far. See
+     * `updateTask` for the rules. It fails with `Validation` when the fact is
+     * not a fact of this Task; every other refusal returns the Task as it is.
      */
     update: (
       input: UpdateInput,
@@ -1456,6 +1542,93 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         return yield* updateTask(id, patch, yield* currentStamp);
+      }),
+
+    /**
+     * Links the outside thing `input.ref` to the Task `input.id` (or to the
+     * Task it was merged into) by hand, and returns the Task. Through the same
+     * write as a provenance `ref` on `update`: the Task gains a provenance
+     * entry, a `task.updated` event, a Fact when the thing is a piece of work
+     * with a lifecycle, and its summary is marked out of date. The link clears
+     * an earlier unlink of the thing, so scans may link it again. Announces
+     * `task`, and `externalEntity` when Hercule holds a record of the thing.
+     *
+     * A thing the Task links already changes nothing. A thing Hercule has no
+     * record of is linked too: the ref is all a link needs. A Task at `done`
+     * or `dropped` takes the link but no Fact, as Facts never move finished
+     * work. Fails with `NotFound` when the Task does not exist or is deleted,
+     * and with `Validation` when the ref is not a valid external ref.
+     */
+    linkEntity: (
+      input: EntityLinkInput,
+    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.update");
+        const { id, ref } = yield* Effect.mapError(
+          decodeEntityLink(input),
+          createDecodeValidationError,
+        );
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const task = yield* readLiveTaskOrFail(id);
+            if (yield* tasks.hasLink(task.id, ref)) return task;
+            const linkedTask = yield* updateTask(task.id, { provenance: [{ ref }] }, actor);
+            yield* announceEntityOfRef(ref);
+            return linkedTask;
+          }),
+        );
+      }),
+
+    /**
+     * Takes the link to the outside thing `input.ref` away from the Task
+     * `input.id` (or from the Task it was merged into) and keeps it away, and
+     * returns the Task. In one transaction it:
+     *
+     * - removes the link row, and never touches provenance, which stays the
+     *   history;
+     * - voids the Facts of the pair, so a Fact queued before the unlink does
+     *   nothing, even if the thing is linked again before it runs;
+     * - records the unlink (`task_entity_link_suppressions`), so no scan links
+     *   the thing again until someone links it by hand;
+     * - writes the Fact that lets the card land, when the unlink leaves none
+     *   of the Task's links open and one completed (`recordLandingFact`);
+     * - marks the summary out of date (a finished Task has none) and announces
+     *   `task`, and
+     *   `externalEntity` when Hercule holds a record of the thing.
+     *
+     * A thing the Task does not link changes nothing, and writes no unlink
+     * record: the call is safe to repeat. Fails with `NotFound` when the Task
+     * does not exist or is deleted, and with `Validation` when the ref is not
+     * a valid external ref.
+     */
+    unlinkEntity: (
+      input: EntityLinkInput,
+    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.update");
+        const { id, ref } = yield* Effect.mapError(
+          decodeEntityLink(input),
+          createDecodeValidationError,
+        );
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const task = yield* readLiveTaskOrFail(id);
+            if (!(yield* tasks.removeLink(task.id, ref, at))) return task;
+            yield* facts.voidFacts(task.id, ref, at);
+            yield* facts.suppress(task.id, ref, at, actor);
+            yield* linked.recordLandingFact(task.id);
+            // A finished Task waits for no summary.
+            if (!isFinishedStage(task.stage)) yield* markSummaryDirty(task.id);
+            yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "updated" });
+            yield* announceEntityOfRef(ref);
+            return yield* readLiveTaskOrFail(task.id);
+          }),
+        );
       }),
 
     /**
@@ -1474,7 +1647,9 @@ const make = Effect.gen(function* () {
      *   client shows it.
      * - A move that changes nothing writes nothing, like `update`. Naming a
      *   `stage` is a stage decision, so it raises the stage revision even when
-     *   the Task is at that stage already.
+     *   the Task is at that stage already, and it overrules every fact
+     *   recorded so far (the Task's fence). A move without a `stage` only
+     *   reorders, and leaves the facts alone.
      *
      * One transaction reads the neighbours, chooses the rank and writes it. It
      * writes one `task.updated`, which lists `boardRank` beside whatever else
@@ -1503,8 +1678,12 @@ const make = Effect.gen(function* () {
      * a line naming the source's title. In one transaction the source's
      * sessions, runs, workspace links and provenance move to the survivor, the
      * survivor gains a provenance entry naming the source, and a failure the
-     * source shows moves too. A read of the source's id then returns the
-     * survivor (`resolveTaskId`).
+     * source shows moves too. The source's stage facts and unlink records move
+     * as well (an unlink record of a ref the survivor now links is dropped).
+     * The survivor's fence becomes the highest fact id and its cause is
+     * cleared, so a fact waiting from before the merge never overwrites its
+     * stage. A read of the source's id then returns the survivor
+     * (`resolveTaskId`).
      *
      * Fails with `NotFound` when either Task does not exist or is deleted, with
      * `InvalidState` when either is at `done` or `dropped`, and with
@@ -1574,6 +1753,12 @@ const make = Effect.gen(function* () {
 
             yield* tasks.markMerged(sourceId, targetId);
             yield* tasks.moveEntityLinks(sourceId, targetId);
+            // Merging is a person's act, so every fact recorded so far is
+            // overruled for the survivor, the moved ones included. This comes
+            // after the facts moved, and `updateTask` below writes no stage.
+            yield* facts.moveFactsAndSuppressions(sourceId, targetId);
+            yield* facts.setFence(targetId, yield* facts.readHighestFactId());
+            yield* facts.setCause(targetId, null);
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
@@ -1906,6 +2091,47 @@ const make = Effect.gen(function* () {
     markSummaryDirty,
 
     /**
+     * Counts the links of the Task `taskId` (or of the Task it was merged
+     * into): how many are open or cannot be read, and how many are completed.
+     * A link to a context kind, to an abandoned thing, or to a ref nothing is
+     * known of counts as neither (see `countLinkedWork` in `linked-work.ts`).
+     * One batch through `LinkedEntities`. It checks no grant.
+     */
+    countLinkedWork: linked.countLinkedWork,
+
+    /**
+     * Reads, before a write of External Entities, what the Tasks that link
+     * `refs` need to compare after it. Pass the result to `recordEntityFacts`
+     * in the same transaction. It checks no grant: its caller is the ingest.
+     */
+    snapshotLinkedEntities: linked.snapshotLinkedEntities,
+
+    /**
+     * Writes, after a write of External Entities and in its transaction, the
+     * facts that the write made for the live Tasks that link a changed thing:
+     * at most one fact per Task and thing, each with a `task.entityChanged`
+     * event. A write that changes no lifecycle, and no readability or
+     * completeness that moves a Task's counts, writes nothing. `snapshot` is
+     * valid only inside the transaction that took it.
+     */
+    recordEntityFacts: linked.recordEntityFacts,
+
+    /**
+     * Writes a first-sight fact for every link of every live Task to a piece
+     * of work that has a lifecycle, in the caller's transaction. Called once,
+     * when a shipped workflow is first installed.
+     */
+    recordFirstInstallFacts: linked.recordFirstInstallFacts,
+
+    /**
+     * Writes the fact that lets a card land after an unlink: when the live
+     * Task has no open link left and a completed one, a fact for its newest
+     * completed link. Call it in the transaction of the unlink, after the link
+     * row is gone.
+     */
+    recordLandingFact: linked.recordLandingFact,
+
+    /**
      * Gives the Task made for a Thread the Thread's generated title. It
      * renames the Task only when the Task is not deleted, merged or finished,
      * its title is still `from` (the title it was made with), and `to` is a
@@ -1985,5 +2211,5 @@ export class TaskService extends Context.Service<TaskService, Effect.Success<typ
 export const TaskServiceLayer: Layer.Layer<
   TaskService,
   never,
-  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier | TaskLinkOwners
+  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier | TaskLinkOwners | LinkedEntities
 > = Layer.effect(TaskService)(make);

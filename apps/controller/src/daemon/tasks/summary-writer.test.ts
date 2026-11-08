@@ -51,7 +51,7 @@ import {
 } from "../../text-generation/testing";
 import { AccountUsageLayer } from "../../usage";
 import { TaskTrackingRunsLayer } from "../runs";
-import { TaskLinkOwnersLayer } from "./link-owners";
+import { TaskServicePortsLayer } from "./task-service";
 import { runTaskSummaryLoop } from "./summary-writer";
 
 const USER: Actor = {
@@ -94,7 +94,7 @@ const buildStandInModel = (): StandInModel => ({
 
 const layerOf = (model: StandInModel) =>
   Layer.mergeAll(
-    TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer)),
+    TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer)),
     TaskSummariesLayer.pipe(Layer.provide(ServingPromotionStateLayer)),
     TaskTrackingRunsLayer,
     TextGenerationModelsLayer,

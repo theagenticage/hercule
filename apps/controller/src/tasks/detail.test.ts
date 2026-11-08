@@ -713,6 +713,7 @@ describe("who may read the details", () => {
                           lastTurnEndedAt: undefined,
                           lastRunEndedAt: undefined,
                           failure: undefined,
+                          stageCause: undefined,
                           linkedRefs: [],
                           entityMarks: [],
                           contextRefs: [],

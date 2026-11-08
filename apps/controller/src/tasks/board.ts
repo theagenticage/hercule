@@ -92,6 +92,8 @@ export interface BoardCardFacts {
   readonly lastRunEndedAt: string | undefined;
   /** The failure of the run `tasks.failed_run_id` names, when the Task has one. */
   readonly failure: BoardFailureFact | undefined;
+  /** Why the card is in its stage, when a fact placed it. See `describeStageCause`. */
+  readonly stageCause: WorkCard["stageCause"];
   /** The refs the Task links, in the order they were linked. */
   readonly linkedRefs: ReadonlyArray<string>;
   /** One mark per kind of the Task's linked things that have a record, in the order they were linked. */
@@ -125,6 +127,8 @@ export interface BoardFacts {
 export interface BoardFactsRequest {
   readonly id: string;
   readonly failedRunId: string | undefined;
+  /** The fact that placed the Task's stage, when one did. */
+  readonly stageCauseFactId: number | undefined;
 }
 
 export class TaskBoardFacts extends Context.Service<
@@ -204,6 +208,8 @@ const findOpenQuestion = (
  *   session of it ended a turn and the last time a run of it ended.
  * - `summary`: the Task's summary, once it has one. It is only a description,
  *   so it never decides `openQuestion`, `failure` or any other fact above.
+ * - `stageCause`: copied from the facts. Set only while the stage is the one
+ *   a fact placed; any other write of the stage clears it.
  * - `entityMarks` and `contextRefs`: copied from the facts, cut to what a
  *   card can hold (`MAX_ENTITY_MARKS`, `MAX_CARD_CONTEXTS`).
  */
@@ -258,6 +264,7 @@ export const buildWorkCard = (task: BoardTask, facts: BoardCardFacts): WorkCard 
     createdAt: task.createdAt,
     stageChangedAt: task.stageChangedAt,
     lastActivityAt,
+    ...(facts.stageCause === undefined ? {} : { stageCause: facts.stageCause }),
     entityMarks: facts.entityMarks.slice(0, MAX_ENTITY_MARKS),
     contextRefs: facts.contextRefs.slice(0, MAX_CARD_CONTEXTS),
   };

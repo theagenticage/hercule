@@ -38,7 +38,7 @@ import { runRepository } from "./repository";
 import { RunService, RunServiceLayer } from "./service";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { WorkspaceSteps, type WorkspaceStepToStart } from "./workspace-steps";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const at = "2026-10-14T10:00:00.000Z";
 
@@ -84,7 +84,7 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
         Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
         Layer.provide(SessionTokensLayer),

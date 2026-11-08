@@ -806,6 +806,38 @@ export const CLI = {
         "the merged task would hold more labels or a longer description than a task may; shorten one of them first, or leave the merge",
     },
   },
+  "task.linkEntity": {
+    command: "task link",
+    help: "Links an outside thing, such as a pull request or a ticket, to a task by hand. The task then shows it, and its card follows what happens to it. A thing the task links already changes nothing. If you unlinked the thing before, linking it again lets scans link it once more. Returns the task.",
+    examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      ref: {
+        flag: "ref",
+        help: "The thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it. A flag, not an argument, because a ref holds characters a shell treats as special: quote it.",
+      },
+    },
+  },
+  "task.unlinkEntity": {
+    command: "task unlink",
+    help: "Takes an outside thing away from a task and keeps it away. No scan links it again, and changes it had queued for the task's card do nothing. Linking it by hand again undoes this. Nothing is changed at the source, and the task's record of where it came from is kept. A thing the task does not link changes nothing. Returns the task.",
+    examples: [{ args: ["1f3a9c2e", "--ref", "github:pr:acme/webshop#87"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+      ref: {
+        flag: "ref",
+        help: "The external ref of the linked thing to take away. A flag, not an argument, because a ref holds characters a shell treats as special: quote it.",
+      },
+    },
+  },
   // Exists only for the sidebar's failed-run dot, which reads it on every
   // screen. A terminal finds failed runs with `hercule task board`.
   "task.readAttention": { hidden: true },

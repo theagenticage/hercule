@@ -25,11 +25,12 @@ import { buildHomePaths, HerculeHome } from "../config";
 import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionObserver } from "./observer";
+import { ConnectionEntityFacts } from "./entity-facts";
 import { ConnectionReferences } from "./references";
 import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer, type ConnectionPage } from "./service";
@@ -52,6 +53,10 @@ const buildStack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
+    // This test builds no Tasks, so no fact follows a delete.
+    Layer.provide(
+      Layer.succeed(ConnectionEntityFacts)({ recordFactsOfDeletion: (_id, deletion) => deletion }),
+    ),
     Layer.provide(Layer.succeed(ConnectionObserver)({ connectionDeleted: () => Effect.void })),
     Layer.provideMerge(
       PluginHostLayer.pipe(
@@ -64,6 +69,8 @@ const buildStack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
+    // The ingest records Task facts, which are Platform Events.
+    Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

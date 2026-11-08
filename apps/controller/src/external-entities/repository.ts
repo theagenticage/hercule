@@ -35,6 +35,7 @@ import {
   MAX_LIVE_WORKFLOWS,
   type EntityChange,
   type EntityConflict,
+  type EntityLifecycle,
   type EntityEdge,
   type EntityPlace,
   type EntityStatus,
@@ -166,6 +167,22 @@ export interface TaskableEntity {
   readonly access: "ok" | "inaccessible" | "deleted";
   /** True when some Connection reports a concern for the thing. */
   readonly hasConcern: boolean;
+}
+
+/**
+ * What the rules for a Task's linked work need of a stored record: how much of
+ * it Hercule holds, whether it is work, and whether anyone can read it now.
+ */
+export interface StoredRecordState {
+  /** The qualified kind. A partial record may have none yet, and then this is the empty string. */
+  readonly kind: string;
+  readonly completeness: "full" | "partial";
+  /** True when the record is a full record of a work kind (see `TaskableEntity.isWorkRecord`). */
+  readonly isWorkRecord: boolean;
+  /** Null when the record has no lifecycle yet. */
+  readonly lifecycle: EntityLifecycle | null;
+  /** What any Connection can read of the thing, as `buildEntityFields` derives it. */
+  readonly access: "ok" | "inaccessible" | "deleted";
 }
 
 /** One thing the sheet lists before the user types, as the rows hold it. */
@@ -1497,6 +1514,50 @@ const make = Effect.gen(function* () {
           const row = rows.get(ref);
           return row === undefined ? [] : [readLinkedEntityFacts(row)];
         }),
+      ),
+
+    /**
+     * Returns the stored state (`StoredRecordState`) of each of `refs` that
+     * has a record, by ref. A ref with no record is left out. Two statements
+     * however many refs there are, and no Connection or plugin is consulted:
+     * it answers from the rows alone.
+     */
+    readStoredRecordStates: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StoredRecordState>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* readEntities(refs);
+        const observations = yield* readObservations([...rows.keys()]);
+        return new Map(
+          [...rows].map(([ref, row]): [string, StoredRecordState] => [
+            ref,
+            {
+              kind: (row.kind as string | null) ?? "",
+              completeness: row.completeness as "full" | "partial",
+              isWorkRecord: isWorkRecord(row),
+              lifecycle: row.lifecycle as EntityLifecycle | null,
+              access: deriveAccess(observations.get(ref) ?? []),
+            },
+          ]),
+        );
+      }),
+
+    /**
+     * Returns the refs the Connection holds a row for (what it reads, and what
+     * it tried to read and could not) that a live Task links. Deleting the
+     * Connection deletes these rows. Only linked refs are returned, because
+     * only they can make a fact, and a Connection may hold thousands of rows.
+     * One statement.
+     */
+    listLinkedObservedRefs: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          SELECT DISTINCT o.ref FROM external_entity_observations o
+          WHERE o.connection_id = ${uuidFromString(connectionId)}
+            AND o.ref IN (SELECT ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}))`,
+        (rows) => rows.map((row) => row.ref),
       ),
 
     /**

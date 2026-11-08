@@ -22,10 +22,11 @@ import {
 } from "@hercule/plugin-host";
 import { ConnectionNotIngesting } from "../connections";
 import { uuidFromString, uuidToString } from "../db";
-import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, inTransaction } from "../db/testing";
 import type { EntityReporter, RecognizeText } from "../plugins";
 import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
+import { TaskTestLayer } from "../tasks/testing";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
 import type { FullEntityObservation } from "./slots";
 
@@ -120,7 +121,7 @@ const run = <A>(
       );
       return yield* body({ ingest, sql, announced });
     }).pipe(
-      Effect.provide(ExternalEntityIngestLayer.pipe(Layer.provideMerge(TestDatabase))),
+      Effect.provide(ExternalEntityIngestLayer.pipe(Layer.provideMerge(TaskTestLayer))),
       Effect.provide(listener),
       Effect.orDie,
     ),

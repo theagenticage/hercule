@@ -181,6 +181,16 @@ const TABLE = {
     usableIn: ["notification.answer", "signal.answer"],
   },
   "task.move": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
+  "task.linkEntity": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/link",
+  },
+  "task.unlinkEntity": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/unlink",
+  },
   // Merging and undoing a Try again are the user's own corrections: a session
   // token is refused whatever its profile holds.
   "task.merge": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },

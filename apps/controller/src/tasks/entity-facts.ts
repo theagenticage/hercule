@@ -1,0 +1,340 @@
+/**
+ * The rows behind stage facts: the facts themselves (`task_entity_facts`), the
+ * links a person took away (`task_entity_link_suppressions`), the fence and the
+ * cause on each Task, and the reads of live links that writing a fact needs.
+ *
+ * A fact says that a linked External Entity changed in a way that may move its
+ * Task. Its `id` is its order: there is one writer, so ids follow commit order
+ * and nothing compares timestamps. This module only reads and writes rows. The
+ * rules (when a fact is written, what a stage write does with the fence) live
+ * in the Task service.
+ */
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import type { EntityLifecycle } from "@hercule/contract";
+import { uuidFromString, uuidToString } from "../db";
+import { LIVE_TASK_LINKS_SQL, LIVE_TASK_SQL } from "./repository";
+import type { StageCauseThing } from "./stage-cause";
+
+/** The most Task ids one statement lists links for, well under SQLite's limit on bound values. */
+const MAX_TASKS_PER_STATEMENT = 500;
+
+/** One fact, as the row holds it. */
+export interface EntityFact {
+  readonly id: number;
+  readonly taskId: string;
+  readonly ref: string;
+  readonly lifecycle: EntityLifecycle;
+  /** Null when the thing was only just linked or observed. */
+  readonly previousLifecycle: EntityLifecycle | null;
+  /** When the thing was observed in this state. For display: it is never compared. */
+  readonly observedAt: string;
+  /** Set when the user unlinked the pair. A voided fact never moves a stage, but is still read for its words. */
+  readonly voidedAt: string | null;
+}
+
+/** A fact that placed a stage, with the stored words of its thing. */
+export interface StageCauseRecord {
+  readonly factId: number;
+  readonly ref: string;
+  readonly lifecycle: EntityLifecycle;
+  readonly previousLifecycle: EntityLifecycle | null;
+  /** The record of `ref`, or `undefined` when Hercule holds none. */
+  readonly thing: StageCauseThing | undefined;
+}
+
+interface StageCauseRow {
+  readonly id: number;
+  readonly ref: string;
+  readonly lifecycle: EntityLifecycle;
+  readonly previous_lifecycle: EntityLifecycle | null;
+  readonly noun: string | null;
+  readonly identifier: string | null;
+  readonly current_lifecycle: EntityLifecycle | null;
+  readonly status_label: string | null;
+}
+
+/** A fact to write. */
+export type NewEntityFact = Omit<EntityFact, "id" | "voidedAt">;
+
+/** A Task's link to a ref. */
+export interface TaskLink {
+  readonly taskId: string;
+  readonly ref: string;
+}
+
+interface FactRow {
+  readonly id: number;
+  readonly task_id: Uint8Array;
+  readonly ref: string;
+  readonly lifecycle: EntityLifecycle;
+  readonly previous_lifecycle: EntityLifecycle | null;
+  readonly observed_at: string;
+  readonly voided_at: string | null;
+}
+
+const buildFact = (row: FactRow): EntityFact => ({
+  id: row.id,
+  taskId: uuidToString(row.task_id),
+  ref: row.ref,
+  lifecycle: row.lifecycle,
+  previousLifecycle: row.previous_lifecycle,
+  observedAt: row.observed_at,
+  voidedAt: row.voided_at,
+});
+
+/** Orders links by Task id, then ref, the way text sorts. */
+const sortLinks = (links: ReadonlyArray<TaskLink>): ReadonlyArray<TaskLink> =>
+  links.toSorted((left, right) =>
+    left.taskId === right.taskId
+      ? left.ref < right.ref
+        ? -1
+        : left.ref > right.ref
+          ? 1
+          : 0
+      : left.taskId < right.taskId
+        ? -1
+        : 1,
+  );
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  return {
+    /** Writes a fact and returns its id. Run it in the transaction of the change it reports. */
+    insertFact: (fact: NewEntityFact): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: number }>`
+          INSERT INTO task_entity_facts (task_id, ref, lifecycle, previous_lifecycle, observed_at)
+          VALUES (${uuidFromString(fact.taskId)}, ${fact.ref}, ${fact.lifecycle},
+                  ${fact.previousLifecycle}, ${fact.observedAt})
+          RETURNING id`,
+        (rows) => rows[0]!.id,
+      ),
+
+    /** Returns the fact with this id, voided or not, or none. */
+    readFact: (id: number): Effect.Effect<Option.Option<EntityFact>, SqlError> =>
+      Effect.map(
+        sql<FactRow>`
+          SELECT id, task_id, ref, lifecycle, previous_lifecycle, observed_at, voided_at
+          FROM task_entity_facts WHERE id = ${id}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), buildFact),
+      ),
+
+    /** Voids every fact of the pair that is not voided yet. A voided fact stays readable but moves no stage. */
+    voidFacts: (taskId: string, ref: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE task_entity_facts SET voided_at = ${at}
+        WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref} AND voided_at IS NULL`),
+
+    /**
+     * Returns, for each fact id that exists, the fact and the stored words of
+     * its thing, voided facts included: a voided fact still says why a card
+     * is where it is. One statement however many ids there are. A fact whose
+     * thing has no record has no `thing`.
+     */
+    listStageCauses: (
+      factIds: ReadonlyArray<number>,
+    ): Effect.Effect<ReadonlyMap<number, StageCauseRecord>, SqlError> =>
+      factIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<StageCauseRow>`
+              SELECT f.id, f.ref, f.lifecycle, f.previous_lifecycle, e.noun, e.identifier,
+                     e.lifecycle AS current_lifecycle,
+                     json_extract(e.status, '$.label') AS status_label
+              FROM task_entity_facts f LEFT JOIN external_entities e ON e.ref = f.ref
+              WHERE f.id IN ${sql.in(factIds)}`,
+            (rows) =>
+              new Map(
+                rows.map((row) => [
+                  row.id,
+                  {
+                    factId: row.id,
+                    ref: row.ref,
+                    lifecycle: row.lifecycle,
+                    previousLifecycle: row.previous_lifecycle,
+                    thing:
+                      row.noun === null
+                        ? undefined
+                        : {
+                            noun: row.noun,
+                            identifier: row.identifier,
+                            lifecycle: row.current_lifecycle,
+                            statusWord: row.status_label,
+                          },
+                  },
+                ]),
+              ),
+          ),
+
+    /** Returns the highest fact id in the table, or 0 when there is none. */
+    readHighestFactId: (): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly highest: number }>`
+          SELECT COALESCE(MAX(id), 0) AS highest FROM task_entity_facts`,
+        (rows) => rows[0]!.highest,
+      ),
+
+    /**
+     * Returns the Task's fence, the highest fact id its stage already accounts
+     * for, and the fact that placed its current stage (null when a person, an
+     * agent or the status did). Taken as it is, never followed to a survivor.
+     * Dies on an id that has no Task: the caller has read the Task.
+     */
+    readFence: (
+      taskId: string,
+    ): Effect.Effect<{ readonly fence: number; readonly causeFactId: number | null }, SqlError> =>
+      Effect.map(
+        sql<{ readonly fence: number; readonly cause: number | null }>`
+          SELECT stage_fact_fence AS fence, stage_cause_fact_id AS cause
+          FROM tasks WHERE id = ${uuidFromString(taskId)}`,
+        (rows) => ({ fence: rows[0]!.fence, causeFactId: rows[0]!.cause }),
+      ),
+
+    /** Sets the Task's fence. */
+    setFence: (taskId: string, fence: number): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE tasks SET stage_fact_fence = ${fence} WHERE id = ${uuidFromString(taskId)}`,
+      ),
+
+    /** Sets the fact that placed the Task's stage, or clears it with null. */
+    setCause: (taskId: string, factId: number | null): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE tasks SET stage_cause_fact_id = ${factId} WHERE id = ${uuidFromString(taskId)}`,
+      ),
+
+    /** Records that the user unlinked the pair, so no scan adds the link back. Does nothing if it is recorded already. */
+    suppress: (
+      taskId: string,
+      ref: string,
+      at: string,
+      actor: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)
+        VALUES (${uuidFromString(taskId)}, ${ref}, ${at}, ${actor})
+        ON CONFLICT (task_id, ref) DO NOTHING`),
+
+    /** Removes the record of an unlink, because someone asked for the link again. */
+    unsuppress: (taskId: string, ref: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        DELETE FROM task_entity_link_suppressions
+        WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`),
+
+    /**
+     * Gives the survivor of a merge the facts and the unlink records of the
+     * merged Task. A fact keeps its `voided_at`, so a fact the user voided
+     * stays voided. A ref both Tasks had unlinked is recorded once, as the
+     * survivor had it. Then the survivor's unlink record of any ref it links
+     * now is dropped: merging brings the links together, and a link wins
+     * over an old unlink.
+     */
+    moveFactsAndSuppressions: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const source = uuidFromString(sourceId);
+        const target = uuidFromString(targetId);
+        yield* sql`UPDATE task_entity_facts SET task_id = ${target} WHERE task_id = ${source}`;
+        yield* sql`
+          INSERT INTO task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)
+          SELECT ${target}, ref, suppressed_at, suppressed_by
+          FROM task_entity_link_suppressions WHERE task_id = ${source}
+          ON CONFLICT (task_id, ref) DO NOTHING`;
+        yield* sql`DELETE FROM task_entity_link_suppressions WHERE task_id = ${source}`;
+        yield* sql`
+          DELETE FROM task_entity_link_suppressions
+          WHERE task_id = ${target}
+            AND ref IN (SELECT ref FROM task_entity_links WHERE task_id = ${target})`;
+      }),
+
+    /** Returns true when the user unlinked the pair and nobody has linked it again. */
+    isSuppressed: (taskId: string, ref: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`
+          SELECT 1 FROM task_entity_link_suppressions
+          WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns the live links to any of `refs`, as `(Task, ref)` pairs sorted by
+     * Task and ref. A link is live by `LIVE_TASK_LINKS_SQL`: the one definition
+     * of a joinable Task. One statement however many refs there are, and none
+     * for no refs. The refs are listed in the statement, not read from a
+     * subquery, so SQLite narrows the links by the index on `ref` before it
+     * numbers them; a subquery would make every poll read every link. Pass at
+     * most a few thousand refs.
+     */
+    listLiveLinksTo: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<TaskLink>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+              SELECT task_id, ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
+              WHERE ref IN ${sql.in(refs)}`,
+            (rows) =>
+              sortLinks(rows.map((row) => ({ taskId: uuidToString(row.task_id), ref: row.ref }))),
+          ),
+
+    /** Returns every live link of every live Task, sorted by Task and ref. */
+    listAllLiveLinks: (): Effect.Effect<ReadonlyArray<TaskLink>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+          SELECT task_id, ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})`,
+        (rows) =>
+          sortLinks(rows.map((row) => ({ taskId: uuidToString(row.task_id), ref: row.ref }))),
+      ),
+
+    /**
+     * Returns the refs the Task links when the Task is live, and none when it
+     * is deleted, merged or finished. The Task is taken as it is. It reads by
+     * the key on the Task id: `LIVE_TASK_LINKS_SQL` ranks links by ref, and
+     * SQLite cannot narrow that ranking by Task.
+     */
+    listLiveLinkRefsOf: (taskId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          SELECT l.ref FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+          WHERE l.task_id = ${uuidFromString(taskId)} AND ${sql.literal(LIVE_TASK_SQL)}
+          ORDER BY l.ref`,
+        (rows) => rows.map((row) => row.ref),
+      ),
+
+    /**
+     * Returns every link of each of `taskIds`, live Task or not, as the refs
+     * per Task, newest link first and then by ref. A Task with no link has no
+     * entry. One statement however
+     * many Tasks there are.
+     */
+    listLinkRefs: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
+      Effect.map(
+        Effect.forEach(
+          Arr.chunksOf(taskIds, MAX_TASKS_PER_STATEMENT),
+          (chunk) =>
+            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
+              SELECT task_id, ref FROM task_entity_links
+              WHERE task_id IN ${sql.in(chunk.map(uuidFromString))}
+              ORDER BY linked_at DESC, ref`,
+        ),
+        (chunks) => {
+          const byTask = new Map<string, Array<string>>();
+          for (const row of chunks.flat()) {
+            const id = uuidToString(row.task_id);
+            const refs = byTask.get(id);
+            if (refs === undefined) byTask.set(id, [row.ref]);
+            else refs.push(row.ref);
+          }
+          return byTask;
+        },
+      ),
+  };
+});
+
+export const entityFactRepository = make;

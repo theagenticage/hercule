@@ -63,7 +63,7 @@ import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { TaskService, TaskServiceLayer } from "../tasks";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { providerAccountRepository } from "../provider-accounts";
@@ -95,6 +95,8 @@ const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClie
     Layer.provideMerge(secrets),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
+    // The ingest records Task facts, which are Platform Events.
+    Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
   );
 
@@ -157,7 +159,7 @@ const buildWorkspaceLayer = () =>
 
 const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(buildWorkspaceLayer()),
-  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
   Layer.provideMerge(
     Layer.mergeAll(
       AuditLogLayer,
@@ -306,7 +308,7 @@ const buildGatedCredentialStack = (
   );
   return SessionServiceLayer.pipe(
     Layer.provideMerge(buildWorkspaceLayer()),
-    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         AuditLogLayer,

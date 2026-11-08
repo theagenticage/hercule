@@ -88,12 +88,10 @@ import {
   RunTargetsLayer,
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
-  TaskServiceWithLinkOwnersLayer,
+  TaskServiceWithPortsLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
-  WorkflowEntitiesLayer,
-  WorkflowRunsLayer,
-  WorkflowSignalsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
@@ -147,7 +145,6 @@ import {
   TriggerEffectsLayer,
   TriggerHealthLayer,
   WorkflowService,
-  WorkflowServiceLayer,
 } from "../workflows";
 import { buildAttachmentResponse } from "./attachment-response";
 
@@ -312,6 +309,12 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       )
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
+      )
+      .handle("linkEntity", ({ params, payload }) =>
+        withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
+      )
+      .handle("unlinkEntity", ({ params, payload }) =>
+        withApiErrors(tasks.unlinkEntity({ id: params.id, ...payload })),
       )
       .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
       .handle("undoTryAgain", ({ params, payload }) =>
@@ -906,12 +909,7 @@ const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCat
  * domain instead (see the event pipeline below).
  */
 const WorkflowDomainLayer = Layer.mergeAll(
-  WorkflowServiceLayer.pipe(
-    Layer.provide(EventKindsOperationLayer),
-    Layer.provide(WorkflowRunsLayer),
-    Layer.provide(WorkflowSignalsLayer),
-    Layer.provide(WorkflowEntitiesLayer),
-  ),
+  WorkflowServiceWithPortsLayer,
   CronTriggerSchedulerLayer,
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
 
@@ -934,7 +932,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
  */
 const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(WorkflowDomainLayer),
-  Layer.provideMerge(TaskServiceWithLinkOwnersLayer),
+  Layer.provideMerge(TaskServiceWithPortsLayer),
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
@@ -1063,7 +1061,7 @@ const operationServices = Layer.mergeAll(
   // thing at its source goes through the plugin host's lookups.
   ExternalEntityServiceLayer.pipe(
     Layer.provide(EntityLookupsLayer),
-    Layer.provide(TaskServiceWithLinkOwnersLayer),
+    Layer.provide(TaskServiceWithPortsLayer),
   ),
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -1118,7 +1116,7 @@ const operationServices = Layer.mergeAll(
       // signal service and the Ignore Rule service share.
       ExternalEntityHandoffsLayer.pipe(
         Layer.provide(RunDomainLayer),
-        Layer.provide(TaskServiceWithLinkOwnersLayer),
+        Layer.provide(TaskServiceWithPortsLayer),
         Layer.provide(SignalServiceDomainLayer),
         Layer.provide(SignalClaimsLayer),
       ),

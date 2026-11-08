@@ -2,7 +2,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "../../external-entities";
+import { AuditLog, PlatformEvents } from "../../events";
+import { Notifier } from "../../notifications";
 import { EntityObservations } from "../../plugins";
+import { TaskServiceWithPortsLayer } from "../tasks";
 
 const make = Effect.gen(function* () {
   const ingest = yield* ExternalEntityIngest;
@@ -21,8 +24,18 @@ const make = Effect.gen(function* () {
  * Entities ingest: an event source reports through it what a poll read of
  * entities. The plugins domain cannot import the External Entities domain
  * without making the domain graph a cycle, so the controller daemon joins the
- * two. The ingest needs only the database, so this layer cannot reach back
- * into the plugin host.
+ * two.
+ *
+ * The ingest records the facts that an entity write makes about the things
+ * Tasks link, so it needs the Task service. That service reads the database
+ * alone (its `LinkedEntities` port is answered from stored rows), so this
+ * layer still cannot reach back into the plugin host, which requires this
+ * layer.
  */
-export const EntityObservationsLayer: Layer.Layer<EntityObservations, never, SqlClient.SqlClient> =
-  Layer.effect(EntityObservations)(make).pipe(Layer.provide(ExternalEntityIngestLayer));
+export const EntityObservationsLayer: Layer.Layer<
+  EntityObservations,
+  never,
+  SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier
+> = Layer.effect(EntityObservations)(make).pipe(
+  Layer.provide(ExternalEntityIngestLayer.pipe(Layer.provide(TaskServiceWithPortsLayer))),
+);

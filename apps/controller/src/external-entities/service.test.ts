@@ -35,7 +35,7 @@ import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
 import { signalRepository } from "../signals/repository";
 import { TaskService, TaskServiceLayer } from "../tasks";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
 import { renderEntitySlots, type FullEntityObservation } from "./slots";
@@ -192,7 +192,7 @@ const buildLayer = (script: Script) =>
     Layer.provideMerge(
       TaskServiceLayer.pipe(
         Layer.provideMerge(NotifierLayer),
-        Layer.provideMerge(TaskLinkOwnersLayer),
+        Layer.provideMerge(TaskServicePortsLayer),
         Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
       ),
     ),

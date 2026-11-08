@@ -19,5 +19,10 @@ export {
   PENDING_URL_PREFIX,
   type PendingTarget,
 } from "./pending-target";
-export { externalEntityRepository, type ContextRead, type ObservedEntity } from "./repository";
+export {
+  externalEntityRepository,
+  type ContextRead,
+  type ObservedEntity,
+  type StoredRecordState,
+} from "./repository";
 export { ExternalEntityService, ExternalEntityServiceLayer } from "./service";

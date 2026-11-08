@@ -44,7 +44,7 @@ import { RunService, RunServiceLayer } from "./service";
 import { buildHeldAction, waitForHeldExecutions, type HeldAction } from "./testing";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { WorkspaceSteps } from "./workspace-steps";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 type Deps = RunService | WorkflowService | TaskService | SqlClient.SqlClient;
 
@@ -70,7 +70,7 @@ const runTest = <A, E>(
         Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
         Layer.provide(SessionTokensLayer),

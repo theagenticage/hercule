@@ -554,6 +554,7 @@ export {
   TaskDetail,
   TaskDetailSession,
   TaskEntityChangedEventPayload,
+  TaskEntityLinkInput,
   TaskFilter,
   TaskMergeInput,
   TaskMoveInput,

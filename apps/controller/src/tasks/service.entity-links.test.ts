@@ -15,11 +15,11 @@ import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { taskRepository } from "./repository";
 import { TaskService, TaskServiceLayer } from "./index";
-import { TaskLinkOwnersLayer } from "../daemon/tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const layer = TaskServiceLayer.pipe(
   Layer.provideMerge(NotifierLayer),
-  Layer.provideMerge(TaskLinkOwnersLayer),
+  Layer.provideMerge(TaskServicePortsLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
   Layer.provideMerge(TestDatabase),
 );

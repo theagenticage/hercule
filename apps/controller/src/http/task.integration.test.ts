@@ -344,3 +344,57 @@ describe("what a request cannot choose when it creates a task", () => {
     });
   });
 });
+
+describe("linking a thing to a task by hand", () => {
+  const REF = "github:pr:acme/webshop#87";
+
+  it("links with the ref in the body, and unlinks it again, answering the task each time", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const created = await createTask(base, token, { title: "Refund button" });
+
+      const linked = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: REF },
+        token,
+      );
+      expect(linked.status).toBe(200);
+      const linkedTask = (await linked.json()) as Task;
+      expect(linkedTask.id).toBe(created.id);
+      expect(linkedTask.provenance.map((entry) => entry.ref)).toEqual([REF]);
+
+      const unlinked = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/unlink`,
+        { ref: REF },
+        token,
+      );
+      expect(unlinked.status).toBe(200);
+      expect(((await unlinked.json()) as Task).provenance.map((entry) => entry.ref)).toEqual([REF]);
+    });
+  });
+
+  it("refuses a ref that is not an external ref, and a task that is not there", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const created = await createTask(base, token, { title: "Refund button" });
+
+      const invalid = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: "a pull request" },
+        token,
+      );
+      expect(invalid.status).toBe(400);
+
+      const missing = await post(
+        base,
+        "/api/v1/tasks/0199e0e7-0004-7000-8000-0000000000ff/entities/unlink",
+        { ref: REF },
+        token,
+      );
+      expect(missing.status).toBe(404);
+    });
+  });
+});
