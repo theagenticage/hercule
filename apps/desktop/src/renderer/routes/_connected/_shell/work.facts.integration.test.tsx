@@ -38,7 +38,7 @@ afterEach(() => {
 
 const WEBSHOP = SIDEBAR_FIXTURE.projects[0]!;
 const buildTaskId = (n: number): string => `01a06d02-7e00-7000-8000-${String(n).padStart(12, "0")}`;
-const MERGED = { ref: "github:pull-request:6221", text: "PR #6221 merged" };
+const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "PR #6221 merged" };
 const SNAPSHOT_KEY = buildBoardSnapshotKey(CONTROLLER_URL, SIDEBAR_FIXTURE.username);
 
 const SLOTS = buildCard(buildTaskId(1), {
@@ -277,7 +277,7 @@ describe("the morning replay", () => {
       { name: "Replay what changed" },
       { timeout: 4_000 },
     );
-    expect(readLine()).toBe("Since you last looked: 1 moved");
+    expect(readLine()).toBe("Since you last looked: one moved");
 
     // The button plays it again from how the board was left.
     fireEvent.click(replay);
@@ -312,7 +312,7 @@ describe("the morning replay", () => {
       ),
     ).toBeTruthy();
     await screen.findByRole("button", { name: "Replay what changed" }, { timeout: 4_000 });
-    expect(readLine()).toBe("Since you last looked: 1 new");
+    expect(readLine()).toBe("Since you last looked: one new");
   });
 
   it("plays nothing under Reduce motion: the board is drawn as it is, and the line says what changed", async () => {
@@ -322,7 +322,7 @@ describe("the morning replay", () => {
     await screen.findByRole("button", { name: /^Cache delivery slot lookups/ });
 
     expect(getCard("Cache delivery slot lookups").dataset["stage"]).toBe("building");
-    expect(readLine()).toBe("Since you last looked: 1 moved");
+    expect(readLine()).toBe("Since you last looked: one moved");
     expect(screen.queryByRole("button", { name: "Replay what changed" })).toBeNull();
     expect(document.querySelector(".card-cause")).toBeNull();
   });

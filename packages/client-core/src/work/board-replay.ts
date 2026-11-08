@@ -34,9 +34,15 @@ export const buildBoardSnapshot = (board: WorkBoard): BoardSnapshot => ({
  */
 export const MOST_REPLAYED_CHANGES = 4;
 
+const SMALL_NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+
+/** Returns `n` as a word when it is from one to nine, as the drawing writes small counts, and as digits otherwise. */
+const spellCount = (n: number): string => SMALL_NUMBER_WORDS[n - 1] ?? String(n);
+
 /**
  * Returns the sentence that tells what changed between two reads, such as
- * "Since you last looked: 2 landed, 1 new". A card that moved into Landed
+ * "Since you last looked: two landed, one new". Counts from one to nine are
+ * words, larger ones digits. A card that moved into Landed
  * counts as landed, a card that moved anywhere else as moved, and a card that
  * arrived as new. Returns `null` when no card landed, moved or arrived: a card
  * that left the board is not told, because nothing here can say why.
@@ -49,7 +55,7 @@ export const summarizeCardMoves = (changes: readonly CardStageChange[]): string 
     [count((change) => change.kind === "moved" && change.to.stage !== "landed"), "moved"],
     [count((change) => change.kind === "arrived"), "new"],
   ] as const;
-  const words = parts.filter(([n]) => n > 0).map(([n, what]) => `${String(n)} ${what}`);
+  const words = parts.filter(([n]) => n > 0).map(([n, what]) => `${spellCount(n)} ${what}`);
   return words.length === 0 ? null : `Since you last looked: ${words.join(", ")}`;
 };
 

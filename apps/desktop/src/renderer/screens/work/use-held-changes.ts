@@ -6,10 +6,10 @@ import {
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { isMotionReduced, pauseFor, waitForStillHand } from "../../app/motion";
-import { isWindowVisible, waitForVisibleWindow } from "../../app/window-visibility";
+import { isMotionReduced, pauseFor } from "../../app/motion";
 import { showCauseLabel } from "../desk";
 import { REPLAY_GAP_MS } from "./morning-replay";
+import { waitForVisibleStillHand } from "./wait-for-visible-still-hand";
 
 /** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
 const NOTE_SHOWN_MS = 10_000;
@@ -138,7 +138,7 @@ export const useHeldChanges = ({
           latest.current.groupBy,
         );
       const waitForDrop = (): Promise<boolean> =>
-        waitForStillHand({
+        waitForVisibleStillHand({
           targets: () => [],
           isDragging: () => latest.current.isCarrying,
           signal,
@@ -146,8 +146,7 @@ export const useHeldChanges = ({
       void (async () => {
         const delay = latest.current.startDelays.get(key);
         if (delay !== undefined && !(await pauseFor(delay, signal))) return;
-        if (!isWindowVisible() && !(await waitForVisibleWindow(signal))) return;
-        const isStill = await waitForStillHand({
+        const isStill = await waitForVisibleStillHand({
           targets: findTargets,
           isDragging: () => latest.current.isCarrying,
           signal,
@@ -163,7 +162,6 @@ export const useHeldChanges = ({
             signal,
           );
           if (!isHeld || !(await waitForDrop())) return;
-          if (!isWindowVisible() && !(await waitForVisibleWindow(signal))) return;
         }
         waits.current.delete(key);
         latest.current.release(key);

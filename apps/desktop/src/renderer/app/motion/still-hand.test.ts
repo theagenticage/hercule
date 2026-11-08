@@ -24,7 +24,10 @@ const running: AbortController[] = [];
 /** Starts a wait and records whether it has ended. */
 const startWait = (
   target: Element | null,
-  { isDragging = () => false }: { isDragging?: () => boolean } = {},
+  {
+    isDragging = () => false,
+    longestWait,
+  }: { isDragging?: () => boolean; longestWait?: number } = {},
 ) => {
   const controller = new AbortController();
   running.push(controller);
@@ -33,6 +36,7 @@ const startWait = (
     targets: () => (target === null ? [] : [target]),
     isDragging,
     signal: controller.signal,
+    ...(longestWait === undefined ? {} : { longestWait }),
   }).then((isStill) => {
     result.value = isStill;
   });
@@ -67,6 +71,23 @@ describe("waitForStillHand", () => {
     await vi.advanceTimersByTimeAsync(7_000);
 
     expect(result.value).toBeNull();
+  });
+
+  it("keeps waiting past eight seconds for a pointer that rests on the target when asked to wait longer, and goes ahead at the longer limit", async () => {
+    const dragging = { value: true };
+    const { result } = startWait(makeTarget(), {
+      isDragging: () => dragging.value,
+      longestWait: 60_000,
+    });
+    movePointer(450, 550);
+    await vi.advanceTimersByTimeAsync(0);
+    dragging.value = false;
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(result.value).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(30_500);
+    expect(result.value).toBe(true);
   });
 
   it("goes ahead once the pointer rests beyond 120px and has stopped moving", async () => {

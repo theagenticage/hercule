@@ -7,7 +7,7 @@
  */
 import type { BoardStage } from "@hercule/contract";
 import type { DropPlace } from "@hercule/client-core/work";
-import { isMotionReduced, pauseFor, waitForStillHand } from "../../app/motion";
+import { isMotionReduced, pauseFor } from "../../app/motion";
 import { openDent, showCauseLabel } from "../desk";
 import {
   fadeInCards,
@@ -19,6 +19,7 @@ import {
 import { findCardElement } from "./card-in-lane";
 import { flipBoard } from "./flip-board";
 import { findHidingPlace } from "./land-card";
+import { waitForVisibleStillHand } from "./wait-for-visible-still-hand";
 
 /**
  * How long a card keeps its cause label and stands above the cards it passes
@@ -27,8 +28,11 @@ import { findHidingPlace } from "./land-card";
  */
 const CROSSING_MS = 1400;
 
-/** How long the dent keeps the old place open once the hand is out of the lane, in milliseconds. */
+/** How long the dent keeps the old place open at least, in milliseconds. */
 const DENT_HOLD_MS = 1500;
+
+/** The longest the dent stays open for a hand that rests in its lane, in milliseconds. */
+const DENT_LONGEST_WAIT_MS = 60_000;
 
 /** A card that moves by itself in one change of the board. */
 export interface SelfMovingCard {
@@ -69,29 +73,33 @@ const buildHidingPlace = (scroller: HTMLElement, laneId: string, stage: BoardSta
     : { kind: "folded-lane", laneId, stage };
 
 /**
- * Closes the dent when the hand has been out of its lane for
- * `DENT_HOLD_MS`: the cards below glide up on `self`. A hand that comes back
- * in the meantime, or a drag, makes it wait again. Removes the dent at once
- * when `signal` aborts. Returns when the dent is gone.
+ * Closes the dent once it has stood for `DENT_HOLD_MS` and the hand is out of
+ * its lane: the cards below glide up on `self`. The hand is asked about only
+ * after the hold, so a pointer that came back to the lane meanwhile keeps the
+ * dent open. The wait does not stop at the eight seconds a change usually
+ * waits, or the dent would close under a pointer that rests in the lane. It
+ * stops at `DENT_LONGEST_WAIT_MS`, so a pointer parked in the lane does not
+ * keep a hole open for good. Removes the dent at once when `signal` aborts.
+ * Returns when the dent is gone.
  */
 const closeDentWhenHandIsOut = async (
   scroller: HTMLElement,
   dent: HTMLElement,
   options: { isDragging: () => boolean; signal: AbortSignal },
 ): Promise<void> => {
-  const { isDragging, signal } = options;
   const lane = dent.closest(".board-lane");
-  do {
-    const isStill = await waitForStillHand({
+  const isDone =
+    (await pauseFor(DENT_HOLD_MS, options.signal)) &&
+    (await waitForVisibleStillHand({
       targets: () => (lane === null ? [] : [lane]),
-      isDragging,
-      signal,
-    });
-    if (!isStill || !(await pauseFor(DENT_HOLD_MS, signal))) {
-      dent.remove();
-      return;
-    }
-  } while (isDragging());
+      isDragging: options.isDragging,
+      signal: options.signal,
+      longestWait: DENT_LONGEST_WAIT_MS,
+    }));
+  if (!isDone) {
+    dent.remove();
+    return;
+  }
   if (dent.isConnected) flipBoard(scroller, "self", () => dent.remove());
 };
 

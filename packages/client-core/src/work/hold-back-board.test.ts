@@ -143,10 +143,12 @@ describe("holdBackBoardChanges", () => {
   });
 
   describe("a card moved by a fact", () => {
-    const OPENED = { ref: "github:pull-request:6221", text: "PR #6221 opened" };
-    const MERGED = { ref: "github:pull-request:6221", text: "PR #6221 merged" };
+    const OPENED = { factId: 1, ref: "github:pull-request:6221", text: "PR #6221 opened" };
+    const MERGED = { factId: 2, ref: "github:pull-request:6221", text: "PR #6221 merged" };
     const AT_NOON = "2026-11-02T12:00:00.000Z";
-    const FACT_KEY = `fact:b:${AT_NOON}`;
+    const FACT_KEY = "fact:b:fact-2";
+    // A move with no cause is named by the time the stage changed.
+    const NO_CAUSE_KEY = `fact:b:${AT_NOON}`;
 
     /** Returns the cards of one stage of a board, in the order the lanes would draw them. */
     const listStage = (board: ReturnType<typeof buildBoard>, stage: string): readonly string[] =>
@@ -260,7 +262,7 @@ describe("holdBackBoardChanges", () => {
     it("holds a second fact for the same card after the first was released", () => {
       const reopened = {
         stage: "in-review",
-        stageCause: OPENED,
+        stageCause: { ...OPENED, factId: 3 },
         stageChangedAt: "2026-11-02T15:00:00.000Z",
       } as const;
       const shown = buildBoard(
@@ -271,19 +273,17 @@ describe("holdBackBoardChanges", () => {
       const result = holdBackBoardChanges(shown, latest, new Set([FACT_KEY]), NOTHING);
 
       expect(result.board).toBe(shown);
-      expect(result.held).toEqual([
-        { kind: "fact", cardId: "b", key: "fact:b:2026-11-02T15:00:00.000Z" },
-      ]);
+      expect(result.held).toEqual([{ kind: "fact", cardId: "b", key: "fact:b:fact-3" }]);
     });
 
     it("holds a move with no cause too when its key is asked for, until it is released", () => {
       const shown = buildBoard(buildCard("b", { stage: "in-review" }));
       const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
-      const asked = new Set([FACT_KEY]);
+      const asked = new Set([NO_CAUSE_KEY]);
 
       const held = holdBackBoardChanges(shown, latest, NOTHING, NOTHING, asked);
       expect(held.board).toBe(shown);
-      expect(held.held).toEqual([{ kind: "fact", cardId: "b", key: FACT_KEY }]);
+      expect(held.held).toEqual([{ kind: "fact", cardId: "b", key: NO_CAUSE_KEY }]);
 
       const released = holdBackBoardChanges(shown, latest, asked, NOTHING, asked);
       expect(released.board.cards[0]).toMatchObject({ stage: "landed" });
@@ -298,6 +298,51 @@ describe("holdBackBoardChanges", () => {
 
       expect(result.board.cards[0]).toMatchObject({ stage: "landed" });
       expect(result.held).toEqual([]);
+    });
+
+    it("never holds a move the user made, though its key is asked for, and does not put the card back", () => {
+      const shown = buildBoard(buildCard("b", { stage: "in-review" }));
+      // The user dragged the card on to Building; the controller has not answered yet. The stage
+      // change time is the controller's, so the card still has the key the replay asked for.
+      const dragged = buildBoard(buildCard("b", { stage: "building", stageChangedAt: AT_NOON }));
+      const asked = new Set([NO_CAUSE_KEY]);
+
+      const result = holdBackBoardChanges(shown, dragged, NOTHING, NOTHING, asked, new Set(["b"]));
+
+      expect(result.board.cards[0]).toMatchObject({ stage: "building" });
+      expect(result.held).toEqual([]);
+    });
+
+    it("lets a card the user moved to the stage a fact is about to move it to stay there", () => {
+      const shown = buildBoard(buildCard("b", { stage: "in-review", stageCause: OPENED }));
+      const latest = buildBoard(buildCard("b", { stage: "landed", stageChangedAt: AT_NOON }));
+
+      const result = holdBackBoardChanges(
+        shown,
+        latest,
+        NOTHING,
+        NOTHING,
+        new Set([NO_CAUSE_KEY]),
+        new Set(["b"]),
+      );
+
+      expect(result.board.cards[0]).toMatchObject({ stage: "landed" });
+      expect(result.held).toEqual([]);
+    });
+
+    it("does not release a fact by the key of another fact that changed the stage in the same millisecond", () => {
+      const shown = buildBoard(buildCard("b", { stage: "in-review" }));
+      const later = buildBoard(
+        buildCard("b", {
+          stage: "landed",
+          stageCause: { ...MERGED, factId: 9 },
+          stageChangedAt: AT_NOON,
+        }),
+      );
+
+      const result = holdBackBoardChanges(shown, later, new Set([FACT_KEY]), NOTHING);
+
+      expect(result.held).toEqual([{ kind: "fact", cardId: "b", key: "fact:b:fact-9" }]);
     });
 
     it("holds both the fact and the failure of a card, and releases them apart", () => {

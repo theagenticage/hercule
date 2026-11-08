@@ -176,6 +176,7 @@ export function WorkScreen({
   const reads = useBoardReads({
     logicalBoard: logical.board,
     hiddenIds: logical.hiddenIds,
+    movedIds: logical.movedIds,
     serverBoard: board.data,
     snapshot,
     projects,

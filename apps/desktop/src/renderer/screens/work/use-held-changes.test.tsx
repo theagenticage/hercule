@@ -87,7 +87,14 @@ beforeEach(() => {
       : matches.call(this, selector);
   });
 });
+/** Hides or shows the window the way the browser does. */
+const setVisibility = (state: DocumentVisibilityState): void => {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+};
+
 afterEach(() => {
+  setVisibility("visible");
   vi.useRealTimers();
   vi.restoreAllMocks();
   release.mockReset();
@@ -128,6 +135,49 @@ describe("a Task that arrives while the board is grouped by an outside place", (
   });
 });
 
+describe("a window that hides while a change waits", () => {
+  const arrival = buildCard("arriving", { contextRefs: [RETURNS.ref] });
+  const held = [{ kind: "arrival", cardId: "arriving", key: buildArrivalKey("arriving") } as const];
+  const props = {
+    held,
+    board: buildPlaceBoard(arrival),
+    lanes: { [`place:${RETURNS.ref}`]: ["other"] },
+  };
+
+  it("releases nothing while it is hidden, and waits for a still hand again when it shows", async () => {
+    hoveredTestId = `cell:place:${RETURNS.ref}`;
+    await renderAndWait(props, 1_000);
+
+    setVisibility("hidden");
+    hoveredTestId = null;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+    // A hidden window does not poll for the hand either.
+    expect(vi.getTimerCount()).toBe(0);
+
+    setVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith(buildArrivalKey("arriving"));
+  });
+
+  it("releases nothing that has no cause to show while it is hidden", async () => {
+    setVisibility("hidden");
+
+    await renderAndWait(props, 10_000);
+    expect(release).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith(buildArrivalKey("arriving"));
+  });
+});
+
 describe("a run that fails on a Task drawn in two lanes", () => {
   const failing = buildCard("failing", { contextRefs: [RETURNS.ref, PRICING.ref] });
   const held = [{ kind: "failure", cardId: "failing", key: "failure:run-1" } as const];
@@ -155,13 +205,13 @@ describe("a run that fails on a Task drawn in two lanes", () => {
 });
 
 describe("a card that a fact moves", () => {
-  const MERGED = { ref: "acme:pull-request:6221", text: "PR #6221 merged" };
+  const MERGED = { factId: 4, ref: "acme:pull-request:6221", text: "PR #6221 merged" };
   const merged = buildCard("merging", {
     stage: "landed",
     stageCause: MERGED,
     stageChangedAt: "2026-11-02T12:00:00.000Z",
   });
-  const held = [{ kind: "fact", cardId: "merging", key: "fact:merging:noon" } as const];
+  const held = [{ kind: "fact", cardId: "merging", key: "fact:merging:fact-4" } as const];
   const props = { held, board: buildBoard(merged), lanes: { here: ["merging"] } };
   const findLabel = (): HTMLElement | null => document.querySelector<HTMLElement>(".card-cause");
 
@@ -186,7 +236,7 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
     expect(document.querySelector("output")?.textContent).toBe("PR #6221 merged");
   });
 
@@ -206,7 +256,26 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
+  });
+
+  it("holds the move while the window is hidden at the end of the hold, and plays it when it shows", async () => {
+    render(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    setVisibility("hidden");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(release).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
   });
 
   it("takes its label away when the change is no longer held", async () => {
@@ -232,12 +301,12 @@ describe("a card that a fact moves", () => {
     await renderAndWait({ ...props, board: buildBoard(plain) }, 0);
 
     expect(findLabel()).toBeNull();
-    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:noon");
+    expect(release).toHaveBeenCalledExactlyOnceWith("fact:merging:fact-4");
     expect(document.querySelector("output")?.textContent).toBe("Moved: Cache slots");
   });
 
   it("starts the wait after its delay, and its words stay for 1.5 seconds only", async () => {
-    const delays = new Map([["fact:merging:noon", 1_500]]);
+    const delays = new Map([["fact:merging:fact-4", 1_500]]);
 
     await renderAndWait({ ...props, startDelays: delays }, 1_499);
     expect(findLabel()).toBeNull();

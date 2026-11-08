@@ -30,9 +30,15 @@ export const buildArrivalKey = (cardId: string): string => `arrival:${cardId}`;
 const buildFailureKey = (runId: string): string => `failure:${runId}`;
 /**
  * Returns the key that releases the move of `card` into the stage it is in
- * now. It holds the time the stage changed, so each move has a key of its own.
+ * now, so each move has a key of its own. A move by a fact is named by the
+ * fact's id, which never repeats. A move with no cause (a drag from another
+ * client, which the morning replay also plays) is named by the time the stage
+ * changed.
  */
-export const buildFactKey = (card: WorkCard): string => `fact:${card.id}:${card.stageChangedAt}`;
+export const buildFactKey = (card: WorkCard): string =>
+  card.stageCause === undefined
+    ? `fact:${card.id}:${card.stageChangedAt}`
+    : `fact:${card.id}:fact-${String(card.stageCause.factId)}`;
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
@@ -50,9 +56,10 @@ const isSameValue = (a: unknown, b: unknown): boolean =>
  * only when it comes with a `stageCause` that `before` did not have: a drag from
  * another client or an undo changes the stage and leaves the cause out.
  *
- * The key holds the time the stage changed, so that each move by a fact has a
- * key of its own: releasing one does not release the next fact for the same
- * card, even when its words are the same ("PR #6221 merged" after a relink).
+ * The key holds the id of the fact (`buildFactKey`), so that each move by a
+ * fact has a key of its own: releasing one does not release the next fact for
+ * the same card, even when its words are the same ("PR #6221 merged" after a
+ * relink).
  *
  * A stage change whose key is in `alsoHeld` counts too, with or without words:
  * the morning replay holds every move it plays.
@@ -145,6 +152,10 @@ const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string)
  *   change only when the hand is still. A stage change whose `buildFactKey`
  *   is in `alsoHeldFactKeys` is held the same way though it has no new cause,
  *   which is how the morning replay holds the moves it plays.
+ * - A card in `movedByUser` has a stage move of the user's own that the
+ *   controller has not answered yet (`LogicalBoard.movedIds`). Its move is
+ *   never held and never put back: the user put the card there, and whatever
+ *   waited for it (a fact's cause, a replayed move) leaves with it.
  *
  * Returns `shown` itself when nothing differs in any field, so the caller can
  * tell that nothing changed by comparing references.
@@ -155,6 +166,7 @@ export const holdBackBoardChanges = (
   released: ReadonlySet<string>,
   hiddenBefore: ReadonlySet<string>,
   alsoHeldFactKeys: ReadonlySet<string> = NO_KEYS,
+  movedByUser: ReadonlySet<string> = NO_KEYS,
 ): HeldBoard => {
   const shownById = new Map(shown.cards.map((card) => [card.id, card]));
   const held: HeldChange[] = [];
@@ -176,7 +188,9 @@ export const holdBackBoardChanges = (
         drawn = keepShownFailure(card, before);
       }
     }
-    const factKey = readFactKey(card, before, alsoHeldFactKeys);
+    const factKey = movedByUser.has(card.id)
+      ? undefined
+      : readFactKey(card, before, alsoHeldFactKeys);
     if (factKey !== undefined && !released.has(factKey)) {
       held.push({ kind: "fact", cardId: card.id, key: factKey });
       factCardIds.push(card.id);

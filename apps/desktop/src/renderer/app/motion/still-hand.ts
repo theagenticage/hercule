@@ -36,6 +36,14 @@ export interface StillHandOptions {
   readonly isDragging: () => boolean;
   /** Stops the wait: the returned promise then resolves with `false`. */
   readonly signal?: AbortSignal;
+  /**
+   * The longest the wait lasts for a hand that is not dragging, in
+   * milliseconds. It defaults to eight seconds, which is right for a change
+   * that must not be held back for long. A change that must never happen under
+   * a hand sets a longer one, and it then happens after that time at the
+   * latest.
+   */
+  readonly longestWait?: number;
 }
 
 interface Waiter {
@@ -96,7 +104,10 @@ const check = (): void => {
       waiter.startedAt = now;
       continue;
     }
-    if (now - waiter.startedAt >= LONGEST_WAIT || !isHandNear(waiter.options, now)) {
+    if (
+      now - waiter.startedAt >= (waiter.options.longestWait ?? LONGEST_WAIT) ||
+      !isHandNear(waiter.options, now)
+    ) {
       waiter.finish(true);
     }
   }

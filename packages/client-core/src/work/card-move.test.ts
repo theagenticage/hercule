@@ -76,7 +76,7 @@ describe("applyCardMove", () => {
   });
 
   it("drops the cause of the stage when the move names a stage, and keeps it for a reorder", () => {
-    const cause = { ref: "github:pull-request:6221", text: "PR #6221 merged" };
+    const cause = { factId: 4, ref: "github:pull-request:6221", text: "PR #6221 merged" };
     const board = buildBoard(
       buildCard("a", { projectId: "depots", stage: "landed", stageCause: cause }),
       buildCard("b", { projectId: "depots", stage: "landed" }),

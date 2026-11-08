@@ -91,6 +91,7 @@ interface Start {
 interface Inputs {
   readonly logicalBoard: WorkBoard | undefined;
   readonly hiddenIds: ReadonlySet<string>;
+  readonly movedIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly released: ReadonlySet<string>;
   readonly picture: Picture | undefined;
@@ -108,6 +109,7 @@ const decidePicture = (
   start: Start | undefined,
   logicalBoard: WorkBoard,
   hiddenIds: ReadonlySet<string>,
+  movedIds: ReadonlySet<string>,
   serverBoard: WorkBoard | undefined,
   released: ReadonlySet<string>,
   heldMoveKeys: ReadonlySet<string>,
@@ -122,6 +124,7 @@ const decidePicture = (
           released,
           picture?.hidden ?? hiddenIds,
           heldMoveKeys,
+          movedIds,
         );
   return {
     next: { board: decided.board, server: serverBoard, released, hidden: hiddenIds },
@@ -169,6 +172,7 @@ const decidePicture = (
 export const useBoardReads = ({
   logicalBoard,
   hiddenIds,
+  movedIds,
   serverBoard,
   snapshot,
   projects,
@@ -178,6 +182,8 @@ export const useBoardReads = ({
 }: {
   readonly logicalBoard: WorkBoard | undefined;
   readonly hiddenIds: ReadonlySet<string>;
+  /** The Tasks whose stage the user moved and the controller has not answered yet. They are never held back (`LogicalBoard.movedIds`). */
+  readonly movedIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
   readonly snapshot: BoardSnapshot | undefined;
   readonly projects: readonly WorkProject[];
@@ -218,6 +224,7 @@ export const useBoardReads = ({
       start,
       logicalBoard,
       hiddenIds,
+      movedIds,
       serverBoard,
       released,
       heldMoveKeys,
@@ -242,6 +249,7 @@ export const useBoardReads = ({
   const latest = useRef<Inputs>({
     logicalBoard,
     hiddenIds,
+    movedIds,
     serverBoard,
     released,
     picture,
@@ -265,6 +273,7 @@ export const useBoardReads = ({
     latest.current = {
       logicalBoard,
       hiddenIds,
+      movedIds,
       serverBoard,
       released,
       picture,
@@ -284,6 +293,7 @@ export const useBoardReads = ({
       const {
         logicalBoard: latestBoard,
         hiddenIds: latestHidden,
+        movedIds: latestMoved,
         serverBoard: latestServer,
         picture: shown,
       } = latest.current;
@@ -293,6 +303,7 @@ export const useBoardReads = ({
         undefined,
         latestBoard,
         latestHidden,
+        latestMoved,
         latestServer,
         latest.current.released,
         latest.current.heldMoveKeys,

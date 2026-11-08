@@ -30,6 +30,8 @@ export interface LogicalBoardState {
   readonly board: WorkBoard | undefined;
   /** The Tasks the logical board leaves out on purpose (see `LogicalBoard.hiddenIds`). */
   readonly hiddenIds: ReadonlySet<string>;
+  /** The Tasks whose stage the user moved and the controller has not answered yet (see `LogicalBoard.movedIds`). */
+  readonly movedIds: ReadonlySet<string>;
   /**
    * Returns the logical board as it is this instant, built from the cached
    * board and the stores, not from the last render. A gesture calls it, so
@@ -70,6 +72,7 @@ export const useLogicalBoard = ({
   return {
     board: logical?.board,
     hiddenIds: logical?.hiddenIds ?? NOTHING_HIDDEN,
+    movedIds: logical?.movedIds ?? NOTHING_HIDDEN,
     readBoardNow: () => {
       const cached = queryClient.getQueryData<WorkBoard>(queryKeys.workBoard());
       return cached === undefined

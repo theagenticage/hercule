@@ -27,13 +27,20 @@ const readSnapshotCard = (value: unknown): BoardSnapshot["cards"][number] | unde
   if (projectId !== undefined && typeof projectId !== "string") return undefined;
   if (stageCause !== undefined) {
     if (!isRecord(stageCause)) return undefined;
-    const { ref, text } = stageCause;
-    if (typeof ref !== "string" || typeof text !== "string") return undefined;
+    const { factId, ref, text } = stageCause;
+    if (
+      typeof factId !== "number" ||
+      !Number.isInteger(factId) ||
+      typeof ref !== "string" ||
+      typeof text !== "string"
+    ) {
+      return undefined;
+    }
     return {
       id,
       stage,
       ...(projectId === undefined ? {} : { projectId }),
-      stageCause: { ref, text },
+      stageCause: { factId, ref, text },
     };
   }
   return { id, stage, ...(projectId === undefined ? {} : { projectId }) };
