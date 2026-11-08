@@ -66,6 +66,8 @@ const findInsertIndex = (
  *   after `afterTaskId` in the target cell, first for `null`, last when
  *   `afterTaskId` is absent. Its `boardRank` is left as it was (see the top of
  *   this file).
+ * - A move that names a `stage` drops the card's `stageCause`, as the
+ *   controller does: the user's stage decision replaces the fact's.
  * - Absent `afterTaskId` in the card's own cell, with no other change, does
  *   nothing, as in `task.move`.
  * - A move whose card is gone, or whose `afterTaskId` is gone or not in the
@@ -85,12 +87,16 @@ export const applyCardMove = (board: WorkBoard, move: CardMove): WorkBoard => {
   );
   if (insertAt === undefined) return board;
 
-  const { projectId: oldProjectId, ...withoutProject } = moving;
+  // A stage in a move is the user's own decision about the stage, so the
+  // fact that put the card in its old stage no longer explains it. The
+  // controller clears the cause the same way.
+  const { projectId: oldProjectId, stageCause, ...withoutProject } = moving;
   void oldProjectId;
+  const keptCause = move.stage === undefined && stageCause !== undefined ? { stageCause } : {};
   const moved: WorkCard =
     projectId === undefined
-      ? { ...withoutProject, stage }
-      : { ...withoutProject, stage, projectId };
+      ? { ...withoutProject, ...keptCause, stage }
+      : { ...withoutProject, ...keptCause, stage, projectId };
   return { ...board, cards: [...others.slice(0, insertAt), moved, ...others.slice(insertAt)] };
 };
 
@@ -197,6 +203,13 @@ export const CARD_NOT_EXACT_NOTE = "The card it followed has gone, so it went la
  */
 export interface DropMove {
   readonly move: CardMove;
+  /**
+   * The stage the card is let go on. The move names it only when the card
+   * changes stage (a reorder inside a column must not claim the stage), so
+   * the cards carried along need it from here. Absent for a move built by
+   * hand: the move's own stage then stands for it.
+   */
+  readonly targetStage?: BoardStage;
   /**
    * The Project of the lane the card is let go on, or `null` for the "No
    * project" lane. Absent for a lane of an outside place, which has no Project:

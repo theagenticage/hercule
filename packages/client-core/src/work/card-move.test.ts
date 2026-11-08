@@ -75,6 +75,20 @@ describe("applyCardMove", () => {
     expect(moved).toEqual({ ...BOARD.cards[0], stage: "planned" });
   });
 
+  it("drops the cause of the stage when the move names a stage, and keeps it for a reorder", () => {
+    const cause = { ref: "github:pull-request:6221", text: "PR #6221 merged" };
+    const board = buildBoard(
+      buildCard("a", { projectId: "depots", stage: "landed", stageCause: cause }),
+      buildCard("b", { projectId: "depots", stage: "landed" }),
+    );
+
+    const dragged = applyCardMove(board, { taskId: "a", stage: "building" });
+    const reordered = applyCardMove(board, { taskId: "a", afterTaskId: "b" });
+
+    expect(dragged.cards.find((card) => card.id === "a")).not.toHaveProperty("stageCause");
+    expect(reordered.cards.find((card) => card.id === "a")?.stageCause).toEqual(cause);
+  });
+
   it("moves a card to another Project, and to no Project with null", () => {
     const toPricing = applyCardMove(BOARD, { taskId: "a", projectId: "pricing" });
     expect(readCell(toPricing, "pricing", "exploring")).toEqual(["e", "a"]);

@@ -81,9 +81,15 @@ describe("buildDropMove", () => {
     // Dropped in front of c: it now follows b.
     expect(dropOn("a", "storefront", "exploring", "c")).toEqual({
       taskId: "a",
-      stage: "exploring",
       afterTaskId: "b",
     });
+  });
+
+  it("names the stage only when the card changes stage", () => {
+    // The controller reads a stage in a move as the user's decision, so a reorder must not send one.
+    expect(dropOn("a", "storefront", "exploring", "c")).not.toHaveProperty("stage");
+    expect(dropOn("a", "storefront", "building", "d")).toHaveProperty("stage", "building");
+    expect(buildDrop("a", "storefront", "exploring", "c").targetStage).toBe("exploring");
   });
 
   it("sends a move that leaves the order as it was for a drop on the card's own place", () => {
@@ -106,7 +112,6 @@ describe("buildDropMove", () => {
   it("names the lane's Project when the card goes to another lane", () => {
     expect(dropOn("a", "checkout", "exploring", null)).toEqual({
       taskId: "a",
-      stage: "exploring",
       projectId: "checkout",
       afterTaskId: "e",
     });
@@ -115,7 +120,6 @@ describe("buildDropMove", () => {
   it("names no Project (null) when the card goes to the No project lane", () => {
     expect(dropOn("a", "no-project", "exploring", "f")).toEqual({
       taskId: "a",
-      stage: "exploring",
       projectId: null,
       afterTaskId: null,
     });
@@ -143,9 +147,11 @@ describe("buildDropMove", () => {
   it("leaves afterTaskId out for a folded lane, and keeps the card's stage when the drop names none", () => {
     expect(dropOn("a", "checkout", null, null, { foldedLaneId: "checkout" })).toEqual({
       taskId: "a",
-      stage: "exploring",
       projectId: "checkout",
     });
+    expect(buildDrop("a", "checkout", null, null, { foldedLaneId: "checkout" }).targetStage).toBe(
+      "exploring",
+    );
     expect(dropOn("a", "checkout", "in-review", null, { foldedLaneId: "checkout" })).toEqual({
       taskId: "a",
       stage: "in-review",
@@ -217,7 +223,7 @@ describe("buildDropMove", () => {
       ["the lane for Tasks under none", "none:acme/project", null],
     ])("changes the stage only in %s", (_, laneId, beforeCardId) => {
       const drop = dropOnOutside(laneId, beforeCardId);
-      expect(drop).toEqual({ move: { taskId: "a", stage: "building" } });
+      expect(drop).toEqual({ move: { taskId: "a", stage: "building" }, targetStage: "building" });
     });
 
     it("changes the stage only on a folded lane too", () => {
@@ -233,11 +239,7 @@ describe("buildDropMove", () => {
 
       expect(settled).toEqual({
         kind: "send",
-        moves: [
-          { taskId: "a", stage: "building" },
-          { taskId: "b", stage: "building" },
-          { taskId: "c", stage: "building" },
-        ],
+        moves: [{ taskId: "a", stage: "building" }, { taskId: "b" }, { taskId: "c" }],
       });
       const moved = (settled as { moves: readonly CardMove[] }).moves.reduce(applyCardMove, board);
       expect(Object.fromEntries(moved.cards.map((card) => [card.id, card.projectId]))).toEqual({
@@ -305,6 +307,16 @@ describe("dropping several cards", () => {
       { taskId: "e", stage: "planned", afterTaskId: null },
       { taskId: "a", stage: "planned", projectId: "checkout", afterTaskId: "e" },
       { taskId: "f", stage: "planned", projectId: "checkout", afterTaskId: "a" },
+    ]);
+  });
+
+  it("names the stage only for the cards that change stage, also when the lead card does not", () => {
+    // d is in Building, a and e in Exploring. Dropping d first in its own cell moves a and e into Building.
+    const { settled } = dropGroup("d", ["a", "e"], "storefront", "building", null);
+    expect(settled.moves).toEqual([
+      { taskId: "d", afterTaskId: null },
+      { taskId: "a", stage: "building", afterTaskId: "d" },
+      { taskId: "e", stage: "building", projectId: "storefront", afterTaskId: "a" },
     ]);
   });
 
@@ -381,5 +393,14 @@ describe("buildFollowerMoves", () => {
     expect(
       buildFollowerMoves({ move: { taskId: "a", stage: "planned" }, targetProjectId: null }, []),
     ).toEqual([]);
+  });
+
+  it("takes the target stage from the lead move when the drop carries none", () => {
+    const moves = buildFollowerMoves({ move: { taskId: "a", stage: "building" } }, [
+      CARDS[3]!,
+      CARDS[1]!,
+    ]);
+
+    expect(moves).toEqual([{ taskId: "d" }, { taskId: "b", stage: "building" }]);
   });
 });

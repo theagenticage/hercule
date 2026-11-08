@@ -573,11 +573,12 @@ describe("dropping a card", () => {
     moveTo(board.scroller, columnX("exploring"), warehouseY);
     release(board.scroller, columnX("exploring"), warehouseY);
 
+    // The card stays in Exploring, so the move names no stage: a stage in a move overrules facts.
     expect(board.moveCard.mock.calls[0]![0]).toMatchObject({
       taskId: "refund-emails",
-      stage: "exploring",
       projectId: "warehouse",
     });
+    expect(board.moveCard.mock.calls[0]![0]).not.toHaveProperty("stage");
   });
 
   it("moves to a folded lane's Project with no place in the column, since a folded lane holds no slot", () => {

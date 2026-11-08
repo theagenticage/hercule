@@ -1,4 +1,5 @@
 import type { WorkBoard, WorkCard } from "@hercule/contract";
+import { applyCardMove, buildMoveToPlacement, readPlacement } from "./card-move";
 
 /**
  * A change the board shows only once the user's hand is still, because
@@ -7,9 +8,12 @@ import type { WorkBoard, WorkCard } from "@hercule/contract";
  * - `arrival`: a Task that was not on the board before.
  * - `failure`: a Task whose run just failed. The card would take the top of
  *   its cell, so a card under the pointer could be sorted away from under it.
+ * - `fact`: a card that changed stage because of a fact about a linked thing
+ *   (a pull request merged), so nobody here moved it. It would cross the board
+ *   under the pointer.
  */
 export interface HeldChange {
-  readonly kind: "arrival" | "failure";
+  readonly kind: "arrival" | "failure" | "fact";
   readonly cardId: string;
   /** Names this one change, so that releasing it once does not release the next failure of the same Task. */
   readonly key: string;
@@ -24,6 +28,7 @@ export interface HeldBoard {
 /** Returns the key that releases the arrival of the Task `cardId`. */
 export const buildArrivalKey = (cardId: string): string => `arrival:${cardId}`;
 const buildFailureKey = (runId: string): string => `failure:${runId}`;
+const buildFactKey = (card: WorkCard): string => `fact:${card.id}:${card.stageChangedAt}`;
 
 /** Returns the key of the failure that `card` shows, or `undefined` when it shows none. */
 const readFailureKey = (card: WorkCard): string | undefined =>
@@ -32,6 +37,23 @@ const readFailureKey = (card: WorkCard): string | undefined =>
 /** Returns whether two values from a board read are equal. Values from one read share their objects, so most pairs end at the first check. */
 const isSameValue = (a: unknown, b: unknown): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Returns the key of the fact that moved `card` since the board showed
+ * `before`, or `undefined` when no fact did. A stage change counts as a fact's
+ * only when it comes with a `stageCause` that `before` did not have: a drag from
+ * another client or an undo changes the stage and leaves the cause out.
+ *
+ * The key holds the time the stage changed, so that each move by a fact has a
+ * key of its own: releasing one does not release the next fact for the same
+ * card, even when its words are the same ("PR #6221 merged" after a relink).
+ */
+const readFactKey = (card: WorkCard, before: WorkCard): string | undefined =>
+  card.stage !== before.stage &&
+  card.stageCause !== undefined &&
+  !isSameValue(card.stageCause, before.stageCause)
+    ? buildFactKey(card)
+    : undefined;
 
 /** Returns whether every field of the two boards other than `cards` is equal. */
 const isSameBoardExceptCards = (a: WorkBoard, b: WorkBoard): boolean =>
@@ -54,6 +76,37 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
 };
 
 /**
+ * Returns `board` with the card `cardId` back in the stage and place it has in
+ * `shown`, with the `stageCause` and `stageChangedAt` it has there: after the card that stood before
+ * it in its cell, or last in the cell when that card is gone. The card keeps
+ * the Project it has in `board`. Returns `board` itself when either board has
+ * no such card.
+ */
+const putBackInShownPlace = (board: WorkBoard, shown: WorkBoard, cardId: string): WorkBoard => {
+  const placement = readPlacement(shown, cardId);
+  const current = board.cards.find((card) => card.id === cardId);
+  const before = shown.cards.find((card) => card.id === cardId);
+  if (placement === undefined || current === undefined || before === undefined) return board;
+  const { move } = buildMoveToPlacement(board, {
+    ...placement,
+    projectId: current.projectId ?? null,
+  });
+  const moved = applyCardMove(board, move);
+  return {
+    ...moved,
+    cards: moved.cards.map((card) => {
+      if (card.id !== cardId) return card;
+      const { stageCause, ...withoutCause } = card;
+      void stageCause;
+      const shownStage = { stageChangedAt: before.stageChangedAt };
+      return before.stageCause === undefined
+        ? { ...withoutCause, ...shownStage }
+        : { ...withoutCause, ...shownStage, stageCause: before.stageCause };
+    }),
+  };
+};
+
+/**
  * Returns the drawn board, given the board `shown` now and the `latest`
  * logical board (`buildLogicalBoard`), and the changes of `latest` that it holds
  * back. Everything else in `latest` is shown at once, including every field
@@ -69,6 +122,13 @@ const keepShownFailure = (card: WorkCard, before: WorkCard): WorkCard => {
  *   `failure` key is in `released`, so it does not rise to the top of its cell
  *   yet. Its stage, project and order are the latest: a card the user moved
  *   stays where the user put it.
+ * - A card that changed stage by a fact (its `stageCause` is new, see
+ *   `readFactKey`) stays in the stage and place `shown` has until its `fact`
+ *   key is in `released`. A stage change with no new cause (a drag from
+ *   another client, an undo) is shown at once, and so is a card the user's
+ *   own move changed, because `applyCardMove` clears its cause. Whether a card
+ *   is in the user's hand is not decided here: the caller releases a held
+ *   change only when the hand is still.
  *
  * Returns `shown` itself when nothing differs in any field, so the caller can
  * tell that nothing changed by comparing references.
@@ -82,6 +142,7 @@ export const holdBackBoardChanges = (
   const shownById = new Map(shown.cards.map((card) => [card.id, card]));
   const held: HeldChange[] = [];
   const cards: WorkCard[] = [];
+  const factCardIds: string[] = [];
   for (const card of latest.cards) {
     const before = shownById.get(card.id);
     if (before === undefined) {
@@ -90,20 +151,28 @@ export const holdBackBoardChanges = (
       else held.push({ kind: "arrival", cardId: card.id, key });
       continue;
     }
+    let drawn = card;
     const failureKey = readFailureKey(card);
     if (failureKey !== undefined && failureKey !== readFailureKey(before)) {
-      if (released.has(failureKey)) cards.push(card);
-      else {
+      if (!released.has(failureKey)) {
         held.push({ kind: "failure", cardId: card.id, key: failureKey });
-        cards.push(keepShownFailure(card, before));
+        drawn = keepShownFailure(card, before);
       }
-      continue;
     }
-    cards.push(card);
+    const factKey = readFactKey(card, before);
+    if (factKey !== undefined && !released.has(factKey)) {
+      held.push({ kind: "fact", cardId: card.id, key: factKey });
+      factCardIds.push(card.id);
+    }
+    cards.push(drawn);
   }
+  const withFactsHeld = factCardIds.reduce<WorkBoard>(
+    (board, cardId) => putBackInShownPlace(board, shown, cardId),
+    { ...latest, cards },
+  );
   const isUnchanged =
-    cards.length === shown.cards.length &&
-    cards.every((card, index) => isSameValue(card, shown.cards[index])) &&
+    withFactsHeld.cards.length === shown.cards.length &&
+    withFactsHeld.cards.every((card, index) => isSameValue(card, shown.cards[index])) &&
     isSameBoardExceptCards(shown, latest);
-  return { board: isUnchanged ? shown : { ...latest, cards }, held };
+  return { board: isUnchanged ? shown : withFactsHeld, held };
 };

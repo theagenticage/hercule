@@ -1,8 +1,8 @@
 /**
  * What the Work board works out from the cards it has read: the lanes, what a
  * cell shows, a move before the controller answers and the drop that asks for
- * it, the Filter menu's facets, Find, the changes the board holds back until
- * the user's hand is still, the keyboard walk, which cards are selected, the
+ * it, the Filter menu's facets, Find, which cards moved between two reads,
+ * the changes the board holds back until the user's hand is still, the keyboard walk, which cards are selected, the
  * words and the pose of a card, the lanes and facets of the outside places a
  * Task stands under, and what the Add sheet opens on and says. It is the
  * subpath `@hercule/client-core/work`, not part of the
@@ -26,6 +26,7 @@ export * from "./find";
 export * from "./held-answers";
 export * from "./hold-back-board";
 export * from "./lanes";
+export * from "./list-card-moves";
 export * from "./logical-board";
 export * from "./merge";
 export * from "./question-answers";

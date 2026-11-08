@@ -37,7 +37,7 @@ const findChangeTargets = (
   groupBy: string,
 ): readonly Element[] => {
   if (scroller === null) return [];
-  if (change.kind === "failure")
+  if (change.kind === "failure" || change.kind === "fact")
     return [...scroller.querySelectorAll(`[data-card-id="${CSS.escape(change.cardId)}"]`)];
   if (card === undefined || board === undefined) return [];
   const cells = listDrawnLaneIds(card, board, projects, groupBy).map(
@@ -49,9 +49,10 @@ const findChangeTargets = (
 /** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */
 const describeChange = (change: HeldChange, card: WorkCard | undefined): string | null => {
   if (card === undefined) return null;
-  return change.kind === "arrival"
-    ? `New: ${card.title}`
-    : `${card.failure?.workflowName ?? "A run"} failed`;
+  if (change.kind === "arrival") return `New: ${card.title}`;
+  // The motion of a card moving by itself is not built yet: say what moved it.
+  if (change.kind === "fact") return card.stageCause?.text ?? `Moved: ${card.title}`;
+  return `${card.failure?.workflowName ?? "A run"} failed`;
 };
 
 /**
