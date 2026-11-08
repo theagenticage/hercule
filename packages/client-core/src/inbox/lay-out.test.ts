@@ -10,6 +10,7 @@ import {
   buildInboxCard,
   buildInboxPlace,
   buildRequestCard,
+  buildWorkflowOffer,
   listCardIds,
 } from "./cards.testing";
 import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
@@ -613,5 +614,30 @@ describe("layOutInbox: Filter", () => {
     expect(layout.ongoing).toMatchObject({ isEmpty: false, isEmptiedByFilter: false });
     const bare = layOut(buildInbox([ticket("1", [])]), view());
     expect(bare.requests).toMatchObject({ isEmpty: true, isEmptiedByFilter: false });
+  });
+});
+
+describe("layOutInbox: the offers of each row", () => {
+  const offer = buildWorkflowOffer("Review PR");
+
+  it("gives each row the offers of its own set, the same object for the same set, and none to a pointer", () => {
+    const first = ticket("1", [PRICING], { offerSetId: "tickets" });
+    const second = ticket("2", [PRICING], { offerSetId: "tickets" });
+    const bare = ticket("3", [PRICING], { offerSetId: "gone" });
+    const request = review("4", [], { offerSetId: "reviews" });
+    const layout = layOut(
+      buildInbox([first, second, bare, request], {
+        places: [project(PRICING, "Pricing")],
+        offerSets: { tickets: [offer], reviews: [offer] },
+      }),
+      view(),
+    );
+
+    const rows = layout.ongoing.surfaces.flatMap((surface) => surface.rows);
+    const offersOf = (id: string) => rows.find((row) => row.card.id === id)?.offers;
+    expect(offersOf(first.id)?.available).toEqual([offer]);
+    expect(offersOf(second.id)).toBe(offersOf(first.id));
+    expect(offersOf(bare.id)).toEqual({ available: [], unavailable: [] });
+    expect(layout.requests.groups[0]?.rows[0]?.offers.available).toEqual([offer]);
   });
 });

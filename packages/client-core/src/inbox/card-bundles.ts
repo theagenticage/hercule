@@ -13,10 +13,11 @@
  * row that draws the same is not drawn again. Nothing here knows a kind by
  * name.
  */
-import type { EntityHint, EntityLink, EntityPeer, InboxCard } from "@hercule/contract";
+import type { EntityHint, EntityLink, EntityPeer, Inbox, InboxCard } from "@hercule/contract";
 import { replaceEqualDeep } from "@tanstack/query-core";
 import { readEntityPluginId } from "../desk/entity-words";
 import { isLinkBetween, nameLinkedThing, readOtherRef } from "../desk/link-ends";
+import { listCardOffers, type CardOffers } from "./card-hand-off";
 import { findHomeName, type PlaceContext } from "./inbox-place";
 import { readRidesOn, type VisitPlacement } from "./visit-placement";
 
@@ -27,11 +28,12 @@ export type LinkClaim = EntityLink["claim"];
  * A card that rides on its lead and asks something of the user, such as a pull
  * request on its ticket. It is a card of its own, with its own moves, and the
  * page draws it under the lead. `homeName` is the title of its first home, which
- * follows its identifier.
+ * follows its identifier. `offers` are the workflows its Hand to move offers.
  */
 export interface AskingPart {
   readonly _tag: "asking";
   readonly card: InboxCard;
+  readonly offers: CardOffers;
   readonly homeName: string | undefined;
   /** What the link between it and the lead says. `undefined` when the read holds no such link. */
   readonly claim: LinkClaim | undefined;
@@ -150,6 +152,8 @@ export interface BundleSources {
   readonly hintsByRef: ReadonlyMap<string, readonly EntityHint[]>;
   /** The riding cards of each lead, by the lead's ref, in the order of the visit. */
   readonly ridersByLead: ReadonlyMap<string, readonly InboxCard[]>;
+  /** The workflows each offer set holds, by offer set id. */
+  readonly offerSets: Inbox["offerSets"];
   /** The bundles of the layout before this one, by card id. A bundle that comes out equal keeps its identity. */
   readonly previousBundles: Readonly<Record<string, CardBundle>>;
   readonly context: PlaceContext;
@@ -182,6 +186,7 @@ export const indexBundleSources = (
     readonly links: readonly EntityLink[];
     readonly hints: readonly EntityHint[];
     readonly peers: readonly EntityPeer[];
+    readonly offerSets: Inbox["offerSets"];
   },
   riding: ReadonlyMap<string, string>,
   readRank: (cardId: string) => number,
@@ -204,6 +209,7 @@ export const indexBundleSources = (
     linksByRef: indexByEnds(inbox.links),
     hintsByRef: indexByEnds(inbox.hints),
     ridersByLead,
+    offerSets: inbox.offerSets,
     previousBundles,
     context,
   };
@@ -308,6 +314,7 @@ export const buildCardBundle = (lead: InboxCard, sources: BundleSources): CardBu
       asking.push({
         _tag: "asking",
         card,
+        offers: listCardOffers(card, sources.offerSets),
         homeName: findHomeName(card, sources.context),
         claim,
       });

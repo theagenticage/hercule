@@ -31,6 +31,22 @@ import { readErrorMessage } from "@hercule/client-core";
 /** The most gestures the stack keeps. The oldest is dropped past this. */
 export const MAX_GESTURES = 50;
 
+/** A button the undo line offers beside Undo, such as "See its Task". */
+export interface UndoAction {
+  readonly label: string;
+  readonly act: () => void;
+}
+
+/**
+ * What an undo says in its own words, for an undo whose answer is not simply
+ * "put back": the controller may have stopped a run instead of reversing it.
+ * `text` replaces the default sentence, so it carries no "Put back:" prefix.
+ */
+export interface UndoAnswer {
+  readonly text: string;
+  readonly action?: UndoAction;
+}
+
 /** One thing the user did, and how to reverse it. */
 export interface Gesture<Page> {
   /** What the undo line shows, in the past tense, such as "Moved Review PR to In review". */
@@ -39,6 +55,9 @@ export interface Gesture<Page> {
    * Reverses this one gesture. It resolves when the reversal is done, with a
    * note for the undo line to add when the reversal was not exact (or
    * `undefined`), and rejects, with an error that says why, when it cannot be.
+   * It resolves to an `UndoAnswer` instead when the undo has its own words,
+   * which the line shows in place of "Put back: ...". Either way the gesture
+   * is gone from the stack afterwards.
    *
    * `page` is what the page that is open when the user presses Undo lends
    * the gesture. A gesture outlives the page that made it: the user may leave
@@ -50,7 +69,7 @@ export interface Gesture<Page> {
    * therefore queue its inverse behind that request itself, so a gesture the
    * user makes after Undo is sent after the inverse. The stack just awaits it.
    */
-  readonly undo: (page: Page) => Promise<string | undefined>;
+  readonly undo: (page: Page) => Promise<string | UndoAnswer | undefined>;
 }
 
 /**
@@ -82,6 +101,8 @@ export type UndoOutcome =
   | { readonly kind: "busy" }
   /** The gesture with these `words` was reversed. A `note` says what was not exact about it. */
   | { readonly kind: "reversed"; readonly words: string; readonly note?: string }
+  /** The gesture's undo has its own words (see `UndoAnswer`). It is never a failure. */
+  | ({ readonly kind: "answered" } & UndoAnswer)
   /**
    * The gesture with these `words` could not be reversed, for `reason`. The
    * gesture is gone from the stack: what changed since is unknown, so trying
@@ -89,10 +110,11 @@ export type UndoOutcome =
    */
   | { readonly kind: "failed"; readonly words: string; readonly reason: string };
 
-/** What the user is told about an undo: the sentence, and whether it reports a failure. */
+/** What the user is told about an undo: the sentence, whether it reports a failure, and a button that goes with it. */
 export interface UndoReport {
   readonly text: string;
   readonly isFailure: boolean;
+  readonly action?: UndoAction;
 }
 
 /**
@@ -110,6 +132,10 @@ const describeUndoOutcome = (outcome: UndoOutcome): UndoReport | undefined => {
         text: `Put back: ${outcome.words}.${outcome.note === undefined ? "" : ` ${outcome.note}`}`,
         isFailure: false,
       };
+    case "answered":
+      return outcome.action === undefined
+        ? { text: outcome.text, isFailure: false }
+        : { text: outcome.text, isFailure: false, action: outcome.action };
     case "failed":
       return {
         text: `Could not put back: ${outcome.words}. ${outcome.reason}`,
@@ -176,10 +202,11 @@ export const createUndoStack = <Page>(): UndoStack<Page> => {
     running = true;
     gestures = gestures.slice(0, -1);
     try {
-      const note = await newest.undo(lent);
-      return note === undefined
+      const result = await newest.undo(lent);
+      if (typeof result === "object") return { kind: "answered", ...result };
+      return result === undefined
         ? { kind: "reversed", words: newest.words }
-        : { kind: "reversed", words: newest.words, note };
+        : { kind: "reversed", words: newest.words, note: result };
     } catch (error) {
       return { kind: "failed", words: newest.words, reason: readErrorMessage(error) };
     } finally {

@@ -20,6 +20,7 @@ import {
   decideOpenCard,
   describeTimelineOverflow,
   findFirstOpenLine,
+  readOpenCardHandOff,
   readPlaceView,
   type EntityLinkMove,
   type PlaceView,
@@ -31,6 +32,7 @@ import { entityQuery, userQuery } from "../../app/queries";
 import { ArrowIcon } from "../../icons/arrow";
 import { OpeningSheet, type SheetPlaces, type SheetRect } from "../desk";
 import { OpenCardBody, OpenPlaceBody } from "./open-card-body";
+import { OpenCardHandRows } from "./open-card-hand";
 import { OpenCardLine } from "./open-card-line";
 import { OpenCardLinked } from "./open-card-linked";
 import { OpenCardLinkSearch } from "./open-card-link-search";
@@ -45,6 +47,16 @@ export interface OpenCardMoveHandlers {
   readonly onTake: (cardId: string) => void;
   /** Dismisses the card. The page folds the sheet and plays the move on the card. */
   readonly onDismiss: (cardId: string) => void;
+  /**
+   * Hands the thing the sheet shows to the workflow `workflowId`. `by` is how
+   * the user asked: by pointer, the page folds the sheet and plays the move on
+   * the card where it lies; by keys, the sheet walks on to the next card and
+   * the move plays behind it. The keys H and 1 to 3 are the page's, not the
+   * sheet's.
+   */
+  readonly onHand: (workflowId: string, by: "keys" | "pointer") => void;
+  /** Picks the account the hand-off acts as. */
+  readonly onChooseConnection: (connectionId: string) => void;
   /** Goes to the card's Task on Work. Called with the Task's id. */
   readonly onSeeTask: (taskId: string) => void;
   /** Links two things as the user's own claim. The page plays the move and offers Undo. */
@@ -55,10 +67,21 @@ export interface OpenCardMoveHandlers {
   readonly onSeeInIntake: (entityId: string) => void;
 }
 
-/** Returns the name of the card or place `target`, for the dialog's name and for the way back. */
-const nameTarget = (target: OpenTarget, inbox: Inbox | undefined): string => {
+/**
+ * Returns the name of the card or place `target`, for the dialog's name and
+ * for the way back. A card the Inbox does not list (a linked peer the sheet
+ * walked to) is named by `readTitle`, the title from its own read, which the
+ * sheet shares with the card's body.
+ */
+const nameTarget = (
+  target: OpenTarget,
+  inbox: Inbox | undefined,
+  readTitle: (id: string) => string | undefined,
+): string => {
   if (target.kind === "card") {
-    return inbox?.cards.find((each) => each.id === target.id)?.title ?? "Back";
+    return (
+      inbox?.cards.find((each) => each.id === target.id)?.title ?? readTitle(target.id) ?? "Back"
+    );
   }
   return inbox?.places.find((each) => each.ref === target.ref)?.title ?? "Back";
 };
@@ -92,6 +115,7 @@ function OpenCardContents({
   onWalk,
   onWalkCard,
   moves,
+  chosenConnectionId,
 }: {
   readonly id: string;
   readonly inbox: Inbox | undefined;
@@ -103,6 +127,8 @@ function OpenCardContents({
   readonly onWalk: (ref: string) => void;
   readonly onWalkCard: (id: string) => void;
   readonly moves: OpenCardMoveHandlers;
+  /** The account the user picked for the hand-off, or `undefined` for none. */
+  readonly chosenConnectionId: string | undefined;
 }): JSX.Element {
   const detail = useQuery(entityQuery(client, id));
   const listed = inbox?.cards.find((card) => card.id === id);
@@ -112,6 +138,9 @@ function OpenCardContents({
   const cards = inbox?.cards ?? [];
   const lines = source === undefined ? [] : buildOpenTimeline(source, cards);
   const now = useOpenCardClock(record, lines);
+
+  // What the card can be handed to: the read of the card once it has answered, else the Inbox's own sets.
+  const { offers, actingConnections, openKinds } = readOpenCardHandOff(detail.data, listed, inbox);
 
   // The card opens one line by itself, the first time it has one to open.
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
@@ -200,6 +229,18 @@ function OpenCardContents({
       userMonogram={userMonogram}
       timeline={timeline}
       linked={linked}
+      hand={
+        offers.available.length + offers.unavailable.length === 0 ? null : (
+          <OpenCardHandRows
+            offers={offers}
+            openKinds={openKinds}
+            actingConnections={actingConnections}
+            chosenConnectionId={chosenConnectionId}
+            onChooseConnection={moves.onChooseConnection}
+            onHand={moves.onHand}
+          />
+        )
+      }
       onClose={onClose}
       onWalk={onWalk}
       onTake={() => {
@@ -242,8 +283,11 @@ export function InboxOpenCard({
   inbox,
   plugins,
   platform,
+  chosenConnectionId,
   onTake,
   onDismiss,
+  onHand,
+  onChooseConnection,
   onSeeTask,
   onLink,
   onUnlink,
@@ -254,9 +298,34 @@ export function InboxOpenCard({
   readonly inbox: Inbox | undefined;
   readonly plugins: readonly PluginIdentity[];
   readonly platform: DesktopPlatform;
+  /** The account the user picked for the hand-off of the card the sheet shows, or `undefined` for none. */
+  readonly chosenConnectionId: string | undefined;
 } & OpenCardMoveHandlers): JSX.Element | null {
   const { sheet } = openCard;
   const { username } = useSuspenseQuery(userQuery(client)).data;
+  // The cards the sheet names that the Inbox does not list: the one it shows and the one it came from.
+  // Their reads are the ones the body makes, so no read is added for them.
+  const findUnlistedCardId = (target: OpenTarget | undefined): string | undefined =>
+    target?.kind === "card" && inbox?.cards.some((each) => each.id === target.id) !== true
+      ? target.id
+      : undefined;
+  const backTarget = sheet.trail.at(-1);
+  const shownCardId = findUnlistedCardId(sheet.shown ?? undefined);
+  const backCardId = findUnlistedCardId(backTarget);
+  const shownRead = useQuery({
+    ...entityQuery(client, shownCardId ?? ""),
+    enabled: shownCardId !== undefined,
+  });
+  const backRead = useQuery({
+    ...entityQuery(client, backCardId ?? ""),
+    enabled: backCardId !== undefined,
+  });
+  const readTitle = (id: string): string | undefined =>
+    id === shownCardId
+      ? shownRead.data?.title
+      : id === backCardId
+        ? backRead.data?.title
+        : undefined;
   const contentRef = useRef<HTMLDivElement>(null);
   const heldDestinationRef = useRef<SheetRect | null>(null);
   const { shown } = sheet;
@@ -273,7 +342,7 @@ export function InboxOpenCard({
   };
   const placeView: PlaceView | undefined =
     shown.kind === "place" && inbox !== undefined ? readPlaceView(shown.ref, inbox) : undefined;
-  const back = sheet.trail.at(-1);
+  const back = backTarget;
   const walkToPlace = (ref: string): void => {
     sheet.walkInside({ kind: "place", ref });
   };
@@ -285,7 +354,7 @@ export function InboxOpenCard({
     <OpeningSheet
       isOpen={sheet.isOpen}
       contentKey={keyTarget(shown)}
-      label={nameTarget(shown, inbox)}
+      label={nameTarget(shown, inbox, readTitle)}
       className="open-card-sheet"
       followsContent
       readPlaces={readPlaces}
@@ -308,7 +377,7 @@ export function InboxOpenCard({
         {back !== undefined && (
           <button type="button" className="open-card-back" onClick={sheet.walkBack}>
             <ArrowIcon size={12} />
-            <span>{nameTarget(back, inbox)}</span>
+            <span>{nameTarget(back, inbox, readTitle)}</span>
           </button>
         )}
         {shown.kind === "card" ? (
@@ -323,7 +392,17 @@ export function InboxOpenCard({
             onClose={openCard.close}
             onWalk={walkToPlace}
             onWalkCard={walkToCard}
-            moves={{ onTake, onDismiss, onSeeTask, onLink, onUnlink, onSeeInIntake }}
+            moves={{
+              onTake,
+              onDismiss,
+              onHand,
+              onChooseConnection,
+              onSeeTask,
+              onLink,
+              onUnlink,
+              onSeeInIntake,
+            }}
+            chosenConnectionId={chosenConnectionId}
           />
         ) : placeView === undefined ? (
           <p className="open-card-trust">This place is not on the Inbox now.</p>

@@ -7,6 +7,8 @@ import type { StepRecord } from "@hercule/contract";
 import { buildRunContext } from "./run-context";
 
 const at = "2026-09-25T00:00:00.000Z";
+const RUN_ID = "01a1b8a8-ac4e-778d-ae4d-282307b58fe1";
+const TASK_ID = "01a1b8a8-ac4d-7787-871e-d1e6f2b97a74";
 
 /** A completed record of `stepId` at `iteration`, with `output`. */
 const buildCompleted = (stepId: string, iteration: number, output: unknown): StepRecord => ({
@@ -21,6 +23,7 @@ const buildCompleted = (stepId: string, iteration: number, output: unknown): Ste
 describe("buildRunContext", () => {
   it("holds the output of each step's latest iteration, and leaves out a step whose latest iteration was skipped", () => {
     const context = buildRunContext({
+      id: RUN_ID,
       inputs: { target: 3 },
       steps: [
         buildCompleted("count", 1, { n: 1 }),
@@ -30,6 +33,17 @@ describe("buildRunContext", () => {
         { stepId: "count", iteration: 3, status: "pending" },
       ],
     });
-    expect(context).toEqual({ inputs: { target: 3 }, steps: { count: { output: { n: 2 } } } });
+    expect(context).toEqual({
+      inputs: { target: 3 },
+      run: { id: RUN_ID },
+      steps: { count: { output: { n: 2 } } },
+    });
+  });
+
+  it("names the Task in `run` when the run works on one, and leaves `taskId` out otherwise", () => {
+    const withTask = buildRunContext({ id: RUN_ID, taskId: TASK_ID, inputs: {}, steps: [] });
+    expect(withTask.run).toEqual({ id: RUN_ID, taskId: TASK_ID });
+    const withoutTask = buildRunContext({ id: RUN_ID, inputs: {}, steps: [] });
+    expect(withoutTask.run).toEqual({ id: RUN_ID });
   });
 });

@@ -1,0 +1,91 @@
+/* The menu of workflows a card can be handed to. It is the drawing's `.menu` (`docs/design/inbox/css/open.css` on
+   the branch `prototype/inbox-hifi`) on the app's tokens. It is a popover, so it lies above the sheet and the
+   page, and `hand-to-menu.tsx` sets its `left` and `top` when it opens. */
+.hand-menu {
+  inset: auto;
+  margin: 0;
+  width: 320px;
+  max-height: calc(100vh - 24px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hand-menu:popover-open {
+    animation: hand-menu-arrive var(--m-base) var(--m-ease) both;
+  }
+}
+@keyframes hand-menu-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+.hand-menu-heading {
+  /* The heading sits 8px in from the menu's edge above and at the sides, and 2px above the first row. */
+  margin: 8px 8px 2px;
+  padding: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.hand-menu-line {
+  display: block;
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--divider);
+}
+
+/* A workflow: its face, its name over its line, and the number key that picks it. */
+.hand-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.hand-row.is-active {
+  background: var(--hover);
+}
+.hand-row:focus-visible {
+  outline: none;
+}
+.hand-row-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hand-row-words b {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.hand-row-words small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+/* A workflow that cannot take the card now: its name in the muted ink and its face dimmed, and its line says why. */
+.hand-row[aria-disabled="true"] {
+  cursor: default;
+}
+.hand-row[aria-disabled="true"] b {
+  color: var(--muted);
+}
+.hand-row[aria-disabled="true"] .cr {
+  opacity: 0.55;
+}

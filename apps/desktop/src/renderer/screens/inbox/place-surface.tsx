@@ -158,6 +158,7 @@ export function PlaceSurface({
               near={row.near}
               bundle={row.bundle}
               freshIds={freshIds}
+              offers={row.offers}
               plugins={plugins}
               showMark={!isMarkShownByHead(head, readEntityPluginId(row.card.kind))}
               showStatus={showStatus}

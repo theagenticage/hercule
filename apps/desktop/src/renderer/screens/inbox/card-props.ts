@@ -9,16 +9,21 @@ interface BundledCardProps {
   readonly freshIds: ReadonlySet<string>;
 }
 
-/** Checks whether `freshIds` marks the same cards of this card, and of the parts under it, as it did. */
-const isSameFreshness = (before: BundledCardProps, after: BundledCardProps): boolean =>
-  listBundleCardIds(after.card, after.bundle).every(
-    (id) => before.freshIds.has(id) === after.freshIds.has(id),
-  );
+/**
+ * Checks whether `freshIds` marks the same cards of this card, and of the
+ * parts under it, as it did. `ids` are those cards' ids.
+ */
+const isSameFreshness = (
+  before: BundledCardProps,
+  after: BundledCardProps,
+  ids: readonly string[],
+): boolean => ids.every((id) => before.freshIds.has(id) === after.freshIds.has(id));
 
 /**
  * Returns the comparison `memo` uses to decide whether a row or a request
  * draws the same as before. The layout keeps the identity of a bundle that
- * did not change, so `bundle` is compared by identity like every other prop.
+ * did not change, and gives each card the same `offers` object for the same
+ * offer set, so both are compared by identity like every other prop.
  * `freshIds` is compared by the cards of this card alone, so a signal landing
  * on another card does not draw this one again. A prop named in `compare` is
  * compared by that function.
@@ -27,8 +32,12 @@ export const buildCardPropsComparer =
   <Props extends BundledCardProps>(
     compare: { readonly [Key in keyof Props]?: (before: Props, after: Props) => boolean } = {},
   ) =>
-  (before: Props, after: Props): boolean =>
-    (Object.keys(after) as (keyof Props)[]).every((key) => {
-      if (key === "freshIds") return isSameFreshness(before, after);
+  (before: Props, after: Props): boolean => {
+    // Read at most once per comparison, and only if a prop reaches it.
+    let ids: readonly string[] | undefined;
+    const readIds = (): readonly string[] => (ids ??= listBundleCardIds(after.card, after.bundle));
+    return (Object.keys(after) as (keyof Props)[]).every((key) => {
+      if (key === "freshIds") return isSameFreshness(before, after, readIds());
       return compare[key]?.(before, after) ?? Object.is(before[key], after[key]);
     });
+  };

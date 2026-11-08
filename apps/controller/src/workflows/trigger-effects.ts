@@ -416,7 +416,7 @@ const announceTriggerCounts = (key: TriggerKey): Effect.Effect<void> =>
     topic: "workflow",
     id: key.workflowId,
     kind: "updated",
-    countsOnly: true,
+    derived: true,
   });
 
 /**

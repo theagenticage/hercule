@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { buildInitials, readErrorMessage } from "@hercule/client-core";
 import {
@@ -7,28 +7,38 @@ import {
   decideEmptyInbox,
   describeFailingSources,
   describeTruncatedInbox,
+  listCardOffers,
+  listRailTargets,
   listRiders,
   nameLinkEnd,
+  NO_OFFERS,
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
+import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../app/live";
 import { connectionsQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import { useWindowVisible } from "../../../app/window-visibility";
 import { IconPill, KeysSheet, ReadFailure, UndoLine, type KeyRow } from "../../../screens/desk";
+import { HandToMenu } from "../../../screens/inbox/hand-to-menu";
 import { InboxDesk, type InboxDeskState } from "../../../screens/inbox/inbox-desk";
 import { InboxLoading } from "../../../screens/inbox/inbox-loading";
 import { InboxPill } from "../../../screens/inbox/inbox-pill";
 import { AllClear, FirstRun } from "../../../screens/inbox/inbox-states";
 import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
 import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
+import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
 import { OngoingSide } from "../../../screens/inbox/ongoing-side";
 import { InboxOpenCard } from "../../../screens/inbox/open-card";
+import { Rail } from "../../../screens/inbox/rail";
 import { RequestsSide } from "../../../screens/inbox/requests-side";
+import { useRunAndMoveOn } from "../../../screens/inbox/use-run-and-move-on";
 import { useCurrentCard } from "../../../screens/inbox/use-current-card";
+import { useHandOff } from "../../../screens/inbox/use-hand-off";
+import { useInboxCarry } from "../../../screens/inbox/use-inbox-carry";
 import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
 import { useInboxView } from "../../../screens/inbox/use-inbox-view";
 import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
@@ -41,6 +51,7 @@ const KEY_ROWS: readonly KeyRow[] = [
   ["↑ ↓ ← →", "Move through the page"],
   ["J K", "Next, previous"],
   ["Space Return", "Open the card"],
+  ["H", "Hand to an agent"],
   ["T", "Take it"],
   ["E", "Dismiss"],
   ["G", "See its Task on Work"],
@@ -67,15 +78,25 @@ const describeOffline = (since: Date): string =>
  *   which takes the sidebar's new mark away.
  * - Offline, or with a source that cannot be read, one line in the bar says
  *   what that means. A read that fails says why, with a Try again button.
- * - The user's moves are here: Take it, Dismiss and Undo (`useInboxMoves`),
- *   the pointer and the keys that drive them (`useCurrentCard`,
- *   `useInboxPage`), the open card, and See its Task, which goes to Work.
+ * - The user's moves are here: Take it, Hand to, Dismiss and Undo
+ *   (`useInboxMoves`), the pointer and the keys that drive them
+ *   (`useCurrentCard`, `useInboxPage`), the open card, and See its Task, which
+ *   goes to Work. Hand to (`useHandOff`) hands a card to the one workflow that
+ *   can take it, or opens a menu of them; the offers follow the workflows, so
+ *   the screen holds the `workflow` topic.
+ * - Carrying a card with the pointer raises the rail, whose targets are the
+ *   workflows that can take it, Take it and Dismiss. Letting go on another
+ *   card links the two, as `Link them` does. A card that arrives meanwhile
+ *   waits until the card is let go.
  */
 export function InboxScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
   const { client, url, live } = controller;
-  const { undoStack } = controller.accountScopes.read();
+  const scope = controller.accountScopes.read();
   const navigate = useNavigate();
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
+  const queryClient = useQueryClient();
+  // The offers of every card depend on the workflows, which the shell does not hold.
+  useScreenTopicsLive(live, queryClient, WORKFLOW_TOPICS);
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: connections } = useSuspenseQuery(connectionsQuery(client));
@@ -84,10 +105,15 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const visitHistory = useVisitHistory();
   const moves = useInboxMoves({
     client,
-    undoStack,
+    scope,
     serverInbox: read.data,
     visit: visitHistory,
     scrollRef,
+    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
+    isCarrying: () => readIsCarrying(),
+    openTask: (taskId) => {
+      void navigate({ to: "/work", search: { task: taskId } });
+    },
   });
   const isVisible = useWindowVisible();
   const offlineSince = useOfflineSince(live);
@@ -121,6 +147,8 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     },
     visit: visitHistory,
     scrollRef,
+    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
+    isCarrying: () => readIsCarrying(),
   });
   const hasWords = inbox !== undefined && !isHolding;
   const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
@@ -153,28 +181,72 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
     void navigate({ to: "/work", search: { task: card.taskId } });
   };
   // Dismissing a card lets what rides on it stand alone, and the undo line says so.
-  const dismissWithRiders = (card: InboxCard): void => {
-    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id));
+  const dismissWithRiders = (card: InboxCard, stepsAside = true): void => {
+    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id), stepsAside);
   };
+  const linkCards = (fromRef: string, toRef: string): void => {
+    if (inbox === undefined) return;
+    moves.link({
+      fromRef,
+      toRef,
+      fromName: nameLinkEnd(inbox, fromRef),
+      toName: nameLinkEnd(inbox, toRef),
+    });
+  };
+  const runAndMoveOn = useRunAndMoveOn({ scrollRef, current, open: openCard });
+  const handOff = useHandOff({
+    client,
+    inbox,
+    open: openCard,
+    hand: moves.handOff,
+    say: moves.sayWithoutUndo,
+    runAndMoveOn,
+  });
   const page = useInboxPage({
     scrollRef,
     current,
     findCard,
     open: openCard,
+    runAndMoveOn,
+    handOff,
     moves: {
       take: moves.take,
       dismiss: dismissWithRiders,
       seeTask,
-      link: (fromRef, toRef) => {
-        if (inbox === undefined) return;
-        moves.link({
-          fromRef,
-          toRef,
-          fromName: nameLinkEnd(inbox, fromRef),
-          toName: nameLinkEnd(inbox, toRef),
-        });
-      },
+      link: linkCards,
       say: moves.sayWithoutUndo,
+    },
+  });
+
+  // ---------- Carrying a card ----------
+  const { rail, attachRail, readIsCarrying } = useInboxCarry({
+    pageRef: scrollRef,
+    disabled: openCard.isOpen,
+    canCarry: (cardId) => findCard(cardId) !== undefined,
+    readRailTargets: (cardId) => {
+      const card = findCard(cardId);
+      if (card === undefined) return [];
+      return listRailTargets(
+        card,
+        inbox === undefined ? NO_OFFERS : listCardOffers(card, inbox.offerSets),
+      );
+    },
+    onDropOnTarget: (cardId, target) => {
+      const card = findCard(cardId);
+      if (card === undefined) return;
+      if (target.kind === "hand") handOff.handCard(card, target.workflowId, "pointer");
+      else if (target.kind === "more") {
+        // The same menu the card's own Hand to… button opens, under the card the drop sent home.
+        const scroller = scrollRef.current;
+        const anchor = scroller === null ? null : findCardElement(scroller, card.id);
+        if (anchor !== null) handOff.openMenu(card, anchor, "pointer");
+      } else if (target.kind === "take") moves.take(card);
+      else dismissWithRiders(card, false);
+    },
+    onDropOnCard: (cardId, ontoCardId) => {
+      const card = findCard(cardId);
+      const onto = findCard(ontoCardId);
+      if (card !== undefined && onto !== undefined) linkCards(card.ref, onto.ref);
     },
   });
 
@@ -307,15 +379,32 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
                 });
               }
             }}
+            chosenConnectionId={handOff.chosenConnectionId}
+            onChooseConnection={handOff.chooseConnection}
+            onHand={handOff.handFromSheet}
             onSeeTask={(taskId) => {
               openCard.close();
               void navigate({ to: "/work", search: { task: taskId } });
             }}
           />
+          {handOff.menu !== null && (
+            <HandToMenu
+              offers={handOff.menu.offers}
+              openKinds={handOff.menu.card.signals.kinds}
+              actingConnections={handOff.menu.card.actingConnections}
+              chosenConnectionId={handOff.chosenConnectionId}
+              onChooseConnection={handOff.chooseConnection}
+              onHand={handOff.pickFromMenu}
+              onClose={handOff.closeMenu}
+              anchor={handOff.menu.anchor}
+            />
+          )}
+          {rail !== null && <Rail ref={attachRail} targets={rail.targets} monogram={monogram} />}
           {page.isKeysSheetOpen && <KeysSheet rows={KEY_ROWS} platform={bridge.platform} />}
           <UndoLine
             text={moves.line.text}
             onUndo={moves.line.canUndo ? moves.undoLastMove : null}
+            action={moves.line.action}
             undoKey={describeUndoKey(bridge.platform)}
             isShown={moves.line.isShown}
           />

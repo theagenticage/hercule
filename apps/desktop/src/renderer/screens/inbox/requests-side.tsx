@@ -120,6 +120,7 @@ export function RequestsSide({
                   homeName={row.homeName}
                   bundle={row.bundle}
                   freshIds={freshIds}
+                  offers={row.offers}
                   plugins={plugins}
                   monogram={monogram}
                   step={stepOfCard.get(row.card.id) ?? 0}

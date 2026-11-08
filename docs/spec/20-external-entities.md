@@ -347,8 +347,9 @@ A client keeps each card's side for the length of a visit, so a card the user ju
 5. `readContext` over the listed cards, once (one walk up);
 6. a batch read of the records, observations, Connections and scans of the cards and of every place their edges reach, and the latest change of each ([section 8.7](#87-what-changed-outside));
 7. the direct links of the cards on the page and, in three statements, the records at their far end that have no card (`peers`).
+8. *(Added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* the offers ([section 8.8](#88-what-a-card-can-be-handed-to)): the Connections that can act on the cards on the page, the runnable workflows, and the Resources their workspaces name, one statement each, however many cards there are.
 
-`places` holds each record above a card once, so 300 cards do not repeat their repository. Its bound is `MAX_INBOX_PLACES`, the card limit plus `MAX_GRAPH_EDGES`. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `links` holds the direct links of the cards on the page, `hints` the pairs among them that only text holds together, and `peers` the records at their far end; the bounds are `MAX_INBOX_LINKS` and `MAX_INBOX_HINTS`, both `MAX_GRAPH_EDGES`, and `MAX_INBOX_PEERS`, their sum, and a read that reaches any of them sets `truncated`. A card gains `signals`, `ridesOn` and `latestChange`.
+`places` holds each record above a card once, so 300 cards do not repeat their repository. Its bound is `MAX_INBOX_PLACES`, the card limit plus `MAX_GRAPH_EDGES`. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `links` holds the direct links of the cards on the page, `hints` the pairs among them that only text holds together, and `peers` the records at their far end; the bounds are `MAX_INBOX_LINKS` and `MAX_INBOX_HINTS`, both `MAX_GRAPH_EDGES`, and `MAX_INBOX_PEERS`, their sum, and a read that reaches any of them sets `truncated`. A card gains `signals`, `ridesOn` and `latestChange`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* It also gains `offerSetId` and `actingConnections`, and the reply gains `offerSets`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* It also gains `liveWorkflows`: the workflows with a live run on the card's active Task, newest run first, at most `MAX_LIVE_WORKFLOWS`, empty when none. The client draws the card's colleague from the first one, so a card shows who has it however the user came to the Inbox, not only for the visit in which they handed it off.
 
 Orders inside the page, and Group by and Filter, are the client's, over this reply: they cost no read and change no number.
 
@@ -389,11 +390,11 @@ A signal alone can bring a card onto the clock. That is an arrival too, taken on
   | Is the record kept and read? | Any open signal, snoozed or not, stops the prune sweep and makes the ref wanted. A snoozed signal still needs its card to be current when it comes back |
 
 - **Dismissal holds.** A dismissed card stays out of sight whatever signals arrive ([section 4.2](#42-dismissal)). The signal stays open and shows on Intake, so it is not lost.
-- **A card's signals.** `InboxCard.signals` is `{ latest?, openCount }`. `openCount` counts the open signals that are not snoozed, and `latest` is the newest of them, by `createdAt` then `id`. A line (`EntitySignalLine`) holds the id, kind, title, asker, priority, status, time, the sentence (`say`), the `outcome` once the signal has ended and whether it is `snoozed`. It holds no blocks and no answers: opening a line reads `signal.read`.
+- **A card's signals.** `InboxCard.signals` is `{ latest?, openCount }`. `openCount` counts the open signals that are not snoozed, and `latest` is the newest of them, by `createdAt` then `id`. A line (`EntitySignalLine`) holds the id, kind, title, asker, priority, status, time, the sentence (`say`), the `outcome` once the signal has ended and whether it is `snoozed`. It holds no blocks and no answers: opening a line reads `signal.read`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* `InboxCard.signals` also carries `kinds`: the distinct kinds of the card's open signals, snoozed ones included, sorted and bounded by `MAX_ENTITY_SIGNALS`. A handoff ends the open signals of the kinds its workflow answers, and snoozed ones are among them, so the menu needs every open kind to say what a click ends and what it leaves open ("Ends *Review requested*. Leaves the mention open.").
 - **The detail's signals.** `ExternalEntityDetail` gains `signals` (at most `MAX_ENTITY_SIGNALS`, 50), `openCount` (every open signal, snoozed ones included) and `signalCount` (open and resolved). The newest open signals are selected first, up to 50. The newest resolved ones fill any room left. The selected lines are returned in time order, oldest first, by `createdAt` then `id`. It is three statements, all served by that index and bounded by the limit however many signals the ref has: the two counts, the open lines, and the resolved lines (not read when the open ones fill the room). Open work is never hidden behind the word "older": a client says how many open lines it left out before it says how many resolved ones.
 - **The sentence.** The Inbox card's `reason` is the sentence of its latest live signal. A card with no live signal keeps the observation's own reason. One function builds the sentence for a card and for every line of its detail. It reads the entity's `reason_templates` under the signal kind's word (the part after `<plugin>/`, so `github/review-requested` reads `review-requested`) and fills `{person}` with the signal's `asker`. It falls back to the signal's title, with the tone `plain`, for a core kind, for a kind the entity stores no template for, and when the template needs a person the signal does not have. The result is cut at a word to the bound of `EntityReason.say`. The templates are stored, never read from the catalog at read time, so a sentence reads well after its plugin is gone.
 - **Arrival** is in [section 8.4](#84-counts-and-the-new-mark).
-- **Acting on a card ends no signal it did not answer.** `takeOn` and `dismiss` end none. The user marks each signal done from its line with `signal.markDone`, or answers it with `signal.act`. A signal is never a fact of the Task. Your work follows the links: it shows a signal on the active Task of its ref only ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)).
+- **Acting on a card ends no signal it did not answer.** `takeOn` and `dismiss` end none. The user marks each signal done from its line with `signal.markDone`, or answers it with `signal.act`. A signal is never a fact of the Task. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* A handoff answers the signals of the kinds its workflow lists in `answers`, and only those ([section 9.6](#96-hand-off-and-its-undo)). Your work follows the links: it shows a signal on the active Task of its ref only ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)).
 
 ### 8.6 What rides
 
@@ -423,17 +424,46 @@ A signal alone can bring a card onto the clock. That is an arrival too, taken on
 - **Read.** `ExternalEntityDetail.timeline` holds at most 50 changes, oldest first. Each is `{ reason, sentence, at, ref? }`, with `ref` for a `linked` change. Each entity record, `EntityPlace` and unrestricted `EntityPeer` has `latestChange`, read for a whole list in one statement, so a Task's linked thing shows its latest change wherever the shared relation row draws it.
 - **Nothing acts on it.** No stage moves, no run stops, no signal ends, no card changes place, no Task changes, and no event or signal is raised. Two pull requests for one ticket are fine: each is linked, and each says so.
 
+### 8.8 What a card can be handed to
+
+*(Added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* A workflow with an `entity` input ([./07-workflows.md](./07-workflows.md#3-inputs)) can take a card's thing. A card carries its **offers**: the workflows it could be handed to, each available or unavailable with a reason.
+
+**A workflow is available on a thing** when all of these hold:
+
+1. It is enabled and valid.
+2. It has exactly one `entity` input, and that input lists the thing's qualified kind.
+3. It has at most one required `connection` input with no default of the Connection type of the kind's plugin (the core fills it with the acting account), and at least one acting account exists for the thing.
+4. Every other required input has a default.
+5. Its repository fits. A workflow with no `workspace`, or with no checkout, runs anywhere. A workflow whose workspace names Resources fits a thing that has a `repository` only when one of those Resources' `canonicalRemote` equals the thing's `repository.target.remote`. A pull request from a fork compares its **target**: that is the repository the work lands in. **A kind with no `repository`, such as a Linear issue, has nothing to compare, so any workflow fits.** A ticket does not say which repository it needs, so the user chooses by choosing the workflow, as they do today.
+
+**Unavailable, with a reason.** When a workflow is listed and one of the rules above fails, the offer says why, when the user can act on it. When several fail, the first of these is given:
+
+| `reason` | The menu says |
+|---|---|
+| `needs-input` | "*Name* needs *input*, which a card cannot fill" |
+| `repository` | "*Name* works on *acme/web* only" |
+| `no-account` | "No connected account can act on this" |
+| `needs-workflow-change` | "*Name* needs a workflow change: replace its signal input with an entity input" |
+
+`needs-workflow-change` is for a workflow that has a `signal` input on a signal kind the thing's plugin raises, and no `entity` input. It is listed so the user learns what to change, and it stays offered on Intake meanwhile ([spec 10 §9.4](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). A disabled or invalid workflow is not listed at all, and neither is one whose `entity` input does not list the kind.
+
+**The acting accounts of a thing** are the Connections of the Connection type of the kind's plugin that have an observation of this very thing with `access: ok` and whose status passes the rule a run start applies to a `connection` input: a Connection that is `disabled` is refused, and `needs-reauth` and `error` are not, because the action that uses the Connection reports that problem. They are listed oldest first (`created_at`, then id), and the first is the default. With several, the menu names the default ("as northwind-bot") and the user can change it. The Connection a poll last used plays no part. A thing no Connection can act on has none, and every workflow is then unavailable with `no-account`.
+
+**The reply.** Offers depend on the kind, the target repository and whether an account can act, not on the card. So `Inbox.offerSets` maps an opaque `offerSetId` to the offers of that group, and each card names its set with `offerSetId` and lists its own accounts in `actingConnections`. The id is built from those three parts, and a client only compares ids; it never parses one. Offers are listed available first, then unavailable, each by name. The lists are bounded by the server (`MAX_ENTITY_OFFERS`, `MAX_ACTING_CONNECTIONS`), so the handoff never reads them: it checks its one workflow and its one Connection directly, with the same rules. `ExternalEntityDetail` carries `offers` and `actingConnections` for one thing. One pure function decides each offer, from workflows, Resources and accounts that are already read, so the Inbox, the detail and the handoff cannot disagree about what is available.
+
 ## 9. Operations
 
 The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule entity`. It reuses the `task` grant family, as `modelProfile` reuses `infra`: no new family and no grants migration. The operations are in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#externalentity). Every mutation is stamped with an actor, and the permission check and the stamp live inside the service method. A transport handler is one line.
 
 | Operation | Route | Grant | What it does |
 |---|---|---|---|
-| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read` and `signal.query` | The Inbox ([section 8.3](#83-reading)) |
+| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query` | The Inbox ([section 8.3](#83-reading)), with the offers ([section 8.8](#88-what-a-card-can-be-handed-to)) |
 | `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` and `signal.query` | `InboxCounts`, for the sidebar |
-| `externalEntity.read` | `GET /external-entities/:id` | `task.read` and `signal.query` | One full record of a work kind. `NotFound` for a partial or context record |
+| `externalEntity.read` | `GET /external-entities/:id` | `task.read`, `signal.query`, `workflow.query` and `connection.query` | One full record of a work kind, with its offers. `NotFound` for a partial or context record |
 | `externalEntity.takeOn` | `POST /external-entities/:id/take-on` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |
 | `externalEntity.undoTakeOn` | `POST /external-entities/:id/take-on/undo` | `task.update`, user only | [Section 9.2](#92-undo-of-a-take-or-an-add) |
+| `externalEntity.handOff` | `POST /external-entities/:id/hand-off` | `run.start`, user only | [Section 9.6](#96-hand-off-and-its-undo) |
+| `externalEntity.undoHandOff` | `POST /external-entities/handoffs/:runId/undo` | `run.write`, user only | [Section 9.6](#96-hand-off-and-its-undo) |
 | `externalEntity.dismiss` | `POST /external-entities/:id/dismiss` | `task.update`, user only | Sets `dismissed_at` and `dismissed_by` |
 | `externalEntity.restore` | `POST /external-entities/:id/restore` | `task.update`, user only | Undo of a dismissal |
 | `externalEntity.search` | `GET /external-entities/search` | `task.read` and `connection.query`, user only | [Section 10](#10-search-recognition-and-resolution) |
@@ -442,9 +472,9 @@ The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule
 | `externalEntity.link` | `POST /external-entities/links` | `task.update`, user only | [Section 9.5](#95-link-and-unlink) |
 | `externalEntity.unlink` | `POST /external-entities/links/remove` | `task.update`, user only | [Section 9.5](#95-link-and-unlink) |
 
-`read` returns the common fields of a card plus `kindAvailable`, `places`, `edges`, `links` (the pairs a source or a person joined, each once, under its firmest claim, which names only its plugin or actor and never a Connection), `hints` (the pairs only text holds together), `conflicts` (the claims the graph refused, with why), and, from slice 5, `signals`, `openCount`, `signalCount`, `timeline` and `peers` ([sections 8.5 to 8.7](#85-signals-inside-a-card)). It needs `signal.query` besides `task.read`, because it shows signal text. The static paths (`inbox`, `search`, `suggestions`, `add-to-work`) sit beside `/external-entities/:id`, and the router prefers them.
+`read` returns the common fields of a card plus `kindAvailable`, `places`, `edges`, `links` (the pairs a source or a person joined, each once, under its firmest claim, which names only its plugin or actor and never a Connection), `hints` (the pairs only text holds together), `conflicts` (the claims the graph refused, with why), and, from slice 5, `signals`, `openCount`, `signalCount`, `timeline` and `peers` ([sections 8.5 to 8.7](#85-signals-inside-a-card)). It needs `signal.query` besides `task.read`, because it shows signal text. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* It also returns `offers` and `actingConnections`, and needs `workflow.query` and `connection.query` for them, because offers name workflows and accounts. The service checks all four before it reads. The static paths (`inbox`, `search`, `suggestions`, `add-to-work`) sit beside `/external-entities/:id`, and the router prefers them.
 
-A session may read (`list`, `read`, `suggestions`) but may not take on, add, dismiss, restore, link or unlink: those are user only. The three reads that show signal text need `signal.query` as well.
+A session may read (`list`, `read`, `suggestions`) but may not take on, add, dismiss, restore, link, unlink, hand off or take a handoff back: those are user only. The three reads that show signal text need `signal.query` as well, and the two that show offers need `workflow.query` and `connection.query`.
 
 ### 9.1 Take on and Add to work
 
@@ -461,7 +491,7 @@ Inside the final transaction the service revalidates the exact requested ref, fu
 - **`takeOn`** with an active Task returns that Task: a second click, or a second account, is idempotent. With none it creates a Task: the entity's title, the stage of [section 9.3](#93-the-stage-a-new-task-starts-at), priority `normal`, the project of [section 9.4](#94-the-project-of-a-task-taken-on), and provenance `{ ref }`, which writes the link. It returns `{ taskId, created }`. It fails `NotFound` for an unknown id. It writes nothing on the source.
 - **`addToWork { ref, projectId? }`** with an active Task returns that Task with `created: false` before any read, even when Hercule holds no record of the ref (the reply then has no `id`). Otherwise, after `prepareEntityForTask`, it writes in one transaction: the observation that was read (which creates the entity when it is new), the Task as `takeOn` makes it (in `projectId` when given; an unknown Project is `NotFound`), and `following` on the link when the entity has no concern of its own. It returns `{ id?, taskId, created, stage, followed }`; `id` is absent only when an existing Task links a ref Hercule holds no record of. The line at the foot reads "Added to Exploring. Hercule now follows WEB-301." Adding is always one thing at a time.
 
-Outbound work uses no credential in this slice. Never pick credentials from whichever poll updated the card.
+Outbound work uses no credential in this slice. Never pick credentials from whichever poll updated the card. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* A handoff starts a run that acts through a Connection, so it picks one by a rule and not by the last poll: the acting account of [section 8.8](#88-what-a-card-can-be-handed-to), chosen by the user or the oldest one.
 
 ### 9.2 Undo of a Take or an Add
 
@@ -482,6 +512,30 @@ Task `projectId` must be a real Project, so a Linear project or a GitHub reposit
 - **`externalEntity.link { fromRef, toRef }`** writes a `person` claim of relation `linked`, stamped with the actor. The target may be a ref nobody has read: it is read like any other linked target ([section 5.3](#53-refresh-listwanted-and-reportmissing)). The source is never told. Linking a pair the user already linked, in either direction, changes nothing. It fails `NotFound` when Hercule holds no record of `fromRef`, and `InvalidState` for the same ref twice and for a ref that starts with `unresolved:`.
 - **`externalEntity.unlink { fromRef, toRef }`** removes the user's own claims between the two refs, in either direction, and returns `{ removed, remaining? }`. `removed` is false when the user had made none. `remaining` is the firmest claim type that still joins them (`source`, `person` or `text`). A source's claim stays: only a person's word is the person's to take back.
 - A source's claim is firmer than a person's, so linking a pair that a source reports changes nothing the user sees. Linking a pair that only a hint reports makes it a link, and the hint is no longer drawn.
+
+### 9.6 Hand off and its Undo
+
+*(Added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034); [ADR 0046](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md).)* **`externalEntity.handOff { id, workflowId, connectionId? }`** hands a card's thing to a workflow, as the user. It lives in its own service, `ExternalEntityHandoffs`, in the shape of `SignalHandoffs`, because it calls the run and signal services. It returns `RunStarted` and the `taskId` the run works on.
+
+**The rule: acting never ends a signal it did not answer.** A handoff ends only the open signals of the kinds its workflow's `entity` input lists in `answers`. A mention on the same pull request stays open on the card. The order is what makes this safe:
+
+1. Check the caller is the user and the entity exists.
+2. **The boundary.** Read the workflow's `answers`, then the ids of the open signals on this exact ref whose kind is in it, snoozed ones included. This is the whole set the handoff may end. A signal that arrives after this read stays open: it is new work.
+3. **Claims.** Take `SignalClaims.withSignalsClaimed` on those ids, around the transaction ([spec 10 §9.6](./10-triage-intake-and-notifications.md#96-when-a-signal-leaves)). If a plugin answer or a withdrawal holds one, the whole handoff fails `invalid_state` before anything is written: "A reply to this is still running. Try again in a moment."
+4. In one transaction:
+   - Check the offer again: the workflow is available on the thing ([section 8.8](#88-what-a-card-can-be-handed-to)) and the chosen account, or the oldest one, can act. An offer read a moment ago proves nothing.
+   - Read the workflow's definition and compare its `answers` with the boundary's, as sets. If they differ, fail `invalid_state`, "This workflow changed. Try again.", with nothing written. The run below is started from this same read, so the run and the signals it ends come from one definition.
+   - Find the active Task of the ref ([./09-tasks.md](./09-tasks.md#entity-links)), or choose an id for a new one.
+   - **Refuse a double click.** When `RunService.findLiveRunOnTask` finds a run of this workflow on the Task that has not ended, fail `invalid_state`, "*Workflow* is already working on this." A second handoff to another workflow is allowed: that is the chain the Task holds.
+   - Start the run on the Task with the ref in the `entity` input and the acting account in the `connection` input, if the workflow has one. The first session is placed after the commit, so no transaction waits on a runner ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md)). A run that cannot start rolls everything back.
+   - Write the Task and its provenance entry `{ ref, runId }` ([./09-tasks.md](./09-tasks.md#a-handoff-from-a-card)). The core never moves a stage on its own: a handoff decides `building` only from `exploring` or `planned`.
+   - End each claimed signal that is still open, with `SignalService.resolveAnswered`: `decided`, the Hand to an agent action id of the workflow, the outcome "Handed to *workflow*", the run, the user's actor, a `signal.decided` audit entry. One that its source ended in the meantime is skipped and is no failure. It runs no source action, tells the source nothing, and feeds no Ignore Rule suggestion: this is not Done.
+   - Write the `entity_handoffs` row the Undo reads.
+5. After the commit it announces `externalEntity`, `task` and `signal`, and the run's start pushes `run` ([section 12](#12-live-updates)).
+
+Intake's Hand to an agent works as before and shares two rules with this: both continue the oldest live link's Task, and both refuse a second live run of the same workflow on it ([spec 10 §9.4](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
+
+**`externalEntity.undoHandOff { runId }`** takes a handoff back as far as is safe. Cancelling a run is not a rollback, so the handoff keeps its `entity_handoffs` row and the Undo reads that, not the client. In one transaction: it returns the first answer when the Undo was done before; answers `too-late` and changes nothing when the run has ended; decides what may be taken back, before cancelling, because cancelling changes how the run looks; cancels the run and its unfinished sub-runs, as `run.cancel` does (the runner hears after the commit, so this is a stop requested and not a stop done); and reverses the Task if the rules allow. The rules for the Task, the three outcomes (`undone`, `stopped`, `too-late`) and the failure that comes back are in [./09-tasks.md](./09-tasks.md#a-handoff-from-a-card). In practice a full Undo works in the moment before the run's first step starts. After that, Undo means Stop, and the line says so. Signals the handoff ended stay ended; the card stays, because its concern stays, and its place and wait return. A second handoff's run is never touched.
 
 ## 10. Search, recognition and resolution
 
@@ -549,6 +603,8 @@ The `externalEntity` topic is a mutable topic ([./14-web-app.md](./14-web-app.md
 | A poll changes what a card shows (access included) | the Inbox, the count, Work's marks, an open pane | `external-entities` announces `externalEntity`. When the ref has a live Task, it also announces `task` with `derived: true`: it imports `tasks` |
 | A claim changes, or a place's title, status or progress | the Inbox, the board's lanes and filters | the same, for the Tasks below it, found by one walk down |
 | Take, Add, Dismiss, Restore | the Inbox, the count, the board | the service, on both topics |
+| A handoff, or its Undo *(added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034))* | the Inbox, the board, the count, To do | the service announces `externalEntity` and `task`; the signals it ended push `signal`; the run's start pushes `run` |
+| An offer's inputs change: a workflow is edited, enabled or disabled, or a Connection changes *(added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034))* | the Inbox's and a detail's offers | `workflow` and `connection` already push. `workflow` is not shell data, so the Inbox route subscribes to it; `connection` is mapped to the Inbox keys |
 | A Task finishes, is deleted, merged, or gains or loses a link | the Inbox's membership, the count | `task` already pushes. The client maps `task` to the Inbox keys, so no reverse import is needed |
 | A signal opens, ends or is snoozed | the Inbox, the count, an open card | `signal` already pushes. The client maps it to the Inbox keys |
 | A thing becomes a full record of a work kind (created, or a partial record made full) | Intake: its open signals now show the record as `Signal.entity` | the poll announces `signal` for each open signal on that ref, snoozed ones included, beside `externalEntity`. An `externalEntity` push alone leaves the signal lists alone |
@@ -568,11 +624,12 @@ Source lives in `apps/controller/src/external-entities/`. It owns entity lifecyc
 
 ```
 external-entities -> actor db events tasks resources connections plugins signals
-                     (slice 6 adds runs and workflows)
+                     runs workflows *(added 2026-11-08, #1034)*
 
 plugins    declares port EntityObservations  -> answered in daemon/ingest/
            declares EntityRecognizer         -> filled by the plugin host at start
 signals    declares port SignalEntities      -> answered in daemon/ingest/
+workflows  declares port WorkflowEntities    -> answered in daemon/workflows/ *(added 2026-11-08, #1034)*
 tasks      TaskBoardFacts                    -> daemon/tasks/ also reads entities and their ancestors
 daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> the resolver loop
 ```
@@ -588,7 +645,6 @@ daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> 
 
 Not in this document yet, and the tables allow for them:
 
-- Handing a card to an agent, and the acting Connection for outbound work (slice 6).
 - Linking a Thread's pull request to its Task, and moving cards on facts. `repository.head` is stored here and used there (slice 7).
 - A triage cluster as Hercule's own kind, `core/triage-cluster`, written by the core with no Connection. `external_entities.kind` is a string and an entity needs no observation row, so it fits. It is not built.
 

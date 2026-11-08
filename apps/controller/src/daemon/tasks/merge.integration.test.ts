@@ -39,7 +39,12 @@ import {
 } from "../../tasks";
 import { TextGeneration } from "../../text-generation";
 import { AccountUsageLayer } from "../../usage";
-import { WorkflowRuns, WorkflowServiceLayer, WorkflowSignals } from "../../workflows";
+import {
+  WorkflowRuns,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../../workflows";
 import { WorkspaceServiceLayer } from "../../workspaces";
 import { RunExecutorLayer, TaskTrackingRunsLayer } from "../runs";
 import { TaskLinkOwnersLayer } from "./link-owners";
@@ -57,6 +62,7 @@ const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor:
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
@@ -430,7 +436,7 @@ describe("an id of a merged Task", () => {
         const moved = yield* tasks.move({ id: source.id, afterTaskId: other.id });
         const listed = yield* tasks.query({});
         const searched = yield* tasks.query({ text: "gift" });
-        const board = yield* repository.listBoardTasks(100);
+        const board = (yield* repository.listBoardTasks(100)).tasks;
         return {
           source,
           survivor,

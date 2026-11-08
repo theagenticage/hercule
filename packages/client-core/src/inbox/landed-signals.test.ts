@@ -17,6 +17,7 @@ const withLatest = (id: string, signalId: string | undefined, createdAt?: string
   buildInboxCard(id, {
     signals: {
       openCount: signalId === undefined ? 0 : 1,
+      kinds: [],
       ...(signalId === undefined
         ? {}
         : {
@@ -70,7 +71,7 @@ describe("listLandedCards", () => {
     const before = buildInbox([withLatest("1", undefined), buildRequestCard("2")]);
     const after = buildInbox([
       buildRequestCard("2", {
-        signals: { openCount: 1, latest: buildSignalLine("s9", "Ines asked") },
+        signals: { openCount: 1, kinds: [], latest: buildSignalLine("s9", "Ines asked") },
       }),
       withLatest("1", "s1"),
     ]);
@@ -171,6 +172,7 @@ describe("describeLanding", () => {
       yours: true,
       signals: {
         openCount: 1,
+        kinds: [],
         latest: buildSignalLine("s1", "Checks failed", {
           say: { say: "Checks failed", tone: "bad" },
         }),
@@ -191,6 +193,7 @@ describe("describeLanding", () => {
       person: { name: "Ines" },
       signals: {
         openCount: 1,
+        kinds: [],
         latest: buildSignalLine("s2", "Omar commented", {
           say: { say: "Omar commented", tone: "bad" },
         }),

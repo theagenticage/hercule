@@ -28,7 +28,13 @@ import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
@@ -128,6 +134,7 @@ const runTest = <A, E>(
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),

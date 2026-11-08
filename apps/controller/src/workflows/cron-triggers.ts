@@ -214,6 +214,7 @@ const make = Effect.gen(function* () {
             topic: "workflow",
             id: key.workflowId,
             kind: "updated",
+            derived: true,
           });
         }),
       ),

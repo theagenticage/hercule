@@ -107,7 +107,9 @@ const make = Effect.gen(function* () {
      *    ref (`findActiveTaskForRef`: the live Task with the oldest link to
      *    the ref, never a finished or deleted one), or decides the id of a
      *    new Task. The describe line runs the same lookup, so it names the
-     *    Task the handoff then continues;
+     *    Task the handoff then continues. A continued Task that already has
+     *    a pending or running run of this workflow refuses the handoff, so
+     *    the workflow works on a Task once at a time;
      * 4. starts the run linked to that Task, with the signal as the
      *    workflow's signal input. Placing the run's first session waits until
      *    the transaction commits;
@@ -121,11 +123,11 @@ const make = Effect.gen(function* () {
      *
      * Fails with `Forbidden` for any caller but the user, `NotFound` when the
      * signal or the workflow does not exist or the signal does not offer the
-     * workflow, `InvalidState` when the signal is resolved, `Validation` when
-     * the answer names another signal or the workflow takes no signal of the
-     * signal's kind, and with whatever starting the run fails with, such as a
-     * workflow that is invalid or has no capable runner. The caller's
-     * transaction then rolls back.
+     * workflow, `InvalidState` when the signal is resolved or the workflow is
+     * already working on the Task, `Validation` when the answer names another
+     * signal or the workflow takes no signal of the signal's kind, and with
+     * whatever starting the run fails with, such as a workflow that is invalid
+     * or has no capable runner. The caller's transaction then rolls back.
      *
      * The run is started before the Task is written, so a new Task has the id
      * chosen in step 3: the run names the Task, and the Task's first entry
@@ -173,6 +175,16 @@ const make = Effect.gen(function* () {
         const existing = Option.isSome(ref)
           ? Option.getOrUndefined(yield* taskRows.findActiveTaskForRef(ref.value))
           : undefined;
+        if (
+          existing !== undefined &&
+          Option.isSome(
+            yield* runs.findLiveRunOnTask({ taskId: existing.id, workflowId: input.workflowId }),
+          )
+        ) {
+          return yield* Effect.fail(
+            createInvalidStateError(`${definition.name} is already working on this.`),
+          );
+        }
         const taskId = existing?.id ?? uuidToString(mintUuid());
 
         const started = yield* runs.startOnTask(

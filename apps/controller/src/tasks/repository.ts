@@ -141,7 +141,8 @@ export interface ActiveTaskOnRef {
 
 /**
  * What a Task has gathered since it was created, for the check that decides
- * whether the Task can still be taken back (`readTraces`).
+ * whether the Task can still be taken back, as a Task made from a ref or as
+ * the Task of a handoff (`readTraces`).
  */
 export interface TaskTraces {
   /** The Task's stage now. */
@@ -158,6 +159,10 @@ export interface TaskTraces {
   readonly hasRun: boolean;
   /** How many refs the Task links. */
   readonly linkCount: number;
+  /** How many stage decisions have been made on the Task (`stage_revision`). */
+  readonly stageRevision: number;
+  /** How many times a run or a session has joined the Task (`join_revision`). */
+  readonly joinRevision: number;
 }
 
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
@@ -267,6 +272,12 @@ export interface TaskEdit {
   readonly title?: string;
   readonly description?: string;
   readonly stage?: TaskStage;
+  /**
+   * True when the write is a stage decision that may leave `stage` as it was:
+   * a request that named a stage the Task already has. A write that sets
+   * `stage` is a stage decision whether or not this is set.
+   */
+  readonly decidesStage?: boolean;
   /** Must be the coarse reading of `stage`; it is written only when it changed. */
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
@@ -1028,6 +1039,22 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the id of one External Entity that the Task links, or none when
+     * it links no ref that has an entity record. One lookup on the Task's
+     * links (`task_entity_links`, keyed by Task) and one by ref on
+     * `external_entities`, so it reads nothing of the other cards.
+     */
+    findLinkedEntityId: (taskId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT e.id FROM task_entity_links l
+          JOIN external_entities e ON e.ref = l.ref
+          WHERE l.task_id = ${uuidFromString(taskId)}
+          LIMIT 1`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
      * Ends the failure the Task shows, because a Thread was started on it by
      * name, and raises its failure revision whether or not it showed one, so
      * that no older Undo of a Try again restores a failure over it. Does
@@ -1269,36 +1296,74 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the cards of the Work board: the live Tasks at a board stage
-     * (neither deleted nor merged into another Task), ordered by project (none first), then stage in the order of the board,
-     * then rank. It returns one Task more than `limit` at most, so the caller
-     * can tell that there were more.
+     * (neither deleted nor merged into another Task), ordered by project (none
+     * first), then stage in the order of the board, then rank. At most `limit`
+     * of them come back, and `truncated` says that there were more.
+     *
+     * Every live Task that shows a failed run is on the board, however many
+     * Tasks there are: the sidebar's failure dot is raised by such a Task
+     * (`existsFailedTaskOnBoard`), and the board must show the failure it
+     * points to. The failed Tasks come first, and the other Tasks fill what
+     * is left of `limit`, in the order the index walks them. Only when more
+     * than `limit` Tasks are failed are some of them left out.
      *
      * A Task of a deleted project is returned with no `projectId` and ordered
      * with the Tasks that have none, as `resolveCell` explains.
      *
-     * One statement. It walks `tasks_board_rank` in its own order, which is
+     * One statement, so both parts see one snapshot: a Task whose failure is
+     * cleared meanwhile (Try again) is in one part and never in both, and so
+     * never twice on the board. The failed Tasks come from `tasks_failed`,
+     * which holds only them. The others walk `tasks_board_rank` in its own order, which is
      * project, stage, rank, so it sorts nothing and stops after `limit + 1`
      * Tasks. The index leaves out finished and deleted Tasks, so the walk never
      * meets them. The index order puts stages in alphabetical order, so the
-     * rows are put in board order afterwards, in memory. It reads no
-     * description and no provenance. The statement names the index, because
+     * rows are put in board order afterwards, in memory, which is also the
+     * order the others are cut in when they do not all fit. It reads no
+     * description and no provenance. The statement names both indexes, because
      * left to itself the planner reads `tasks_stage` and sorts.
      *
      * Each Task's summary comes in the same statement, from a join on the
      * summary's primary key. A Task has a summary once it has a line. The
      * summary is stale while the Task is dirty or its last attempt failed.
      */
-    listBoardTasks: (limit: number): Effect.Effect<ReadonlyArray<BoardTask>, SqlError> =>
+    listBoardTasks: (
+      limit: number,
+    ): Effect.Effect<
+      { readonly tasks: ReadonlyArray<BoardTask>; readonly truncated: boolean },
+      SqlError
+    > =>
       Effect.map(
         sql<BoardTaskRow>`
-          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
-          FROM tasks t INDEXED BY tasks_board_rank
-          LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
-          LEFT JOIN task_summaries s ON s.task_id = t.id
-          WHERE t.${sql.literal(ON_BOARD)} AND ${buildLiveTaskSql("t")}
-          ORDER BY t.project_id, t.stage, t.board_rank
-          LIMIT ${limit + 1}`,
-        (rows) => rows.map(readBoardTaskRow).toSorted(compareBoardOrder),
+          SELECT * FROM (
+            SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
+            FROM tasks t INDEXED BY tasks_failed
+            LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+            LEFT JOIN task_summaries s ON s.task_id = t.id
+            WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
+              AND ${buildLiveTaskSql("t")}
+            LIMIT ${limit + 1})
+          UNION ALL
+          SELECT * FROM (
+            SELECT ${sql.literal(BOARD_TASK_COLUMNS)}
+            FROM tasks t INDEXED BY tasks_board_rank
+            LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+            LEFT JOIN task_summaries s ON s.task_id = t.id
+            WHERE t.${sql.literal(ON_BOARD)} AND t.failed_run_id IS NULL
+              AND ${buildLiveTaskSql("t")}
+            ORDER BY t.project_id, t.stage, t.board_rank
+            LIMIT ${limit + 1})`,
+        (rows) => {
+          const toCards = (selected: ReadonlyArray<BoardTaskRow>) =>
+            selected.map(readBoardTaskRow).toSorted(compareBoardOrder);
+          const failed = toCards(rows.filter((row) => row.failed_run_id !== null));
+          const others = toCards(rows.filter((row) => row.failed_run_id === null));
+          return {
+            tasks: [...failed.slice(0, limit), ...others]
+              .slice(0, limit)
+              .toSorted(compareBoardOrder),
+            truncated: failed.length + others.length > limit,
+          };
+        },
       ),
 
     /**
@@ -1477,8 +1542,11 @@ const make = Effect.gen(function* () {
           readonly has_session: number;
           readonly has_run: number;
           readonly link_count: number;
+          readonly stage_revision: number;
+          readonly join_revision: number;
         }>`
           SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged,
+                 tasks.stage_revision, tasks.join_revision,
                  EXISTS (SELECT 1 FROM task_entity_links
                          WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
                  tasks.revision > 0 AS edited,
@@ -1498,8 +1566,60 @@ const make = Effect.gen(function* () {
                 hasSession: row.has_session === 1,
                 hasRun: row.has_run === 1,
                 linkCount: row.link_count,
+                stageRevision: row.stage_revision,
+                joinRevision: row.join_revision,
               });
         },
+      ),
+
+    /**
+     * Returns the stage revision and the join revision of the Task with that
+     * id, whether or not it is deleted or merged, or none when there is no row.
+     */
+    readRevisions: (
+      id: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly stageRevision: number; readonly joinRevision: number }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly stage_revision: number; readonly join_revision: number }>`
+          SELECT stage_revision, join_revision FROM tasks WHERE id = ${uuidFromString(id)}`,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            stageRevision: row.stage_revision,
+            joinRevision: row.join_revision,
+          })),
+      ),
+
+    /**
+     * Raises the stage revision of the Task with that id, and writes nothing
+     * else: not `updated_at`, not `revision`. It records a stage decision that
+     * kept the stage, so it leaves no trace a reader of the Task could see.
+     */
+    raiseStageRevision: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE tasks SET stage_revision = stage_revision + 1 WHERE id = ${uuidFromString(id)}`,
+      ),
+
+    /**
+     * Returns true when a Task that the board lists shows a failed run: it is
+     * live (neither deleted nor merged), not at `done` or `dropped`, and
+     * `failed_run_id` names a run. These are the board's own conditions
+     * (`listBoardTasks`), so a Task that raises this is one the board shows
+     * with a failure. One `EXISTS` on `tasks_failed`, which holds only such
+     * Tasks. The conditions must stay as the index writes them for SQLite to
+     * use it.
+     */
+    existsFailedTaskOnBoard: (): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT EXISTS (
+            SELECT 1 FROM tasks t INDEXED BY tasks_failed
+            WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
+              AND ${buildLiveTaskSql("t")}
+          ) AS found`,
+        (rows) => rows[0]?.found === 1,
       ),
 
     /**
@@ -1631,6 +1751,11 @@ const make = Effect.gen(function* () {
           // Done and Drop change who handles a failure: the board stops
           // listing the Task, and no earlier Undo may bring a failure back.
           if (isFinishedStage(edit.stage)) sets.push(sql`failure_revision = failure_revision + 1`);
+        }
+        // Unlike `stage_changed_at`, the stage revision also moves for a decision that
+        // kept the stage, which is what lets a handoff's Undo see that one was made.
+        if (edit.stage !== undefined || edit.decidesStage === true) {
+          sets.push(sql`stage_revision = stage_revision + 1`);
         }
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;

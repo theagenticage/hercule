@@ -1,0 +1,81 @@
+/* The rail that rises while a card is carried, and the card in the hand. It is the drawing's `css/states.css`
+   ("The rail that rises while a card is carried", `.rail`, `.rail-t`, `.rail-rule`, `.rail-x`), value for value.
+   The motion kernel moves the rail and its targets (`transform` and `opacity`), so there is no transition or
+   animation on them here, and under Reduce motion the kernel makes the rise a fade. The rail is centred with
+   auto margins and not with a translate, because the kernel owns the element's `transform`. It is as wide as its
+   targets up to the desk's width less 12px each side, and past that the targets wrap into a second row, centred;
+   it is anchored by its bottom, so the extra row grows upwards. */
+.inbox-rail {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 22px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--h-carry);
+  pointer-events: none;
+}
+.inbox-rail-target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 96px;
+  padding: 6px 8px 4px;
+  border-radius: 12px;
+  color: var(--muted);
+  font: var(--type-summary);
+  transition:
+    background-color var(--m-quick),
+    color var(--m-quick);
+}
+/* The carry marks the target the card is near, and swells its picture on the kernel. */
+.inbox-rail-target[data-near] {
+  background: var(--hover);
+  color: var(--ink);
+}
+.inbox-rail-face {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+}
+/* The hairline and Dismiss wrap as one, so the hairline never ends a row. */
+.inbox-rail-tail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.inbox-rail-rule {
+  width: 1px;
+  height: 44px;
+  margin: 0 4px;
+  background: var(--divider);
+}
+/* The two faces of the `more` target overlap by 8px, so together they are as wide as a single face. */
+.inbox-rail-face > .cr + .cr {
+  margin-inline-start: -8px;
+}
+.inbox-rail-cross {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--muted);
+}

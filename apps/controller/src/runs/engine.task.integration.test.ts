@@ -13,7 +13,14 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { NotFound, type Run, type TryAgainUndo } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { AfterCommit, uuidFromString, type Change } from "../db";
+import {
+  AfterCommit,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  withTransaction,
+  type Change,
+} from "../db";
 import { RunExecutorLayer } from "../daemon/runs";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -25,7 +32,13 @@ import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TextGeneration } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
 import { RunService, RunServiceLayer } from "./service";
 import { buildHeldAction, waitForHeldExecutions, type HeldAction } from "./testing";
@@ -54,6 +67,7 @@ const runTest = <A, E>(
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
@@ -204,6 +218,52 @@ describe("a run that works on a Task", () => {
   });
 });
 
+/** A workflow whose step names the run's Task in the title of the task it files. */
+const NAMES_ITS_TASK_DEFINITION = {
+  name: "File a task that names its Task",
+  steps: [
+    {
+      id: "file",
+      kind: "action" as const,
+      action: "task.create",
+      params: { title: "{{ run.taskId }}", description: "" },
+    },
+  ],
+};
+
+describe("run.taskId in a step", () => {
+  it("renders the Task the run works on", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const { runId } = yield* runs.startOnTask(
+          { definition: NAMES_ITS_TASK_DEFINITION },
+          TASK_ID,
+        );
+
+        const ended = yield* waitForRunToEnd(runId);
+
+        expect(ended.status).toBe("completed");
+        expect(ended.steps[0]).toMatchObject({ status: "completed", output: { title: TASK_ID } });
+      }),
+    );
+  });
+
+  it("fails the run with a message that says it works on no Task, when it has none", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const { runId } = yield* runs.start({ definition: NAMES_ITS_TASK_DEFINITION });
+
+        const ended = yield* waitForRunToEnd(runId);
+
+        expect(ended).toMatchObject({ status: "failed" });
+        expect(JSON.stringify(ended)).toContain("run.taskId is not set: this run works on no Task");
+      }),
+    );
+  });
+});
+
 describe("the failure a Task shows", () => {
   /** Creates a Task and returns its id and a reader of its failure state. */
   const createTask = Effect.gen(function* () {
@@ -298,7 +358,7 @@ describe("the card of a Task, when a run of it starts or ends", () => {
     ]);
   });
 
-  it("is announced only as derived changes when a run fails and the next run ends the failure", async () => {
+  it("is announced as a plain change when a failure starts and when it ends, and as a derived one when the retry's run ends", async () => {
     const published: Array<Change> = [];
     const taskId = await runTest(
       Effect.gen(function* () {
@@ -309,20 +369,80 @@ describe("the card of a Task, when a run of it starts or ends", () => {
         yield* waitForRunToEnd(failing.runId);
         const retry = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
         yield* waitForRunToEnd(retry.runId);
-        // The failure and the start that ended it.
-        yield* waitForAnnouncements(published, task.id, 2);
+        // The failure starting (plain), the first run ending (derived), the
+        // retry starting and ending the failure (plain), and the retry ending (derived).
+        yield* waitForAnnouncements(published, task.id, 4);
         return task.id;
       }),
       published,
     );
 
+    // The sidebar's failure dot follows plain pushes only, so a failure
+    // starting or ending must send one. The rest of the card stays derived.
     const changes = cardChanges(published, taskId);
-    expect(changes.length).toBeGreaterThanOrEqual(2);
+    expect(changes.map((change) => "derived" in change)).toEqual([false, true, false, true]);
+  });
+
+  it("announces the linked entity, and no plain task push, when a run starts and ends on a Task that links one", async () => {
+    const published: Array<Change> = [];
+    const { taskId, entityId } = await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const tasks = yield* TaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const task = yield* tasks.create({ title: "Add a refund button", description: "" });
+        const entityId = uuidToString(mintUuid());
+        const at = new Date().toISOString();
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO external_entities
+                (id, ref, kind, noun, completeness, title, first_observed_at, updated_at)
+              VALUES (${uuidFromString(entityId)}, 'acme:ticket:1', 'acme/ticket', 'Ticket', 'full',
+                      'Refund button', ${at}, ${at})`;
+            yield* sql`
+              INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
+              VALUES (${uuidFromString(task.id)}, 'acme:ticket:1', ${at}, 'user', 0)`;
+          }),
+        );
+        published.length = 0;
+        const run = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
+        yield* waitForRunToEnd(run.runId);
+        yield* waitForAnnouncements(published, task.id, 1);
+        return { taskId: task.id, entityId };
+      }),
+      published,
+    );
+
+    const entityChanges = published.filter(
+      (change) => change._tag === "record" && change.topic === "externalEntity",
+    );
+    // One at the start and one at the end.
+    expect(entityChanges).toEqual([
+      { _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" },
+      { _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" },
+    ]);
+    expect(cardChanges(published, taskId).every((change) => "derived" in change)).toBe(true);
+  });
+
+  it("announces no entity when a run starts and ends on a Task that links none", async () => {
+    const published: Array<Change> = [];
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const tasks = yield* TaskService;
+        const task = yield* tasks.create({ title: "Add a refund button", description: "" });
+        const run = yield* runs.startOnTask({ definition: FILE_DEFINITION }, task.id);
+        yield* waitForRunToEnd(run.runId);
+        yield* waitForAnnouncements(published, task.id, 1);
+      }),
+      published,
+    );
+
     expect(
-      changes.every(
-        (change) => change._tag === "record" && change.topic === "task" && change.derived === true,
-      ),
-    ).toBe(true);
+      published.filter((change) => change._tag === "record" && change.topic === "externalEntity"),
+    ).toEqual([]);
   });
 
   it("is not announced when a run that cannot start is refused", async () => {

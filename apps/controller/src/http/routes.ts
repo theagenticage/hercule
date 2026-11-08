@@ -91,6 +91,7 @@ import {
   TaskServiceWithLinkOwnersLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
+  WorkflowEntitiesLayer,
   WorkflowRunsLayer,
   WorkflowSignalsLayer,
   WorkspaceStepsLayer,
@@ -109,7 +110,12 @@ import {
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
-import { ExternalEntityService, ExternalEntityServiceLayer } from "../external-entities";
+import {
+  ExternalEntityHandoffs,
+  ExternalEntityHandoffsLayer,
+  ExternalEntityService,
+  ExternalEntityServiceLayer,
+} from "../external-entities";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
@@ -294,6 +300,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryBoard", () => withApiErrors(board.query()))
+      .handle("readAttention", () => withApiErrors(tasks.readAttention()))
       .handle("queryTracking", () => withApiErrors(tracking.query()))
       .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
       .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
@@ -317,6 +324,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
 const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handlers) =>
   Effect.gen(function* () {
     const entities = yield* ExternalEntityService;
+    const handoffs = yield* ExternalEntityHandoffs;
     return handlers
       .handle("queryInbox", () => withApiErrors(entities.queryInbox()))
       .handle("countInbox", () => withApiErrors(entities.countInbox()))
@@ -327,6 +335,10 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("undoTakeOn", ({ params, payload }) =>
         withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),
       )
+      .handle("handOff", ({ params, payload }) =>
+        withApiErrors(handoffs.handOff(params.id, payload)),
+      )
+      .handle("undoHandOff", ({ params }) => withApiErrors(handoffs.undoHandOff(params.runId)))
       .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
       .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
       .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
@@ -898,6 +910,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
     Layer.provide(EventKindsOperationLayer),
     Layer.provide(WorkflowRunsLayer),
     Layer.provide(WorkflowSignalsLayer),
+    Layer.provide(WorkflowEntitiesLayer),
   ),
   CronTriggerSchedulerLayer,
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
@@ -977,6 +990,17 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
   Layer.provide(RunDomainLayer),
   Layer.provide(PermissionRequestsDomainLayer),
   Layer.provide(IgnoreRuleDomainLayer),
+);
+
+/**
+ * The signal service, with the claims on signals it takes. The handoff of an
+ * External Entity ends signals through it too, so both are provided this one
+ * layer and share one instance. It still needs `BoundOperations`, which the
+ * group that holds both provides.
+ */
+const SignalServiceDomainLayer = SignalServiceLayer.pipe(
+  Layer.provide(SignalClaimsLayer),
+  Layer.provide(SignalEntitiesLayer),
 );
 
 /**
@@ -1088,7 +1112,16 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer), Layer.provide(SignalEntitiesLayer)),
+      SignalServiceDomainLayer,
+      // A handoff of an External Entity starts a run, writes a Task, and ends
+      // signals through the signal service, under the one set of claims the
+      // signal service and the Ignore Rule service share.
+      ExternalEntityHandoffsLayer.pipe(
+        Layer.provide(RunDomainLayer),
+        Layer.provide(TaskServiceWithLinkOwnersLayer),
+        Layer.provide(SignalServiceDomainLayer),
+        Layer.provide(SignalClaimsLayer),
+      ),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,

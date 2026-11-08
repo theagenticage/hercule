@@ -148,6 +148,13 @@ const TABLE = {
   "task.queryLegs": { requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
   // Reads the runs of one Task as well as the Task, so the service also needs
   // `run.read`.
+  // Reads whether any live Task has a failed run, so the service also needs
+  // `run.query`.
+  "task.readAttention": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/attention",
+  },
   "task.readTracking": {
     requires: "task.read",
     method: "GET",
@@ -261,6 +268,8 @@ const TABLE = {
   // The Inbox and the detail show the text of signals, so `queryInbox`,
   // `countInbox` and `read` also need `signal.query`, which the service checks
   // beside the `task.read` that this table checks.
+  // `queryInbox` also needs `workflow.query`, `connection.query` and
+  // `run.query`, for the offers and the workflows running on a card's Task.
   "externalEntity.queryInbox": {
     requires: "task.read",
     method: "GET",
@@ -295,6 +304,19 @@ const TABLE = {
     requires: "task.update",
     method: "POST",
     path: "/api/v1/external-entities/:id/take-on/undo",
+  },
+  // Handing off starts a run, and undoing it cancels one, so the grants are
+  // the run operations'. Both are the user's own: a session token is refused
+  // whatever its profile holds.
+  "externalEntity.handOff": {
+    requires: "run.start",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/hand-off",
+  },
+  "externalEntity.undoHandOff": {
+    requires: "run.write",
+    method: "POST",
+    path: "/api/v1/external-entities/handoffs/:runId/undo",
   },
   "externalEntity.dismiss": {
     requires: "task.update",

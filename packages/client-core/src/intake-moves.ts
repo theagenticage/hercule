@@ -10,7 +10,8 @@
  * this runtime can format, as `resolveDisplayTimezone` returns one.
  */
 import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
-import { lowerFirst, namePlugin, nameSignalKind, type PluginName } from "./intake";
+import { namePlugin, nameSignalKind, type PluginName } from "./intake";
+import { lowerFirst } from "./text";
 import { formatNameList } from "./name-list";
 import { parsePluginId } from "./plugin-id";
 import {

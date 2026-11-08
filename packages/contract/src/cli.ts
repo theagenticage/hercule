@@ -798,6 +798,9 @@ export const CLI = {
         "the merged task would hold more labels or a longer description than a task may; shorten one of them first, or leave the merge",
     },
   },
+  // Exists only for the sidebar's failed-run dot, which reads it on every
+  // screen. A terminal finds failed runs with `hercule task board`.
+  "task.readAttention": { hidden: true },
   // Undoes a Try again. It exists only for the Undo line of Try again, which
   // the desktop app shows for a few seconds after it starts a run again. A
   // terminal user stops the run with `hercule run cancel`.
@@ -1143,7 +1146,7 @@ export const CLI = {
 
   "externalEntity.queryInbox": {
     command: "entity list",
-    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Each card also gives its signals: the newest open one that is not snoozed, and how many are open. Also gives the places above the cards, the links between them, the records at the far end of those links, and the counts. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Needs the grants `task.read` and `signal.query`, because cards show signal text. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
+    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Each card also gives its signals: the newest open one that is not snoozed, and how many are open. Also gives the places above the cards, the links between them, the records at the far end of those links, the counts, and the workflows each card can be handed to (offer sets) with the accounts that can act. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Needs the grants `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query`, because cards show signal text, the workflows and accounts they can be handed to, and the workflows running on their Task. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -1152,7 +1155,7 @@ export const CLI = {
   "externalEntity.countInbox": { hidden: true },
   "externalEntity.read": {
     command: "entity read",
-    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, and the linked things that have no card. Needs the grants `task.read` and `signal.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
+    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
     examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
     fields: {
       id: {
@@ -1169,6 +1172,57 @@ export const CLI = {
       id: {
         positional: true,
         help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.handOff": {
+    command: "entity hand-off",
+    help: "Hands a thing from another system to a workflow, as you, and tracks the work on its Task. It starts a run of the workflow with the thing's ref as its entity input, on the thing's Task (a new one when it has none), then ends the open signals about the thing of the kinds the workflow answers. A signal of another kind, such as a mention, stays open. If the run cannot start, nothing is written. Fails with invalid_state when the workflow does not take this kind of thing, needs an input a card cannot fill, or already has a live run on the thing's Task. Find the workflows that take the thing with `hercule entity read`, which lists its offers.",
+    examples: [
+      { args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c", "--workflow", "9f8e7d6c"] },
+      {
+        args: [
+          "1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c",
+          "--workflow",
+          "9f8e7d6c",
+          "--connection",
+          "4c5d6e7f",
+        ],
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+      workflowId: {
+        flag: "workflow",
+        help: "The workflow to hand the thing to, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      connectionId: {
+        flag: "connection",
+        help: "The connection that acts, by its id or a tail of eight or more characters. When left out, the oldest connection that can act on the thing acts.",
+        resolves: "connection.query",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the workflow is not available on this thing, it already has a live run on the thing's Task, or a reply to one of the thing's signals is still running; read the thing's offers with `hercule entity read` or try again in a moment",
+    },
+  },
+  "externalEntity.undoHandOff": {
+    command: "entity undo-hand-off",
+    help: "Takes back a hand-off, as you, as far as is safe. When the run has not started a step, the run is cancelled and the Task is deleted if the hand-off made it, or put back at its earlier stage. When the run has gone further, the run is asked to stop and the Task stays; anything the run already did stays. When the run has already ended, nothing changes. Signals the hand-off ended stay ended. Returns the outcome (undone, stopped or too-late). Calling it again returns the first answer.",
+    examples: [{ args: ["7b2d40aa"] }],
+    fields: {
+      runId: {
+        positional: true,
+        placeholder: "run-id",
+        help: "The run that the hand-off started, by its id or a tail of eight or more characters.",
+        resolves: "run.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

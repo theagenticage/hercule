@@ -14,9 +14,12 @@ import {
 import type { WorkCard } from "@hercule/contract";
 import {
   ghostElement,
+  HandTracker,
   isMotionReduced,
   measureLayoutRect,
+  swallowNextClick,
   trackBody,
+  trackCarryGesture,
   type LayoutRect,
   type SpringName,
 } from "../../app/motion";
@@ -44,7 +47,7 @@ import { landCard, type ReleasePose } from "./land-card";
 import { measureBoardGeometry } from "./measure-board-geometry";
 import "./drag.css";
 
-/** How far the pointer moves, in pixels, before a press becomes a carry. Less than this is a click. */
+/** How far the pointer moves, in pixels, before a press becomes a carry. Up to this far is a click. */
 const LIFT_DISTANCE = 5;
 
 /** The most a carried card leans, in degrees, to either side. */
@@ -52,21 +55,6 @@ const MOST_LEAN = 1.2;
 
 /** Degrees of lean for each pixel per millisecond of smoothed sideways speed. */
 const LEAN_PER_SPEED = 0.9;
-
-/** How much of the old smoothed speed is kept at each pointer move: a shaky hand does not make the card shiver. */
-const SPEED_KEPT = 0.7;
-
-/** The shortest time one pointer move is taken to last, in milliseconds, so a burst of events gives no huge speed. */
-const SHORTEST_MOVE_MS = 8;
-
-/** How long the pointer must be still, in milliseconds, before the card stands straight and the hand has no speed. */
-const STILL_AFTER_MS = 60;
-
-/** The fastest a hand is taken to throw a card, in pixels a second, so a flick does not fling the landing across the page. */
-const FASTEST_THROW = 2500;
-
-/** How long, in milliseconds, a click right after a carry is swallowed. */
-const CLICK_GUARD_MS = 50;
 
 /** What `useBoardDrag` is given. */
 export interface BoardDragOptions {
@@ -122,14 +110,10 @@ export interface BoardDragOptions {
   readonly onCarryingChange: (isCarrying: boolean) => void;
 }
 
-/** A press on a card that has not moved far enough to be a carry. */
-interface Press {
-  readonly pointerId: number;
-  /** The card pressed, and the lane it stands in. */
-  readonly pressed: CardInLane;
+/** What a press picked up: the card pressed and the lane it stands in, and its element. */
+interface Pressed {
+  readonly card: CardInLane;
   readonly element: HTMLElement;
-  readonly startX: number;
-  readonly startY: number;
 }
 
 /**
@@ -142,10 +126,6 @@ interface DropChange {
   readonly describe: (moves: readonly CardMove[]) => string;
   readonly note: string | undefined;
 }
-
-/** Returns `value` limited to the range from `-limit` to `limit`. */
-const limitSymmetric = (value: number, limit: number): number =>
-  Math.max(-limit, Math.min(limit, value));
 
 /** Returns the element after `element` that takes room in the layout, which is the next one not hidden because it is in the hand. */
 const findNextShownSibling = (element: Element): Element | null => {
@@ -164,35 +144,6 @@ const findCellFoot = (cell: Element): HTMLElement | null =>
   ) ?? null;
 
 /**
- * Swallows the click that follows a carry, which would otherwise open the card
- * that was dropped. `isPointerUp` is whether the button is already up. When
- * it is not (Esc was pressed with the button held), the click comes when the
- * user lets go, so the guard waits for that. A new press ends the guard, so a
- * release that never arrives cannot swallow a later click.
- */
-const swallowNextClick = (isPointerUp: boolean): void => {
-  let timer: number | undefined;
-  const stop = (event: Event): void => {
-    event.stopPropagation();
-    event.preventDefault();
-    clear();
-  };
-  const startTimer = (): void => {
-    timer = window.setTimeout(clear, CLICK_GUARD_MS);
-  };
-  function clear(): void {
-    window.removeEventListener("click", stop, true);
-    window.removeEventListener("pointerup", startTimer, true);
-    window.removeEventListener("pointerdown", clear, true);
-    window.clearTimeout(timer);
-  }
-  window.addEventListener("click", stop, true);
-  window.addEventListener("pointerdown", clear, true);
-  if (isPointerUp) startTimer();
-  else window.addEventListener("pointerup", startTimer, { capture: true, once: true });
-};
-
-/**
  * Handles the pointer on `scroller` for as long as it lives. Everything a
  * carry touches outside React (the copy in the hand, the slot, the marks) is
  * made, moved and removed here, so the hook only has to start it on mount and
@@ -205,9 +156,6 @@ const createBoardDrag = (
   scroller: HTMLElement,
   readOptions: () => BoardDragOptions,
 ): { readonly destroy: () => void } => {
-  let press: Press | null = null;
-  let carry: Carry | null = null;
-
   /**
    * Measures the board again after the page changed. `places` are the card
    * places a flip just measured, which spares measuring the cards twice.
@@ -307,7 +255,7 @@ const createBoardDrag = (
     if (c.scrollFrame !== 0) return;
     const step = (): void => {
       c.scrollFrame = 0;
-      if (carry !== c) return;
+      if (gesture.readCarry() !== c) return;
       const speed = computeEdgeScrollSpeed(c.hand.y, c.view.top, c.view.bottom);
       if (speed === 0) return;
       const before = scroller.scrollTop;
@@ -321,14 +269,8 @@ const createBoardDrag = (
 
   /** Follows the pointer: the copy goes under it one to one, leans with the hand's speed, and the slot goes where it points. */
   const followHand = (c: Carry, x: number, y: number): void => {
-    const now = performance.now();
-    const elapsed = Math.max(SHORTEST_MOVE_MS, now - c.hand.movedAt);
     const { hand } = c;
-    hand.vx = hand.vx * SPEED_KEPT + ((x - hand.x) / elapsed) * (1 - SPEED_KEPT);
-    hand.vy = hand.vy * SPEED_KEPT + ((y - hand.y) / elapsed) * (1 - SPEED_KEPT);
-    hand.x = x;
-    hand.y = y;
-    hand.movedAt = now;
+    hand.moveTo(x, y);
     // Drawn into a card, the card in the hand stays docked until the pointer
     // leaves the card. It is docked when the card is chosen, and again when the
     // card moves (`onScroll`, `onPageChanged`), not when the pointer does.
@@ -343,13 +285,7 @@ const createBoardDrag = (
       }
     }
     if (!c.reduced && handMotion !== "docked") {
-      c.body.to({ r: limitSymmetric(hand.vx * LEAN_PER_SPEED, MOST_LEAN) }, "hand", {
-        reduced: false,
-      });
-      window.clearTimeout(c.uprightTimer);
-      c.uprightTimer = window.setTimeout(() => {
-        if (c.merge.handMotion() !== "docked") c.body.to({ r: 0 }, "hand", { reduced: false });
-      }, STILL_AFTER_MS);
+      gesture.leanWithHand(c.body, hand, () => c.merge.handMotion() !== "docked");
     }
     moveFollowers(c);
     choosePlace(c);
@@ -359,29 +295,21 @@ const createBoardDrag = (
   /** Reads how the copy looks now, and how fast the hand moves, for the landing to start from. */
   const readReleasePose = (c: Carry): ReleasePose => {
     const shown = c.body.values;
-    const isStill = performance.now() - c.hand.movedAt > STILL_AFTER_MS;
-    const toPixelsASecond = (speed: number): number =>
-      isStill ? 0 : limitSymmetric(speed * 1000, FASTEST_THROW);
     return {
       centerX: c.home.left + c.home.width / 2 + shown.x,
       centerY: c.home.top + c.home.height / 2 + shown.y,
       scale: shown.s,
       tilt: shown.r,
       lift: shown.l,
-      velocity: { x: toPixelsASecond(c.hand.vx), y: toPixelsASecond(c.hand.vy) },
+      velocity: c.hand.readThrow(),
     };
   };
 
-  /** Stops watching the pointer, the page and the keys, and lets the pointer go. The copy, the slot and the carrying value are left to the caller. */
+  /** Stops watching the page and the edge scroll. The copy, the slot and the carrying value are left to the caller. */
   const endCarry = (c: Carry): void => {
-    carry = null;
-    window.clearTimeout(c.uprightTimer);
     cancelAnimationFrame(c.scrollFrame);
     c.watcher.disconnect();
-    scroller.removeEventListener("lostpointercapture", onLostCapture);
     scroller.removeEventListener("scroll", onScroll);
-    if (scroller.hasPointerCapture(c.pointerId)) scroller.releasePointerCapture(c.pointerId);
-    stopListening();
   };
 
   /** Takes the marks of a carry off the page. */
@@ -538,35 +466,23 @@ const createBoardDrag = (
    * window, or a page change that took its place away. `isPointerUp` is
    * whether the pointer's button is already up.
    */
-  const cancelCarry = (isPointerUp: boolean): void => {
-    if (carry === null) return;
+  const cancelCarry = (c: Carry, isPointerUp: boolean): void => {
     swallowNextClick(isPointerUp);
-    releaseCarry(carry, "travel", undefined);
+    releaseCarry(c, "travel", undefined);
   };
 
-  /** Lifts the pressed card into the hand: the card is copied into the carry layer, and its place in the page becomes a slot. */
-  const liftCard = (event: PointerEvent): void => {
-    const held = press;
-    press = null;
-    if (held === null) return;
+  /**
+   * Lifts the pressed card into the hand: the card is copied into the carry
+   * layer, and its place in the page becomes a slot. Returns `null` when the
+   * card, its cell or the desk is not on the page.
+   */
+  const liftCard = (held: Pressed, event: PointerEvent): Carry | null => {
     const root = scroller.closest<HTMLElement>(".work-desk");
-    const source = held.element.isConnected
-      ? held.element
-      : findCardElement(scroller, held.pressed);
+    const source = held.element.isConnected ? held.element : findCardElement(scroller, held.card);
     const cell = source?.closest<HTMLElement>(".board-cell") ?? null;
     const options = readOptions();
-    const card = options.cards.find((each) => each.id === held.pressed.cardId);
-    if (root === null || source === null || cell === null || card === undefined) {
-      stopListening();
-      return;
-    }
-    try {
-      scroller.setPointerCapture(held.pointerId);
-    } catch {
-      // The pointer was let go before the lift, so there is nothing to carry.
-      stopListening();
-      return;
-    }
+    const card = options.cards.find((each) => each.id === held.card.cardId);
+    if (root === null || source === null || cell === null || card === undefined) return null;
     flushSync(() => {
       options.onCarryingChange(true);
     });
@@ -603,15 +519,13 @@ const createBoardDrag = (
 
     const watcher = new MutationObserver(onPageChanged);
     watcher.observe(scroller, { childList: true, subtree: true });
-    scroller.addEventListener("lostpointercapture", onLostCapture);
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     const measured = measureBoardGeometry(scroller, options.arrangedLanes);
     const grab = { x: event.clientX - seen.left, y: event.clientY - seen.top };
-    const c: Carry = {
-      pointerId: held.pointerId,
+    return {
       card,
-      laneId: held.pressed.laneId,
+      laneId: held.card.laneId,
       source,
       root,
       layer,
@@ -623,11 +537,10 @@ const createBoardDrag = (
       grab,
       reduced,
       watcher,
-      hand: { x: event.clientX, y: event.clientY, vx: 0, vy: 0, movedAt: performance.now() },
+      hand: new HandTracker(event.clientX, event.clientY),
       geometry: measured.geometry,
       view: measured.view,
       place: null,
-      uprightTimer: undefined,
       scrollFrame: 0,
       markedLane: null,
       merge: createMergeGesture({
@@ -642,8 +555,6 @@ const createBoardDrag = (
         isOptionHeld: event.altKey,
       }),
     };
-    carry = c;
-    followHand(c, event.clientX, event.clientY);
   };
 
   // ---------- Handlers for the page, the pointer and the keys ----------
@@ -655,10 +566,10 @@ const createBoardDrag = (
    * home. Otherwise the board is measured again.
    */
   function onPageChanged(): void {
-    const c = carry;
+    const c = gesture.readCarry();
     if (c === null) return;
     if (!c.source.isConnected || !c.slot.isConnected) {
-      cancelCarry(false);
+      gesture.cancel(false);
       return;
     }
     remeasure(c);
@@ -672,140 +583,52 @@ const createBoardDrag = (
    * page is not read.
    */
   function onScroll(): void {
-    const c = carry;
+    const c = gesture.readCarry();
     if (c === null) return;
     c.view = { ...c.view, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop };
     choosePlace(c);
     c.merge.refresh();
   }
 
-  /** Runs when the system took the pointer away from the board other than by letting it go. */
-  function onLostCapture(event: PointerEvent): void {
-    if (carry !== null && event.pointerId === carry.pointerId) cancelCarry(true);
-  }
-
-  function onPointerMove(event: PointerEvent): void {
-    if (carry !== null) {
-      if (event.pointerId === carry.pointerId) {
-        carry.merge.setOptionHeld(event.altKey);
-        followHand(carry, event.clientX, event.clientY);
-      }
-      return;
-    }
-    if (press === null || event.pointerId !== press.pointerId) return;
-    if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) < LIFT_DISTANCE) {
-      return;
-    }
-    liftCard(event);
-  }
-
-  function onPointerUp(event: PointerEvent): void {
-    if (carry !== null) {
-      if (event.pointerId === carry.pointerId) dropCard(carry);
-      return;
-    }
-    if (press !== null && event.pointerId === press.pointerId) {
-      press = null;
-      stopListening();
-    }
-  }
-
-  function onPointerCancel(event: PointerEvent): void {
-    if (carry !== null) {
-      if (event.pointerId === carry.pointerId) cancelCarry(true);
-      return;
-    }
-    if (press !== null && event.pointerId === press.pointerId) {
-      press = null;
-      stopListening();
-    }
-  }
-
-  /**
-   * Sends the card home on Esc while a card is in the hand, and keeps the key
-   * from reaching anything else. Option chooses the card under the pointer to
-   * merge into at once. No other key is handled.
-   */
-  function onKeyDown(event: KeyboardEvent): void {
-    if (carry === null) return;
-    if (event.key === "Alt") {
-      carry.merge.setOptionHeld(true);
-      choosePlace(carry);
-      return;
-    }
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    cancelCarry(false);
-  }
-
-  /** Notes that Option was let go. A card already chosen to merge into stays chosen until the pointer leaves it. */
-  function onKeyUp(event: KeyboardEvent): void {
-    if (carry !== null && event.key === "Alt") carry.merge.setOptionHeld(false);
-  }
-
-  /** Sends the card home when the window loses the focus: the pointer's release may never arrive. */
-  function onWindowAway(): void {
-    if (carry !== null) cancelCarry(true);
-  }
-
-  /** Sends the card home when the window is hidden. */
-  function onVisibilityChange(): void {
-    if (document.hidden) onWindowAway();
-  }
-
-  function startListening(): void {
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerCancel);
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", onWindowAway);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-  }
-
-  function stopListening(): void {
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-    window.removeEventListener("pointercancel", onPointerCancel);
-    window.removeEventListener("keydown", onKeyDown, true);
-    window.removeEventListener("keyup", onKeyUp, true);
-    window.removeEventListener("blur", onWindowAway);
-    document.removeEventListener("visibilitychange", onVisibilityChange);
-  }
-
-  /** Starts a press when the primary button goes down on a card. Below `LIFT_DISTANCE` of movement it stays a click. */
-  const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 || !event.isPrimary || carry !== null || press !== null) return;
-    const element =
-      event.target instanceof Element ? event.target.closest<HTMLElement>("[data-card-id]") : null;
-    const pressed = element === null ? null : readCardInLane(element);
-    if (element === null || pressed === null) return;
-    press = {
-      pointerId: event.pointerId,
-      pressed,
-      element,
-      startX: event.clientX,
-      startY: event.clientY,
-    };
-    startListening();
-  };
-
-  scroller.addEventListener("pointerdown", onPointerDown);
+  const gesture = trackCarryGesture<Pressed, Carry>({
+    element: scroller,
+    liftDistance: LIFT_DISTANCE,
+    lean: { perSpeed: LEAN_PER_SPEED, most: MOST_LEAN },
+    readPressed: (event) => {
+      const element =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>("[data-card-id]")
+          : null;
+      const card = element === null ? null : readCardInLane(element);
+      return element === null || card === null ? null : { card, element };
+    },
+    lift: liftCard,
+    move: (c, event) => {
+      c.merge.setOptionHeld(event.altKey);
+      followHand(c, event.clientX, event.clientY);
+    },
+    drop: dropCard,
+    cancel: cancelCarry,
+    // Option chooses the card under the pointer to merge into at once. A card
+    // already chosen stays chosen after Option is let go, until the pointer leaves it.
+    onKey: (c, event) => {
+      if (event.key !== "Alt") return;
+      c.merge.setOptionHeld(event.type === "keydown");
+      if (event.type === "keydown") choosePlace(c);
+    },
+  });
 
   return {
     destroy: () => {
-      scroller.removeEventListener("pointerdown", onPointerDown);
-      press = null;
-      if (carry === null) stopListening();
-      else abandonCarry(carry);
+      const held = gesture.destroy();
+      if (held !== null) abandonCarry(held);
     },
   };
 };
 
 /**
  * Lets the user carry a card of the Work board with the pointer. A press that
- * moves less than 5px is a click and opens the card as before. Past that, the
+ * moves 5px or less is a click and opens the card as before. Past that, the
  * card lifts into a layer of its own and follows the pointer, a hollow slot
  * opens where it would land, and on release `moveCard` is called once with
  * the target stage, the lane's Project and the card to follow.

@@ -898,6 +898,15 @@ describe("the query plans of the newest runs of some Tasks", () => {
     expect(plan.some((step) => step.startsWith("SCAN runs"))).toBe(false);
   });
 
+  it("finds the live workflows of some Tasks on runs_unfinished, not by a scan of runs", async () => {
+    const plan = await explainStatement("ROW_NUMBER", (runs) =>
+      runs.listLiveWorkflowsOfTasks(TASKS, 8),
+    );
+
+    expect(plan).toContain("SEARCH runs USING INDEX runs_unfinished (status=?)");
+    expect(plan.some((step) => step.startsWith("SCAN runs"))).toBe(false);
+  });
+
   it("looks the failed runs up by key, and each failed step's record by its key, with no sort", async () => {
     const plan = await explainStatement("run_steps", (runs) =>
       runs.listFailureMessages(["0190c000-0000-7000-8000-0000000000c1"]),

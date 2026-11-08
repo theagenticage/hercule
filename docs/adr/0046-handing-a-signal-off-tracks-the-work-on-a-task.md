@@ -23,15 +23,15 @@ Four designs were prototyped. The one chosen, Round Trip, brought each result ba
 
 **Handing a signal to an agent puts the work on a Task. Intake tracks that Task until the user ticks it off.**
 
-- **Handing off is an Intake act.** The core's Hand to an agent answers bind `signal.handOff { signalId, workflowId }`, a user-only operation. At the click it:
+- **Handing off is ~~an Intake act~~ the user's act on a signal or a card** *(amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034): it can start from a card on the Inbox too, see the amendment below)*. The core's Hand to an agent answers bind `signal.handOff { signalId, workflowId }`, a user-only operation. At the click it:
   - continues the open Task that carries the signal's thread ref, or creates one, `in-progress`, with the signal's title and priority;
   - appends a provenance entry that names the signal and the run;
   - starts the run linked to the Task (`run.taskId`);
   - resolves the signal "Handed to *X*", recording the run.
 
-  `run.start` stays as it is, so a run started any other way has no Task and never shows up in Intake.
+  `run.start` stays as it is, so a run started any other way ~~has no Task~~ *(amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034): except a handoff from a card, which starts its run on a Task too)* and never shows up in Intake.
 - **The Task holds the chain.** Each handoff is one entry in its provenance, with its run. A follow-up is an ordinary signal from a source (checks failed, changes requested, a mention), which finds the Task by its refs, as Your work does. Handing that signal off continues the same Task.
-- **The core never moves the Task's status** (ADR 0019). The user's click sets `in-progress`, and the user's tick-off sets `done` or `cancelled`. Between those, the Task stays in progress, and that is the "the agent finished, but I have not looked yet" state. It needs no new status.
+- **The core never moves the Task's status** (ADR 0019). The user's click sets `in-progress`, and the user's tick-off sets `done` or `cancelled`. Between those, the Task stays in progress, and that is the "the agent finished, but I have not looked yet" state. It needs no new status. *(Amended 2026-11-07, [ADR 0052](./0052-tasks-have-a-stage-and-threads-join-them.md): a Task has a stage, and the status is read from it. The click sets the stage `building`, and the rule that the core moves nothing else stands.)*
 - **Tracking** is the section at the bottom of To do that lists these Tasks, each in a state worked out on read from its runs, its sessions' Requests and the open signals that name it: Needs you, Failed, Working, Finished or Stopped. The UI never calls the row a Task.
 - **Failures stay Notifications.** A failed run still raises `core.run-failed` for Check-in (ADR 0040). Its Task shows Failed in Tracking as well, so the failure has a lasting place on desktop.
 
@@ -60,3 +60,15 @@ Four designs were prototyped. The one chosen, Round Trip, brought each result ba
 - **The active Task of a ref is the live Task with the oldest link to it,** by `(linked_at, task_id)` in `task_entity_links`. Live means not `done`, not `dropped`, not deleted and not merged. Nothing a Task does later can change the answer.
 - **Both users of the rule move together.** The signal's Describe Line and `signal.handOff` call the same function, so the line still names the Task the hand-off continues.
 - **Nothing else changes.** A hand-off with no live linked Task still creates one, and the core still never moves the Task's status.
+
+## Amendment: handing off from a card (2026-11-08)
+
+*(Added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034), slice 6 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026), [ADR 0054](./0054-external-entities-are-durable-records-kept-true-by-polls.md).)* The Inbox shows the pull requests and issues that concern the user as cards, with or without a signal on them. The user can hand a card to an agent too, so the Decision above no longer stops at Intake. This amends two lines of it, marked above: "Handing off is an Intake act" and "a run started any other way has no Task".
+
+- **Handing off can start from a card.** `externalEntity.handOff` hands the card's thing to a workflow that declares an `entity` input ([spec 07 §3](../spec/07-workflows.md#3-inputs)). It starts the run on the thing's active Task ([spec 09](../spec/09-tasks.md#entity-links)), or on a new one, and appends a provenance entry `{ ref, runId }`. The entry names no signal, so the Task shows on Work and not in Tracking.
+- **The Task still holds the chain.** A follow-up still finds the Task by its ref. Whether the first handoff came from a signal or a card, the next one continues the same Task, and a second workflow on a Task is allowed. Two ways in can reach the same thing, so both refuse a second live run of the same workflow on the Task, and both continue the oldest live link's Task.
+- **The core never moves a stage on its own.** A handoff decides `building` only from `exploring` or `planned`. At any other stage, such as `in-review`, the Task is not moved back. The stage is still written as a decision every time, so a later Undo can tell that someone decided after the handoff ([spec 09 §A handoff from a card](../spec/09-tasks.md#a-handoff-from-a-card)).
+- **Acting never ends a signal it did not answer.** A handoff from a card ends only the open signals of the kinds its workflow's entity input lists in `answers`. A mention on the same pull request stays open on the card. The ending is the Hand to an agent resolution, "Handed to *X*", with no source action and no Ignore Rule suggestion ([spec 10 §9.6](../spec/10-triage-intake-and-notifications.md#96-when-a-signal-leaves)).
+- **A handoff from a card can be taken back, as far as is safe.** Cancelling a run is not a rollback, so the handoff keeps a record of what it did and Undo reverses the Task only while nothing of the run has started and nothing has joined or moved the Task since. Otherwise the run is asked to stop and the Task stays. Signals the handoff ended stay ended.
+- **Intake's Hand to an agent and Tracking stay as they are,** and keep working until [#1048](https://github.com/theagenticage/hercule/issues/1048) removes them, on Rogier's word. Until then the same thing can be handed off from both places, under the shared rules above.
+- **Not changed:** the Task model stays thin (ADR 0019), workflows stay generic, and failures stay Notifications. A failed run on a Task now also reaches the user from any screen, as a dot on the desktop's sidebar ([spec 17](../spec/17-desktop-app.md#a-failed-run-from-any-screen)).

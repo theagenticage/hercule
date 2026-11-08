@@ -5,7 +5,9 @@
  * and the `--lift` custom property are written; `will-change` is set only
  * while a body moves, by the `is-moving` class; and the clock asks for a frame
  * only while something moves. `buildSpringCurve` and `buildSpringKnock` are the
- * other way to use a spring: as the easing or the keyframes of a Web Animation.
+ * other way to use a spring: as the easing or the keyframes of a Web Animation,
+ * and `knockElement` plays the keyframes as a push. `flyToSidebarTarget` and
+ * `flyHomeFromSidebarTarget` fly a mark between a screen and the sidebar.
  */
 export { findBody, MOVING_CLASS, trackBody, type MotionBody, type Velocity } from "./body";
 export {
@@ -20,6 +22,16 @@ export {
   type LayoutRect,
 } from "./layout";
 export { MOTION_EASE } from "./ease";
+export { knockElement } from "./knock";
+export {
+  flyHomeFromSidebarTarget,
+  flyToSidebarTarget,
+  type SidebarFlight,
+  type SidebarTargetName,
+} from "./sidebar-flight";
+export { HAND_STILL_AFTER_MS, HandTracker } from "./hand";
+export { trackCarryGesture, type CarryGesture } from "./carry-gesture";
+export { swallowNextClick } from "./swallow-click";
 export { copyElementWithoutIds } from "./copy-element";
 export { isMotionReduced } from "./reduced";
 export {

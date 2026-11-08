@@ -291,6 +291,10 @@
   /* Not --divider: on the dark themes it is as dark as the stock, so on a sheet it would not show. */
   border-top: 1px solid var(--line-soft);
 }
+/* The moves of a sheet that has just opened take no pointer: a double click must never start anything. */
+.open-card-ledger[data-arming] {
+  pointer-events: none;
+}
 .open-card-why {
   grid-column: 1 / -1;
   margin: 0 8px 4px;
@@ -322,6 +326,49 @@
 .open-card-row:disabled {
   opacity: 0.5;
   pointer-events: none;
+}
+/* The first Hand to row is the sheet's answer: its name sits on the accent, as the drawing's `.o-row.is-first`. */
+.open-card-row.is-first .open-card-label {
+  width: fit-content;
+  height: 32px;
+  margin-left: -6px;
+  padding: 0 12px 0 6px;
+  border-radius: var(--r-btn);
+  background: var(--answer);
+  color: var(--answer-fg);
+  font-weight: var(--w-bold);
+}
+.open-card-row.is-first:hover,
+.open-card-row.is-first:focus-visible {
+  background: none;
+}
+.open-card-row.is-first:hover .open-card-label,
+.open-card-row.is-first:focus-visible .open-card-label {
+  background: color-mix(in oklab, var(--answer) 88%, var(--ink));
+}
+/* A workflow that cannot take the card now: its name in the muted ink and its face dimmed, with the reason where
+   its line would be. The text keeps full strength in a quieter colour, so it stays readable. */
+.open-card-row.is-unavailable .open-card-label {
+  color: var(--muted);
+}
+.open-card-row.is-unavailable .cr {
+  opacity: 0.55;
+}
+/* A workflow's name can be long, and the Text size can be large: the name ends with an ellipsis at the edge of its
+   column and never runs into the line beside it. */
+.open-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.open-card-row .open-card-label .cr {
+  flex: none;
+}
+.open-card-row.is-unavailable:hover {
+  background: none;
+}
+.open-card-ledger .hand-account {
+  grid-column: 1 / -1;
 }
 .open-card-label {
   display: flex;

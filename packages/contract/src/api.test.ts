@@ -128,6 +128,12 @@ const NEW_OPERATIONS = [
   { id: "task.queryBoard", requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
   { id: "task.queryLegs", requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
   {
+    id: "task.readAttention",
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/attention",
+  },
+  {
     id: "task.readTracking",
     requires: "task.read",
     method: "GET",

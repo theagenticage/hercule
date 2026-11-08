@@ -65,7 +65,7 @@ const COUNTS = { onTheClock: 3, requests: 1, withSomeoneElse: 0, newestArrival: 
 
 /** Returns what a card says last: this sentence, from the signal numbered `n`. */
 const saying = (n: number, say: string): Pick<InboxCard, "signals"> => ({
-  signals: { openCount: 1, latest: buildSignalLine(buildCardId(900 + n), say) },
+  signals: { openCount: 1, kinds: [], latest: buildSignalLine(buildCardId(900 + n), say) },
 });
 
 const ticket = (n: number, title: string, overrides: Partial<InboxCard> = {}): InboxCard =>

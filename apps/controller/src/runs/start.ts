@@ -265,6 +265,10 @@ export const makeRunStart = (
           const connectionId = step.params?.[CONNECTION_PARAM];
           if (action?.connection === undefined || !isId(connectionId)) continue;
           const found = yield* connections.one(connectionId);
+          // Keep this rule the same as the SQL condition of a Connection that
+          // can act for a handoff (`buildActingFilter` in
+          // external-entities/workflow-offer-reads.ts), so a menu never offers
+          // an account that the run start then refuses.
           if (Option.isSome(found) && found.value.status === "disabled") {
             issues.push({
               path: ["steps", String(index), "params", CONNECTION_PARAM],
@@ -305,11 +309,14 @@ export const makeRunStart = (
      * refuses steps that name a disabled Connection, and resolves the
      * inputs. Fails with `Validation` when any
      * check fails, with the message from `refusals` where it has one.
+     * `areInputsFrozen` is true for a re-run, whose inputs were checked when
+     * the original run started (see `resolveRunInputs`).
      */
     const checkRunnable = (
       plan: WorkflowDefinition,
       unresolvedInputs: Readonly<Record<string, unknown>>,
       refusals: RefusalMessages,
+      areInputsFrozen = false,
     ): Effect.Effect<Record<string, unknown>, Validation | SqlError> =>
       Effect.gen(function* () {
         // Disabled Connections are checked only on a valid definition: an
@@ -319,7 +326,9 @@ export const makeRunStart = (
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }
-        const inputs = yield* workflows.resolveRunInputs(plan, unresolvedInputs);
+        const inputs = yield* workflows.resolveRunInputs(plan, unresolvedInputs, {
+          areFrozen: areInputsFrozen,
+        });
         if (Result.isFailure(inputs)) {
           return yield* Effect.fail(createValidationError(inputs.failure, refusals.invalidInputs));
         }
@@ -378,7 +387,12 @@ export const makeRunStart = (
           // store the merged id.
           const taskId =
             chosen.taskId === undefined ? undefined : yield* tasks.resolveTaskId(chosen.taskId);
-          const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
+          const resolvedInputs = yield* checkRunnable(
+            plan,
+            inputs,
+            refusals,
+            originalRunId !== undefined,
+          );
           yield* checkCapableRunner(plan);
           yield* checkNesting(origin);
           const at = yield* nowIso;

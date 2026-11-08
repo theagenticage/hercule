@@ -36,11 +36,18 @@ import type { SubagentId } from "@hercule/protocol";
  * delta is never written to the database, so it is announced as soon as it is
  * reported, with no transaction involved.
  *
- * - A `record` change with `countsOnly` changed nothing about the record but
- *   its counts: its Token Usage and, for a session, its tool calls, or for a
- *   workflow, how many runs a trigger used of its spawn bound and how many
- *   events it holds. These counts can change with almost every event, so the
- *   change is sent at a slower pace than other changes.
+ * - A `record` change on the `session` topic with `countsOnly` changed
+ *   nothing about the session but its counts: its Token Usage and its tool
+ *   calls. These counts can change with almost every event, so the change is
+ *   sent at a slower pace than other changes.
+ * - A `record` change on the `workflow` topic with `derived` says that a
+ *   trigger changed in a way no definition edit causes: how many runs it used
+ *   of its spawn bound, how many events it holds, when it fires next, or its
+ *   health. A busy trigger causes these changes with almost every event, so
+ *   they are sent at the slower pace too. A client that draws offers from the
+ *   workflows' definitions reads nothing for them. A definition change, an
+ *   enable or disable, a validity change and a trigger pause or resume are not
+ *   `derived`.
  * - A `record` change on the `task` topic with `derived` says that a fact a
  *   Task's card shows changed (a session of the Task started or stopped
  *   working, a question opened or closed, a run ended), not a field of the
@@ -59,14 +66,13 @@ import type { SubagentId } from "@hercule/protocol";
 export type Change =
   | {
       readonly _tag: "record";
-      readonly topic: Exclude<MutableLiveTopic, "session" | "task">;
+      readonly topic: Exclude<MutableLiveTopic, "session" | "task" | "workflow">;
       readonly id: string;
       readonly kind: InvalidateKind;
-      readonly countsOnly?: true;
     }
   | {
       readonly _tag: "record";
-      readonly topic: "task";
+      readonly topic: "task" | "workflow";
       readonly id: string;
       readonly kind: InvalidateKind;
       readonly derived?: true;

@@ -329,14 +329,24 @@ export interface InputRow {
   /**
    * Its type: the schema's type, "JSON" for a schema with no single type,
    * the Connection type its value is the id of ("github/github
-   * connection"), or the kinds of Signal its value is the id of
-   * ("github/review-requested signal").
+   * connection"), the kinds of Signal its value is the id of
+   * ("github/review-requested signal"), or the kinds of External Entity its
+   * value is the ref of ("github/pull-request entity"), followed by the
+   * signal kinds it answers when it names any
+   * ("github/pull-request entity, answers github/review-requested").
    */
   readonly typeText: string;
   readonly requiredText: "Required" | "Optional";
   /** Its default as JSON, or "" when it has none. */
   readonly defaultText: string;
 }
+
+type EntityInput = NonNullable<NonNullable<WorkflowDefinition["inputs"]>[number]["entity"]>;
+
+/** Returns the type text of an entity input: its kinds, then the signal kinds it answers. */
+const describeEntityInput = (entity: EntityInput): string =>
+  `${entity.kinds.join(", ")} entity` +
+  (entity.answers === undefined ? "" : `, answers ${entity.answers.join(", ")}`);
 
 /** Builds a row for each input `definition` declares, in its order. */
 export const buildInputRows = (definition: WorkflowDefinition): ReadonlyArray<InputRow> =>
@@ -349,9 +359,11 @@ export const buildInputRows = (definition: WorkflowDefinition): ReadonlyArray<In
           ? `${input.connection.type} connection`
           : input.signal !== undefined
             ? `${input.signal.kinds.join(", ")} signal`
-            : typeof schemaType === "string"
-              ? schemaType
-              : "JSON",
+            : input.entity !== undefined
+              ? describeEntityInput(input.entity)
+              : typeof schemaType === "string"
+                ? schemaType
+                : "JSON",
       requiredText: input.required ? "Required" : "Optional",
       defaultText: input.default === undefined ? "" : JSON.stringify(input.default),
     };

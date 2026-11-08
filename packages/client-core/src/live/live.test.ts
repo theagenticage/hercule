@@ -1077,7 +1077,7 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
-  it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, and every signal", () => {
+  it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, every signal, and the Inbox and entity panes, whose offers come from the workflows", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
@@ -1085,6 +1085,8 @@ describe("buildQueryKeys", () => {
       queryKeys.triggers(),
       queryKeys.signals(),
       queryKeys.signal(),
+      queryKeys.inbox(),
+      queryKeys.externalEntity(),
     ]);
 
     // A push with no ids means any workflow may have changed.

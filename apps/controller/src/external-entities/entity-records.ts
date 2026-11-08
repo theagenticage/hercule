@@ -19,6 +19,7 @@ import { ENTITY_CONCERNS } from "@hercule/contract";
 import type { ConnectionStatus } from "@hercule/plugin-host";
 import { canConnectionPoll } from "../connections";
 import { uuidToString } from "../db";
+import type { EntityKindSource } from "./workflow-offers";
 
 /**
  * The columns of an entity row that hold what the thing is, written by an
@@ -120,6 +121,12 @@ export interface EntityEnvironment {
    * that name no such thing do not need them; absent means none.
    */
   readonly activeEntityKinds?: ReadonlyArray<ActiveEntityKind>;
+  /**
+   * What the offers need of the plugin of each entity kind that is active
+   * (see `listEntityKindSources`). Reads that build no offers do not need them;
+   * absent means none, so no Connection acts on any thing.
+   */
+  readonly kindSources?: ReadonlyArray<EntityKindSource>;
 }
 
 /** What a read needs to know of an active entity kind: which refs it owns and what to call one. */

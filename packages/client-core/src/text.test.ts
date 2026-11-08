@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cutWithEllipsis, dropClosingFullStops } from "./text";
+import { cutWithEllipsis, dropClosingFullStops, endSentence, lowerFirst } from "./text";
 
 describe("cutWithEllipsis", () => {
   it("returns text that fits as it is", () => {
@@ -27,5 +27,25 @@ describe("dropClosingFullStops", () => {
     ["Version 1.2 is out", "Version 1.2 is out"],
   ])("turns %j into %j", (text, expected) => {
     expect(dropClosingFullStops(text)).toBe(expected);
+  });
+});
+
+describe("endSentence", () => {
+  it.each([
+    ["Review PR is already working on this", "Review PR is already working on this."],
+    ["Try again in a moment.", "Try again in a moment."],
+    ["Is it done?", "Is it done?"],
+  ])("%s", (text, sentence) => {
+    expect(endSentence(text)).toBe(sentence);
+  });
+});
+
+describe("lowerFirst", () => {
+  it.each([
+    ["Review requested", "review requested"],
+    ["FYI", "FYI"],
+    ["", ""],
+  ])("turns %j into %j", (text, expected) => {
+    expect(lowerFirst(text)).toBe(expected);
   });
 });

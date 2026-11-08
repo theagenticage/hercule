@@ -1,7 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
-  decideCardRisingIntoPlace,
-  decideNextWaitingCard,
   describeMoveRefusal,
   walkInbox,
   type InboxMove,
@@ -13,8 +11,9 @@ import { useFocusPageOnArrival } from "../desk";
 import { OPEN_OVERLAY_SELECTOR, OVERLAY_SELECTOR } from "../desk/desk-keys";
 import { CARD_SELECTOR, findCardElement, readCardElement, readInboxStops } from "./inbox-page-dom";
 import { readInboxKey, type InboxKeyCommand } from "./read-inbox-key";
-import type { CurrentCard } from "./use-current-card";
-import type { OpenCard } from "./use-open-card";
+import type { OpenCardControls, RunAndMoveOn } from "./use-run-and-move-on";
+import type { CurrentBy, CurrentCard } from "./use-current-card";
+import type { HandOff } from "./use-hand-off";
 
 /** How near, in pixels, and how soon after a dismissal, a click counts as the same click again. */
 const SAME_SPOT_PX = 4;
@@ -23,11 +22,11 @@ const SAME_SPOT_MS = 1_500;
 /** How soon after a Take a click on "On Work" is ignored: it is the second click of a double click on "Take it", which "On Work" replaced. */
 const DOUBLE_CLICK_MS = 400;
 
-/** The sheet that opens a card, as the page uses it. */
-export type OpenCardControls = Pick<
-  OpenCard,
-  "isOpen" | "origin" | "shown" | "open" | "close" | "walk"
->;
+/** What the undo line says for a key that asks a move of a place. */
+const PLACE_HAS_NO_MOVES = "A place has no moves. Open one of its cards to act on it.";
+
+/** The moves that need nothing but the card. A hand-off also needs a workflow, so it has its own path. */
+type PlainMove = Exclude<InboxMove, "hand">;
 
 /** What `useInboxPage` needs from the Inbox screen. */
 export interface InboxPageInput {
@@ -37,6 +36,10 @@ export interface InboxPageInput {
   /** Returns the card `id` on the Inbox as the screen draws it. */
   readonly findCard: (id: string) => InboxCard | undefined;
   readonly open: OpenCardControls;
+  /** Runs a move on a card and moves the page on: the current card goes to the next that waits, or the open sheet walks to it. */
+  readonly runAndMoveOn: RunAndMoveOn;
+  /** The Hand to gesture (`useHandOff`): the page calls it for H, the card's Hand to button, and the sheet's keys. */
+  readonly handOff: Pick<HandOff, "startCardHand" | "handCard" | "pressSheetKey">;
   readonly moves: {
     readonly take: (card: InboxCard) => void;
     readonly dismiss: (card: InboxCard) => void;
@@ -67,6 +70,10 @@ export interface InboxPage {
  * - The current card (`useCurrentCard`) is the card every key acts on. After
  *   a Take or a Dismiss the current card moves on to the next that waits,
  *   chosen by the order of the page and never by what lies under the pointer.
+ * - H hands the current card to its one workflow, opens the Hand to menu
+ *   when several can take it, and says why when none can. The number keys
+ *   belong to that menu and to the open sheet, so the page ignores them
+ *   while neither is open.
  * - A click on a move button runs the move. A click on a card, or on a part
  *   that asks, opens it. A click on a quiet part, or on a line that says what a
  *   request is linked to, opens the thing it names. A click on `Link them`
@@ -75,8 +82,10 @@ export interface InboxPage {
  *   brings the next under the pointer; a part has no next card.
  * - While a card is open, the sheet holds the focus: J and K walk it through
  *   the page, T and E act on the card the sheet shows and walk it on, and G
- *   closes it and goes to the Task. A sheet that shows a place has no moves,
- *   and says so.
+ *   closes it and goes to the Task. H and the number keys 1 to 3 hand the
+ *   thing the sheet shows to a workflow, as the sheet's Hand to rows do, and
+ *   H says why when no workflow can take it. A sheet that shows a place has
+ *   no moves, and says so.
  * - When the screen opens, the page takes the keyboard focus, so the keys
  *   act at once, even after a click on the sidebar. Focus in a text field
  *   stays there.
@@ -90,40 +99,25 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
   const lastTakeAt = useRef(0);
   const tabStop = useRef<HTMLElement | null>(null);
 
-  /** Makes the card `nextId`, or no card, the current one after a move: by the keys, or handed over to the pointer. */
-  const moveOn = (nextId: string | undefined, by: "keys" | "pointer"): void => {
-    if (by === "keys") current.set(nextId ?? null, "keys");
-    else current.handOver(nextId ?? null);
-  };
-
   /**
    * Runs `move` on `card` unless it is refused, which is said on the undo
    * line. Take and Dismiss then hand the current card to the next that waits,
    * or walk the open sheet to it. Returns whether it ran.
    */
-  const perform = (move: InboxMove, card: InboxCard, by: "keys" | "pointer"): boolean => {
+  const perform = (move: PlainMove, card: InboxCard, by: CurrentBy): boolean => {
     const reason = describeMoveRefusal(card, move);
     if (reason !== undefined) {
       input.moves.say(reason);
       return false;
     }
-    const scroller = scrollRef.current;
     if (move === "see-task") {
       input.moves.seeTask(card);
       return true;
     }
-    // The next card is chosen before the move, because a dismissal takes the card off the page.
-    // The pointer only goes to the card that rises into the card's place; the keys go back when nothing follows.
-    const decideNext = by === "pointer" ? decideCardRisingIntoPlace : decideNextWaitingCard;
-    const next = scroller === null ? undefined : decideNext(readInboxStops(scroller), card.id);
-    if (move === "take") input.moves.take(card);
-    else input.moves.dismiss(card);
-    if (!open.isOpen) moveOn(next, by);
-    else if (next === undefined) open.close();
-    else {
-      open.walk(next);
-      current.set(next, "keys", false);
-    }
+    input.runAndMoveOn(card.id, by, () => {
+      if (move === "take") input.moves.take(card);
+      else input.moves.dismiss(card);
+    });
     return true;
   };
 
@@ -148,11 +142,34 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     current.set(to, "keys", false);
   };
 
+  /**
+   * Handles H and the number keys 1 to 3 while a sheet is open (`useHandOff`
+   * does the hand-off). A sheet that shows a place has no moves, and says so.
+   */
+  const handleSheetHandKey = (
+    command: Extract<InboxKeyCommand, { kind: "hand" | "pick-workflow" }>,
+    event: KeyboardEvent,
+  ): void => {
+    if (open.shown?.kind === "place") {
+      if (command.kind === "hand") {
+        event.preventDefault();
+        input.moves.say(PLACE_HAS_NO_MOVES);
+      }
+      return;
+    }
+    const position = command.kind === "hand" ? undefined : command.position;
+    if (input.handOff.pressSheetKey(position)) event.preventDefault();
+  };
+
   const handleOpenCardKey = (command: InboxKeyCommand, event: KeyboardEvent): void => {
     if (command.kind === "walk") {
       if (command.walk !== "next" && command.walk !== "previous") return;
       event.preventDefault();
       if (!event.repeat) walkSheet(command.walk);
+      return;
+    }
+    if (command.kind === "hand" || command.kind === "pick-workflow") {
+      handleSheetHandKey(command, event);
       return;
     }
     if (command.kind !== "take" && command.kind !== "dismiss" && command.kind !== "see-task") {
@@ -163,7 +180,7 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     if (shown === null) return;
     event.preventDefault();
     if (shown.kind === "place") {
-      input.moves.say("A place has no moves. Open one of its cards to act on it.");
+      input.moves.say(PLACE_HAS_NO_MOVES);
       return;
     }
     const card = input.findCard(shown.id);
@@ -220,6 +237,14 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
         perform(command.kind, card, "keys");
         return;
       }
+      case "hand": {
+        const card = here === null ? undefined : input.findCard(here.id);
+        const element = here === null ? null : findCardElement(scroller, here.id);
+        if (card === undefined || element === null) return;
+        event.preventDefault();
+        input.handOff.startCardHand(card, element, "keys");
+        return;
+      }
       case "toggle-keys-sheet":
         setKeysSheetOpen(!isKeysSheetOpen);
         return;
@@ -261,6 +286,10 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
         perform("dismiss", card, "pointer");
       } else if (move === "see-task" && now - lastTakeAt.current >= DOUBLE_CLICK_MS) {
         perform("see-task", card, "pointer");
+      } else if (move === "hand") {
+        const workflowId = button.dataset["workflowId"];
+        if (workflowId !== undefined) input.handOff.handCard(card, workflowId, "pointer");
+        else input.handOff.startCardHand(card, button, "pointer");
       }
       return;
     }
@@ -348,5 +377,8 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     tabStop.current = stop;
   });
 
-  return { isKeysSheetOpen, toggleKeysSheet: () => setKeysSheetOpen(!isKeysSheetOpen) };
+  return {
+    isKeysSheetOpen,
+    toggleKeysSheet: () => setKeysSheetOpen(!isKeysSheetOpen),
+  };
 };

@@ -4,6 +4,8 @@ import { describeClaim, describeLockedRow } from "@hercule/client-core/desk";
 import {
   decideAskingSentence,
   decideCardFace,
+  decideCardHolder,
+  decideHandedSentence,
   type AskingPart,
   type LockedPart,
   type QuietPart,
@@ -12,7 +14,7 @@ import {
 import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
 import { StatusShape } from "../desk";
-import { CardMoves } from "./card-moves";
+import { CardColleague, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
 import { useCardTime } from "./use-card-time";
 
@@ -22,8 +24,10 @@ import { useCardTime } from "./use-card-time";
  * ("Ines asked for your review") with its wait at the end, and under that what
  * it is: its status shape when that is not the usual one, its title, and its
  * identifier with the title of its first home. It is a card of its own
- * (`data-card-id`), so it has Take it and Dismiss like any card, a click opens
- * it, and the keys stop on it. The words of the link are its tooltip.
+ * (`data-card-id`), so it has Take it, Dismiss and Hand to like any card, a
+ * click opens it, and the keys stop on it. The words of the link are its
+ * tooltip. While a workflow is working on it, the colleague stands where its
+ * wait was, and what it asks reads "Agent review has it".
  */
 function AskingPartRow({
   part,
@@ -38,8 +42,11 @@ function AskingPartRow({
 }): JSX.Element {
   const { card } = part;
   const { wait } = useCardTime(card);
+  const holder = decideCardHolder(card);
+  const colleague = holder?.kind === "colleague" ? holder.workflow : undefined;
   const face = decideCardFace(card);
-  const sentence = decideAskingSentence(card);
+  const sentence =
+    colleague === undefined ? decideAskingSentence(card) : decideHandedSentence(colleague);
   const claimWords = part.claim === undefined ? undefined : describeClaim(part.claim, plugins);
   const where = [face.identifier, part.homeName].filter((each) => each !== undefined).join(" ");
   return (
@@ -51,10 +58,11 @@ function AskingPartRow({
       data-card-id={card.id}
       data-lead-id={leadId}
       data-access={card.access === "ok" ? undefined : card.access}
+      data-has-task={holder === undefined ? undefined : ""}
       title={claimWords}
       aria-description={claimWords}
     >
-      <span className="part-mark">
+      <span className="part-mark" data-hand-off-mark>
         <PluginMark pluginId={face.pluginId} plugins={plugins} size={14} />
       </span>
       <span className="part-ask">
@@ -65,7 +73,11 @@ function AskingPartRow({
           </span>
         )}
       </span>
-      {wait !== null && <CardWaitFigure wait={wait} />}
+      {colleague !== undefined ? (
+        <CardColleague workflow={colleague} />
+      ) : (
+        wait !== null && <CardWaitFigure wait={wait} />
+      )}
       <span className="part-line" data-landing-line>
         {face.status !== undefined && (
           <StatusShape shape={face.status.shape} tone={face.status.tone} size={12} />
@@ -78,7 +90,7 @@ function AskingPartRow({
           {card.yours ? " · yours" : ""}
         </span>
       </span>
-      <CardMoves card={card} />
+      <CardMoves card={card} offers={part.offers} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /**
- * Taking on and dismissing the Inbox's cards, and the undo line at the foot of
- * the screen. It follows the Work board's moves (`-card-moves.ts`):
+ * Taking on, handing off and dismissing the Inbox's cards, and the undo line at
+ * the foot of the screen. It follows the Work board's moves (`-card-moves.ts`):
  *
  * - Moves are sent one at a time, in the order the user made them. The
  *   reversal of a move takes its place in the same line when the user presses
@@ -26,8 +26,23 @@
  *   makes no Task, takes its gesture off again. A gesture outlives the screen
  *   that made it, so it is undone through the screen that is open when Undo is
  *   pressed (`CardMover`).
+ * - A hand-off shows at once too: a `hand-off` edit puts the workflow first in
+ *   the card's live workflows, so the colleague takes the card's place in the
+ *   wait slot and the chain plays, before the controller answers. The answer
+ *   brings the Task's id, which goes into the Inbox as a `set-task` edit. A
+ *   refusal takes the edit off again, backwards, and says why. Undo asks the
+ *   controller whether the hand-off can be taken back, and plays it backwards
+ *   (a `take-back-hand-off` edit) only when it was. A thing the Inbox does not
+ *   list (a linked peer in the open sheet) is handed the same way, with
+ *   nothing to draw: the undo line reports.
+ * - A move waits in the line, and the user may sign out while it waits. The
+ *   client sends the token it holds when a call is made, so a move or a
+ *   reversal that started after sign-out would go out as the next account, and
+ *   its late answer would be written into the next account's cache. So each
+ *   one asks `isCurrent()` of the account scope when it starts and after every
+ *   wait, before it calls the controller, writes the cache or says anything.
  */
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -38,8 +53,11 @@ import {
 } from "@hercule/client-core";
 import {
   describeDismissal,
+  describeHandOffRefusal,
+  describeHandOffUndo,
   describeLinkRemaining,
   describeLinkRemoved,
+  isHandOffTakenBack,
   nameCard,
   planLink,
   planUnlink,
@@ -48,7 +66,14 @@ import {
   type InboxEdit,
   type RidingMove,
 } from "@hercule/client-core/inbox";
-import type { EntityUnlinkResult, Inbox, InboxCard } from "@hercule/contract";
+import type {
+  EntityUnlinkResult,
+  Inbox,
+  InboxCard,
+  LiveWorkflow,
+  WorkflowOffer,
+} from "@hercule/contract";
+import type { AccountScope } from "../../../app/account-scope";
 import {
   buildCachedCardMover,
   buildCachedEndedCardMover,
@@ -56,10 +81,12 @@ import {
   type CardMover,
 } from "../../../app/card-mover";
 import type { SpringName } from "../../../app/motion";
-import type { Gesture, UndoStack } from "../../../app/undo-stack";
+import type { Gesture, UndoAnswer } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
+import { createHandOffChains } from "../../../screens/inbox/hand-off-motion";
 import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
+import type { HandOffTarget } from "../../../screens/inbox/use-hand-off";
 import type { VisitHistoryHandle } from "../../../screens/inbox/use-inbox-visit";
 import {
   comeBackFromAside,
@@ -81,6 +108,8 @@ interface PendingEdit {
 const NO_EDITS: readonly PendingEdit[] = [];
 
 const NOTHING_TO_PUT_BACK = "That move changed nothing, so there is nothing to put back.";
+
+const SIGNED_OUT = "You signed out before this was sent.";
 
 /** Removes the full stops at the end of an error's words, so a sentence can go on after them. */
 const readReason = (error: unknown): string => readErrorMessage(error).replace(/\.+$/, "");
@@ -130,12 +159,27 @@ export interface InboxMoves {
    */
   readonly take: (card: InboxCard) => void;
   /**
-   * Dismisses the card. It leaves the page at once: a copy steps aside, and the
-   * cards after it close up on `hand`. A failure puts it back on `travel`
-   * and says why. `riders` are the cards drawn riding on it: they stand alone
-   * from then on, and the undo line says so.
+   * Hands `target` to the workflow of `offer`. `connectionId` is the account
+   * the user chose, or `undefined` to leave the choice to the controller,
+   * which refuses an account that can no longer act. The colleague has the
+   * card at once and the chain plays. When the controller answers, the card
+   * holds the Task it made or continued, and the undo line offers Undo. A
+   * refusal takes the colleague away again and says why. A thing whose
+   * hand-off has not been answered yet is not handed again.
    */
-  readonly dismiss: (card: InboxCard, riders: readonly InboxCard[]) => void;
+  readonly handOff: (
+    target: HandOffTarget,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ) => void;
+  /**
+   * Dismisses the card. It leaves the page at once: a copy steps aside (unless
+   * `stepsAside` is false, as for a card dropped on the rail, which leaves from
+   * the rail), and the cards after it close up on `hand`. A failure puts it
+   * back on `travel` and says why. `riders` are the cards drawn riding on it:
+   * they stand alone from then on, and the undo line says so.
+   */
+  readonly dismiss: (card: InboxCard, riders: readonly InboxCard[], stepsAside?: boolean) => void;
   /**
    * Links two things as the user's own claim. The undo line says what was
    * linked and offers Undo, which removes the link again. A failure says why.
@@ -175,22 +219,35 @@ const sendLinkChange = async (
  * `serverInbox` is the Inbox as the last read gave it, and `scrollRef` is the
  * element that scrolls the page, which the motion of a move measures. `visit`
  * is the history of the visit, where the Links and Unlinks the user makes are
- * followed.
+ * followed. Undo waits while `isCarrying()` is true. `scope` is the signed-in
+ * user's: it holds the undo stack, and says whether that user is still the one
+ * signed in.
  */
 export const useInboxMoves = ({
   client,
-  undoStack,
+  scope,
   serverInbox,
   visit,
   scrollRef,
+  isCarrying,
+  openTask,
 }: {
   readonly client: HerculeClient;
-  readonly undoStack: UndoStack<CardMover>;
+  readonly scope: AccountScope;
   readonly serverInbox: Inbox | undefined;
   readonly visit: VisitHistoryHandle;
   readonly scrollRef: RefObject<HTMLElement | null>;
+  /** Returns whether a card is in the hand of a carry: Undo waits while one is. */
+  readonly isCarrying: () => boolean;
+  /** Opens the Task `taskId` on Work. */
+  readonly openTask: (taskId: string) => void;
 }): InboxMoves => {
   const queryClient = useQueryClient();
+  const { undoStack, isCurrent } = scope;
+  /** Throws when the user who made the move has signed out, so nothing goes to the controller as the next account. */
+  const requireSignedIn = (): void => {
+    if (!isCurrent()) throw new Error(SIGNED_OUT);
+  };
   const pendingRef = useRef<readonly PendingEdit[]>(NO_EDITS);
   const [pendingEdits, setPendingEdits] = useState(NO_EDITS);
   const changePending = (change: (edits: readonly PendingEdit[]) => readonly PendingEdit[]) => {
@@ -198,6 +255,11 @@ export const useInboxMoves = ({
     setPendingEdits(pendingRef.current);
   };
   const nextId = useRef(1);
+  // The cards whose hand-off the controller has not answered, so a second click waits for the first.
+  const handingOff = useRef(new Set<string>());
+  // The hand-off chains playing on this screen: they stop with it.
+  const [handOffChains] = useState(createHandOffChains);
+  useEffect(() => handOffChains.stopAll, [handOffChains]);
   const writeCachedInbox = buildCachedInboxWriter(queryClient);
 
   // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
@@ -250,6 +312,33 @@ export const useInboxMoves = ({
   };
 
   /**
+   * Shows `edit`, a hand-off or the taking back of one, on the page at once,
+   * with the hand-off chain playing on the card forwards or backwards
+   * (`direction`), and lists it as pending. Returns the pending edit. The
+   * card's neighbours do not move, so the page does not glide.
+   */
+  const showHandOffEdit = (
+    edit: Extract<InboxEdit, { readonly kind: "hand-off" | "take-back-hand-off" }>,
+    direction: "forwards" | "backwards",
+  ): PendingEdit => {
+    const shown: PendingEdit = { id: nextId.current++, edit };
+    handOffChains.play(scrollRef.current, edit.id, direction, () => {
+      changePending((edits) => [...edits, shown]);
+    });
+    return shown;
+  };
+
+  /**
+   * Takes `shown`, a hand-off edit on the card `cardId` that the controller
+   * refused, off the page again, with the hand-off chain playing backwards.
+   */
+  const takeHandOffEditBack = (shown: PendingEdit, cardId: string): void => {
+    handOffChains.play(scrollRef.current, cardId, "backwards", () => {
+      changePending((edits) => edits.filter((each) => each.id !== shown.id));
+    });
+  };
+
+  /**
    * Takes `shown` off the page again because the controller refused it, or
    * because it changed nothing. The cards it moved are put back where they
    * stood, and a move made after it stays.
@@ -277,9 +366,14 @@ export const useInboxMoves = ({
   /**
    * Shows an edit made by Undo on the page that is open, and writes it into
    * the cached Inbox. A card put back parts the page on `hand` and comes from
-   * 14px aside on `travel`.
+   * 14px aside on `travel`. A hand-off taken back plays the hand-off chain
+   * backwards.
    */
   const writeInboxEdit = async (edit: InboxEdit): Promise<void> => {
+    if (edit.kind === "take-back-hand-off") {
+      await settleEdit(showHandOffEdit(edit, "backwards"));
+      return;
+    }
     const { shown, born } = showEdit(edit, "hand");
     if (edit.kind === "put-back") {
       for (const card of born) {
@@ -289,21 +383,50 @@ export const useInboxMoves = ({
     await settleEdit(shown);
   };
 
-  const { line, say, undo } = useUndoLine(undoStack, () => ({
-    putCardBack: buildCachedCardMover(client, queryClient),
-    putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
-    writeInboxEdit,
-  }));
+  const { line, say, undo } = useUndoLine(
+    undoStack,
+    () => ({
+      putCardBack: buildCachedCardMover(client, queryClient),
+      putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
+      writeInboxEdit,
+    }),
+    isCarrying,
+  );
 
   const takeOn = useMutation({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
-    mutationFn: (card: InboxCard) => client.externalEntity.takeOn({ params: { id: card.id } }),
+    mutationFn: (card: InboxCard) => {
+      requireSignedIn();
+      return client.externalEntity.takeOn({ params: { id: card.id } });
+    },
+  });
+  const handOffCard = useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: ({
+      entityId,
+      workflowId,
+      connectionId,
+    }: {
+      readonly entityId: string;
+      readonly workflowId: string;
+      readonly connectionId: string | undefined;
+    }) => {
+      requireSignedIn();
+      return client.externalEntity.handOff({
+        params: { id: entityId },
+        payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
+      });
+    },
   });
   const dismissCard = useMutation({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
-    mutationFn: (card: InboxCard) => client.externalEntity.dismiss({ params: { id: card.id } }),
+    mutationFn: (card: InboxCard) => {
+      requireSignedIn();
+      return client.externalEntity.dismiss({ params: { id: card.id } });
+    },
   });
 
   const changeLinkRequest = useMutation({
@@ -319,16 +442,22 @@ export const useInboxMoves = ({
       readonly isWanted: MoveIsWanted | undefined;
     }): Promise<LinkAnswer> => {
       // Checked when the move reaches the front of the line, so a move that changed nothing is never reversed.
+      requireSignedIn();
       if (isWanted !== undefined && !(await isWanted)) throw new Error(NOTHING_TO_PUT_BACK);
+      requireSignedIn();
       return sendLinkChange(client, move, direction);
     },
   });
 
-  // The reversals wait in the same line as the moves, so none overtakes another.
+  // The reversals wait in the same line as the moves, so none overtakes another. A reversal that
+  // has its own words for the undo line (a hand-off's) resolves to them.
   const reverseMove = useMutation({
     mutationKey: INBOX_MOVES_KEY,
     scope: { id: "inbox-moves" },
-    mutationFn: (reverse: () => Promise<void>) => reverse(),
+    mutationFn: (reverse: () => Promise<UndoAnswer | undefined>) => {
+      requireSignedIn();
+      return reverse();
+    },
   });
 
   const take = (card: InboxCard): void => {
@@ -342,24 +471,28 @@ export const useInboxMoves = ({
     const gesture: Gesture<CardMover> = {
       words: `Took on ${name}`,
       undo: async (page) => {
-        await reverseMove.mutateAsync(async () => {
+        return reverseMove.mutateAsync(async () => {
           if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
           const { taskId } = await request;
+          requireSignedIn();
           // The Task was touched since, so it stays and the line says why.
           await undoAddedTask(client, card.id, taskId);
+          if (!isCurrent()) return undefined;
           await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
+          return undefined;
         });
-        return undefined;
       },
     };
     undoStack.reserve(gesture, wasCreated);
     request.then(
       async ({ taskId, created }) => {
+        if (!isCurrent()) return;
         const { shown } = showEdit({ kind: "set-task", id: card.id, taskId }, "hand");
         const scroller = scrollRef.current;
         const element = scroller === null ? null : findCardElement(scroller, card.id);
         if (element !== null) riseMonogram(element);
         await settleEdit(shown);
+        if (!isCurrent()) return;
         if (!created) {
           say(`${name} already had a Task, so no new one was made.`);
           return;
@@ -367,27 +500,103 @@ export const useInboxMoves = ({
         say(`Took on ${name}. A Task is on Work.`, gesture);
       },
       (error: unknown) => {
+        if (!isCurrent()) return;
         say(`${name} was not taken on: ${readReason(error)}. Try again.`);
       },
     );
   };
 
-  const dismiss = (card: InboxCard, riders: readonly InboxCard[]): void => {
+  const handOff = (
+    target: HandOffTarget,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ): void => {
+    if (handingOff.current.has(target.id)) return;
+    handingOff.current.add(target.id);
+    const name = nameCard(target);
+    const workflow: LiveWorkflow = { workflowId: offer.workflowId, name: offer.name };
+    // What the hand-off ends stays ended, whatever Undo does.
+    const endedKinds = target.openKinds.filter((kind) => offer.answers.includes(kind));
+    const handShown = showHandOffEdit({ kind: "hand-off", id: target.id, workflow }, "forwards");
+
+    const request = handOffCard.mutateAsync({
+      entityId: target.id,
+      workflowId: offer.workflowId,
+      connectionId,
+    });
+    const wasHanded = request.then(
+      () => true,
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: `Handed ${name} to ${offer.name}`,
+      undo: (page) =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasHanded)) throw new Error(NOTHING_TO_PUT_BACK);
+          const { runId, taskId } = await request;
+          requireSignedIn();
+          const result = await client.externalEntity.undoHandOff({ params: { runId } });
+          // The answer belongs to the user who signed out: the caches and the line are the next one's.
+          if (!isCurrent()) return undefined;
+          const text = describeHandOffUndo(result, offer.name, endedKinds);
+          // Stopped and too-late are the controller's final answers, not failures: the line says
+          // them in its own words, and the card stays as it is, because a reversal that did not
+          // happen would be a lie. Only a hand-off that was taken back plays backwards.
+          if (!isHandOffTakenBack(result)) {
+            return result.outcome === "stopped"
+              ? { text, action: { label: "See its Task", act: () => openTask(taskId) } }
+              : { text };
+          }
+          // A Task the hand-off made is gone. A Task it continued stays, and so does the card's hold on it.
+          await page.writeInboxEdit({
+            kind: "take-back-hand-off",
+            id: target.id,
+            workflowId: offer.workflowId,
+            taskId: result.taskRemoved ? undefined : taskId,
+          });
+          return { text };
+        }),
+    };
+    undoStack.reserve(gesture, wasHanded);
+    request.then(
+      async ({ taskId }) => {
+        handingOff.current.delete(target.id);
+        if (!isCurrent()) return;
+        const { shown: taskShown } = showEdit({ kind: "set-task", id: target.id, taskId }, "hand");
+        // The hand-off edit is written first, so the colleague stays when it leaves the pending list.
+        await settleEdit(handShown);
+        await settleEdit(taskShown);
+        if (!isCurrent()) return;
+        say(`Handed ${name} to ${offer.name}. Its Task is on Work.`, gesture);
+      },
+      (error: unknown) => {
+        handingOff.current.delete(target.id);
+        if (!isCurrent()) return;
+        takeHandOffEditBack(handShown, target.id);
+        say(describeHandOffRefusal(target, offer.name, readReason(error)));
+      },
+    );
+  };
+
+  const dismiss = (card: InboxCard, riders: readonly InboxCard[], stepsAside = true): void => {
     const name = nameCard(card);
     const scroller = scrollRef.current;
     const element = scroller === null ? null : findCardElement(scroller, card.id);
     // The copy is made while the card is still on the page, and steps aside once it has left.
     const copy =
-      scroller === null || element === null ? null : copyCardToStepAside(scroller, element);
+      !stepsAside || scroller === null || element === null
+        ? null
+        : copyCardToStepAside(scroller, element);
     const { shown } = showEdit({ kind: "drop", id: card.id }, "hand");
     if (copy !== null) stepAside(copy);
 
     const wasSaved = dismissCard.mutateAsync(card).then(
       async () => {
-        await settleEdit(shown);
+        if (isCurrent()) await settleEdit(shown);
         return true;
       },
       (error: unknown) => {
+        if (!isCurrent()) return false;
         playPageChange("travel", () => {
           changePending((edits) => edits.filter((each) => each.id !== shown.id));
         });
@@ -398,12 +607,14 @@ export const useInboxMoves = ({
     const gesture: Gesture<CardMover> = {
       words: `Dismissed ${name}`,
       undo: async (page) => {
-        await reverseMove.mutateAsync(async () => {
+        return reverseMove.mutateAsync(async () => {
           if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
+          requireSignedIn();
           await client.externalEntity.restore({ params: { id: card.id } });
+          if (!isCurrent()) return undefined;
           await page.writeInboxEdit({ kind: "put-back", card });
+          return undefined;
         });
-        return undefined;
       },
     };
     undoStack.reserve(gesture, wasSaved);
@@ -445,6 +656,7 @@ export const useInboxMoves = ({
       plan === undefined ? undefined : showEdit(plan.edit, "hand", plan.ridingMove).shown;
     return changeLinkRequest.mutateAsync({ move, direction, isWanted }).then(
       async (answer) => {
+        if (!isCurrent()) return answer;
         if (shown !== undefined) {
           if (answer.didChange) await settleEdit(shown, answer.remaining);
           else takeEditBack(shown);
@@ -453,7 +665,7 @@ export const useInboxMoves = ({
         return answer;
       },
       (error: unknown) => {
-        if (shown !== undefined) takeEditBack(shown);
+        if (shown !== undefined && isCurrent()) takeEditBack(shown);
         throw error;
       },
     );
@@ -491,6 +703,7 @@ export const useInboxMoves = ({
     undoStack.reserve(gesture, wasChanged);
     answered.then(
       ({ didChange, remaining }) => {
+        if (!isCurrent()) return;
         if (!didChange) {
           say(`You had made no link between ${words}, so none was removed.`);
           return;
@@ -501,6 +714,7 @@ export const useInboxMoves = ({
         );
       },
       (error: unknown) => {
+        if (!isCurrent()) return;
         say(LINK_WORDS[direction].failed(words, readReason(error)));
       },
     );
@@ -510,6 +724,7 @@ export const useInboxMoves = ({
     inbox,
     hasPendingEdits: pendingEdits.length > 0,
     take,
+    handOff,
     dismiss,
     link: (move) => {
       makeLinkChange(move, "link");

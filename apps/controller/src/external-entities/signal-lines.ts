@@ -17,9 +17,6 @@ import type {
 import type { LiveThreadSignals, ThreadSignal, ThreadSignalLines } from "../signals";
 import { parseReasonTemplates, renderSentence } from "./sentences";
 
-/** What a card holds when it has no live signal. */
-const NO_CARD_SIGNALS: InboxCard["signals"] = { openCount: 0 };
-
 /**
  * Builds the line of one signal: its fields, and the sentence it says
  * (`buildSignalSay`).
@@ -65,15 +62,20 @@ const buildSignalSay = (
  * `signals` summary, and, when the card has a live signal, the `reason` that
  * replaces the observation's own: the sentence of its latest signal. A card
  * with no live signal gets no `reason` here, so it keeps the one its
- * observation gave.
+ * observation gave. `openKinds` are the kinds of all the card's open signals,
+ * snoozed ones included.
  */
 export const buildCardSignalFields = (
   found: LiveThreadSignals | undefined,
+  openKinds: ReadonlyArray<string>,
   reasonTemplates: string | null,
 ): Pick<InboxCard, "signals"> & { readonly reason?: EntityReason } => {
-  if (found === undefined) return { signals: NO_CARD_SIGNALS };
+  if (found === undefined) return { signals: { openCount: 0, kinds: openKinds } };
   const latest = buildSignalLine(found.latest, reasonTemplates);
-  return { signals: { latest, openCount: found.liveCount }, reason: latest.say };
+  return {
+    signals: { latest, openCount: found.liveCount, kinds: openKinds },
+    reason: latest.say,
+  };
 };
 
 /** Builds the fields of an entity's detail that come from its signals. */

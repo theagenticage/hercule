@@ -18,7 +18,7 @@
  * sentence inside a line is `data-landing-sentence`.
  */
 import type { EntityReason } from "@hercule/contract";
-import { buildSpringCurve, buildSpringKnock, MOTION_EASE } from "../../app/motion";
+import { buildSpringCurve, knockElement, MOTION_EASE } from "../../app/motion";
 import { ensureCopyLayer } from "./inbox-motion";
 import { findCardElement } from "./inbox-page-dom";
 
@@ -188,13 +188,19 @@ export const holdSentence = (element: HTMLElement): HeldSentence | undefined => 
  * Rolls a card's line from its old sentence to the new one. Both move
  * together on the `hand` spring, 16px apart, and the line clips them, so the
  * two sentences never show at once. The old one is a copy in a clip laid over
- * the line; the clip leaves when it has gone. Does nothing when the new
- * sentence is missing.
+ * the line; the clip leaves when it has gone.
+ *
+ * The roll starts after `delay` milliseconds. Until then the old sentence
+ * stands in its place and the new one waits below the line's edge, so a
+ * caller can start the roll when something else has happened. Returns a
+ * function that stops the roll and leaves the new sentence in place; it is
+ * safe to call after the roll has ended. Does nothing, and returns a function
+ * that does nothing, when the new sentence is missing.
  */
-const rollSentence = (element: HTMLElement, held: HeldSentence): void => {
+export const rollSentence = (element: HTMLElement, held: HeldSentence, delay = 0): (() => void) => {
   const line = element.querySelector(LINE);
   const arrived = line?.querySelector<HTMLElement>(SENTENCE);
-  if (line == null || arrived == null) return;
+  if (line == null || arrived == null) return () => {};
   const { ease, ms } = buildSpringCurve("hand");
   const clip = document.createElement("div");
   clip.className = "card-line-clip";
@@ -215,11 +221,11 @@ const rollSentence = (element: HTMLElement, held: HeldSentence): void => {
   line.classList.add("is-rolling");
   const leaving = held.sentence.animate(
     [{ transform: "none" }, { transform: `translateY(-${String(ROLL_DISTANCE)}px)` }],
-    { duration: ms, easing: ease, fill: "forwards" },
+    { duration: ms, delay, easing: ease, fill: "both" },
   );
   const arriving = arrived.animate(
     [{ transform: `translateY(${String(ROLL_DISTANCE)}px)` }, { transform: "none" }],
-    { duration: ms, easing: ease },
+    { duration: ms, delay, easing: ease, fill: "backwards" },
   );
   const clearClip = (): void => {
     clip.remove();
@@ -231,6 +237,10 @@ const rollSentence = (element: HTMLElement, held: HeldSentence): void => {
   leaving.oncancel = clearClip;
   arriving.onfinish = clearRolling;
   arriving.oncancel = clearRolling;
+  return () => {
+    leaving.cancel();
+    arriving.cancel();
+  };
 };
 
 /** The rim each element shows now, so a second rim on the same element takes over from the first. */
@@ -302,10 +312,6 @@ export const playReaction = (
     );
     return;
   }
-  const { offsets, ms } = buildSpringKnock("hand", KNOCK_SPEED);
-  element.animate(
-    offsets.map((offset) => ({ transform: `translate3d(0,${offset.toFixed(2)}px,0)` })),
-    { duration: ms, easing: "linear", composite: "add" },
-  );
+  knockElement(element, KNOCK_SPEED);
   if (held !== undefined) rollSentence(element, held);
 };

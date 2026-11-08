@@ -23,6 +23,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
+  CapExceeded,
   Conflict,
   Forbidden,
   Internal,
@@ -34,6 +35,7 @@ import {
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
+import { MAX_CONNECTION_LABEL_LENGTH } from "./connection";
 import {
   EntityChange,
   EntityEdge,
@@ -49,7 +51,9 @@ import {
   SignalKind,
   SignalStatus,
 } from "./signal";
+import { RunStarted } from "./run";
 import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
+import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
 export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
 
@@ -122,6 +126,28 @@ export const MAX_ENTITY_SUGGESTIONS = 100;
 
 /** The most other contexts a suggestion names ("Also in Pricing rules"). */
 export const MAX_SUGGESTION_CONTEXTS = 8;
+
+/**
+ * The most workflows one offer set lists. A person writes a few workflows
+ * that take one kind of thing; 100 is far past real use and keeps the reply
+ * small.
+ */
+export const MAX_ENTITY_OFFERS = 100;
+
+/**
+ * The most Connections one card lists as able to act on it. A person connects
+ * a few accounts of one source.
+ */
+export const MAX_ACTING_CONNECTIONS = 16;
+
+/** The most live workflows one card lists. A person has a few workflows running on one Task at once. */
+export const MAX_LIVE_WORKFLOWS = 8;
+
+/** The longest id of an offer set. The server makes the ids, and the client only compares them. */
+export const MAX_OFFER_SET_ID_LENGTH = 64;
+
+/** The longest sentence that explains why a workflow cannot be offered. */
+export const MAX_OFFER_MESSAGE_LENGTH = 512;
 
 /**
  * Why a thing concerns the user. A thing concerns the user while at least one
@@ -288,6 +314,55 @@ export const EntityPeer = Schema.Struct({
 export type EntityPeer = Schema.Schema.Type<typeof EntityPeer>;
 
 /**
+ * One workflow a card can hand its thing to, or could if something changed.
+ * The workflow is available when it is enabled and valid, takes this kind
+ * through an `entity` input, can fill every other required input, fits the
+ * thing's repository, and an account can act. Otherwise `unavailable` says
+ * why, when the user can do something about it.
+ */
+export const WorkflowOffer = Schema.Struct({
+  workflowId: Id,
+  name: bounded(1, MAX_WORKFLOW_NAME_LENGTH),
+  /** The signal kinds this handoff would end, for the Describe Line. */
+  answers: atMost(SignalKind, MAX_INPUT_ANSWERED_SIGNAL_KINDS),
+  /** The `connection` input the core fills with the acting account. Absent when the workflow has none. */
+  connectionInputName: Schema.optionalKey(Schema.String),
+  /** Set when the workflow cannot be handed this thing. Absent when it is available. */
+  unavailable: Schema.optionalKey(
+    Schema.Struct({
+      /**
+       * - `needs-input`: a required input the core cannot fill.
+       * - `repository`: the workflow works on another repository only.
+       * - `no-account`: no connected account can act on this thing.
+       * - `needs-workflow-change`: the workflow takes a `signal` input and no
+       *   `entity` input, so it cannot take a card.
+       */
+      reason: Schema.Literals(["needs-input", "repository", "no-account", "needs-workflow-change"]),
+      /** The sentence the menu shows. */
+      message: bounded(1, MAX_OFFER_MESSAGE_LENGTH),
+    }),
+  ),
+});
+
+export type WorkflowOffer = Schema.Schema.Type<typeof WorkflowOffer>;
+
+/** A workflow with a live run on a card's active Task: its id, and its name for "<name> has it". */
+export const LiveWorkflow = Schema.Struct({
+  workflowId: Id,
+  name: bounded(1, MAX_WORKFLOW_NAME_LENGTH),
+});
+
+export type LiveWorkflow = Schema.Schema.Type<typeof LiveWorkflow>;
+
+/** A Connection that can act on a thing: its id, and its label for the menu ("as northwind-bot"). */
+export const ActingConnection = Schema.Struct({
+  id: Id,
+  label: bounded(1, MAX_CONNECTION_LABEL_LENGTH),
+});
+
+export type ActingConnection = Schema.Schema.Type<typeof ActingConnection>;
+
+/**
  * Which column of the Inbox a card lies in. The server decides it:
  *
  * - `with-someone-else`: the entity has a live Task.
@@ -395,6 +470,14 @@ export const InboxCard = Schema.Struct({
     latest: Schema.optionalKey(EntitySignalLine),
     /** How many open signals that are not snoozed the card holds. */
     openCount: Schema.Int,
+    /**
+     * The distinct kinds of the card's open signals, snoozed ones included,
+     * sorted, cut to the first `MAX_ENTITY_SIGNALS`. A handoff ends the open
+     * signals of the kinds its workflow answers, so this lets the menu name
+     * what a click would end. It is a presentation list: the handoff reads
+     * the signals itself.
+     */
+    kinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
   }),
   /**
    * Set when this compact thing rides on a rich thing on the Inbox: it has a
@@ -402,6 +485,23 @@ export const InboxCard = Schema.Struct({
    * instead of as a card of its own.
    */
   ridesOn: Schema.optionalKey(ExternalRef),
+  /**
+   * The key of this card's offers in `Inbox.offerSets`. Offers depend on the
+   * kind, the target repository and whether an account can act, not on the
+   * card, so cards that share those share one set.
+   */
+  offerSetId: bounded(1, MAX_OFFER_SET_ID_LENGTH),
+  /**
+   * The Connections that can act on this thing, oldest first, cut to the
+   * first `MAX_ACTING_CONNECTIONS`. The first is the default. A presentation
+   * list: the handoff checks the account it uses itself.
+   */
+  actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
+  /**
+   * The workflows with a live run on this card's active Task, newest run
+   * first. Empty when none.
+   */
+  liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
 });
 
 export type InboxCard = Schema.Schema.Type<typeof InboxCard>;
@@ -447,6 +547,18 @@ export const Inbox = Schema.Struct({
   hints: atMost(EntityHint, MAX_INBOX_HINTS),
   /** The records at the far end of those links and hints that have no card of their own. */
   peers: atMost(EntityPeer, MAX_INBOX_PEERS),
+  /**
+   * The workflows each card can be handed to, by `InboxCard.offerSetId`. One
+   * set serves every card that shares a kind, target repository and
+   * acting-account state, so 300 cards do not repeat their offers. Each set
+   * lists available workflows first, then unavailable ones, each by name,
+   * cut to the first `MAX_ENTITY_OFFERS`. A presentation list: the handoff
+   * checks its workflow itself.
+   */
+  offerSets: Schema.Record(
+    bounded(1, MAX_OFFER_SET_ID_LENGTH),
+    atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
+  ).check(Schema.isMaxProperties(MAX_INBOX_CARDS)),
   /** True when more cards exist than `MAX_INBOX_CARDS`. The screen says so. */
   truncated: Schema.Boolean,
 });
@@ -486,6 +598,19 @@ export const ExternalEntityDetail = Schema.Struct({
   timeline: atMost(EntityChange, MAX_ENTITY_TIMELINE),
   /** The records at the far end of this thing's links and hints that have no card of their own. */
   peers: atMost(EntityPeer, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
+  /**
+   * The workflows this thing can be handed to, as `Inbox.offerSets` holds
+   * them for a card: available ones first, then unavailable ones, each by
+   * name, cut to the first `MAX_ENTITY_OFFERS`. A presentation list: the
+   * handoff checks its workflow itself.
+   */
+  offers: atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
+  /**
+   * The Connections that can act on this thing, oldest first, cut to the
+   * first `MAX_ACTING_CONNECTIONS`. The first is the default. A presentation
+   * list: the handoff checks the account it uses itself.
+   */
+  actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
 });
 
 export type ExternalEntityDetail = Schema.Schema.Type<typeof ExternalEntityDetail>;
@@ -515,6 +640,48 @@ export const EntityUndoTakeOnResult = Schema.Struct({
 });
 
 export type EntityUndoTakeOnResult = Schema.Schema.Type<typeof EntityUndoTakeOnResult>;
+
+/**
+ * The input of `handOff`, beside the entity's id in the path: the workflow to
+ * hand the thing to, and the account that acts. Without `connectionId` the
+ * first of the thing's acting Connections acts.
+ */
+export const EntityHandOffInput = Schema.Struct({
+  workflowId: Id,
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type EntityHandOffInput = Schema.Schema.Type<typeof EntityHandOffInput>;
+
+/** What `handOff` returns: the run it started, and the Task that run works on (new or continued). */
+export const EntityHandOffResult = Schema.Struct({ ...RunStarted.fields, taskId: Id });
+
+export type EntityHandOffResult = Schema.Schema.Type<typeof EntityHandOffResult>;
+
+/**
+ * What `undoHandOff` returns. A repeat of the call returns the first answer
+ * again. The undo line never claims more than happened.
+ *
+ * - `undone`: nothing had started, so the run is cancelled and the Task is
+ *   deleted or back at its earlier stage.
+ * - `stopped`: the run was asked to stop, but it had gone too far to take
+ *   back. The Task and its stage stay, and anything the run did stays.
+ * - `too-late`: the run had already ended. Nothing changed.
+ *
+ * Signals the handoff ended stay ended in every case.
+ */
+export const HandOffUndo = Schema.Struct({
+  outcome: Schema.Literals(["undone", "stopped", "too-late"]),
+  /** True when a stop was asked for. It does not mean execution has stopped: the run's sessions report that. */
+  stopRequested: Schema.Boolean,
+  taskRemoved: Schema.Boolean,
+  stageRestored: Schema.Boolean,
+  failureRestored: Schema.Boolean,
+  /** Why the Task or its stage stayed, in words for the undo line. */
+  reason: Schema.optionalKey(Schema.String),
+});
+
+export type HandOffUndo = Schema.Schema.Type<typeof HandOffUndo>;
 
 /**
  * The query of `search`.
@@ -753,6 +920,43 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       params: { id: Id },
       payload: EntityUndoTakeOnInput,
       success: EntityUndoTakeOnResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Hands the thing to a workflow: starts a run on the thing's active Task
+     * (new or continued) and ends the open signals of the kinds the workflow
+     * answers. Returns the run and the Task. Only the user hands off. Fails
+     * `NotFound` for an unknown entity or workflow, and `InvalidState` when
+     * the workflow is not available on the thing, the same workflow already
+     * works on its Task, or a reply to one of the signals is still running.
+     */
+    HttpApiEndpoint.post("handOff", "/external-entities/:id/hand-off", {
+      params: { id: Id },
+      payload: EntityHandOffInput,
+      success: EntityHandOffResult,
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Conflict,
+        Internal,
+      ],
+    }),
+    /**
+     * Takes back a handoff as far as is safe: cancels its run, and deletes
+     * the Task or restores its stage only when nothing had started and
+     * nothing has changed the Task since. Only the user undoes. Fails
+     * `NotFound` when the run is not a handoff of an entity.
+     */
+    // A static first segment: `/external-entities/:id/hand-off` and the other
+    // `:id` routes end in a word that is not `undo`, so the router never takes
+    // this path for one of them, and "handoffs" is not an id.
+    HttpApiEndpoint.post("undoHandOff", "/external-entities/handoffs/:runId/undo", {
+      params: { runId: Id },
+      success: HandOffUndo,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /** Takes the card off the Inbox. Only `restore` brings it back. */

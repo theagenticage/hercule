@@ -216,6 +216,27 @@ const checkExpressionMap = (
   );
 
 /**
+ * Returns an issue for each `entity` input after the first. A handoff from a
+ * card fills the workflow's entity input with the card's ref, and with two
+ * such inputs it could not tell which one the card fills. The schema already
+ * requires qualified entity kinds, and like signal kinds they are not checked
+ * against the active plugins, so a workflow can be saved before its plugin is
+ * enabled.
+ */
+const listExtraEntityInputIssues = (inputs: ReadonlyArray<Input>): ReadonlyArray<Issue> =>
+  inputs.flatMap((input, index) =>
+    input.entity !== undefined && inputs.findIndex((other) => other.entity !== undefined) < index
+      ? [
+          {
+            path: ["inputs", String(index), "entity"],
+            message:
+              "A workflow can take only one entity input for now. Keep one entity input and remove this one.",
+          },
+        ]
+      : [],
+  );
+
+/**
  * Validates a Connection input or a signal input, and returns no issues for a
  * `schema` input.
  *
@@ -1263,6 +1284,7 @@ export const validateDefinition = (
       ...(definition.inputs ?? []).flatMap((input, index) =>
         listInputIssues(input, index, references),
       ),
+      ...listExtraEntityInputIssues(definition.inputs ?? []),
       ...(yield* Effect.forEach(triggers, (trigger, index) =>
         checkTrigger(trigger, index, definition, references),
       )).flat(),

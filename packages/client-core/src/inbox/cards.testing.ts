@@ -9,6 +9,7 @@ import type {
   Inbox,
   InboxCard,
   PluginDetail,
+  WorkflowOffer,
 } from "@hercule/contract";
 
 /**
@@ -40,7 +41,10 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   ancestors: [],
   contextComplete: true,
   side: "ongoing",
-  signals: { openCount: 0 },
+  signals: { openCount: 0, kinds: [] },
+  offerSetId: "none",
+  actingConnections: [],
+  liveWorkflows: [],
   ...overrides,
 });
 
@@ -148,10 +152,27 @@ export const buildSignalLine = (
   ...overrides,
 });
 
+/**
+ * Returns an available offer of the workflow `name` that answers the given
+ * signal kinds. `unavailable` makes it one the card cannot be handed to.
+ */
+export const buildWorkflowOffer = (
+  name: string,
+  answers: readonly string[] = [],
+  unavailable?: WorkflowOffer["unavailable"],
+): WorkflowOffer => ({
+  workflowId: `wf-${name.toLowerCase().replaceAll(" ", "-")}`,
+  name,
+  answers,
+  ...(unavailable === undefined ? {} : { unavailable }),
+});
+
 /** Returns an Inbox of these cards, in this order, with the places and edges given. */
 export const buildInbox = (
   cards: readonly InboxCard[],
-  context: Partial<Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers">> = {},
+  context: Partial<
+    Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers" | "offerSets">
+  > = {},
 ): Inbox => ({
   cards,
   places: [],
@@ -159,6 +180,7 @@ export const buildInbox = (
   links: [],
   hints: [],
   peers: [],
+  offerSets: {},
   counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
   truncated: false,
   ...context,

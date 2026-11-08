@@ -3,13 +3,18 @@
  * says (every place above it, why its facts may be old), what its moves do
  * and when they are off, and walking to a place inside the sheet and back.
  */
-import { Suspense, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
-import { buildInbox, buildInboxCard, buildInboxPlace } from "@hercule/client-core/inbox/testing";
+import {
+  buildInbox,
+  buildInboxCard,
+  buildInboxPlace,
+  buildWorkflowOffer,
+} from "@hercule/client-core/inbox/testing";
 import type {
   EntityLink,
   EntitySignalLine,
@@ -70,12 +75,27 @@ const buildDetail = (
     signalCount: 0,
     timeline: [],
     peers: [],
+    offers: [],
+    actingConnections: [],
     ...overrides,
   };
 };
 
+/** What the sheet calls to hand its card on. */
+type HandHandler = (workflowId: string, by: "keys" | "pointer") => void;
+
+/** Returns what the newest call of `onHand` was given. */
+const readLastHand = (onHand: ReturnType<typeof vi.fn<HandHandler>>) => {
+  const call = onHand.mock.calls.at(-1);
+  if (call === undefined) throw new Error("The sheet handed nothing.");
+  const [workflowId, by] = call;
+  return { workflowId, by };
+};
+
 interface Rendered {
   readonly onTake: ReturnType<typeof vi.fn<(cardId: string) => void>>;
+  readonly onHand: ReturnType<typeof vi.fn<HandHandler>>;
+  readonly onChooseConnection: ReturnType<typeof vi.fn<(connectionId: string) => void>>;
   readonly onSeeTask: ReturnType<typeof vi.fn<(taskId: string) => void>>;
   readonly onLink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
   readonly onUnlink: ReturnType<typeof vi.fn<(move: EntityLinkMove) => void>>;
@@ -100,6 +120,8 @@ const renderPage = (
   });
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
   const onTake = vi.fn<(cardId: string) => void>();
+  const onHand = vi.fn<HandHandler>();
+  const onChooseConnection = vi.fn<(connectionId: string) => void>();
   const onSeeTask = vi.fn<(taskId: string) => void>();
   const onLink = vi.fn<(move: EntityLinkMove) => void>();
   const onUnlink = vi.fn<(move: EntityLinkMove) => void>();
@@ -107,6 +129,8 @@ const renderPage = (
   const inbox = options.inbox ?? buildInboxOf(card);
   function Page(): JSX.Element {
     const openCard = useOpenCard();
+    // The screen owns the account choice (`useHandOff`); the sheet shows it and reports a pick.
+    const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
     return (
       <div className="inbox-desk">
         <div className="inbox-row" data-card-id={card.id}>
@@ -124,8 +148,14 @@ const renderPage = (
           inbox={inbox}
           plugins={[]}
           platform="linux"
+          chosenConnectionId={chosenConnectionId}
           onTake={onTake}
           onDismiss={vi.fn()}
+          onHand={onHand}
+          onChooseConnection={(connectionId) => {
+            onChooseConnection(connectionId);
+            setChosenConnectionId(connectionId);
+          }}
           onSeeTask={onSeeTask}
           onLink={onLink}
           onUnlink={onUnlink}
@@ -141,7 +171,7 @@ const renderPage = (
       </Suspense>
     </QueryClientProvider>,
   );
-  return { onTake, onSeeTask, onLink, onUnlink, onSeeInIntake, calls };
+  return { onTake, onHand, onChooseConnection, onSeeTask, onLink, onUnlink, onSeeInIntake, calls };
 };
 
 /** Opens the card and waits until the moves take a pointer, which they do not for the first moment. */
@@ -149,7 +179,7 @@ const openTheCard = async (): Promise<HTMLElement> => {
   await userEvent.setup().click(await screen.findByRole("button", { name: "Open the card" }));
   const sheet = await screen.findByRole("dialog");
   await waitFor(() => {
-    expect(sheet.hasAttribute("data-arming")).toBe(false);
+    expect(sheet.querySelector("[data-arming]")).toBeNull();
   });
   return sheet;
 };
@@ -217,6 +247,130 @@ describe("InboxOpenCard", () => {
     expect(
       within(sheet).getByRole("heading", { name: "Chilled crates for the depot" }),
     ).toBeTruthy();
+  });
+
+  it("takes no pointer on the moves of a sheet that has just opened, so a double click starts nothing", async () => {
+    const { onTake } = renderPage(ORDER, buildDetail(ORDER));
+    const opener = await screen.findByRole("button", { name: "Open the card" });
+
+    // One synchronous step: the moves are read before the guard's 420ms can pass.
+    fireEvent.click(opener);
+    const sheet = screen.getByRole("dialog");
+    const take = within(sheet).getByRole("button", { name: /^Take it/ });
+    expect(getComputedStyle(take.parentElement!).pointerEvents).toBe("none");
+    await expect(userEvent.setup().click(take)).rejects.toThrow(/pointer-events/);
+    expect(onTake).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(sheet.querySelector("[data-arming]")).toBeNull();
+    });
+    await userEvent.setup().click(take);
+    expect(onTake).toHaveBeenCalledExactlyOnceWith(ORDER_ID);
+  });
+
+  describe("the Hand to rows", () => {
+    // The controller's ids are UUIDs, and the read decodes them.
+    const REVIEW = {
+      ...buildWorkflowOffer("Agent review", ["acme/review"]),
+      workflowId: "01a06d02-7e00-7000-8000-000000000d01",
+    };
+    const REPAIR = {
+      ...buildWorkflowOffer("Repair the build", ["acme/checks"]),
+      workflowId: "01a06d02-7e00-7000-8000-000000000d02",
+    };
+    const SHIP = {
+      ...buildWorkflowOffer("Ship it", [], {
+        reason: "repository",
+        message: "Ship it works on acme/web only",
+      }),
+      workflowId: "01a06d02-7e00-7000-8000-000000000d03",
+    };
+    const BOT = { id: "01a06d02-7e00-7000-8000-000000000e01", label: "northwind-bot" };
+    const AVA = { id: "01a06d02-7e00-7000-8000-000000000e02", label: "ava-northwind" };
+    const OPEN_REVIEW = [buildLine(SIGNAL_IDS[0], 2, { kind: "acme/review" })];
+
+    it("shows the one workflow with what it ends and the key H, and hands to it when pressed", async () => {
+      const { onHand } = renderPage(
+        ORDER,
+        buildDetail(ORDER, { offers: [REVIEW], actingConnections: [BOT], signals: OPEN_REVIEW }),
+      );
+      const sheet = await openTheCard();
+
+      const row = await within(sheet).findByRole("button", { name: /^Agent review/ });
+      expect(row.textContent).toBe("Agent reviewEnds Review.H");
+      await userEvent.setup().click(row);
+
+      expect(onHand).toHaveBeenCalledOnce();
+      const { workflowId, by } = readLastHand(onHand);
+      expect([workflowId, by]).toEqual([REVIEW.workflowId, "pointer"]);
+    });
+
+    it("numbers several workflows, lists the ones that cannot take the card below with why, and keeps them before Take it", async () => {
+      renderPage(ORDER, buildDetail(ORDER, { offers: [REVIEW, SHIP, REPAIR] }));
+      const sheet = await openTheCard();
+
+      const rows = [...sheet.querySelectorAll(".open-card-ledger > .open-card-row")];
+      expect(rows.map((row) => row.querySelector(".open-card-label")?.textContent)).toEqual([
+        "Agent review",
+        "Repair the build",
+        "Ship it",
+        "RTake it",
+        "Dismiss",
+      ]);
+      expect(rows.slice(0, 2).map((row) => row.querySelector("kbd")?.textContent)).toEqual([
+        "1",
+        "2",
+      ]);
+      expect(within(sheet).getByText("Ship it works on acme/web only")).toBeTruthy();
+    });
+
+    it("offers the workflows beside the way to the Task on a card that has one", async () => {
+      const held = buildInboxCard(ORDER_ID, {
+        ...ORDER,
+        taskId: "01a06d02-7e00-7000-8000-000000000f01",
+      });
+      renderPage(held, buildDetail(held, { offers: [REVIEW] }));
+      const sheet = await openTheCard();
+
+      expect(await within(sheet).findByRole("button", { name: /^Agent review/ })).toBeTruthy();
+      expect(within(sheet).getByRole("button", { name: /^See its Task/ })).toBeTruthy();
+    });
+
+    it("shows no Hand to rows when the card's plugin is off or no workflow could take it", async () => {
+      renderPage(ORDER, buildDetail(ORDER, { offers: [REVIEW], kindAvailable: false }));
+      const sheet = await openTheCard();
+
+      expect(within(sheet).queryByRole("button", { name: /^Agent review/ })).toBeNull();
+    });
+
+    it("reports the account the user picks when there are several, and shows it as picked", async () => {
+      const { onChooseConnection } = renderPage(
+        ORDER,
+        buildDetail(ORDER, { offers: [REVIEW, REPAIR], actingConnections: [BOT, AVA] }),
+      );
+      const sheet = await openTheCard();
+
+      const account = within(sheet).getByRole<HTMLSelectElement>("combobox");
+      expect(account.selectedOptions[0]?.textContent).toBe(BOT.label);
+      await userEvent.setup().selectOptions(account, AVA.id);
+
+      expect(onChooseConnection).toHaveBeenCalledExactlyOnceWith(AVA.id);
+      expect(account.selectedOptions[0]?.textContent).toBe(AVA.label);
+    });
+
+    it("counts Return on a focused Hand to row as keys, so the sheet walks on, and a click as pointer", async () => {
+      const { onHand } = renderPage(ORDER, buildDetail(ORDER, { offers: [REVIEW, REPAIR] }));
+      const sheet = await openTheCard();
+      const user = userEvent.setup();
+
+      const first = await within(sheet).findByRole("button", { name: /^Agent review/ });
+      first.focus();
+      await user.keyboard("{Enter}");
+      expect(readLastHand(onHand)).toMatchObject({ workflowId: REVIEW.workflowId, by: "keys" });
+
+      await user.click(within(sheet).getByRole("button", { name: /^Repair the build/ }));
+      expect(readLastHand(onHand)).toMatchObject({ workflowId: REPAIR.workflowId, by: "pointer" });
+    });
   });
 
   it("offers Take it and Dismiss, and Take it calls the page with the card", async () => {

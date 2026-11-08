@@ -70,7 +70,9 @@ import {
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
 import { buildActiveEntityKind } from "./entity-records";
+import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
+import { findProjectOfRemote } from "./project-of-remote";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import {
@@ -110,6 +112,8 @@ interface Catalog {
   readonly activePluginIds: ReadonlyArray<string>;
   /** The active kinds, by qualified word. */
   readonly kinds: ReadonlyMap<string, CatalogKind>;
+  /** What the offers need of the plugin of each active kind. */
+  readonly kindSources: ReadonlyArray<EntityKindSource>;
 }
 
 /** What `prepareEntityForTask` read: nothing when the rows already held a full, readable record. */
@@ -197,7 +201,11 @@ const make = Effect.gen(function* () {
           kinds.set(declaration.word, { pluginId: source.pluginId, declaration });
         }
       }
-      return { activePluginIds: [...new Set(sources.map((source) => source.pluginId))], kinds };
+      return {
+        activePluginIds: [...new Set(sources.map((source) => source.pluginId))],
+        kinds,
+        kindSources: listEntityKindSources(sources),
+      };
     },
   );
 
@@ -211,6 +219,7 @@ const make = Effect.gen(function* () {
       activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
         buildActiveEntityKind(declaration),
       ),
+      kindSources: catalog.kindSources,
     };
   });
 
@@ -347,22 +356,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the Project for the Task of an entity: the only Project that is
-   * not deleted and that the Resource whose canonical remote is the repository
-   * the work lands in is filed under. With no repository, no such Resource, or
-   * a Resource in no live Project or in several, there is none. A GitHub
-   * repository or a Linear project is never a Project.
-   */
-  const findProjectOfRemote = (
-    remote: string | undefined,
-  ): Effect.Effect<string | undefined, SqlError> =>
-    Effect.gen(function* () {
-      if (remote === undefined) return undefined;
-      const projects = yield* resources.listLiveProjectsOfRemote(remote);
-      return projects.length === 1 ? projects[0] : undefined;
-    });
-
-  /**
    * Returns the active Task of an entity, or makes one, in one transaction.
    *
    * 1. When a thing was read, checks that its Connection can still read, and
@@ -430,7 +423,8 @@ const make = Effect.gen(function* () {
         }
         const stage = chooseStageForEntity(record);
         const followed = input.followIfUnconcerned && !record.hasConcern;
-        const projectId = input.projectId ?? (yield* findProjectOfRemote(record.targetRemote));
+        const projectId =
+          input.projectId ?? (yield* findProjectOfRemote(resources, record.targetRemote));
         const task = yield* tasks.createTaskLinkedToRef({
           ref,
           title: record.title,
@@ -582,12 +576,17 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the Inbox: the cards, the places above them, the edges between
-     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text.
+     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text,
+     * `workflow.query` and `connection.query`, because the offers name workflows and accounts,
+     * and `run.query`, because a card names the workflows running on its Task.
      */
     queryInbox: (): Effect.Effect<Inbox, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
+        yield* requireGrant("workflow.query");
+        yield* requireGrant("connection.query");
+        yield* requireGrant("run.query");
         return yield* entities.queryInbox(yield* readEnvironment);
       }),
 
@@ -603,7 +602,9 @@ const make = Effect.gen(function* () {
      * Returns one entity with the records above it and what it links to.
      * Fails with `NotFound` for an unknown id, a partial record or a place:
      * only a full record of a work kind has a detail. Needs the grants
-     * `task.read` and `signal.query`, because the detail shows signal text.
+     * `task.read` and `signal.query`, because the detail shows signal text,
+     * and `workflow.query` and `connection.query`, because the offers name
+     * workflows and accounts.
      */
     read: (
       id: string,
@@ -611,6 +612,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
+        yield* requireGrant("workflow.query");
+        yield* requireGrant("connection.query");
         const found = yield* entities.readEntity(id, yield* readEnvironment);
         return yield* Option.match(found, {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),

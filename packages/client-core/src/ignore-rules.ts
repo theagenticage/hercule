@@ -15,7 +15,8 @@ import {
   type SignalKindLabels,
   type SignalMatch,
 } from "@hercule/contract";
-import { describeRetentionSpan, lowerFirst } from "./intake";
+import { describeRetentionSpan } from "./intake";
+import { lowerFirst } from "./text";
 import { parsePluginId } from "./plugin-id";
 
 /**

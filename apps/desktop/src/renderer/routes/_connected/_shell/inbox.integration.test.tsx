@@ -931,6 +931,8 @@ const buildDetailHandler = (card: InboxCard): Record<string, Handler> => ({
       signalCount: 0,
       timeline: [],
       peers: [],
+      offers: [],
+      actingConnections: [],
     },
   },
 });
@@ -1007,7 +1009,7 @@ const openSheetOf = async (
   await user.click(await screen.findByText(title));
   const sheet = await screen.findByRole("dialog", { name: title });
   await waitFor(() => {
-    expect(sheet.hasAttribute("data-arming")).toBe(false);
+    expect(sheet.querySelector("[data-arming]")).toBeNull();
   });
   return sheet;
 };

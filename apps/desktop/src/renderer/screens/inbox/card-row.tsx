@@ -2,10 +2,15 @@ import { memo, type JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { OpenPlaceRow } from "@hercule/client-core/desk";
 import { formatTargetDate } from "@hercule/client-core/desk";
-import { decideCardFace, describeCardAloud, type CardBundle } from "@hercule/client-core/inbox";
+import {
+  decideCardDraw,
+  describeCardAloud,
+  type CardBundle,
+  type CardOffers,
+} from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
-import { CardMonogram, CardMoves } from "./card-moves";
+import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardFactText, CardStatus, CardWaitFigure, NewMark } from "./card-parts";
 import { buildCardPropsComparer } from "./card-props";
 import { LinkLines } from "./link-lines";
@@ -18,6 +23,7 @@ interface CardRowProps {
   readonly bundle: CardBundle;
   /** The cards a signal just landed on. The row and the cards that ride on it show the new mark. */
   readonly freshIds: ReadonlySet<string>;
+  readonly offers: CardOffers;
   readonly plugins: readonly PluginIdentity[];
   readonly showMark: boolean;
   readonly showStatus: boolean;
@@ -54,7 +60,9 @@ const arePropsEqual = buildCardPropsComparer<CardRowProps>({
  *   `showStatus` is false when the surface is a status, whose head already
  *   says it, so the column closes up.
  * - `monogram` is the user's, which takes the place of the wait once a Task
- *   holds the card.
+ *   holds the card. A card a workflow is working on (`card.liveWorkflows`)
+ *   shows the colleague there instead, and its sentence reads "Agent review
+ *   has it". `offers` are the workflows its Hand to move offers.
  * - `bundle` is what rides on the card and the hints under it. Parts and hints
  *   stand as siblings of the row inside one `.inbox-bundle`, under the row's
  *   title, so what the row says and where it lies never depend on them. The
@@ -77,14 +85,14 @@ function CardRowView({
   near,
   bundle,
   freshIds,
+  offers,
   plugins,
   showMark,
   showStatus,
   monogram,
   step,
 }: CardRowProps): JSX.Element {
-  const { wait, trust, signalAge } = useCardTime(card);
-  const face = decideCardFace(card);
+  const { face, wait, trust, signalAge, holder } = decideCardDraw(card, useCardTime(card));
   return (
     <div className="inbox-bundle" style={{ "--arrive-step": step }}>
       <div
@@ -92,14 +100,14 @@ function CardRowView({
         role="listitem"
         data-card-id={card.id}
         data-access={card.access === "ok" ? undefined : card.access}
-        data-has-task={card.taskId === undefined ? undefined : ""}
+        data-has-task={holder === undefined ? undefined : ""}
         tabIndex={-1}
         aria-label={describeCardAloud(face, wait, bundle.riders.length)}
       >
         <span className="card-body">
           <span className="row-rail">
             {showMark && (
-              <span className="row-mark">
+              <span className="row-mark" data-hand-off-mark>
                 <PluginMark pluginId={face.pluginId} plugins={plugins} size={15} />
               </span>
             )}
@@ -141,9 +149,9 @@ function CardRowView({
           <span className="row-end">
             <span className="row-id">{face.identifier}</span>
             {wait !== null && <CardWaitFigure wait={wait} />}
-            {card.taskId !== undefined && <CardMonogram monogram={monogram} />}
+            <CardHolderMark holder={holder} monogram={monogram} />
           </span>
-          <CardMoves card={card} />
+          <CardMoves card={card} offers={offers} />
         </span>
       </div>
       {bundle.parts.length > 0 && (

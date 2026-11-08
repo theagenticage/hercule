@@ -121,13 +121,15 @@ describe("validateExpression with a scope", () => {
     expect(message).toContain("can read only event");
   });
 
-  it("accepts inputs and steps in the run scope, and explains how to get a value from the event", () => {
+  it("accepts inputs, run and steps in the run scope, and explains how to get a value from the event", () => {
     expect(
-      Effect.runSync(validateExpression(`has(inputs.pr) && steps.review.output.ok`, "run")),
+      Effect.runSync(
+        validateExpression(`has(inputs.pr) && has(run.taskId) && steps.review.output.ok`, "run"),
+      ),
     ).toBeUndefined();
 
     const message = readFailureMessage(validateExpression(`event.kind == "task.updated"`, "run"));
-    expect(message).toContain("can read only inputs and steps");
+    expect(message).toContain("can read only inputs, run and steps");
     expect(message).toContain("inputs.<name>");
   });
 

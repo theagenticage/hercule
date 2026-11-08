@@ -25,6 +25,15 @@ export const findCardElement = (root: ParentNode, id: string): HTMLElement | nul
   root.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(id)}"]`);
 
 /**
+ * Focuses the first Hand to row of the open card inside `root`, or does
+ * nothing when there is none. The key H uses it when several workflows can
+ * take the card: the user then chooses with the arrow keys or a number.
+ */
+export const focusFirstHandRow = (root: ParentNode): void => {
+  root.querySelector<HTMLElement>("[data-sheet-hand-row]")?.focus({ preventScroll: true });
+};
+
+/**
  * Returns the element on the page that stands for `target`, searched in the
  * desk `near` lies in (else in the whole document), or `null` when none is
  * drawn. A card is found by its id and a place by its ref, never one for the
@@ -49,6 +58,14 @@ export const readCardElement = (element: Element | null): HTMLElement | null =>
 /** Returns the id of the card `element` is, or is inside of, or `null`. */
 export const readCardId = (element: Element | null): string | null =>
   readCardElement(element)?.dataset["cardId"] ?? null;
+
+/**
+ * Returns the lead card (a row or a request) of the bundle `element` lies in,
+ * or `null` when it lies in none. The parts and hints under a card belong to
+ * its bundle, so a pointer anywhere on them points at the lead.
+ */
+export const readBundleLeadElement = (element: Element | null): HTMLElement | null =>
+  element?.closest(BUNDLE_SELECTOR)?.querySelector<HTMLElement>(LEAD_SELECTOR) ?? null;
 
 /**
  * Returns the id of the card that rises into the place of `element` when it

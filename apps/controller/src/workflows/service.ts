@@ -84,6 +84,7 @@ import type { PluginHost } from "../plugins";
 import { Settings } from "../settings";
 import { workflowReferences } from "./references";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
+import { WorkflowEntities } from "./entities";
 import { WorkflowRuns } from "./runs";
 import { WorkflowSignals } from "./signals";
 import { readDefaultSpawnBound } from "./spawn-bounds";
@@ -297,6 +298,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const runs = yield* WorkflowRuns;
   const signals = yield* WorkflowSignals;
+  const entities = yield* WorkflowEntities;
   const effects = yield* triggerEffectRepository;
   const settings = yield* Settings;
 
@@ -423,13 +425,22 @@ const make = Effect.gen(function* () {
      * - a required input with no value;
      * - a value that does not match the input's JSON Schema;
      * - a Connection id for a Connection that does not exist, is of another
-     *   type, or is disabled.
+     *   type, or is disabled;
+     * - a signal id for a Signal that does not exist or is of another kind;
+     * - an External Ref for an External Entity that does not exist or is of
+     *   a kind the entity input does not list.
+     *
+     * With `areFrozen`, the values are those of a run that already started,
+     * which a re-run copies. An entity that was pruned since is then fine,
+     * because the run froze its ref and not the entity. An entity that still
+     * exists must still be of a listed kind.
      *
      * Checks no grant: the run engine calls it while it starts a run.
      */
     resolveRunInputs: (
       definition: WorkflowDefinition,
       given: Readonly<Record<string, unknown>>,
+      options: { readonly areFrozen?: boolean } = {},
     ): Effect.Effect<Result.Result<Record<string, unknown>, ReadonlyArray<Issue>>, SqlError> =>
       Effect.gen(function* () {
         const declarations = definition.inputs ?? [];
@@ -497,6 +508,23 @@ const make = Effect.gen(function* () {
               issues.push({
                 path,
                 message: `This signal is of kind ${kind.value}, but the input takes only these kinds: ${wanted.join(", ")}.`,
+              });
+            }
+          } else if (input.entity !== undefined) {
+            const wanted = input.entity.kinds;
+            const kind =
+              typeof value === "string" ? yield* entities.readKind(value) : Option.none();
+            if (Option.isNone(kind)) {
+              if (options.areFrozen !== true) {
+                issues.push({
+                  path,
+                  message: `No External Entity has this ref. Give the External Ref of an entity of one of these kinds: ${wanted.join(", ")}.`,
+                });
+              }
+            } else if (!wanted.includes(kind.value)) {
+              issues.push({
+                path,
+                message: `This entity is of kind ${kind.value}, but the input takes only these kinds: ${wanted.join(", ")}.`,
               });
             }
           }
@@ -854,5 +882,6 @@ export const WorkflowServiceLayer: Layer.Layer<
   | EventKinds
   | WorkflowRuns
   | WorkflowSignals
+  | WorkflowEntities
   | Settings
 > = Layer.effect(WorkflowService)(make);

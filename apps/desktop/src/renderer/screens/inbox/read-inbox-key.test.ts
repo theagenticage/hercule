@@ -21,6 +21,9 @@ describe("readInboxKey", () => {
     [press("k"), { kind: "walk", walk: "previous" }],
     [press("Enter"), { kind: "open" }],
     [press(" "), { kind: "open" }],
+    [press("h"), { kind: "hand" }],
+    [press("1"), { kind: "pick-workflow", position: 1 }],
+    [press("3"), { kind: "pick-workflow", position: 3 }],
     [press("t"), { kind: "take" }],
     [press("e"), { kind: "dismiss" }],
     [press("g"), { kind: "see-task" }],
@@ -30,7 +33,7 @@ describe("readInboxKey", () => {
     expect(readInboxKey(pressed)).toEqual(command);
   });
 
-  it.each(["h", "l", "d", "x", "1", "Tab", "Backspace"])(
+  it.each(["l", "d", "x", "0", "4", "Tab", "Backspace"])(
     "does not use %s, which later slices own or nobody does",
     (key) => {
       expect(readInboxKey(press(key))).toBeNull();

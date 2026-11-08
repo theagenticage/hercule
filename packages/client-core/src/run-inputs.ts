@@ -43,7 +43,7 @@ interface FieldBase {
 
 /**
  * One input of the run form, with the widget it is edited with:
- * - `text`: a string;
+ * - `text`: a string, also for an `entity` input, whose value is an External Ref;
  * - `number`: a number or an integer;
  * - `boolean`: a checkbox;
  * - `enum`: a choice of a string schema's `enum` values;
@@ -117,6 +117,16 @@ const buildField = (
             : connection.label,
           disabled: connection.status === "disabled",
         })),
+    };
+  }
+  if (declaration.entity !== undefined) {
+    // No picker: the user pastes the ref, and the controller says whether an
+    // External Entity of a listed kind has it.
+    return {
+      ...base,
+      kind: "text",
+      description: `The External Ref of an entity of kind ${declaration.entity.kinds.join(" or ")}.`,
+      initial: toText(declaration.default, false),
     };
   }
   const type = schema["type"];

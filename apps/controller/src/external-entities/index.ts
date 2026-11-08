@@ -10,6 +10,7 @@ export {
   type PendingClaim,
 } from "./claim-resolution";
 export { buildActiveEntityKind } from "./entity-records";
+export { ExternalEntityHandoffs, ExternalEntityHandoffsLayer } from "./handoffs";
 export { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
 export {
   buildScopedTargetPrefix,

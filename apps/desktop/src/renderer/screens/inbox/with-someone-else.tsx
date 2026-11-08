@@ -53,6 +53,7 @@ export function WithSomeoneElse({
               homeName={row.homeName}
               bundle={row.bundle}
               freshIds={freshIds}
+              offers={row.offers}
               plugins={plugins}
               monogram={monogram}
               step={index}

@@ -1,10 +1,13 @@
 /** Tests the words of the Inbox's moves, why one is refused, and the edits that write an answered move into the cached Inbox. */
 import { describe, expect, it } from "vitest";
-import { buildInbox, buildInboxCard, buildRequestCard } from "./cards.testing";
+import { partitionOffers } from "./card-hand-off";
+import { buildInbox, buildInboxCard, buildRequestCard, buildWorkflowOffer } from "./cards.testing";
 import {
   applyInboxEdit,
   describeDismissal,
+  describeHandOffRefusal,
   describeMoveRefusal,
+  listRailTargets,
   nameCard,
   reapplyInboxEdits,
   type InboxEdit,
@@ -13,6 +16,7 @@ import {
 const TASK_ID = "01a1b576-c999-7000-8000-0000000000aa";
 const waiting = buildInboxCard("1");
 const held = buildInboxCard("2", { taskId: TASK_ID });
+const AGENT = { workflowId: "wf-agent-review", name: "Agent review" };
 
 describe("describeMoveRefusal", () => {
   it("lets take and dismiss through on a card that waits, and see-task through on one with a Task", () => {
@@ -29,6 +33,53 @@ describe("describeMoveRefusal", () => {
   it("refuses to see the Task of a card that has none, and says how to make one", () => {
     expect(describeMoveRefusal(waiting, "see-task")).toBe(
       "It has no Task yet. Press T to take it on, and G to see the Task.",
+    );
+  });
+});
+
+describe("describeMoveRefusal for a hand-off", () => {
+  const review = buildWorkflowOffer("Review PR");
+  const blocked = buildWorkflowOffer("Ship it", [], {
+    reason: "repository",
+    message: "Ship it works on acme/web only",
+  });
+
+  it("lets a card through when a workflow can take it, also when it has a Task", () => {
+    const offers = partitionOffers([review, blocked]);
+    expect(describeMoveRefusal(waiting, "hand", offers)).toBeUndefined();
+    expect(describeMoveRefusal(held, "hand", offers)).toBeUndefined();
+  });
+
+  it("says how to get a workflow when none exists", () => {
+    expect(describeMoveRefusal(waiting, "hand")).toBe(
+      "No workflow takes a ticket. Give a workflow an entity input for acme/ticket to hand these off.",
+    );
+  });
+
+  it("gives the controller's reason when workflows exist and none can take the card", () => {
+    expect(describeMoveRefusal(waiting, "hand", partitionOffers([blocked]))).toBe(
+      "No workflow can take it now. Ship it works on acme/web only.",
+    );
+  });
+});
+
+describe("describeHandOffRefusal", () => {
+  it("names the card and workflow, then gives the controller's reason as a sentence", () => {
+    expect(
+      describeHandOffRefusal(
+        buildRequestCard("87"),
+        "Review PR",
+        "Review PR is already working on this",
+      ),
+    ).toBe("Review #87 was not handed to Review PR. Review PR is already working on this.");
+    expect(
+      describeHandOffRefusal(
+        waiting,
+        "Review PR",
+        "A reply to this is still running. Try again in a moment.",
+      ),
+    ).toBe(
+      "Ticket ACME-1 was not handed to Review PR. A reply to this is still running. Try again in a moment.",
     );
   });
 });
@@ -65,6 +116,41 @@ describe("applyInboxEdit", () => {
   });
 });
 
+describe("applyInboxEdit for a hand-off", () => {
+  const other = { workflowId: "wf-other", name: "Other" };
+
+  it("puts the workflow first among the card's live workflows, once", () => {
+    const busy = buildInboxCard("3", { liveWorkflows: [other] });
+    const inbox = buildInbox([waiting, busy]);
+    const handed = applyInboxEdit(inbox, { kind: "hand-off", id: busy.id, workflow: AGENT });
+    expect(handed.cards[1]?.liveWorkflows).toEqual([AGENT, other]);
+    expect(handed.cards[0]).toBe(waiting);
+    expect(
+      applyInboxEdit(handed, { kind: "hand-off", id: busy.id, workflow: AGENT }).cards[1]
+        ?.liveWorkflows,
+    ).toEqual([AGENT, other]);
+  });
+
+  it("takes the workflow away and sets the Task the card has after a hand-off is taken back", () => {
+    const handed = buildInboxCard("3", { taskId: TASK_ID, liveWorkflows: [AGENT, other] });
+    const inbox = buildInbox([handed]);
+    const kept = applyInboxEdit(inbox, {
+      kind: "take-back-hand-off",
+      id: handed.id,
+      workflowId: AGENT.workflowId,
+      taskId: TASK_ID,
+    });
+    expect(kept.cards[0]).toMatchObject({ taskId: TASK_ID, liveWorkflows: [other] });
+    const gone = applyInboxEdit(inbox, {
+      kind: "take-back-hand-off",
+      id: handed.id,
+      workflowId: AGENT.workflowId,
+      taskId: undefined,
+    });
+    expect("taskId" in (gone.cards[0] ?? {})).toBe(false);
+  });
+});
+
 describe("reapplyInboxEdits", () => {
   it("makes the edits in order, so a card dropped and put back is there once", () => {
     const inbox = buildInbox([waiting]);
@@ -96,5 +182,65 @@ describe("describeDismissal", () => {
     ],
   ])("says what becomes of what rode on it when %s", (_name, riders, words) => {
     expect(describeDismissal(lead, riders)).toBe(words);
+  });
+});
+
+describe("listRailTargets", () => {
+  const review = buildWorkflowOffer("Review PR");
+  const blocked = buildWorkflowOffer("Ship it", [], { reason: "repository", message: "No" });
+  const offers = partitionOffers([review, blocked]);
+  const hand = { kind: "hand", workflowId: review.workflowId, name: "Review PR" };
+
+  it("offers a card that waits the workflows that can take it, then Take and Dismiss", () => {
+    expect(listRailTargets(waiting, offers)).toEqual([hand, { kind: "take" }, { kind: "dismiss" }]);
+  });
+
+  it.each([
+    ["a Task holds", held],
+    ["a workflow is working on", buildInboxCard("3", { liveWorkflows: [AGENT] })],
+  ])("offers only the workflows for a card %s", (_name, card) => {
+    expect(listRailTargets(card, offers)).toEqual([hand]);
+  });
+
+  it("names the first five workflows and stands for the rest with a target that shows two of them", () => {
+    const many = Array.from({ length: 8 }, (_unused, index) =>
+      buildWorkflowOffer(`Agent ${index}`),
+    );
+    const targets = listRailTargets(waiting, partitionOffers(many));
+
+    expect(targets.map((target) => target.kind)).toEqual([
+      ...Array.from({ length: 5 }, () => "hand"),
+      "more",
+      "take",
+      "dismiss",
+    ]);
+    expect(targets[5]).toEqual({
+      kind: "more",
+      workflowIds: [many[5]!.workflowId, many[6]!.workflowId],
+    });
+  });
+
+  it("has no target for the rest when every workflow fits, and keeps it on a held card", () => {
+    const five = Array.from({ length: 5 }, (_unused, index) =>
+      buildWorkflowOffer(`Agent ${index}`),
+    );
+    expect(listRailTargets(waiting, partitionOffers(five)).map((each) => each.kind)).toEqual([
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "take",
+      "dismiss",
+    ]);
+    const six = [...five, buildWorkflowOffer("Agent 5")];
+    expect(listRailTargets(held, partitionOffers(six)).map((each) => each.kind)).toEqual([
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "hand",
+      "more",
+    ]);
   });
 });

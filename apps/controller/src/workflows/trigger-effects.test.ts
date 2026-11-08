@@ -766,7 +766,7 @@ describe("the spawn bound", () => {
       topic: "workflow",
       id: workflowId,
       kind: "updated",
-      countsOnly: true,
+      derived: true,
     });
   });
 

@@ -25,6 +25,7 @@ import {
   ModelSelection,
   OutputSchema,
 } from "@hercule/protocol";
+import { QualifiedContributionId } from "@hercule/plugin-host";
 import { closedStruct } from "../closed";
 import { MAX_QUOTED_LENGTH, quoteAuthorText } from "../excerpts";
 import { isId } from "../ids";
@@ -224,7 +225,7 @@ const JsonObject = Schema.Record(Schema.String, Schema.Json).check(refuseDeepJso
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 /** The maximum length of a workflow name. The name labels the workflow in every list. */
-const MAX_WORKFLOW_NAME_LENGTH = 128;
+export const MAX_WORKFLOW_NAME_LENGTH = 128;
 
 /**
  * A workflow's name: one line of plain text. The schema rejects:
@@ -425,38 +426,74 @@ const SignalTrigger = closedStruct({
 /** The most signal kinds one signal input accepts. */
 export const MAX_INPUT_SIGNAL_KINDS = 32;
 
+/** The most signal kinds one entity input answers. */
+export const MAX_INPUT_ANSWERED_SIGNAL_KINDS = 32;
+
+/** The most entity kinds one entity input accepts. */
+export const MAX_INPUT_ENTITY_KINDS = 32;
+
 /**
- * The signal kinds a `signal` input accepts. It lists at least one kind, and
- * never `proposal`: a proposal is answered by Accept, which creates its Task,
- * so it cannot be handed to an agent.
+ * Returns the schema of a list of signal kinds that an input names. The list
+ * holds at least one kind, and never `proposal`: a proposal is answered by
+ * Accept, which creates its Task, so it cannot be handed to an agent.
+ * `subject` names the list in the error messages, such as "A signal input".
  */
-const InputSignalKinds = atMost(SignalKind, MAX_INPUT_SIGNAL_KINDS).check(
-  Schema.isMinLength(1, { message: "A signal input lists at least one signal kind." }),
-  Schema.makeFilter((kinds: ReadonlyArray<string>) =>
-    kinds.flatMap((kind, index) =>
-      kind === "proposal"
-        ? [
-            {
-              path: [index],
-              issue:
-                "A signal input cannot accept proposal. A proposal is answered by Accept, which creates its Task, so it cannot be handed to an agent. Start the work from the Task instead.",
-            },
-          ]
-        : [],
+const buildSignalKindList = (subject: string, maximum: number) =>
+  atMost(SignalKind, maximum).check(
+    Schema.isMinLength(1, { message: `${subject} must list at least one signal kind.` }),
+    Schema.makeFilter((kinds: ReadonlyArray<string>) =>
+      kinds.flatMap((kind, index) =>
+        kind === "proposal"
+          ? [
+              {
+                path: [index],
+                issue: `${subject} cannot include proposal. A proposal is answered by Accept, which creates its Task, so it cannot be handed to an agent. Start the work from the Task instead.`,
+              },
+            ]
+          : [],
+      ),
     ),
-  ),
+  );
+
+/** The signal kinds a `signal` input accepts. */
+const InputSignalKinds = buildSignalKindList("A signal input", MAX_INPUT_SIGNAL_KINDS);
+
+/**
+ * The qualified signal kinds an `entity` input answers, such as
+ * `github/review-requested`: the open signals a handoff ends. A core kind
+ * such as `proposal` or `fyi` has no plugin to qualify it, so a card's
+ * handoff can never answer one. The list holds at least one kind.
+ */
+const InputAnsweredSignalKinds = atMost(
+  QualifiedContributionId,
+  MAX_INPUT_ANSWERED_SIGNAL_KINDS,
+).check(
+  Schema.isMinLength(1, {
+    message: "The answers of an entity input must list at least one qualified signal kind.",
+  }),
 );
 
 /**
- * A value a run starts with. Its type is one of three, set by exactly one
+ * The qualified entity kinds an `entity` input accepts, such as
+ * `github/pull-request`. It lists at least one kind.
+ */
+const InputEntityKinds = atMost(QualifiedContributionId, MAX_INPUT_ENTITY_KINDS).check(
+  Schema.isMinLength(1, { message: "An entity input lists at least one entity kind." }),
+);
+
+/**
+ * A value a run starts with. Its type is one of four, set by exactly one
  * field:
  *
  * - `schema`: a JSON Schema the value must fit.
  * - `connection`: the value is the id of a Connection of this type.
  * - `signal`: the value is the id of a Signal of one of these kinds. Such a
  *   workflow is offered as Hand to an agent on each signal of those kinds.
+ * - `entity`: the value is the External Ref of an External Entity of one of
+ *   these kinds. Such a workflow is offered on each card of those kinds, and
+ *   `answers` names the signal kinds a handoff ends.
  *
- * The three are fields of one object instead of a union, so an error in one
+ * The four are fields of one object instead of a union, so an error in one
  * is reported at its own field and not at the whole input.
  */
 const InputDeclaration = closedStruct({
@@ -466,13 +503,27 @@ const InputDeclaration = closedStruct({
   connection: Schema.optionalKey(closedStruct({ type: Schema.String })),
   /** The value is the id of a Signal of one of these kinds, such as `github/review-requested`. */
   signal: Schema.optionalKey(closedStruct({ kinds: InputSignalKinds })),
+  /**
+   * The value is the External Ref of an External Entity of one of these
+   * qualified kinds, such as `github/pull-request`. The run freezes the ref,
+   * not the entity's id, so it outlives pruning and a prompt can use it.
+   */
+  entity: Schema.optionalKey(
+    closedStruct({
+      kinds: InputEntityKinds,
+      /** The signal kinds this workflow answers. A handoff ends only open signals of these kinds. */
+      answers: Schema.optionalKey(InputAnsweredSignalKinds),
+    }),
+  ),
   required: Schema.Boolean,
   default: Schema.optionalKey(Schema.Json.check(refuseDeepJson)),
 }).check(
   Schema.makeFilter((input) =>
-    [input.schema, input.connection, input.signal].filter((type) => type !== undefined).length === 1
+    [input.schema, input.connection, input.signal, input.entity].filter(
+      (type) => type !== undefined,
+    ).length === 1
       ? undefined
-      : "An input sets its type with exactly one of schema, connection and signal.",
+      : "An input sets its type with exactly one of schema, connection, signal and entity.",
   ),
 );
 

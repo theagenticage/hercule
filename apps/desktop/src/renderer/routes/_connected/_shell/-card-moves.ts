@@ -445,7 +445,7 @@ export const useCardMoves = ({
       putEndedCardBack,
       writeInboxEdit: buildCachedInboxWriter(queryClient),
     }),
-    isCarrying,
+    () => isCarrying,
   );
 
   /**

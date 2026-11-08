@@ -270,6 +270,13 @@ interface ActiveStepRow {
 }
 
 /**
+ * The SQL condition for a live run: one that is pending or running, the same
+ * statuses `isUnfinished` accepts. Every read of "the live runs" shares it,
+ * and its `status` is the column of `runs`.
+ */
+const LIVE_RUN_CONDITION = "status IN ('pending', 'running')";
+
+/**
  * The actor that started a run, as SQL over the `origin` column:
  *
  * - `run:<id>` for a run that a step of another run started;
@@ -928,7 +935,7 @@ const make = Effect.gen(function* () {
           CROSS JOIN runs ON runs.id = latest_id`;
         const liveRows = yield* sql<SummaryRow>`
           SELECT ${sql.literal(SUMMARY_COLUMNS)} FROM runs
-          WHERE status IN ('pending', 'running')
+          WHERE ${sql.literal(LIVE_RUN_CONDITION)}
             AND task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
           ORDER BY created_at DESC, id DESC`;
         const records = yield* listActiveStepRecords(
@@ -940,6 +947,59 @@ const make = Effect.gen(function* () {
           parseSummaryRow(row, records.get(uuidToString(row.id)) ?? []);
         return { latest: latestRows.map(parse), live: liveRows.map(parse) };
       }),
+
+    /**
+     * Returns, for each of the Tasks `taskIds` that has one, the workflows
+     * with a live run on it, by Task id: newest run first, each workflow once
+     * (by its newest live run), at most `perTask` for each Task. A workflow
+     * is named as its live run was planned. A run that was not started from a
+     * stored workflow is left out, since no workflow stands behind it.
+     *
+     * One statement, whatever the number of Tasks: the live runs come from
+     * `runs_unfinished`, which holds few, kept to these Tasks. The ids reach
+     * SQLite as one JSON text, so the statement does not grow with them.
+     */
+    listLiveWorkflowsOfTasks: (
+      taskIds: ReadonlyArray<string>,
+      perTask: number,
+    ): Effect.Effect<
+      ReadonlyMap<string, ReadonlyArray<{ readonly workflowId: string; readonly name: string }>>,
+      SqlError
+    > =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly task_id: Uint8Array;
+              readonly workflow_id: Uint8Array;
+              readonly name: string;
+            }>`
+              SELECT task_id, workflow_id, name FROM (
+                SELECT task_id, workflow_id, name,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY task_id ORDER BY newest DESC, workflow_id DESC) AS position
+                FROM (
+                  SELECT task_id, workflow_id, json_extract(plan, '$.name') AS name,
+                    MAX(created_at) AS newest
+                  FROM runs
+                  WHERE ${sql.literal(LIVE_RUN_CONDITION)} AND workflow_id IS NOT NULL
+                    AND task_id IN (SELECT unhex(value)
+                                    FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+                  GROUP BY task_id, workflow_id))
+              WHERE position <= ${perTask}
+              ORDER BY task_id, position`,
+            (rows) => {
+              const found = new Map<string, Array<{ workflowId: string; name: string }>>();
+              for (const row of rows) {
+                const taskId = uuidToString(row.task_id);
+                const workflow = { workflowId: uuidToString(row.workflow_id), name: row.name };
+                const list = found.get(taskId);
+                if (list === undefined) found.set(taskId, [workflow]);
+                else list.push(workflow);
+              }
+              return found;
+            },
+          ),
 
     /**
      * Returns what went wrong in each failed run of `runIds` that says so, by
@@ -1027,6 +1087,42 @@ const make = Effect.gen(function* () {
         sql<{ readonly total: number }>`
           SELECT COUNT(*) AS total FROM runs WHERE task_id = ${uuidFromString(taskId)}`,
         (rows) => rows[0]!.total,
+      ),
+
+    /**
+     * Returns the id of a pending or running run of the stored workflow
+     * `workflowId` on the Task, or none when it has no such run. One lookup on
+     * `runs_task_id`, which reads only the runs of the Task.
+     */
+    findLiveRunIdOnTask: (
+      taskId: string,
+      workflowId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE task_id = ${uuidFromString(taskId)}
+            AND workflow_id = ${uuidFromString(workflowId)}
+            AND ${sql.literal(LIVE_RUN_CONDITION)}
+          LIMIT 1`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns true when anything of the run has been handed to an executor:
+     * a step record that is not `pending`, or a session. A running action may
+     * already have changed the source, and a session may already have acted,
+     * long before any step completes, so only a run where this is false can
+     * be taken back as if it never started.
+     */
+    hasDispatchedWork: (runId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly dispatched: number }>`
+          SELECT EXISTS (SELECT 1 FROM run_steps
+                         WHERE run_id = ${uuidFromString(runId)} AND status <> 'pending')
+              OR EXISTS (SELECT 1 FROM sessions WHERE run_id = ${uuidFromString(runId)})
+              AS dispatched`,
+        (rows) => rows[0]?.dispatched === 1,
       ),
 
     /**

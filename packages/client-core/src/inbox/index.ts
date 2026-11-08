@@ -12,6 +12,7 @@
 export * from "./card-aloud";
 export * from "./card-bundles";
 export * from "./card-face";
+export * from "./card-hand-off";
 export * from "./card-links";
 export * from "./card-wait";
 export * from "./empty-inbox";

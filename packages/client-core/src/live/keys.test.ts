@@ -121,6 +121,19 @@ describe("the Work board's key", () => {
     ]);
   });
 
+  it("reads the failure dot again on an ordinary task push, but not on a derived one", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.taskAttention())),
+      );
+      assert.isFalse(
+        buildQueryKeys("task", ids, undefined, true).some((key) =>
+          isPrefixOf(key, queryKeys.taskAttention()),
+        ),
+      );
+    }
+  });
+
   it("reads a Task's detail again on an ordinary task push, with or without ids", () => {
     assert.isTrue(
       buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
@@ -290,8 +303,45 @@ describe("the Inbox's and the entities' keys", () => {
     assert.isFalse(keys.some((read) => isPrefixOf(read, queryKeys.signals({ view: "to-do" }))));
   });
 
+  it("reads the Inbox and the entity panes again on a push that names a workflow, because their offers come from the workflows, and not the count or the suggestions", () => {
+    const keys = buildQueryKeys("workflow", ["w1"]);
+    for (const key of [queryKeys.inbox(), queryKeys.externalEntity()]) {
+      assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    }
+    for (const key of [queryKeys.inboxCount(), queryKeys.entitySuggestions()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("leaves the Inbox, the entity panes and the signals alone on a derived workflow push, which a trigger's counts, next fire time or health cause", () => {
+    const keys = buildQueryKeys("workflow", ["w1"], undefined, true);
+    for (const key of [
+      ...inboxKeys,
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+      queryKeys.signals(),
+    ]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("still reads the workflow lists, the named workflow and every trigger on a derived workflow push", () => {
+    assert.deepStrictEqual(buildQueryKeys("workflow", ["w1"], undefined, true), [
+      queryKeys.workflows(),
+      queryKeys.workflow("w1"),
+      queryKeys.triggers(),
+    ]);
+  });
+
+  it("leaves the Inbox alone on a workflow push that names no workflow, which is the first push of every subscription", () => {
+    const keys = buildQueryKeys("workflow", []);
+    for (const key of [...inboxKeys, queryKeys.externalEntity()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
   it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
-    for (const topic of ["run", "session", "workflow", "wikiPage"] as const) {
+    for (const topic of ["run", "session", "wikiPage"] as const) {
       for (const ids of [[], ["x"]]) {
         const keys = buildQueryKeys(topic, ids);
         for (const key of [

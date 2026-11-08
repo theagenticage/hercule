@@ -352,6 +352,11 @@
 .row-trust {
   margin-top: 1px;
 }
+/* A card someone has taken on takes a step back: its title is ink mixed a quarter of the way to the muted words. */
+.inbox-row[data-has-task] .row-title,
+.inbox-request[data-has-task] .request-title {
+  color: color-mix(in oklab, var(--ink) 74%, var(--muted));
+}
 /* A card that lost access keeps its last known facts, with its words a step back. */
 .inbox-row[data-access] .row-title,
 .inbox-request[data-access] .request-title {
@@ -630,9 +635,19 @@
 .inbox-row[data-current] .row-end {
   opacity: 0;
 }
+/* The width of a card's moves. The page sets it on the element that holds the moves when the card becomes the
+   current one, because the hand-off's name is as long as the workflow's. It is registered as not inherited, so a
+   new value restyles that element alone and not the whole card below it; the lines that give up room for the moves
+   take it from their parent with `inherit`. */
+@property --moves-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 92px;
+}
 /* The request's second line ends before the moves, with an ellipsis, and gives up its place. */
 .inbox-request[data-current] .request-under {
-  margin-right: 92px;
+  --moves-width: inherit;
+  margin-right: var(--moves-width);
 }
 .inbox-request[data-current] .request-where {
   display: none;
@@ -669,24 +684,37 @@
 .card-move--go {
   padding: 0 8px;
 }
+/* The hand-off names the workflow, or says "Hand to…" over the faces of the first two, which overlap by 6px. */
+.card-move--hand {
+  color: var(--ink);
+}
+.card-move--hand .cr + .cr {
+  margin-left: -12px;
+}
+.card-move-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .card-move:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
 
 /* ---------- Who has taken a card on ---------- */
-/* The user's monogram stands where the wait was. Its box clips the monogram, which rises into it from below. */
+/* The user's monogram stands where the wait was. Its box clips the monogram, which rises into it from below.
+   The box is as big as the colleague's below, and sits in the same place. */
 .card-taken {
   flex: none;
   display: inline-block;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   overflow: hidden;
 }
 .inbox-request .card-taken {
   grid-column: 3;
   grid-row: 1;
-  margin: -1px 0;
+  margin: -1px 0 -3px;
 }
 .card-taken-in {
   display: grid;
@@ -706,6 +734,36 @@
   font-weight: var(--w-bold);
   letter-spacing: 0.01em;
   line-height: 1;
+}
+
+/* The colleague who has a card stands in the same place: a 22px face in a box that clips it, so it rises into its
+   place from below and sinks out of it. The box is 4px taller than the wait's line, so on a request it gives back
+   1px above and 3px below, and no line changes height. */
+.card-colleague {
+  flex: none;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+}
+.inbox-request .card-colleague {
+  grid-column: 3;
+  grid-row: 1;
+  margin: -1px 0 -3px;
+}
+/* The id on a row ends 8px before the colleague or the monogram, and a request's title ends 12px before it. */
+.row-end .card-colleague,
+.row-end .card-taken {
+  margin-left: -2px;
+}
+.inbox-request:has(.card-colleague, .card-taken) .request-title {
+  margin-right: 4px;
+}
+.card-colleague-in {
+  display: block;
+  width: 100%;
+  height: 100%;
+  line-height: 0;
 }
 
 /* ---------- Copies that step aside ---------- */

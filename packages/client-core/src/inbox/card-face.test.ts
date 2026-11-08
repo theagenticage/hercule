@@ -134,7 +134,7 @@ describe("the sentence of a card with signals", () => {
   it("draws the latest signal's sentence in place of the observation's reason", () => {
     const card = buildInboxCard("1", {
       reason: { say: "Assigned to you", tone: "plain" },
-      signals: { openCount: 2, latest: commented },
+      signals: { openCount: 2, kinds: [], latest: commented },
     });
     expect(decideCardFace(card).sentence).toEqual({ text: "Tessa commented", tone: "plain" });
   });
@@ -143,27 +143,27 @@ describe("the sentence of a card with signals", () => {
     const failed = buildSignalLine("s3", "Checks failed", {
       say: { say: "Checks failed", tone: "bad" },
     });
-    const card = buildRequestCard("1", { signals: { openCount: 1, latest: failed } });
+    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: failed } });
     expect(decideCardFace(card).sentence).toEqual({ text: "Checks failed", tone: "bad" });
   });
 
   it("reduces a request's plain signal to the name of whoever it came from", () => {
-    const card = buildRequestCard("1", { signals: { openCount: 1, latest: commented } });
+    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: commented } });
     expect(decideCardFace(card).sentence).toEqual({ text: "Tessa Hart", tone: "plain" });
   });
 
   it("says nothing on a row that has only been assigned", () => {
     const card = buildInboxCard("1", {
       concerns: ["assigned"],
-      signals: { openCount: 1, latest: assigned },
+      signals: { openCount: 1, kinds: [], latest: assigned },
     });
     expect(decideCardFace(card)).not.toHaveProperty("sentence");
     expect(readSentenceSignal(card)).toBeUndefined();
   });
 
   it.each([
-    ["a second open signal", { openCount: 2, latest: assigned }],
-    ["a signal that is not its concern", { openCount: 1, latest: commented }],
+    ["a second open signal", { openCount: 2, kinds: [], latest: assigned }],
+    ["a signal that is not its concern", { openCount: 1, kinds: [], latest: commented }],
   ])("says the latest signal on a row with %s", (_name, signals) => {
     const card = buildInboxCard("1", { concerns: ["assigned"], signals });
     expect(readSentenceSignal(card)).toBe(signals.latest);
@@ -173,7 +173,7 @@ describe("the sentence of a card with signals", () => {
   it("keeps the assigned sentence of a request, which a request always shows", () => {
     const card = buildRequestCard("1", {
       concerns: ["assigned"],
-      signals: { openCount: 1, latest: assigned },
+      signals: { openCount: 1, kinds: [], latest: assigned },
     });
     expect(readSentenceSignal(card)).toBe(assigned);
   });
@@ -186,12 +186,15 @@ describe("decideAskingSentence", () => {
   });
 
   it("keeps the full sentence, and its tone on the user's own work", () => {
-    const card = buildRequestCard("1", { yours: true, signals: { openCount: 1, latest: failed } });
+    const card = buildRequestCard("1", {
+      yours: true,
+      signals: { openCount: 1, kinds: [], latest: failed },
+    });
     expect(decideAskingSentence(card)).toEqual({ text: "Checks failed", tone: "bad" });
   });
 
   it("draws someone else's sentence plain, because their red stays in the status shape", () => {
-    const card = buildRequestCard("1", { signals: { openCount: 1, latest: failed } });
+    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: failed } });
     expect(decideAskingSentence(card)).toEqual({ text: "Checks failed", tone: "plain" });
   });
 
