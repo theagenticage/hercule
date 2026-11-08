@@ -346,9 +346,23 @@
 .open-card-row.is-first:focus-visible .open-card-label {
   background: color-mix(in oklab, var(--answer) 88%, var(--ink));
 }
-/* A workflow that cannot take the card now: dimmed, with the reason where its line would be. */
-.open-card-row.is-unavailable {
+/* A workflow that cannot take the card now: its name in the muted ink and its face dimmed, with the reason where
+   its line would be. The text keeps full strength in a quieter colour, so it stays readable. */
+.open-card-row.is-unavailable .open-card-label {
+  color: var(--muted);
+}
+.open-card-row.is-unavailable .cr {
   opacity: 0.55;
+}
+/* A workflow's name can be long, and the Text size can be large: the name ends with an ellipsis at the edge of its
+   column and never runs into the line beside it. */
+.open-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.open-card-row .open-card-label .cr {
+  flex: none;
 }
 .open-card-row.is-unavailable:hover {
   background: none;

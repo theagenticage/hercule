@@ -55,8 +55,9 @@
 
 /* A failed run, on the Hercule segment while the Threads face shows: a 26px
    button of its own, with the 7px dot drawn in the middle of it, 2px in from
-   the segment's top and right edges. The Hercule tab gives it the room, so
-   the word and the To do count centre in what is left. */
+   the segment's top and right edges. The word stays centred in the tab, as
+   drawn. Only when the To do count shows too does the tab give the dot room
+   (below), so the count and the dot never touch. */
 .seg-dot {
   position: absolute;
   top: 2px;
@@ -72,7 +73,7 @@
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--r-pill);
   background: var(--failed-dot);
 }
 .seg-dot:hover {
@@ -82,7 +83,7 @@
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
-.seg.seg--side > [data-has-dot] {
+.seg.seg--side > [data-has-dot]:has(.count) {
   padding-right: 26px;
 }
 
@@ -92,7 +93,7 @@
   width: 7px;
   height: 7px;
   margin-right: 6px;
-  border-radius: 50%;
+  border-radius: var(--r-pill);
   background: var(--failed-dot);
 }
 

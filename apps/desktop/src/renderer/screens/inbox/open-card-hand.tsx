@@ -66,7 +66,9 @@ export function OpenCardHandRows({
         >
           <span className="open-card-label">
             <Face look={buildLook(offer.workflowId)} pose="idle" size={FACE_SIZE} />
-            {offer.name}
+            <span className="open-card-name" title={offer.name}>
+              {offer.name}
+            </span>
           </span>
           <span className="open-card-says">{describeHandOffEnds(offer, openKinds)}</span>
           {index < NUMBERED_ROWS && <kbd>{available.length === 1 ? "H" : index + 1}</kbd>}
@@ -81,7 +83,9 @@ export function OpenCardHandRows({
         <div key={offer.workflowId} className="open-card-row is-unavailable">
           <span className="open-card-label">
             <Face look={buildLook(offer.workflowId)} pose="idle" size={FACE_SIZE} />
-            {offer.name}
+            <span className="open-card-name" title={offer.name}>
+              {offer.name}
+            </span>
           </span>
           <span className="open-card-says">{offer.unavailable?.message}</span>
         </div>

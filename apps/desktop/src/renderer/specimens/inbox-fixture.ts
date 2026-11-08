@@ -109,7 +109,7 @@ const OFFER_SETS: Readonly<Record<string, readonly WorkflowOffer[]>> = {
   ],
   "tidewatch/ticket": [
     buildWorkflowOffer("Plan the work", ["tidewatch/commented", "tidewatch/assigned"]),
-    buildWorkflowOffer("Estimate the ticket", [], {
+    buildWorkflowOffer("Size the ticket", [], {
       reason: "needs-workflow-change",
       message: "Takes a signal, not a card. Give it an entity input.",
     }),
