@@ -10,6 +10,8 @@ const make = Effect.gen(function* () {
     reconcile: ingest.reconcile,
     refresh: ingest.refresh,
     listWanted: (reporter, kind, limit) => Effect.orDie(ingest.listWanted(reporter, kind, limit)),
+    // TODO(#1035 phase 3): answer from the tracked branches of live Tasks. Until then no branch is tracked.
+    listTrackedBranches: () => Effect.succeed([]),
     reportMissing: ingest.reportMissing,
   });
 });

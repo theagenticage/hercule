@@ -76,6 +76,7 @@ export {
   type EntityMissing,
   type EntityResolution,
   type IngestEntities,
+  type TrackedBranch,
 } from "./entities";
 
 export {

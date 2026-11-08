@@ -862,6 +862,7 @@ export const buildFakeEntities = (
           reported.listed.push({ kind, limit });
           return wanted[kind] ?? [];
         }),
+      listTrackedBranches: () => Effect.succeed([]),
       reportMissing: (ref, reason) =>
         Effect.sync(() => void reported.missing.push({ ref, reason })),
     },

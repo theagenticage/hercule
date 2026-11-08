@@ -16,6 +16,7 @@ import {
   MAX_EVENT_TITLE_LENGTH,
   type EntityObservation,
   type PluginError,
+  type TrackedBranch,
 } from "@hercule/plugin-host";
 import { ISSUE_KIND, PULL_REQUEST_KIND, REPOSITORY_KIND } from "./entity-kinds";
 import { decodeGithubValue, fetchGraphql, type FeedError } from "./ingest/requests";
@@ -226,8 +227,12 @@ const buildItemTexts = (node: ItemNode): Pick<EntityObservation, "texts"> => ({
   ],
 });
 
+/** What every address of a repository on GitHub starts with, as the core stores a remote. */
+export const GITHUB_REMOTE_PREFIX = "github.com/";
+
 /** Returns the address of a repository the way a plugin reports it: `github.com/owner/repo`, lowercase. */
-const buildRemote = (nameWithOwner: string): string => `github.com/${nameWithOwner.toLowerCase()}`;
+const buildRemote = (nameWithOwner: string): string =>
+  `${GITHUB_REMOTE_PREFIX}${nameWithOwner.toLowerCase()}`;
 
 /** Returns the relations of an item: GitHub always knows its repository, and reports nothing else. */
 const buildRelations = (repo: string) => ({
@@ -492,6 +497,90 @@ ${fragments}`;
       observations.push(
         yield* decodeTargetAnswer(target, answer[`t${String(index)}`], viewer.login),
       );
+    }
+    return observations;
+  });
+
+/** How many pull requests of one branch a read lists, newest first. A branch rarely has more. */
+const PULL_REQUESTS_PER_BRANCH = 5;
+
+const BranchPullRequestsAnswer = Schema.NullOr(
+  Schema.Struct({
+    pullRequests: Schema.Struct({
+      nodes: Schema.NullOr(Schema.Array(Schema.NullOr(PullRequestNode))),
+    }),
+  }),
+);
+
+/**
+ * Returns the owner and name of the repository a remote such as
+ * `github.com/owner/repo` names, or undefined for an address that is not a
+ * GitHub repository GitHub would allow.
+ */
+const parseGithubRemote = (remote: string): { owner: string; name: string } | undefined => {
+  if (!remote.startsWith(GITHUB_REMOTE_PREFIX)) return undefined;
+  const repo = parseRepoRef(`github:repo:${remote.slice(GITHUB_REMOTE_PREFIX.length)}`);
+  return repo === undefined ? undefined : splitRepoName(repo);
+};
+
+/**
+ * Reads, in one request with one alias per branch, the pull requests whose
+ * head is each of `branches`, open, merged or closed, and returns their
+ * observations with no concerns. A pull request is kept only when its head
+ * lives on the branch's own remote, so a fork's pull request that happens to
+ * use the same branch name is left out. A branch on an address that is not a
+ * GitHub repository is skipped. Sends no request when no branch is left.
+ * Fails as `fetchGraphql` fails.
+ */
+export const readPullRequestsByBranch = (
+  token: string,
+  branches: ReadonlyArray<TrackedBranch>,
+): Effect.Effect<ReadonlyArray<EntityObservation>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const readable = branches.flatMap((branch) => {
+      const repository = parseGithubRemote(branch.remote);
+      return repository === undefined ? [] : [{ ...branch, ...repository }];
+    });
+    if (readable.length === 0) return [];
+
+    const declarations: Array<string> = [];
+    const variables: Record<string, string> = {};
+    const selections: Array<string> = [];
+    for (const [index, { owner, name, branch }] of readable.entries()) {
+      const i = String(index);
+      declarations.push(`$o${i}: String!`, `$n${i}: String!`, `$b${i}: String!`);
+      variables[`o${i}`] = owner;
+      variables[`n${i}`] = name;
+      variables[`b${i}`] = branch;
+      selections.push(
+        `b${i}: repository(owner: $o${i}, name: $n${i}) { pullRequests(headRefName: $b${i}, first: ${String(PULL_REQUESTS_PER_BRANCH)}, states: [OPEN, MERGED, CLOSED], orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...PullRequestFields } } }`,
+      );
+    }
+    const query = `query (${declarations.join(", ")}) {
+  viewer { login }
+  ${selections.join("\n  ")}
+}
+${buildFragments({ pullRequest: true, issue: false })}`;
+
+    const data = yield* fetchGraphql(token, query, variables, { tolerateMissing: true });
+    const answer = yield* decodeGithubValue(
+      Schema.Record(Schema.String, Schema.Unknown),
+      data,
+      "the branches asked for",
+    );
+    const viewer = yield* decodeGithubValue(ViewerNode, answer["viewer"], "the viewer");
+    const observations: Array<EntityObservation> = [];
+    for (const [index, { remote }] of readable.entries()) {
+      const nodes = (yield* decodeGithubValue(
+        BranchPullRequestsAnswer,
+        answer[`b${String(index)}`],
+        "the pull requests of a branch",
+      ))?.pullRequests.nodes;
+      for (const node of nodes ?? []) {
+        if (node === null || node.headRepository === null) continue;
+        if (buildRemote(node.headRepository.nameWithOwner) !== remote) continue;
+        observations.push(buildPullRequestObservation(node, viewer.login, []));
+      }
     }
     return observations;
   });

@@ -15,6 +15,7 @@ import {
   type EntityObservation,
   type IngestEntities,
   type PollResult,
+  type TrackedBranch,
 } from "@hercule/plugin-host";
 import { readJsonBody } from "../actions/testing";
 import {
@@ -108,15 +109,18 @@ interface GraphqlBody {
 
 /**
  * Builds a stub that answers each search by its qualifier and cursor from
- * `searches`, answers an alias query with `refresh`, and answers an
+ * `searches`, answers the alias query of the refresh with `refresh` and the
+ * alias query of the tracked branches with `branches`, and answers an
  * unlisted search with an empty result.
  */
 const stubGraphql = (
   searches: Readonly<Record<string, ReadonlyArray<unknown>>>,
   refresh: StubResponse = { status: 200, body: { data: { viewer: VIEWER } } },
+  branches: StubResponse = { status: 200, body: { data: { viewer: VIEWER } } },
 ): GithubStub =>
   stubGithub((request) => {
     const body = readJsonBody(request) as GraphqlBody;
+    if (body.query.includes("pullRequests(headRefName:")) return branches;
     if (body.query.includes("repository(owner:")) return refresh;
     const pages = searches[String(body.variables["query"])] ?? searchPages([{ nodes: [] }]);
     const cursor = body.variables["after"];
@@ -130,13 +134,25 @@ interface Reported {
   readonly refreshed: Array<ReadonlyArray<EntityObservation>>;
   readonly missing: Array<{ readonly ref: string; readonly reason: string }>;
   readonly listed: Array<{ readonly kind: string; readonly limit: number }>;
+  readonly listedBranches: Array<{ readonly remotePrefix: string; readonly limit: number }>;
 }
 
-/** Builds the `entities` member of an ingest context, which records every call. */
+/**
+ * Builds the `entities` member of an ingest context, which records every call.
+ * `wanted` holds the refs `listWanted` returns by kind, and `tracked` the
+ * branches `listTrackedBranches` returns.
+ */
 const fakeEntities = (
   wanted: Readonly<Record<string, ReadonlyArray<string>>> = {},
+  tracked: ReadonlyArray<TrackedBranch> = [],
 ): { readonly entities: IngestEntities; readonly reported: Reported } => {
-  const reported: Reported = { reconciled: [], refreshed: [], missing: [], listed: [] };
+  const reported: Reported = {
+    reconciled: [],
+    refreshed: [],
+    missing: [],
+    listed: [],
+    listedBranches: [],
+  };
   return {
     reported,
     entities: {
@@ -151,6 +167,12 @@ const fakeEntities = (
           reported.listed.push({ kind, limit });
           return wanted[kind] ?? [];
         }),
+      // Like the host, returns at most `limit` branches.
+      listTrackedBranches: (remotePrefix, limit) =>
+        Effect.sync(() => {
+          reported.listedBranches.push({ remotePrefix, limit });
+          return tracked.filter(({ remote }) => remote.startsWith(remotePrefix)).slice(0, limit);
+        }),
       reportMissing: (ref, reason) =>
         Effect.sync(() => void reported.missing.push({ ref, reason })),
     },
@@ -161,11 +183,12 @@ const fakeEntities = (
 const pollEntitiesFeed = async (
   stub: GithubStub,
   wanted: Readonly<Record<string, ReadonlyArray<string>>> = {},
+  tracked: ReadonlyArray<TrackedBranch> = [],
 ): Promise<{
   readonly result: Result.Result<PollResult, AuthError | PluginError>;
   readonly reported: Reported;
 }> => {
-  const { entities, reported } = fakeEntities(wanted);
+  const { entities, reported } = fakeEntities(wanted, tracked);
   const context = { ...buildIngestHarness().context, entities };
   const result = await runAgainstStub(pollGithubFeed("entities", {}, context, TEST_IDENTITY), stub);
   return { result, reported };
@@ -597,6 +620,202 @@ describe("the entities feed's request count", () => {
       { kind: "issue", limit: 50 },
       { kind: "repository", limit: 50 },
     ]);
+  });
+});
+
+describe("the entities feed's tracked branches", () => {
+  const BRANCH: TrackedBranch = {
+    remote: "github.com/acme/storefront-web",
+    branch: "feature/slots",
+  };
+
+  /** The answer to the aliased branch read: the pull requests of each branch, in order. */
+  const answerBranches = (...branches: ReadonlyArray<ReadonlyArray<unknown>>): StubResponse => ({
+    status: 200,
+    body: {
+      data: {
+        viewer: VIEWER,
+        ...Object.fromEntries(
+          branches.map((nodes, index) => [`b${String(index)}`, { pullRequests: { nodes } }]),
+        ),
+      },
+    },
+  });
+
+  it("sends one more request when a branch is tracked, and asks the host for at most 50", async () => {
+    const stub = stubGraphql({}, undefined, answerBranches([]));
+
+    const { reported } = await pollEntitiesFeed(stub, {}, [BRANCH]);
+
+    expect(stub.requests).toHaveLength(3 + 1);
+    expect(reported.listedBranches).toEqual([{ remotePrefix: "github.com/", limit: 50 }]);
+    expectValidGraphqlFragments(stub);
+  });
+
+  it("reads at most 50 branches in the one request", async () => {
+    const stub = stubGraphql({}, undefined, answerBranches([]));
+    const many = Array.from({ length: 60 }, (_, index) => ({
+      remote: "github.com/acme/storefront-web",
+      branch: `feature/slots-${String(index)}`,
+    }));
+
+    await pollEntitiesFeed(stub, {}, many);
+
+    const request = readJsonBody(stub.requests[3]!) as GraphqlBody;
+    expect(stub.requests).toHaveLength(4);
+    expect(request.query.match(/pullRequests\(headRefName:/g)).toHaveLength(50);
+  });
+
+  it("sends no request when no branch is tracked", async () => {
+    const stub = stubGraphql({});
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    expect(stub.requests).toHaveLength(3);
+    expect(reported.listedBranches).toHaveLength(1);
+    expect(reported.refreshed).toEqual([]);
+  });
+
+  it("asks for the pull requests of every branch in one request, whatever their state", async () => {
+    const stub = stubGraphql({}, undefined, answerBranches([], []));
+
+    await pollEntitiesFeed(stub, {}, [
+      BRANCH,
+      { remote: "github.com/acme/storefront-api", branch: "fix/totals" },
+    ]);
+
+    const request = readJsonBody(stub.requests[3]!) as GraphqlBody;
+    expect(stub.requests).toHaveLength(4);
+    expect(request.variables).toEqual({
+      o0: "acme",
+      n0: "storefront-web",
+      b0: "feature/slots",
+      o1: "acme",
+      n1: "storefront-api",
+      b1: "fix/totals",
+    });
+    expect(request.query).toContain("states: [OPEN, MERGED, CLOSED]");
+    expect(request.query).toContain("orderBy: { field: CREATED_AT, direction: DESC }");
+    expectValidGraphqlFragments(stub);
+  });
+
+  it("refreshes a pull request that was already merged when first seen, with no concern", async () => {
+    const stub = stubGraphql(
+      {},
+      undefined,
+      answerBranches([pullRequestNode(12, { state: "MERGED" })]),
+    );
+
+    const { reported } = await pollEntitiesFeed(stub, {}, [BRANCH]);
+
+    expect(reported.refreshed).toHaveLength(1);
+    expect(full(reported.refreshed[0]?.[0])).toMatchObject({
+      ref: "github:pr:acme/storefront-web#12",
+      lifecycle: "completed",
+      status: "merged",
+      concerns: [],
+      repository: { head: { remote: BRANCH.remote, branch: BRANCH.branch } },
+    });
+  });
+
+  it("leaves out a pull request whose head is a fork, or a deleted fork", async () => {
+    const stub = stubGraphql(
+      {},
+      undefined,
+      answerBranches([
+        pullRequestNode(12, { headRepository: { nameWithOwner: "marta-vos/storefront-web" } }),
+        pullRequestNode(13, { headRepository: null }),
+        pullRequestNode(14),
+      ]),
+    );
+
+    const { reported } = await pollEntitiesFeed(stub, {}, [BRANCH]);
+
+    expect(reported.refreshed.flat().map(({ ref }) => ref)).toEqual([
+      "github:pr:acme/storefront-web#14",
+    ]);
+  });
+
+  it("matches the head remote whatever case GitHub spells the repository in", async () => {
+    const stub = stubGraphql({}, undefined, answerBranches([pullRequestNode(12)]));
+
+    const { reported } = await pollEntitiesFeed(stub, {}, [BRANCH]);
+
+    expect(reported.refreshed).toHaveLength(1);
+  });
+
+  it("refreshes nothing when a branch has no pull request, or its repository is not visible", async () => {
+    const stub = stubGraphql({}, undefined, {
+      status: 200,
+      body: {
+        data: { viewer: VIEWER, b0: null },
+        errors: [{ type: "NOT_FOUND", message: "Could not resolve to a Repository" }],
+      },
+    });
+
+    const { result, reported } = await pollEntitiesFeed(stub, {}, [BRANCH]);
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(reported.refreshed).toEqual([]);
+  });
+
+  it("sends no request for a remote that is not a GitHub repository", async () => {
+    const stub = stubGraphql({});
+
+    await pollEntitiesFeed(stub, {}, [
+      { remote: "github.com/acme", branch: "main" },
+      { remote: "github.com/acme/../evil", branch: "main" },
+    ]);
+
+    expect(stub.requests).toHaveLength(3);
+  });
+
+  it("reads the wanted refs and the tracked branches in separate requests", async () => {
+    const stub = stubGraphql(
+      {},
+      {
+        status: 200,
+        body: {
+          data: { viewer: VIEWER, t0: { pullRequest: pullRequestNode(9, { state: "MERGED" }) } },
+        },
+      },
+      answerBranches([pullRequestNode(12, { state: "MERGED" })]),
+    );
+
+    const { reported } = await pollEntitiesFeed(
+      stub,
+      { "pull-request": ["github:pr:acme/storefront-web#9"] },
+      [BRANCH],
+    );
+
+    expect(stub.requests).toHaveLength(3 + 1 + 1);
+    expect(reported.refreshed.map((batch) => batch.map(({ ref }) => ref))).toEqual([
+      ["github:pr:acme/storefront-web#9"],
+      ["github:pr:acme/storefront-web#12"],
+    ]);
+    expectValidGraphqlFragments(stub);
+  });
+
+  it("keeps the refresh when the branch read fails", async () => {
+    const stub = stubGraphql(
+      {},
+      {
+        status: 200,
+        body: {
+          data: { viewer: VIEWER, t0: { pullRequest: pullRequestNode(9, { state: "MERGED" }) } },
+        },
+      },
+      { status: 502, body: { message: "Bad Gateway" } },
+    );
+
+    const { result, reported } = await pollEntitiesFeed(
+      stub,
+      { "pull-request": ["github:pr:acme/storefront-web#9"] },
+      [BRANCH],
+    );
+
+    expect(Result.isFailure(result)).toBe(true);
+    expect(reported.refreshed).toHaveLength(1);
   });
 });
 

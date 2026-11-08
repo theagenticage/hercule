@@ -449,6 +449,12 @@ export interface EntityInventory {
   readonly observations: ReadonlyArray<EntityObservation>;
 }
 
+/** A branch on a remote that a Task's checkout is on. `remote` is the address as the core stores it. */
+export interface TrackedBranch {
+  readonly remote: string;
+  readonly branch: string;
+}
+
 /**
  * What the host passes to an ingest handle for reporting entities. Present
  * only when the manifest requested the `entities` capability.
@@ -472,6 +478,32 @@ export interface IngestEntities {
    * Each call moves on to the next ones, so every wanted ref gets its turn.
    */
   readonly listWanted: (kind: string, limit: number) => Effect.Effect<ReadonlyArray<string>>;
+  /**
+   * Returns the branches the core wants this Connection to look up pull
+   * requests for, on remotes that start with `remotePrefix` (such as
+   * `github.com/`), at most `limit`. Use it to find a short-lived pull request
+   * that was opened and merged between two inventories, so the inventory never
+   * listed it: read the pull requests whose head is each branch and report
+   * them with `refresh`.
+   *
+   * A branch is listed when:
+   *
+   * - an ephemeral checkout of a live Task is on it;
+   * - it is not the checkout's default branch;
+   * - it exists on the remote;
+   * - that Task does not yet link an entity whose `repository.head` is exactly
+   *   this `(remote, branch)`. A link to something else, such as a ticket,
+   *   does not hide the branch.
+   *
+   * Each call moves on to the next branches, kept durably per Connection, so
+   * every tracked branch gets its turn. `remote` is the address as the core
+   * stores it, such as `github.com/acme/storefront-web`. The same pair is
+   * returned once, however many Tasks track it.
+   */
+  readonly listTrackedBranches: (
+    remotePrefix: string,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<TrackedBranch>>;
   /** Says a ref could not be read, and why. Never removes anything. */
   readonly reportMissing: (
     ref: string,

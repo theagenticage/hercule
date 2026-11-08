@@ -146,6 +146,8 @@ const buildIngestEntities = (
         port.refresh(reporter, observations, recognize),
       ),
     listWanted: (kind, limit) => port.listWanted(reporter, kind, limit),
+    listTrackedBranches: (remotePrefix, limit) =>
+      port.listTrackedBranches(reporter, remotePrefix, limit),
     reportMissing: (ref, reason) => port.reportMissing(reporter, ref, reason),
   };
 };

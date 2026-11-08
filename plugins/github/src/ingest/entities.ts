@@ -13,6 +13,10 @@
  *    it wants read although they are not in the inventory, such as a pull
  *    request that was merged since and so left the `is:open` searches. One
  *    GraphQL request reads them all (`readEntitiesByRef`).
+ * 3. The tracked branches. The host names the branches that Tasks work on.
+ *    A pull request opened and merged between two polls never shows in the
+ *    `is:open` searches, so one more request reads the pull requests of
+ *    those branches (`readPullRequestsByBranch`) and refreshes them.
  *
  * `../entity-reads.ts` does the reading and builds the observations.
  */
@@ -27,9 +31,11 @@ import {
 } from "@hercule/plugin-host";
 import { ISSUE_KIND, PULL_REQUEST_KIND, REPOSITORY_KIND } from "../entity-kinds";
 import {
+  GITHUB_REMOTE_PREFIX,
   buildItemObservation,
   buildRepositoryObservation,
   readEntitiesByRef,
+  readPullRequestsByBranch,
   readSearchPage,
   type EntityConcern,
   type ItemNode,
@@ -41,6 +47,9 @@ import type { FeedError } from "./requests";
 
 /** How many refs of one kind the poll asks the host for, and reads, each time. */
 const WANTED_REFS_PER_KIND = 50;
+
+/** How many tracked branches the poll asks the host for, and reads, each time. */
+const TRACKED_BRANCHES_PER_POLL = 50;
 
 /** The most results GitHub returns for one page of a search. */
 const SEARCH_PAGE_SIZE = 100;
@@ -198,12 +207,32 @@ const refreshWantedEntities = (
   });
 
 /**
+ * Asks the host which branches Tasks work on, reads the pull requests whose
+ * head is one of them, and hands over what was found, so a pull request that
+ * was opened and merged between two polls is still known. Sends no request
+ * when the host tracks no branch.
+ */
+const refreshTrackedBranches = (
+  token: string,
+  entities: IngestEntities,
+): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const branches = yield* entities.listTrackedBranches(
+      GITHUB_REMOTE_PREFIX,
+      TRACKED_BRANCHES_PER_POLL,
+    );
+    const observations = yield* readPullRequestsByBranch(token, branches);
+    if (observations.length > 0) yield* entities.refresh(observations);
+  });
+
+/**
  * Polls the `entities` feed once: reports the inventory, then refreshes what
- * the host wants read. Costs one request per page of each of the three
- * searches, and one more for the refresh when anything is wanted. Fails as
- * `fetchGraphql` fails, and with the host's `PluginError` when it refuses
- * what was reported. The inventory is stored before the refresh starts, so
- * a refresh that fails leaves it in place.
+ * the host wants read, then the pull requests of the branches Tasks work on.
+ * Costs one request per page of each of the three searches, and one more for
+ * the refresh when anything is wanted, and one more when any branch is
+ * tracked. Fails as `fetchGraphql` fails, and with the host's `PluginError`
+ * when it refuses what was reported. The inventory is stored before the
+ * refresh starts, so a refresh that fails leaves it in place.
  */
 export const pollEntities = (
   token: string,
@@ -212,5 +241,6 @@ export const pollEntities = (
   Effect.gen(function* () {
     yield* reconcileInventory(token, entities);
     yield* refreshWantedEntities(token, entities);
+    yield* refreshTrackedBranches(token, entities);
     return {};
   });
