@@ -551,7 +551,7 @@ A CEL source stored on a subscription or a trigger and evaluated against one eve
 _Avoid_: rule, predicate string
 
 **Workflow**:
-A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
+A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. It declares typed inputs, and one may take an External Entity (an *entity input*: the value is its External Ref, with the signal kinds the workflow answers), so the workflow can be handed a card from the Inbox. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
 _Avoid_: recipe
 
 **Trigger**:
@@ -671,7 +671,7 @@ The user's rule that keeps signals of one kind, with given field values, from be
 _Avoid_: filter, mute (a Notification delivery setting)
 
 **Handoff**:
-Handing a Signal to an agent from Intake: the user's pick of a Hand to an agent answer. It resolves the signal and puts the work on a Task, continuing the open Task that carries the signal's thread ref, or creating one. The Task's provenance records it as one entry naming the signal and the run it started. Each handoff is one leg of the Task's trip: its signal, its run and that run's re-runs. A run started any other way is not a handoff.
+Handing work to an agent, as the user, with the work put on a Task. It starts one of two ways. From a standalone Signal on Intake, it is the user's pick of a Hand to an agent answer: it resolves the signal and continues the active Task of the signal's thread ref, or creates one. From a card on the Inbox, it is the user's pick of a workflow on the card (the card's *workflow offers*, not an Offer): it ends only the open signals of the kinds that workflow answers, and continues the active Task of the card's ref, or creates one. The Task's provenance records it as one entry naming the run it started, and the signal too when it came from Intake. A handoff from a card can be taken back (Undo) only while nothing of its run has started and nothing has joined or moved the Task. Each handoff is one leg of the Task's trip: its run and that run's re-runs. A run started any other way is not a handoff.
 _Avoid_: delegation, dispatch; "handoff" for a Migration
 
 **Tracking**:
