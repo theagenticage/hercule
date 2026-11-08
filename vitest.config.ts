@@ -95,6 +95,7 @@ const binaryTests = [
   "e2e/workflows.test.ts",
   "e2e/hand-off.test.ts",
   "e2e/entity-hand-off.test.ts",
+  "e2e/card-follows-pull-request.test.ts",
   "e2e/text-generation-step.test.ts",
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",

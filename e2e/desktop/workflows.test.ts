@@ -1,8 +1,9 @@
 /**
  * Tests the workflow list in the packaged app, signed in to a real
- * controller that holds no workflows yet (spec 17 §Workflows): Go ›
- * Workflows opens the list, with its filters and search in the floating
- * header, and the list says it is empty.
+ * controller (spec 17 §Workflows): Go › Workflows opens the list, with its
+ * filters and search in the floating header. A new controller holds the two
+ * workflows that ship with Hercule, so one test reads them, and another
+ * deletes them first to see the list say it is empty.
  *
  * A second test checks that a run pushed while the list is open pops the
  * marks it changes, and that Reduce motion stops that motion.
@@ -13,8 +14,34 @@ import { describe, expect, it } from "vitest";
 import { arrangeFleet, chooseMenuItem, openSignedIn } from "./harness";
 
 describe("Workflows", () => {
+  it("lists the two workflows that ship with Hercule on a new controller", async () => {
+    const arranged = await arrangeFleet();
+    const { app, page } = await openSignedIn(arranged.url);
+
+    await chooseMenuItem(app, "Go", "Workflows");
+
+    const filters = page.getByRole("navigation", { name: "Filter workflows" });
+    await filters.getByRole("heading", { level: 1, name: "Workflows" }).waitFor();
+    expect(await filters.getByRole("button").allTextContents()).toEqual([
+      "All 2",
+      "Needs you 0",
+      "Failing 0",
+      "Running 0",
+      "Off 0",
+    ]);
+    await page
+      .locator(".table-row", { hasText: "Move a card to In review when its pull request opens" })
+      .waitFor();
+    await page
+      .locator(".table-row", { hasText: "Move a card to Landed when its work is finished" })
+      .waitFor();
+  });
+
   it("opens from Go › Workflows, with its filters and search, and says when there are no workflows", async () => {
     const arranged = await arrangeFleet();
+    // A deleted shipped workflow stays deleted, so the list starts empty.
+    const { items } = await arranged.client.workflow.query({ query: { limit: 10 } });
+    for (const { id } of items) await arranged.client.workflow.delete({ params: { id } });
     const { app, page } = await openSignedIn(arranged.url);
 
     await chooseMenuItem(app, "Go", "Workflows");
