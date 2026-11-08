@@ -1085,6 +1085,19 @@ export const entityQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads whether any live Task has a failed run, for the sidebar's dot, which
+ * shows on every screen. The answer is one boolean, so the dot has no number.
+ * A plain `task` push reads it again, and the controller sends one when a
+ * failure starts or ends. A derived push does not (see `buildQueryKeys`).
+ */
+export const taskAttentionQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.taskAttention(),
+    queryFn: () => client.task.readAttention(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
  * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
  * every screen. A push on `task` reads it again, so the read is a small one.
  */
@@ -2230,6 +2243,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(trackingQuery(client)),
     queryClient.ensureQueryData(yourWorkQuery(client)),
     queryClient.ensureQueryData(inboxCountQuery(client)),
+    queryClient.ensureQueryData(taskAttentionQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

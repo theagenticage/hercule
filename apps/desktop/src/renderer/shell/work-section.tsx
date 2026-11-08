@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useSyncExternalStore, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useFailedRun } from "../app/failed-run";
 import { readAcknowledgedInboxArrival, subscribeInboxArrival } from "../app/inbox-arrival";
 import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
 import { trackBody } from "../app/motion";
@@ -20,6 +21,10 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * - Overview, first, which opens the view of the Overview used last, the
  *   Office or Work. It is selected on Work only: the Office has its own row
  *   just below, which stays selected on the Office as before. With no count.
+ *   Its row is named `data-motion-target="overview"`, the place a mark flies
+ *   to when a card is handed on (`flyToSidebarTarget`). While a run is failed
+ *   on a Task it ends in a 7px marigold dot with no number, and a click opens
+ *   Work on what failed instead, whichever view was used last.
  * - The office, with no count.
  * - The Inbox, ending in a plain grey count of the cards with a clock on them,
  *   hidden at 0, and one small marigold dot while the Inbox holds an arrival
@@ -46,6 +51,7 @@ export function WorkSection(): JSX.Element {
   const overviewView = useSyncExternalStore(subscribeOverviewView, () =>
     readOverviewView(controller.url),
   );
+  const { hasFailedRun, openFailedRuns } = useFailedRun();
   return (
     <section className="side-sec">
       <h3 className="side-h">
@@ -54,12 +60,19 @@ export function WorkSection(): JSX.Element {
       {/* The link is to Work, so it is selected on Work only: a link to the
           Office would be selected on the Office too, where the row below is
           the selected one. When the Office was the view used last, the click
-          is sent there instead. */}
+          is sent there instead. A failed run sends it to what failed first. */}
       <Link
         to="/work"
         className="nav-row"
+        data-motion-target="overview"
         activeProps={SELECTED_LINK_PROPS}
+        aria-label={hasFailedRun ? "Overview, a run failed" : undefined}
         onClick={(event) => {
+          if (hasFailedRun) {
+            event.preventDefault();
+            openFailedRuns();
+            return;
+          }
           if (overviewView !== "office") return;
           event.preventDefault();
           void navigate({ to: "/office" });
@@ -67,6 +80,7 @@ export function WorkSection(): JSX.Element {
       >
         <OfficeIcon />
         <span>Overview</span>
+        {hasFailedRun && <i className="nav-dot" />}
       </Link>
       <Link to="/office" className="nav-row" activeProps={SELECTED_LINK_PROPS}>
         <OfficeIcon />

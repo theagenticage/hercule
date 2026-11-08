@@ -57,6 +57,7 @@ import { useMergePick } from "../../../screens/work/use-merge-pick";
 import { useBoardReads } from "../../../screens/work/use-board-reads";
 import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
 import { useViewMotion } from "../../../screens/work/use-view-motion";
+import { useFailedArrival } from "../../../screens/work/use-failed-arrival";
 import { useWorkView } from "../../../screens/work/use-work-view";
 import type { PressedKeys } from "../../../screens/work/work-card";
 import { buildWorkViewKey } from "../../../screens/work/work-view-storage";
@@ -104,17 +105,25 @@ const describeOffline = (since: Date): string =>
  * - A Task the address names when the screen opens, such as when the Inbox's
  *   See its Task comes here, has its card brought into view and made the
  *   current card, once.
+ * - Opened from the sidebar's failed-run dot (`isOpeningOnFailed`), it shows
+ *   only the cards that failed, with the first in view.
  */
 export function WorkScreen({
   controller,
   openTaskId,
   onChangeOpenTask,
+  isOpeningOnFailed,
+  onOpenedOnFailed,
 }: {
   readonly controller: SavedController;
   /** The Task whose details are open, from the address, or `null` when none is. */
   readonly openTaskId: string | null;
   /** Puts a Task's id in the address to open its details, or `null` to close them. */
   readonly onChangeOpenTask: (taskId: string | null) => void;
+  /** Whether the address asks to open on what failed. */
+  readonly isOpeningOnFailed: boolean;
+  /** Takes that request out of the address once the screen has acted on it. */
+  readonly onOpenedOnFailed: () => void;
 }): JSX.Element {
   const { client, url, live } = controller;
   const scope = controller.accountScopes.read();
@@ -276,6 +285,17 @@ export function WorkScreen({
     keepCardInView(scroller, element);
     setCurrentCard(at);
   }, [taskNamedOnOpen, hasBoard, setCurrentCard]);
+
+  useFailedArrival({
+    isRequested: isOpeningOnFailed,
+    hasBoard,
+    filter: savedView.filter,
+    scrollRef,
+    setFilter: savedView.setFilter,
+    setFindText: savedView.setFindText,
+    setCurrentCard,
+    onArrived: onOpenedOnFailed,
+  });
 
   // Merging by key: `M` or the details' Merge picks a card, and choosing
   // another card (Return, or a click) merges the first into it.

@@ -158,6 +158,7 @@ import {
   laterSignalsOfKindQuery,
   signalsLaterQuery,
   signalsToDoQuery,
+  taskAttentionQuery,
   snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
@@ -906,6 +907,8 @@ const seedQueryCache = (
       textGeneration: { model: null, lastFailure: null, unavailableReason: null },
     });
   }
+  // The sidebar's dot reads whether a run failed on a Task on every screen. No specimen has one.
+  queryClient.setQueryData(taskAttentionQuery(client).queryKey, { anyFailure: false });
   // The sidebar's Inbox row reads the counts on every screen. Without an Inbox, nothing is on the clock.
   queryClient.setQueryData(
     inboxCountQuery(client).queryKey,

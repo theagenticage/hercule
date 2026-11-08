@@ -6,7 +6,12 @@
  * one more entry of the list `buildWorkFacets` returns.
  */
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { FROM_YOUR_SOURCES_HEADING, type FilterFacet, type FilterValue } from "../desk/filter";
+import {
+  FROM_YOUR_SOURCES_HEADING,
+  type Filter,
+  type FilterFacet,
+  type FilterValue,
+} from "../desk/filter";
 import { buildPlaceFacets } from "../desk/place-facets";
 import { namePlugin, type PluginName } from "../intake";
 import { chooseLaneId, type WorkLane } from "./lanes";
@@ -22,6 +27,9 @@ export const SOURCE_FACET_ID = "source";
 
 /** The id of the Source value for a card whose Task links nothing outside. */
 const NO_SOURCE_VALUE_ID = "(none)";
+
+/** The filter that shows only the cards with a failed run: the State facet's Failed row. */
+export const FAILED_FILTER: Filter = { [STATE_FACET_ID]: ["failed"] };
 
 interface StateRow {
   readonly id: string;

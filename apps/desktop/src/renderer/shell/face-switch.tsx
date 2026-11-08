@@ -1,5 +1,6 @@
 import { useRef, type JSX, type KeyboardEvent } from "react";
 import { describeOrchestrationSegment } from "@hercule/client-core";
+import { useFailedRun } from "../app/failed-run";
 import { useToDoCount } from "../app/tracking";
 import type { SidebarFace } from "./sidebar-face";
 
@@ -22,6 +23,12 @@ const SEGMENTS: ReadonlyArray<{ readonly face: SidebarFace; readonly label: stri
  *   accessible name carries the count: "Hercule, 8 to do". The count is the
  *   open signals and the rows of Tracking that wait on the user. It is hidden
  *   at 0.
+ * - While a run is failed on a Task and the Threads face shows, a 7px marigold
+ *   dot sits at the end of the Hercule segment, as a button of its own beside
+ *   the tab list (it is not a tab). It is the only click here that opens Work
+ *   on what failed: pressing the word still only changes the face, so nobody
+ *   leaves a thread to glance at the other face. The Hercule face shows the
+ *   same dot on its Overview row instead.
  */
 export function FaceSwitch({
   face,
@@ -33,6 +40,9 @@ export function FaceSwitch({
   readonly listId: string;
 }): JSX.Element {
   const toDoCount = useToDoCount();
+  const { hasFailedRun, openFailedRuns } = useFailedRun();
+  // The Hercule face shows the same dot on its Overview row instead.
+  const showsDot = hasFailedRun && face === "threads";
   const listRef = useRef<HTMLDivElement>(null);
 
   const moveSelection = (event: KeyboardEvent): void => {
@@ -45,34 +55,45 @@ export function FaceSwitch({
   };
 
   return (
-    <div
-      ref={listRef}
-      className="seg seg--side"
-      role="tablist"
-      aria-label="Sidebar"
-      onKeyDown={moveSelection}
-    >
-      {SEGMENTS.map((segment) => (
+    <div className="seg-side">
+      <div
+        ref={listRef}
+        className="seg seg--side"
+        role="tablist"
+        aria-label="Sidebar"
+        onKeyDown={moveSelection}
+      >
+        {SEGMENTS.map((segment) => (
+          <button
+            key={segment.face}
+            type="button"
+            role="tab"
+            aria-selected={segment.face === face}
+            aria-controls={listId}
+            tabIndex={segment.face === face ? 0 : -1}
+            data-has-dot={segment.face === "orchestration" && showsDot ? "" : undefined}
+            onClick={() => onChange(segment.face)}
+            aria-label={
+              segment.face === "orchestration" && toDoCount > 0
+                ? describeOrchestrationSegment(toDoCount)
+                : undefined
+            }
+          >
+            {segment.label}
+            {segment.face === "orchestration" && toDoCount > 0 && (
+              <b className="count count--you">{toDoCount}</b>
+            )}
+          </button>
+        ))}
+      </div>
+      {showsDot && (
         <button
-          key={segment.face}
           type="button"
-          role="tab"
-          aria-selected={segment.face === face}
-          aria-controls={listId}
-          tabIndex={segment.face === face ? 0 : -1}
-          onClick={() => onChange(segment.face)}
-          aria-label={
-            segment.face === "orchestration" && toDoCount > 0
-              ? describeOrchestrationSegment(toDoCount)
-              : undefined
-          }
-        >
-          {segment.label}
-          {segment.face === "orchestration" && toDoCount > 0 && (
-            <b className="count count--you">{toDoCount}</b>
-          )}
-        </button>
-      ))}
+          className="seg-dot"
+          aria-label="A run failed. Open Work filtered to Failed."
+          onClick={openFailedRuns}
+        />
+      )}
     </div>
   );
 }

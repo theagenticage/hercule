@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { countFacetValues, dropEmptyValues, filterItems, toggleFilterValue } from "../desk/filter";
 import { buildCard, buildBoard, buildPlace, FAILURE, listIds, QUESTION } from "./cards.testing";
-import { buildWorkFacets } from "./facets";
+import { buildWorkFacets, FAILED_FILTER } from "./facets";
 import { buildLanes } from "./lanes";
 
 const PROJECTS = [
@@ -73,6 +73,10 @@ describe("buildWorkFacets", () => {
       failed: 0,
       agent: 1,
     });
+  });
+
+  it("has a ready-made filter that leaves only the cards with a failed run", () => {
+    expect(listIds(filterItems(BOARD.cards, FAILED_FILTER, FACETS))).toEqual(["broke"]);
   });
 
   it("does not exclude a failed card from With an agent", () => {

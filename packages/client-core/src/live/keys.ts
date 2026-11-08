@@ -57,6 +57,13 @@ export const queryKeys = {
    */
   workBoard: (): LiveQueryKey => [...queryKeys.tasks(), "board"],
   /**
+   * Whether any live Task has a failed run (`task.readAttention`), which the
+   * sidebar draws as a dot on every screen. It sits under the Tasks' key, so
+   * every ordinary `task` push reads it again. A `derived` `task` push does not:
+   * the controller sends a plain push whenever a failure starts or ends.
+   */
+  taskAttention: (): LiveQueryKey => [...queryKeys.tasks(), "attention"],
+  /**
    * What the details pane of one Task draws (`task.readDetail`). It sits under
    * `task(id)`, so an ordinary `task` push reads it again with the Task's
    * record. A `derived` `task` push names it too (see `buildQueryKeys`),
@@ -521,9 +528,10 @@ const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
  *
  * `derived` is the push's flag of the same name, which only a `task` push can
  * carry. It means a Task's card changed because of its sessions, runs or
- * summary, and no field of the Task record changed. Only the Work board and
- * the details pane of the named Tasks draw that, so the push reads the board
- * and those details. The Inbox sorts a card by whether its Task is live and
+ * summary, and no field of the Task record changed. Only the Work board and the
+ * details pane of the named Tasks draw that, so the push reads the board and
+ * those details. The sidebar's failure dot is read again only on a plain push,
+ * which the controller sends when a failure starts or ends. The Inbox sorts a card by whether its Task is live and
  * has it, which only a plain `task` push (a Task created, edited, finished or
  * deleted) or an `externalEntity` push can change. Tracking already follows
  * `run` pushes, and the list, the Task's record and Your work read fields of

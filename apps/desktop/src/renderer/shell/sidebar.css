@@ -5,6 +5,10 @@
 /* Solid, one tone darker than the main pane. It never floats over content,
    so it is not glass. */
 .side {
+  /* The failed-run dot: marigold, because a run waits for a person. It sits
+     between --you and --you-ink, which reaches 3:1 against the sidebar in all
+     six themes. */
+  --failed-dot: color-mix(in oklab, var(--you) 45%, var(--you-ink));
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -29,7 +33,8 @@
    control in that band opts out, so a click reaches it. The face switch
    starts at 48px, inside the band. */
 .side-top .icon-btn,
-.seg--side {
+.seg--side,
+.seg-dot {
   -webkit-app-region: no-drag;
 }
 
@@ -39,8 +44,56 @@
 .seg.seg--side {
   display: grid;
   grid-template-columns: 1fr 1fr;
+}
+
+/* The face switch and the failed-run dot that sits over its right end. */
+.seg-side {
+  position: relative;
   flex: none;
   margin-bottom: 8px;
+}
+
+/* A failed run, on the Hercule segment while the Threads face shows: a 26px
+   button of its own, with the 7px dot drawn in the middle of it, 2px in from
+   the segment's top and right edges. The Hercule tab gives it the room, so
+   the word and the To do count centre in what is left. */
+.seg-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--r-btn);
+}
+.seg-dot::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--failed-dot);
+}
+.seg-dot:hover {
+  background: var(--hover);
+}
+.seg-dot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.seg.seg--side > [data-has-dot] {
+  padding-right: 26px;
+}
+
+/* The failed-run dot at the end of the Overview row, 7px, with 6px after it. */
+.nav-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--failed-dot);
 }
 
 /* Not the book's, which draws New thread and Search as two full-width rows.

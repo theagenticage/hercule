@@ -72,7 +72,6 @@ import {
 import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
   announce,
-  announceTaskCardChange,
   nowIso,
   buildPageInputFields,
   refuseCursor,
@@ -230,6 +229,16 @@ const HANDOFF_STAYS = {
   otherLink: "The task links something else too.",
   edited: "The task was edited since.",
 } as const;
+
+/**
+ * Records that a failure of the Task `taskId` started or ended, to announce
+ * once the transaction commits. It is a plain `task` push, not a derived one:
+ * clients read the sidebar's failure dot on a plain push only, because a
+ * derived push comes every second from a busy agent and reads the board
+ * alone. A failure starts or ends rarely, so the plain push costs little.
+ */
+const announceTaskFailureChange = (taskId: string): Effect.Effect<void> =>
+  announce({ _tag: "record", topic: "task", id: taskId, kind: "updated" });
 
 /** Why `restoreRecoveredFailure` left the Task as it was. */
 export type FailureRestoreRefusal =
@@ -1013,7 +1022,7 @@ const make = Effect.gen(function* () {
             payload: { taskId: taskId.value, runId: input.runId },
             at,
           });
-          yield* announceTaskCardChange(taskId.value);
+          yield* announceTaskFailureChange(taskId.value);
           return { restored: true, taskId: taskId.value } as const;
         }
         const recovery = yield* tasks.readFailureRecovery(input.runId);
@@ -1685,7 +1694,7 @@ const make = Effect.gen(function* () {
             actor._tag === "user"
           ) {
             if (yield* tasks.endFailure(requestedTaskId)) {
-              yield* announceTaskCardChange(requestedTaskId);
+              yield* announceTaskFailureChange(requestedTaskId);
             }
           }
           const taskId = yield* joinExistingTaskRecordingWorkspace({
@@ -1800,7 +1809,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const clearedFailure = yield* tasks.recordRunStart(input.taskId, input.runId);
           if (clearedFailure) {
-            yield* announceTaskCardChange(input.taskId);
+            yield* announceTaskFailureChange(input.taskId);
           }
         }),
       ),
@@ -1814,8 +1823,8 @@ const make = Effect.gen(function* () {
      * run.
      *
      * It writes no `task.updated` event: the failure is not a field of the
-     * Task that a trigger can watch. It announces the change so that clients
-     * read the Task again.
+     * Task that a trigger can watch. It announces a plain `task` push so that
+     * clients read the Task and the failure dot again.
      */
     recordRunFailure: (input: {
       readonly taskId: string;
@@ -1825,7 +1834,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           if (yield* tasks.setFailedRun(input.taskId, input.runId)) {
-            yield* announceTaskCardChange(input.taskId);
+            yield* announceTaskFailureChange(input.taskId);
           }
         }),
       ),

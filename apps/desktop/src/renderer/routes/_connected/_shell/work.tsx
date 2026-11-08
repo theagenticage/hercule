@@ -18,6 +18,7 @@ import { workBoardQuery } from "./-work-board";
  */
 export interface WorkSearch {
   readonly task?: string | undefined;
+  readonly failed?: true | undefined;
 }
 
 /**
@@ -28,6 +29,7 @@ export interface WorkSearch {
  */
 const validateWorkSearch = (search: Record<string, unknown>): WorkSearch => ({
   task: isId(search.task) ? search.task : undefined,
+  failed: search.failed === true ? true : undefined,
 });
 
 /**
@@ -64,12 +66,16 @@ export const Route = createFileRoute("/_connected/_shell/work")({
 
 function WorkRoute(): JSX.Element {
   const { controller } = Route.useRouteContext();
-  const { task } = Route.useSearch();
+  const { task, failed } = Route.useSearch();
   const navigate = Route.useNavigate();
   return (
     <WorkScreen
       controller={controller}
       openTaskId={task ?? null}
+      isOpeningOnFailed={failed === true}
+      onOpenedOnFailed={() => {
+        void navigate({ search: { task }, replace: true });
+      }}
       onChangeOpenTask={(taskId) => {
         // The address is replaced, never added to: there is no Back to step
         // through the Tasks, and Esc closes the details.

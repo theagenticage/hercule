@@ -10,7 +10,14 @@ import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { BoardStage, TaskStage } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import {
+  AfterCommit,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  withTransaction,
+  type Change,
+} from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -38,6 +45,32 @@ const run = <A, E>(effect: Effect.Effect<A, E, TaskService | SqlClient.SqlClient
     effect.pipe(
       Effect.provideService(CurrentActor, USER),
       Effect.provide(layer),
+      Effect.provide(TestClock.layer()),
+    ),
+  );
+
+/**
+ * Like `run`, and adds every change a committed transaction announces to
+ * `published`.
+ */
+const runCollectingChanges = <A, E>(
+  effect: Effect.Effect<A, E, TaskService | SqlClient.SqlClient>,
+  published: Array<Change>,
+) =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provideService(CurrentActor, USER),
+      Effect.provide(
+        Layer.mergeAll(
+          layer,
+          Layer.succeed(AfterCommit)({
+            publish: (changes) =>
+              Effect.sync(() => {
+                published.push(...changes);
+              }),
+          }),
+        ),
+      ),
       Effect.provide(TestClock.layer()),
     ),
   );
@@ -265,6 +298,41 @@ describe("the failure a Task shows", () => {
       value: { failedRunId: RUN_A, restoredAt: undefined },
     });
     expect(result.second._tag).toBe("None");
+  });
+
+  it("announces a plain task push when a failure starts, when a run start ends it, and when a restore brings it back", async () => {
+    const published: Array<Change> = [];
+    const taskId = await runCollectingChanges(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* createInCell("Refund button", "building");
+        published.length = 0;
+        yield* tasks.recordRunFailure({ taskId: task.id, runId: RUN_A });
+        yield* tasks.recordRunStart({ taskId: task.id, runId: RUN_B });
+        yield* tasks.restoreRecoveredFailure({ runId: RUN_B });
+        return task.id;
+      }),
+      published,
+    );
+
+    // Not derived: only a plain push makes a client read the sidebar's failure dot.
+    const plain = { _tag: "record", topic: "task", id: taskId, kind: "updated" };
+    expect(published.filter((change) => change._tag === "record")).toEqual([plain, plain, plain]);
+  });
+
+  it("announces nothing for a run start on a Task that shows no failure", async () => {
+    const published: Array<Change> = [];
+    await runCollectingChanges(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const task = yield* createInCell("Plain", "planned");
+        published.length = 0;
+        yield* tasks.recordRunStart({ taskId: task.id, runId: RUN_B });
+      }),
+      published,
+    );
+
+    expect(published.filter((change) => change._tag === "record")).toEqual([]);
   });
 
   it("raises the revision for a start on a Task that shows no failure, and does nothing for a Task not written yet", async () => {

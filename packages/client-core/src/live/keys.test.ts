@@ -121,6 +121,19 @@ describe("the Work board's key", () => {
     ]);
   });
 
+  it("reads the failure dot again on an ordinary task push, but not on a derived one", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.taskAttention())),
+      );
+      assert.isFalse(
+        buildQueryKeys("task", ids, undefined, true).some((key) =>
+          isPrefixOf(key, queryKeys.taskAttention()),
+        ),
+      );
+    }
+  });
+
   it("reads a Task's detail again on an ordinary task push, with or without ids", () => {
     assert.isTrue(
       buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
