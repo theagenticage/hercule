@@ -14,7 +14,14 @@
  */
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { describeMerge, describeMergedInto, describeMergeFailure } from "@hercule/client-core/work";
+import { useQueryClient } from "@tanstack/react-query";
+import type { HerculeClient } from "@hercule/client-core";
+import {
+  describeMerge,
+  describeMergedInto,
+  describeMergeFailure,
+  type MergeCheckResult,
+} from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
 import { listFailedMerges } from "../../../app/pending-intents";
@@ -27,6 +34,7 @@ import {
 } from "../../../screens/work/board-flights";
 import { flipBoard } from "../../../screens/work/flip-board";
 import type { CardMoves } from "./-card-moves";
+import { askMergeCheck } from "./-merge-check";
 
 /** What `useMergeCards` returns. */
 export interface MergeCards {
@@ -45,10 +53,18 @@ export interface MergeCards {
    * left the board.
    */
   readonly mergeCard: (sourceCardId: string, targetCardId: string) => void;
+  /**
+   * Asks the controller whether the card `sourceCardId` could be merged into
+   * the card `targetCardId`, so a refusal shows before the drop. Asks once per
+   * pair within a few seconds. Never rejects: a question that could not be
+   * asked answers `unchecked`, which is no approval.
+   */
+  readonly checkMerge: (sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>;
 }
 
 /**
- * Returns the merge actions. `readBoard` returns the logical board as it is
+ * Returns the merge actions. `client` is the controller's, for the merge
+ * check. `readBoard` returns the logical board as it is
  * this instant (`useLogicalBoard`), which leaves out the card of each merge
  * that is held or on its way, and has it again once the merge failed.
  * `isBoardRead` is whether the board was read: a merge that failed while
@@ -58,6 +74,7 @@ export interface MergeCards {
  * `closePane` closes them (a merge away of the open Task closes them).
  */
 export const useMergeCards = ({
+  client,
   scope,
   readBoard,
   isBoardRead,
@@ -66,6 +83,7 @@ export const useMergeCards = ({
   openTaskId,
   closePane,
 }: {
+  readonly client: HerculeClient;
   readonly scope: AccountScope;
   readonly readBoard: () => WorkBoard | undefined;
   readonly isBoardRead: boolean;
@@ -75,6 +93,7 @@ export const useMergeCards = ({
   readonly closePane: () => void;
 }): MergeCards => {
   const { store } = usePendingIntents(scope);
+  const queryClient = useQueryClient();
 
   // The listeners of the store outlive a render, so they read the newest values from here.
   const latest = useRef({ readBoard, isBoardRead, moves, openTaskId, closePane });
@@ -199,5 +218,8 @@ export const useMergeCards = ({
     reportRef.current(false);
   }, [isBoardRead]);
 
-  return { holdMerge, mergeCard };
+  const checkMerge = (sourceCardId: string, targetCardId: string): Promise<MergeCheckResult> =>
+    askMergeCheck(queryClient, client, sourceCardId, targetCardId);
+
+  return { holdMerge, mergeCard, checkMerge };
 };

@@ -7,12 +7,13 @@ import {
   buildCellId,
   buildTaskPane,
   chooseLaneId,
+  decideInitiativePick,
   describeSummaryStanding,
   type ArrangedLane,
   type SummaryStanding,
   type TaskPaneContent,
 } from "@hercule/client-core/work";
-import type { BoardStage, Project, WorkCard } from "@hercule/contract";
+import type { BoardStage, Initiative, Project, WorkCard } from "@hercule/contract";
 import { useClockValue } from "../../../app/age-clock";
 import {
   listHeldAnswers,
@@ -31,10 +32,13 @@ import {
   type TaskPaneChanges,
   type TaskPaneRead,
 } from "../../../screens/work/task-pane";
-import { taskDetailQuery } from "./-work-board";
+import { initiativesQuery, taskDetailQuery } from "./-work-board";
 
 /** How long the line "This Task no longer exists." shows before the pane closes, in milliseconds. */
 const GONE_LINE_MS = 1_600;
+
+/** The open Initiatives before they are read: none, so the crumb and the menu fill in when they arrive. */
+const NO_INITIATIVES: readonly Initiative[] = [];
 
 /** What Text Generation says when the controller has not been read yet: that it can run, so no note says summaries are off. */
 const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
@@ -68,6 +72,13 @@ const TEXT_GENERATION_UNKNOWN = { unavailableReason: null } as const;
  * click on the stage path moves the card, through the board's own moves.
  * `onFilterByPlace` is what a click on a row of Part of does: it filters the
  * board to that place. `onChangeTask` changes the address: a Task's id to show it, `null` to close.
+ *
+ * A row of Blocked by or Blocks opens its Task in the pane. Esc then goes back
+ * to the Task the user came from, and closes once there is none.
+ *
+ * `onCreateInitiative` opens the sheet that makes a new Initiative, from "New
+ * initiative…" at the end of the Initiative menu. The Work screen wires it to
+ * the Initiative sheet. Until it is given, the menu has no such row.
  */
 export function WorkPane({
   client,
@@ -82,6 +93,7 @@ export function WorkPane({
   changes,
   moveToStage,
   onFilterByPlace,
+  onCreateInitiative,
   onShown,
   onChangeTask,
 }: {
@@ -97,6 +109,7 @@ export function WorkPane({
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
   readonly onFilterByPlace: (placeRef: string) => void;
+  readonly onCreateInitiative?: (() => void) | undefined;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
 }): JSX.Element | null {
@@ -106,6 +119,40 @@ export function WorkPane({
   useLayoutEffect(() => {
     wantedId.current = taskId;
   });
+
+  // The Tasks the user came from by opening a row of Blocked by or Blocks,
+  // newest last, which Esc goes back through. Another way of changing the
+  // address (a click on a card, a merge) starts the trail again. `expectedId`
+  // is the Task the pane itself asked for.
+  const cameFrom = useRef<string[]>([]);
+  const expectedId = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (taskId !== expectedId.current) cameFrom.current = [];
+    expectedId.current = taskId;
+  }, [taskId]);
+  // The row that was pressed to open another Task goes away with the words
+  // it was in, which leaves the focus on nothing and the keys (Esc) dead. So
+  // the title of the Task that opens takes the focus.
+  const shouldFocusTitle = useRef(false);
+  useLayoutEffect(() => {
+    if (!shouldFocusTitle.current) return;
+    shouldFocusTitle.current = false;
+    document
+      .querySelector<HTMLElement>(".opening-sheet [data-sheet-focus]")
+      ?.focus({ preventScroll: true });
+  }, [presentedId]);
+  const openFromPane = (nextId: string): void => {
+    if (presentedId !== null) cameFrom.current.push(presentedId);
+    expectedId.current = nextId;
+    shouldFocusTitle.current = true;
+    onChangeTask(nextId);
+  };
+  const stepBack = (): void => {
+    const previousId = cameFrom.current.pop() ?? null;
+    expectedId.current = previousId;
+    shouldFocusTitle.current = previousId !== null;
+    onChangeTask(previousId);
+  };
 
   // The dent stays on the card of the Task the sheet shows. A card the board
   // draws again is a new element, so it is marked again whenever the lanes change.
@@ -119,7 +166,9 @@ export function WorkPane({
     };
   }, [scrollRef]);
 
-  // Closing hands the focus back to the card, so the keys go on from it.
+  // Closing hands the focus back to the card, so the keys go on from it. It
+  // acts only while the address is clear and a Task is still shown, which is
+  // the moment of closing: `presentedId` changes then only to `null`.
   useLayoutEffect(() => {
     if (taskId !== null || presentedId === null) return;
     const inSheet = document.activeElement?.closest(".opening-sheet") != null;
@@ -127,9 +176,7 @@ export function WorkPane({
     scrollRef.current
       ?.querySelector<HTMLElement>(`[data-card-id="${presentedId}"]`)
       ?.focus({ preventScroll: true });
-    // Only the moment the address clears matters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+  }, [taskId, presentedId, scrollRef]);
 
   if (presentedId === null) return null;
   return (
@@ -146,8 +193,11 @@ export function WorkPane({
       changes={changes}
       moveToStage={moveToStage}
       onFilterByPlace={onFilterByPlace}
+      onCreateInitiative={onCreateInitiative}
       onShown={onShown}
       onChangeTask={onChangeTask}
+      onOpenTask={openFromPane}
+      onStepBack={stepBack}
       onClosed={() => {
         // A sheet that was opened again while it closed has an id to show.
         if (wantedId.current === null) setPresentedId(null);
@@ -170,8 +220,11 @@ function PresentedTask({
   changes,
   moveToStage,
   onFilterByPlace,
+  onCreateInitiative,
   onShown,
   onChangeTask,
+  onOpenTask,
+  onStepBack,
   onClosed,
 }: {
   readonly client: HerculeClient;
@@ -186,8 +239,11 @@ function PresentedTask({
   readonly changes: TaskPaneChanges;
   readonly moveToStage: (card: WorkCard, stage: BoardStage) => void;
   readonly onFilterByPlace: (placeRef: string) => void;
+  readonly onCreateInitiative: (() => void) | undefined;
   readonly onShown: (pane: TaskPaneContent | null) => void;
   readonly onChangeTask: (taskId: string | null) => void;
+  readonly onOpenTask: (taskId: string) => void;
+  readonly onStepBack: () => void;
   readonly onClosed: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
@@ -196,6 +252,8 @@ function PresentedTask({
   const detail = useQuery({ ...taskDetailQuery(client, presentedId), enabled: isVisible });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const controller = useQuery(controllerQuery(client));
+  // The Work screen reads the open Initiatives beside the board, so this is the cache it filled.
+  const initiatives = useQuery(initiativesQuery(client)).data ?? NO_INITIATIVES;
   const textGeneration = controller.data?.textGeneration ?? TEXT_GENERATION_UNKNOWN;
   const summary = detail.data?.card.summary;
 
@@ -290,9 +348,21 @@ function PresentedTask({
     onRetryRead: () => {
       void detail.refetch();
     },
-    onStepBack: () => {
-      onChangeTask(null);
+    onOpenTask,
+    onPickInitiative: (choiceId) => {
+      if (card === undefined) return;
+      const pick = decideInitiativePick(choiceId, card);
+      if (pick.kind === "create") {
+        onCreateInitiative?.();
+      } else if (pick.kind === "set") {
+        const chosen =
+          pick.initiativeId === null
+            ? null
+            : initiatives.find((each) => each.id === pick.initiativeId);
+        if (chosen !== undefined) changes.onSetInitiative(chosen);
+      }
     },
+    onStepBack,
   };
 
   const readPlaces = (): SheetPlaces => {
@@ -328,6 +398,9 @@ function PresentedTask({
       <TaskPane
         pane={pane}
         projectName={projectName}
+        initiatives={initiatives}
+        canCreateInitiative={onCreateInitiative !== undefined}
+        boardCards={cards}
         read={read}
         plugins={plugins}
         threadPromptWords={threadPromptWords}

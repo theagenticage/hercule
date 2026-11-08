@@ -211,6 +211,11 @@
 .menu-mark:empty {
   display: none;
 }
+.hue-flag {
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
 .menu-box {
   flex: none;
   display: grid;

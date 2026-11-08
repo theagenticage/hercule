@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoardStage, WorkCard } from "@hercule/contract";
 import { buildCard, FAILURE, QUESTION } from "./cards.testing";
-import { buildInitiativeLine, MOST_BEADS_BEFORE_TALLY } from "./initiative-line";
+import { buildInitiativeLine, MOST_BEADS_BEFORE_TALLY, MOST_TALLY_MARKS } from "./initiative-line";
 import { buildLane } from "./lanes";
 
 /** Returns the line of a row holding `cards` and `doneRingCount` rings. */
@@ -78,11 +78,26 @@ describe("buildInitiativeLine", () => {
       expect(lineOf(many(count)).cells[0]?.isTally).toBe(isTally);
     });
 
+    it("draws at most MOST_TALLY_MARKS marks, and counts every Task", () => {
+      const line = lineOf(many(MOST_TALLY_MARKS + 7));
+      expect(line.cells[0]?.beads).toHaveLength(MOST_TALLY_MARKS);
+      expect(line.cells[0]?.beadCount).toBe(MOST_TALLY_MARKS + 7);
+    });
+
     it("keeps the failed bead first in a tally cell, whatever its place on the board", () => {
       const line = lineOf([...many(12), buildCard("broke", { failure: FAILURE })]);
       const [first] = beadsAt(line, "exploring");
       expect(line.cells[0]?.isTally).toBe(true);
       expect(first).toEqual({ taskId: "broke", kind: "failed" });
+    });
+
+    it("keeps the failed bead when the cap cuts a cell", () => {
+      const line = lineOf([
+        ...many(MOST_TALLY_MARKS + 5),
+        buildCard("broke", { failure: FAILURE }),
+      ]);
+      expect(beadsAt(line, "exploring")[0]).toEqual({ taskId: "broke", kind: "failed" });
+      expect(beadsAt(line, "exploring")).toHaveLength(MOST_TALLY_MARKS);
     });
   });
 

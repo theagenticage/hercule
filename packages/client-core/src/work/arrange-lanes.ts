@@ -188,6 +188,17 @@ export const arrangeLanes = (
 };
 
 /**
+ * Returns the lanes the board draws: `lanes` without the Initiative rows that
+ * stand under a folded Project lane (In lanes). A folded lane hides its rows
+ * and keeps a small flag for each instead, so nothing of them is on screen:
+ * the keyboard walk, a drop and the selection must not reach them.
+ */
+export const listDrawnLanes = (lanes: readonly ArrangedLane[]): readonly ArrangedLane[] => {
+  const foldedLaneIds = new Set(lanes.filter((each) => each.isFolded).map((each) => each.lane.id));
+  return lanes.filter(({ lane }) => !foldedLaneIds.has(lane.initiative?.underLaneId ?? ""));
+};
+
+/**
  * Returns how many Tasks stand at each stage across `lanes`, shown or not,
  * with 0 for a stage no Task is at. A Task with a card in two lanes (under two
  * outside places) is counted once.

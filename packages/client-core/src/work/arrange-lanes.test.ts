@@ -1,6 +1,12 @@
 /** Tests the lanes as the board draws them: what each cell shows, the failed count, the dots, and the counts over the stages. */
 import { describe, expect, it } from "vitest";
-import { arrangeLanes, buildCellId, buildStackId, countCardsByStage } from "./arrange-lanes";
+import {
+  arrangeLanes,
+  buildCellId,
+  buildStackId,
+  countCardsByStage,
+  listDrawnLanes,
+} from "./arrange-lanes";
 import { buildBoard, buildCard, FAILURE, QUESTION } from "./cards.testing";
 import { groupBoardByProject } from "./initiative-lanes";
 import { buildLanes } from "./lanes";
@@ -237,5 +243,24 @@ describe("arrangeLanes with Initiative rows", () => {
     const row = arrange({ openedInitiativeIds: new Set(["platform"]) });
     expect(row.cells[0]?.shownCards.map((card) => card.id)).toEqual(["open"]);
     expect(row.cells[2]?.dot).toBe("failed");
+  });
+
+  it("leaves out the rows under a folded Project lane, and keeps the rows under an open one", () => {
+    const underLanes = groupBoardByProject(
+      board,
+      PROJECTS,
+      [{ ...PLATFORM, projectId: "storefront" }],
+      {
+        place: "lanes",
+        isFiltering: false,
+      },
+    );
+    const names = (foldedLaneIds: readonly string[]) =>
+      listDrawnLanes(
+        arrangeLanes(underLanes, { ...CLOSED, foldedLaneIds: new Set(foldedLaneIds) }),
+      ).map((each) => each.lane.name);
+
+    expect(names([])).toEqual(["Storefront", "Platform"]);
+    expect(names(["storefront"])).toEqual(["Storefront"]);
   });
 });

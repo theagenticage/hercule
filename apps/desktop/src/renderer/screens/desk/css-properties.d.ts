@@ -12,5 +12,7 @@ declare module "react" {
     "--face-box-height"?: string;
     /** The distance a pane's width is shifted for the undo line, so it stays centred on the board. */
     "--undo-line-x"?: string;
+    /** The OKLCH hue of an Initiative's flag, from the Initiative's own colour. */
+    "--plan-hue"?: string;
   }
 }

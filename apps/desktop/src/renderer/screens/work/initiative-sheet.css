@@ -1,0 +1,120 @@
+/* The Initiative sheet, on the shared side sheet: the fields of an Initiative
+   in the language of Add to Work, and a foot like the details pane's. The
+   drawing has no form for an Initiative, so this one is built from its parts. */
+
+/* The sheet's body is a column that holds the form, so the fields scroll
+   inside it and the foot stays at the bottom. */
+.initiative-sheet {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The fields scroll under the sheet's 24px padding, so the scrollbar sits at
+   the sheet's edge. */
+.initiative-sheet-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  margin: 0 -24px;
+  padding: 4px 24px 18px;
+  overflow-y: auto;
+}
+.initiative-field {
+  display: grid;
+  gap: 6px;
+}
+.initiative-field > label,
+.initiative-label {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+  font-weight: var(--w-bold);
+}
+/* The drawing rings a field with an inset line, not the outline other fields get. */
+.initiative-sheet .field:focus-within {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+.initiative-name.field {
+  padding-right: 8px;
+}
+/* A field of text with more than one line. It grows with its text up to a
+   height, then scrolls, and the user cannot drag its size. It is three lines
+   tall when empty, so it reads as a box for a few sentences. */
+.initiative-intent.field {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: calc(3lh + 16px);
+  max-height: 200px;
+  padding: 8px 11px;
+  border: 0;
+  line-height: 1.45;
+  field-sizing: content;
+  resize: none;
+}
+.initiative-intent.field::placeholder {
+  color: var(--faint);
+}
+
+/* ---------- Colour ---------- */
+/* Twelve flags in the Initiative's own colours, one chosen. The colour is the
+   flag's ink, the choice a ring in the page's ink, so the choice is also a
+   shape and not only a colour. */
+.initiative-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.initiative-swatch {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-btn);
+  color: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
+  transition:
+    background var(--m-quick) var(--m-ease),
+    box-shadow var(--m-quick) var(--m-ease);
+}
+.initiative-swatch:hover {
+  background: var(--hover);
+}
+.initiative-swatch[aria-checked="true"] {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 60%, transparent);
+}
+
+/* ---------- The foot ---------- */
+/* As the details pane's: a hairline above, 48px of buttons at 12px from the
+   edges, and the one button that cannot be taken back alone at the far end. */
+.initiative-sheet-foot {
+  flex: none;
+  margin: 0 -24px;
+  border-top: 1px solid var(--divider);
+}
+.initiative-sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 12px;
+}
+.initiative-sheet-end {
+  margin-left: auto;
+}
+/* What the foot says before the buttons: the words that ask to confirm a
+   delete, and an error from the controller. */
+.initiative-sheet-line {
+  margin: 0;
+  padding: 10px 24px 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.initiative-sheet-line--error {
+  color: var(--fail-ink);
+}

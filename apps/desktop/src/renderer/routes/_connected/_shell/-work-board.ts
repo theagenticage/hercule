@@ -34,6 +34,15 @@ export const initiativesQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads the open Initiatives while the window is visible, like `useWorkBoard`.
+ * `data` is `undefined` until the first read ends.
+ */
+export const useWorkInitiatives = (client: HerculeClient) => {
+  const isVisible = useWindowVisible();
+  return useQuery({ ...initiativesQuery(client), enabled: isVisible });
+};
+
+/**
  * Returns the query that reads what the details pane of one Task draws: the
  * Task, its card with the summary, its Threads and its runs. Like every live
  * read, it stays fresh until a push says otherwise. A `task` push that names

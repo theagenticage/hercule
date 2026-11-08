@@ -14,8 +14,10 @@ import { EMPTY_FILTER, type Filter } from "@hercule/client-core/desk";
 import {
   buildLanes,
   buildWorkFacets,
+  INITIATIVE_FACET_ID,
   listBoardGroupings,
   PROJECT_FACET_ID,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import {
   buildBoard,
@@ -56,7 +58,19 @@ const PLUGINS = [{ id: "acme", displayName: "Acme Tracker", mark: { paths: ["M2 
 const RETURNS = buildPlace("acme:project:returns", "Returns at the depots");
 const PRICING = buildPlace("acme:project:pricing", "Pricing rules");
 
-const DISPLAY: WorkDisplay = { laneLabels: "side-labels", isStill: false, hasSingleKeys: true };
+const CHECKOUT_REWORK: WorkInitiative = {
+  id: "checkout-rework",
+  name: "Checkout rework",
+  hue: 245,
+  projectId: STOREFRONT.id,
+};
+
+const DISPLAY: WorkDisplay = {
+  laneLabels: "side-labels",
+  initiativePlace: "top",
+  isStill: false,
+  hasSingleKeys: true,
+};
 
 interface Spies {
   readonly onFoldEverything: () => void;
@@ -77,6 +91,7 @@ function Harness({
   findValue = "",
   findMatches = [],
   places = [],
+  initiatives = [],
   groupBy = PROJECT_FACET_ID,
 }: {
   readonly cards?: readonly WorkCard[];
@@ -86,6 +101,7 @@ function Harness({
   readonly findValue?: string;
   readonly findMatches?: readonly WorkCard[];
   readonly places?: readonly EntityPlace[];
+  readonly initiatives?: readonly WorkInitiative[];
   readonly groupBy?: string;
 }): JSX.Element {
   const [filter, setFilter] = useState(initialFilter);
@@ -95,10 +111,11 @@ function Harness({
     places,
     groupings: places.length === 0 ? [] : [{ kind: "acme/project", caption: "Acme project" }],
   };
-  const facets = buildWorkFacets(buildLanes({ cards }, projects), board, PLUGINS);
+  const facets = buildWorkFacets(buildLanes({ cards }, projects), board, initiatives, PLUGINS);
   return (
     <WorkToolbar
       pill={<span>Overview</span>}
+      hasInitiatives={initiatives.length > 0}
       groupings={listBoardGroupings(board)}
       groupBy={groupBy}
       onGroupByChange={spies?.onGroupByChange ?? vi.fn()}
@@ -228,6 +245,75 @@ describe("WorkToolbar", () => {
     expect(getRow(withCount("Has a question", 1))).toBeTruthy();
     expect(getRow(withCount("Failed", 1))).toBeTruthy();
     expect(getRow(withCount("With an agent", 1))).toBeTruthy();
+    expect(getRow(withCount("Blocked", 0))).toBeTruthy();
+  });
+
+  it("counts the cards that wait on another Task under Blocked", () => {
+    const blocked = buildCard("hub-labels", "Print hub labels", {
+      blockedBy: [{ id: "label-printer", title: "Buy a label printer", stage: "planned" }],
+      blockedByCount: 1,
+    });
+    render(<Harness cards={[...CARDS, blocked]} />);
+
+    expect(getRow(withCount("Blocked", 1))).toBeTruthy();
+  });
+
+  it("offers Initiative to group by only when an Initiative is open, and reports the pick", async () => {
+    const user = userEvent.setup();
+    const onGroupByChange = vi.fn();
+    const { unmount } = render(<Harness spies={{ onGroupByChange }} />);
+    expect(screen.queryByRole("menuitemradio", { name: "Initiative", hidden: true })).toBeNull();
+    unmount();
+
+    render(<Harness initiatives={[CHECKOUT_REWORK]} spies={{ onGroupByChange }} />);
+    const [project, initiative] = screen.getAllByRole("menuitemradio", { hidden: true });
+    expect(project?.textContent).toBe("Project");
+    expect(initiative?.textContent).toBe("Initiative");
+    await user.click(initiative!);
+
+    expect(onGroupByChange).toHaveBeenCalledWith(INITIATIVE_FACET_ID);
+  });
+
+  it("names the grouping on the button when it is Initiative", () => {
+    render(<Harness initiatives={[CHECKOUT_REWORK]} groupBy={INITIATIVE_FACET_ID} />);
+
+    expect(screen.getByRole("button", { name: /^Group by\s*Initiative$/ })).toBeTruthy();
+  });
+
+  it("filters by an Initiative, whose value has a flag in its colour, and shows a captioned chip", async () => {
+    const user = userEvent.setup();
+    const cards = [
+      buildCard("express-pay", "Add express pay", { initiativeId: CHECKOUT_REWORK.id }),
+      buildCard("plain-card", "Tidy the depot labels"),
+    ];
+    render(<Harness cards={cards} initiatives={[CHECKOUT_REWORK]} />);
+
+    await user.click(getRow("Initiative"));
+    const value = getRow(withCount("Checkout rework", 1));
+    expect(value.querySelector(".hue-flag")?.getAttribute("style")).toContain("245");
+    await user.click(value);
+
+    expect(
+      screen.getByRole("button", { name: "Remove filter Initiative Checkout rework" }),
+    ).toBeTruthy();
+  });
+
+  it("has no Initiative row in the Filter menu when none is open", () => {
+    render(<Harness />);
+
+    expect(screen.queryAllByRole("menuitem", { name: /^Initiative/, hidden: true })).toHaveLength(
+      0,
+    );
+  });
+
+  it("puts the Initiative rows On top or In lanes from the Display menu", async () => {
+    const user = userEvent.setup();
+    const onDisplayChange = vi.fn();
+    render(<Harness spies={{ onDisplayChange }} />);
+
+    await user.click(screen.getByRole("button", { name: "In lanes", hidden: true }));
+
+    expect(onDisplayChange).toHaveBeenLastCalledWith({ ...DISPLAY, initiativePlace: "lanes" });
   });
 
   it("filters by a Project from the Filter menu, and shows it as a chip with its caption", async () => {

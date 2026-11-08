@@ -18,6 +18,7 @@ import {
   groupBoardByContext,
   STAGE_NAMES,
   type CardMove,
+  type MergeCheckResult,
 } from "@hercule/client-core/work";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
 import {
@@ -183,6 +184,9 @@ interface Harness {
   readonly holdMerge: ReturnType<
     typeof vi.fn<(sourceCardId: string, targetCardId: string) => boolean>
   >;
+  readonly checkMerge: ReturnType<
+    typeof vi.fn<(sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>>
+  >;
   readonly onOpenCard: ReturnType<typeof vi.fn<(card: WorkCard) => void>>;
   /** The stacks the board draws: the pairs that may stack, and the ids (`buildStackId`) of the open ones. */
   readonly stack?: {
@@ -223,6 +227,7 @@ function Board({
   const arrangedLanes = arrangeLanes(lanes, {
     foldedLaneIds,
     openedCellIds: new Set(),
+    openedInitiativeIds: new Set(),
     openedStackIds: harness.stack?.openedIds ?? new Set(),
     stackCandidates: harness.stack?.candidates ?? [],
     isFiltering: false,
@@ -232,12 +237,14 @@ function Board({
     scrollRef,
     cards,
     projects: PROJECTS,
+    initiatives: [],
     arrangedLanes,
     selectedIds: harness.selectedIds,
     moveCard: harness.moveCard,
     moveCards: harness.moveCards,
     say: harness.say,
     holdMerge: harness.holdMerge,
+    checkMerge: harness.checkMerge,
     onCarryingChange: setIsCarrying,
   });
   return (
@@ -291,6 +298,7 @@ const renderBoard = (
     moveCards: vi.fn(),
     say: vi.fn(),
     holdMerge: vi.fn(() => true),
+    checkMerge: vi.fn(() => Promise.resolve({ kind: "allowed" } as const)),
     onOpenCard: vi.fn(),
   };
   const view = render(
@@ -308,6 +316,7 @@ const renderBoard = (
     moveCards: harness.moveCards,
     say: harness.say,
     holdMerge: harness.holdMerge,
+    checkMerge: harness.checkMerge,
     onOpenCard: harness.onOpenCard,
     /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
     isCarrying: (): boolean =>
@@ -924,7 +933,10 @@ describe("merging by holding a carried card over another", () => {
   /** Returns whether the card is drawn as the one to merge into. */
   const isTarget = (card: HTMLElement): boolean => card.hasAttribute("data-merge-target");
 
-  it("makes the card the target once the pointer has rested over its middle for one second", () => {
+  /** Lets the answers of the merge check, which arrive as promises, reach the board. */
+  const settleChecks = (): Promise<void> => act(() => Promise.resolve());
+
+  it("makes the card the target once the pointer has rested over its middle for one second", async () => {
     useFakeClock();
     const board = renderBoard();
     carryOverDeliverySlots(board);
@@ -935,6 +947,8 @@ describe("merging by holding a carried card over another", () => {
     vi.advanceTimersByTime(1);
 
     expect(isTarget(target)).toBe(true);
+    expect(board.checkMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    await settleChecks();
     expect(target.dataset["mergeLabel"]).toBe("Merge into Delivery slots");
     expect(target.dataset["mergeKeeps"]).toBe("Keeps its title, stage and place");
     // The slot closes but keeps its room, so nothing jumps.
@@ -1053,6 +1067,109 @@ describe("merging by holding a carried card over another", () => {
     expect(board.ghost()).toBeNull();
     vi.advanceTimersByTime(3000);
     expect(board.scroller.querySelector(".board-merge-under")).toBeNull();
+  });
+
+  describe("the check before the drop", () => {
+    /** An answer of the merge check that the test gives when it chooses. */
+    const deferAnswer = (): {
+      readonly promise: Promise<MergeCheckResult>;
+      readonly answer: (result: MergeCheckResult) => void;
+    } => {
+      let answer: (result: MergeCheckResult) => void = () => undefined;
+      const promise = new Promise<MergeCheckResult>((resolve) => {
+        answer = resolve;
+      });
+      return { promise, answer };
+    };
+
+    /** Brings the card in the hand to rest over Delivery slots with Option, which chooses at once. */
+    const chooseDeliverySlots = (board: ReturnType<typeof renderBoard>): void => {
+      press(board.card("refund-emails"), 220, 70);
+      moveTo(board.scroller, 220, 76);
+      moveWithOption(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+    };
+
+    it("shows the target as checking, and promises nothing, until the controller answers", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+
+      chooseDeliverySlots(board);
+      const target = board.card("delivery-slots");
+
+      expect(isTarget(target)).toBe(true);
+      expect(target.dataset["mergeCheck"]).toBe("checking");
+      expect(target.dataset["mergeLabel"]).toBe("Checking merge into Delivery slots");
+      expect(target.hasAttribute("data-merge-keeps")).toBe(false);
+
+      check.answer({ kind: "allowed" });
+      await act(() => check.promise.then(() => undefined));
+      expect(target.dataset["mergeCheck"]).toBe("allowed");
+      expect(target.dataset["mergeLabel"]).toBe("Merge into Delivery slots");
+      expect(target.dataset["mergeKeeps"]).toBe("Keeps its title, stage and place");
+    });
+
+    it("shows a refusal on the target before the drop, and the drop merges nothing", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockResolvedValue({
+        kind: "refused",
+        refusal: "Plan the launch already waits on this Task.",
+      });
+      chooseDeliverySlots(board);
+      await act(() => Promise.resolve());
+      const target = board.card("delivery-slots");
+      expect(target.dataset["mergeLabel"]).toBe(
+        "Cannot merge: Plan the launch already waits on this Task",
+      );
+      expect(target.dataset["mergeKeeps"]).toBe("Nothing will be merged");
+
+      release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+      expect(board.holdMerge).not.toHaveBeenCalled();
+      expect(board.moveCard).not.toHaveBeenCalled();
+      expect(board.say).toHaveBeenCalledExactlyOnceWith(
+        '"Refund emails" was not merged: Plan the launch already waits on this Task.',
+      );
+      expect(board.isCarrying()).toBe(false);
+      expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+      expect(isTarget(target)).toBe(false);
+    });
+
+    it("does not read a question that could not be asked as an approval, and lets the merge decide", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      board.checkMerge.mockResolvedValue({ kind: "unchecked" });
+      chooseDeliverySlots(board);
+      await act(() => Promise.resolve());
+      expect(board.card("delivery-slots").dataset["mergeKeeps"]).toBe(
+        "Could not check this merge first",
+      );
+
+      release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+
+      expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    });
+
+    it("ignores an answer that arrives after the target was left", async () => {
+      useFakeClock();
+      const board = renderBoard();
+      const check = deferAnswer();
+      board.checkMerge.mockReturnValue(check.promise);
+      chooseDeliverySlots(board);
+      const target = board.card("delivery-slots");
+
+      // Off the middle of the card: the choice is undone at once.
+      moveTo(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y + 60);
+      expect(isTarget(target)).toBe(false);
+      check.answer({ kind: "refused", refusal: "Too late." });
+      await act(() => check.promise.then(() => undefined));
+
+      expect(isTarget(target)).toBe(false);
+      expect(target.hasAttribute("data-merge-label")).toBe(false);
+      expect(target.hasAttribute("data-merge-check")).toBe(false);
+    });
   });
 
   it("says nothing was merged, and sends the card home, when a card left the board meanwhile", () => {

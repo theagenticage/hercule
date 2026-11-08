@@ -8,6 +8,10 @@
  *   the card once the board shows the failure gone (`useTryAgain`).
  * - Link and Unlink on Linked send `task.linkEntity` and `task.unlinkEntity`
  *   for the Task the pane shows, with an Undo (`useTaskLinks`).
+ * - Add a blocker and the remove button of Blocked by send `task.addBlocker`
+ *   and `task.removeBlocker`, with an Undo (`useTaskBlockers`).
+ * - The Initiative menu sends `task.update` with `initiativeId`, with an Undo
+ *   (`useTaskInitiative`).
  */
 import { useEffect, useRef, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -28,6 +32,8 @@ import type { TaskPaneChanges } from "../../../screens/work/task-pane";
 import type { CardMoves } from "./-card-moves";
 import { answerFromPane } from "./-pane-answers";
 import { useSettleUnsentAnswers } from "./-settle-unsent-answers";
+import { useTaskBlockers } from "./-task-blockers";
+import { useTaskInitiative } from "./-task-initiative";
 import { useTaskLinks } from "./-task-links";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
@@ -48,6 +54,9 @@ export type PaneChanges = Pick<
   | "onReturn"
   | "onLinkEntity"
   | "onUnlinkEntity"
+  | "onAddBlocker"
+  | "onRemoveBlocker"
+  | "onSetInitiative"
 >;
 
 /** What `usePaneChanges` returns. */
@@ -151,6 +160,8 @@ export const usePaneChanges = ({
   });
 
   const taskLinks = useTaskLinks({ client, scope, moves });
+  const taskBlockers = useTaskBlockers({ client, scope, moves });
+  const setTaskInitiative = useTaskInitiative({ client, scope, moves });
 
   // When the pane started to show this Task, for the Return key's quiet moment.
   const shownAt = useRef(0);
@@ -249,6 +260,36 @@ export const usePaneChanges = ({
           taskTitle: pane.card.title,
           ref: row.ref,
           thingName: nameLinkedThing(row),
+        });
+      },
+      onAddBlocker: async (blocker) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return null;
+        return taskBlockers.add({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          blockerId: blocker.id,
+          blockerTitle: blocker.title,
+        });
+      },
+      onRemoveBlocker: (blocker) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        taskBlockers.remove({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          blockerId: blocker.id,
+          blockerTitle: blocker.title,
+        });
+      },
+      onSetInitiative: (initiative) => {
+        const pane = shownPane.current;
+        if (pane?.card === undefined) return;
+        setTaskInitiative({
+          taskId: pane.taskId,
+          taskTitle: pane.card.title,
+          fromInitiativeId: pane.card.initiativeId,
+          to: initiative,
         });
       },
     },

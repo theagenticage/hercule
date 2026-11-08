@@ -223,7 +223,7 @@ import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
 import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
 import {
   buildWorkViewKey,
-  DEFAULT_WORK_DISPLAY,
+  EMPTY_WORK_VIEW,
   writeSavedWorkView,
 } from "../screens/work/work-view-storage";
 import { Shell } from "../shell";
@@ -896,6 +896,7 @@ const seedQueryCache = (
   }
   if (work !== undefined) {
     queryClient.setQueryData(queryKeys.workBoard(), work.board);
+    queryClient.setQueryData(queryKeys.initiatives(), work.initiatives ?? []);
     for (const detail of work.details ?? []) {
       queryClient.setQueryData(queryKeys.taskDetail(detail.task.id), detail);
     }
@@ -1868,9 +1869,8 @@ export async function mountWorkSpecimen(
   openTaskId?: string,
 ): Promise<void> {
   writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
-    groupBy: "project",
+    ...EMPTY_WORK_VIEW,
     foldedLaneIds: work.foldedLaneIds,
-    display: DEFAULT_WORK_DISPLAY,
   });
   await mountShellSpecimen(
     records,

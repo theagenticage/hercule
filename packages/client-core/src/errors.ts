@@ -123,6 +123,13 @@ export const isInvalidState = (error: unknown): boolean =>
 
 const isInvalidStateDetails = Schema.is(InvalidStateDetails);
 
+/** Returns true when the error is an `invalid_state` response whose details carry `reason`. */
+const hasInvalidStateReason = (error: unknown, reason: InvalidStateDetails["reason"]): boolean => {
+  if (!isInvalidState(error)) return false;
+  const { details } = error as ApiError;
+  return isInvalidStateDetails(details) && details.reason === reason;
+};
+
 /**
  * Returns true when the error is an `invalid_state` response that says the
  * Request a decision or an answer was for is not open: the session waits on
@@ -130,11 +137,17 @@ const isInvalidStateDetails = Schema.is(InvalidStateDetails);
  * which means the session is gone. Other `invalid_state` refusals, such as
  * the runner being away, are false: the Request may still be open.
  */
-export const isRequestClosed = (error: unknown): boolean => {
-  if (isNotFound(error)) return true;
-  if (!isInvalidState(error)) return false;
-  return isInvalidStateDetails((error as ApiError).details);
-};
+export const isRequestClosed = (error: unknown): boolean =>
+  isNotFound(error) || hasInvalidStateReason(error, "request-closed");
+
+/**
+ * Returns true when the error is an `invalid_state` response that says the
+ * write would make Tasks wait on each other in a loop (a blocker added, or
+ * two Tasks merged). Its message names the path, so a client shows it as it
+ * is.
+ */
+export const isBlockerCycle = (error: unknown): boolean =>
+  hasInvalidStateReason(error, "blocker-cycle");
 
 /**
  * Returns the issues of a `validation` error response, in order, or

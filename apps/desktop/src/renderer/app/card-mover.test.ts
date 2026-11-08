@@ -25,7 +25,7 @@ describe("buildCachedCardMover", () => {
     );
 
     const put = buildCachedCardMover(client, queryClient)(
-      { taskId: "a", stage: "planned", projectId: null, afterTaskId: null },
+      { taskId: "a", stage: "planned", projectId: null, initiativeId: null, afterTaskId: null },
       Promise.resolve(true),
     );
     await put!.request;

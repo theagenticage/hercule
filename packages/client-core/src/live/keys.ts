@@ -72,6 +72,18 @@ export const queryKeys = {
    */
   taskDetail: (id: string): LiveQueryKey => [...queryKeys.task(id), "detail"],
   /**
+   * What `task.checkMerge` answers for one pair: whether the Task `sourceId`
+   * could be merged into the Task `intoTaskId`. It sits outside `tasks()` on
+   * purpose, so no live push marks it out of date: the app reads it with a
+   * short stale time and a blocker added meanwhile is caught by the merge
+   * itself, which always decides.
+   */
+  mergeCheck: (sourceId: string, intoTaskId: string): LiveQueryKey => [
+    "mergeCheck",
+    sourceId,
+    intoTaskId,
+  ],
+  /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
    * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for

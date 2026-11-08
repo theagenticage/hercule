@@ -52,61 +52,64 @@ export const measureBoardGeometry = (
     }
   }
 
-  const lanes = [...scroller.querySelectorAll<HTMLElement>(".board-lane[data-lane-id]")].flatMap(
-    (element): LaneBox[] => {
-      const arranged = arrangedLanes.find((each) => each.lane.id === element.dataset["laneId"]);
-      if (arranged === undefined) return [];
-      const rect = element.getBoundingClientRect();
-      const cells = new Map<BoardStage, CellBox>();
-      for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
-        const stage = readStage(cell.dataset["stage"]);
-        if (stage === undefined) continue;
-        // A row of the cell is a card alone, or the lead of a stack: the stack's members stand
-        // inside it and are not places a drop may take.
-        const shownCards = [...cell.children].flatMap(
-          (child): { card: HTMLElement; row: HTMLElement }[] => {
-            if (!(child instanceof HTMLElement)) return [];
-            if (child.dataset["cardId"] !== undefined) return [{ card: child, row: child }];
-            const lead = findStackLead(child);
-            return lead === null ? [] : [{ card: lead, row: child }];
-          },
-        );
-        const rows = shownCards.flatMap(({ card, row }) => {
-          const { cardId, dragged } = card.dataset;
-          if (cardId === undefined || dragged !== undefined) return [];
-          const place = places?.get(cardKeys?.get(card) ?? "") ?? measureLayoutRect(card);
-          return [
-            {
-              id: cardId,
-              element: row,
-              left: toBoardLeft(place.left),
-              right: toBoardLeft(place.left + place.width),
-              top: toBoardTop(place.top),
-              bottom: toBoardTop(place.top + place.height),
-              middle: toBoardTop(place.top + place.height / 2),
-            },
-          ];
-        });
-        // The card in the hand still counts as shown: it leaves a place that a drop may take again.
-        const hasClosedMoreLine =
-          arranged.cells.find((each) => each.stage === stage)?.arrangement.foot === "more";
-        cells.set(stage, {
-          element: cell,
-          rows,
-          ...(hasClosedMoreLine ? { lastIndex: shownCards.length - 1 } : {}),
-        });
-      }
-      return [
-        {
-          id: arranged.lane.id,
-          element,
-          top: toBoardTop(rect.top),
-          bottom: toBoardTop(rect.bottom),
-          isFolded: arranged.isFolded,
-          cells,
+  // An Initiative row is a lane to a drop: open, it has cells; folded, its head and line take the card.
+  const lanes = [
+    ...scroller.querySelectorAll<HTMLElement>(
+      ".board-lane[data-lane-id], .initiative-row[data-lane-id]",
+    ),
+  ].flatMap((element): LaneBox[] => {
+    const arranged = arrangedLanes.find((each) => each.lane.id === element.dataset["laneId"]);
+    if (arranged === undefined) return [];
+    const rect = element.getBoundingClientRect();
+    const cells = new Map<BoardStage, CellBox>();
+    for (const cell of element.querySelectorAll<HTMLElement>(".board-cell[data-stage]")) {
+      const stage = readStage(cell.dataset["stage"]);
+      if (stage === undefined) continue;
+      // A row of the cell is a card alone, or the lead of a stack: the stack's members stand
+      // inside it and are not places a drop may take.
+      const shownCards = [...cell.children].flatMap(
+        (child): { card: HTMLElement; row: HTMLElement }[] => {
+          if (!(child instanceof HTMLElement)) return [];
+          if (child.dataset["cardId"] !== undefined) return [{ card: child, row: child }];
+          const lead = findStackLead(child);
+          return lead === null ? [] : [{ card: lead, row: child }];
         },
-      ];
-    },
-  );
+      );
+      const rows = shownCards.flatMap(({ card, row }) => {
+        const { cardId, dragged } = card.dataset;
+        if (cardId === undefined || dragged !== undefined) return [];
+        const place = places?.get(cardKeys?.get(card) ?? "") ?? measureLayoutRect(card);
+        return [
+          {
+            id: cardId,
+            element: row,
+            left: toBoardLeft(place.left),
+            right: toBoardLeft(place.left + place.width),
+            top: toBoardTop(place.top),
+            bottom: toBoardTop(place.top + place.height),
+            middle: toBoardTop(place.top + place.height / 2),
+          },
+        ];
+      });
+      // The card in the hand still counts as shown: it leaves a place that a drop may take again.
+      const hasClosedMoreLine =
+        arranged.cells.find((each) => each.stage === stage)?.arrangement.foot === "more";
+      cells.set(stage, {
+        element: cell,
+        rows,
+        ...(hasClosedMoreLine ? { lastIndex: shownCards.length - 1 } : {}),
+      });
+    }
+    return [
+      {
+        id: arranged.lane.id,
+        element,
+        top: toBoardTop(rect.top),
+        bottom: toBoardTop(rect.bottom),
+        isFolded: arranged.isFolded,
+        cells,
+      },
+    ];
+  });
   return { geometry: { stageEdges, lanes }, view };
 };

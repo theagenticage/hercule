@@ -4,10 +4,16 @@
  * card in the hand docks on the corner of the card it would merge into, and
  * moving off the middle of that card undoes it.
  */
+import {
+  describeMergeKeeps,
+  type MergeCheckResult,
+  type MergeCheckState,
+  type WorkInitiative,
+} from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
 import { measureLayoutRect, type LayoutRect, type MotionBody } from "../../app/motion";
 import { CARRY_SCALE } from "./board-drag-carry";
-import { markMergeTarget, unmarkMergeTarget } from "./merge-target";
+import { markMergeTarget, showMergeTargetWords, unmarkMergeTarget } from "./merge-target";
 
 /** How long, in milliseconds, the hand must rest over the middle of a card before the two are drawn together. */
 const MERGE_DWELL_MS = 1000;
@@ -27,10 +33,15 @@ const DOCK_LIFT = 0.6;
 /** How long, in milliseconds, a card that leaves its dock glides to the pointer instead of jumping to it. */
 const UNDOCK_GLIDE_MS = 200;
 
-/** The card a carry would merge into: its id and its element, which carries the marks. */
+/**
+ * The card a carry would merge into: its id, its element (which carries the
+ * marks), and what the merge check found when the choice was read. A drop on
+ * a `refused` choice merges nothing.
+ */
 export interface MergeChoice {
   readonly cardId: string;
   readonly element: HTMLElement;
+  readonly check: MergeCheckState;
 }
 
 /** A place in the window, in pixels. */
@@ -53,6 +64,16 @@ export interface MergeCarried {
   readonly scroller: HTMLElement;
   /** Returns the cards the board draws now, to read the title of the card merged into. */
   readonly readCards: () => readonly WorkCard[];
+  /** Returns the open Initiatives, to name the one a merge keeps. */
+  readonly readInitiatives: () => readonly WorkInitiative[];
+  /** The id of the card in the hand: the card that merges away. */
+  readonly sourceId: string;
+  /**
+   * Asks whether the card in the hand could be merged into the card
+   * `targetId`. It never rejects: a question that could not be asked
+   * answers `unchecked`.
+   */
+  readonly checkMerge: (sourceId: string, targetId: string) => Promise<MergeCheckResult>;
   /** The hollow that shows where the card would land. It closes while a merge is chosen. */
   readonly slot: HTMLElement;
   /** The body of the copy in the hand. */
@@ -107,8 +128,24 @@ export interface MergeGesture {
 
 /** Starts the merge gesture of a carry. */
 export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
-  const { scroller, readCards, slot, body, home, grab, reduced } = carried;
-  let target: MergeChoice | null = null;
+  const {
+    scroller,
+    readCards,
+    readInitiatives,
+    sourceId,
+    checkMerge,
+    slot,
+    body,
+    home,
+    grab,
+    reduced,
+  } = carried;
+  /** The card chosen with its element, and what the check found so far. */
+  let target: {
+    readonly cardId: string;
+    readonly element: HTMLElement;
+    check: MergeCheckState;
+  } | null = null;
   let isOptionHeld = carried.isOptionHeld;
   let isOver = false;
   let pointer = carried.pointer;
@@ -164,10 +201,26 @@ export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
     const element = scroller.querySelector<HTMLElement>(`[data-card-id="${cardId}"]`);
     const card = readCards().find((each) => each.id === cardId);
     if (element === null || card === undefined) return;
-    target = { cardId, element };
+    const chosen = { cardId, element, check: { kind: "checking" } as MergeCheckState };
+    target = chosen;
     slot.classList.add("is-shut");
-    markMergeTarget(element, card.title);
+    const words = {
+      title: card.title,
+      keeps: describeMergeKeeps(
+        card,
+        readCards().find((each) => each.id === sourceId) ?? {},
+        readInitiatives(),
+      ),
+    };
+    markMergeTarget(element, { ...words, check: chosen.check });
     dock();
+    // The answer counts only while this choice is the card chosen: a card left
+    // or chosen again meanwhile makes it stale.
+    void checkMerge(sourceId, cardId).then((result) => {
+      if (target !== chosen || isOver) return;
+      chosen.check = result;
+      showMergeTargetWords(element, { ...words, check: result });
+    });
   };
 
   return {
@@ -210,7 +263,9 @@ export const createMergeGesture = (carried: MergeCarried): MergeGesture => {
     commit: () => {
       isOver = true;
       window.clearTimeout(dwellTimer);
-      return target;
+      return target === null
+        ? null
+        : { cardId: target.cardId, element: target.element, check: target.check };
     },
     cancel: () => {
       isOver = true;

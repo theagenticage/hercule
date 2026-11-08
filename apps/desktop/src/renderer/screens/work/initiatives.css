@@ -1,0 +1,391 @@
+/* Initiatives on the Work board: the row with its head and its line of beads,
+   the block that holds the rows On top, and the flag. From the Overview
+   drawing's `css/work.css` ("Initiatives"), with the app's class names:
+   `initiative-` in place of the drawing's `plan-`, `wire` and `bead`. Both
+   lane label modes are here: `.work-desk[data-lanes="band"]` and the side
+   labels, which are the default. */
+
+/* ---------- The colour ---------- */
+/* An Initiative's colour is declared where its hue is set, because a custom
+   property resolves on the element that declares it: `--plan-hue` is set on the
+   row and on every flag, and these two follow from it. */
+.initiative-row,
+.initiative-flag {
+  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
+  --plan-soft: oklch(var(--plan-l) var(--plan-c) var(--plan-hue) / var(--plan-soft-a));
+}
+.initiative-flag {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  color: var(--plan-ink);
+  line-height: 0;
+}
+/* The flag stands for the folder in the head of an Initiative's lane, 2px wider as the drawing has it. */
+.board-lane-folder.is-flag {
+  width: 16px;
+}
+/* A folded Project lane's flags sit after its count, 4px apart. */
+.board-lane-line > .initiative-flag {
+  align-self: center;
+  margin-right: -3px;
+}
+
+/* ---------- The headings over the blocks ---------- */
+.initiative-title {
+  margin: 0;
+  padding: 18px 0 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+  font-weight: var(--w-medium);
+}
+.initiative-block > .initiative-title {
+  padding-top: 4px;
+}
+/* The first lane under a heading draws no line above it: the heading is its top. */
+.initiative-title + .board-lane {
+  border-top: 0;
+}
+.initiative-block-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: var(--muted);
+  font: inherit;
+  border-radius: var(--r-xs);
+}
+.initiative-block-button:hover {
+  color: var(--ink);
+}
+.initiative-block-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.initiative-block-button small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.initiative-block-button[aria-expanded="true"] .initiative-chevron {
+  transform: rotate(90deg);
+}
+.initiative-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- The row ---------- */
+.initiative-row {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, 1fr);
+  align-items: center;
+  min-height: 34px;
+}
+.initiative-row.is-open {
+  align-items: start;
+  padding: 6px 0;
+}
+.initiative-row > .initiative-line,
+.initiative-row > .initiative-band {
+  grid-column: 2;
+}
+/* A row In lanes sits 12px under its lane's cards, indented 14px with side
+   labels. The lane's own bottom padding gives way to that gap, and the last
+   row of a lane brings the padding back. */
+.board-lane:has(+ .initiative-row[data-place="lane"]) {
+  padding-bottom: 12px;
+}
+.board-lane:not(:has([data-card-id])):has(+ .initiative-row[data-place="lane"]) {
+  padding-bottom: 0;
+}
+.initiative-row[data-place="lane"]:not(:has(+ .initiative-row[data-place="lane"])) {
+  margin-bottom: 18px;
+}
+
+.initiative-head {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+  padding: 3px 14px 3px 0;
+  font: inherit;
+}
+.initiative-row[data-place="lane"] .initiative-head {
+  padding-left: 14px;
+}
+.initiative-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 34px;
+  text-align: left;
+  border-radius: var(--r-xs);
+}
+.initiative-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.initiative-chevron {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+.initiative-row.is-open .initiative-chevron {
+  transform: rotate(90deg);
+}
+/* Turning is movement, so Reduce motion turns the chevron at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .initiative-chevron {
+    transition: transform var(--m-base) var(--m-ease);
+  }
+}
+.initiative-words {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.initiative-name {
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: var(--line-18);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.initiative-facts {
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: var(--line-16);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Opens the Initiative's sheet. Shown on hover and on keyboard focus, where a lane head has its `+`. */
+.initiative-edit {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-btn);
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity var(--m-quick);
+}
+.initiative-head:hover .initiative-edit,
+.initiative-head:has(.initiative-toggle:focus-visible) .initiative-edit,
+.initiative-edit:focus-visible {
+  opacity: 1;
+}
+.initiative-edit:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.initiative-edit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* ---------- The open band ---------- */
+/* The bar in the Initiative's colour runs down the left, 12px outside the cards. */
+.initiative-band {
+  position: relative;
+  margin-left: -12px;
+  padding: 18px 0 14px 10px;
+  border-left: 2px solid var(--plan-ink);
+}
+
+/* ---------- The line ---------- */
+/* Five cells on the board's own columns, so a bead stands under its stage. The
+   faint line runs the full width, and the bright one from the start to the last
+   bead. */
+.initiative-line {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--cols);
+  column-gap: var(--col-gap);
+  align-items: center;
+  height: 22px;
+  cursor: default;
+}
+.initiative-line::before,
+.initiative-beads.is-reach-end::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+}
+.initiative-line::before {
+  left: 0;
+  right: 0;
+  background: var(--plan-soft);
+}
+/* The bright line from the start across the stages before the reach cell, and
+   over the gap to it. It is positioned so it paints over the faint line. */
+.initiative-reach {
+  position: relative;
+  grid-row: 1;
+  align-self: center;
+  height: 2px;
+  margin-right: calc(-1 * var(--col-gap));
+  border-radius: 1px;
+  background: var(--plan-ink);
+}
+.initiative-line-cell {
+  position: relative;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 14px;
+}
+.initiative-beads {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+/* In the reach cell the bright line runs behind the beads, to the last one's edge. */
+.initiative-beads.is-reach-end::before {
+  left: 0;
+  right: 0;
+  background: var(--plan-ink);
+}
+
+/* ---------- The beads ---------- */
+.initiative-bead {
+  position: relative;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--plan-ink);
+  box-shadow: 0 0 0 2px var(--desk);
+}
+.initiative-bead[data-kind="landed"] {
+  background: var(--desk);
+  box-shadow:
+    inset 0 0 0 2px var(--plan-ink),
+    0 0 0 2px var(--desk);
+}
+.initiative-bead[data-kind="blocked"] {
+  background: var(--desk);
+  box-shadow:
+    inset 0 0 0 2px var(--plan-soft),
+    0 0 0 2px var(--desk);
+}
+.initiative-bead[data-kind="question"] {
+  background: var(--you);
+}
+/* The failed mark is the app's own, at 13px: the one tomato on the line. */
+.initiative-bead[data-kind="failed"] {
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  background: none;
+  box-shadow: none;
+}
+/* A real bead has a button's reach, 9px past it above and below. */
+button.initiative-bead::after {
+  content: "";
+  position: absolute;
+  inset: -9px -3px;
+}
+button.initiative-bead:hover,
+button.initiative-bead:focus-visible {
+  transform: scale(1.4);
+}
+button.initiative-bead:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .initiative-bead {
+    transition: transform var(--m-quick) var(--m-ease);
+  }
+}
+/* Past ten, a cell is tally marks: 3px by 11px, 2px apart. The failed mark keeps its size and its place first. */
+.initiative-line-cell.is-tally .initiative-beads {
+  gap: 2px;
+}
+.initiative-line-cell.is-tally .initiative-bead:not([data-kind="failed"]) {
+  width: 3px;
+  height: 11px;
+  border-radius: 1.5px;
+  box-shadow: none;
+}
+.initiative-line-cell.is-tally .initiative-bead[data-kind="landed"] {
+  box-shadow: inset 0 0 0 1px var(--plan-ink);
+}
+.initiative-line-cell.is-tally .initiative-bead[data-kind="blocked"] {
+  box-shadow: inset 0 0 0 1px var(--plan-soft);
+}
+.is-offline .initiative-bead {
+  filter: saturate(0.2);
+}
+
+/* ---------- Bands ---------- */
+.work-desk[data-lanes="band"] .initiative-row {
+  display: block;
+  min-height: 0;
+  margin-bottom: 2px;
+}
+.work-desk[data-lanes="band"] .initiative-row.is-open {
+  padding: 6px 0 0;
+}
+.work-desk[data-lanes="band"] .initiative-head {
+  width: 100%;
+  min-height: 22px;
+  padding: 0;
+}
+.work-desk[data-lanes="band"] .initiative-toggle {
+  min-height: 22px;
+}
+.work-desk[data-lanes="band"] .initiative-words {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+.work-desk[data-lanes="band"] .initiative-edit {
+  width: 22px;
+  height: 22px;
+}
+.work-desk[data-lanes="band"] .initiative-line {
+  height: 18px;
+}
+.work-desk[data-lanes="band"] .initiative-band {
+  margin: 6px 0 0 -12px;
+}
+/* Under a lane's band the last row leaves 22px and its own 2px, as a lane's padding does. */
+.work-desk[data-lanes="band"] .board-lane:has(+ .initiative-row[data-place="lane"]) {
+  padding-bottom: 12px;
+}
+.work-desk[data-lanes="band"]
+  .board-lane:not(:has([data-card-id])):has(+ .initiative-row[data-place="lane"]) {
+  padding-bottom: 0;
+}
+.work-desk[data-lanes="band"]
+  .initiative-row[data-place="lane"]:not(:has(+ .initiative-row[data-place="lane"])) {
+  margin-bottom: 24px;
+}
+.work-desk[data-lanes="band"] .initiative-row[data-place="lane"] .initiative-head {
+  padding-left: 0;
+}

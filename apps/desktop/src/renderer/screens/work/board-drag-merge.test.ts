@@ -4,6 +4,7 @@
  * `use-board-drag.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MergeCheckResult } from "@hercule/client-core/work";
 import { buildCard } from "@hercule/client-core/work/testing";
 import { trackBody } from "../../app/motion";
 import { createMergeGesture, type MergeGesture } from "./board-drag-merge";
@@ -16,12 +17,22 @@ let slot: HTMLElement;
 let ghost: HTMLElement;
 let target: HTMLElement;
 
-/** Starts a gesture on a board with one card, "delivery-slots". */
-const startGesture = (isOptionHeld = false): MergeGesture => {
+/** Starts a gesture on a board with one card, "delivery-slots", whose merge check allows it unless `checkMerge` says otherwise. */
+const startGesture = (
+  isOptionHeld = false,
+  checkMerge: (sourceId: string, targetId: string) => Promise<MergeCheckResult> = () =>
+    Promise.resolve({ kind: "allowed" }),
+): MergeGesture => {
   ghost = document.createElement("div");
   return createMergeGesture({
     scroller,
-    readCards: () => [buildCard("delivery-slots", { title: "Delivery slots" })],
+    readCards: () => [
+      buildCard("delivery-slots", { title: "Delivery slots", initiativeId: "checkout" }),
+      buildCard("refund-emails", { title: "Refund emails", initiativeId: "billing" }),
+    ],
+    readInitiatives: () => [{ id: "checkout", name: "Checkout", hue: 245 }],
+    sourceId: "refund-emails",
+    checkMerge,
     slot,
     body: trackBody(ghost),
     home: HOME,
@@ -113,7 +124,11 @@ describe("the merge gesture", () => {
     const merge = startGesture(true);
     merge.update({ x: 300, y: 200 }, "delivery-slots");
 
-    expect(merge.commit()).toEqual({ cardId: "delivery-slots", element: target });
+    expect(merge.commit()).toEqual({
+      cardId: "delivery-slots",
+      element: target,
+      check: { kind: "checking" },
+    });
     expect(isMarked()).toBe(true);
     merge.cancel();
     expect(isMarked()).toBe(false);
@@ -149,5 +164,44 @@ describe("the merge gesture", () => {
 
     expect(merge.handMotion()).toBe("gliding");
     expect(slot.classList.contains("is-shut")).toBe(false);
+  });
+});
+
+describe("the merge check of the gesture", () => {
+  it("asks once for the pair chosen, and says what stays with the initiative of the card merged into", async () => {
+    const ask = vi.fn(() => Promise.resolve({ kind: "allowed" } as const));
+    const merge = startGesture(true, ask);
+    merge.update({ x: 300, y: 200 }, "delivery-slots");
+    merge.update({ x: 301, y: 200 }, "delivery-slots");
+
+    expect(ask).toHaveBeenCalledExactlyOnceWith("refund-emails", "delivery-slots");
+    await Promise.resolve();
+    expect(target.dataset["mergeKeeps"]).toBe(
+      "Keeps its title, stage, place and initiative Checkout",
+    );
+    expect(merge.commit()?.check).toEqual({ kind: "allowed" });
+  });
+
+  it("commits a refused choice with its refusal", async () => {
+    const merge = startGesture(true, () =>
+      Promise.resolve({ kind: "refused", refusal: "A loop." } as const),
+    );
+    merge.update({ x: 300, y: 200 }, "delivery-slots");
+    await Promise.resolve();
+
+    expect(merge.commit()?.check).toEqual({ kind: "refused", refusal: "A loop." });
+    expect(target.dataset["mergeLabel"]).toBe("Cannot merge: A loop");
+  });
+
+  it("ignores an answer that comes after the drop", async () => {
+    let answer: (result: MergeCheckResult) => void = () => undefined;
+    const merge = startGesture(true, () => new Promise((resolve) => (answer = resolve)));
+    merge.update({ x: 300, y: 200 }, "delivery-slots");
+    merge.commit();
+
+    answer({ kind: "refused", refusal: "A loop." });
+    await Promise.resolve();
+
+    expect(target.dataset["mergeCheck"]).toBe("checking");
   });
 });

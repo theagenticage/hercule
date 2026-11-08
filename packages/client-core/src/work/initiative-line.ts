@@ -10,8 +10,9 @@
  *   landed. Beads of one kind keep the board's order.
  * - A Done Task has no card, so it is a ring with no Task at the end of the
  *   Landed cell, one for each (`InitiativeLane.doneRingCount`).
- * - Past ten beads in a cell they are drawn as tally marks. The failed mark
- *   stays first, because it is first in the list.
+ * - Past ten beads in a cell they are drawn as tally marks, and a cell draws
+ *   at most `MOST_TALLY_MARKS` of them. The failed mark stays first, because it
+ *   is first in the list.
  */
 import type { BoardStage } from "@hercule/contract";
 import { decideCardState, type CardState } from "./card-state";
@@ -19,6 +20,14 @@ import type { LaneCell } from "./lanes";
 
 /** The most beads a cell draws as beads. A cell with more draws tally marks. */
 export const MOST_BEADS_BEFORE_TALLY = 10;
+
+/**
+ * The most marks a tally cell draws. The narrowest cell is Landed at 112px,
+ * and a mark is 3px wide with a 2px gap, so 22 marks fill it exactly. 20 leave
+ * a little air before the next stage, so a cell never runs into its
+ * neighbour. The cell's `beadCount` and the row's words carry the true count.
+ */
+export const MOST_TALLY_MARKS = 20;
 
 /** One bead of a line. */
 export interface InitiativeBead {
@@ -30,7 +39,10 @@ export interface InitiativeBead {
 /** The beads of one stage of a line. */
 export interface InitiativeLineCell {
   readonly stage: BoardStage;
+  /** The beads the cell draws. A tally cell draws at most `MOST_TALLY_MARKS`, the first ones in the cell's order. */
   readonly beads: readonly InitiativeBead[];
+  /** How many Tasks the cell stands for, drawn or not: Done Tasks included. Words that count the Tasks read this, not `beads.length`. */
+  readonly beadCount: number;
   /** Whether the beads are drawn as tally marks: there are more than `MOST_BEADS_BEFORE_TALLY`. */
   readonly isTally: boolean;
 }
@@ -74,8 +86,14 @@ export const buildInitiativeLine = (
           }))
         : [];
     const all = [...beads, ...rings];
-    return { stage, beads: all, isTally: all.length > MOST_BEADS_BEFORE_TALLY };
+    const isTally = all.length > MOST_BEADS_BEFORE_TALLY;
+    return {
+      stage,
+      beads: isTally ? all.slice(0, MOST_TALLY_MARKS) : all,
+      beadCount: all.length,
+      isTally,
+    };
   });
-  const last = lineCells.findLastIndex((cell) => cell.beads.length > 0);
+  const last = lineCells.findLastIndex((cell) => cell.beadCount > 0);
   return { cells: lineCells, reachStageIndex: last < 0 ? null : last };
 };

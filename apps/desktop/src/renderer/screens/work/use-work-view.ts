@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { EMPTY_FILTER, isFilterOn, type Filter } from "@hercule/client-core/desk";
-import type { CardInLane } from "@hercule/client-core/work";
+import type { CardInLane, InitiativePlace, WorkLane } from "@hercule/client-core/work";
 import { readSavedWorkView, writeSavedWorkView, type SavedWorkView } from "./work-view-storage";
 
 /** How the lanes label themselves: in a strip at the side, or in a band across the top. */
@@ -9,6 +9,8 @@ export type LaneLabels = "side-labels" | "bands";
 /** The choices of the Display menu. */
 export interface WorkDisplay {
   readonly laneLabels: LaneLabels;
+  /** Where Group by Project draws the Initiative rows: all together above the lanes, or each under its Project's lane. */
+  readonly initiativePlace: InitiativePlace;
   /** Whether the colleagues on the cards hold still: no typing paws, no blinking. */
   readonly isStill: boolean;
   /** Whether single keys, such as A and F, work on the board. */
@@ -32,6 +34,15 @@ const foldOrOpenAll = (
   }
   return next;
 };
+
+/**
+ * Returns the ids of the lanes that Fold everything folds. Rows fold by
+ * `openedInitiativeIds`, which Fold everything empties by itself, so they are
+ * left out; only while a filter is on, when rows open like lanes, do they fold
+ * as lanes do.
+ */
+export const listFoldableLaneIds = (lanes: readonly WorkLane[], isFiltering: boolean): string[] =>
+  lanes.filter((lane) => isFiltering || lane.initiative?.isRow !== true).map((lane) => lane.id);
 
 /** Returns `ids` with `id` taken out when it is in, and put in when it is not. */
 const toggleId = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => {
@@ -74,7 +85,26 @@ export interface WorkView {
    */
   readonly foldedLaneIds: ReadonlySet<string>;
   readonly toggleLane: (laneId: string) => void;
-  /** Folds every lane in `laneIds`, or opens them when they are all folded. */
+  /**
+   * The ids of the Initiatives whose row the user opened into cards. A row is
+   * folded to its line of beads unless it is in here. While a filter is on,
+   * rows are open whatever this holds (see `foldedLaneIds`).
+   */
+  readonly openedInitiativeIds: ReadonlySet<string>;
+  /**
+   * Folds or opens the row `rowLaneId` of the Initiative `initiativeId`. While
+   * a filter is on, a row is open and the fold lasts as long as the filter,
+   * as for a lane. Otherwise the choice is saved.
+   */
+  readonly toggleInitiativeRow: (rowLaneId: string, initiativeId: string) => void;
+  /** Whether the user folded the block of rows On top, so that only its "Initiatives" heading shows. */
+  readonly isInitiativeBlockFolded: boolean;
+  readonly toggleInitiativeBlock: () => void;
+  /**
+   * Folds every lane in `laneIds` and closes every open Initiative row, or
+   * opens the lanes when they are all folded and no row is open. While a
+   * filter is on, `laneIds` also holds the rows, which then fold like lanes.
+   */
   readonly foldEverything: (laneIds: readonly string[]) => void;
   /** The card the keyboard is on, or `null`. It may be a card that has left the board. */
   readonly currentCard: CardInLane | null;
@@ -83,10 +113,10 @@ export interface WorkView {
 
 /**
  * Holds the client state of the Work board: the filter and the Find text,
- * which lanes are folded, which cells and stacks are opened, the Display choices, and
+ * which lanes are folded, which Initiative rows are open, which cells and stacks are opened, the Display choices, and
  * the current card.
  *
- * - How the lanes group, folds and Display are kept in `localStorage` under `storageKey` (see
+ * - How the lanes group, folds, open rows and Display are kept in `localStorage` under `storageKey` (see
  *   `work-view-storage.ts`). The filter, the Find text, the opened cells and stacks, and
  *   the current card are not: they are about what the user is doing now.
  * - A fold made while a filter is on lasts as long as the filter does: it is
@@ -120,6 +150,7 @@ export const useWorkView = (storageKey: string): WorkView => {
   };
 
   const savedFolds = new Set(saved.foldedLaneIds);
+  const openedInitiativeIds = new Set(saved.openedInitiativeIds);
   const foldedLaneIds = isFiltering ? filterFolds : savedFolds;
 
   const changeFolds = (change: (ids: ReadonlySet<string>) => ReadonlySet<string>): void => {
@@ -153,8 +184,31 @@ export const useWorkView = (storageKey: string): WorkView => {
     toggleLane: (laneId) => {
       changeFolds((ids) => toggleId(ids, laneId));
     },
+    openedInitiativeIds,
+    toggleInitiativeRow: (rowLaneId, initiativeId) => {
+      if (isFiltering) {
+        setFilterFolds(toggleId(filterFolds, rowLaneId));
+      } else {
+        save({ ...saved, openedInitiativeIds: [...toggleId(openedInitiativeIds, initiativeId)] });
+      }
+    },
+    isInitiativeBlockFolded: saved.isInitiativeBlockFolded,
+    toggleInitiativeBlock: () => {
+      save({ ...saved, isInitiativeBlockFolded: !saved.isInitiativeBlockFolded });
+    },
+    // Folding everything means everything: the rows the user opened close too.
     foldEverything: (laneIds) => {
-      changeFolds((ids) => foldOrOpenAll(ids, laneIds));
+      if (isFiltering) {
+        setFilterFolds(foldOrOpenAll(filterFolds, laneIds));
+        return;
+      }
+      const isOpening = laneIds.every((id) => savedFolds.has(id)) && openedInitiativeIds.size === 0;
+      const folds = new Set(savedFolds);
+      for (const id of laneIds) {
+        if (isOpening) folds.delete(id);
+        else folds.add(id);
+      }
+      save({ ...saved, foldedLaneIds: [...folds], openedInitiativeIds: [] });
     },
     currentCard,
     setCurrentCard,

@@ -1,14 +1,19 @@
 import { flushSync } from "react-dom";
 import type { RefObject } from "react";
 import { ROWS_BEFORE_HIDING } from "@hercule/client-core/work";
+import { isMotionReduced } from "../../app/motion";
 import {
+  fadeInBeads,
   fadeInCards,
+  findFoldRow,
+  findFoldTarget,
   flyFlightsTo,
   FOLD_GAP,
   growCardsFromOrigins,
   INTO_COUNT,
   launchFlights,
   recordGrowthOrigins,
+  showBeadsOnArrival,
   TO_BUTTON,
 } from "./board-flights";
 import { findStack, findStackMembers } from "./dragged-card";
@@ -41,7 +46,10 @@ interface BoardChange {
   readonly prepare?: () => (born: readonly HTMLElement[]) => void;
 }
 
-/** What a fold or an unfold needs to know: the lanes it changes, how to commit it, and the lane that stays still. */
+/**
+ * What a fold or an unfold needs to know: the lanes and Initiative rows it
+ * changes, how to commit it, and the part that stays still.
+ */
 interface FoldRequest {
   readonly lanes: readonly HTMLElement[];
   readonly commit: () => void;
@@ -91,9 +99,16 @@ const playChange = (scroller: HTMLElement | null, change: BoardChange): void => 
   finish?.(born);
 };
 
-/** Finds the section of a lane. */
+/** Finds the section of a lane, or of an Initiative's row, which folds the same way. */
 const findLane = (scroller: HTMLElement, laneId: string): HTMLElement | null =>
-  scroller.querySelector<HTMLElement>(`.board-lane[data-lane-id="${CSS.escape(laneId)}"]`);
+  scroller.querySelector<HTMLElement>(
+    `:is(.board-lane, .initiative-row)[data-lane-id="${CSS.escape(laneId)}"]`,
+  );
+
+/** Finds the rows of Initiatives that are open into cards. */
+const findOpenRows = (scroller: HTMLElement): HTMLElement[] => [
+  ...scroller.querySelectorAll<HTMLElement>(".initiative-row.is-open[data-lane-id]"),
+];
 
 /** Returns the cards under `elements`, in order. */
 const listCards = (elements: readonly Element[]): HTMLElement[] =>
@@ -102,7 +117,8 @@ const listCards = (elements: readonly Element[]): HTMLElement[] =>
 /**
  * Returns a change that folds `lanes`: the lanes below glide up after a short
  * wait, and, when `hasFlights` is true, a copy of each card in view flies to
- * its count first.
+ * its count first, or to its bead on an Initiative's line, which appears as
+ * the copy arrives.
  */
 const buildFold = (
   scroller: HTMLElement,
@@ -117,16 +133,16 @@ const buildFold = (
       flyFlightsTo(
         flights,
         (flight) =>
-          scroller.querySelector(
-            `[data-fold-row="${CSS.escape(flight.laneId)}"] [data-stage="${flight.stage}"]`,
-          ),
+          findFoldTarget(findFoldRow(scroller, flight.laneId), flight.cardId, flight.stage),
         INTO_COUNT,
       );
+      showBeadsOnArrival(scroller, flights);
+      if (isMotionReduced()) fadeInBeads(lanes);
     };
   },
 });
 
-/** Returns a change that opens `lanes`: each card grows out of its count, or out of the copy still flying there. */
+/** Returns a change that opens `lanes`: each card grows out of its count or its bead, or out of the copy still flying there. */
 const buildUnfold = (
   scroller: HTMLElement,
   { lanes, commit, anchor }: FoldRequest,
@@ -225,23 +241,76 @@ export const useViewMotion = (
     const commit = (): void => {
       view.foldEverything(laneIds);
     };
-    if (scroller === null || lanes.length === 0) {
+    // Rows the user opened close too, and are one change with the lanes. While a filter is on
+    // they are among the lanes (`laneIds`) and fold like them.
+    const openRows = scroller === null || view.isFiltering ? [] : findOpenRows(scroller);
+    if (scroller === null || lanes.length + openRows.length === 0) {
       commit();
       return;
     }
-    // Fold everything opens the lanes when all are folded, and folds the open ones otherwise.
-    const isOpening = laneIds.every((id) => view.foldedLaneIds.has(id));
+    // Fold everything opens the lanes when all are folded and no row is open, and folds the open ones otherwise.
+    const isOpening =
+      laneIds.every((id) => view.foldedLaneIds.has(id)) &&
+      (view.isFiltering || view.openedInitiativeIds.size === 0);
     playChange(
       scroller,
       isOpening
         ? buildUnfold(scroller, { lanes, commit, anchor: "top" })
         : buildFold(scroller, {
-            lanes: lanes.filter((lane) => !view.foldedLaneIds.has(lane.dataset["laneId"] ?? "")),
+            lanes: [
+              ...lanes.filter((lane) => !view.foldedLaneIds.has(lane.dataset["laneId"] ?? "")),
+              ...openRows,
+            ],
             commit,
             anchor: "top",
             hasFlights: true,
           }),
     );
+  };
+
+  const toggleInitiativeRow = (rowLaneId: string, initiativeId: string): void => {
+    const scroller = scrollRef.current;
+    const row = scroller === null ? null : findLane(scroller, rowLaneId);
+    if (scroller === null || row === null) {
+      view.toggleInitiativeRow(rowLaneId, initiativeId);
+      return;
+    }
+    const request = {
+      lanes: [row],
+      commit: () => {
+        view.toggleInitiativeRow(rowLaneId, initiativeId);
+      },
+      anchor: row,
+    };
+    // While a filter is on a row is open unless the user folded it since the filter came on.
+    const isFolded = view.isFiltering
+      ? view.foldedLaneIds.has(rowLaneId)
+      : !view.openedInitiativeIds.has(initiativeId);
+    playChange(
+      scroller,
+      isFolded
+        ? buildUnfold(scroller, request)
+        : buildFold(scroller, { ...request, hasFlights: !view.isFiltering }),
+    );
+  };
+
+  /**
+   * Folds or opens the whole block of rows On top as one change: the rows go
+   * or come, and everything below glides. The heading that was pressed stays
+   * where it is. What comes back fades in.
+   */
+  const toggleInitiativeBlock = (): void => {
+    const scroller = scrollRef.current;
+    const heading = scroller?.querySelector<HTMLElement>(".initiative-block-button") ?? null;
+    playChange(scroller, {
+      commit: () => {
+        view.toggleInitiativeBlock();
+      },
+      anchor: heading ?? "none",
+      prepare: () => (born) => {
+        fadeInCards(born, "travel");
+      },
+    });
   };
 
   const toggleCell = (cellId: string): void => {
@@ -369,6 +438,8 @@ export const useViewMotion = (
     setGroupBy,
     toggleLane,
     foldEverything,
+    toggleInitiativeRow,
+    toggleInitiativeBlock,
     toggleCell,
     toggleStack,
     setFilter: (filter) => {

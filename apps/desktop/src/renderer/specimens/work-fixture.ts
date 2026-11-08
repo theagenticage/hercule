@@ -23,6 +23,7 @@
 import type {
   EntityEdge,
   EntityPlace,
+  Initiative,
   Project,
   TaskDetail,
   TrackingDetailRun,
@@ -234,6 +235,8 @@ export interface WorkRecords {
   readonly board: WorkBoard;
   /** The ids of the lanes the user folded, which the screen keeps in `localStorage`. */
   readonly foldedLaneIds: readonly string[];
+  /** What `initiative.query` returns: the open Initiatives. None when left out. */
+  readonly initiatives?: readonly Initiative[];
   /** What `task.readDetail` returns for the Tasks whose details the specimen opens. None when left out. */
   readonly details?: readonly TaskDetail[];
 }

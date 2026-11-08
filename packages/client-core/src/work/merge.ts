@@ -4,26 +4,123 @@
  * the desktop renderer); these functions turn what it holds into what the board
  * draws and says.
  */
-import type { WorkCard } from "@hercule/contract";
+import type { TaskMergeCheck, WorkCard } from "@hercule/contract";
 import { dropClosingFullStops, cutWithEllipsis } from "../text";
 import { shortenTitle } from "./card-title";
+import type { WorkInitiative } from "./lanes";
 
 /** The most characters of a title that the label on the card to merge into shows before it is cut. */
 const MOST_LABEL_TITLE_CHARACTERS = 22;
 
 /**
- * What stays when two cards merge. It is said before the merge, on the card
- * that is picked, because the user cannot see it afterwards: the card that is
- * merged into keeps its own title, stage, Project and place.
+ * What the user is told stays when two cards merge. The card that is merged
+ * into keeps its own title, stage, Project and place, and its Initiative:
+ * - Both cards are in the same Initiative, or the card merged away is in none:
+ *   nothing changes, so the words only name the title, stage and place.
+ * - Both are in different Initiatives: the card merged into keeps its own, and
+ *   the words name it.
+ * - Only the card merged away is in an Initiative: the card merged into takes
+ *   it, even a closed one, and the words name it.
+ *
+ * An Initiative is named when `initiatives` lists it. The list holds the open
+ * ones, so a closed Initiative is described without its name.
  */
-export const MERGE_KEEPS_WORDS = "Keeps its title, stage and place";
+export const describeMergeKeeps = (
+  into: Pick<WorkCard, "initiativeId">,
+  away: Pick<WorkCard, "initiativeId">,
+  initiatives: readonly Pick<WorkInitiative, "id" | "name">[],
+): string => {
+  const nameOf = (id: string): string | undefined =>
+    initiatives.find((initiative) => initiative.id === id)?.name;
+  if (away.initiativeId === undefined || away.initiativeId === into.initiativeId) {
+    return "Keeps its title, stage and place";
+  }
+  if (into.initiativeId === undefined) {
+    const name = nameOf(away.initiativeId);
+    return name === undefined
+      ? "Keeps its title, stage and place, and takes the other card's initiative"
+      : `Keeps its title, stage and place, and takes the initiative ${cutWithEllipsis(name, MOST_LABEL_TITLE_CHARACTERS)}`;
+  }
+  const name = nameOf(into.initiativeId);
+  return name === undefined
+    ? "Keeps its title, stage, place and initiative"
+    : `Keeps its title, stage, place and initiative ${cutWithEllipsis(name, MOST_LABEL_TITLE_CHARACTERS)}`;
+};
+
+/**
+ * What the controller said when asked whether a merge would go ahead
+ * (`task.checkMerge`), or that it could not be asked:
+ * - `allowed`: the controller found nothing against the merge.
+ * - `refused`: the controller would refuse it, for the reason in `refusal`.
+ * - `unchecked`: the question failed (offline, an error). This never means
+ *   safe: the merge itself decides.
+ */
+export type MergeCheckResult =
+  | { readonly kind: "allowed" }
+  | { readonly kind: "refused"; readonly refusal: string }
+  | { readonly kind: "unchecked" };
+
+/** A merge check that has not answered yet, or its result. */
+export type MergeCheckState = { readonly kind: "checking" } | MergeCheckResult;
+
+/** Returns the result of a merge check from the controller's answer. */
+export const readMergeCheck = (answer: TaskMergeCheck): MergeCheckResult =>
+  answer.refusal === undefined ? { kind: "allowed" } : { kind: "refused", refusal: answer.refusal };
 
 /** What the undo line asks while the user picks the card to merge into by key. */
 export const MERGE_PICK_WORDS = "Pick the card to merge this into. Return merges, Esc cancels.";
 
-/** Returns the label on the top edge of the card to merge into: `Merge into Serve smaller…`. A long title is cut. */
-export const describeMergeTarget = (title: string): string =>
-  `Merge into ${cutWithEllipsis(title, MOST_LABEL_TITLE_CHARACTERS)}`;
+/** The most characters of a refusal that the label on the card to merge into shows before it is cut. */
+const MOST_LABEL_REFUSAL_CHARACTERS = 56;
+
+/**
+ * Returns the label on the top edge of the card to merge into, by what the
+ * merge check found:
+ * - allowed or unchecked: `Merge into Serve smaller…` (a long title is cut).
+ * - checking: `Checking merge into Serve smaller…`, which promises nothing.
+ * - refused: `Cannot merge: ` and the controller's reason, cut to fit.
+ */
+export const describeMergeTarget = (title: string, check: MergeCheckState): string => {
+  const cutTitle = cutWithEllipsis(title, MOST_LABEL_TITLE_CHARACTERS);
+  switch (check.kind) {
+    case "checking":
+      return `Checking merge into ${cutTitle}`;
+    case "refused":
+      return cutWithEllipsis(
+        `Cannot merge: ${dropClosingFullStops(check.refusal)}`,
+        MOST_LABEL_REFUSAL_CHARACTERS,
+      );
+    case "allowed":
+    case "unchecked":
+      return `Merge into ${cutTitle}`;
+  }
+};
+
+/**
+ * Returns the label on the bottom edge of the card to merge into, or
+ * `undefined` for none: what stays (`keeps`) when the merge is allowed, that
+ * the check could not be made, or that nothing will be merged. A check that is
+ * still running says nothing yet.
+ */
+export const describeMergeNote = (check: MergeCheckState, keeps: string): string | undefined => {
+  switch (check.kind) {
+    case "checking":
+      return undefined;
+    case "refused":
+      return "Nothing will be merged";
+    case "unchecked":
+      return "Could not check this merge first";
+    case "allowed":
+      return keeps;
+  }
+};
+
+/**
+ * Returns what the undo line says when a merge is not sent because the check
+ * showed the controller would refuse it. The card has not left the board.
+ */
+export const describeMergeRefused = (sourceTitle: string, refusal: string): string =>
+  `"${shortenTitle(sourceTitle)}" was not merged: ${dropClosingFullStops(refusal)}.`;
 
 /** Returns what the undo line says after a merge: `Merged into "Serve smaller checkout".` A long title is cut. */
 export const describeMergedInto = (targetTitle: string): string =>

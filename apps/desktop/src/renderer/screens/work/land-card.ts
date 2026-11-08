@@ -7,7 +7,15 @@ import {
   type SpringName,
   type Velocity,
 } from "../../app/motion";
-import { flyFlightsTo, INTO_PLACE, removeFlight } from "./board-flights";
+import {
+  DROPPED_BEAD_DELAY,
+  findFoldRow,
+  findFoldTarget,
+  flyFlightsTo,
+  INTO_PLACE,
+  removeFlight,
+  showBeadOnArrival,
+} from "./board-flights";
 import { findCardElement } from "./card-in-lane";
 
 /** How long the thin ring on a card that landed in Landed stays on it, in milliseconds. A little longer than the ring's fade. */
@@ -40,9 +48,10 @@ export interface EndedCarry {
 }
 
 /**
- * Returns the element that stands for a card that has no place of its own on
- * the page at `place`: the "13 more" line of its cell, the count of its stage
- * on a folded lane, or that lane's head. A drop that keeps the card's stage
+ * Returns the element that stands for the card `cardId` when it has no place
+ * of its own on the page at `place`: the "13 more" line of its cell, its bead
+ * on the folded line of an Initiative's row, the count of its stage on a
+ * folded line, or that lane's head. A drop that keeps the card's stage
  * (`place.stage` is `null`) means `cardStage`. Returns `null` when there is
  * no place.
  */
@@ -50,19 +59,17 @@ export const findHidingPlace = (
   scroller: HTMLElement,
   place: DropPlace | null,
   cardStage: BoardStage,
-): Element | null => {
+  cardId: string,
+): HTMLElement | null => {
   if (place === null) return null;
   if (place.kind === "cell") {
-    return scroller.querySelector(
+    return scroller.querySelector<HTMLElement>(
       `[data-more-cell-id="${CSS.escape(buildCellId(place.laneId, place.stage))}"]`,
     );
   }
-  const foldRow = scroller.querySelector(`[data-fold-row="${CSS.escape(place.laneId)}"]`);
-  const stage = place.stage ?? cardStage;
   return (
-    [...(foldRow?.children ?? [])].find(
-      (cell) => cell instanceof HTMLElement && cell.dataset["stage"] === stage,
-    ) ?? scroller.querySelector(`[data-lane-head="${CSS.escape(place.laneId)}"]`)
+    findFoldTarget(findFoldRow(scroller, place.laneId), cardId, place.stage ?? cardStage) ??
+    scroller.querySelector<HTMLElement>(`[data-lane-head="${CSS.escape(place.laneId)}"]`)
   );
 };
 
@@ -86,18 +93,19 @@ const findLandedCard = (scroller: HTMLElement, carry: EndedCarry): HTMLElement |
 
 /**
  * Sends `ghost`, the copy of a card, to the line that now stands for the
- * card, and fades it there: the count of the folded lane it went into, or the
- * "3 landed" line of a cell that hides it (`findHidingPlace`). A card with no
- * such place fades where it is. Both go on `travel`, because the user dropped
- * the card.
+ * card, and fades it there: its bead on the folded row it went into, the
+ * count of the folded lane it went into, or the "3 landed" line of a cell that
+ * hides it (`findHidingPlace`). A card with no such place fades where it is.
+ * Both go on `travel`, because the user dropped the card. A bead appears as the
+ * copy arrives.
  */
 const flyAway = (
   scroller: HTMLElement,
   ghost: HTMLElement,
   place: DropPlace | null,
-  cardStage: BoardStage,
+  card: Pick<WorkCard, "id" | "stage">,
 ): void => {
-  const target = findHidingPlace(scroller, place, cardStage);
+  const target = findHidingPlace(scroller, place, card.stage, card.id);
   if (target === null) {
     trackBody(ghost).to({ s: 0.96, o: 0 }, "travel", {
       done: () => {
@@ -107,6 +115,7 @@ const flyAway = (
     return;
   }
   flyFlightsTo([{ ghost, delay: 0 }], () => target, INTO_PLACE);
+  showBeadOnArrival(target, DROPPED_BEAD_DELAY);
 };
 
 /**
@@ -128,7 +137,7 @@ export const landCard = (
 ): void => {
   const card = findLandedCard(scroller, carry);
   if (card === null) {
-    flyAway(scroller, carry.ghost, carry.place, carry.card.stage);
+    flyAway(scroller, carry.ghost, carry.place, carry.card);
     return;
   }
   const place = measureLayoutRect(card);

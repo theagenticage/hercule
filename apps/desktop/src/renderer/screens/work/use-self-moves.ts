@@ -205,6 +205,7 @@ const drawWithMoves = (
           scroller,
           buildHidingPlace(scroller, flight.laneId, move.stage),
           move.stage,
+          move.cardId,
         ),
       INTO_PLACE,
       "self",

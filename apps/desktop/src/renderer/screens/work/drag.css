@@ -105,7 +105,8 @@
 }
 
 /* A folded lane has no cell to hold a slot, so its head is the target. */
-.board-lane[data-drop-target] .board-lane-head {
+.board-lane[data-drop-target] .board-lane-head,
+.initiative-row[data-drop-target] .initiative-head {
   box-shadow: inset 0 0 0 1px var(--focus);
   border-radius: var(--r-xs);
 }
@@ -177,6 +178,35 @@
   bottom: -12px;
   color: var(--muted);
 }
+/* The labels are cut with an ellipsis when they are wider than the card, and
+   the bottom one is not drawn while the merge check runs (it has no words). */
+.desk-card[data-merge-target]::after,
+.desk-card[data-merge-target]::before {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-card[data-merge-target]:not([data-merge-keeps])::before {
+  content: none;
+}
+
+/* The merge check decides how the ring reads. While it runs, or when it could
+   not be made, the ring is the quiet one of a card that is not approved yet.
+   When the controller would refuse the merge, the ring and the top label take
+   the failure colour. */
+.desk-card[data-merge-target][data-merge-check="checking"] .card-stock,
+.desk-card[data-merge-target][data-merge-check="unchecked"] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--faint);
+}
+.desk-card[data-merge-target][data-merge-check="refused"] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--fail-ink);
+}
+.desk-card[data-merge-target][data-merge-check="refused"]::after {
+  color: var(--fail-ink);
+}
 
 /* Picking the card to merge into by key: the card to merge dashes, and the
    walk's ring is the accent. The ring is the walk's alone, so the target's
@@ -190,6 +220,11 @@
 }
 .work-desk[data-merge-picking] .desk-card[data-merge-target] .card-stock {
   box-shadow: var(--h-hover);
+}
+.work-desk[data-merge-picking]
+  .desk-card[data-merge-target][data-merge-check="refused"]:focus-visible
+  .card-stock {
+  outline-color: var(--fail-ink);
 }
 
 /* The copy of a card sliding in under the card it merges into stands in the

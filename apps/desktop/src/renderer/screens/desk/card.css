@@ -58,6 +58,16 @@
   opacity: var(--lift, 0);
   pointer-events: none;
 }
+/* A blocked card goes quiet: a flat sheet with a hairline, and no sheen. It
+   comes before the hover, focus and selected rules, so each of those still
+   wins when it applies at once. */
+.desk-card[data-state="blocked"] .card-stock {
+  background: var(--stock-flat);
+  box-shadow: inset 0 0 0 1px var(--stock-rim-flat);
+}
+.desk-card[data-state="blocked"] .card-stock::before {
+  display: none;
+}
 .desk-card:not(.is-carried):hover {
   z-index: 2;
 }
@@ -76,6 +86,14 @@
   box-shadow:
     var(--h-hover),
     0 0 0 1.5px var(--ink);
+}
+/* The card that holds a blocked card back, while the line from that card points at it: the
+   hover shadow and a 1px ring. It also holds under the pointer. */
+.desk-card.is-blocker .card-stock,
+.desk-card.is-blocker:not(.is-carried):hover .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 1px var(--muted);
 }
 .card-check {
   position: absolute;
@@ -165,6 +183,17 @@
   color: var(--muted);
   line-height: 0;
 }
+/* The small flag of the Initiative a card belongs to, beside the age and the marks, in the
+   Initiative's colour (--plan-hue, set on the flag). It is drawn on cards of every grouping
+   but Group by Project, where the Initiative has a row of its own. */
+.card-plan {
+  --plan-ink: oklch(var(--plan-l) var(--plan-c) var(--plan-hue));
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--plan-ink);
+  line-height: 0;
+}
 /* What a card in two lanes says at the bottom left, so no lane looks like its
    only home. It stops short of the marks and the age on the right. */
 .card-also {
@@ -240,6 +269,18 @@
 }
 .desk-card.has-long-title .card-now {
   -webkit-line-clamp: 1;
+}
+/* A blocked card's words step back, and its lock stands before the second line. Under the
+   pointer they come back to full strength, as on every card. */
+.desk-card[data-state="blocked"] .card-title,
+.desk-card[data-state="blocked"] .card-words {
+  color: var(--word-press);
+}
+.card-lock {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+  line-height: 0;
 }
 .desk-card:hover .card-title,
 .desk-card:focus-visible .card-title {

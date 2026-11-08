@@ -188,6 +188,7 @@ export {
 export {
   ApiError,
   ConnectionError,
+  isBlockerCycle,
   isConflict,
   isInvalidState,
   isNotFound,

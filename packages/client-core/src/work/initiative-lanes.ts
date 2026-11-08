@@ -200,3 +200,26 @@ export const findCardInitiativeFlag = (
   groupBy === PROJECT_FACET_ID
     ? undefined
     : initiatives.find((initiative) => initiative.id === card.initiativeId);
+
+/** What a folded Project lane shows of an Initiative it holds: its small flag. */
+export interface HeldInitiative {
+  readonly id: string;
+  readonly hue: number;
+  readonly name: string;
+}
+
+/**
+ * Returns the Initiatives the lane `laneId` holds, in the order of their rows:
+ * the rows drawn under it In lanes. A folded lane hides its rows, so it keeps
+ * a flag for each in its head. Returns no Initiative for a lane that holds
+ * none, and for every lane while the rows are On top.
+ */
+export const listLaneInitiatives = (
+  lanes: readonly { readonly lane: WorkLane }[],
+  laneId: string,
+): readonly HeldInitiative[] =>
+  lanes.flatMap(({ lane }): HeldInitiative[] =>
+    lane.initiative?.underLaneId === laneId
+      ? [{ id: lane.initiative.initiativeId, hue: lane.initiative.hue, name: lane.name }]
+      : [],
+  );

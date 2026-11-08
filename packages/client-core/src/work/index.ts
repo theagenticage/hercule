@@ -6,7 +6,7 @@
  * the changes the board holds back until the user's hand is still, the keyboard walk, which cards are selected, the
  * words and the pose of a card, the lanes and facets of the outside places a
  * Task stands under, the Initiative rows and lanes with their beads and
- * progress, what a blocked card says, what the Add sheet opens on and says, and the words of
+ * progress, what a blocked card says, the Blocked by and Blocks of the details pane and the Initiative it is on, what the Add sheet opens on and says, and the words of
  * linking a thing to a Task. It is the
  * subpath `@hercule/client-core/work`, not part of the
  * library's index, so that its code stays out of the shell's chunk. The
@@ -31,6 +31,7 @@ export * from "./facets";
 export * from "./find";
 export * from "./held-answers";
 export * from "./hold-back-board";
+export * from "./initiative-form";
 export * from "./initiative-lanes";
 export * from "./initiative-line";
 export * from "./initiative-progress";
@@ -41,7 +42,9 @@ export * from "./merge";
 export * from "./question-answers";
 export * from "./selection";
 export * from "./summary-standing";
+export * from "./task-blockers";
 export * from "./task-context-rows";
+export * from "./task-initiative";
 export * from "./task-links";
 export * from "./task-pane";
 export * from "./task-run";

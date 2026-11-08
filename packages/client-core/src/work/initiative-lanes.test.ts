@@ -9,6 +9,7 @@ import {
   findCardInitiativeFlag,
   groupBoardByInitiative,
   groupBoardByProject,
+  listLaneInitiatives,
   NO_INITIATIVE_LANE_ID,
 } from "./initiative-lanes";
 import { buildLanes, NO_PROJECT_LANE_ID, type WorkLane } from "./lanes";
@@ -230,5 +231,30 @@ describe("findCardInitiativeFlag", () => {
   it("shows no flag for a card with no Initiative, or one that is not listed", () => {
     expect(findCardInitiativeFlag(buildCard("b"), "initiative", [PLATFORM])).toBeUndefined();
     expect(findCardInitiativeFlag(card, "initiative", [LAUNCH])).toBeUndefined();
+  });
+});
+
+describe("listLaneInitiatives", () => {
+  const view = { place: "lanes", isFiltering: false } as const;
+  const rows = (initiatives: Parameters<typeof groupBoardByProject>[2]) =>
+    groupBoardByProject(BOARD, PROJECTS, initiatives, view).map((lane) => ({ lane }));
+
+  it("lists the Initiatives drawn under a lane, in the order of their rows", () => {
+    expect(listLaneInitiatives(rows([PLATFORM, LAUNCH, ORPHAN]), "storefront")).toEqual([
+      { id: "platform", hue: 245, name: "Platform" },
+    ]);
+    expect(listLaneInitiatives(rows([PLATFORM, LAUNCH, ORPHAN]), NO_PROJECT_LANE_ID)).toEqual([
+      { id: "launch", hue: 150, name: "Spring launch" },
+      { id: "orphan", hue: 300, name: "Old plans" },
+    ]);
+  });
+
+  it("lists none for a lane that holds none, and none while the rows are On top", () => {
+    expect(listLaneInitiatives(rows([PLATFORM]), "checkout")).toEqual([]);
+    const onTop = groupBoardByProject(BOARD, PROJECTS, [PLATFORM], {
+      place: "top",
+      isFiltering: false,
+    }).map((lane) => ({ lane }));
+    expect(listLaneInitiatives(onTop, "storefront")).toEqual([]);
   });
 });

@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+} from "react";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import { dropEmptyValues, filterItems } from "@hercule/client-core/desk";
@@ -8,19 +16,27 @@ import {
   buildLanes,
   buildWorkFacets,
   chooseAddOpening,
+  chooseLaneId,
   chooseLaneProject,
+  computeInitiativeProgress,
   countCardsByStage,
   describeCardMove,
+  describeInitiativeFacts,
   type EndStage,
   findCards,
   groupBoardByContext,
+  groupBoardByInitiative,
+  groupBoardByProject,
+  INITIATIVE_FACET_ID,
   listBoardGroupings,
+  listDrawnLanes,
   listShownCards,
   NO_PROJECT_LANE_ID,
   NO_PROJECT_LANE_NAME,
   PROJECT_FACET_ID,
   STAGE_NAMES,
   type AddOpening,
+  type WorkInitiative,
 } from "@hercule/client-core/work";
 import {
   BOARD_STAGES,
@@ -33,6 +49,7 @@ import {
 } from "@hercule/contract";
 import type { SavedController } from "../../../app/context";
 import { useMediaQueryMatch } from "../../../app/appearance";
+import { INITIATIVE_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { controllerQuery, pluginsQuery, projectsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey, isPrimaryModifierHeld } from "../../../app/primary-modifier";
 import { useFirstArrival } from "../../../app/use-first-arrival";
@@ -44,7 +61,7 @@ import { AddFromSource } from "../../../screens/work/add-from-source";
 import { AddTaskSheet, type AddTaskLane } from "../../../screens/work/add-task-sheet";
 import { BoardDesk, type DeskState } from "../../../screens/work/board-desk";
 import { DeskClear, FirstRun, NoMatch } from "../../../screens/work/board-empty";
-import { BoardLane } from "../../../screens/work/board-lane";
+import { BoardBody } from "../../../screens/work/board-body";
 import { BoardLoading } from "../../../screens/work/board-loading";
 import { isSameCardInLane, readCardInLane } from "../../../screens/work/card-in-lane";
 import { keepCardInView } from "../../../screens/work/keep-in-view";
@@ -58,7 +75,7 @@ import { useBoardReads } from "../../../screens/work/use-board-reads";
 import { usePausePawsOffScreen } from "../../../screens/work/use-pause-paws";
 import { useViewMotion } from "../../../screens/work/use-view-motion";
 import { useFailedArrival } from "../../../screens/work/use-failed-arrival";
-import { useWorkView } from "../../../screens/work/use-work-view";
+import { listFoldableLaneIds, useWorkView } from "../../../screens/work/use-work-view";
 import type { PressedKeys } from "../../../screens/work/work-card";
 import { buildBoardSnapshotKey } from "../../../screens/work/board-snapshot-storage";
 import { SinceLine } from "../../../screens/work/since-line";
@@ -71,7 +88,7 @@ import { useStopRun } from "./-stop-run";
 import { usePaneChanges } from "./-pane-changes";
 import { useTaskThreads } from "./-task-threads";
 import { WorkPane } from "./-work-pane";
-import { hasAnyTaskQuery, useWorkBoard } from "./-work-board";
+import { hasAnyTaskQuery, useWorkBoard, useWorkInitiatives } from "./-work-board";
 
 /** Below this window width, lanes are bands: side labels would cost the cards 210px. */
 const SIDE_LABELS_FROM_PX = 1320;
@@ -82,6 +99,8 @@ const LOADING_LANES = 3;
 const EMPTY_CARDS: readonly WorkCard[] = [];
 const EMPTY_PLACES: readonly EntityPlace[] = [];
 const EMPTY_STACK_CANDIDATES: readonly WorkStackCandidate[] = [];
+const EMPTY_INITIATIVES: readonly WorkInitiative[] = [];
+const EMPTY_DONE_COUNTS: Readonly<Record<string, number>> = {};
 
 /** Returns whether Text Generation can run on `controllerInfo`, so that a summary can be written. */
 const canTextGenerationRun = (controllerInfo: ControllerInfo): boolean =>
@@ -134,6 +153,11 @@ export function WorkScreen({
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const board = useWorkBoard(client);
+  // The Initiatives are read with the board, kept current by their own topic, held only while Work is open.
+  const queryClient = useQueryClient();
+  useScreenTopicsLive(live, queryClient, INITIATIVE_TOPICS);
+  const initiativesRead = useWorkInitiatives(client);
+  const initiatives = initiativesRead.data ?? EMPTY_INITIATIVES;
   // Until the controller's record is read, nothing says a summary is coming, so no card promises one.
   const canWriteSummaries =
     useQuery({ ...controllerQuery(client), select: canTextGenerationRun }).data === true;
@@ -184,16 +208,29 @@ export function WorkScreen({
   });
   const view = useViewMotion(savedView, scrollRef);
   usePausePawsOffScreen(scrollRef);
-  const drawnBoard = reads.drawnBoard;
+  // The board is not drawn until the Initiatives are in: cards of an Initiative would
+  // first show in their lanes, and then jump onto their rows.
+  const drawnBoard = initiativesRead.data === undefined ? undefined : reads.drawnBoard;
   const drawnCards = drawnBoard?.cards ?? EMPTY_CARDS;
   const places = drawnBoard?.places ?? EMPTY_PLACES;
   const groupings = listBoardGroupings({ groupings: drawnBoard?.groupings ?? [] });
   // A saved grouping whose kind the board no longer has (its plugin was
-  // removed, or none of its places is on the board) is drawn as Project, and
-  // stays saved in case the kind comes back.
-  const groupBy = groupings.some((grouping) => grouping.kind === view.groupBy)
-    ? view.groupBy
-    : PROJECT_FACET_ID;
+  // removed, or none of its places is on the board), or Initiative once no
+  // Initiative is open, is drawn as Project, and stays saved in case it comes back.
+  const groupBy =
+    groupings.some((grouping) => grouping.kind === view.groupBy) ||
+    (view.groupBy === INITIATIVE_FACET_ID && initiatives.length > 0)
+      ? view.groupBy
+      : PROJECT_FACET_ID;
+  // A card under any grouping but Project draws the small flag of its Initiative. The map keeps
+  // its identity until the Initiatives or the grouping change, so the cards stay as drawn.
+  const initiativeFlags = useMemo(
+    () =>
+      groupBy === PROJECT_FACET_ID
+        ? undefined
+        : new Map(initiatives.map((initiative) => [initiative.id, initiative])),
+    [initiatives, groupBy],
+  );
   // The answers the user gave from the pane and the app still holds show on
   // their cards as answered; the pane's answer and Try again buttons act here.
   const pane = usePaneChanges({
@@ -211,6 +248,7 @@ export function WorkScreen({
   });
   // A merge held for the undo line hides the card that merges away.
   const merging = useMergeCards({
+    client,
     scope,
     readBoard: logical.readBoardNow,
     isBoardRead: logical.board !== undefined,
@@ -228,6 +266,7 @@ export function WorkScreen({
   const facets = buildWorkFacets(
     allLanes,
     { cards: drawnCards, places, groupings: drawnBoard?.groupings ?? [] },
+    initiatives,
     plugins,
   );
 
@@ -244,25 +283,57 @@ export function WorkScreen({
 
   const found = findCards(drawnCards, view.findText);
   const visibleCards = filterItems(found.matches, view.filter, facets);
+  // The cards the filter leaves, with the Done counts that give a row its rings.
+  const filteredBoard = {
+    cards: visibleCards,
+    initiativeDoneCounts: drawnBoard?.initiativeDoneCounts ?? EMPTY_DONE_COUNTS,
+  };
+  const initiativeView = {
+    place: view.display.initiativePlace,
+    isFiltering: view.isFiltering,
+  };
   const lanes =
     groupBy === PROJECT_FACET_ID
-      ? buildLanes({ cards: visibleCards }, projects)
-      : groupBoardByContext(
-          { cards: visibleCards, places, groupings: drawnBoard?.groupings ?? [] },
-          groupBy,
-        );
-  const arrangedLanes = arrangeLanes(lanes, {
+      ? groupBoardByProject(filteredBoard, projects, initiatives, initiativeView)
+      : groupBy === INITIATIVE_FACET_ID
+        ? groupBoardByInitiative(filteredBoard, initiatives, initiativeView)
+        : groupBoardByContext(
+            { cards: visibleCards, places, groupings: drawnBoard?.groupings ?? [] },
+            groupBy,
+          );
+  const everyArrangedLane = arrangeLanes(lanes, {
     foldedLaneIds: view.foldedLaneIds,
+    openedInitiativeIds: view.openedInitiativeIds,
     openedCellIds: view.openedCellIds,
     openedStackIds: view.openedStackIds,
     stackCandidates: drawnBoard?.stackCandidates ?? EMPTY_STACK_CANDIDATES,
     isFiltering: view.isFiltering,
   });
+  // The rows under a folded lane are not on screen, so nothing that walks, selects or drops sees them.
+  const arrangedLanes = listDrawnLanes(everyArrangedLane);
   const shownCards = listShownCards(arrangedLanes);
   // Which cards are selected. A card the board stops drawing leaves the selection.
   const selection = useCardSelection(shownCards.map((card) => card.cardId));
   const tabStop =
     shownCards.find((card) => isSameCardInLane(card, view.currentCard)) ?? shownCards[0] ?? null;
+  // The words under each row's name come from the logical board and every card, not the ones the
+  // filter leaves, so that "2 of 8 landed" says the same whatever the user looks for, and a Task
+  // the user just marked Done keeps counting.
+  const factsByInitiativeId = new Map(
+    lanes.flatMap(({ initiative }) =>
+      initiative?.isRow === true && logical.board !== undefined
+        ? [
+            [
+              initiative.initiativeId,
+              describeInitiativeFacts(
+                computeInitiativeProgress(logical.board, initiative.initiativeId),
+                initiative.projectName,
+              ),
+            ] as const,
+          ]
+        : [],
+    ),
+  );
 
   const isBoardEmpty = drawnBoard !== undefined && drawnCards.length === 0;
   const hasAnyTaskRead = useQuery({ ...hasAnyTaskQuery(client), enabled: isBoardEmpty });
@@ -307,7 +378,9 @@ export function WorkScreen({
   const mergePick = useMergePick({
     scrollRef,
     cards: logicalCards,
+    initiatives,
     merge: merging.mergeCard,
+    checkMerge: merging.checkMerge,
     say: moves.sayWithoutUndo,
     onStart: () => {
       onChangeOpenTask(null);
@@ -369,7 +442,7 @@ export function WorkScreen({
   /** Moves a card to a stage from the details' stage path, as the number keys do. */
   const moveCardToStage = (card: WorkCard, stage: BoardStage): void => {
     const move = { taskId: card.id, stage };
-    moves.moveCardWithMotion(move, describeCardMove(card, move, projects));
+    moves.moveCardWithMotion(move, describeCardMove(card, move, projects, initiatives));
   };
 
   /**
@@ -432,9 +505,21 @@ export function WorkScreen({
     const project = projects.find((each) => each.id === projectId);
     return { id: lane.id, name: project?.name ?? lane.name, projectId };
   };
-  /** Returns the lane the toolbar's Add opens in: the current card's, else the first on screen, else No project. */
-  const chooseAddLane = (): AddTaskLane =>
-    toAddLane(tabStop?.laneId ?? lanes[0]?.id ?? NO_PROJECT_LANE_ID);
+  /**
+   * Returns the lane the toolbar's Add opens in: the current card's, else the
+   * first on screen, else No project. A card on an Initiative row stands in
+   * no Project lane, so its own Project's lane is the one.
+   */
+  const chooseAddLane = (): AddTaskLane => {
+    const stopLane = lanes.find((each) => each.id === tabStop?.laneId);
+    if (stopLane?.initiative?.isRow === true) {
+      const card = logicalCards.find((each) => each.id === tabStop?.cardId);
+      const projectIds = new Set(projects.map((project) => project.id));
+      return toAddLane(card === undefined ? NO_PROJECT_LANE_ID : chooseLaneId(card, projectIds));
+    }
+    const firstLane = lanes.find((each) => each.initiative?.isRow !== true);
+    return toAddLane(tabStop?.laneId ?? firstLane?.id ?? NO_PROJECT_LANE_ID);
+  };
   const { mutateAsync: createTask } = useMutation({
     mutationFn: ({ title, lane }: { readonly title: string; readonly lane: AddTaskLane }) =>
       client.task.create({
@@ -464,6 +549,7 @@ export function WorkScreen({
     scrollRef,
     cards: logicalCards,
     projects,
+    initiatives,
     arrangedLanes,
     selectedIds: selection.selectedIds,
     moveCard: moves.moveCard,
@@ -474,12 +560,30 @@ export function WorkScreen({
     },
     say: moves.sayWithoutUndo,
     holdMerge: merging.holdMerge,
+    checkMerge: merging.checkMerge,
     onCarryingChange: (isCarryingNow) => {
       setIsCarrying(isCarryingNow);
       // A card in the hand ends the key flow of a merge.
       if (isCarryingNow) mergePick.cancel();
     },
   });
+
+  /**
+   * Opens the sheet that edits the Initiative `initiativeId`, from the edit
+   * button in a row's head.
+   */
+  const editInitiative = (initiativeId: string): void => {
+    // TODO(#1036 sheet): open the Initiative sheet for `initiativeId`. The coordinator wires
+    // the sheet's hook here; until then the button says so instead of doing nothing.
+    void initiativeId;
+    moves.sayWithoutUndo("Editing an initiative is not ready yet.");
+  };
+
+  /** Opens the Task of a bead on an Initiative's line, as a click on its card does. */
+  const pressBead = (taskId: string): void => {
+    const card = logicalCards.find((each) => each.id === taskId);
+    if (card !== undefined) openCard(card);
+  };
 
   // ---------- Keys ----------
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
@@ -510,6 +614,7 @@ export function WorkScreen({
     arrangedLanes,
     findMatches: found.topMatches,
     projects,
+    initiatives,
     moves,
     isCarrying,
     scrollRef,
@@ -553,6 +658,14 @@ export function WorkScreen({
           void board.refetch();
         }}
       />
+    ) : initiativesRead.isError ? (
+      <ReadFailure
+        what="The initiatives"
+        reason={readErrorMessage(initiativesRead.error)}
+        onRetry={() => {
+          void initiativesRead.refetch();
+        }}
+      />
     ) : (
       <BoardLoading laneNames={projects.slice(0, LOADING_LANES).map((project) => project.name)} />
     );
@@ -581,27 +694,33 @@ export function WorkScreen({
     body = <NoMatch />;
   } else {
     body = (
-      <div className="board-lanes">
-        {arrangedLanes.map((each) => (
-          <BoardLane
-            key={each.lane.id}
-            arrangedLane={each}
-            plugins={plugins}
-            tabStop={tabStop}
-            isStill={view.display.isStill}
-            canWriteSummaries={canWriteSummaries}
-            selectedIds={selection.selectedIds}
-            onToggleLane={view.toggleLane}
-            onToggleCell={view.toggleCell}
-            onToggleStack={view.toggleStack}
-            onAddTask={(laneId) => {
-              openAddSheet(toAddLane(laneId), laneId);
-            }}
-            onPressCard={pressCard}
-            onFocusCard={view.setCurrentCard}
-          />
-        ))}
-      </div>
+      <BoardBody
+        arrangedLanes={everyArrangedLane}
+        plugins={plugins}
+        initiativeFlags={initiativeFlags}
+        factsByInitiativeId={factsByInitiativeId}
+        tabStop={tabStop}
+        isStill={view.display.isStill}
+        canWriteSummaries={canWriteSummaries}
+        selectedIds={selection.selectedIds}
+        isBlockFolded={view.isInitiativeBlockFolded}
+        onToggleBlock={view.toggleInitiativeBlock}
+        onToggleLane={view.toggleLane}
+        onToggleRow={(rowLaneId) => {
+          const initiativeId = lanes.find((each) => each.id === rowLaneId)?.initiative
+            ?.initiativeId;
+          if (initiativeId !== undefined) view.toggleInitiativeRow(rowLaneId, initiativeId);
+        }}
+        onEditInitiative={editInitiative}
+        onPressBead={pressBead}
+        onToggleCell={view.toggleCell}
+        onToggleStack={view.toggleStack}
+        onAddTask={(laneId) => {
+          openAddSheet(toAddLane(laneId), laneId);
+        }}
+        onPressCard={pressCard}
+        onFocusCard={view.setCurrentCard}
+      />
     );
   }
 
@@ -610,6 +729,7 @@ export function WorkScreen({
       toolbar={
         <WorkToolbar
           pill={<OverviewPill />}
+          hasInitiatives={initiatives.length > 0}
           groupings={groupings}
           groupBy={groupBy}
           onGroupByChange={(next) => {
@@ -636,7 +756,7 @@ export function WorkScreen({
           display={view.display}
           onDisplayChange={view.setDisplay}
           onFoldEverything={() => {
-            view.foldEverything(lanes.map((lane) => lane.id));
+            view.foldEverything(listFoldableLaneIds(lanes, view.isFiltering));
           }}
           onShowKeys={keys.showKeysSheet}
           onAdd={() => {
@@ -746,7 +866,7 @@ export function WorkScreen({
           />
         </>
       }
-      stageCounts={drawnBoard === undefined ? null : countCardsByStage(arrangedLanes)}
+      stageCounts={drawnBoard === undefined ? null : countCardsByStage(everyArrangedLane)}
       laneLabels={isNarrow ? "bands" : view.display.laneLabels}
       isOffline={offlineSince !== null}
       isCarrying={isCarrying}

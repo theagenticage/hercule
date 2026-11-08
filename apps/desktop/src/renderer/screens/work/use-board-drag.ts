@@ -4,11 +4,14 @@ import {
   buildDropMove,
   describeCardMove,
   describeCardsMove,
+  describeMergeRefused,
   settleGroupDrop,
   type ArrangedLane,
   type CardInLane,
   type CardMove,
   type DropPlace,
+  type MergeCheckResult,
+  type WorkInitiative,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkCard } from "@hercule/contract";
@@ -68,6 +71,12 @@ export interface BoardDragOptions {
    */
   readonly cards: readonly WorkCard[];
   readonly projects: readonly WorkProject[];
+  /**
+   * The open Initiatives, which the board lists. A drop on a Project lane
+   * takes a card off its Initiative only when the Initiative is in here,
+   * because only then was the card drawn on it.
+   */
+  readonly initiatives: readonly WorkInitiative[];
   /** The lanes the board draws: which are folded, and which cards a cell hides. */
   readonly arrangedLanes: readonly ArrangedLane[];
   /**
@@ -100,6 +109,13 @@ export interface BoardDragOptions {
    * either card is no longer on the board.
    */
   readonly holdMerge: (sourceCardId: string, targetCardId: string) => boolean;
+  /**
+   * Asks whether the card `sourceCardId` could be merged into the card
+   * `targetCardId`, which the carry does when it chooses a card to merge
+   * into. It never rejects: a question that could not be asked answers
+   * `unchecked` (see `MergeCheckResult`).
+   */
+  readonly checkMerge: (sourceCardId: string, targetCardId: string) => Promise<MergeCheckResult>;
   /**
    * Called with `true` when a card enters the hand and with `false` when it
    * leaves it. The screen keeps the value and draws it as the desk's
@@ -393,6 +409,8 @@ const createBoardDrag = (
     const pose = readReleasePose(c);
     endCarry(c);
     const options = readOptions();
+    // A merge the controller said it would refuse is not sent: the card goes home.
+    const refusal = target.check.kind === "refused" ? target.check.refusal : undefined;
     let isHeld = false;
     flipBoard(scroller, "hand", () => {
       c.slot.remove();
@@ -400,7 +418,7 @@ const createBoardDrag = (
       clearMarks(c);
       flushSync(() => {
         options.onCarryingChange(false);
-        isHeld = options.holdMerge(c.card.id, target.cardId);
+        if (refusal === undefined) isHeld = options.holdMerge(c.card.id, target.cardId);
       });
     });
     if (isHeld) {
@@ -408,7 +426,11 @@ const createBoardDrag = (
       return;
     }
     landCard(scroller, c, pose, "travel", undefined, 0);
-    options.say("A card left the board, so nothing was merged.");
+    options.say(
+      refusal === undefined
+        ? "A card left the board, so nothing was merged."
+        : describeMergeRefused(c.card.title, refusal),
+    );
   };
 
   /**
@@ -439,6 +461,7 @@ const createBoardDrag = (
       stage: place.stage,
       beforeCardId: place.kind === "cell" ? place.beforeCardId : null,
       followerIds: followers.map((card) => card.id),
+      listedInitiativeIds: new Set(options.initiatives.map((initiative) => initiative.id)),
     });
     const settled = settleGroupDrop({ cards: options.cards }, options.projects, drop, followers);
     if (settled.kind === "refuse") {
@@ -455,8 +478,13 @@ const createBoardDrag = (
           : (options.cards.find((each) => each.id === only.taskId) ??
             [c.card, ...followers].find((each) => each.id === only.taskId));
       return only !== undefined && moves.length === 1 && card !== undefined
-        ? describeCardMove(card, only, options.projects)
-        : describeCardsMove(moves, place.stage ?? c.card.stage, options.projects);
+        ? describeCardMove(card, only, options.projects, options.initiatives)
+        : describeCardsMove(
+            moves,
+            place.stage ?? c.card.stage,
+            options.projects,
+            options.initiatives,
+          );
     };
     releaseCarry(c, "hand", { moves: settled.moves, describe, note: settled.note });
   };
@@ -546,6 +574,9 @@ const createBoardDrag = (
       merge: createMergeGesture({
         scroller,
         readCards: () => readOptions().cards,
+        readInitiatives: () => readOptions().initiatives,
+        sourceId: card.id,
+        checkMerge: (sourceId, targetId) => readOptions().checkMerge(sourceId, targetId),
         slot,
         body,
         home,
