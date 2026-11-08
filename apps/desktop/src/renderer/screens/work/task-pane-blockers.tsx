@@ -222,10 +222,11 @@ function AddBlocker({
 
 /**
  * Renders Blocked by and Blocks: the Tasks this Task waits on, and the Tasks
- * that wait on it, in the order the details list them. A list with no row is
- * not drawn, except that Blocked by always has "Add a blocker", which is how
- * the first blocker is made. The details list at most 50 of each, and "and 12
- * more" counts the rest.
+ * that wait on it, in the order the details list them. Blocks is not drawn
+ * when it has no row. Blocked by always has its heading and "Add a blocker"
+ * as its last row, which is how the first blocker is made; its heading shows
+ * the number of blockers only when there are some. The details list at most
+ * 50 of each, and "and 12 more" counts the rest.
  *
  * - `blockers` are the details' lists and totals.
  * - `cards` are the board's cards, which "Add a blocker" searches.
@@ -259,16 +260,14 @@ export function BlockerSections({
   return (
     <>
       <section className="task-pane-sec" aria-label="Blocked by">
+        <h3>Blocked by {blockedBy.rows.length > 0 && <span>{blockers.blockerCount}</span>}</h3>
         {blockedBy.rows.length > 0 && (
-          <>
-            <h3>Blocked by</h3>
-            <BlockerRows
-              list={blockedBy}
-              mark={<LockIcon size={14} />}
-              onOpen={onOpenTask}
-              onRemove={onRemove}
-            />
-          </>
+          <BlockerRows
+            list={blockedBy}
+            mark={<LockIcon size={14} />}
+            onOpen={onOpenTask}
+            onRemove={onRemove}
+          />
         )}
         <AddBlocker
           cards={cards}

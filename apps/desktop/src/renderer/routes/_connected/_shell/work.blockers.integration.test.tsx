@@ -239,6 +239,9 @@ describe("Blocked by and Blocks on the details pane", () => {
       "Move the old photo bucketDone",
     ]);
     expect(within(blockedBy).getByText("and 12 more")).toBeTruthy();
+    expect(within(blockedBy).getByRole("heading").textContent).toBe("Blocked by 15");
+    // "Add a blocker" is the section's last row, after the blockers.
+    expect(blockedBy.lastElementChild?.textContent).toContain("Add a blocker");
     // A blocker that landed or finished no longer holds the Task back, so it reads quietly.
     expect(rows.map((row) => row.classList.contains("is-quiet"))).toEqual([false, true, true]);
     const blocks = within(pane).getByRole("region", { name: "Blocks" });
@@ -282,13 +285,13 @@ describe("Blocked by and Blocks on the details pane", () => {
     });
   });
 
-  it("offers Add a blocker on a Task that waits on nothing, with no Blocked by heading", async () => {
+  it("offers Add a blocker on a Task that waits on nothing, under a Blocked by heading with no count", async () => {
     const { pane } = await openPane({ blockers: [] });
 
     const blockedBy = await findBlockedBy(pane);
 
     expect(within(blockedBy).getByRole("button", { name: "Add a blocker" })).toBeTruthy();
-    expect(within(blockedBy).queryByRole("heading")).toBeNull();
+    expect(within(blockedBy).getByRole("heading").textContent?.trim()).toBe("Blocked by");
     expect(within(pane).queryByRole("region", { name: "Blocks" })).toBeNull();
   });
 });
