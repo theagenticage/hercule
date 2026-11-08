@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import {
   chooseLaneId,
   listContextLaneIds,
@@ -6,16 +6,7 @@ import {
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { isMotionReduced, pauseFor, waitForVisibleStillHand } from "../../app/motion";
-import { showCauseLabel } from "../desk";
-import { REPLAY_GAP_MS } from "./morning-replay";
-
-/** How long the toolbar's line keeps saying what happened by itself, in milliseconds. */
-const NOTE_SHOWN_MS = 10_000;
-
-/** How long the cause label stays on a card before the card moves, in milliseconds. Under Reduce motion the card does not travel, so the label only needs to be seen. */
-const CAUSE_HELD_MS = 760;
-const CAUSE_HELD_REDUCED_MS = 80;
+import { pauseFor, waitForVisibleStillHand } from "../../app/motion";
 
 /** Returns the ids of the lanes the board draws `card` in, given how it is grouped. */
 const listDrawnLaneIds = (
@@ -52,30 +43,28 @@ const findChangeTargets = (
   return [...scroller.querySelectorAll(cells.join(","))];
 };
 
-/** Returns the sentence for the toolbar's line when `change` shows, or `null` when the card is gone. */
-const describeChange = (change: HeldChange, card: WorkCard | undefined): string | null => {
-  if (card === undefined) return null;
-  if (change.kind === "arrival") return `New: ${card.title}`;
-  if (change.kind === "move") return card.stageCause?.text ?? `Moved: ${card.title}`;
-  return `${card.failure?.workflowName ?? "A run"} failed`;
-};
+/** What a held change is about, handed to `beforeRelease` to show it before it happens. */
+export interface HeldContext {
+  /** The change's card as the board was last read (the logical board), or `undefined` when it is gone. */
+  readonly card: WorkCard | undefined;
+  /** Returns every element the change would happen at (see `findChangeTargets`), as the page is now. */
+  readonly findTargets: () => readonly Element[];
+  /** Aborts when the change is no longer held, or the screen goes. */
+  readonly signal: AbortSignal;
+}
 
 /**
- * Waits for a still hand (`waitForStillHand`) for each change in `held`, and
- * calls `release` with its key once the hand is still. A change that is no
- * longer held stops waiting. Returns the sentence for the toolbar's line that
- * names what the board did by itself last, such as "Review PR failed", or
- * `null` when there is nothing to show. The sentence goes away after ten
- * seconds.
+ * Waits for a still hand (`waitForVisibleStillHand`) for each change in
+ * `held`, then calls `release` with the change. A change that is no longer
+ * held stops waiting.
  *
- * - A card moved by a fact first shows why: its cause label rises onto the
- *   card and holds for 760ms (80ms under Reduce motion), and only then is the
- *   change released. A drag that begins during the hold makes it wait for the
- *   drop.
  * - `startDelays` holds back the start of the wait for a change, in
  *   milliseconds after it is first held, by key. The morning replay uses it to
- *   start its changes 1.5 seconds apart. The sentence of such a change stays
- *   for 1.5 seconds only, so the next one can follow it.
+ *   start its changes 1.5 seconds apart.
+ * - `beforeRelease`, when given, runs once the hand is still and before the
+ *   change is released. It resolves `true` to go ahead and `false` when the
+ *   change must not happen (its signal aborted). A card that moves by itself
+ *   shows its cause there.
  * - Nothing is waited for or released while the window is hidden.
  *
  * `board` is the board as read, not as drawn: a held card is only in this one.
@@ -91,8 +80,9 @@ export const useHeldChanges = ({
   groupBy,
   isCarrying,
   scrollRef,
-  release,
   startDelays,
+  beforeRelease,
+  release,
 }: {
   readonly held: readonly HeldChange[];
   readonly board: WorkBoard | undefined;
@@ -100,15 +90,31 @@ export const useHeldChanges = ({
   readonly groupBy: string;
   readonly isCarrying: boolean;
   readonly scrollRef: RefObject<HTMLElement | null>;
-  readonly release: (key: string) => void;
   readonly startDelays: ReadonlyMap<string, number>;
-}): string | null => {
-  const [note, setNote] = useState<{ readonly text: string; readonly shownMs: number } | null>(
-    null,
-  );
-  const latest = useRef({ held, board, projects, groupBy, isCarrying, release, startDelays });
+  readonly beforeRelease: (change: HeldChange, context: HeldContext) => Promise<boolean>;
+  readonly release: (change: HeldChange) => void;
+}): void => {
+  const latest = useRef({
+    held,
+    board,
+    projects,
+    groupBy,
+    isCarrying,
+    release,
+    startDelays,
+    beforeRelease,
+  });
   useEffect(() => {
-    latest.current = { held, board, projects, groupBy, isCarrying, release, startDelays };
+    latest.current = {
+      held,
+      board,
+      projects,
+      groupBy,
+      isCarrying,
+      release,
+      startDelays,
+      beforeRelease,
+    };
   });
   const waits = useRef(new Map<string, AbortController>());
 
@@ -136,12 +142,6 @@ export const useHeldChanges = ({
           latest.current.projects,
           latest.current.groupBy,
         );
-      const waitForDrop = (): Promise<boolean> =>
-        waitForVisibleStillHand({
-          targets: () => [],
-          isDragging: () => latest.current.isCarrying,
-          signal,
-        });
       void (async () => {
         const delay = latest.current.startDelays.get(key);
         if (delay !== undefined && !(await pauseFor(delay, signal))) return;
@@ -151,23 +151,14 @@ export const useHeldChanges = ({
           signal,
         });
         if (!isStill) return;
-        const cause = change.kind === "move" ? findCard()?.stageCause : undefined;
-        if (cause !== undefined) {
-          const labelled = findTargets().filter((each) => each instanceof HTMLElement);
-          const removeLabel = showCauseLabel(labelled, cause.text, true);
-          signal.addEventListener("abort", removeLabel, { once: true });
-          const isHeld = await pauseFor(
-            isMotionReduced() ? CAUSE_HELD_REDUCED_MS : CAUSE_HELD_MS,
-            signal,
-          );
-          if (!isHeld || !(await waitForDrop())) return;
-        }
+        const isReady = await latest.current.beforeRelease(change, {
+          card: findCard(),
+          findTargets,
+          signal,
+        });
+        if (!isReady) return;
         waits.current.delete(key);
-        latest.current.release(key);
-        const text = describeChange(change, findCard());
-        if (text !== null) {
-          setNote({ text, shownMs: delay === undefined ? NOTE_SHOWN_MS : REPLAY_GAP_MS });
-        }
+        latest.current.release(change);
       })();
     }
   }, [heldKeys, scrollRef]);
@@ -178,16 +169,4 @@ export const useHeldChanges = ({
       running.clear();
     };
   }, []);
-
-  useEffect(() => {
-    if (note === null) return;
-    const timer = setTimeout(() => {
-      setNote(null);
-    }, note.shownMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [note]);
-
-  return note?.text ?? null;
 };

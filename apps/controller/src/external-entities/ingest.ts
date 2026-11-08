@@ -362,19 +362,13 @@ const make = Effect.gen(function* () {
    * a first sight of a linked ref, a change of access that changes what a Task
    * counts). The repository stays SQL: the rules live in the Task service.
    *
-   * Call it inside the transaction of the write. The snapshot costs one
-   * statement when no live Task links any of `refs`, which is the usual poll.
+   * It costs one statement when no live Task links any of `refs`, which is
+   * the usual poll.
    */
   const recordingEntityFacts = <A, E>(
     refs: ReadonlyArray<string>,
     write: Effect.Effect<A, E | SqlError>,
-  ): Effect.Effect<A, E | SqlError> =>
-    Effect.gen(function* () {
-      const snapshot = yield* tasks.snapshotLinkedEntities(refs);
-      const written = yield* write;
-      yield* tasks.recordEntityFacts(snapshot);
-      return written;
-    });
+  ): Effect.Effect<A, E | SqlError> => tasks.recordEntityFactsAround(refs, write);
 
   /**
    * Runs `write` in one transaction on behalf of the reporter's Connection,

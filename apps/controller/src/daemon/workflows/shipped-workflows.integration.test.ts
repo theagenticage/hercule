@@ -27,7 +27,7 @@ import {
 } from "../../workflows/testing";
 import { SHIPPED_WORKFLOWS, type ShippedWorkflowSource } from "../../workflows";
 import { runEffect } from "../testing";
-import { installShippedWorkflows } from "./shipped-workflows";
+import { installCardWorkflows } from "./card-workflows";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
 
@@ -46,7 +46,7 @@ const boot = async (
   harness: ServerHarness,
   sources: ReadonlyArray<ShippedWorkflowSource> = SHIPPED_WORKFLOWS,
 ): Promise<boolean> =>
-  Exit.isSuccess(await harness.runWithShippedWorkflowServices(installShippedWorkflows(sources)));
+  Exit.isSuccess(await harness.runWithShippedWorkflowServices(installCardWorkflows(sources)));
 
 const readInstalledKeys = async (harness: ServerHarness): Promise<ReadonlyArray<string>> =>
   (

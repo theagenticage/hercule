@@ -34,6 +34,7 @@ export const LinkedEntitiesLayer: Layer.Layer<LinkedEntities, never, SqlClient.S
       const plugins = yield* pluginRepository;
 
       return {
+        readRecordIds: entities.readRecordIds,
         readMany: (refs: ReadonlyArray<string>) =>
           Effect.gen(function* () {
             const states = new Map<string, LinkedEntityState>();

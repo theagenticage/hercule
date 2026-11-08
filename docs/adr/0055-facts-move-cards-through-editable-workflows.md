@@ -60,7 +60,7 @@ Four things make this harder than "run a workflow on `pr.merged`":
 - A new Notification kind, `core.shipped-workflow-failed`.
 - The plugin host's `IngestContext.entities` gains `listTrackedBranches`. It grows additively, so `hostApi` stays 8.
 - The tasks domain declares a port, `LinkedEntities`, answered in the controller daemon from the database alone. It must never require `PluginHost` or `ExternalEntityService`: ingest sits below the plugin host and calls `TaskService`.
-- External entities call `TaskService` around every write that can change a linked entity's state: a snapshot before, and the Facts after, in the same transaction. All the rules live in tasks.
+- External entities call `TaskService` around every write that can change a linked entity's state: one `TaskService` method wraps the write: it reads a snapshot before and writes the Facts after, in the same transaction. All the rules live in tasks.
 - At first install, a manual placement from before this build has no fence to respect, so a linked Task can move once. Later drags are fenced. The release note says so.
 - A user who deletes a shipped workflow keeps it deleted, and one who edits it keeps the edit. Neither is reached by an upgrade. That is the cost of not deciding #502 here.
 - An outside change that is not a lifecycle change still only shows on the timeline (ADR 0054). A second pull request, or someone else's assignment, moves nothing and stops nothing.

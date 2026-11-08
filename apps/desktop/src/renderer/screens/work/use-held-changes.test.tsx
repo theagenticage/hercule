@@ -11,7 +11,7 @@ import { useRef, type JSX } from "react";
 import { buildBoard, buildCard, buildPlace } from "@hercule/client-core/work/testing";
 import { buildArrivalKey, type HeldChange } from "@hercule/client-core/work";
 import type { WorkBoard, WorkCard } from "@hercule/contract";
-import { useHeldChanges } from "./use-held-changes";
+import { useHeldChanges, type HeldContext } from "./use-held-changes";
 
 const RETURNS = buildPlace("acme:project:returns", "Returns at the depots");
 const PRICING = buildPlace("acme:project:pricing", "Pricing rules");
@@ -28,7 +28,11 @@ const NO_DELAYS: ReadonlyMap<string, number> = new Map();
 /** The `data-testid` of the element the pointer rests on, or `null` while it rests on none. */
 let hoveredTestId: string | null = null;
 
-const release = vi.fn<(key: string) => void>();
+const release = vi.fn<(change: HeldChange) => void>();
+const beforeRelease = vi.fn<(change: HeldChange, context: HeldContext) => Promise<boolean>>();
+
+/** Returns the keys of the changes released so far, in order. */
+const releasedKeys = (): string[] => release.mock.calls.map(([change]) => change.key);
 
 /**
  * Draws lanes, each holding the cards of `lanes` in its Exploring cell (the
@@ -49,19 +53,19 @@ function Harness({
   readonly startDelays?: ReadonlyMap<string, number>;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const note = useHeldChanges({
+  useHeldChanges({
     held,
     board,
     projects: [],
     groupBy: "acme/project",
     isCarrying,
     scrollRef,
-    release,
     startDelays,
+    beforeRelease,
+    release,
   });
   return (
     <div ref={scrollRef}>
-      <output>{note}</output>
       {Object.entries(lanes).map(([laneId, cardIds]) => (
         <section key={laneId} data-lane-id={laneId}>
           <div data-lane-id={laneId} data-stage="exploring" data-testid={`cell:${laneId}`}>
@@ -78,6 +82,7 @@ function Harness({
 beforeEach(() => {
   vi.useFakeTimers();
   hoveredTestId = null;
+  beforeRelease.mockResolvedValue(true);
   // The mock calls the real method with the element it was called on, so it needs no binding.
   // oxlint-disable-next-line typescript/unbound-method
   const matches = Element.prototype.matches;
@@ -98,6 +103,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   release.mockReset();
+  beforeRelease.mockReset();
 });
 
 /** Renders the harness, then lets the clock run for `ms` milliseconds. */
@@ -123,7 +129,7 @@ describe("a Task that arrives while the board is grouped by an outside place", (
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_000);
     });
-    expect(release).toHaveBeenCalledWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toContain(buildArrivalKey("arriving"));
   });
 
   it("goes ahead at once when the pointer rests elsewhere", async () => {
@@ -131,7 +137,7 @@ describe("a Task that arrives while the board is grouped by an outside place", (
 
     await renderAndWait(props, 0);
 
-    expect(release).toHaveBeenCalledWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toContain(buildArrivalKey("arriving"));
   });
 });
 
@@ -161,7 +167,7 @@ describe("a window that hides while a change waits", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 
   it("releases nothing that has no cause to show while it is hidden", async () => {
@@ -174,7 +180,7 @@ describe("a window that hides while a change waits", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith(buildArrivalKey("arriving"));
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 });
 
@@ -204,49 +210,69 @@ describe("a run that fails on a Task drawn in two lanes", () => {
   });
 });
 
-describe("a card that a fact moves", () => {
-  const MERGED = { factId: 4, ref: "acme:pull-request:6221", text: "Pull request #6221 merged" };
-  const merged = buildCard("merging", {
-    stage: "landed",
-    stageCause: MERGED,
-    stageChangedAt: "2026-11-02T12:00:00.000Z",
-  });
-  const held = [{ kind: "move", cardId: "merging", key: "move:merging:fact-4" } as const];
-  const props = { held, board: buildBoard(merged), lanes: { here: ["merging"] } };
-  const findLabel = (): HTMLElement | null => document.querySelector<HTMLElement>(".card-cause");
+describe("a change that waits for something before it is released", () => {
+  const arrival = buildCard("arriving");
+  const held = [{ kind: "arrival", cardId: "arriving", key: buildArrivalKey("arriving") } as const];
+  const props = { held, board: buildBoard(arrival), lanes: { here: ["other"] } };
 
-  // A page with no stylesheet counts as reduced motion, which holds the label for 80ms only.
-  beforeEach(() => {
-    document.documentElement.style.setProperty("--dur-2", "200ms");
-  });
-  afterEach(() => {
-    document.documentElement.style.removeProperty("--dur-2");
-  });
+  it("gives beforeRelease the change and its card, and releases once it resolves true", async () => {
+    let finish: (isReady: boolean) => void = () => undefined;
+    beforeRelease.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
 
-  it("shows its cause on the card, holds it for 760ms, and only then lets the card move", async () => {
     await renderAndWait(props, 0);
-
-    expect(findLabel()?.textContent).toBe("Pull request #6221 merged");
-    expect(document.querySelector("[data-card-id]")?.hasAttribute("data-cause")).toBe(true);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(759);
-    });
+    expect(beforeRelease).toHaveBeenCalledOnce();
+    expect(beforeRelease.mock.calls[0]![0]).toBe(held[0]);
+    expect(beforeRelease.mock.calls[0]![1].card).toBe(arrival);
     expect(release).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finish(true);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith(held[0]);
+  });
+
+  it("never releases a change whose beforeRelease resolves false", async () => {
+    beforeRelease.mockResolvedValue(false);
+
+    await renderAndWait(props, 5_000);
+
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("aborts the signal beforeRelease got when the change is no longer held", async () => {
+    beforeRelease.mockImplementation(() => new Promise<boolean>(() => undefined));
+    const { rerender } = render(<Harness {...props} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const { signal } = beforeRelease.mock.calls[0]![1];
+    expect(signal.aborted).toBe(false);
+
+    rerender(<Harness {...props} held={[]} />);
+
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("starts the wait after its delay", async () => {
+    const delays = new Map([[buildArrivalKey("arriving"), 1_500]]);
+
+    await renderAndWait({ ...props, startDelays: delays }, 1_499);
+    expect(beforeRelease).not.toHaveBeenCalled();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
-    expect(document.querySelector("output")?.textContent).toBe("Pull request #6221 merged");
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 
-  it("waits for the drop when a drag begins during the hold", async () => {
-    const { rerender } = render(<Harness {...props} />);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
-    });
-
-    rerender(<Harness {...props} isCarrying />);
+  it("waits for the drop of a drag, and releases after it", async () => {
+    const { rerender } = render(<Harness {...props} isCarrying />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
@@ -256,68 +282,6 @@ describe("a card that a fact moves", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
     });
-    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
-  });
-
-  it("holds the move while the window is hidden at the end of the hold, and plays it when it shows", async () => {
-    render(<Harness {...props} />);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
-    });
-
-    setVisibility("hidden");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(release).not.toHaveBeenCalled();
-
-    setVisibility("visible");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
-    });
-    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
-  });
-
-  it("takes its label away when the change is no longer held", async () => {
-    const { rerender } = render(<Harness {...props} />);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
-    });
-    expect(findLabel()).not.toBeNull();
-
-    rerender(<Harness {...props} held={[]} />);
-
-    expect(findLabel()).toBeNull();
-    expect(document.querySelector("[data-card-id]")?.hasAttribute("data-cause")).toBe(false);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(release).not.toHaveBeenCalled();
-  });
-
-  it("shows no label for a move that has no cause, and says that the card moved", async () => {
-    const plain = buildCard("merging", { stage: "landed", title: "Cache slots" });
-
-    await renderAndWait({ ...props, board: buildBoard(plain) }, 0);
-
-    expect(findLabel()).toBeNull();
-    expect(release).toHaveBeenCalledExactlyOnceWith("move:merging:fact-4");
-    expect(document.querySelector("output")?.textContent).toBe("Moved: Cache slots");
-  });
-
-  it("starts the wait after its delay, and its words stay for 1.5 seconds only", async () => {
-    const delays = new Map([["move:merging:fact-4", 1_500]]);
-
-    await renderAndWait({ ...props, startDelays: delays }, 1_499);
-    expect(findLabel()).toBeNull();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1 + 760);
-    });
-    expect(document.querySelector("output")?.textContent).toBe("Pull request #6221 merged");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
-    });
-    expect(document.querySelector("output")?.textContent).toBe("");
+    expect(releasedKeys()).toEqual([buildArrivalKey("arriving")]);
   });
 });

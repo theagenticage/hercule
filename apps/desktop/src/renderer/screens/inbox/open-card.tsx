@@ -8,8 +8,10 @@ import {
 } from "@hercule/client-core";
 import {
   buildLinkedRows,
+  listRefsNotToOffer,
   nameLinkedThing,
   readEntityPluginId,
+  type EntityLinkMove,
   type OpenPlaceRow,
   type PlaceRow,
 } from "@hercule/client-core/desk";
@@ -20,10 +22,8 @@ import {
   decideOpenCard,
   describeTimelineOverflow,
   findFirstOpenLine,
-  listRefsNotToOffer,
   readOpenCardHandOff,
   readPlaceView,
-  type EntityLinkMove,
   type PlaceView,
 } from "@hercule/client-core/inbox";
 import type { AddRow } from "@hercule/client-core/work";

@@ -10,8 +10,8 @@
  *
  * Facts are written on these occasions:
  *
- * - an entity write changes a linked thing (`snapshotLinkedEntities` before
- *   the write, `recordEntityFacts` after it);
+ * - an entity write changes a linked thing (`recordEntityFactsAround`, which
+ *   reads before the write and writes the facts after it);
  * - a link is added (`recordLinkFacts`);
  * - the last open link goes away and a completed one remains
  *   (`recordLandingFact`, called by `unlinkEntity`);
@@ -20,21 +20,15 @@
  *
  * The event carries the actor `system`: no request caused it.
  */
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import {
-  createValidationError,
-  isFinishedStage,
-  type TaskStage,
-  type Validation,
-} from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { PlatformEvents } from "../events";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
-import { groupByTask, removeDuplicates } from "./lists";
+import { groupByTask } from "./lists";
 import { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 import {
   classifyLink,
@@ -47,13 +41,11 @@ import {
 import { taskRepository } from "./repository";
 
 /**
- * What `snapshotLinkedEntities` read before a write of entities, for
- * `recordEntityFacts` to compare with after it. Callers only pass it back.
- *
- * It is valid only inside the transaction that took it: it holds the states
- * of that moment, and a later transaction may see others.
+ * What was read before a write of entities, to compare with after it. It is
+ * valid only inside the transaction that took it: it holds the states of that
+ * moment, and a later transaction may see others.
  */
-export interface LinkedEntitySnapshot {
+interface LinkedEntitySnapshot {
   /** The live `(Task, ref)` links to the refs the write may change. */
   readonly links: ReadonlyArray<EntityLinkPair>;
   /** Every link of each Task in `links`, not only the ones to changed refs. */
@@ -73,28 +65,6 @@ const countStates = (
   refs: ReadonlyArray<string>,
   states: ReadonlyMap<string, LinkedEntityState>,
 ): LinkedWorkCounts => countLinkedWork(refs.map((ref) => states.get(ref)));
-
-/** What a write that names a fact asks for. */
-export interface StageFactClaim {
-  readonly factId: number;
-  /** Move the Task only if none of its links is open and one is completed. */
-  readonly onlyWhenLinkedWorkFinished: boolean;
-  /**
-   * The refs the same write links, which are not stored yet. The check counts
-   * them with the stored links, so a write cannot land a card and add open
-   * work in one call.
-   */
-  readonly alsoLinking: ReadonlyArray<string>;
-}
-
-/**
- * The verdict on a stage write that names a fact: `refused` means the write
- * changes nothing, and `accepted` carries the fact's id, which becomes the
- * Task's fence.
- */
-export type StageFactVerdict =
-  | { readonly _tag: "refused" }
-  | { readonly _tag: "accepted"; readonly factId: number };
 
 export const makeLinkedFacts = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -179,11 +149,61 @@ export const makeLinkedFacts = Effect.gen(function* () {
   ): Effect.Effect<LinkedWorkCounts, SqlError> =>
     Effect.gen(function* () {
       const id = yield* tasks.resolveTaskId(taskId);
-      const refs = removeDuplicates([
+      const refs = Arr.dedupe([
         ...((yield* tasks.listEntityLinks([id])).get(id) ?? []),
         ...alsoLinking,
       ]);
       return countStates(refs, yield* linkedEntities.readMany(refs));
+    });
+
+  /**
+   * Reads the state of `refs` and of every other link of the live Tasks that
+   * link them, to compare with after a write.
+   */
+  const takeSnapshot = (
+    refs: ReadonlyArray<string>,
+  ): Effect.Effect<LinkedEntitySnapshot, SqlError> =>
+    Effect.gen(function* () {
+      const links = yield* facts.listLiveLinksTo(Arr.dedupe(refs));
+      const taskIds = Arr.dedupe(links.map(({ taskId }) => taskId));
+      const linksOfTask =
+        taskIds.length === 0
+          ? new Map<string, ReadonlyArray<string>>()
+          : yield* tasks.listEntityLinks(taskIds);
+      const states = yield* linkedEntities.readMany(Arr.dedupe([...linksOfTask.values()].flat()));
+      return { links, linksOfTask, states };
+    });
+
+  /** Writes the facts that the write since `snapshot` made. Run it in the transaction of the write. */
+  const recordFactsSince = (snapshot: LinkedEntitySnapshot): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (snapshot.links.length === 0) return;
+      const at = yield* nowIso;
+      const now = yield* linkedEntities.readMany(
+        Arr.dedupe([...snapshot.linksOfTask.values()].flat()),
+      );
+      for (const [taskId, changedRefs] of groupRefsByTask(snapshot.links)) {
+        const allRefs = snapshot.linksOfTask.get(taskId) ?? [];
+        const before = countStates(allRefs, snapshot.states);
+        const after = countStates(allRefs, now);
+        const countsChanged = haveLinkedWorkCountsChanged(before, after);
+        for (const ref of changedRefs) {
+          const lifecycles = decideFactLifecycles(
+            snapshot.states.get(ref),
+            now.get(ref),
+            countsChanged,
+          );
+          if (lifecycles === undefined) continue;
+          yield* writeFact({
+            taskId,
+            ref,
+            entityKind: now.get(ref)!.kind,
+            lifecycles,
+            counts: after,
+            at,
+          });
+        }
+      }
     });
 
   return {
@@ -195,122 +215,33 @@ export const makeLinkedFacts = Effect.gen(function* () {
     countLinkedWork: countTaskLinks,
 
     /**
-     * Decides whether a stage write that names a fact may go on, in the
-     * caller's transaction. `task` is the live Task the write is about, after
-     * the merge redirect. The checks run in this order, and the first that
-     * fails ends them:
+     * Runs `write`, which changes what is stored of `refs`, and writes the
+     * facts that change makes for the live Tasks that link those things, then
+     * returns what `write` returned. It joins the caller's transaction, or
+     * opens one, so the snapshot, the write and the facts commit together.
      *
-     * 1. The fact must exist and belong to the Task. Otherwise this fails
-     *    with `Validation`: a caller cannot make up a fact.
-     * 2. The Task is finished: refused. A fact never brings finished work back.
-     * 3. The fact is voided, because the user unlinked its thing: refused,
-     *    even if the thing was linked again since. The new link has a fact of
-     *    its own.
-     * 4. The fact is at or below the Task's fence: refused. A person decided
-     *    the stage after the fact, or the fact (or a newer one) has been
-     *    applied already.
-     * 5. With `onlyWhenLinkedWorkFinished`, the links are counted now, and
-     *    the write is refused unless none is open and one is completed. The
-     *    counts on the event were true when it was written, and a link may
-     *    have come or gone since. The refs the write itself links count too.
-     *
-     * A refusal is not an error: a run must not fail because a person dragged
-     * a card.
+     * Before the write it reads the state of `refs` and of every other link of
+     * the live Tasks that link them. A ref no live Task links costs one
+     * statement and writes no fact, which is the usual poll. After the write
+     * it compares, and for each live Task that links a changed thing writes at
+     * most one fact for each thing, by `decideFactLifecycles`. Each fact and
+     * its `task.entityChanged` event carry the Task's counts over all its
+     * links after the write. A write that changed nothing a Task counts
+     * writes nothing.
      */
-    judgeStageFact: (
-      task: { readonly id: string; readonly stage: TaskStage },
-      claim: StageFactClaim,
-    ): Effect.Effect<StageFactVerdict, Validation | SqlError> =>
-      Effect.gen(function* () {
-        const fact = yield* facts.readFact(claim.factId);
-        if (Option.isNone(fact) || fact.value.taskId !== task.id) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["stageFactId"],
-                message:
-                  `the fact ${String(claim.factId)} is not a fact of this task, so the stage was not written; ` +
-                  "pass the factId of a task.entityChanged event of this task, or leave stageFactId out to set the stage yourself",
-              },
-            ]),
-          );
-        }
-        if (isFinishedStage(task.stage) || fact.value.voidedAt !== null) {
-          return { _tag: "refused" } as const;
-        }
-        if (claim.factId <= (yield* facts.readFence(task.id))) return { _tag: "refused" } as const;
-        if (claim.onlyWhenLinkedWorkFinished) {
-          const counts = yield* countTaskLinks(task.id, claim.alsoLinking);
-          if (counts.openLinks > 0 || counts.completedLinks === 0)
-            return { _tag: "refused" } as const;
-        }
-        return { _tag: "accepted", factId: claim.factId } as const;
-      }),
-
-    /**
-     * Reads, before a write of entities, the state of `refs` and of every
-     * other link of the live Tasks that link them. Pass the result to
-     * `recordEntityFacts` after the write, in the same transaction. A ref no
-     * live Task links needs nothing and costs one statement.
-     */
-    snapshotLinkedEntities: (
+    recordEntityFactsAround: <A, E, R>(
       refs: ReadonlyArray<string>,
-    ): Effect.Effect<LinkedEntitySnapshot, SqlError> =>
-      Effect.gen(function* () {
-        const links = yield* facts.listLiveLinksTo(removeDuplicates(refs));
-        const taskIds = removeDuplicates(links.map(({ taskId }) => taskId));
-        const linksOfTask =
-          taskIds.length === 0
-            ? new Map<string, ReadonlyArray<string>>()
-            : yield* tasks.listEntityLinks(taskIds);
-        const states = yield* linkedEntities.readMany(
-          removeDuplicates([...linksOfTask.values()].flat()),
-        );
-        return { links, linksOfTask, states };
-      }),
-
-    /**
-     * Writes the facts that the write since `snapshot` made, in the caller's
-     * transaction: for each live Task that links a changed thing, at most one
-     * fact for each thing, by `decideFactLifecycles`. Each fact and its
-     * `task.entityChanged` event carry the Task's counts over all its links
-     * after the write. A write that changed nothing a Task counts writes
-     * nothing.
-     */
-    recordEntityFacts: (snapshot: LinkedEntitySnapshot): Effect.Effect<void, SqlError> =>
-      snapshot.links.length === 0
-        ? Effect.void
-        : withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const at = yield* nowIso;
-              const now = yield* linkedEntities.readMany(
-                removeDuplicates([...snapshot.linksOfTask.values()].flat()),
-              );
-              for (const [taskId, changedRefs] of groupRefsByTask(snapshot.links)) {
-                const allRefs = snapshot.linksOfTask.get(taskId) ?? [];
-                const before = countStates(allRefs, snapshot.states);
-                const after = countStates(allRefs, now);
-                const countsChanged = haveLinkedWorkCountsChanged(before, after);
-                for (const ref of changedRefs) {
-                  const lifecycles = decideFactLifecycles(
-                    snapshot.states.get(ref),
-                    now.get(ref),
-                    countsChanged,
-                  );
-                  if (lifecycles === undefined) continue;
-                  yield* writeFact({
-                    taskId,
-                    ref,
-                    entityKind: now.get(ref)!.kind,
-                    lifecycles,
-                    counts: after,
-                    at,
-                  });
-                }
-              }
-            }),
-          ),
+      write: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E | SqlError, R> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const snapshot = yield* takeSnapshot(refs);
+          const written = yield* write;
+          yield* recordFactsSince(snapshot);
+          return written;
+        }),
+      ),
 
     /**
      * Writes a first-sight fact (`previousLifecycle` null) for each of `refs`,
@@ -332,7 +263,7 @@ export const makeLinkedFacts = Effect.gen(function* () {
               const states = yield* linkedEntities.readMany(allRefs);
               yield* writeFirstFacts(
                 taskId,
-                removeDuplicates(refs).toSorted(),
+                Arr.dedupe(refs).toSorted(),
                 states,
                 countStates(allRefs, states),
                 yield* nowIso,
@@ -384,9 +315,7 @@ export const makeLinkedFacts = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const links = groupRefsByTask(yield* facts.listAllLiveLinks());
-          const states = yield* linkedEntities.readMany(
-            removeDuplicates([...links.values()].flat()),
-          );
+          const states = yield* linkedEntities.readMany(Arr.dedupe([...links.values()].flat()));
           const at = yield* nowIso;
           for (const [taskId, refs] of links) {
             yield* writeFirstFacts(taskId, refs, states, countStates(refs, states), at);

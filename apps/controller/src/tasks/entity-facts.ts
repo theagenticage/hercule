@@ -17,7 +17,6 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { EntityLifecycle } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
 import { LIVE_TASK_LINKS_SQL, JOINABLE_TASK_SQL } from "./repository";
-import type { StageCauseThing } from "./stage-cause";
 
 /** The most refs one statement lists links for, well under SQLite's limit on bound values. */
 const MAX_REFS_PER_STATEMENT = 500;
@@ -34,27 +33,6 @@ export interface EntityFact {
   readonly observedAt: string;
   /** Set when the user unlinked the pair. A voided fact never moves a stage, but is still read for its words. */
   readonly voidedAt: string | null;
-}
-
-/** A fact that placed a stage, with the stored words of its thing. */
-export interface StageCauseRecord {
-  readonly factId: number;
-  readonly ref: string;
-  readonly lifecycle: EntityLifecycle;
-  readonly previousLifecycle: EntityLifecycle | null;
-  /** The record of `ref`, or `undefined` when Hercule holds none. */
-  readonly thing: StageCauseThing | undefined;
-}
-
-interface StageCauseRow {
-  readonly id: number;
-  readonly ref: string;
-  readonly lifecycle: EntityLifecycle;
-  readonly previous_lifecycle: EntityLifecycle | null;
-  readonly noun: string | null;
-  readonly identifier: string | null;
-  readonly current_lifecycle: EntityLifecycle | null;
-  readonly status_label: string | null;
 }
 
 /** A fact to write. */
@@ -131,44 +109,20 @@ const make = Effect.gen(function* () {
         WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref} AND voided_at IS NULL`),
 
     /**
-     * Returns, for each fact id that exists, the fact and the stored words of
-     * its thing, voided facts included: a voided fact still says why a card
-     * is where it is. One statement however many ids there are. A fact whose
-     * thing has no record has no `thing`.
+     * Returns the facts with these ids, by id, voided ones included: a voided
+     * fact still says why a card is where it is. An id with no fact is left
+     * out. One statement however many ids there are.
      */
-    listStageCauses: (
+    listFacts: (
       factIds: ReadonlyArray<number>,
-    ): Effect.Effect<ReadonlyMap<number, StageCauseRecord>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<number, EntityFact>, SqlError> =>
       factIds.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
-            sql<StageCauseRow>`
-              SELECT f.id, f.ref, f.lifecycle, f.previous_lifecycle, e.noun, e.identifier,
-                     e.lifecycle AS current_lifecycle,
-                     json_extract(e.status, '$.label') AS status_label
-              FROM task_entity_facts f LEFT JOIN external_entities e ON e.ref = f.ref
-              WHERE f.id IN ${sql.in(factIds)}`,
-            (rows) =>
-              new Map(
-                rows.map((row) => [
-                  row.id,
-                  {
-                    factId: row.id,
-                    ref: row.ref,
-                    lifecycle: row.lifecycle,
-                    previousLifecycle: row.previous_lifecycle,
-                    thing:
-                      row.noun === null
-                        ? undefined
-                        : {
-                            noun: row.noun,
-                            identifier: row.identifier,
-                            lifecycle: row.current_lifecycle,
-                            statusWord: row.status_label,
-                          },
-                  },
-                ]),
-              ),
+            sql<FactRow>`
+              SELECT id, task_id, ref, lifecycle, previous_lifecycle, observed_at, voided_at
+              FROM task_entity_facts WHERE id IN ${sql.in(factIds)}`,
+            (rows) => new Map(rows.map((row) => [row.id, buildFact(row)])),
           ),
 
     /** Returns the highest fact id in the table, or 0 when there is none. */
@@ -177,30 +131,6 @@ const make = Effect.gen(function* () {
         sql<{ readonly highest: number }>`
           SELECT COALESCE(MAX(id), 0) AS highest FROM task_entity_facts`,
         (rows) => rows[0]!.highest,
-      ),
-
-    /**
-     * Returns the Task's fence, the highest fact id its stage already accounts
-     * for. Taken as it is, never followed to a survivor. Dies on an id that
-     * has no Task: the caller has read the Task.
-     */
-    readFence: (taskId: string): Effect.Effect<number, SqlError> =>
-      Effect.map(
-        sql<{ readonly fence: number }>`
-          SELECT stage_fact_fence AS fence FROM tasks WHERE id = ${uuidFromString(taskId)}`,
-        (rows) => rows[0]!.fence,
-      ),
-
-    /** Sets the Task's fence. */
-    setFence: (taskId: string, fence: number): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE tasks SET stage_fact_fence = ${fence} WHERE id = ${uuidFromString(taskId)}`,
-      ),
-
-    /** Sets the fact that placed the Task's stage, or clears it with null. */
-    setCause: (taskId: string, factId: number | null): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE tasks SET stage_cause_fact_id = ${factId} WHERE id = ${uuidFromString(taskId)}`,
       ),
 
     /** Records that the user unlinked the pair, so no scan adds the link back. Does nothing if it is recorded already. */

@@ -9,7 +9,7 @@
  * story on a fresh database and then reads the Task's stage, fence and cause,
  * and what each delivery of a fact did. The facts come from the code that
  * writes them: a link (`create`, `update`) and an entity write
- * (`recordEntityFacts`), never from hand-written rows. A link and an unlink
+ * (`recordEntityFactsAround`), never from hand-written rows. A link and an unlink
  * go through `linkEntity` and `unlinkEntity`.
  */
 import { describe, expect, it } from "vitest";

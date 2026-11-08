@@ -18,14 +18,6 @@ export interface ShippedWorkflowSource {
    */
   readonly key: string;
   readonly source: string;
-  /**
-   * True for a workflow that moves a card when a fact arrives. The first time
-   * one is installed, every live link gets a first fact, so that cards linked
-   * before the workflow existed are corrected. Another shipped workflow must
-   * not do that: its first install would write facts newer than every drag's
-   * fence, and undo every drag.
-   */
-  readonly movesCards?: boolean;
 }
 
 const CARD_IN_REVIEW_SOURCE = `name: Move a card to In review when its pull request opens
@@ -95,11 +87,8 @@ steps:
       onlyWhenLinkedWorkFinished: true
 `;
 
-/**
- * Every workflow that ships with Hercule. A workflow added here that moves no
- * card leaves `movesCards` out, and installs without the first facts.
- */
+/** Every workflow that ships with Hercule: the two that move cards (`installCardWorkflows`). */
 export const SHIPPED_WORKFLOWS: ReadonlyArray<ShippedWorkflowSource> = [
-  { key: "card-in-review", source: CARD_IN_REVIEW_SOURCE, movesCards: true },
-  { key: "card-landed", source: CARD_LANDED_SOURCE, movesCards: true },
+  { key: "card-in-review", source: CARD_IN_REVIEW_SOURCE },
+  { key: "card-landed", source: CARD_LANDED_SOURCE },
 ];

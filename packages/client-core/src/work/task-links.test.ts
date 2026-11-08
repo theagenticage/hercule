@@ -5,18 +5,12 @@ import {
   describeTaskLinkFailure,
   describeTaskLinkGesture,
   describeTaskLinkNothing,
-  reverseTaskLinkDirection,
 } from "./task-links";
 
 const THING = "#412";
 const TITLE = "Restore a basket after sign-in";
 
 describe("the words of a link on a Task", () => {
-  it("reverses a link by removing it and a removal by linking", () => {
-    expect(reverseTaskLinkDirection("link")).toBe("unlink");
-    expect(reverseTaskLinkDirection("unlink")).toBe("link");
-  });
-
   it("names the thing and the Task in the gesture Undo reports", () => {
     expect(describeTaskLinkGesture("link", THING, TITLE)).toBe(`Linked #412 to ${TITLE}`);
     expect(describeTaskLinkGesture("unlink", THING, TITLE)).toBe(

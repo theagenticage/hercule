@@ -32,8 +32,8 @@ export {
   type SummaryText,
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
-export { entityFactRepository, type StageCauseRecord } from "./entity-facts";
-export { describeStageCause } from "./stage-cause";
+export { entityFactRepository, type EntityFact } from "./entity-facts";
+export { describeStageCause, type StageCauseThing } from "./stage-cause";
 export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";

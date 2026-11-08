@@ -164,7 +164,7 @@ export {
 } from "./sessions";
 export {
   checkSchedulerInterval,
-  installShippedWorkflowsOrLog,
+  installCardWorkflowsOrLog,
   revalidateStoredWorkflowsOrLog,
   runScheduler,
   SchedulerInterval,

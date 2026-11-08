@@ -639,7 +639,7 @@ daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> 
 ```
 
 - No domain imports `external-entities` except through a port, so the arrows only ever point out of it and the graph stays acyclic.
-- *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The tasks domain declares a port, `LinkedEntities.readMany(refs)`, which returns each ref's stored work or context classification, lifecycle and access, or nothing for a ref with no record. `daemon/tasks/linked-entities.ts` answers it from the entity repository and, for a ref with no record, from the declared kinds in the stored plugin catalog. It reads the database only. It must never require `PluginHost`, `ExternalEntityService` or anything that does: `ExternalEntityIngestLayer` sits below `PluginHost`, and ingest calls `TaskService`. `external-entities` calls `TaskService.snapshotLinkedEntities` and `recordEntityFacts` around every write that can change a linked entity's state ([section 14](#14-facts-links-by-hand-and-the-branch-join)).
+- *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The tasks domain declares a port, `LinkedEntities.readMany(refs)`, which returns each ref's stored work or context classification, lifecycle and access, or nothing for a ref with no record. `daemon/tasks/linked-entities.ts` answers it from the entity repository and, for a ref with no record, from the declared kinds in the stored plugin catalog. It reads the database only. It must never require `PluginHost`, `ExternalEntityService` or anything that does: `ExternalEntityIngestLayer` sits below `PluginHost`, and ingest calls `TaskService`. `external-entities` wraps every write that can change a linked entity's state in `TaskService.recordEntityFactsAround` ([section 14](#14-facts-links-by-hand-and-the-branch-join)).
 - `ExternalEntityService` requires `TaskService`, so nothing `TaskService` needs may require `ExternalEntityService`. A port the tasks domain declares is answered from the repository, which needs only the SQL client.
 - `plugins` cannot import `external-entities`, because it imports `plugins` for the catalog. The port is `EntityObservations`, in `plugins/entity-observations.ts`, answered in `daemon/ingest/entity-observations.ts`, as Open Signals is. The host side of search is `EntityLookups` in `plugins/entity-lookups.ts`.
 - *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `external-entities` imports `signals`, for the rows. `signals` imports nothing of it: it declares the port `SignalEntities` (`readByRefs`, `recordArrivalAfter`) and the controller daemon answers it from the entity repository.
@@ -652,18 +652,18 @@ daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> 
 
 ### 14.1 Ingest feeds Facts
 
-A Fact is a lifecycle change of a linked thing, so it is written where the entity is written. Every write that can change what a Task counts goes through one pair of `TaskService` methods, and nothing else in this domain knows the rules:
+A Fact is a lifecycle change of a linked thing, so it is written where the entity is written. Every write that can change what a Task counts goes through one `TaskService` method, `recordEntityFactsAround(refs, write)`, and nothing else in this domain knows the rules. It joins the caller's transaction or opens one, and does three things in it:
 
-1. `snapshotLinkedEntities(refs)` reads, before the write, the linked-work state of those refs that a live Task links.
-2. The write happens: `writeObservations` (for `reconcile`, `refresh` and a read of one ref), `reportMissing`, and any other place that changes `access` (the inaccessible rows of `listWanted`, pruning, and the deletion of a Connection).
-3. `recordEntityFacts(snapshot)` compares each ref's state now with the snapshot, in the same transaction, and writes one Fact and one `task.entityChanged` for each live linked Task when:
+1. It reads, before the write, the linked-work state of those refs that a live Task links.
+2. It runs the write: `writeObservations` (for `reconcile`, `refresh` and a read of one ref), `reportMissing`, and any other place that changes `access` (the inaccessible rows of `listWanted`, pruning, and the deletion of a Connection).
+3. It compares each ref's state now with what it read, and writes one Fact and one `task.entityChanged` for each live linked Task when:
    - the lifecycle changed;
    - the ref had no record before (a first observation, `previous_lifecycle` null);
    - the Task's `openLinks` or `completedLinks` differ between before and now (a change of `access`, or a first full record), with `previous_lifecycle` equal to the lifecycle.
 
    Never anything else. A poll that changes nothing writes nothing: no Fact, no event, no push.
 
-**Deleting a Connection also records Facts.** Its observation rows go, so `access` can change for the things it was the only reader of. The connections domain declares a port, `ConnectionEntityFacts` (`recordFactsOfDeletion`), and `daemon/connections/entity-facts.ts` answers it. The port snapshots the linked refs the Connection holds an observation for, runs the deletion, and records the Facts after it, in the same transaction, through the same pair of `TaskService` methods. The connections domain cannot read External Entities itself, because External Entities depends on it.
+**Deleting a Connection also records Facts.** Its observation rows go, so `access` can change for the things it was the only reader of. The connections domain declares a port, `ConnectionEntityFacts` (`recordFactsOfDeletion`), and `daemon/connections/entity-facts.ts` answers it. The port wraps the deletion, for the linked refs the Connection holds an observation for, in the same `recordEntityFactsAround`. The connections domain cannot read External Entities itself, because External Entities depends on it.
 
 A first observation with no link writes no Fact. `reconcile` and `refresh` still emit no event and raise no signal of their own ([section 5.1](#51-reconcile)).
 

@@ -148,14 +148,7 @@ export const writeEntities = (
     const sql = yield* SqlClient.SqlClient;
     const tasks = yield* TaskService;
     yield* TestClock.adjust(A_MINUTE);
-    yield* withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const snapshot = yield* tasks.snapshotLinkedEntities(refs);
-        yield* change;
-        yield* tasks.recordEntityFacts(snapshot);
-      }),
-    );
+    yield* withTransaction(sql, tasks.recordEntityFactsAround(refs, change));
   });
 
 export const setLifecycle = (ref: string, lifecycle: EntityLifecycle) =>

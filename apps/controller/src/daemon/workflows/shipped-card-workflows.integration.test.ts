@@ -20,7 +20,7 @@ import { mintUuid, uuidFromString, withTransaction } from "../../db";
 import { get, post, send, type ServerHarness } from "../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
-import { SHIPPED_WORKFLOWS, type ShippedWorkflowSource } from "../../workflows";
+import { SHIPPED_WORKFLOWS } from "../../workflows";
 import { TaskService } from "../../tasks";
 import {
   ACCEPTED_GITHUB_TOKEN,
@@ -30,7 +30,7 @@ import {
   type SetUpController,
 } from "../../workflows/testing";
 import { runEffect, waitUntilCaughtUp } from "../testing";
-import { installShippedWorkflows, installShippedWorkflowsOrLog } from "./shipped-workflows";
+import { installCardWorkflows, installCardWorkflowsOrLog } from "./card-workflows";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 20_000 });
 
@@ -54,7 +54,7 @@ const installShipped = async (controller: SetUpController): Promise<Arranged> =>
     pat: ACCEPTED_GITHUB_TOKEN,
   });
   const exit = await harness.runWithShippedWorkflowServices(
-    installShippedWorkflows(SHIPPED_WORKFLOWS),
+    installCardWorkflows(SHIPPED_WORKFLOWS),
   );
   expect(exit._tag).toBe("Success");
   const items = (await queryWorkflows(base, token)).items;
@@ -97,14 +97,7 @@ const writeEntity = (
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const tasks = yield* TaskService;
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const snapshot = yield* tasks.snapshotLinkedEntities([ref]);
-            yield* change(sql);
-            yield* tasks.recordEntityFacts(snapshot);
-          }),
-        );
+        yield* withTransaction(sql, tasks.recordEntityFactsAround([ref], change(sql)));
       }),
     )
     .then((exit) => expect(exit._tag, JSON.stringify(exit)).toBe("Success"));
@@ -256,7 +249,7 @@ describe("the first install", () => {
       await waitUntilCaughtUp(harness);
       const factsBefore = await countFacts(harness);
 
-      await harness.runWithShippedWorkflowServices(installShippedWorkflows(SHIPPED_WORKFLOWS));
+      await harness.runWithShippedWorkflowServices(installCardWorkflows(SHIPPED_WORKFLOWS));
 
       const inReview = (await queryWorkflows(base, token)).items.find((one) =>
         one.name.includes("In review"),
@@ -266,34 +259,8 @@ describe("the first install", () => {
       expect(await countFacts(harness)).toBe(factsBefore + 1);
 
       // A later start installs nothing, so it writes no fact that could undo a drag.
-      await harness.runWithShippedWorkflowServices(installShippedWorkflows(SHIPPED_WORKFLOWS));
+      await harness.runWithShippedWorkflowServices(installCardWorkflows(SHIPPED_WORKFLOWS));
       expect(await countFacts(harness)).toBe(factsBefore + 1);
-    });
-  });
-
-  it("is not repeated when a later start installs a shipped workflow that moves no card", async () => {
-    await withCardController(async (controller) => {
-      const { harness } = controller;
-      const { connectionId } = await installShipped(controller);
-      await createTask(controller, "Fix the cart badge", PULL_REQUEST_REF);
-      await storePullRequest(harness, connectionId, PULL_REQUEST_REF, "open");
-      await waitUntilCaughtUp(harness);
-      const factsBefore = await countFacts(harness);
-      const another: ShippedWorkflowSource = {
-        key: "something-else",
-        source: SHIPPED_WORKFLOWS[0]!.source.replace(
-          "name: Move a card to In review when its pull request opens",
-          "name: Something else that ships",
-        ),
-      };
-
-      const exit = await harness.runWithShippedWorkflowServices(
-        installShippedWorkflows([...SHIPPED_WORKFLOWS, another]),
-      );
-
-      expect(exit._tag).toBe("Success");
-      expect(await runEffect(harness.sql`SELECT key FROM shipped_workflows`)).toHaveLength(3);
-      expect(await countFacts(harness)).toBe(factsBefore);
     });
   });
 
@@ -311,7 +278,7 @@ describe("the first install", () => {
 
       // The reconciliation writes its facts, then the process dies before the commit.
       const crashAfterReconciling = Effect.flatMap(TaskService, (tasks) =>
-        installShippedWorkflows(SHIPPED_WORKFLOWS).pipe(
+        installCardWorkflows(SHIPPED_WORKFLOWS).pipe(
           Effect.provideService(TaskService, {
             ...tasks,
             recordFirstInstallFacts: () =>
@@ -325,7 +292,7 @@ describe("the first install", () => {
       // At boot the same failure is logged, and the boot goes on.
       const bootAfterCrash = await harness.runWithShippedWorkflowServices(
         Effect.flatMap(TaskService, (tasks) =>
-          installShippedWorkflowsOrLog(SHIPPED_WORKFLOWS).pipe(
+          installCardWorkflowsOrLog(SHIPPED_WORKFLOWS).pipe(
             Effect.provideService(TaskService, {
               ...tasks,
               recordFirstInstallFacts: () => Effect.die("crash"),
@@ -340,7 +307,7 @@ describe("the first install", () => {
       expect(await countFacts(harness)).toBe(factsBefore);
       expect(await harness.platformEvents("task.entityChanged")).toHaveLength(eventsBefore);
 
-      await harness.runWithShippedWorkflowServices(installShippedWorkflows(SHIPPED_WORKFLOWS));
+      await harness.runWithShippedWorkflowServices(installCardWorkflows(SHIPPED_WORKFLOWS));
 
       expect((await queryWorkflows(base, token)).items).toHaveLength(2);
       expect(await countFacts(harness)).toBe(factsBefore + 1);

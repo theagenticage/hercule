@@ -26,7 +26,8 @@ import {
   type BoardEntityContext,
   type BoardFacts,
   type BoardFactsRequest,
-  type StageCauseRecord,
+  type EntityFact,
+  type StageCauseThing,
 } from "../../tasks";
 import { readEntityEnvironment } from "./entity-environment";
 
@@ -101,18 +102,23 @@ const buildEntityContext = (
 };
 
 /**
- * Builds a card's stage cause from the cause fact read for it. Returns
- * `undefined` for a Task whose stage no fact placed. Facts are never deleted,
- * so a cause id always has its row.
+ * Builds a card's stage cause from the cause fact read for it and the stored
+ * words of its thing. Returns `undefined` for a Task whose stage no fact
+ * placed. Facts are never deleted, so a cause id always has its row.
  */
 const buildStageCause = (
-  causes: ReadonlyMap<number, StageCauseRecord>,
+  causes: ReadonlyMap<number, EntityFact>,
+  words: ReadonlyMap<string, StageCauseThing>,
   factId: number | undefined,
 ): BoardCardFacts["stageCause"] => {
   const cause = factId === undefined ? undefined : causes.get(factId);
   return cause === undefined
     ? undefined
-    : { factId: cause.factId, ref: cause.ref, text: describeStageCause(cause) };
+    : {
+        factId: cause.id,
+        ref: cause.ref,
+        text: describeStageCause({ ...cause, thing: words.get(cause.ref) }),
+      };
 };
 
 /**
@@ -164,10 +170,13 @@ export const TaskBoardFactsLayer: Layer.Layer<
               tasks.flatMap((task) => (task.failedRunId === undefined ? [] : [task.failedRunId])),
             )).map((failure) => [failure.runId, failure] as const),
           );
-          const causes = yield* factRows.listStageCauses(
+          const causes = yield* factRows.listFacts(
             tasks.flatMap((task) =>
               task.stageCauseFactId === undefined ? [] : [task.stageCauseFactId],
             ),
+          );
+          const causeWords = yield* entities.listEntityWords(
+            [...causes.values()].map((cause) => cause.ref),
           );
           const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
           const linkedRefs = [...new Set([...linksByTask.values()].flat())];
@@ -191,7 +200,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
                 lastRunEndedAt: lastRunEndings.get(task.id),
                 failure:
                   task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
-                stageCause: buildStageCause(causes, task.stageCauseFactId),
+                stageCause: buildStageCause(causes, causeWords, task.stageCauseFactId),
                 linkedRefs: linksByTask.get(task.id) ?? [],
                 entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
                 contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],

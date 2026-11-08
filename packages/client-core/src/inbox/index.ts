@@ -20,7 +20,6 @@ export * from "./facets";
 export * from "./groupings";
 export * from "./inbox-notes";
 export * from "./landed-signals";
-export * from "./link-search";
 export * from "./open-card";
 export * from "./open-timeline";
 export * from "./place-view";

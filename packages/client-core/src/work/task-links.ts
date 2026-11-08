@@ -3,13 +3,7 @@
  * removes a link: the line on the undo line for each outcome, and the words
  * of the gesture Undo reverses.
  */
-
-/** Which way a change to a Task's link goes. */
-export type TaskLinkDirection = "link" | "unlink";
-
-/** Returns the direction that reverses `direction`. */
-export const reverseTaskLinkDirection = (direction: TaskLinkDirection): TaskLinkDirection =>
-  direction === "link" ? "unlink" : "link";
+import type { LinkDirection } from "../desk/link-search";
 
 /**
  * Returns the words of the gesture, in the past tense, as the undo line shows
@@ -17,7 +11,7 @@ export const reverseTaskLinkDirection = (direction: TaskLinkDirection): TaskLink
  * `thing` is how a sentence names the linked thing (`nameLinkedThing`).
  */
 export const describeTaskLinkGesture = (
-  direction: TaskLinkDirection,
+  direction: LinkDirection,
   thing: string,
   taskTitle: string,
 ): string =>
@@ -31,7 +25,7 @@ export const describeTaskLinkGesture = (
  * because the user may expect the next scan of the source to bring it back.
  */
 export const describeTaskLinkDone = (
-  direction: TaskLinkDirection,
+  direction: LinkDirection,
   thing: string,
   taskTitle: string,
 ): string =>
@@ -45,7 +39,7 @@ export const describeTaskLinkDone = (
  * the user acted, which was for a change that has not happened.
  */
 export const describeTaskLinkNothing = (
-  direction: TaskLinkDirection,
+  direction: LinkDirection,
   thing: string,
   taskTitle: string,
 ): string =>
@@ -55,7 +49,7 @@ export const describeTaskLinkNothing = (
 
 /** Returns the sentence for a change the controller refused, with its `reason` and what to do. */
 export const describeTaskLinkFailure = (
-  direction: TaskLinkDirection,
+  direction: LinkDirection,
   thing: string,
   taskTitle: string,
   reason: string,

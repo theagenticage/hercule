@@ -3,8 +3,7 @@
  * Task service on real rows:
  *
  * - what a Task's links count as (`countLinkedWork`)
- * - the facts an entity write makes (`snapshotLinkedEntities` and
- *   `recordEntityFacts`)
+ * - the facts an entity write makes (`recordEntityFactsAround`)
  * - the facts a new link and a first install make (the fact of an unlink is
  *   tested with `unlinkEntity`, in `service.link-by-hand.test.ts`)
  *

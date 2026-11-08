@@ -24,7 +24,7 @@ interface RejectedSource {
 
 /**
  * The reason a first install rolled back: at least one shipped source did not
- * validate. It never leaves `installShippedWorkflows`: the function turns it
+ * validate. It never leaves `installCardWorkflows`: the function turns it
  * into notifications.
  */
 class SourcesRejected extends Data.TaggedError("SourcesRejected")<{
@@ -55,14 +55,18 @@ const describeRejectedSource = (errors: RejectedSource["errors"]): string => {
 };
 
 /**
- * Installs the shipped workflows in `sources` that were never installed, and
+ * Installs the card workflows in `sources` that were never installed, and
  * does nothing else when every key was installed before (a deleted or edited
  * shipped workflow keeps its key, so it is never installed again).
  *
+ * This is the installer of the two workflows that move cards, not of shipped
+ * workflows in general: whatever it installs gets the first-install
+ * reconciliation below. A shipped workflow of another kind needs its own
+ * installer, or this one generalised, which waits for #502.
+ *
  * The missing keys install together in one transaction: each workflow with
- * its triggers and its key, then, when one of them moves cards
- * (`movesCards`), the first-install reconciliation, which writes a
- * fact for every live Task's link to a thing that has a lifecycle.
+ * its triggers and its key, then the first-install reconciliation, which
+ * writes a fact for every live Task's link to a thing that has a lifecycle.
  * The transaction commits only if every source validates and the
  * reconciliation succeeds. Then the Event Router, which reads the log after
  * the commit, finds the triggers in place. A boot that installs a key
@@ -76,7 +80,7 @@ const describeRejectedSource = (errors: RejectedSource["errors"]): string => {
  * Fails with `SqlError` when the database cannot be read or written. Nothing
  * from that attempt is stored.
  */
-export const installShippedWorkflows = (
+export const installCardWorkflows = (
   sources: ReadonlyArray<ShippedWorkflowSource>,
 ): Effect.Effect<void, SqlError, WorkflowService | Notifier | TaskService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -112,13 +116,10 @@ export const installShippedWorkflows = (
           );
           // Cards whose pull request was linked before the workflows existed
           // get their first fact now, in the transaction that installs the
-          // triggers. It runs only here, never on an ordinary start, and only
-          // when a workflow that moves cards is installed: a fact written at
-          // any other start would be newer than a drag's fence and would undo
-          // the drag.
-          if (missing.some((shipped) => shipped.movesCards === true)) {
-            yield* tasks.recordFirstInstallFacts();
-          }
+          // triggers. It runs only here, never on an ordinary start: a fact
+          // written at every start would be newer than a drag's fence and
+          // would undo the drag.
+          yield* tasks.recordFirstInstallFacts();
         }),
       ),
     );
@@ -152,10 +153,10 @@ export const installShippedWorkflows = (
  * plugins, and before ingest starts. A failure must not keep the controller
  * from starting: nothing was stored, and the next boot tries again.
  */
-export const installShippedWorkflowsOrLog = (
+export const installCardWorkflowsOrLog = (
   sources: ReadonlyArray<ShippedWorkflowSource>,
 ): Effect.Effect<void, never, WorkflowService | Notifier | TaskService | SqlClient.SqlClient> =>
   absorbFailures(
     "The shipped workflows could not be installed; the next start tries again",
-    installShippedWorkflows(sources),
+    installCardWorkflows(sources),
   );

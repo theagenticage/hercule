@@ -24,13 +24,12 @@
 import { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
+import { reverseLinkDirection, type LinkDirection } from "@hercule/client-core/desk";
 import {
   describeTaskLinkDone,
   describeTaskLinkFailure,
   describeTaskLinkGesture,
   describeTaskLinkNothing,
-  reverseTaskLinkDirection,
-  type TaskLinkDirection,
 } from "@hercule/client-core/work";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import type { CardMover } from "../../../app/card-mover";
@@ -89,7 +88,7 @@ export const useTaskLinks = ({
     }: {
       readonly taskId: string;
       readonly ref: string;
-      readonly direction: TaskLinkDirection;
+      readonly direction: LinkDirection;
       /** For a reversal: resolves to whether the change it reverses was made. */
       readonly isWanted: Promise<boolean> | undefined;
     }) => {
@@ -109,7 +108,7 @@ export const useTaskLinks = ({
 
   const change = (
     { taskId, taskTitle, ref, thingName: name }: TaskLinkChange,
-    direction: TaskLinkDirection,
+    direction: LinkDirection,
   ): void => {
     const key = `${direction} ${taskId} ${ref}`;
     if (onItsWay.current.has(key)) return;
@@ -128,7 +127,7 @@ export const useTaskLinks = ({
         await request.mutateAsync({
           taskId,
           ref,
-          direction: reverseTaskLinkDirection(direction),
+          direction: reverseLinkDirection(direction),
           isWanted: wasChanged,
         });
         if (scope.isCurrent()) readAgain(taskId);

@@ -245,7 +245,7 @@ For each live Task that links the ref, one Fact and one Platform Event `task.ent
 
 - **Never for a change of title, status, owner or facts,** and never for a first observation that no Task links. So 300 existing pull requests start no runs. A poll that changes nothing writes nothing: no Fact, no event, no run, no push.
 - **Not for a Task that is deleted, merged, `done` or `dropped`.** A Task has to be live.
-- **The ingest asks the Task domain twice.** `TaskService.snapshotLinkedEntities` reads the linked-work state of the refs that a live Task links before an entity write, and `TaskService.recordEntityFacts` compares it with the state after, in the same transaction. All the rules above live in the tasks domain. External entities call this pair around every write that can change a linked entity's state: `reconcile`, `refresh`, `reportMissing`, and a change of access.
+- **The ingest asks the Task domain once.** `TaskService.recordEntityFactsAround(refs, write)` runs an entity write in a transaction, reading the linked-work state of the refs that a live Task links before it and comparing with the state after. All the rules above live in the tasks domain. External entities wrap every write that can change a linked entity's state: `reconcile`, `refresh`, `reportMissing`, and a change of access.
 - **It is not available to triage.** An outside change that is not a lifecycle change still shows only on the timeline ([./20](./20-external-entities.md#87-what-changed-outside)). Someone else being assigned, or a second pull request opening, moves nothing and stops nothing.
 
 ### What counts as open

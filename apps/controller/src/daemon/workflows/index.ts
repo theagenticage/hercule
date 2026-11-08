@@ -15,5 +15,5 @@ export { WorkflowEntitiesLayer } from "./entities";
 export { WorkflowServiceWithPortsLayer } from "./workflow-service";
 export { WorkflowSignalsLayer } from "./signals";
 export { revalidateStoredWorkflowsOrLog, WorkflowValidityObserversLayer } from "./validity";
-export { installShippedWorkflows, installShippedWorkflowsOrLog } from "./shipped-workflows";
+export { installCardWorkflows, installCardWorkflowsOrLog } from "./card-workflows";
 export { checkSchedulerInterval, runScheduler, SchedulerInterval } from "./scheduler";

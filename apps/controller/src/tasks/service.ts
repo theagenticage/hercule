@@ -26,7 +26,7 @@
  * in the repository, as it reads `projects`. A Task is
  * joinable when it is neither deleted nor finished (`isFinishedStage`).
  */
-import type * as Arr from "effect/Array";
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -74,14 +74,7 @@ import {
   type TryAgainUndo,
   type Unauthenticated,
 } from "@hercule/contract";
-import {
-  CurrentActor,
-  currentStamp,
-  isRunStamp,
-  requireGrant,
-  requireUserActor,
-  SYSTEM_ACTOR,
-} from "../actor";
+import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
 import {
   announce,
   nowIso,
@@ -95,11 +88,11 @@ import {
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
-import { removeDuplicates } from "./lists";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
 import { LinkedEntities } from "./linked-entities";
 import { makeLinkedFacts } from "./linked-facts";
+import { makeStageDecisions } from "./stage-decision";
 import { TaskLinkOwners } from "./link-owners";
 import { makeSummaryDirtyMarker } from "./summary-dirty";
 import {
@@ -344,27 +337,6 @@ const isNewValue = <Value>(next: Value | undefined, held: Value): next is Value 
   next !== undefined && next !== held;
 
 /**
- * Returns the stage a legacy `status` write moves a Task to. A Task whose
- * stage already reads as that status stays where it is, so `in-progress` never
- * moves an `in-review` Task back to `building`. Otherwise the status gives a
- * stage outright: `open` gives `planned`, `in-progress` gives `building`,
- * `done` gives `done` and `cancelled` gives `dropped`.
- */
-const chooseStageForStatus = (current: TaskStage, status: TaskStatus): TaskStage => {
-  if (deriveTaskStatus(current) === status) return current;
-  switch (status) {
-    case "open":
-      return "planned";
-    case "in-progress":
-      return "building";
-    case "done":
-      return "done";
-    case "cancelled":
-      return "dropped";
-  }
-};
-
-/**
  * Returns the description a Task has after another Task is merged into it:
  * its own, then the other's under a line naming the other's title. A merged
  * Task with an empty description adds nothing.
@@ -463,7 +435,9 @@ const make = Effect.gen(function* () {
   const platformEvents = yield* PlatformEvents;
 
   const linkOwners = yield* TaskLinkOwners;
+  const linkedEntities = yield* LinkedEntities;
   const linked = yield* makeLinkedFacts;
+  const stageDecisions = yield* makeStageDecisions(linked.countLinkedWork);
   const facts = yield* entityFactRepository;
 
   /**
@@ -530,11 +504,14 @@ const make = Effect.gen(function* () {
    * starts and ends rarely, but a workflow trigger can start many.
    */
   const announceRunChangeOnLinkedEntity = (taskId: string): Effect.Effect<void, SqlError> =>
-    Effect.flatMap(tasks.findLinkedEntityId(taskId), (entityId) =>
-      Option.isSome(entityId)
-        ? announce({ _tag: "record", topic: "externalEntity", id: entityId.value, kind: "updated" })
-        : Effect.void,
-    );
+    Effect.gen(function* () {
+      const refs = (yield* tasks.listEntityLinks([taskId])).get(taskId) ?? [];
+      const recordIds = yield* linkedEntities.readRecordIds(refs);
+      const entityId = refs.map((ref) => recordIds.get(ref)).find((id) => id !== undefined);
+      if (entityId !== undefined) {
+        yield* announce({ _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" });
+      }
+    });
 
   /**
    * Records, for the transaction it runs in, an `externalEntity` change for the
@@ -542,11 +519,12 @@ const make = Effect.gen(function* () {
    * unlink. Does nothing when Hercule holds no record of the thing.
    */
   const announceEntityOfRef = (ref: string): Effect.Effect<void, SqlError> =>
-    Effect.flatMap(tasks.findEntityIdOfRef(ref), (entityId) =>
-      Option.isSome(entityId)
-        ? announce({ _tag: "record", topic: "externalEntity", id: entityId.value, kind: "updated" })
-        : Effect.void,
-    );
+    Effect.gen(function* () {
+      const entityId = (yield* linkedEntities.readRecordIds([ref])).get(ref);
+      if (entityId !== undefined) {
+        yield* announce({ _tag: "record", topic: "externalEntity", id: entityId, kind: "updated" });
+      }
+    });
 
   /**
    * Checks that the project a task points at exists. Fails with `NotFound` if
@@ -572,29 +550,11 @@ const make = Effect.gen(function* () {
    * The event reports `changes.stage` whenever the stage changes, and
    * `changes.status` whenever the coarse status changes with it.
    *
-   * Every stage decision raises the Task's stage revision: a patch that names
-   * a `stage` (even the one the Task has, which writes no event), and a
-   * `status` that moves the stage. A patch that leaves the stage alone does
-   * not. Neither does a stage that a workflow run writes from a fact (below):
-   * that is not a person or an agent deciding, and the Undo of a handoff reads
-   * the revision to learn whether someone did. A user or a session that passes
-   * a `stageFactId` is held to the same fence, but it is deciding, so its write
-   * raises the revision like any other.
-   *
-   * A stage decision also settles which facts it overrules, through the
-   * Task's fence (`stage_fact_fence`) and cause (`stage_cause_fact_id`):
-   *
-   * - With no `stageFactId`, the decision is a person's or an agent's. The
-   *   fence becomes the highest fact id there is, so every fact recorded so
-   *   far is overruled, and the cause is cleared.
-   * - With a `stageFactId`, the decision comes from that fact, and
-   *   `judgeStageFact` decides whether it may go on. When it is refused, the
-   *   stage of the patch is dropped and nothing about the stage happens: no
-   *   event, no fence. When it is accepted, the fence becomes the fact's
-   *   id. If the stage differs, it is written and the cause becomes the fact.
-   *   If the Task holds that stage already, only the fence moves, and the
-   *   cause stays: the fact placed nothing. For a run the stage revision
-   *   stays as it was (see above).
+   * The stage fields of the patch (`stage`, `status`, `stageFactId`) become one
+   * stage decision (`decideStageOfPatch`), which settles the stage to write,
+   * the fence, the cause and the revisions together. A patch that names a
+   * `stage` always decides, even the one the Task has, which writes no event.
+   * A refused `stageFactId` drops the stage of the patch.
    *
    * The other fields of a patch with a `stageFactId` are not guarded by the
    * fact: they apply whether the fact is accepted or refused. The workflows
@@ -612,19 +572,7 @@ const make = Effect.gen(function* () {
         const before = yield* readLiveTaskOrFail(requestedId);
         // A merged id lands on the survivor, and everything below is about it.
         const id = before.id;
-        let requestedStage = patch.stage;
-        let acceptedFactId: number | undefined;
-        if (patch.stageFactId !== undefined) {
-          const verdict = yield* linked.judgeStageFact(before, {
-            factId: patch.stageFactId,
-            onlyWhenLinkedWorkFinished: patch.onlyWhenLinkedWorkFinished === true,
-            alsoLinking: (patch.provenance ?? []).flatMap((entry) =>
-              entry.ref === undefined ? [] : [entry.ref],
-            ),
-          });
-          if (verdict._tag === "accepted") acceptedFactId = verdict.factId;
-          else requestedStage = undefined;
-        }
+        const decision = yield* stageDecisions.decideStageOfPatch(before, patch, actor);
         yield* ensureProjectExists(patch.projectId);
 
         // Each field is compared on its own, rather than in a loop over
@@ -643,35 +591,14 @@ const make = Effect.gen(function* () {
           changes.priority = { old: before.priority, new: patch.priority };
           edit.priority = patch.priority;
         }
-        const stage =
-          requestedStage ??
-          (patch.status === undefined
-            ? undefined
-            : chooseStageForStatus(before.stage, patch.status));
-        // Asking for a stage is a stage decision even when the Task is there
-        // already. A stage that a workflow run writes from a fact is not
-        // anyone deciding it, so it leaves `stage_revision` alone. A user or a
-        // session that passes a fact is fenced like a run, but is deciding.
-        if (requestedStage !== undefined) {
-          if (acceptedFactId !== undefined && isRunStamp(actor)) edit.stageFromFact = true;
-          else edit.decidesStage = true;
-        }
-        if (isNewValue(stage, before.stage)) {
+        if (decision !== undefined) edit.stageDecision = decision;
+        const stage = decision?.stage;
+        if (stage !== undefined) {
           changes.stage = { old: before.stage, new: stage };
-          edit.stage = stage;
           const status = deriveTaskStatus(stage);
           if (status !== before.status) {
             changes.status = { old: before.status, new: status };
             edit.status = status;
-          }
-        }
-        if (requestedStage !== undefined || edit.stage !== undefined) {
-          if (acceptedFactId === undefined) {
-            edit.stageFactFence = yield* facts.readHighestFactId();
-            edit.stageCauseFactId = null;
-          } else {
-            edit.stageFactFence = acceptedFactId;
-            if (edit.stage !== undefined) edit.stageCauseFactId = acceptedFactId;
           }
         }
         const project = before.projectId ?? null;
@@ -687,22 +614,22 @@ const make = Effect.gen(function* () {
           if (patch.boardRank !== held) {
             changes.boardRank = { old: held, new: patch.boardRank };
           }
-        } else if (edit.stage !== undefined || edit.projectId !== undefined) {
+        } else if (stage !== undefined || edit.projectId !== undefined) {
           // A Task that changes cell by anything other than `task.move` goes
           // last in the new cell, so nothing the user is looking at moves. The
           // event reports the stage or the project, which is why the move to
           // the end is not listed as a change of its own.
           edit.boardRank = yield* tasks.chooseLastRankOfCell({
             projectId: (edit.projectId === undefined ? before.projectId : edit.projectId) ?? null,
-            stage: edit.stage ?? before.stage,
+            stage: stage ?? before.stage,
           });
         }
 
         // A label in both lists is added and removed in one call, so the
         // task keeps it. Reporting it as removed would trigger every
         // workflow that watches for that label being removed.
-        const adding = removeDuplicates(patch.addLabels ?? []);
-        const removed = removeDuplicates(patch.removeLabels ?? []).filter(
+        const adding = Arr.dedupe(patch.addLabels ?? []);
+        const removed = Arr.dedupe(patch.removeLabels ?? []).filter(
           (label) => !adding.includes(label) && before.labels.includes(label),
         );
         const kept = before.labels.filter((label) => !removed.includes(label));
@@ -737,16 +664,11 @@ const make = Effect.gen(function* () {
 
         // If nothing changes, the task is returned as it is, with no row
         // written and no event recorded. The one exception is a stage decision
-        // that kept the stage: it raises the stage revision and nothing else,
-        // because an Undo of a handoff has to see that someone decided. A fact
-        // is not someone deciding, so a fact only moves the fence.
+        // that kept the stage: it writes the decision and nothing else (an
+        // Undo of a handoff has to see that someone decided, and the fence has
+        // to move).
         if (Object.keys(changes).length === 0) {
-          if (requestedStage !== undefined) {
-            if (edit.decidesStage === true) yield* tasks.raiseStageRevision(id);
-            yield* facts.setFence(id, edit.stageFactFence!);
-            if (edit.stageCauseFactId !== undefined)
-              yield* facts.setCause(id, edit.stageCauseFactId);
-          }
+          if (decision !== undefined) yield* tasks.writeStageDecision(id, decision);
           return before;
         }
 
@@ -758,13 +680,13 @@ const make = Effect.gen(function* () {
         // A finished Task waits for no summary. Taking it back to a live stage,
         // changing the words a summary reads, or linking a new outside thing
         // makes the summary out of date.
-        if (edit.stage !== undefined && isFinishedStage(edit.stage)) {
+        if (stage !== undefined && isFinishedStage(stage)) {
           yield* tasks.clearSummaryDirty(id);
         } else if (
           newRefs.length > 0 ||
           edit.title !== undefined ||
           edit.description !== undefined ||
-          (edit.stage !== undefined && isFinishedStage(before.stage))
+          (stage !== undefined && isFinishedStage(before.stage))
         ) {
           yield* markSummaryDirty(id);
         }
@@ -1237,7 +1159,7 @@ const make = Effect.gen(function* () {
                 description: decoded.description,
                 stage: decoded.stage ?? "planned",
                 priority: decoded.priority ?? "normal",
-                labels: removeDuplicates(decoded.labels ?? []),
+                labels: Arr.dedupe(decoded.labels ?? []),
                 projectId: decoded.projectId,
                 provenance,
               },
@@ -1821,11 +1743,11 @@ const make = Effect.gen(function* () {
             yield* tasks.markMerged(sourceId, targetId);
             yield* tasks.moveEntityLinks(sourceId, targetId);
             // Merging is a person's act, so every fact recorded so far is
-            // overruled for the survivor, the moved ones included. This comes
-            // after the facts moved, and `updateTask` below writes no stage.
+            // overruled for the survivor, the moved ones included: the
+            // decision is made after the facts moved, and `updateTask` below
+            // writes no stage.
             yield* facts.moveFactsAndSuppressions(sourceId, targetId);
-            yield* facts.setFence(targetId, yield* facts.readHighestFactId());
-            yield* facts.setCause(targetId, null);
+            yield* tasks.writeStageDecision(targetId, yield* stageDecisions.decideStageOfMerge());
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
@@ -2167,21 +2089,16 @@ const make = Effect.gen(function* () {
     countLinkedWork: linked.countLinkedWork,
 
     /**
-     * Reads, before a write of External Entities, what the Tasks that link
-     * `refs` need to compare after it. Pass the result to `recordEntityFacts`
-     * in the same transaction. It checks no grant: its caller is the ingest.
+     * Runs `write`, which changes External Entities, and writes the facts
+     * that change makes for the live Tasks that link a changed thing: at most
+     * one fact per Task and thing, each with a `task.entityChanged` event. It
+     * returns what `write` returned. A write that changes no lifecycle, and no
+     * readability or completeness that moves a Task's counts, writes nothing,
+     * and when no live Task links any of `refs` the cost is one statement.
+     * It joins the caller's transaction or opens one, so the write and its
+     * facts commit together. It checks no grant: its caller is the ingest.
      */
-    snapshotLinkedEntities: linked.snapshotLinkedEntities,
-
-    /**
-     * Writes, after a write of External Entities and in its transaction, the
-     * facts that the write made for the live Tasks that link a changed thing:
-     * at most one fact per Task and thing, each with a `task.entityChanged`
-     * event. A write that changes no lifecycle, and no readability or
-     * completeness that moves a Task's counts, writes nothing. `snapshot` is
-     * valid only inside the transaction that took it.
-     */
-    recordEntityFacts: linked.recordEntityFacts,
+    recordEntityFactsAround: linked.recordEntityFactsAround,
 
     /**
      * Writes a first-sight fact for every link of every live Task to a piece

@@ -2,25 +2,20 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "
 import { flushSync } from "react-dom";
 import {
   buildArrivalKey,
-  buildStageMoveKey,
   holdBackBoardChanges,
-  planMorningReplay,
-  type BoardSnapshot,
   type EndStage,
   type HeldChange,
   type WorkProject,
 } from "@hercule/client-core/work";
 import type { WorkBoard } from "@hercule/contract";
-import { isMotionReduced } from "../../app/motion";
 import { fadeInCards, returnCard, riseArrival } from "./board-flights";
-import { prepareSelfMoves, type SelfMovingCard } from "./fact-move";
-import { flipBoard } from "./flip-board";
-import { buildReplayDelays } from "./morning-replay";
+import { useChangeNote } from "./use-change-note";
 import { useHeldChanges } from "./use-held-changes";
+import { REPLAY_GAP_MS, useMorningReplay, useRememberDrawnBoard } from "./use-morning-replay";
+import { useSelfMoves } from "./use-self-moves";
 import "./motion.css";
 
 const NOTHING_RELEASED: ReadonlySet<string> = new Set();
-const NO_PLAYED_KEYS: ReadonlySet<string> = new Set();
 
 /** The board the screen draws, and what the reads did to it. */
 export interface BoardReads {
@@ -65,17 +60,6 @@ interface Picture {
   readonly released: ReadonlySet<string>;
   /** The Tasks the logical board left out when this picture was made. */
   readonly hidden: ReadonlySet<string>;
-}
-
-/**
- * What the morning replay of this visit plays: the sentence that tells what
- * changed, and the keys of the changes it plays, oldest first (empty when
- * nothing plays, as under Reduce motion).
- */
-interface VisitReplay {
-  readonly summary: string;
-  /** The keys, oldest first: a Set keeps the order they were added in. */
-  readonly playedKeys: ReadonlySet<string>;
 }
 
 /** What the screen gave `useBoardReads` at its last render. */
@@ -127,7 +111,7 @@ const decidePicture = (
  * (`buildLogicalBoard`), `hiddenIds` the Tasks it left out on purpose, and
  * `serverBoard` the board as the last read gave it; a change of the last is a
  * read, and a change of only the logical board is the user's own change.
- * `snapshot` is the board as the user last saw it, if the app kept one.
+ * `snapshotKey` is where the board as the user last saw it is kept, if the app kept one.
  * Returns the drawn board.
  *
  * - A user's own move is drawn at once, in the render: the code that makes it
@@ -142,7 +126,7 @@ const decidePicture = (
  *   (`holdBackBoardChanges`). Then the Task rises at the end of its cell on
  *   `self`, or the failing card takes the top of its cell, or the card that a
  *   fact moved shows its cause and crosses to the end of its new cell
- *   (`prepareSelfMoves`), and the toolbar's line shows what happened. A Task
+ *   (`useSelfMoves`), and the toolbar's line shows what happened. A Task
  *   that lies past what its cell shows, or under a folded lane, moves
  *   nothing: only the counts change.
  * - While a card is in the hand (`isCarrying`), nothing that nobody caused is
@@ -163,7 +147,7 @@ export const useBoardReads = ({
   hiddenIds,
   movedIds,
   serverBoard,
-  snapshot,
+  snapshotKey,
   projects,
   groupBy,
   isCarrying,
@@ -174,7 +158,8 @@ export const useBoardReads = ({
   /** The Tasks whose stage the user moved and the controller has not answered yet. They are never held back (`LogicalBoard.movedIds`). */
   readonly movedIds: ReadonlySet<string>;
   readonly serverBoard: WorkBoard | undefined;
-  readonly snapshot: BoardSnapshot | undefined;
+  /** Where the board the user last saw is stored (`buildBoardSnapshotKey`), for the morning replay. */
+  readonly snapshotKey: string;
   readonly projects: readonly WorkProject[];
   /** How the board is grouped, as the view saved it. */
   readonly groupBy: string;
@@ -182,29 +167,20 @@ export const useBoardReads = ({
   readonly scrollRef: RefObject<HTMLElement | null>;
 }): BoardReads => {
   const [picture, setPicture] = useState<Picture | undefined>(undefined);
-  const [visitReplay, setVisitReplay] = useState<VisitReplay | undefined>(undefined);
   const [released, setReleased] = useState(NOTHING_RELEASED);
   const [wasCarrying, setWasCarrying] = useState(false);
   if (wasCarrying !== isCarrying) setWasCarrying(isCarrying);
+  const replay = useMorningReplay({ snapshotKey, logicalBoard, isStarting: picture === undefined });
+  const selfMoves = useSelfMoves({ isCarrying });
+  const { playedKeys } = replay;
 
   // The drawn board is derived while rendering, and the picture is kept to
   // compare the next render with.
   let drawn = logicalBoard;
   let held: readonly HeldChange[] = [];
   let isDeferred = false;
-  let playedKeys = visitReplay?.playedKeys ?? NO_PLAYED_KEYS;
   if (logicalBoard !== undefined) {
-    // The first picture of a visit, which is also the first one after the
-    // replay is asked for again, may start from how the board looked.
-    let replayStart: WorkBoard | undefined;
-    if (picture === undefined) {
-      const plan = snapshot === undefined ? undefined : planMorningReplay(snapshot, logicalBoard);
-      const isPlayed = plan !== undefined && !isMotionReduced();
-      replayStart = isPlayed ? plan.shown : undefined;
-      playedKeys = isPlayed ? new Set(plan.playedKeys) : NO_PLAYED_KEYS;
-      setVisitReplay(plan === undefined ? undefined : { summary: plan.summary, playedKeys });
-    }
-    const decided = decidePicture(picture, replayStart, logicalBoard, {
+    const decided = decidePicture(picture, replay.startBoard, logicalBoard, {
       hiddenIds,
       movedIds,
       serverBoard,
@@ -227,6 +203,7 @@ export const useBoardReads = ({
       drawn = picture.board;
     }
   }
+  useRememberDrawnBoard(snapshotKey, drawn, replay.hasSaved);
 
   const latest = useRef<Inputs>({
     logicalBoard,
@@ -240,17 +217,6 @@ export const useBoardReads = ({
   });
   const ownTaskIds = useRef(new Set<string>());
   const returnedTasks = useRef(new Map<string, EndStage>());
-  // Stops what a read started and has not finished, such as a dent that waits
-  // to close, when the screen goes. Made in a layout effect so that the first
-  // draw, which comes from a microtask queued by a later one, can use it.
-  const lifetime = useRef<AbortController | null>(null);
-  useLayoutEffect(() => {
-    const controller = new AbortController();
-    lifetime.current = controller;
-    return () => {
-      controller.abort();
-    };
-  }, []);
   useLayoutEffect(() => {
     latest.current = {
       logicalBoard,
@@ -297,33 +263,19 @@ export const useBoardReads = ({
         commit();
         return;
       }
-      const shownCards = new Map(shown.board.cards.map((card) => [card.id, card]));
+      const shownIds = new Set(shown.board.cards.map((card) => card.id));
       const isCausedByUser = next.board.cards.some(
         (card) =>
-          !shownCards.has(card.id) &&
+          !shownIds.has(card.id) &&
           (ownTaskIds.current.has(card.id) || returnedTasks.current.has(card.id)),
       );
-      // A card whose move was released by this read crosses by itself, with
-      // its cause and its dent.
-      const selfMoves = next.board.cards.flatMap((card): SelfMovingCard[] => {
-        const key = buildStageMoveKey(card);
-        const before = shownCards.get(card.id);
-        return before !== undefined &&
-          before.stage !== card.stage &&
-          next.released.has(key) &&
-          !shown.released.has(key)
-          ? [{ cardId: card.id, stage: card.stage, cause: card.stageCause?.text }]
-          : [];
-      });
-      const moves = prepareSelfMoves(scroller, selfMoves);
-      const { born } = flipBoard(scroller, isCausedByUser ? "travel" : "self", () => {
-        moves.keepPlaces();
-        commit();
-      });
-      moves.play({
-        isDragging: () => latest.current.isCarrying,
-        signal: lifetime.current?.signal ?? new AbortController().signal,
-      });
+      // A card the board released crosses by itself, with its cause and its dent.
+      const { born } = selfMoves.draw(
+        scroller,
+        { shown: shown.board, next: next.board },
+        isCausedByUser ? "travel" : "self",
+        commit,
+      );
       for (const card of born) {
         const id = card.dataset["cardId"];
         if (id === undefined) continue;
@@ -341,19 +293,23 @@ export const useBoardReads = ({
     return () => {
       isCancelled = true;
     };
-  }, [isDeferred, serverBoard, released, scrollRef]);
+  }, [isDeferred, serverBoard, released, scrollRef, selfMoves]);
 
-  const note = useHeldChanges({
+  const { note, say } = useChangeNote(logicalBoard);
+  useHeldChanges({
     held,
     board: logicalBoard,
     projects,
     groupBy,
     isCarrying,
     scrollRef,
-    release: (key) => {
-      setReleased((before) => new Set(before).add(key));
+    startDelays: replay.startDelays,
+    beforeRelease: selfMoves.announce,
+    release: (change) => {
+      selfMoves.noteReleased(change);
+      setReleased((before) => new Set(before).add(change.key));
+      say(change, replay.startDelays.has(change.key) ? REPLAY_GAP_MS : undefined);
     },
-    startDelays: buildReplayDelays(visitReplay?.playedKeys ?? NO_PLAYED_KEYS),
   });
 
   const noteAddedTask = useCallback((taskId: string): void => {
@@ -372,15 +328,12 @@ export const useBoardReads = ({
     setReleased(NOTHING_RELEASED);
   }, []);
 
-  const isReplaying =
-    visitReplay !== undefined && held.some((change) => visitReplay.playedKeys.has(change.key));
   return {
     drawnBoard: drawn,
     note,
     noteAddedTask,
     noteReturnedTask,
-    sinceLastLook: visitReplay === undefined || isReplaying ? null : visitReplay.summary,
-    playReplayAgain:
-      visitReplay !== undefined && visitReplay.playedKeys.size > 0 ? playReplayAgain : null,
+    sinceLastLook: replay.summarize(held),
+    playReplayAgain: replay.canPlayAgain ? playReplayAgain : null,
   };
 };

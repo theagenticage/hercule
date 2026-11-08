@@ -3,9 +3,6 @@
  * controller daemon beside it, use.
  */
 
-/** Returns the values without repeats, in the order they first appear. */
-export const removeDuplicates = <A>(values: Iterable<A>): ReadonlyArray<A> => [...new Set(values)];
-
 /** Groups the items by their Task id, keeping their order within each group. */
 export const groupByTask = <Item extends { readonly taskId: string }>(
   items: ReadonlyArray<Item>,

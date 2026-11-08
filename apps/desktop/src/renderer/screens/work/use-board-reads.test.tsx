@@ -10,14 +10,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { useRef, type JSX } from "react";
-import {
-  buildBoardSnapshot,
-  PROJECT_FACET_ID,
-  type BoardSnapshot,
-} from "@hercule/client-core/work";
+import { buildBoardSnapshot, PROJECT_FACET_ID } from "@hercule/client-core/work";
 import { buildBoard, buildCard, FAILURE } from "@hercule/client-core/work/testing";
 import type { WorkBoard } from "@hercule/contract";
+import { writeSavedBoardSnapshot } from "./board-snapshot-storage";
 import { useBoardReads } from "./use-board-reads";
+
+const SNAPSHOT_KEY = "work-board-snapshot:http://controller.test:noa";
 
 /** Ends the waits that have started, in the order they started. */
 const endWaits: (() => void)[] = [];
@@ -47,14 +46,12 @@ function Harness({
   serverBoard = board,
   hiddenIds = NOTHING_HIDDEN,
   movedIds = NOTHING_HIDDEN,
-  snapshot,
   isCarrying = false,
 }: {
   readonly board: WorkBoard;
   readonly serverBoard?: WorkBoard;
   readonly hiddenIds?: ReadonlySet<string>;
   readonly movedIds?: ReadonlySet<string>;
-  readonly snapshot?: BoardSnapshot;
   readonly isCarrying?: boolean;
   readonly unrelated?: number;
 }): JSX.Element {
@@ -64,7 +61,7 @@ function Harness({
     hiddenIds,
     movedIds,
     serverBoard,
-    snapshot,
+    snapshotKey: SNAPSHOT_KEY,
     projects: [],
     groupBy: PROJECT_FACET_ID,
     isCarrying,
@@ -106,6 +103,7 @@ const settle = async (): Promise<void> => {
 };
 
 afterEach(() => {
+  localStorage.clear();
   endWaits.length = 0;
   vi.restoreAllMocks();
 });
@@ -223,7 +221,8 @@ describe("the morning replay", () => {
       buildCard("a", { stage: "landed", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
       buildCard("b"),
     );
-    const { rerender } = render(<Harness board={read} snapshot={buildBoardSnapshot(left)} />);
+    writeSavedBoardSnapshot(SNAPSHOT_KEY, buildBoardSnapshot(left));
+    const { rerender } = render(<Harness board={read} />);
     expect(findCard("a")!.dataset["stage"]).toBe("in-review");
 
     // The user drags the card, which is drawn in Review, on to Building. The controller has not
@@ -232,14 +231,7 @@ describe("the morning replay", () => {
       buildCard("a", { stage: "building", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
       buildCard("b"),
     );
-    rerender(
-      <Harness
-        board={dragged}
-        serverBoard={read}
-        movedIds={new Set(["a"])}
-        snapshot={buildBoardSnapshot(left)}
-      />,
-    );
+    rerender(<Harness board={dragged} serverBoard={read} movedIds={new Set(["a"])} />);
     await settle();
 
     expect(findCard("a")!.dataset["stage"]).toBe("building");
@@ -251,9 +243,10 @@ describe("the morning replay", () => {
       buildCard("a", { stage: "landed", stageChangedAt: "2026-11-03T03:00:00.000Z" }),
       buildCard("b"),
     );
-    const { rerender } = render(<Harness board={read} snapshot={buildBoardSnapshot(left)} />);
+    writeSavedBoardSnapshot(SNAPSHOT_KEY, buildBoardSnapshot(left));
+    const { rerender } = render(<Harness board={read} />);
 
-    rerender(<Harness board={read} snapshot={buildBoardSnapshot(left)} unrelated={1} />);
+    rerender(<Harness board={read} unrelated={1} />);
     await settle();
 
     expect(findCard("a")!.dataset["stage"]).toBe("in-review");

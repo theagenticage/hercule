@@ -414,10 +414,7 @@ describe("the cost of watching for facts", () => {
         yield* Effect.provideService(
           withTransaction(
             yield* SqlClient.SqlClient,
-            Effect.flatMap(
-              tasks.snapshotLinkedEntities([pr(1), pr(2), pr(3), pr(4), pr(5)]),
-              tasks.recordEntityFacts,
-            ),
+            tasks.recordEntityFactsAround([pr(1), pr(2), pr(3), pr(4), pr(5)], Effect.void),
           ),
           Statement.CurrentTransformer,
           (statement) =>

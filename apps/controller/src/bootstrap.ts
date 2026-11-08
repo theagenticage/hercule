@@ -46,7 +46,7 @@ import {
   IngestExecutorLayer,
   EntityObservationsLayer,
   OpenSignalsLayer,
-  installShippedWorkflowsOrLog,
+  installCardWorkflowsOrLog,
   ProviderAccountProbingLayer,
   revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
@@ -532,7 +532,7 @@ export const bootWith = <A, E>(
         // workflows were validated again, so a source that cannot be
         // installed is reported on its own. Before ingest starts, which
         // happens with the server. A failure is logged and the boot goes on.
-        yield* installShippedWorkflowsOrLog(SHIPPED_WORKFLOWS);
+        yield* installCardWorkflowsOrLog(SHIPPED_WORKFLOWS);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);

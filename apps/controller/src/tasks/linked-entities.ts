@@ -49,5 +49,13 @@ export class LinkedEntities extends Context.Service<
     readonly readMany: (
       refs: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyMap<string, LinkedEntityState>, SqlError>;
+    /**
+     * Returns the id of the entity record of each of `refs`, by ref. A ref
+     * Hercule holds no record of is left out. One batch however many refs
+     * there are.
+     */
+    readonly readRecordIds: (
+      refs: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, string>, SqlError>;
   }
 >()("hercule/controller/tasks/LinkedEntities") {}

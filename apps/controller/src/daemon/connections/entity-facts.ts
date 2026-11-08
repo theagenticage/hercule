@@ -11,9 +11,9 @@ import { TaskService } from "../../tasks";
  * because the External Entities domain depends on the connections domain, so
  * the connections domain cannot read it back.
  *
- * It takes the snapshot of the things the Connection holds a row for and a
- * live Task links, before the delete, and records the facts after it, as the
- * ingest does for a write.
+ * It wraps the delete in `recordEntityFactsAround` for the things the
+ * Connection holds a row for and a live Task links, as the ingest does for a
+ * write.
  */
 export const ConnectionEntityFactsLayer: Layer.Layer<
   ConnectionEntityFacts,
@@ -25,14 +25,9 @@ export const ConnectionEntityFactsLayer: Layer.Layer<
     const tasks = yield* TaskService;
     return {
       recordFactsOfDeletion: (connectionId, deletion) =>
-        Effect.gen(function* () {
-          const snapshot = yield* tasks.snapshotLinkedEntities(
-            yield* entities.listLinkedObservedRefs(connectionId),
-          );
-          const deleted = yield* deletion;
-          yield* tasks.recordEntityFacts(snapshot);
-          return deleted;
-        }),
+        Effect.flatMap(entities.listLinkedObservedRefs(connectionId), (refs) =>
+          tasks.recordEntityFactsAround(refs, deletion),
+        ),
     };
   }),
 );

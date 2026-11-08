@@ -46,7 +46,7 @@
  *   done.
  */
 export { Card, type CardColleague, type CardNowTone } from "./card";
-export { showCauseLabel } from "./cause-label";
+export { showCauseLabel, type CauseLabels } from "./cause-label";
 export { ChoiceMenu, type ChoiceMenuEntry } from "./choice-menu";
 export { Colleague, type ColleaguePose } from "./colleague";
 export { copyCardForMotion } from "./copy-card-for-motion";

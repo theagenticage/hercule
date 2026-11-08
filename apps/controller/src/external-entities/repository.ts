@@ -51,7 +51,12 @@ import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { runRepository } from "../runs";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
-import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../tasks";
+import {
+  LIVE_TASK_LINKS_SQL,
+  makeSummaryDirtyMarker,
+  taskRepository,
+  type StageCauseThing,
+} from "../tasks";
 import {
   buildEntityFields,
   buildPlace,
@@ -1563,6 +1568,60 @@ const make = Effect.gen(function* () {
                     isWorkRecord: row.is_work_record === 1,
                     lifecycle: row.lifecycle,
                     access: row.access,
+                  },
+                ]),
+              ),
+          ),
+
+    /**
+     * Returns the id of the record of each of `refs`, by ref. A ref with no
+     * record is left out. One statement however many refs there are.
+     */
+    readRecordIds: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly ref: string; readonly id: Uint8Array }>`
+              SELECT ref, id FROM external_entities
+              WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) => new Map(rows.map((row) => [row.ref, uuidToString(row.id)])),
+          ),
+
+    /**
+     * Returns the stored words of each of `refs` that has a record (the noun
+     * and identifier of its kind, its lifecycle and the label of its status),
+     * by ref. A ref with no record is left out. One statement however many
+     * refs there are. A card's stage cause is written from these.
+     */
+    listEntityWords: (
+      refs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StageCauseThing>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly noun: string;
+              readonly identifier: string | null;
+              readonly lifecycle: EntityLifecycle | null;
+              readonly status_label: string | null;
+            }>`
+              SELECT ref, noun, identifier, lifecycle,
+                     json_extract(status, '$.label') AS status_label
+              FROM external_entities
+              WHERE noun IS NOT NULL
+                AND ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) =>
+              new Map(
+                rows.map((row): [string, StageCauseThing] => [
+                  row.ref,
+                  {
+                    noun: row.noun,
+                    identifier: row.identifier,
+                    lifecycle: row.lifecycle,
+                    statusWord: row.status_label,
                   },
                 ]),
               ),

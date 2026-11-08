@@ -24,7 +24,7 @@ import type {
   PluginDetail,
   Signal,
 } from "@hercule/contract";
-import type { EntityLinkMove } from "@hercule/client-core/inbox";
+import type { EntityLinkMove } from "@hercule/client-core/desk";
 import { createQueryClient } from "../../app/query-client";
 import { CONTROLLER_URL, stubApi, type Call, type Handler } from "../../app/testing";
 import { InboxOpenCard } from "./open-card";

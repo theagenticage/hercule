@@ -47,6 +47,11 @@ import { flushSync } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
 import {
+  reverseLinkDirection,
+  type EntityLinkMove,
+  type LinkDirection,
+} from "@hercule/client-core/desk";
+import {
   describeDismissal,
   describeHandOffRefusal,
   describeHandOffUndo,
@@ -57,7 +62,6 @@ import {
   planLink,
   planUnlink,
   reapplyInboxEdits,
-  type EntityLinkMove,
   type InboxEdit,
   type RidingMove,
 } from "@hercule/client-core/inbox";
@@ -105,9 +109,6 @@ const NO_EDITS: readonly PendingEdit[] = [];
 
 const NOTHING_TO_PUT_BACK = "That move changed nothing, so there is nothing to put back.";
 
-/** Which way a change to a link goes. */
-type LinkDirection = "link" | "unlink";
-
 /** Whether `move` may be sent: it resolves to false when the move it reverses changed nothing. */
 type MoveIsWanted = Promise<boolean>;
 
@@ -118,10 +119,6 @@ interface LinkAnswer {
   /** The firmest claim that still joins the two after an Unlink. */
   readonly remaining: EntityUnlinkResult["remaining"];
 }
-
-/** Returns the direction that reverses `direction`. */
-const reverseDirection = (direction: LinkDirection): LinkDirection =>
-  direction === "link" ? "unlink" : "link";
 
 /** What the undo line says about a Link or Unlink: the gesture, and what a refusal says. */
 const LINK_WORDS = {
@@ -681,7 +678,7 @@ export const useInboxMoves = ({
       undo: async () => {
         const { remaining } = await changeLinkRef.current(
           move,
-          reverseDirection(direction),
+          reverseLinkDirection(direction),
           wasChanged,
         );
         return describeLinkRemaining(remaining);
