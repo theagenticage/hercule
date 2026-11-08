@@ -533,45 +533,107 @@ describe("the Initiative of a Task on the details pane", () => {
     expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();
   });
 
-  it("puts the Task back on the Initiative the pick before it chose, when two picks come before the pane shows the first", async () => {
+  it("offers no second pick while the first is on its way, and shows the Initiative it chose as pending", async () => {
     let answerFirst: (reply: Answer) => void = () => undefined;
-    let updates = 0;
     const { calls, user, pane } = await openPane({
-      // The Task is on none, and the first pick's answer is slow.
-      answerUpdate: () => {
-        updates += 1;
-        return updates === 1
-          ? new Promise<Answer>((resolve) => {
-              answerFirst = resolve;
-            })
-          : Promise.resolve({ body: buildTask(CARD) });
-      },
+      // The Task is on none, and the answer is slow.
+      answerUpdate: () =>
+        new Promise<Answer>((resolve) => {
+          answerFirst = resolve;
+        }),
     });
-    await within(pane).findByRole("button", { name: "Initiative: none" });
+    const row = await within(pane).findByRole("button", { name: "Initiative: none" });
     const menu = readInitiativeMenu(pane);
 
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
     );
+
+    const pending = await within(pane).findByRole("button", { name: "Initiative: Faster search" });
+    expect(pending.getAttribute("aria-disabled")).toBe("true");
+    // Even a pick that reaches the menu another way sends nothing.
     await user.click(
       within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
     );
-    await waitFor(() => {
-      expect(readBodies(calls, UPDATE_PATH)).toHaveLength(1);
-    });
+    expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: SEARCH.id }]);
+
     answerFirst({ body: buildTask(CARD) });
     await waitFor(() => {
-      expect(readBodies(calls, UPDATE_PATH)).toHaveLength(2);
+      expect(row.getAttribute("aria-disabled")).toBeNull();
     });
+  });
+
+  it("starts the next pick's Undo from the Initiative the Task is really on, after a refused pick", async () => {
+    let updates = 0;
+    const { calls, user, pane } = await openPane({
+      // The Task is on none. The first pick is refused, the second accepted.
+      answerUpdate: () => {
+        updates += 1;
+        return Promise.resolve(
+          updates === 1
+            ? {
+                status: 409,
+                body: buildErrorBody("invalid_state", "That initiative was closed."),
+              }
+            : { body: buildTask(CARD) },
+        );
+      },
+    });
+    const row = await within(pane).findByRole("button", { name: "Initiative: none" });
+    const menu = readInitiativeMenu(pane);
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+    );
+    await waitFor(() => {
+      expect(row.getAttribute("aria-disabled")).toBeNull();
+    });
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
+    );
     await user.click(await screen.findByRole("button", { name: /^Undo/ }));
 
     await waitFor(() => {
       expect(readBodies(calls, UPDATE_PATH)).toEqual([
         { initiativeId: SEARCH.id },
         { initiativeId: CHECKOUT.id },
-        // Not null: the Task was on Faster search when the second pick came.
-        { initiativeId: SEARCH.id },
+        // Not Faster search: the first pick was refused, so the Task was on none.
+        { initiativeId: null },
       ]);
+    });
+  });
+
+  it("offers no pick while an Undo is on its way", async () => {
+    let updates = 0;
+    let answerUndo: (reply: Answer) => void = () => undefined;
+    const { user, pane } = await openPane({
+      initiativeId: CHECKOUT.id,
+      answerUpdate: () => {
+        updates += 1;
+        return updates === 1
+          ? Promise.resolve({ body: buildTask(CARD) })
+          : new Promise<Answer>((resolve) => {
+              answerUndo = resolve;
+            });
+      },
+    });
+    await within(pane).findByRole("button", { name: "Initiative: Accessible checkout" });
+    const menu = readInitiativeMenu(pane);
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+    );
+    await user.click(await screen.findByRole("button", { name: /^Undo/ }));
+
+    const pending = await within(pane).findByRole("button", {
+      name: "Initiative: Accessible checkout",
+    });
+    await waitFor(() => {
+      expect(pending.getAttribute("aria-disabled")).toBe("true");
+    });
+
+    answerUndo({ body: buildTask(CARD) });
+    await waitFor(() => {
+      expect(pending.getAttribute("aria-disabled")).toBeNull();
     });
   });
 });

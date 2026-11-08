@@ -103,6 +103,7 @@ function Board({ harness }: { readonly harness: Harness }): JSX.Element {
     cards,
     projects: PROJECTS,
     initiatives: INITIATIVES,
+    isCarrying,
     onCarryingChange: (isCarryingNow) => {
       harness.onCarryingChange(isCarryingNow);
       setIsCarrying(isCarryingNow);

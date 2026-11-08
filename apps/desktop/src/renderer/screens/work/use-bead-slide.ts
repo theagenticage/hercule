@@ -46,6 +46,11 @@ export interface BeadSlideOptions {
    * bead's new place.
    */
   readonly onCarryingChange: (isCarrying: boolean) => void;
+  /**
+   * Whether a card or a bead is in the hand, or a card waits for its merge
+   * check. No bead is pressed or moved by key meanwhile.
+   */
+  readonly isCarrying: boolean;
 }
 
 /** What a press on a bead found: the bead, its Task, and where the pointer was. */
@@ -186,6 +191,7 @@ const createBeadSlide = (
     // A bead does not lean.
     lean: { perSpeed: 0, most: 0 },
     readPressed: (event) => {
+      if (readOptions().isCarrying) return null;
       const element =
         event.target instanceof Element ? event.target.closest<HTMLElement>(BEAD_SELECTOR) : null;
       const taskId = element?.dataset["beadTaskId"];
@@ -209,7 +215,7 @@ const createBeadSlide = (
     const bead =
       event.target instanceof Element ? event.target.closest<HTMLElement>(BEAD_SELECTOR) : null;
     const taskId = bead?.dataset["beadTaskId"];
-    if (event.defaultPrevented || taskId === undefined) return;
+    if (event.defaultPrevented || taskId === undefined || readOptions().isCarrying) return;
     const command = readBoardKey(event, false);
     if (command?.kind !== "shift-stage") return;
     event.preventDefault();

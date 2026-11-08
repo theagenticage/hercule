@@ -49,8 +49,18 @@ export interface UndoableTaskChange {
    * be reversed: the line then says what happened and offers no Undo.
    */
   readonly sendBack: (() => Promise<TaskChangeAnswer>) | null;
-  /** Reads again what the change touched. Called after an answer and after an Undo, while the user is signed in. */
-  readonly readAgain: () => void;
+  /**
+   * Reads again what the change touched. Called after an answer and after an
+   * Undo, while the user is signed in. The change counts as running until the
+   * returned promise resolves, if it returns one. It must not reject.
+   */
+  readonly readAgain: () => void | Promise<void>;
+  /**
+   * Called when the user undoes the change, with a promise that resolves
+   * once the Undo has been sent and read again (and rejects if it failed).
+   * For a caller that shows the Task as changing meanwhile.
+   */
+  readonly trackUndo?: (undoing: Promise<unknown>) => void;
   readonly words: {
     /** The gesture as Undo reports it ("Put back: ..."). */
     readonly gesture: string;
@@ -122,8 +132,12 @@ export const useUndoableTaskChanges = ({
       const gesture: Gesture<CardMover> = {
         words: change.words.gesture,
         undo: async () => {
-          await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
-          if (scope.isCurrent()) change.readAgain();
+          const undoing = (async () => {
+            await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
+            if (scope.isCurrent()) await change.readAgain();
+          })();
+          change.trackUndo?.(undoing);
+          await undoing;
           return undefined;
         },
       };
@@ -133,7 +147,7 @@ export const useUndoableTaskChanges = ({
     try {
       const { changed } = await answered;
       if (!scope.isCurrent()) return null;
-      change.readAgain();
+      await change.readAgain();
       if (!changed) moves.sayWithoutUndo(change.words.nothing);
       return null;
     } catch (error) {

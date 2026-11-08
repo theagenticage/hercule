@@ -180,6 +180,8 @@ interface Harness {
     >
   >;
   readonly selectedIds: ReadonlySet<string>;
+  /** Called with every value the drag gives `onCarryingChange`. */
+  readonly onCarryingChange: ReturnType<typeof vi.fn<(isCarrying: boolean) => void>>;
   readonly say: ReturnType<typeof vi.fn<(text: string) => void>>;
   readonly holdMerge: ReturnType<
     typeof vi.fn<(sourceCardId: string, targetCardId: string) => boolean>
@@ -245,7 +247,10 @@ function Board({
     say: harness.say,
     holdMerge: harness.holdMerge,
     checkMerge: harness.checkMerge,
-    onCarryingChange: setIsCarrying,
+    onCarryingChange: (isCarryingNow) => {
+      harness.onCarryingChange(isCarryingNow);
+      setIsCarrying(isCarryingNow);
+    },
   });
   return (
     <BoardDesk
@@ -294,6 +299,7 @@ const renderBoard = (
   const harness: Harness = {
     ...(stack === undefined ? {} : { stack }),
     selectedIds,
+    onCarryingChange: vi.fn(),
     moveCard: vi.fn(),
     moveCards: vi.fn(),
     say: vi.fn(),
@@ -318,6 +324,7 @@ const renderBoard = (
     holdMerge: harness.holdMerge,
     checkMerge: harness.checkMerge,
     onOpenCard: harness.onOpenCard,
+    onCarryingChange: harness.onCarryingChange,
     /** Whether the desk is marked as carrying a card, which is how the screen draws that a card is in the hand. */
     isCarrying: (): boolean =>
       view.container.querySelector(".work-desk")?.hasAttribute("data-carrying") === true,
@@ -1239,6 +1246,91 @@ describe("merging by holding a carried card over another", () => {
       expect(isTarget(target)).toBe(false);
       expect(target.hasAttribute("data-merge-label")).toBe(false);
       expect(target.hasAttribute("data-merge-check")).toBe(false);
+    });
+
+    describe("a card that waits for the check after the drop", () => {
+      /** Lets go of the card over Delivery slots while the check has not answered, so the card waits. */
+      const dropWhileChecking = (board: ReturnType<typeof renderBoard>) => {
+        const check = deferAnswer();
+        board.checkMerge.mockReturnValue(check.promise);
+        chooseDeliverySlots(board);
+        release(board.scroller, MIDDLE_OF_DELIVERY_SLOTS.x, MIDDLE_OF_DELIVERY_SLOTS.y);
+        return check;
+      };
+
+      it("sends the card home on Esc, merges nothing, and ignores the answer that comes late", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+        expect(board.isCarrying()).toBe(true);
+
+        const escape = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        window.dispatchEvent(escape);
+
+        expect(escape.defaultPrevented).toBe(true);
+        expect(board.isCarrying()).toBe(false);
+        expect(board.ghost()).toBeNull();
+        expect(board.card("refund-emails").hasAttribute("data-dragged")).toBe(false);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        vi.advanceTimersByTime(3000);
+        expect(board.holdMerge).not.toHaveBeenCalled();
+        expect(board.say).not.toHaveBeenCalled();
+      });
+
+      it("sends the card home when the window loses the focus, and not again when the time runs out", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        dropWhileChecking(board);
+
+        fireEvent.blur(window);
+
+        expect(board.isCarrying()).toBe(false);
+        vi.advanceTimersByTime(3000);
+        await act(() => Promise.resolve());
+        expect(board.holdMerge).not.toHaveBeenCalled();
+      });
+
+      it("lifts no other card meanwhile, and the card in the wait still merges when it is allowed", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+
+        press(board.card("gift-wrap"), columnX("exploring"), rowY(2));
+        moveTo(board.scroller, columnX("exploring"), rowY(2) + 14);
+        moveTo(board.scroller, columnX("exploring") + 10, rowY(2) + 30);
+
+        expect(board.ghost()?.textContent).toContain("Refund emails");
+        expect(board.card("gift-wrap").hasAttribute("data-dragged")).toBe(false);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        expect(board.holdMerge).toHaveBeenCalledExactlyOnceWith(
+          "refund-emails",
+          "delivery-slots",
+          true,
+        );
+        expect(board.isCarrying()).toBe(false);
+      });
+
+      it("tells the screen that nothing is carried exactly once, however the wait ends", async () => {
+        useFakeClock();
+        const board = renderBoard();
+        const check = dropWhileChecking(board);
+
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+        );
+        fireEvent.blur(window);
+        check.answer({ kind: "allowed" });
+        await act(() => check.promise.then(() => undefined));
+        vi.advanceTimersByTime(3000);
+
+        expect(board.onCarryingChange.mock.calls.map(([value]) => value)).toEqual([true, false]);
+      });
     });
   });
 

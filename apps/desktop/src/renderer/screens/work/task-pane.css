@@ -461,8 +461,16 @@ button.task-pane-note:hover {
   color: var(--ink);
   text-align: left;
 }
-.task-pane-initiative-row:not(:disabled):hover {
+.task-pane-initiative-row:not(:disabled):not(.is-pending):hover {
   background: var(--hover);
+}
+/* While a change is on its way the row shows where the Task is going, quietly, and does not open. */
+.task-pane-initiative-row.is-pending {
+  cursor: default;
+}
+.task-pane-initiative-row.is-pending .task-pane-row-text,
+.task-pane-initiative-row.is-pending > svg {
+  color: var(--muted);
 }
 .task-pane-initiative-row > svg {
   flex: none;

@@ -175,8 +175,15 @@ const createBoardDrag = (
   scroller: HTMLElement,
   readOptions: () => BoardDragOptions,
 ): { readonly destroy: () => void } => {
-  /** The carry that was dropped on a card whose merge check has not answered yet, or `null`. */
+  /**
+   * The carry that was dropped on a card whose merge check has not answered
+   * yet, or `null`. The drag still owns it: Esc and a window that loses the
+   * focus or is hidden send it home (`cancelWait`), and no other card can be
+   * pressed meanwhile.
+   */
   let waitingCarry: Carry | null = null;
+  /** Stops the keys and the window events that cancel the wait. */
+  let stopWatchingWait: () => void = () => undefined;
 
   /**
    * Measures the board again after the page changed. `places` are the card
@@ -435,6 +442,49 @@ const createBoardDrag = (
     );
   };
 
+  /** Ends the wait for a merge check without touching the carry: the caller finishes or cancels it. */
+  const endWait = (): void => {
+    waitingCarry = null;
+    stopWatchingWait();
+    stopWatchingWait = () => undefined;
+  };
+
+  /**
+   * Sends the card that waits for a merge check home, and ignores the answer
+   * when it comes. Nothing is merged. Does nothing when no card waits.
+   */
+  const cancelWait = (): void => {
+    const c = waitingCarry;
+    if (c === null) return;
+    endWait();
+    releaseCarry(c, "travel", undefined);
+  };
+
+  /**
+   * Listens for Esc, a window that loses the focus and a hidden document while
+   * a card waits for a merge check, which is when the carry gesture no longer
+   * does. Returns the function that stops listening.
+   */
+  const watchWait = (): (() => void) => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cancelWait();
+    };
+    const onVisibilityChange = (): void => {
+      if (document.hidden) cancelWait();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("blur", cancelWait);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("blur", cancelWait);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  };
+
   /**
    * Lets go of the card over the card it is drawn into. The merge is held for
    * the undo line, and the copy in the hand slides in under the card it
@@ -453,9 +503,10 @@ const createBoardDrag = (
       return;
     }
     waitingCarry = c;
+    stopWatchingWait = watchWait();
     void waitForMergeCheck(target.result).then((check) => {
       if (waitingCarry !== c) return;
-      waitingCarry = null;
+      endWait();
       finishMergeCarry(c, target.cardId, check);
     });
   };
@@ -653,6 +704,8 @@ const createBoardDrag = (
     liftDistance: LIFT_DISTANCE,
     lean: { perSpeed: LEAN_PER_SPEED, most: MOST_LEAN },
     readPressed: (event) => {
+      // A card waiting for its merge check is still in the hand: no other card is lifted meanwhile.
+      if (waitingCarry !== null) return null;
       const element =
         event.target instanceof Element
           ? event.target.closest<HTMLElement>("[data-card-id]")
@@ -680,8 +733,9 @@ const createBoardDrag = (
     destroy: () => {
       const held = gesture.destroy();
       if (held !== null) abandonCarry(held);
-      if (waitingCarry !== null) abandonCarry(waitingCarry);
-      waitingCarry = null;
+      const waiting = waitingCarry;
+      endWait();
+      if (waiting !== null) abandonCarry(waiting);
     },
   };
 };

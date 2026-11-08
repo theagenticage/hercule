@@ -622,6 +622,7 @@ export function WorkScreen({
     initiatives,
     moveCard: moves.moveCardWithMotion,
     onCarryingChange,
+    isCarrying,
   });
 
   /** Closes the details and Add to Work, which would cover the Initiative sheet at the right. */
@@ -911,6 +912,7 @@ export function WorkScreen({
             drawnLanes={arrangedLanes}
             isStill={view.display.isStill}
             intents={pane.intents}
+            pendingInitiatives={pane.pendingInitiatives}
             threadPromptWords={threads.threadPromptWords}
             changes={{
               ...pane.changes,

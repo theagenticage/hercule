@@ -190,6 +190,8 @@ export function TaskPaneColleague({
  *   this value.
  * - `projectName` and the Initiative the Task is on (from `initiatives`, the
  *   open ones) are the crumbs.
+ * - `pendingInitiative` is set while a change of the Task's Initiative is on
+ *   its way (see `InitiativeSection`).
  * - `read` is what the details read gives: quiet bars while it is on its
  *   way, a line and a retry after it failed, a line when the Task is gone.
  *   The pane has its final size at once, so nothing moves when the words
@@ -217,6 +219,7 @@ export function TaskPane({
   pane,
   projectName,
   initiatives,
+  pendingInitiative,
   boardCards,
   read,
   plugins,
@@ -227,6 +230,12 @@ export function TaskPane({
   readonly pane: TaskPaneContent;
   readonly projectName: string | null;
   readonly initiatives: readonly WorkInitiative[];
+  /**
+   * The Initiative the Task is being put on (`null` for none) while a pick or
+   * its Undo has not finished, else `undefined`. The Initiative menu then
+   * shows it as pending and opens no menu.
+   */
+  readonly pendingInitiative: { readonly initiativeId: string | null } | undefined;
   readonly boardCards: readonly WorkCard[];
   readonly read: TaskPaneRead;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -389,6 +398,7 @@ export function TaskPane({
             <InitiativeSection
               current={initiative}
               initiatives={initiatives}
+              pendingInitiative={pendingInitiative}
               isDisabled={card === undefined}
               onPick={actions.onPickInitiative}
             />

@@ -17,6 +17,10 @@ import { ChoiceMenu, HueFlag, type ChoiceMenuEntry } from "../desk";
  *
  * - `current` is the open Initiative the Task is on. A Task on a closed
  *   Initiative has none to show, as the board draws it.
+ * - `pendingInitiative` is set while a change is on its way. The row then
+ *   shows the Initiative the Task is being put on, quiet, and is
+ *   `aria-disabled` and opens no menu, so the next pick starts from the
+ *   answer and not from a guess.
  * - `onPick` is called with the id of the row the user chose: an Initiative's
  *   id, `NO_INITIATIVE_CHOICE_ID` or `NEW_INITIATIVE_CHOICE_ID`.
  *
@@ -26,11 +30,17 @@ import { ChoiceMenu, HueFlag, type ChoiceMenuEntry } from "../desk";
 export function InitiativeSection({
   current,
   initiatives,
+  pendingInitiative,
   isDisabled,
   onPick,
 }: {
   readonly current: WorkInitiative | undefined;
   readonly initiatives: readonly WorkInitiative[];
+  /**
+   * The Initiative the Task is being put on (`null` for none) while a pick or
+   * its Undo has not finished, else `undefined`.
+   */
+  readonly pendingInitiative: { readonly initiativeId: string | null } | undefined;
   /** True for a Task that no longer exists, which cannot be changed. */
   readonly isDisabled: boolean;
   readonly onPick: (choiceId: string) => void;
@@ -53,6 +63,10 @@ export function InitiativeSection({
       event.stopPropagation();
     }
   };
+  const isPending = pendingInitiative !== undefined;
+  const shown = isPending
+    ? initiatives.find((each) => each.id === pendingInitiative.initiativeId)
+    : current;
   return (
     <section className="task-pane-sec task-pane-initiative" aria-label="Initiative">
       <h3>Initiative</h3>
@@ -62,20 +76,26 @@ export function InitiativeSection({
           label="Initiative"
           edge="button-end"
           entries={entries}
-          chosenId={current?.id ?? NO_INITIATIVE_CHOICE_ID}
+          chosenId={shown?.id ?? NO_INITIATIVE_CHOICE_ID}
           onPick={onPick}
           renderTrigger={(triggerProps) => (
             <button
               {...triggerProps}
               type="button"
-              className="task-pane-row task-pane-initiative-row"
+              className={`task-pane-row task-pane-initiative-row${isPending ? " is-pending" : ""}`}
               disabled={isDisabled}
-              aria-label={`Initiative: ${current?.name ?? "none"}`}
+              aria-disabled={isPending ? true : undefined}
+              aria-label={`Initiative: ${shown?.name ?? "none"}`}
+              onClick={(event) => {
+                // The button stays focusable while pending, so it only refuses to open the menu.
+                if (isPending) event.preventDefault();
+                else triggerProps.onClick(event);
+              }}
             >
               <span className="task-pane-initiative-mark">
-                {current === undefined ? <FlagIcon size={14} /> : <HueFlag hue={current.hue} />}
+                {shown === undefined ? <FlagIcon size={14} /> : <HueFlag hue={shown.hue} />}
               </span>
-              <span className="task-pane-row-text">{current?.name ?? "No initiative"}</span>
+              <span className="task-pane-row-text">{shown?.name ?? "No initiative"}</span>
               <ChevronDownIcon size={12} />
             </button>
           )}

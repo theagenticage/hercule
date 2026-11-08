@@ -33,7 +33,7 @@ import type { CardMoves } from "./-card-moves";
 import { answerFromPane } from "./-pane-answers";
 import { useSettleUnsentAnswers } from "./-settle-unsent-answers";
 import { useTaskBlockers } from "./-task-blockers";
-import { useTaskInitiative } from "./-task-initiative";
+import { useTaskInitiative, type PendingInitiative } from "./-task-initiative";
 import { useTaskLinks } from "./-task-links";
 import { isTryAgainStarting, useTryAgain, type FailedCard } from "./-try-again";
 
@@ -75,6 +75,11 @@ export interface PaneChangesState {
    */
   readonly readCard: (taskId: string) => WorkCard | undefined;
   readonly changes: PaneChanges;
+  /**
+   * The changes of a Task's Initiative that have not finished, which the pane
+   * shows as pending and in which it offers no pick.
+   */
+  readonly pendingInitiatives: readonly PendingInitiative[];
   /**
    * Handles Return pressed on the board's card `taskId`. When the pane is open
    * for that Task, does what Return does in the pane and returns `true`.
@@ -161,7 +166,7 @@ export const usePaneChanges = ({
 
   const taskLinks = useTaskLinks({ client, scope, moves });
   const taskBlockers = useTaskBlockers({ client, scope, moves });
-  const setTaskInitiative = useTaskInitiative({ client, scope, moves });
+  const taskInitiative = useTaskInitiative({ client, scope, moves });
 
   // When the pane started to show this Task, for the Return key's quiet moment.
   const shownAt = useRef(0);
@@ -223,6 +228,7 @@ export const usePaneChanges = ({
       moves.sayWithoutUndo(describeEndWhileTryingAgain(failed.title, stage));
       return true;
     },
+    pendingInitiatives: taskInitiative.pending,
     changes: {
       onTryAgain: () => {
         if (shownPane.current !== null) tryAgainPane(shownPane.current);
@@ -285,7 +291,7 @@ export const usePaneChanges = ({
       onSetInitiative: (initiative, canPutBack) => {
         const pane = shownPane.current;
         if (pane?.card === undefined) return;
-        setTaskInitiative({
+        taskInitiative.change({
           taskId: pane.taskId,
           taskTitle: pane.card.title,
           fromInitiativeId: pane.card.initiativeId,
