@@ -324,6 +324,7 @@ interface IngestContext {
     refresh(observations: EntityObservation[]): Effect<void, PluginError>
     listWanted(kind: string, limit: number): Effect<string[]>
     reportMissing(ref: string, reason: "inaccessible" | "deleted"): Effect<void, PluginError>
+    listTrackedBranches(remotePrefix: string, limit: number): Effect<{ remote: string; branch: string }[]>   // added 2026-11-08, #1035: branches of live Tasks' ephemeral checkouts, in a fair rotation; ./20 section 14.5
   }
 }
 

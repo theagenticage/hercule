@@ -1,6 +1,6 @@
 # Tasks
 
-A Task is a unit of human intent: a described piece of work someone wants done. It is a thin row - title, markdown description, one fixed stage axis with a coarse status read from it, a priority, bare-string labels, an optional project, and a provenance list whose entries are never edited or removed. The core stores tasks, emits `task.created` / `task.updated` platform events, and answers exact-identity and full-text queries. It creates a Task for every Thread that has none to join (see [Threads and their Tasks](#threads-and-their-tasks)). A Text Generation describes each Task in a [Task Summary](#task-summaries), and the user can [merge](#merging-tasks) two Tasks. Beyond that it never decides when a task is in progress or done; every task semantic beyond the row (what "done" means, when to close, what a label signifies) belongs to workflows and their shipped defaults ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), amended by [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)). Tasks are the buffer between triage and work: triage workflows create and update them, work workflows trigger on their platform events ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [./10](./10-triage-intake-and-notifications.md)).
+A Task is a unit of human intent: a described piece of work someone wants done. It is a thin row - title, markdown description, one fixed stage axis with a coarse status read from it, a priority, bare-string labels, an optional project, and a provenance list whose entries are never edited or removed. The core stores tasks, emits `task.created` / `task.updated` platform events, and answers exact-identity and full-text queries. It creates a Task for every Thread that has none to join (see [Threads and their Tasks](#threads-and-their-tasks)). A Text Generation describes each Task in a [Task Summary](#task-summaries), and the user can [merge](#merging-tasks) two Tasks. It records a [Fact](#facts-and-the-fence) when a linked outside thing changes state, and two shipped workflows turn Facts into stage moves, with a fence so that a drag wins until a newer Fact arrives ([ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md)). Beyond that it never decides when a task is in progress or done; every task semantic beyond the row (what "done" means, when to close, what a label signifies) belongs to workflows and their shipped defaults ([ADR 0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), amended by [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)). Tasks are the buffer between triage and work: triage workflows create and update them, work workflows trigger on their platform events ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [./10](./10-triage-intake-and-notifications.md)).
 
 ## The Task row
 
@@ -75,15 +75,17 @@ Rules:
 
 - **The list is fixed.** Users and workflows define no stage of their own. A client may group or colour stages as it likes ([Presentation over the stage](#presentation-over-the-stage)), but never adds one.
 - **Any-to-any.** The core enforces no order. `done -> exploring` is legal, and so is `exploring -> landed`. The core refuses no stage change because some condition is unmet.
-- **The core never moves a stage on its own.** A run starting, succeeding or failing, a session starting or ending, a PR merging: none of them moves the stage. A stage changes only through an explicit `task.update` (API operation or built-in action). One exception: the core creates a Task, at `exploring`, for a Thread that has none to join ([Threads and their Tasks](#threads-and-their-tasks)). Creating the row does not decide that any work has progressed.
+- **The core never moves a stage on its own.** A run starting, succeeding or failing, a session starting or ending, a PR merging: none of them moves the stage. A stage changes only through an explicit `task.update` (API operation or built-in action). *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* A PR merging records a [Fact](#facts-and-the-fence), and a shipped workflow, which the user can edit or delete, reacts to it with a `task.update`. The core still writes no stage by itself. One exception: the core creates a Task, at `exploring`, for a Thread that has none to join ([Threads and their Tasks](#threads-and-their-tasks)). Creating the row does not decide that any work has progressed.
 - **Where a new Task starts.** `task.create` takes an optional `stage`, default `planned`. A Task made for a Thread starts at `exploring`. A Task that `signal.handOff` or `externalEntity.handOff` creates starts at `building` (below, [Provenance](#provenance-and-external-refs) and [A handoff from a card](#a-handoff-from-a-card)).
 - **`stageChangedAt`** moves only when `stage` changes.
 - **`stage_revision`** *(added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034))* is a whole number on the row that counts the stage decisions made on the Task. It starts at 0 and only goes up. A clock cannot see a decision that kept the stage, so a count is what lets the Undo of a handoff tell that someone decided after it. It rises on:
   - any `task.update` or `task.move` that names a `stage`, even the value the Task already has, which writes no stage event;
   - a legacy `status` write that changes the stage;
-  - a handoff from a card, which decides the stage every time ([A handoff from a card](#a-handoff-from-a-card)).
+  - a handoff from a card, which decides the stage every time ([A handoff from a card](#a-handoff-from-a-card));
+  - *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* a `task.update` with a `stageFactId` that passes every check of [the fence](#the-fence), even when the Task already holds the stage.
 
   Nothing else raises it: not a title or label edit, not a move inside a cell with no `stage`, not a run or Thread joining. It is not part of the contract, so no client reads it.
+- **`stage_fact_fence`** and **`stage_cause_fact_id`** *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* are two columns on the row. The fence is the highest [Fact](#facts-and-the-fence) id already accounted for on this Task, 0 at the start. The cause is the Fact that placed the current stage, or null. Neither is part of the contract: the card reads the cause as `stageCause` ([The cause of a move](#the-cause-of-a-move)).
 - A stage names a position and nothing more. What it means for the work, and which fact moves a Task into it, is for workflows, as "done means the PR is merged" is below.
 
 ## Status axis and lifecycle
@@ -131,6 +133,8 @@ The shipped coding workflows implement it; the core knows nothing about PRs. The
 One run represents the work start to finish. Because v1 GitHub ingress polls, the merge signal lands with roughly one poll interval of latency, which is acceptable.
 
 Accepted cost: nothing marks a task done when its run succeeds unless a workflow says so. Shipped defaults MUST demonstrate the pattern.
+
+*(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)* The pattern is shipped now, but not as `done`. Two shipped workflows move the card to `in-review` when a linked pull request opens and to `landed` when everything linked is finished ([The shipped workflows](#the-shipped-workflows)). No shipped workflow sets `done`: Landed says the thing shipped, and Done says the acceptance criteria are met, which the user decides. The convention above still works for a user who writes it.
 
 ## Priority
 
@@ -205,8 +209,215 @@ task_entity_links (task_id, ref, linked_at, linked_by, following INTEGER NOT NUL
 - **Merging, summaries and the details pane** meet links in three rules ([Merging Tasks](#merging-tasks), [Task Summaries](#task-summaries)):
   - `task.merge` moves the links of the merged Task to the survivor without duplicates, in the merge's own transaction. When both Tasks link a ref, one link stays, with the older `linked_at` (and the `linked_by` that came with it), and `following` if either had it. The merged Task is left with no links, so the active Task of each of its refs, an entity's `taskId` and its side on the Inbox all follow the survivor. A merge has no server-side Undo: the desktop app holds the merge back while its undo line shows and sends nothing when the user undoes it ([./17](./17-desktop-app.md)).
   - Every writer of a link resolves a merged Task id to its survivor at its final write. `updateTask` (and so a handoff that continues a Task) reads the Task through `resolveTaskId` in its own transaction. `insertTask` writes a Task it has just made, which no merge can have touched. `externalEntity.takeOn` and `addToWork` return the active Task of the ref, and a merged Task is never active. `undoTakeOn` reads the Task by its own id and refuses a merged one with its own reason, `task-merged`.
-  - The summary's input gains each linked entity's kind, identifier, title, status label and lifecycle. A link added, or a change to a linked entity's kind, identifier, title, status or lifecycle, marks the Task's summary dirty in the same transaction. No operation removes a link yet, and a merge marks the survivor dirty already. `TaskDetail` carries `entities`, `places` and `edges`.
+  - The summary's input gains each linked entity's kind, identifier, title, status label and lifecycle. A link added, or a change to a linked entity's kind, identifier, title, status or lifecycle, marks the Task's summary dirty in the same transaction. ~~No operation removes a link yet, and a merge marks the survivor dirty already.~~ *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035): `task.unlinkEntity` removes one, and marks the summary dirty like any other change of links. A merge marks the survivor dirty already.)* `TaskDetail` carries `entities`, `places` and `edges`.
+- **Facts, suppressions and the fence** follow the Task. [Facts and the fence](#facts-and-the-fence) holds the rules, including what a link by hand, an unlink and a merge do to them.
 - **The board.** A `WorkCard` carries `entityMarks` and `contextRefs`, and `task.queryBoard` carries `places`, `edges`, `groupings` and `contextComplete` ([./20-external-entities.md](./20-external-entities.md#11-works-context)). A Task is matched to a place through its own links and upward `part of` only. Filtering or grouping by an outside place never sets a Task's `projectId` or `initiativeId`.
+
+## Facts and the fence
+
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)* A card keeps itself true: when a thing a Task links changes state, the core records a Fact, and two shipped workflows decide what the Fact means for the stage. The core decides nothing about the stage ([Stage](#stage)). A Fact is only what happened, and the fence keeps a Fact from undoing something a person did.
+
+### What a Fact is
+
+A **Fact** says that the lifecycle of a thing a live Task links changed. It comes from the entity, not from a raw event. Entity state is kept true by polls, so a merge that no event reported is still a Fact ("a missed event loses nothing").
+
+```sql
+task_entity_facts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,  -- the order. One writer, so ids follow commit order
+  task_id BLOB NOT NULL, ref TEXT NOT NULL,
+  lifecycle TEXT NOT NULL,               -- open | completed | abandoned
+  previous_lifecycle TEXT,               -- null when the entity was only just linked or first observed
+  observed_at TEXT NOT NULL,             -- for display. Never compared
+  voided_at TEXT                         -- set when the user unlinks this pair
+)  -- index on (task_id, ref, id)
+```
+
+The order is the id, and never a time: two changes of one poll can share a millisecond, and a clock can step back.
+
+For each live Task that links the ref, one Fact and one Platform Event `task.entityChanged` ([./08](./08-events-and-connections.md#55-platform-events-core)) are written, in the transaction of the change, in these cases and no others:
+
+| Case | `previous_lifecycle` |
+|---|---|
+| `reconcile` or `refresh` changes the entity's `lifecycle` | the lifecycle before |
+| A link is added (by a provenance `ref`, a handoff, `task.linkEntity` or the branch link step) and the entity has a stored lifecycle | null |
+| A linked ref is first observed (it had a link and no record) | null |
+| An unlink leaves nothing open and at least one completed link | the newest completed link's lifecycle, and the Fact is for that link. Otherwise removing the last open link could never land a card |
+| A change of a linked entity's derived `access`, or its first full record, changes the Task's `openLinks` or `completedLinks` | its lifecycle. Otherwise a completed link that was unreadable for a while could never land the card when it reads again |
+
+- **Never for a change of title, status, owner or facts,** and never for a first observation that no Task links. So 300 existing pull requests start no runs. A poll that changes nothing writes nothing: no Fact, no event, no run, no push.
+- **Not for a Task that is deleted, merged, `done` or `dropped`.** A Task has to be live.
+- **The ingest asks the Task domain twice.** `TaskService.snapshotLinkedEntities` reads the linked-work state of the refs that a live Task links before an entity write, and `TaskService.recordEntityFacts` compares it with the state after, in the same transaction. All the rules above live in the tasks domain. External entities call this pair around every write that can change a linked entity's state: `reconcile`, `refresh`, `reportMissing`, and a change of access.
+- **It is not available to triage.** An outside change that is not a lifecycle change still shows only on the timeline ([./20](./20-external-entities.md#87-what-changed-outside)). Someone else being assigned, or a second pull request opening, moves nothing and stops nothing.
+
+### What counts as open
+
+A card lands only when nothing linked to it is still open, so the first merged pull request must not land a card while a second pull request or the ticket is open. `TaskService.countLinkedWork(taskId)` reads every link of the Task in one batch and returns `openLinks` and `completedLinks`. Each link falls to the first case that fits:
+
+| # | A link to | Counts as |
+|---|---|---|
+| 1 | A context kind, by its stored record, or a ref with no stored record and no declared kind | neither: not a piece of work |
+| 2 | Work with no record, a partial record, no known lifecycle, or `access` other than `ok` | open, because what cannot be read cannot be called finished |
+| 3 | Readable work with `lifecycle: open` | open |
+| 4 | Readable work with `lifecycle: completed` | completed |
+| 5 | Readable work with `lifecycle: abandoned` | neither: closed without being done, so it holds nothing up and proves nothing |
+
+- **"Work"** means a stored work record, or a ref of a declared work kind with no record. For a full record, work or context comes from the stored record, so a record stays counted after its plugin leaves the catalog: a removed plugin's unreadable thing stays open, whatever lifecycle it last had. For a partial record, and for a ref with no record, it comes from the declared kind.
+- **The tasks domain reads this through a port,** `LinkedEntities.readMany(refs)`, answered in the controller daemon from the database alone (the entity repository and the stored plugin catalog). It never requires `PluginHost` or `ExternalEntityService`, because ingest sits below the host and calls `TaskService` ([./20](./20-external-entities.md#13-the-domain-graph)).
+- A link the user removed does not count, so unlinking the last open thing can land the card. A merge brings links together, and the count follows.
+- **Landing needs `openLinks == 0` and `completedLinks > 0`.** A Task whose every link is abandoned, or that has no work links, never lands.
+
+### The fence
+
+Last write wins is not enough. A queued run can land after a newer drag, and a repeated Fact would undo a drag for ever. So `task.update` takes the Fact its caller acts on, and the core checks it in the transaction that writes.
+
+`task.update` gains two fields ([./07](./07-workflows.md#8-built-in-actions), [./11](./11-public-api-and-agent-surface.md#task)):
+
+- `stageFactId` (a whole number) needs `stage`, or `Validation` says so.
+- `onlyWhenLinkedWorkFinished` (a boolean) needs `stageFactId`.
+
+**A write with a `stageFactId`** runs these steps, in order:
+
+1. The Fact must exist and belong to this Task, after the merge redirect. Otherwise `Validation`. A caller cannot make up a Fact: the operation takes no timestamp, and an id proves itself only by its row.
+2. The Task is `done` or `dropped`: nothing happens. A Fact never brings finished work back.
+3. The Fact is voided: nothing happens. An unlink voids every Fact of that `(task, ref)` pair, so a Fact queued before an unlink dies with it, even if the user links the pair again before its run gets here. The relink writes a new Fact of its own.
+4. `fact.id <= stage_fact_fence`: nothing happens.
+5. With `onlyWhenLinkedWorkFinished`, the links are counted again in this transaction. Unless `openLinks` is 0 and `completedLinks` is above 0, nothing happens. The count on the event is a snapshot, and a link can arrive or leave between a Fact and its run, so the write checks again. A filter alone cannot.
+6. Otherwise the fence is set to `fact.id`, the cause to the Fact, and `stage_revision` rises. If the stage differs, it is written, `task.updated` is emitted, and the card goes last in its new cell. If the Task already holds that stage, only the fence, the cause and the revision move: no event, no `updatedAt`, no move. This is what stops an older queued Fact from moving the card afterwards.
+
+"Nothing happens" returns the Task as it is, with no error and no event, as a no-change update does. A run must not fail because a user dragged a card.
+
+**A stage written by a person or an agent,** with no `stageFactId`, sets the fence to the highest Fact id in the table, so every Fact recorded so far is overruled. This covers:
+
+- a `task.move` with a `stage`, or a `task.update` with a `stage`, **even when the stage is the same**: it is an explicit "keep it here";
+- a legacy `status` write that changes the stage.
+
+The same write clears the cause. A merge also clears it ([Merging Tasks](#merging-tasks)).
+
+**Reordering inside a column affirms nothing.** A `task.move` with no `stage` carries no opinion on the stage, so a Fact still applies, and the fence and cause stay as they are. The desktop sends `stage` only when the card changes column.
+
+| Case | Result |
+|---|---|
+| A Fact committed before a drag, delivered after it | Refused: at or below the fence |
+| The same Fact twice, or a replayed run | Refused: at or below the fence |
+| Two Facts of one poll, in the same millisecond | Different ids. They apply in order |
+| Two Facts delivered in reverse order | The newer applies, the older is refused |
+| A newer Fact asks for the stage already held, then an older Fact arrives | The newer moves the fence, so the older is refused |
+| A new Fact after a drag | Applies. That is "until new facts arrive" |
+| A clock that steps back | No effect: nothing compares time |
+| The Task was unlinked before delivery | Nothing happens: the Fact is voided |
+| Unlinked, linked again, and the old Fact arrives before the relink's Fact | Nothing happens. The relink's own Fact applies when it arrives |
+| A Task the user marked Done, then a merge | Never moved |
+| Two linked pull requests, one merged | Each is a Fact. `card-landed` does not run: one link is open |
+| The second merges, and the ticket stays open | `card-landed` does not run: the ticket is open |
+| Everything merged or completed, one link abandoned | Landed: nothing is open, and something completed |
+| Every link abandoned | Nothing moves: nothing completed |
+| A link added after the last Fact, before its run | Nothing happens: the write recounts |
+| The only completed link removed before an abandoned link's Fact runs | Nothing happens: nothing completed |
+| A completed link unreadable, then readable with the same lifecycle | Its own Fact, and the card lands |
+| The last open link unlinked | Its own Fact, and the card lands |
+
+Agents use the same `task.update`. A session that passes `stageFactId` is held to the same checks, and one that passes none is making a stage decision of its own. The agent report tool is later, and will have this check to use.
+
+### The cause of a move
+
+`tasks.stage_cause_fact_id` holds the Fact that placed the current stage. The fence cannot say it: a person's write sets the fence to the table's maximum, which may be the Fact of another Task. The cause is set only by a Fact write that applies (step 6 above), and cleared by any stage write with no `stageFactId`: a person, an agent, a legacy `status` write, a `task.move` with a `stage`, and a merge.
+
+`WorkCard` carries `stageCause`, an optional `{ ref, text }`, present when the cause is set. `text` is built in the read from the cause Fact's **own** `lifecycle`, never the entity's latest one, plus the entity's stored noun and identifier: "PR #6221 merged". So a pull request reopened later does not change why the card moved. The card's cause label reads it ([./17](./17-desktop-app.md#a-card-moving-by-itself)). <!-- coordinator: check: exact wording per lifecycle (open, completed, abandoned) of the cause text -->
+
+### Links by hand and suppressions
+
+A person links a thing to a Task, or takes it away ([./11](./11-public-api-and-agent-surface.md#task)). Both operations have the grant `task.update`, stamp the actor, announce, resolve merged ids at the write, and are methods on `TaskService`. Refs hold `:`, `/` and `#`, so they travel in a body, never in a path.
+
+- **`task.linkEntity { taskId, ref }`** adds the link to `task_entity_links`, writes a Fact when the entity has a stored lifecycle (`previous_lifecycle` null), and clears the Task's suppression of the ref. A link that exists already changes nothing.
+- **`task.unlinkEntity { taskId, ref }`** removes the link row, voids that pair's Facts, and writes a suppression, `task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)`, in one transaction. It never touches provenance, which stays the history. If the unlink leaves nothing open and something completed, it also writes a Fact for the newest completed link (see the table above).
+- **An unlink sticks.** The branch link step checks the suppression first, so the next scan does not add back what the user took away. A refresh of the entity updates it and never restores the link.
+- **Asking for the link clears the suppression.** `task.linkEntity` does, and so does an explicit provenance `ref` on `task.update`. Both are someone asking for the link.
+- A second live Task on a ref is allowed. The oldest stays the active Task of the ref ([Entity links](#entity-links)).
+- **A merge keeps both.** See [Merging Tasks](#merging-tasks).
+
+### The shipped workflows
+
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* Two workflows ship, as the first in code ([./10](./10-triage-intake-and-notifications.md#27-the-shipped-workflow-mechanism) holds the mechanism). Their keys are `card-in-review` and `card-landed`. They are ordinary workflows: listed on the Workflows page, editable, and they can be disabled or deleted. They run with no agent and no workspace, so a run costs a few rows and no model call. These are the complete sources.
+
+```yaml
+name: Move a card to In review when its pull request opens
+description: A Task linked an open pull request, so its card moves to In review. Edit or delete this as you like.
+inputs:
+  - name: task_id
+    schema:
+      type: string
+    required: true
+  - name: fact_id
+    schema:
+      type: integer
+    required: true
+triggers:
+  - id: pull_request_open
+    kind: start
+    on:
+      kind: task.entityChanged
+      filter: event.payload.entityKind == "github/pull-request" && event.payload.lifecycle == "open"
+    inputs:
+      task_id: event.payload.taskId
+      fact_id: event.payload.factId
+    spawnBound:
+      maxRuns: 200
+      windowSeconds: 3600
+steps:
+  - id: move_card
+    kind: action
+    action: task.update
+    params:
+      taskId: "{{ inputs.task_id }}"
+      stage: in-review
+      stageFactId: "{{ inputs.fact_id }}"
+```
+
+```yaml
+name: Move a card to Landed when its work is finished
+description: Everything linked to a Task is finished, and at least one thing completed, so its card moves to Landed. While anything linked is open, it stays. It never moves a card to Done. Edit or delete this as you like.
+inputs:
+  - name: task_id
+    schema:
+      type: string
+    required: true
+  - name: fact_id
+    schema:
+      type: integer
+    required: true
+triggers:
+  - id: work_finished
+    kind: start
+    on:
+      kind: task.entityChanged
+      filter: event.payload.openLinks == 0 && event.payload.completedLinks > 0
+    inputs:
+      task_id: event.payload.taskId
+      fact_id: event.payload.factId
+    spawnBound:
+      maxRuns: 200
+      windowSeconds: 3600
+steps:
+  - id: move_card
+    kind: action
+    action: task.update
+    params:
+      taskId: "{{ inputs.task_id }}"
+      stage: landed
+      stageFactId: "{{ inputs.fact_id }}"
+      onlyWhenLinkedWorkFinished: true
+```
+
+- A Core Kind's trigger names no Connection.
+- `"{{ inputs.fact_id }}"` is exactly one template, so it renders to the number with its own JSON type ([./07](./07-workflows.md#5-expressions-cel)). CEL hands a whole number over as a `bigint`, and the expression layer turns a safe one into a number before a mapping or a template uses it, so `fact_id` reaches `task.update` as an integer.
+- **What they do to stages.** An open pull request puts the card in `in-review`. The finished-work rule puts it in `landed`. A Fact about an `abandoned` thing can land a card, when it was the last open link and something else completed. On its own, `abandoned` moves nothing. No shipped workflow sets `done`. A user's own workflow may, because `task.update` is the same for everyone.
+- **A drag holds.** A card whose pull request opens goes to `in-review`. The user can drag it back to `building`, and it stays: the drag set the fence, and a repeated or late Fact is refused. The next new Fact, such as the merge, moves it again.
+- **A first install corrects existing cards.** The first install writes one Fact and one event for every live Task's link to an entity that exists, with `previous_lifecycle` null. A manual placement from before this slice has no fence to respect, because fences did not exist, so a linked Task can move once. Later drags are fenced. An ordinary restart does this no more: it would mint Facts newer than a drag's fence.
+- A workflow that listens to `task.entityChanged` MUST filter, as both of these do, because the event fires for every Fact.
+
+### Merging with Facts
+
+A merge ([Merging Tasks](#merging-tasks)) repoints the source's Facts and suppressions to the survivor, and sets the survivor's fence to the highest Fact id in the table, so a Fact pending from before the merge never overwrites the survivor's stage: merging is a person's act. It clears the survivor's cause. It writes no new Fact. When one Task links a ref and the other suppresses it, the link wins and the suppression is dropped, because merging brings links together.
 
 ## Threads and their Tasks
 
@@ -432,6 +643,7 @@ The answer is `HandOffUndo`. `undone` is returned only when the Task was actuall
 3. `tasks.merged_into_id` is set on the source, and every Task that was merged into the source is repointed to the survivor, so a redirect is always one hop and a chain cannot form.
 4. The source's sessions and runs get the survivor's `taskId`, and its `task_workspaces` rows move. A live run on the source stays live, on the survivor.
 5. **The source's links to outside things move to the survivor** (`task_entity_links`). A ref both Tasks link keeps one link: the older `linked_at` with the `linked_by` that came with it, and `following` if either link had it ([Links between Tasks and outside things](#entity-links)).
+   *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The source's Facts and suppressions move too, the survivor's fence becomes the highest Fact id in the table, and its cause is cleared ([Merging with Facts](#merging-with-facts)).
 6. **The source's provenance entries move to the survivor,** whole and unedited, with their original `at`, `actor` and fields. `task.queryLegs` joins an entry to its run by Task, so entries and runs move together or not at all. The survivor then gains one new entry, `{ mergedTaskId: <source>, at, actor }`.
 7. The survivor gets one `task.updated` event (its description, labels and the new entry), and a `task.merged` audit entry names both Tasks and holds the source's snapshot, as `task.deleted` does. Clients read both cards again.
 
@@ -493,6 +705,8 @@ Rules:
 - *(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* `changes.stage` appears for every stage change, and `changes.status` whenever the coarse status changes ([Status axis and lifecycle](#status-axis-and-lifecycle)). A change of stage inside one status reports `changes.stage` alone.
 - Example CEL filters: `event.payload.changes.status.new == "done"`, `has(event.payload.changes.status)`, `event.payload.changes.stage.new == "in-review"`, ~~`"proposed" in event.changes.labels.removed`~~ `"ready-for-agent" in event.payload.changes.labels.added` *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): `proposed` is retired.)*. The payload sits under `event.payload` in the CEL context, so a change to a Task is read at `event.payload.changes` ([./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md)).
 
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* **`task.entityChanged`** carries a [Fact](#facts-and-the-fence): `taskId`, `ref`, `entityKind`, `lifecycle`, `previousLifecycle` (null at a link or a first observation), `factId`, `openLinks`, `completedLinks` and `observedAt`. [./08](./08-events-and-connections.md#55-platform-events-core) owns the payload table. A bare trigger on it fires for every Fact, so a workflow that listens must filter.
+
 **`task.deleted`** carries the final snapshot, because the row is unreadable afterwards:
 
 ```ts
@@ -502,7 +716,7 @@ interface TaskDeletedPayload {
 }
 ```
 
-There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `changes` covers them.
+There are no finer-grained kinds (`task.done`, `task.labelled`); CEL over `changes` covers them. *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* `task.entityChanged` is the one kind that is not a field of a Task: it reports a linked thing's lifecycle, not a change to the row.
 
 ## Search
 
@@ -539,10 +753,12 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hercule task query` | structured filters + FTS, returns matching tasks; no filters lists all |
 | `hercule task read <id>` | one task, full row including provenance |
 | `hercule task create` | creates a task; emits `task.created` |
-| `hercule task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated` |
+| `hercule task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated`. `--stage-fact <id>` is for workflows: it names the Fact the stage change acts on, and the fence refuses it when the Fact is at or below the Task's fence ([The fence](#the-fence)) |
 | `hercule task board` | every unfinished Task as a card for Work ([The board](#the-board)); needs `task.read`, `session.read` and `run.read` |
 | `hercule task move <id>` | moves a Task to a stage, a project or a place in its cell; grant `task.update`; emits one `task.updated` |
 | `hercule task details <id>` | one Task with everything its details pane draws: the card, its summary, up to 10 Threads with their open questions, its runs and what the newest produced; needs `task.read`, `session.query` and `run.query` |
+| `hercule task link <id> --ref <ref>` | links an outside thing to a Task by hand, and clears a suppression of it ([Links by hand and suppressions](#links-by-hand-and-suppressions)); grant `task.update` |
+| `hercule task unlink <id> --ref <ref>` | takes a link away and keeps it away: voids the pair's Facts and suppresses the ref; grant `task.update` |
 | `hercule task merge <id> --into <id>` | merges the first Task into the second, as the user ([Merging Tasks](#merging-tasks)); grant `task.update`; refused for a session |
 | `hercule session move-to-task <id> [--task <id>]` | moves a Thread to a Task, or to a new one ([Moving a Thread to another Task](#moving-a-thread-to-another-task)); grant `session.steer`; refused for a session |
 | `hercule task delete <id>` | soft delete ([Delete](#delete)); grant `task.delete` |
@@ -590,4 +806,5 @@ Kanban-style groupings, columns, swimlanes~~, and the Intake tiers~~ *(Amended 2
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #391, #392 and #393
 - [ADR 0052 - Tasks have a stage, and Threads join them](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)
 - [ADR 0053 - A Text Generation describes a Task; it never moves one](../adr/0053-a-text-generation-describes-a-task-it-never-moves-one.md)
+- [ADR 0055 - Facts move cards through editable workflows](../adr/0055-facts-move-cards-through-editable-workflows.md)
 - [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)

@@ -1,6 +1,6 @@
 # External Entities
 
-*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md). Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033), slice 5: signals inside their entity, links, hints and the timeline.)*
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md). Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033), slice 5: signals inside their entity, links, hints and the timeline. Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), slice 7: Facts, links by hand and the branch join, [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)*
 
 An **External Entity** is a durable record of an outside thing, such as a pull request, a ticket or an error. It is never a copy of the thing: it holds what a card needs to draw, and a poll keeps it true. The Inbox is the page that lists the ones that concern the user. "External Entity" is a word for code and docs. The UI says the kind's noun, "Pull request", and the word "entity" never reaches a screen.
 
@@ -609,6 +609,9 @@ The `externalEntity` topic is a mutable topic ([./14-web-app.md](./14-web-app.md
 | A signal opens, ends or is snoozed | the Inbox, the count, an open card | `signal` already pushes. The client maps it to the Inbox keys |
 | A thing becomes a full record of a work kind (created, or a partial record made full) | Intake: its open signals now show the record as `Signal.entity` | the poll announces `signal` for each open signal on that ref, snoozed ones included, beside `externalEntity`. An `externalEntity` push alone leaves the signal lists alone |
 | A snooze runs out | the Inbox, the count | nothing is written, so nothing pushes. The desktop's snooze timer reads them again when the soonest `until` passes |
+| A Fact moves a stage *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* | the board, an open pane | an ordinary `task` write on the 50 ms window, not `derived` |
+| A Fact moves only the fence | nothing | no announce |
+| A Task links or unlinks a thing by hand, or the branch step links one | the board, the pane, the Inbox | `TaskService` announces `task` and `externalEntity` |
 | A person links or unlinks two things | the Inbox, an open card, the board | the service announces `externalEntity` for both refs, and `task` with `derived: true` for the Tasks that link them |
 | The resolver settles a claim | the same | the same announcement |
 | A Connection changes status | `stale` | `connection` already pushes. The client maps it to the Inbox keys |
@@ -635,17 +638,88 @@ daemon/ingest  ClaimResolution (external-entities) + EntityLookups (plugins) -> 
 ```
 
 - No domain imports `external-entities` except through a port, so the arrows only ever point out of it and the graph stays acyclic.
+- *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* The tasks domain declares a port, `LinkedEntities.readMany(refs)`, which returns each ref's stored work or context classification, lifecycle and access, or nothing for a ref with no record. `daemon/tasks/linked-entities.ts` answers it from the entity repository and, for a ref with no record, from the declared kinds in the stored plugin catalog. It reads the database only. It must never require `PluginHost`, `ExternalEntityService` or anything that does: `ExternalEntityIngestLayer` sits below `PluginHost`, and ingest calls `TaskService`. `external-entities` calls `TaskService.snapshotLinkedEntities` and `recordEntityFacts` around every write that can change a linked entity's state ([section 14](#14-facts-links-by-hand-and-the-branch-join)).
 - `ExternalEntityService` requires `TaskService`, so nothing `TaskService` needs may require `ExternalEntityService`. A port the tasks domain declares is answered from the repository, which needs only the SQL client.
 - `plugins` cannot import `external-entities`, because it imports `plugins` for the catalog. The port is `EntityObservations`, in `plugins/entity-observations.ts`, answered in `daemon/ingest/entity-observations.ts`, as Open Signals is. The host side of search is `EntityLookups` in `plugins/entity-lookups.ts`.
 - *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `external-entities` imports `signals`, for the rows. `signals` imports nothing of it: it declares the port `SignalEntities` (`readByRefs`, `recordArrivalAfter`) and the controller daemon answers it from the entity repository.
 - Recognition (pure) is the ingest's, over a `RecognizeText` that the ingest context builds from the active sources it is given at each call. `PluginHost` requires the ingest loops, so the ingest context cannot depend on the host: the reconciler hands the active sources to `IngestLoops.open`. Resolution (credentialed, slow) is the controller daemon's resolver loop, which may require `EntityLookups`; the database side is `ClaimResolution` in this domain ([section 5.5](#55-resolving-pending-claims)).
 - The repository requires the SQL client only. Its write methods join the caller's transaction and never open their own or call a service.
 
+## 14. Facts, links by hand and the branch join
+
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), slice 7; [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)* A Task keeps its link to a thing true, and the thing's state moves the Task's card through two shipped workflows. The Task side (Facts, the fence, what counts as open, the shipped workflows) is in [./09-tasks.md](./09-tasks.md#facts-and-the-fence). This section holds what belongs to entities: how ingest feeds Facts, how a link is found, and how the user's unlink holds.
+
+### 14.1 Ingest feeds Facts
+
+A Fact is a lifecycle change of a linked thing, so it is written where the entity is written. Every write that can change what a Task counts goes through one pair of `TaskService` methods, and nothing else in this domain knows the rules:
+
+1. `snapshotLinkedEntities(refs)` reads, before the write, the linked-work state of those refs that a live Task links.
+2. The write happens: `writeObservations` (for `reconcile`, `refresh` and a read of one ref), `reportMissing`, and any other place that changes `access` (the inaccessible rows of `listWanted`, pruning).
+3. `recordEntityFacts(snapshot)` compares each ref's state now with the snapshot, in the same transaction, and writes one Fact and one `task.entityChanged` for each live linked Task when:
+   - the lifecycle changed;
+   - the ref had no record before (a first observation, `previous_lifecycle` null);
+   - the Task's `openLinks` or `completedLinks` differ between before and now (a change of `access`, or a first full record), with `previous_lifecycle` equal to the lifecycle.
+
+   Never anything else. A poll that changes nothing writes nothing: no Fact, no event, no push.
+
+A first observation with no link writes no Fact. `reconcile` and `refresh` still emit no event and raise no signal of their own ([section 5.1](#51-reconcile)).
+
+### 14.2 What counts as open
+
+The count that decides whether a card lands is in [./09-tasks.md](./09-tasks.md#what-counts-as-open). The entity side of it:
+
+- Work or context for a **full record** comes from the stored record. So a record stays counted after its kind leaves the catalog, and its stored `access` decides whether it is readable. A kind leaving the catalog does not by itself make a record unreadable.
+- Work or context for a **partial record**, and for a ref with no record, comes from the kind the catalog declares. `isWorkRecord` needs a full record and cannot classify a partial one.
+- Readable means `access: ok` (derived across Connections, [section 4](#4-lifecycle)). Anything else counts as open.
+
+### 14.3 Links, suppressions and unlinking
+
+- A link is a row of `task_entity_links` ([./09-tasks.md](./09-tasks.md#entity-links)), added by a provenance `ref`, a handoff, `task.linkEntity` or the branch link step. A link added by any path writes a Fact (`previous_lifecycle` null) when the entity has a stored lifecycle.
+- **`task_entity_link_suppressions (task_id, ref, suppressed_at, suppressed_by)`** holds one row for each Task and ref the user unlinked. `task.unlinkEntity` writes it, in the transaction that removes the link and voids the pair's Facts. `task.linkEntity` and an explicit provenance `ref` on `task.update` clear it.
+- **The branch link step checks suppressions first.** It never adds back a pair the user unlinked, and a refresh of the entity updates the record and never restores the link.
+- **A merge** moves suppressions with the Task, without duplicates. When one Task links a ref and the other suppresses it, the link wins and the suppression is dropped.
+
+### 14.4 Finding a Thread's pull request: the branch join
+
+Hercule already knows a session's live branch. The runner reports the workspace after each `turn.completed` and on exit, and the controller writes `checkouts.branch`. So a rename by the agent is followed. An entity holds `repository.head` as `(remote, branch)` since slice 4. A link is a join of the two.
+
+A step of the controller daemon (`daemon/tasks/entity-links.ts`) runs after each complete scan, after each refresh of a kind that has a `repository`, and when a checkout's branch changes. It joins the entities whose `repository.head` is `(remote, branch)` with the checkouts of ephemeral workspaces whose sessions have a live Task. The checkout's remote is its Resource's `canonicalRemote`.
+
+- **Match on the head, not the target.** A fork's head remote differs from the Resource's, so a fork's pull request does not match; the user links it by hand. Two repositories that share a branch name never match each other.
+- **Skip** a checkout on its `default_branch`, and workspaces of kind `primary`: a main workspace's branch says nothing about one Task.
+- **Count the Tasks first.** The step counts distinct live Tasks for each `(remote, branch)` over the whole association, before it filters by suppression or "already linked". Several sessions of one Task in one workspace are one match. Two different live Tasks on one branch link neither, and the step logs why. A wrong link is worse than a missing one, and the user can link by hand. Counting before the filter matters: otherwise a Task that unlinked the pull request would drop out of the count, and the other Task would look alone on the branch and get the link.
+- **Skip** a pair the user unlinked ([section 14.3](#143-links-suppressions-and-unlinking)).
+- **This is not the branch-name match ADR 0046 rejected.** It reads the branch the checkout really has, it matches on the head's remote, and it holds for a Thread and a run alike.
+- A pull request never links its ticket: that needs reading text. A Take or a handoff links it, the user links it by hand, or a workflow records a ref.
+
+### 14.5 Short-lived pull requests: `listTrackedBranches`
+
+The inventory is `is:open`, so a pull request opened and merged between two scans may never appear in it. So the core also tells the plugin which branches it cares about. `IngestContext.entities` gains:
+
+```ts
+/** Returns tracked branches on remotes starting with `remotePrefix`, at most `limit`, in a fair rotation. */
+readonly listTrackedBranches: (remotePrefix: string, limit: number) =>
+  Effect.Effect<ReadonlyArray<{ readonly remote: string; readonly branch: string }>>;
+```
+
+- It lists the branches of ephemeral checkouts of live Tasks that are not the default branch and are on the remote (`remote_branches`, a JSON column on `checkouts`).
+- **A fair rotation.** Branches have no observation rows, so the rotation has its own durable cursor, `tracked_branch_attempts (connection_id, remote, branch, last_attempted_at)`, primary key on all three. Like `listWanted`, it stamps `last_attempted_at` on what it returns, before it returns, never-tried first and then oldest first. So more branches than the limit all get their turn.
+- **It leaves a branch out only when the Task already links an entity whose `repository.head` is this exact `(remote, branch)`.** It is an anti-join on the head, not on "has a link":
+
+| What the Task already has | Is the branch listed? | Can the link step link what it finds? |
+|---|---|---|
+| A link to something else, such as its Linear ticket | Yes | Yes. A ticket says nothing about this branch |
+| A link to a pull request with this head | No | Nothing to do |
+| A pull request with this head that the user unlinked | Yes, it may be read again | No. The suppression holds, so a refresh updates the entity and never restores the link |
+
+- **The plugin** reads each branch's pull requests by head and reports them with `refresh`, which creates the entity with no concerns ([section 5.3](#53-refresh-listwanted-and-reportmissing)). The GitHub feed is in [./08](./08-events-and-connections.md#51-github-plugin). The link step does the rest. So a pull request that is already merged when first seen links, and its Fact has `lifecycle: completed` and `previous_lifecycle` null: the card lands.
+- The capability grows additively, so `hostApi` stays 8.
+
 ## Later slices
 
 Not in this document yet, and the tables allow for them:
 
-- Linking a Thread's pull request to its Task, and moving cards on facts. `repository.head` is stored here and used there (slice 7).
+- ~~Linking a Thread's pull request to its Task, and moving cards on facts. `repository.head` is stored here and used there (slice 7).~~ *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035): built, in [section 14](#14-facts-links-by-hand-and-the-branch-join).)*
 - A triage cluster as Hercule's own kind, `core/triage-cluster`, written by the core with no Connection. `external_entities.kind` is a string and an entity needs no observation row, so it fits. It is not built.
 
 ## Sources
@@ -658,3 +732,4 @@ Not in this document yet, and the tables allow for them:
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0046 - Handing a signal off tracks the work on a Task](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md)
 - [ADR 0052 - Tasks have a stage, and Threads join them](../adr/0052-tasks-have-a-stage-and-threads-join-them.md)
+- [ADR 0055 - Facts move cards through editable workflows](../adr/0055-facts-move-cards-through-editable-workflows.md)

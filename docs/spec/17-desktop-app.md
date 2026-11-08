@@ -1484,14 +1484,40 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 - **Done and Dropped (`travel`).** Done: the card shrinks into its stage's count, and the count rolls down. Dropped: it sinks 12px with a small tilt and fades. Undo plays either one back.
 - **Merging (`hand`).** The target scales to 1.02 and takes a focus ring and a label naming it. The carried card docks on the target's corner, shrinks to 0.96, tilts 1.6 degrees, and the slot closes. Moving away undoes all of it at once. On release the carried card slides in under the target and fades, then the target settles from 1.03 to 1 and a thin ring fades over `--m-long`. Undo plays it back.
 - **A hand-off (`travel`).** Starting a Thread, or Try again, is one chain: the colleague's head rises from behind the card's edge and its paws reach the edge 90 ms later. Undo plays it back.
-- **A fact that moves a card waits for a still hand.** A Task arriving rises at the end of its cell on `self`, and a failed run takes the top of its cell on `self`, with the colleague's head changing to its plaster. Neither starts while the user drags, while the pointer moves within 280px of the card, or while it rests within 120px of it, and never later than 8 seconds after the fact. A card the user is hovering is never sorted away.
+- **A fact that moves a card waits for a still hand** *(extended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035): a Fact from a linked thing is one of these, see [A card moving by itself](#a-card-moving-by-itself))*. A Task arriving rises at the end of its cell on `self`, and a failed run takes the top of its cell on `self`, with the colleague's head changing to its plaster. Neither starts while the user drags, while the pointer moves within 280px of the card, or while it rests within 120px of it, and never later than 8 seconds after the fact. A card the user is hovering is never sorted away.
 - **The working paws** are a further continuous animation, in short bursts: see rule 2 of [Rules](#rules). Still colleagues in Display stops them.
 - **Reduce motion** (the system's; the Appearance setting is not wired yet, see [Motion](#motion)): every spring jumps to its end, except opacity, which fades on `travel`, so the cause is told in the same order. The paws stop.
 - **Everything is interruptible,** because every change starts from what is on screen with the speed it has. FLIP measures once before and once after a change, and commits the React change synchronously in between.
 
-The drawing's other motions come with later slices: a card moving by itself and the morning replay.
+~~The drawing's other motions come with later slices: a card moving by itself and the morning replay.~~ *(Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035): both are built, below.)*
 
-**Left out of Work,** and so out of Display and Keys: "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5; *amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032): both are built, for GitHub, in [Work and your sources](#work-and-your-sources)*); the sidebar's dot (slice 6); a card moving by itself and the morning replay (slice 7); initiatives, plans, the Blocked state and Filter row (slice 8); Wear.
+**Left out of Work,** and so out of Display and Keys: "From a source" in Add to Work and the outside groups of grouping (slices 4 and 5; *amended 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032): both are built, for GitHub, in [Work and your sources](#work-and-your-sources)*); the sidebar's dot (slice 6); ~~a card moving by itself and the morning replay (slice 7)~~ *(built in slice 7, [#1035](https://github.com/theagenticage/hercule/issues/1035))*; initiatives, plans, the Blocked state and Filter row (slice 8); Wear.
+
+### A card moving by itself
+
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* A shipped workflow moves a card when a Fact arrives, such as a pull request merging ([./09-tasks.md](./09-tasks.md#facts-and-the-fence)). The user sees it as a push of the Task and a read of the board. The motion is the drawing's `MOTION.md` §A card moving by itself, on the `self` spring. The desktop learns a card's old and new cell by comparing two reads of the board: `listCardMoves(previous, next)` in `@hercule/client-core/work` returns the moves, and the same function feeds [the morning replay](#the-morning-replay).
+
+- **It waits for a still hand.** Not while the pointer rests within 120px of the card, however long it has been still, because a parked pointer means someone is reading. Not while the pointer moves within 280px of it. Not during a drag. Never longer than 8 seconds after the Fact. A card the user is hovering is never sorted away.
+- **The cause lands first.** A small label rises onto the card on `hand` and holds for 760 ms. Its words are the card's `stageCause` ("PR #6221 merged"). A move with no cause shows no label. <!-- coordinator: check: card moved by a Fact but stageCause absent -->
+- **The card crosses on `self`,** about one second, to the end of its new cell. Heading for Landed, which is only words, it fades out on the way and goes into the "N landed" line. A card rising into the row it left passes over what stands behind the next card's top edge, never under it. Nothing already on the board reshuffles.
+- **The dent stays.** Its old place stays open for 1.5 seconds, and closes only when the hand is out of that lane.
+- The stage counts roll over, and a quiet line in the toolbar says what happened.
+- **A card with no place on screen** (past what its cell shows, or under something folded): only its bead and the counts change, and the toolbar's line says so.
+- **`⌘Z` never undoes a Fact.** A Fact is not an act of the user. The user's answer to a card that moved is to drag it back, and a drag holds ([./09-tasks.md](./09-tasks.md#the-fence)). The desktop sends `stage` in a move only when the card changes column, so a reorder inside a column does not move the fence.
+- **A hidden window plays nothing.** The board catches up when the window shows ([What Work reads and writes](#what-work-reads-and-writes)), and the morning replay covers what it missed.
+- **Reduced motion:** the cause label still shows, then the card appears in its new place with a fade.
+
+### The morning replay
+
+*(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* On opening, the board starts from how the user left it and plays each change in turn, 1.5 seconds apart, by the rules of the section above. It takes about six seconds. `MOTION.md` §The morning replay is the reference.
+
+- **The snapshot.** The renderer keeps a snapshot of the last board in local storage, one per controller and user, as `app/last-screen.ts` keeps the last screen. It holds what `listCardMoves` needs to place a card, and nothing the user typed. <!-- coordinator: check: exact fields of the snapshot -->
+- **What plays.** The net change between the stored snapshot and the first read. That is all a snapshot can know: a card that moved twice in the night plays one move, and a card that moved and came back plays none. Cards that arrived, landed or moved are played; the rest are placed at once.
+- **It stops for nobody.** The user can act while it plays, and every move still waits for a still hand.
+- **After it ends,** one quiet line stays, such as "Since last night: two landed, one new", with a button to see it again.
+- **Reduced motion:** no replay. The toolbar's line says what changed.
+- **No snapshot** (a first visit, or another controller) plays nothing and stores the first read. <!-- coordinator: check: behaviour with no snapshot -->
+- **Link and Unlink.** *(Same slice.)* The details pane's Linked rows offer Link and Unlink ([./20](./20-external-entities.md#143-links-suppressions-and-unlinking)). Linking uses the Add to Work search, so it reaches the source, and accepts a pasted link. Unlink calls `task.unlinkEntity` and the link stays away across polls; Link calls `task.linkEntity` and brings it back. A Linked row shows the thing's latest outside change from the timeline, and nothing happens because of it ([./20](./20-external-entities.md#87-what-changed-outside)). The card's linked marks show the state of each thing.
 
 ### Work and your sources
 
