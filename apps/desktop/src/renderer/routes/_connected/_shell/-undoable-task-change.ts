@@ -50,15 +50,14 @@ export interface UndoableTaskChange {
    */
   readonly sendBack: (() => Promise<TaskChangeAnswer>) | null;
   /**
-   * Reads again what the change touched. Called after an answer and after an
-   * Undo, while the user is signed in. The change counts as running until the
-   * returned promise resolves, if it returns one. It must not reject.
+   * Starts reading again what the change touched. Called after an answer and
+   * after an Undo, while the user is signed in. It does not wait for the read.
    */
-  readonly readAgain: () => void | Promise<void>;
+  readonly readAgain: () => void;
   /**
    * Called when the user undoes the change, with a promise that resolves
-   * once the Undo has been sent and read again (and rejects if it failed).
-   * For a caller that shows the Task as changing meanwhile.
+   * once the Undo has been sent (and rejects if it failed). For a caller
+   * that shows the Task as changing meanwhile.
    */
   readonly trackUndo?: (undoing: Promise<unknown>) => void;
   readonly words: {
@@ -134,7 +133,7 @@ export const useUndoableTaskChanges = ({
         undo: async () => {
           const undoing = (async () => {
             await request.mutateAsync({ send: sendBack, isWanted: wasChanged });
-            if (scope.isCurrent()) await change.readAgain();
+            if (scope.isCurrent()) change.readAgain();
           })();
           change.trackUndo?.(undoing);
           await undoing;
@@ -147,7 +146,7 @@ export const useUndoableTaskChanges = ({
     try {
       const { changed } = await answered;
       if (!scope.isCurrent()) return null;
-      await change.readAgain();
+      change.readAgain();
       if (!changed) moves.sayWithoutUndo(change.words.nothing);
       return null;
     } catch (error) {

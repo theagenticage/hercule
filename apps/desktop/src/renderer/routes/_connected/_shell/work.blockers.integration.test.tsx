@@ -21,7 +21,6 @@ import {
   stubIntersectionObserver,
   type Answer,
   type Call,
-  type Handler,
 } from "../../../app/testing";
 
 beforeEach(() => {
@@ -120,7 +119,11 @@ const LOOP_MESSAGE =
  *   read shows something else, as when another client changed them a moment ago.
  * - `refuseAdd` is the answer of every `task.addBlocker` call instead.
  * - `initiativeId` is the Initiative the Task is on.
- * - `answerUpdate` is the handler of every `task.update` call, to hold an answer back.
+ * - `answerUpdate` is the handler of every `task.update` call, to hold an answer
+ *   back. It gets `accept`, which changes the Initiative the controller has and
+ *   answers as the default answer does.
+ * - `detail.mode` (on the result) makes the next details reads answer, fail or
+ *   never answer.
  */
 const openPane = async ({
   blockers = [toBlocker(LOYALTY)],
@@ -137,26 +140,41 @@ const openPane = async ({
   readonly controllerBlockers?: readonly WorkCardBlocker[];
   readonly refuseAdd?: { readonly status: number; readonly body: unknown };
   readonly initiativeId?: string;
-  readonly answerUpdate?: Handler;
+  readonly answerUpdate?: (call: Call, accept: (call: Call) => Answer) => Answer | Promise<Answer>;
 } = {}) => {
   let current = [...(controllerBlockers ?? blockers)];
   // True until the first change: the details read then shows what the user last saw.
   let isStale = controllerBlockers !== undefined;
-  const card: WorkCard = initiativeId === undefined ? CARD : { ...CARD, initiativeId };
+  // The Initiative the controller has the Task on: a `task.update` changes it.
+  let currentInitiativeId = initiativeId;
+  const detail = { mode: "answer" as "answer" | "fail" | "never" };
+  const readCard = (): WorkCard =>
+    currentInitiativeId === undefined ? CARD : { ...CARD, initiativeId: currentInitiativeId };
+  const card: WorkCard = readCard();
+  const answerInitiative = (call: Call): Answer => {
+    const next = (call.body as { initiativeId: string | null }).initiativeId;
+    currentInitiativeId = next ?? undefined;
+    return { body: next === null ? buildTask(card) : { ...buildTask(card), initiativeId: next } };
+  };
   const handlers = {
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
-    "GET /api/v1/tasks/board": () => ({ body: buildBoard(card, ...BOARD_CARDS.slice(1)) }),
+    "GET /api/v1/tasks/board": () => ({ body: buildBoard(readCard(), ...BOARD_CARDS.slice(1)) }),
     "GET /api/v1/tasks": { body: { items: [] } },
     "GET /api/v1/plugins": { body: [] },
     "GET /api/v1/initiatives": { body: { items: [CHECKOUT, SEARCH] } },
-    [`GET ${TASK_PATH}/detail`]: () => ({
-      body: buildDetail(card, isStale ? blockers : current, blocks, totals),
-    }),
+    [`GET ${TASK_PATH}/detail`]: (): Answer | Promise<Answer> => {
+      if (detail.mode === "never") return new Promise<Answer>(() => undefined);
+      if (detail.mode === "fail") {
+        return { status: 500, body: buildErrorBody("internal", "The details could not be read.") };
+      }
+      return { body: buildDetail(readCard(), isStale ? blockers : current, blocks, totals) };
+    },
     [`GET /api/v1/tasks/${LOYALTY.id}/detail`]: {
       body: buildDetail(LOYALTY, [], [toBlocker(CARD)]),
     },
     [`POST ${TASK_PATH}/move`]: { body: buildTask(card) },
-    [UPDATE_PATH]: answerUpdate ?? { body: buildTask(card) },
+    [UPDATE_PATH]: (call: Call) =>
+      answerUpdate === undefined ? answerInitiative(call) : answerUpdate(call, answerInitiative),
     [ADD_PATH]: (call: Call) => {
       if (refuseAdd !== undefined) return refuseAdd;
       isStale = false;
@@ -186,7 +204,7 @@ const openPane = async ({
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /^Print depot pick lists/ }));
   const pane = await screen.findByRole("dialog", { name: "Print depot pick lists" });
-  return { calls, user, pane, ...app };
+  return { calls, user, pane, detail, ...app };
 };
 
 /** Returns the Initiative menu of `pane`. jsdom has no popover API, so it is always in the page but not in the accessibility tree. */
@@ -534,12 +552,14 @@ describe("the Initiative of a Task on the details pane", () => {
   });
 
   it("offers no second pick while the first is on its way, and shows the Initiative it chose as pending", async () => {
-    let answerFirst: (reply: Answer) => void = () => undefined;
+    let answerFirst: () => void = () => undefined;
     const { calls, user, pane } = await openPane({
       // The Task is on none, and the answer is slow.
-      answerUpdate: () =>
+      answerUpdate: (call, accept) =>
         new Promise<Answer>((resolve) => {
-          answerFirst = resolve;
+          answerFirst = () => {
+            resolve(accept(call));
+          };
         }),
     });
     const row = await within(pane).findByRole("button", { name: "Initiative: none" });
@@ -557,7 +577,7 @@ describe("the Initiative of a Task on the details pane", () => {
     );
     expect(readBodies(calls, UPDATE_PATH)).toEqual([{ initiativeId: SEARCH.id }]);
 
-    answerFirst({ body: buildTask(CARD) });
+    answerFirst();
     await waitFor(() => {
       expect(row.getAttribute("aria-disabled")).toBeNull();
     });
@@ -567,7 +587,7 @@ describe("the Initiative of a Task on the details pane", () => {
     let updates = 0;
     const { calls, user, pane } = await openPane({
       // The Task is on none. The first pick is refused, the second accepted.
-      answerUpdate: () => {
+      answerUpdate: (call, accept) => {
         updates += 1;
         return Promise.resolve(
           updates === 1
@@ -575,7 +595,7 @@ describe("the Initiative of a Task on the details pane", () => {
                 status: 409,
                 body: buildErrorBody("invalid_state", "That initiative was closed."),
               }
-            : { body: buildTask(CARD) },
+            : accept(call),
         );
       },
     });
@@ -603,17 +623,89 @@ describe("the Initiative of a Task on the details pane", () => {
     });
   });
 
+  it.each([
+    ["fails", "fail"],
+    ["never answers", "never"],
+  ] as const)(
+    "shows the Initiative the controller confirmed and starts the next Undo from it, when the read after the pick %s",
+    async (_name, mode) => {
+      const { calls, detail, user, pane } = await openPane();
+      const row = await within(pane).findByRole("button", { name: "Initiative: none" });
+      const menu = readInitiativeMenu(pane);
+      detail.mode = mode;
+
+      await user.click(
+        within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+      );
+
+      // The pane does not wait for the read: the answer alone settles it.
+      await waitFor(() => {
+        expect(row.getAttribute("aria-disabled")).toBeNull();
+        expect(row.textContent).toBe("Faster search");
+      });
+      await user.click(
+        within(menu).getByRole("menuitemradio", { name: "Accessible checkout", hidden: true }),
+      );
+      await waitFor(() => {
+        expect(row.getAttribute("aria-disabled")).toBeNull();
+        expect(row.textContent).toBe("Accessible checkout");
+      });
+      await user.click(await screen.findByRole("button", { name: /^Undo/ }));
+
+      await waitFor(() => {
+        expect(readBodies(calls, UPDATE_PATH)).toEqual([
+          { initiativeId: SEARCH.id },
+          { initiativeId: CHECKOUT.id },
+          // Back to Faster search, which the controller confirmed, not to none.
+          { initiativeId: SEARCH.id },
+        ]);
+      });
+      await waitFor(() => {
+        expect(row.getAttribute("aria-disabled")).toBeNull();
+        expect(row.textContent).toBe("Faster search");
+      });
+    },
+  );
+
+  it("leaves the Initiative the pane shows alone when the pick is refused, even if the read fails", async () => {
+    const { detail, user, pane } = await openPane({
+      initiativeId: CHECKOUT.id,
+      answerUpdate: () =>
+        Promise.resolve({
+          status: 409,
+          body: buildErrorBody("invalid_state", "That initiative was closed."),
+        }),
+    });
+    const row = await within(pane).findByRole("button", {
+      name: "Initiative: Accessible checkout",
+    });
+    const menu = readInitiativeMenu(pane);
+    detail.mode = "fail";
+
+    await user.click(
+      within(menu).getByRole("menuitemradio", { name: "Faster search", hidden: true }),
+    );
+
+    expect(await screen.findByText(/That initiative was closed\./)).toBeTruthy();
+    await waitFor(() => {
+      expect(row.getAttribute("aria-disabled")).toBeNull();
+    });
+    expect(row.textContent).toBe("Accessible checkout");
+  });
+
   it("offers no pick while an Undo is on its way", async () => {
     let updates = 0;
-    let answerUndo: (reply: Answer) => void = () => undefined;
+    let answerUndo: () => void = () => undefined;
     const { user, pane } = await openPane({
       initiativeId: CHECKOUT.id,
-      answerUpdate: () => {
+      answerUpdate: (call, accept) => {
         updates += 1;
         return updates === 1
-          ? Promise.resolve({ body: buildTask(CARD) })
+          ? Promise.resolve(accept(call))
           : new Promise<Answer>((resolve) => {
-              answerUndo = resolve;
+              answerUndo = () => {
+                resolve(accept(call));
+              };
             });
       },
     });
@@ -631,7 +723,7 @@ describe("the Initiative of a Task on the details pane", () => {
       expect(pending.getAttribute("aria-disabled")).toBe("true");
     });
 
-    answerUndo({ body: buildTask(CARD) });
+    answerUndo();
     await waitFor(() => {
       expect(pending.getAttribute("aria-disabled")).toBeNull();
     });

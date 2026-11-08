@@ -6,12 +6,13 @@
  * (or on none). A change away from a closed Initiative has no Undo, because
  * the controller refuses to put a Task back on a closed Initiative.
  *
- * Picks for one Task are not stacked. From the pick until the answer has
- * been read again (and the same for an Undo), the Task counts as changing
+ * Picks for one Task are not stacked. From the pick until the controller
+ * answers (and the same for an Undo), the Task counts as changing
  * (`PendingInitiative`): the pane disables its Initiative menu and shows the
- * chosen Initiative as pending. So every pick reads the Initiative it leaves
- * from a pane that shows the settled answer, and Undo puts back what was
- * really there.
+ * chosen Initiative as pending. The answer is written into the cached details
+ * and board at once, whether or not reading them again works, so every pick
+ * reads the Initiative it leaves from a pane that shows the confirmed answer,
+ * and Undo puts back what was really there. A refused change writes nothing.
  *
  * The controller refuses an Initiative that was closed since the pane listed
  * it (`InvalidState`) and one that is gone (`NotFound`). The undo line says
@@ -26,6 +27,7 @@ import {
   describeInitiativeGesture,
 } from "@hercule/client-core/work";
 import type { AccountScope } from "../../../app/account-scope";
+import type { TaskDetail, WorkBoard } from "@hercule/contract";
 import { readReason } from "../../../app/read-reason";
 import type { CardMoves } from "./-card-moves";
 import { useUndoableTaskChanges } from "./-undoable-task-change";
@@ -49,46 +51,55 @@ export interface PendingInitiative {
   readonly initiativeId: string | null;
 }
 
-/** The longest the pane waits for the board to be read again after a change, in milliseconds. */
-const READ_AGAIN_LIMIT_MS = 5000;
+/** Returns `value` with its `initiativeId` set to `initiativeId`, or without one for `null`. */
+const withInitiative = <T extends { readonly initiativeId?: string }>(
+  value: T,
+  initiativeId: string | null,
+): T => {
+  const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "initiativeId"));
+  return (initiativeId === null ? rest : { ...rest, initiativeId }) as T;
+};
 
 /**
- * Returns a promise that resolves once the active board and details reads
- * under `keys` are not running, or after `READ_AGAIN_LIMIT_MS`. It never
- * rejects. The check runs one tick after the last change of the query cache,
- * because a read that finished after the change was made starts another one
- * right away.
+ * Writes the Initiative the controller answered into the cached details of the
+ * Task and into its card on the cached board, so the pane shows the confirmed
+ * membership at once, even when reading again fails or is slow. Reads under
+ * way are cancelled first: one that began before the answer could end after
+ * the write and put the old Initiative back. Nothing is written when the user
+ * who made the change has signed out, because the cache then belongs to the
+ * next account.
  */
-const waitForReads = (
+const writeAnsweredInitiative = async (
   queryClient: QueryClient,
-  keys: readonly (readonly unknown[])[],
-): Promise<void> =>
-  new Promise((resolve) => {
-    const cache = queryClient.getQueryCache();
-    let check: ReturnType<typeof setTimeout> | undefined;
-    let unsubscribe = (): void => undefined;
-    const finish = (): void => {
-      unsubscribe();
-      clearTimeout(check);
-      clearTimeout(limit);
-      resolve();
-    };
-    const isReading = (): boolean =>
-      keys.some((queryKey) =>
-        cache
-          .findAll({ queryKey, type: "active" })
-          .some((query) => query.state.fetchStatus === "fetching"),
-      );
-    const checkSoon = (): void => {
-      clearTimeout(check);
-      check = setTimeout(() => {
-        if (!isReading()) finish();
-      }, 0);
-    };
-    const limit = setTimeout(finish, READ_AGAIN_LIMIT_MS);
-    unsubscribe = cache.subscribe(checkSoon);
-    checkSoon();
-  });
+  scope: AccountScope,
+  taskId: string,
+  initiativeId: string | null,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: queryKeys.workBoard() }),
+    queryClient.cancelQueries({ queryKey: queryKeys.taskDetail(taskId) }),
+  ]);
+  if (!scope.isCurrent()) return;
+  queryClient.setQueryData<WorkBoard>(queryKeys.workBoard(), (board) =>
+    board === undefined
+      ? undefined
+      : {
+          ...board,
+          cards: board.cards.map((card) =>
+            card.id === taskId ? withInitiative(card, initiativeId) : card,
+          ),
+        },
+  );
+  queryClient.setQueryData<TaskDetail>(queryKeys.taskDetail(taskId), (detail) =>
+    detail === undefined
+      ? undefined
+      : {
+          ...detail,
+          task: withInitiative(detail.task, initiativeId),
+          card: withInitiative(detail.card, initiativeId),
+        },
+  );
+};
 
 /**
  * Returns the function that puts a Task on an Initiative, or takes it off,
@@ -132,7 +143,13 @@ export const useTaskInitiative = ({
   }: TaskInitiativeChange) => {
     if (pending.some((each) => each.taskId === taskId)) return;
     const write = (initiativeId: string | null) => async () => {
-      await client.task.update({ params: { id: taskId }, payload: { initiativeId } });
+      const answered = await client.task.update({
+        params: { id: taskId },
+        payload: { initiativeId },
+      });
+      if (scope.isCurrent()) {
+        await writeAnsweredInitiative(queryClient, scope, taskId, answered.initiativeId ?? null);
+      }
       return { changed: true };
     };
     const name = to?.name ?? null;
@@ -150,7 +167,6 @@ export const useTaskInitiative = ({
         readAgain: () => {
           invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
           invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
-          return waitForReads(queryClient, [queryKeys.workBoard(), queryKeys.taskDetail(taskId)]);
         },
         words: {
           gesture: describeInitiativeGesture(taskTitle, name, wasClosed),
