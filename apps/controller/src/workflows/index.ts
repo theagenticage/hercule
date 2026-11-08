@@ -2,6 +2,7 @@
 export { workflowRepository } from "./repository";
 export { readDefaultSpawnBound } from "./spawn-bounds";
 export { TriggeredRuns, WorkflowRuns } from "./runs";
+export { WorkflowEntities } from "./entities";
 export { WorkflowSignals } from "./signals";
 export { admitsEvent } from "./trigger-selection";
 export { CronTriggerScheduler, CronTriggerSchedulerLayer, FIRING_TOLERANCE } from "./cron-triggers";

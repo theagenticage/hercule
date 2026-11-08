@@ -25,7 +25,13 @@ import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TextGeneration } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
 import { RunService, RunServiceLayer } from "./service";
 import { buildHeldAction, waitForHeldExecutions, type HeldAction } from "./testing";
@@ -54,6 +60,7 @@ const runTest = <A, E>(
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),
@@ -199,6 +206,52 @@ describe("a run that works on a Task", () => {
         for (const rerun of [restamped, replayed]) reruns.push(yield* waitForRunToEnd(rerun.runId));
         expect(reruns.map((rerun) => rerun.taskId)).toEqual([TASK_ID, TASK_ID]);
         expect(yield* listRunIdsOfTask(TASK_ID)).toHaveLength(3);
+      }),
+    );
+  });
+});
+
+/** A workflow whose step names the run's Task in the title of the task it files. */
+const NAMES_ITS_TASK_DEFINITION = {
+  name: "File a task that names its Task",
+  steps: [
+    {
+      id: "file",
+      kind: "action" as const,
+      action: "task.create",
+      params: { title: "{{ run.taskId }}", description: "" },
+    },
+  ],
+};
+
+describe("run.taskId in a step", () => {
+  it("renders the Task the run works on", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const { runId } = yield* runs.startOnTask(
+          { definition: NAMES_ITS_TASK_DEFINITION },
+          TASK_ID,
+        );
+
+        const ended = yield* waitForRunToEnd(runId);
+
+        expect(ended.status).toBe("completed");
+        expect(ended.steps[0]).toMatchObject({ status: "completed", output: { title: TASK_ID } });
+      }),
+    );
+  });
+
+  it("fails the run with a message that says it works on no Task, when it has none", async () => {
+    await runTest(
+      Effect.gen(function* () {
+        const runs = yield* RunService;
+        const { runId } = yield* runs.start({ definition: NAMES_ITS_TASK_DEFINITION });
+
+        const ended = yield* waitForRunToEnd(runId);
+
+        expect(ended).toMatchObject({ status: "failed" });
+        expect(JSON.stringify(ended)).toContain("run.taskId is not set: this run works on no Task");
       }),
     );
   });

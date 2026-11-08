@@ -5,10 +5,13 @@
  * confirms it.
  */
 import type { Inbox, InboxCard } from "@hercule/contract";
+import { lowerFirst } from "../intake";
+import { endSentence } from "../text";
+import { NO_OFFERS, type CardOffers } from "./card-hand-off";
 import { applySetLink, type SetLinkEdit } from "./card-links";
 
 /** The moves a card offers on the Inbox. */
-export type InboxMove = "take" | "dismiss" | "see-task";
+export type InboxMove = "take" | "dismiss" | "see-task" | "hand";
 
 /**
  * Returns why `move` does not apply to `card`, as a sentence for the undo
@@ -17,8 +20,24 @@ export type InboxMove = "take" | "dismiss" | "see-task";
  * - Take and dismiss refuse a card that has a live Task: Take would only find
  *   that Task, and dismissing the card would hide work in progress.
  * - Seeing the Task refuses a card that has none.
+ * - Handing off refuses a card that no workflow can take now, and never
+ *   because of a Task: a hand-off continues the card's Task. `offers` are the
+ *   card's (`listCardOffers`); without them nothing can take the card. The
+ *   line gives the controller's reason for the first workflow that cannot, or
+ *   says how to get a workflow that can.
  */
-export const describeMoveRefusal = (card: InboxCard, move: InboxMove): string | undefined => {
+export const describeMoveRefusal = (
+  card: InboxCard,
+  move: InboxMove,
+  offers: CardOffers = NO_OFFERS,
+): string | undefined => {
+  if (move === "hand") {
+    if (offers.available.length > 0) return undefined;
+    const [firstUnavailable] = offers.unavailable;
+    return firstUnavailable?.unavailable === undefined
+      ? `No workflow takes a ${lowerFirst(card.noun)}. Give a workflow an entity input for ${card.kind} to hand these off.`
+      : `No workflow can take it now. ${endSentence(firstUnavailable.unavailable.message)}`;
+  }
   if (move === "see-task") {
     return card.taskId === undefined
       ? "It has no Task yet. Press T to take it on, and G to see the Task."
@@ -45,6 +64,18 @@ export const describeDismissal = (card: InboxCard, riders: readonly InboxCard[])
         : ` ${String(riders.length)} things that rode on it stand alone now.`;
   return `Dismissed ${nameCard(card)}.${alone}`;
 };
+
+/**
+ * Returns what the undo line says when a hand-off is refused: "Pull request
+ * #87 was not handed to Review PR. Review PR is already working on this." The
+ * `reason` is the controller's own sentence, which already says whether to try
+ * again.
+ */
+export const describeHandOffRefusal = (
+  card: InboxCard,
+  workflowName: string,
+  reason: string,
+): string => `${nameCard(card)} was not handed to ${workflowName}. ${endSentence(reason)}`;
 
 /** One change to the cards of the Inbox the screen draws. */
 export type InboxEdit =

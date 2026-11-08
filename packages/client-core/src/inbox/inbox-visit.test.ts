@@ -432,7 +432,7 @@ describe("advanceLinkGesture: where a card rides", () => {
 
 describe("advanceInboxVisit: a signal landing on a card", () => {
   const saying = (n: number, say: string) => ({
-    signals: { openCount: 1, latest: buildSignalLine(`s${String(n)}`, say) },
+    signals: { openCount: 1, kinds: [], latest: buildSignalLine(`s${String(n)}`, say) },
   });
   const read = (n: number, say: string, others: readonly InboxCard[] = []) =>
     inboxOf([ticket("1", [PRICING], saying(n, say)), ...others]);

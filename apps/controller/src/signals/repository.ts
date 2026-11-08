@@ -704,6 +704,34 @@ const make = Effect.gen(function* () {
           ),
 
     /**
+     * Returns, for each of `threadRefs` that holds an open signal (snoozed
+     * ones too), the distinct kinds of those signals, sorted. A ref with no
+     * open signal is left out. One statement however many refs there are,
+     * none for no refs.
+     */
+    listOpenKindsByThread: (
+      threadRefs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
+      threadRefs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly ref: string; readonly kind: string }>`
+              SELECT DISTINCT thread_ref AS ref, kind FROM signals
+              WHERE status = 'open'
+                AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))
+              ORDER BY thread_ref, kind`,
+            (rows) => {
+              const kinds = new Map<string, Array<string>>();
+              for (const row of rows) {
+                const found = kinds.get(row.ref);
+                if (found === undefined) kinds.set(row.ref, [row.kind]);
+                else found.push(row.kind);
+              }
+              return kinds;
+            },
+          ),
+
+    /**
      * Returns the ids of the open signals (snoozed ones too) whose thread ref
      * is one of `threadRefs`, sorted. One statement, none for no refs.
      */

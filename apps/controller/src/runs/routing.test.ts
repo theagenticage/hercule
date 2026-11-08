@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import type { StepRecord, WorkflowDefinition } from "@hercule/contract";
 import { decideRouting, type RoutedRun } from "./routing";
 
+const RUN_ID = "0199f0b7-0000-7000-8000-00000000b001";
 const at = "2026-09-25T00:00:00.000Z";
 
 /** A completed record of `stepId` at `iteration`, with `output`. */
@@ -51,7 +52,7 @@ const routeAfter = (
   edgeTraversals: ReadonlyArray<number>,
   finishedStepId: string,
 ) => {
-  const run: RoutedRun = { plan, inputs: {}, steps, edgeTraversals };
+  const run: RoutedRun = { id: RUN_ID, plan, inputs: {}, steps, edgeTraversals };
   return Effect.runSync(decideRouting(run, finishedStepId));
 };
 
@@ -184,7 +185,7 @@ describe("maxTraversals", () => {
   const decideWithMore = (more: boolean, traversals: ReadonlyArray<number>) =>
     Effect.runSync(
       decideRouting(
-        { plan: LOOP, inputs: { more }, steps: RECORDS, edgeTraversals: traversals },
+        { id: RUN_ID, plan: LOOP, inputs: { more }, steps: RECORDS, edgeTraversals: traversals },
         "count",
       ),
     );
@@ -227,7 +228,10 @@ describe("maxTraversals", () => {
       ],
     );
     const decision = Effect.runSync(
-      decideRouting({ plan: once, inputs: {}, steps: RECORDS, edgeTraversals: [2, 1] }, "count"),
+      decideRouting(
+        { id: RUN_ID, plan: once, inputs: {}, steps: RECORDS, edgeTraversals: [2, 1] },
+        "count",
+      ),
     );
     expect(decision.ending).toMatchObject({
       failedEdge: {

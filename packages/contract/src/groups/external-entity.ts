@@ -458,6 +458,12 @@ export const InboxCard = Schema.Struct({
     latest: Schema.optionalKey(EntitySignalLine),
     /** How many open signals that are not snoozed the card holds. */
     openCount: Schema.Int,
+    /**
+     * The distinct kinds of the card's open signals, snoozed ones included,
+     * sorted. A handoff ends the open signals of the kinds its workflow
+     * answers, so this lets the menu name what a click would end.
+     */
+    kinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
   }),
   /**
    * Set when this compact thing rides on a rich thing on the Inbox: it has a

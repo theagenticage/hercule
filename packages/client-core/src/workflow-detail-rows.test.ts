@@ -26,6 +26,12 @@ const RELEASE: WorkflowDefinition = {
     { name: "dry_run", schema: { type: "boolean" }, required: false, default: false },
     { name: "channel", schema: { enum: ["stable", "beta"] }, required: false },
     { name: "request", signal: { kinds: ["github/review-requested"] }, required: false },
+    {
+      name: "pull_request",
+      entity: { kinds: ["github/pull-request"], answers: ["github/review-requested"] },
+      required: false,
+    },
+    { name: "issue", entity: { kinds: ["github/issue", "linear/issue"] }, required: false },
   ],
   triggers: [
     { id: "labeled", kind: "start", on: { kind: "github.issue.labeled" } },
@@ -388,6 +394,18 @@ describe("buildInputRows", () => {
       {
         name: "request",
         typeText: "github/review-requested signal",
+        requiredText: "Optional",
+        defaultText: "",
+      },
+      {
+        name: "pull_request",
+        typeText: "github/pull-request entity, answers github/review-requested",
+        requiredText: "Optional",
+        defaultText: "",
+      },
+      {
+        name: "issue",
+        typeText: "github/issue, linear/issue entity",
         requiredText: "Optional",
         defaultText: "",
       },

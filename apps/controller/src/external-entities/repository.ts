@@ -75,6 +75,7 @@ import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
 import { selectInboxPage } from "./riding";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
+import { makeOfferReads, type OfferTarget } from "./offer-reads";
 import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
@@ -478,6 +479,19 @@ const MAX_REFS_PER_STATEMENT = 1000;
 /** Returns the refs sorted, each once. */
 const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
+/** Returns the canonical remote of the repository an entity's work lands in, or none when its kind has no repository. */
+const readTargetRemote = (row: EntityRow): string | undefined =>
+  row.repository === null
+    ? undefined
+    : (JSON.parse(String(row.repository)) as { target: { remote: string } }).target.remote;
+
+/** Builds what the offers read needs of a full record of a work kind. */
+const buildOfferTarget = (row: EntityRow): OfferTarget => ({
+  ref: row.ref,
+  kind: row.kind as string,
+  targetRemote: readTargetRemote(row),
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* claimRepository;
@@ -487,6 +501,7 @@ const make = Effect.gen(function* () {
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
   const inbox = makeInboxPopulation(sql, linkReads);
+  const offerReads = yield* makeOfferReads;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
 
@@ -1247,11 +1262,17 @@ const make = Effect.gen(function* () {
      * `peers` the records at their far end that have no card. If the page, the
      * links or the peers hit their bound, `truncated` is set.
      *
+     * Each card carries the id of its offer set and the Connections that can
+     * act on it. Cards that share a kind, a target repository and an
+     * acting-account state share one set in `offerSets`, evaluated once (see
+     * `readOffers`).
+     *
      * A constant number of statements however many cards there are: the
      * eligible cards and their links (evaluating the membership once), the
      * entity rows of the page, one walk up for every card, the records above
-     * them, the observations of cards and places together, the links of the
-     * page, and the three reads of the peers.
+     * them, the observations of cards and places together, the live signals
+     * and the open signal kinds, the offers (acting Connections, workflows,
+     * Resources), the links of the page, and the three reads of the peers.
      */
     queryInbox: (environment: EntityEnvironment): Effect.Effect<Inbox, SqlError> =>
       Effect.gen(function* () {
@@ -1284,6 +1305,11 @@ const make = Effect.gen(function* () {
           rows.map(({ row }) => row.ref),
           environment.now,
         );
+        const openKinds = yield* signals.listOpenKindsByThread(rows.map(({ row }) => row.ref));
+        const offers = yield* offerReads.readOffers(
+          rows.map(({ row }) => buildOfferTarget(row)),
+          environment.offeredKinds ?? [],
+        );
 
         const cards = rows.map(({ card, row }): InboxCard => ({
           ...buildEntityFields({
@@ -1297,11 +1323,14 @@ const make = Effect.gen(function* () {
             latestChange: context.latestChanges.get(row.ref),
           }),
           side: card.side,
-          ...buildCardSignalFields(cardSignals.get(row.ref), row.reason_templates as string | null),
+          ...buildCardSignalFields(
+            cardSignals.get(row.ref),
+            openKinds.get(row.ref) ?? [],
+            row.reason_templates as string | null,
+          ),
           ...buildRidesOn(riding.get(row.ref)),
-          // TODO(#1034): fill the offers and the acting accounts.
-          offerSetId: "none",
-          actingConnections: [],
+          offerSetId: offers.offerSetIds.get(row.ref)!,
+          actingConnections: offers.actingConnections.get(row.ref) ?? [],
         }));
         const { places, edges } = context;
 
@@ -1327,9 +1356,26 @@ const make = Effect.gen(function* () {
           found.links.length > MAX_INBOX_LINKS ||
           found.hints.length > MAX_INBOX_HINTS ||
           foundPeers.length > MAX_INBOX_PEERS;
-        // TODO(#1034): fill the offer sets.
-        return { cards, places, edges, counts, links, hints, peers, offerSets: {}, truncated };
+        return {
+          cards,
+          places,
+          edges,
+          counts,
+          links,
+          hints,
+          peers,
+          offerSets: offers.offerSets,
+          truncated,
+        };
       }),
+
+    /**
+     * Returns the offers and acting Connections of things, as the Inbox and
+     * the detail show them (see `makeOfferReads`). The handoff reads one
+     * thing through it inside its transaction, so a click is checked by the
+     * rules the menu used.
+     */
+    readOffers: offerReads.readOffers,
 
     /**
      * Reads what lies above `starts`, as places and edges, cut by one rule
@@ -1384,6 +1430,10 @@ const make = Effect.gen(function* () {
           maxPlaces: MAX_ENTITY_ANCESTORS + MAX_ENTITY_LINKS + MAX_ENTITY_HINTS,
           environment,
         });
+        const offers = yield* offerReads.readOffers(
+          [buildOfferTarget(row)],
+          environment.offeredKinds ?? [],
+        );
         return Option.some({
           ...buildEntityFields({
             row,
@@ -1411,9 +1461,8 @@ const make = Effect.gen(function* () {
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
-          // TODO(#1034): fill the offers and the acting accounts.
-          offers: [],
-          actingConnections: [],
+          offers: offers.offerSets[offers.offerSetIds.get(row.ref)!]!,
+          actingConnections: offers.actingConnections.get(row.ref) ?? [],
         });
       }),
 
@@ -1452,10 +1501,6 @@ const make = Effect.gen(function* () {
         if (row === undefined) return Option.none();
         const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
         const { status, stage } = parseStoredStatus(row.status as string | null);
-        const repository =
-          row.repository === null
-            ? undefined
-            : (JSON.parse(String(row.repository)) as { target: { remote: string } });
         return Option.some({
           id: uuidToString(row.id),
           ref: row.ref,
@@ -1465,7 +1510,7 @@ const make = Effect.gen(function* () {
           title: (row.title as string | null) ?? "",
           status,
           stage,
-          targetRemote: repository?.target.remote,
+          targetRemote: readTargetRemote(row),
           access: deriveAccess(observations),
           hasConcern: unionConcerns(observations).length > 0,
         });

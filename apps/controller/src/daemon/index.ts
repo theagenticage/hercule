@@ -168,6 +168,7 @@ export {
   runScheduler,
   SchedulerInterval,
   TriggeredRunsLayer,
+  WorkflowEntitiesLayer,
   WorkflowRunsLayer,
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,

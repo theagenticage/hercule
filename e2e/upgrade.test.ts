@@ -635,6 +635,28 @@ const STATUS_STEP_WORKFLOW = [
   "      status: in-progress",
 ].join("\n");
 
+/**
+ * A workflow with a `signal` input, offered as Hand to an agent on signals of
+ * its kind. It is never enabled. The upgrade adds a fourth input type
+ * (`entity`) beside it, and a workflow stored with a signal input must stay
+ * valid and keep its input as it was.
+ */
+const SIGNAL_INPUT_WORKFLOW = [
+  "name: Upgrade fixture signal input",
+  "inputs:",
+  "  - name: signal",
+  "    signal:",
+  "      kinds: [github/review-requested]",
+  "    required: true",
+  "steps:",
+  "  - id: file_task",
+  "    kind: action",
+  "    action: task.create",
+  "    params:",
+  "      title: Look at the signal",
+  "      description: Filed by the upgrade fixture.",
+].join("\n");
+
 /** The spawn bound over today's limits that the fixture stores for `LEGACY_BOUND_TRIGGER`. */
 const LEGACY_SPAWN_BOUND = { maxRuns: 20_000, windowSeconds: Number.MAX_SAFE_INTEGER } as const;
 
@@ -2546,6 +2568,9 @@ describe("upgrading from the previous edge release", () => {
       const statusStepWorkflow = expectJson<{ workflow: { id: string } }>(
         await runCli(["workflow", "create", "--json"], { ...edge, stdin: STATUS_STEP_WORKFLOW }),
       ).workflow;
+      const signalInputWorkflow = expectJson<{ workflow: { id: string } }>(
+        await runCli(["workflow", "create", "--json"], { ...edge, stdin: SIGNAL_INPUT_WORKFLOW }),
+      ).workflow;
 
       const port = controller.port;
       expect(await controller.stop()).toBe(0);
@@ -3285,6 +3310,13 @@ describe("upgrading from the previous edge release", () => {
         await runCli(["workflow", "read", statusStepWorkflow.id, "--json"], upgraded),
       );
       expect(upgradedStatusStepWorkflow).not.toHaveProperty("invalidSince");
+      // The workflow stored with a signal input is valid too, and keeps its
+      // input.
+      const upgradedSignalInputWorkflow = expectJson<{ invalidSince?: string; source: string }>(
+        await runCli(["workflow", "read", signalInputWorkflow.id, "--json"], upgraded),
+      );
+      expect(upgradedSignalInputWorkflow).not.toHaveProperty("invalidSince");
+      expect(upgradedSignalInputWorkflow.source).toContain("kinds: [github/review-requested]");
       if (taskBoardRowsSeeded) {
         // Migration 112 gave every Task a rank, deleted Tasks included. In
         // each cell (project and stage), the ranks put the Tasks in the order

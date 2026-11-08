@@ -20,3 +20,9 @@ export const cutWithEllipsis = (text: string, mostCharacters: number): string =>
  * sentence quotes and then ends with a full stop of its own.
  */
 export const dropClosingFullStops = (text: string): string => text.replace(/\.+$/, "");
+
+/**
+ * Returns `text` ending in a full stop, so a sentence can follow it. Text that
+ * already ends in a full stop, "!" or "?" comes back as it is.
+ */
+export const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);

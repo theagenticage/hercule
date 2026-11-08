@@ -206,6 +206,20 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Returns the id of the pending or running run of the stored workflow
+     * `workflowId` on the Task, or none when the workflow is not working on
+     * it. Fails with `Forbidden` without the `run.read` grant.
+     */
+    findLiveRunOnTask: (input: {
+      readonly taskId: string;
+      readonly workflowId: string;
+    }): Effect.Effect<Option.Option<string>, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("run.read");
+        return yield* runs.findLiveRunIdOnTask(input.taskId, input.workflowId);
+      }),
+
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */
     query: (
       input: QueryInput,

@@ -1313,8 +1313,10 @@ describe("the Inbox: membership, sides and counts", () => {
     expect(large.inbox.cards).toHaveLength(100);
     expect(large.statements).toHaveLength(small.statements.length);
     // The counts, who rides, the cards, the walk up, the places, the observations, the
-    // signals, the latest changes and the links of the page.
-    expect(small.statements.length).toBeLessThanOrEqual(9);
+    // signals, the latest changes and the links of the page, then the open signal kinds,
+    // the acting Connections and the runnable workflows (and one more for the Resources
+    // their workspaces name, when there are any).
+    expect(small.statements.length).toBeLessThanOrEqual(12);
   });
 });
 

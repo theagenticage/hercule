@@ -271,6 +271,7 @@ const CARDS: readonly InboxCard[] = [
     reason: { say: "Tessa commented", tone: "plain" },
     signals: {
       openCount: 2,
+      kinds: ["github/commented"],
       latest: {
         id: "01a0d1c0-6e80-7000-8000-000000000a01",
         kind: "github/commented",
@@ -326,7 +327,7 @@ const CARDS: readonly InboxCard[] = [
     yours: false,
     status: { shape: "half", tone: "active", label: "In progress" },
     reason: { say: "Mei commented", tone: "plain" },
-    signals: { openCount: 1, latest: TICKET_142_SIGNALS[1]! },
+    signals: { openCount: 1, kinds: [TICKET_142_SIGNALS[1]!.kind], latest: TICKET_142_SIGNALS[1]! },
   }),
   ticket(150, "Remember the last address a shopper used", BETA),
   ticket(163, "Retry a failed card payment once", LAUNCH, {

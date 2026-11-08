@@ -168,7 +168,7 @@ describe("the age of a row's sentence", () => {
       createdAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
     });
   const row = (overrides = {}) =>
-    buildInboxCard("1", { signals: { openCount: 2, latest: landed(4) }, ...overrides });
+    buildInboxCard("1", { signals: { openCount: 2, kinds: [], latest: landed(4) }, ...overrides });
 
   it("is drawn on a row whose sentence comes from a signal", () => {
     expect(describeCardTime(row(), NOW).signalAge).toBe("4m");
@@ -178,7 +178,7 @@ describe("the age of a row's sentence", () => {
   it.each([
     [
       "a request, which has its wait",
-      buildRequestCard("1", { signals: { openCount: 1, latest: landed(4) } }),
+      buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: landed(4) } }),
     ],
     ["a row a Task holds", row({ taskId: "task-1" })],
     ["a row with no signal", buildInboxCard("1")],

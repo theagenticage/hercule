@@ -70,6 +70,7 @@ import {
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
 import { buildActiveEntityKind } from "./entity-records";
+import { listOfferedKinds, type OfferedKind } from "./offers";
 import { isPendingTarget } from "./pending-target";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
@@ -110,6 +111,8 @@ interface Catalog {
   readonly activePluginIds: ReadonlyArray<string>;
   /** The active kinds, by qualified word. */
   readonly kinds: ReadonlyMap<string, CatalogKind>;
+  /** What the offers need of the plugin of each active kind. */
+  readonly offeredKinds: ReadonlyArray<OfferedKind>;
 }
 
 /** What `prepareEntityForTask` read: nothing when the rows already held a full, readable record. */
@@ -197,7 +200,11 @@ const make = Effect.gen(function* () {
           kinds.set(declaration.word, { pluginId: source.pluginId, declaration });
         }
       }
-      return { activePluginIds: [...new Set(sources.map((source) => source.pluginId))], kinds };
+      return {
+        activePluginIds: [...new Set(sources.map((source) => source.pluginId))],
+        kinds,
+        offeredKinds: listOfferedKinds(sources),
+      };
     },
   );
 
@@ -211,6 +218,7 @@ const make = Effect.gen(function* () {
       activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
         buildActiveEntityKind(declaration),
       ),
+      offeredKinds: catalog.offeredKinds,
     };
   });
 

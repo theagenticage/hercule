@@ -160,6 +160,33 @@ export interface TaskTraces {
   readonly linkCount: number;
 }
 
+/** How many runs and sessions point at a Task by `task_id` (`countTaskHoldings`). */
+export interface TaskHoldings {
+  readonly runs: number;
+  readonly sessions: number;
+}
+
+/**
+ * What a Task is now, for the check that decides whether a handoff can be
+ * taken back (`readHandoffTraces`).
+ */
+export interface HandoffTraces {
+  /** The Task's stage now. */
+  readonly stage: TaskStage;
+  /** True when the Task was merged into another Task. */
+  readonly merged: boolean;
+  /** How many stage decisions have been made on the Task (`stage_revision`). */
+  readonly stageRevision: number;
+  /** True when the Task links the ref the handoff was made for. */
+  readonly linksRef: boolean;
+  /** How many refs the Task links. */
+  readonly linkCount: number;
+  /** True when `update` has written the Task since it was created. */
+  readonly edited: boolean;
+  /** The runs and sessions the Task holds now. */
+  readonly holdings: TaskHoldings;
+}
+
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
 export interface TrackedTask {
   readonly id: string;
@@ -267,6 +294,12 @@ export interface TaskEdit {
   readonly title?: string;
   readonly description?: string;
   readonly stage?: TaskStage;
+  /**
+   * True when the write is a stage decision that may leave `stage` as it was:
+   * a request that named a stage the Task already has. A write that sets
+   * `stage` is a stage decision whether or not this is set.
+   */
+  readonly decidesStage?: boolean;
   /** Must be the coarse reading of `stage`; it is written only when it changed. */
   readonly status?: TaskStatus;
   readonly priority?: TaskPriority;
@@ -561,6 +594,14 @@ const make = Effect.gen(function* () {
    */
   const taskCanBeSummarized = sql`${buildLiveTaskSql("t")}
                                   AND t.stage NOT IN ${sql.in(FINISHED_STAGES)}`;
+
+  const countTaskHoldings = (id: string): Effect.Effect<TaskHoldings, SqlError> =>
+    Effect.map(
+      sql<{ readonly runs: number; readonly sessions: number }>`
+        SELECT (SELECT count(*) FROM runs WHERE task_id = ${uuidFromString(id)}) AS runs,
+               (SELECT count(*) FROM sessions WHERE task_id = ${uuidFromString(id)}) AS sessions`,
+      (rows) => ({ runs: rows[0]?.runs ?? 0, sessions: rows[0]?.sessions ?? 0 }),
+    );
 
   /**
    * Builds the expression for the id a Task id stands for: the id of the Task
@@ -1503,6 +1544,95 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the facts about the Task `id` that decide whether a handoff can
+     * be taken back, or none when there is no such Task or it is deleted.
+     * Reads the Task by its own id, so a merged Task is returned as itself.
+     * The run and session counts use the partial indexes on `runs.task_id` and
+     * `sessions.task_id`.
+     */
+    readHandoffTraces: (
+      id: string,
+      ref: ExternalRef,
+    ): Effect.Effect<Option.Option<HandoffTraces>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly stage: string;
+          readonly merged: number;
+          readonly stage_revision: number;
+          readonly links_ref: number;
+          readonly link_count: number;
+          readonly edited: number;
+        }>`
+          SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged, tasks.stage_revision,
+                 EXISTS (SELECT 1 FROM task_entity_links
+                         WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
+                 (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count,
+                 tasks.revision > 0 AS edited
+          FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`;
+        const row = rows[0];
+        if (row === undefined) return Option.none();
+        return Option.some({
+          stage: row.stage as TaskStage,
+          merged: row.merged === 1,
+          stageRevision: row.stage_revision,
+          linksRef: row.links_ref === 1,
+          linkCount: row.link_count,
+          edited: row.edited === 1,
+          holdings: yield* countTaskHoldings(id),
+        });
+      }),
+
+    /**
+     * Returns how many runs and sessions the Task `id` holds, whoever put them
+     * there: a run started on it, a Thread that joined or was moved onto it,
+     * or the runs and Threads of a Task merged into it all show up as a higher
+     * count. A handoff keeps these counts to see, when it is taken back, that
+     * nothing joined the Task since.
+     */
+    countTaskHoldings,
+
+    /**
+     * Returns the stage revision of the Task with that id, whether or not it is
+     * deleted or merged, or none when there is no row.
+     */
+    readStageRevision: (id: string): Effect.Effect<Option.Option<number>, SqlError> =>
+      Effect.map(
+        sql<{ readonly stage_revision: number }>`
+          SELECT stage_revision FROM tasks WHERE id = ${uuidFromString(id)}`,
+        (rows) => Option.fromNullishOr(rows[0]?.stage_revision),
+      ),
+
+    /**
+     * Raises the stage revision of the Task with that id, and writes nothing
+     * else: not `updated_at`, not `revision`. It records a stage decision that
+     * kept the stage, so it leaves no trace a reader of the Task could see.
+     */
+    raiseStageRevision: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE tasks SET stage_revision = stage_revision + 1 WHERE id = ${uuidFromString(id)}`,
+      ),
+
+    /**
+     * Returns true when a Task that the board lists shows a failed run: it is
+     * live (neither deleted nor merged), not at `done` or `dropped`, and
+     * `failed_run_id` names a run. These are the board's own conditions
+     * (`listBoardTasks`), so a Task that raises this is one the board shows
+     * with a failure. One `EXISTS` on `tasks_failed`, which holds only such
+     * Tasks. The conditions must stay as the index writes them for SQLite to
+     * use it.
+     */
+    existsFailedTaskOnBoard: (): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT EXISTS (
+            SELECT 1 FROM tasks t INDEXED BY tasks_failed
+            WHERE t.failed_run_id IS NOT NULL AND t.${sql.literal(ON_BOARD)}
+              AND ${buildLiveTaskSql("t")}
+          ) AS found`,
+        (rows) => rows[0]?.found === 1,
+      ),
+
+    /**
      * Returns the id of the Task that the workspace's row in `task_workspaces`
      * names, or none when the workspace has no row or the Task is deleted, merged or
      * finished (the contract's `FINISHED_STAGES`). One query that joins the
@@ -1631,6 +1761,11 @@ const make = Effect.gen(function* () {
           // Done and Drop change who handles a failure: the board stops
           // listing the Task, and no earlier Undo may bring a failure back.
           if (isFinishedStage(edit.stage)) sets.push(sql`failure_revision = failure_revision + 1`);
+        }
+        // Unlike `stage_changed_at`, the stage revision also moves for a decision that
+        // kept the stage, which is what lets a handoff's Undo see that one was made.
+        if (edit.stage !== undefined || edit.decidesStage === true) {
+          sets.push(sql`stage_revision = stage_revision + 1`);
         }
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;

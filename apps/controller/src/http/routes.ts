@@ -91,6 +91,7 @@ import {
   TaskServiceWithLinkOwnersLayer,
   TaskTrackingRunsLayer,
   TriggeredRunsLayer,
+  WorkflowEntitiesLayer,
   WorkflowRunsLayer,
   WorkflowSignalsLayer,
   WorkspaceStepsLayer,
@@ -909,6 +910,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
     Layer.provide(EventKindsOperationLayer),
     Layer.provide(WorkflowRunsLayer),
     Layer.provide(WorkflowSignalsLayer),
+    Layer.provide(WorkflowEntitiesLayer),
   ),
   CronTriggerSchedulerLayer,
 ).pipe(Layer.provideMerge(TriggerHealthLayer));

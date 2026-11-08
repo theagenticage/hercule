@@ -26,7 +26,13 @@ import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration, TextGenerationError, type TextGenerationCall } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
 import { runRepository } from "./repository";
 import { RunService, RunServiceLayer } from "./service";
@@ -75,6 +81,7 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskLinkOwnersLayer))),

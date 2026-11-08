@@ -24,8 +24,9 @@ const AT = "2026-11-01T00:00:00.000Z";
 
 const insertHandoff = (sql: SqlClient.SqlClient, run: string, undoResult: string | null) =>
   Effect.exit(
-    sql`INSERT INTO entity_handoffs (run_id, ref, task_id, task_created, stage_revision, undo_result)
-        VALUES (${buildTestId(run)}, 'github:pr:acme/api#1', ${buildTestId("task")}, 1, 1, ${undoResult})`,
+    sql`INSERT INTO entity_handoffs (run_id, ref, task_id, task_created, stage_revision,
+                                    runs_on_task, sessions_on_task, undo_result)
+        VALUES (${buildTestId(run)}, 'github:pr:acme/api#1', ${buildTestId("task")}, 1, 1, 1, 0, ${undoResult})`,
   );
 
 describe("the entity handoffs migration", () => {

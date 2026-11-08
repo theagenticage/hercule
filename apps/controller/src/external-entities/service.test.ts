@@ -26,7 +26,7 @@ import {
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { connectionRepository } from "../connections";
-import { uuidFromString, uuidToString, withTransaction } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { EntityLookups, PluginHost, type DecidedResolution, type SearchOutcome } from "../plugins";
@@ -1419,6 +1419,153 @@ describe("link and unlink", () => {
       { error: { code: "invalid_state" } },
       { error: { code: "invalid_state" } },
       { error: { code: "not_found" } },
+    ]);
+  });
+});
+
+const WEB = "github.com/acme/web";
+const API = "github.com/acme/api";
+
+/** Inserts a stored workflow that takes an `acme/ticket` and an `acme/acme` account, and returns its id. */
+const insertWorkflow = (
+  sql: SqlClient.SqlClient,
+  name: string,
+  options: {
+    readonly workspace?: unknown;
+    readonly enabled?: boolean;
+    readonly invalid?: boolean;
+    readonly kinds?: ReadonlyArray<string>;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const id = uuidToString(mintUuid());
+    const definition = {
+      name,
+      inputs: [
+        { name: "ticket", entity: { kinds: options.kinds ?? [KIND] }, required: true },
+        { name: "account", connection: { type: "acme/acme" }, required: true },
+      ],
+      steps: [],
+      ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+    };
+    const at = new Date().toISOString();
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO workflows (id, source, definition, enabled, invalid_since, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, '', ${JSON.stringify(definition)},
+                ${options.enabled === false ? 0 : 1}, ${options.invalid === true ? at : null},
+                ${at}, ${at})`,
+    );
+    return id;
+  });
+
+/** Inserts a repo Resource with this canonical remote, and returns its id. */
+const insertRepo = (sql: SqlClient.SqlClient, canonicalRemote: string) =>
+  Effect.gen(function* () {
+    const id = uuidToString(mintUuid());
+    const at = new Date().toISOString();
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, 'repo', ${`https://${canonicalRemote}`}, ${canonicalRemote}, 1,
+                ${at}, ${at})`,
+    );
+    return id;
+  });
+
+describe("what a card offers", () => {
+  it("gives cards of one kind and repository one offer set, and each card its own accounts", async () => {
+    const result = await run(({ service, sql, report, connectionId, insertAccount, entityId }) =>
+      Effect.gen(function* () {
+        const second = yield* insertAccount("acme-2");
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        yield* report(second, [buildObservation("1")]);
+        const review = yield* insertWorkflow(sql, "Review");
+        yield* insertWorkflow(sql, "Disabled", { enabled: false });
+        yield* insertWorkflow(sql, "Invalid", { invalid: true });
+        yield* insertWorkflow(sql, "Other kind", { kinds: ["acme/epic"] });
+        const inbox = yield* service.queryInbox();
+        const detail = yield* service.read(yield* entityId(ticketRef("1")));
+        return { review, inbox, detail, second };
+      }),
+    );
+    const [first, other] = result.inbox.cards;
+    expect(first!.offerSetId).toBe(other!.offerSetId);
+    expect(result.inbox.offerSets).toEqual({
+      [first!.offerSetId]: [
+        {
+          workflowId: result.review,
+          name: "Review",
+          answers: [],
+          connectionInputName: "account",
+        },
+      ],
+    });
+    expect(first!.actingConnections.map((account) => account.label)).toEqual(["acme-1", "acme-2"]);
+    expect(other!.actingConnections.map((account) => account.label)).toEqual(["acme-1"]);
+    expect(result.detail.offers).toEqual(result.inbox.offerSets[first!.offerSetId]);
+    expect(result.detail.actingConnections).toEqual(first!.actingConnections);
+  });
+
+  it("splits offer sets by the repository the work lands in, and a fork compares its target", async () => {
+    const result = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("web", { repository: { target: { remote: WEB } } }),
+          buildObservation("api", { repository: { target: { remote: API } } }),
+          buildObservation("fork", {
+            repository: {
+              target: { remote: WEB },
+              head: { remote: "github.com/someone/web", branch: "fix" },
+            },
+          }),
+        ]);
+        const webOnly = yield* insertWorkflow(sql, "Web only", {
+          workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
+        });
+        const inbox = yield* service.queryInbox();
+        const setOf = (key: string) =>
+          inbox.cards.find((card) => card.ref === ticketRef(key))!.offerSetId;
+        return { webOnly, inbox, setOf };
+      }),
+    );
+    const { inbox, setOf } = result;
+    expect(setOf("web")).toBe(setOf("fork"));
+    expect(setOf("api")).not.toBe(setOf("web"));
+    expect(inbox.offerSets[setOf("web")]![0]!.unavailable).toBeUndefined();
+    expect(inbox.offerSets[setOf("api")]![0]!.unavailable).toEqual({
+      reason: "repository",
+      message: "Web only works on acme/web only",
+    });
+  });
+
+  it("offers a workflow with a fixed repository on a kind that has none", async () => {
+    const offers = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* insertWorkflow(sql, "Web only", {
+          workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
+        });
+        return (yield* service.read(yield* entityId(ticketRef("1")))).offers;
+      }),
+    );
+    expect(offers.map((offer) => offer.unavailable)).toEqual([undefined]);
+  });
+
+  it("says no account can act when the only Connection is disabled", async () => {
+    const detail = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* insertWorkflow(sql, "Review");
+        yield* withTransaction(sql, sql`UPDATE connections SET status = 'disabled'`);
+        return yield* service.read(yield* entityId(ticketRef("1")));
+      }),
+    );
+    expect(detail.actingConnections).toEqual([]);
+    expect(detail.offers.map((offer) => offer.unavailable)).toEqual([
+      { reason: "no-account", message: "No connected account can act on this" },
     ]);
   });
 });

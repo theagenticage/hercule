@@ -99,6 +99,7 @@ describe("buildOpenTimeline", () => {
       ...REVIEW,
       signals: {
         openCount: 1,
+        kinds: [],
         latest: buildLine("p1", 1, { say: { say: "Checks failed", tone: "bad" } }),
       },
     };
@@ -122,7 +123,7 @@ describe("buildOpenTimeline", () => {
   });
 
   it("weaves in a linked card when the link points at this thing", () => {
-    const linked = { ...REVIEW, signals: { openCount: 1, latest: buildLine("p1", 1) } };
+    const linked = { ...REVIEW, signals: { openCount: 1, kinds: [], latest: buildLine("p1", 1) } };
 
     const lines = buildOpenTimeline(buildSource({ links: [linkTo(REVIEW.ref, "person")] }), [
       linked,
@@ -262,7 +263,7 @@ describe("the keys of the lines", () => {
 describe("buildListedTimelineSource", () => {
   it("holds the newest signal of a card alone, or nothing for a card with none", () => {
     const latest = buildLine("s1", 2);
-    const card = buildInboxCard("1", { signals: { openCount: 1, latest } });
+    const card = buildInboxCard("1", { signals: { openCount: 1, kinds: [], latest } });
     expect(buildListedTimelineSource(card)).toMatchObject({ ref: card.ref, signals: [latest] });
     expect(buildListedTimelineSource(buildInboxCard("2")).signals).toEqual([]);
   });

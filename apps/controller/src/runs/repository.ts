@@ -1030,6 +1030,25 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id of a pending or running run of the stored workflow
+     * `workflowId` on the Task, or none when it has no such run. One lookup on
+     * `runs_task_id`, which reads only the runs of the Task.
+     */
+    findLiveRunIdOnTask: (
+      taskId: string,
+      workflowId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE task_id = ${uuidFromString(taskId)}
+            AND workflow_id = ${uuidFromString(workflowId)}
+            AND status IN ('pending', 'running')
+          LIMIT 1`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
      * Points every run of the Task `sourceId` at the Task `targetId`, for a
      * merge. One statement on `runs_task_id`.
      */

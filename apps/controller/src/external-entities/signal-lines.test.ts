@@ -601,6 +601,27 @@ describe("Inbox membership and arrivals", () => {
     ]);
   });
 
+  it("lists the distinct kinds of all the open signals on a card, snoozed ones too and resolved ones never", async () => {
+    const inbox = await run(({ repository, refresh, reconcile }) =>
+      Effect.gen(function* () {
+        yield* refresh(ACCOUNT_A, [ticket("two")], 1);
+        yield* reconcile(ACCOUNT_A, [ticket("three", { concerns: ["assigned"] })], 1);
+        yield* raiseSignal(ticketRef("two"), { kind: "acme-tracker/mentioned" });
+        yield* raiseSignal(ticketRef("two"), { kind: "acme-tracker/mentioned", createdAt: at(3) });
+        yield* raiseSignal(ticketRef("two"), {
+          kind: "acme-tracker/assigned",
+          snoozeUntil: at(99),
+        });
+        yield* raiseSignal(ticketRef("two"), { kind: "acme-tracker/closed", resolved: true });
+        return yield* readInbox(repository, 5);
+      }),
+    );
+    const kindsOf = (name: string) =>
+      inbox.cards.find((card) => card.ref === ticketRef(name))!.signals.kinds;
+    expect(kindsOf("two")).toEqual(["acme-tracker/assigned", "acme-tracker/mentioned"]);
+    expect(kindsOf("three")).toEqual([]);
+  });
+
   it("picks the latest signal by creation time, then id", async () => {
     const latest = await run(({ repository, refresh }) =>
       Effect.gen(function* () {
