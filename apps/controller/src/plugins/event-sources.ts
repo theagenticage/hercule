@@ -52,7 +52,7 @@ const buildCatalogEntityKinds = (
   declarations.map(({ word, refPrefix, pace }) => ({
     kind: word,
     refPrefix,
-    work: pace !== "context",
+    classification: pace === "context" ? "context" : "work",
   }));
 
 /**

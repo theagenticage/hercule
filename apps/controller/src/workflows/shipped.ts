@@ -87,7 +87,19 @@ steps:
       onlyWhenLinkedWorkFinished: true
 `;
 
-/** Every workflow that ships with Hercule. */
+/**
+ * The keys of the shipped workflows that move a card when a fact arrives. The
+ * first time one of them is installed, every live link gets a first fact, so
+ * that cards linked before the workflow existed are corrected. Another shipped
+ * workflow must not do that: its first install would write fresh facts that
+ * are newer than every drag's fence, and undo every drag.
+ */
+export const CARD_WORKFLOW_KEYS: ReadonlySet<string> = new Set(["card-in-review", "card-landed"]);
+
+/**
+ * Every workflow that ships with Hercule. A workflow added here that does not
+ * move a card (see `CARD_WORKFLOW_KEYS`) installs without the first facts.
+ */
 export const SHIPPED_WORKFLOWS: ReadonlyArray<ShippedWorkflowSource> = [
   { key: "card-in-review", source: CARD_IN_REVIEW_SOURCE },
   { key: "card-landed", source: CARD_LANDED_SOURCE },

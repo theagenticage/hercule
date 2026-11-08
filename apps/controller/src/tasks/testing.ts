@@ -92,8 +92,8 @@ export const declareKinds = Effect.gen(function* () {
     sql`INSERT INTO plugin_contributions (owner, extension_point, id, definition)
       VALUES (${PLUGIN}, 'event-source', ${`${PLUGIN}/${PLUGIN}`}, ${JSON.stringify({
         entityKinds: [
-          { kind: PULL_REQUEST, refPrefix: PULL_REQUEST_PREFIX, work: true },
-          { kind: REPOSITORY_KIND, refPrefix: "northwind:repo:", work: false },
+          { kind: PULL_REQUEST, refPrefix: PULL_REQUEST_PREFIX, classification: "work" },
+          { kind: REPOSITORY_KIND, refPrefix: "northwind:repo:", classification: "context" },
         ],
       })})`,
   );

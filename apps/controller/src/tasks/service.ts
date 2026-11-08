@@ -73,7 +73,14 @@ import {
   type TryAgainUndo,
   type Unauthenticated,
 } from "@hercule/contract";
-import { CurrentActor, currentStamp, requireGrant, requireUserActor, SYSTEM_ACTOR } from "../actor";
+import {
+  CurrentActor,
+  currentStamp,
+  isRunStamp,
+  requireGrant,
+  requireUserActor,
+  SYSTEM_ACTOR,
+} from "../actor";
 import {
   announce,
   nowIso,
@@ -87,8 +94,9 @@ import {
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { chooseRankBetween } from "./board-rank";
+import { removeDuplicates } from "./lists";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
-import { entityFactRepository } from "./entity-facts";
+import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
 import { LinkedEntities } from "./linked-entities";
 import { makeLinkedFacts } from "./linked-facts";
 import { TaskLinkOwners } from "./link-owners";
@@ -136,21 +144,15 @@ const MoveInput = Schema.Struct({ id: Id, ...TaskMoveInput.fields });
 export type MoveInput = Schema.Schema.Type<typeof MoveInput>;
 
 /** The input of `task.linkEntity` and `task.unlinkEntity`: the Task's id and the outside thing's ref. */
-const EntityLinkInput = Schema.Struct({ id: Id, ...TaskEntityLinkInput.fields });
+const LinkEntityInput = Schema.Struct({ id: Id, ...TaskEntityLinkInput.fields });
 
-export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
-
-/** A Task and the outside thing that the branch link step matched to it. */
-export interface EntityLinkPair {
-  readonly taskId: string;
-  readonly ref: string;
-}
+export type LinkEntityInput = Schema.Schema.Type<typeof LinkEntityInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeMove = Schema.decodeUnknownEffect(MoveInput);
-const decodeEntityLink = Schema.decodeUnknownEffect(EntityLinkInput);
+const decodeEntityLink = Schema.decodeUnknownEffect(LinkEntityInput);
 
 /** The fields `updateTask` changes: an update after decoding. */
 interface TaskPatch {
@@ -375,9 +377,6 @@ const joinMergedDescriptions = (
   return target.description === "" ? appended : `${target.description}\n\n${appended}`;
 };
 
-/** Returns the values with duplicates removed, keeping the first of each. */
-const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
-
 /**
  * Returns how a listing is ordered: by relevance for a full-text search,
  * otherwise by the requested sort keys, or by the default when there are
@@ -575,9 +574,11 @@ const make = Effect.gen(function* () {
    * Every stage decision raises the Task's stage revision: a patch that names
    * a `stage` (even the one the Task has, which writes no event), and a
    * `status` that moves the stage. A patch that leaves the stage alone does
-   * not. Neither does a stage that comes from a fact (below): a fact is not a
-   * person or an agent deciding, and the Undo of a handoff reads the revision
-   * to learn whether someone did.
+   * not. Neither does a stage that a workflow run writes from a fact (below):
+   * that is not a person or an agent deciding, and the Undo of a handoff reads
+   * the revision to learn whether someone did. A user or a session that passes
+   * a `stageFactId` is held to the same fence, but it is deciding, so its write
+   * raises the revision like any other.
    *
    * A stage decision also settles which facts it overrules, through the
    * Task's fence (`stage_fact_fence`) and cause (`stage_cause_fact_id`):
@@ -591,8 +592,8 @@ const make = Effect.gen(function* () {
    *   event, no fence. When it is accepted, the fence becomes the fact's
    *   id. If the stage differs, it is written and the cause becomes the fact.
    *   If the Task holds that stage already, only the fence moves, and the
-   *   cause stays: the fact placed nothing. Either way the stage revision
-   *   stays as it was.
+   *   cause stays: the fact placed nothing. For a run the stage revision
+   *   stays as it was (see above).
    *
    * The other fields of a patch with a `stageFactId` are not guarded by the
    * fact: they apply whether the fact is accepted or refused. The workflows
@@ -647,11 +648,12 @@ const make = Effect.gen(function* () {
             ? undefined
             : chooseStageForStatus(before.stage, patch.status));
         // Asking for a stage is a stage decision even when the Task is there
-        // already. A stage that comes from a fact is not anyone deciding it, so
-        // it leaves `stage_revision` alone.
+        // already. A stage that a workflow run writes from a fact is not
+        // anyone deciding it, so it leaves `stage_revision` alone. A user or a
+        // session that passes a fact is fenced like a run, but is deciding.
         if (requestedStage !== undefined) {
-          if (acceptedFactId === undefined) edit.decidesStage = true;
-          else edit.stageFromFact = true;
+          if (acceptedFactId !== undefined && isRunStamp(actor)) edit.stageFromFact = true;
+          else edit.decidesStage = true;
         }
         if (isNewValue(stage, before.stage)) {
           changes.stage = { old: before.stage, new: stage };
@@ -1575,7 +1577,7 @@ const make = Effect.gen(function* () {
      * and with `Validation` when the ref is not a valid external ref.
      */
     linkEntity: (
-      input: EntityLinkInput,
+      input: LinkEntityInput,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
@@ -1608,7 +1610,7 @@ const make = Effect.gen(function* () {
      * - records the unlink (`task_entity_link_suppressions`), so no scan links
      *   the thing again until someone links it by hand;
      * - writes the Fact that lets the card land, when the unlink leaves none
-     *   of the Task's links open and one completed (`recordLandingFact`);
+     *   of the Task's links open and one completed (the landing fact);
      * - marks the summary out of date (a finished Task has none) and announces
      *   `task`, and
      *   `externalEntity` when Hercule holds a record of the thing.
@@ -1619,7 +1621,7 @@ const make = Effect.gen(function* () {
      * a valid external ref.
      */
     unlinkEntity: (
-      input: EntityLinkInput,
+      input: LinkEntityInput,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
@@ -1649,11 +1651,13 @@ const make = Effect.gen(function* () {
     /**
      * Links each matched `(Task, ref)` pair that is still free to link, in one
      * transaction, as the system, and returns the pairs it linked. It is the
-     * write of the branch link step (`daemon/tasks/entity-links.ts`), not an
+     * write of the branch link step (`daemon/tasks/branch-links.ts`), not an
      * operation: no grant is checked and no request carries it.
      *
-     * Each pair is checked again here, because the match was read before this
-     * transaction began. A pair is skipped when the Task is deleted, merged or
+     * The caller reads the match in the same transaction that calls this, so
+     * the pairs are not stale when they are written: the writer is held from
+     * the read to the commit. Each pair is checked again here for what the
+     * match cannot know, and for a caller that did not do that. A pair is skipped when the Task is deleted, merged or
      * finished, when it links the ref already, or when the user unlinked the
      * ref and nobody linked it again. Skipping is how a suppression holds: the
      * owner of the suppressions decides, not the caller's read. A linked pair is
@@ -2174,14 +2178,6 @@ const make = Effect.gen(function* () {
      * when a shipped workflow is first installed.
      */
     recordFirstInstallFacts: linked.recordFirstInstallFacts,
-
-    /**
-     * Writes the fact that lets a card land after an unlink: when the live
-     * Task has no open link left and a completed one, a fact for its newest
-     * completed link. Call it in the transaction of the unlink, after the link
-     * row is gone.
-     */
-    recordLandingFact: linked.recordLandingFact,
 
     /**
      * Gives the Task made for a Thread the Thread's generated title. It

@@ -93,11 +93,12 @@ export const decideFactLifecycles = (
   if (now === undefined || now.classification !== "work" || now.lifecycle === null) {
     return undefined;
   }
-  const previous = before?.lifecycle ?? null;
-  if (previous === null) return { lifecycle: now.lifecycle, previousLifecycle: null };
+  if (before === undefined || before.lifecycle === null) {
+    return { lifecycle: now.lifecycle, previousLifecycle: null };
+  }
+  const previous = before.lifecycle;
   if (previous !== now.lifecycle) return { lifecycle: now.lifecycle, previousLifecycle: previous };
   const itselfChanged =
-    before === undefined ||
     before.isReadable !== now.isReadable ||
     before.isFullRecord !== now.isFullRecord ||
     before.classification !== now.classification;

@@ -26,6 +26,11 @@
  *   `(remote, branch)` without reading every entity. It is an index on the two
  *   JSON expressions, and only entities that have a head are in it. A query
  *   uses it only when it writes the expressions exactly as written here.
+ * - `external_entities.source_created_at` is when the source created the thing,
+ *   as the plugin reports it. It never changes, unlike `source_updated_at`, so
+ *   the branch link step uses it to tell a pull request made before a Task's
+ *   workspace from one made after it. A row read before this column existed
+ *   has none until its next observation.
  * - `tasks.stage_fact_fence` is the highest fact id the Task already accounts
  *   for. A stage write that comes from a fact at or below it does nothing.
  *   `tasks.stage_cause_fact_id` is the fact that placed the Task's current
@@ -88,6 +93,8 @@ export default Effect.gen(function* () {
       json_extract(repository, '$.head.branch')
     ) WHERE json_extract(repository, '$.head.branch') IS NOT NULL
   `;
+
+  yield* sql`ALTER TABLE external_entities ADD COLUMN source_created_at TEXT`;
 
   yield* sql`ALTER TABLE tasks ADD COLUMN stage_fact_fence INTEGER NOT NULL DEFAULT 0`;
   yield* sql`ALTER TABLE tasks ADD COLUMN stage_cause_fact_id INTEGER`;

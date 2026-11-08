@@ -39,6 +39,13 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
+const RUN = {
+  _tag: "run",
+  runId: "0199e0e7-0004-7000-8000-000000000000",
+  stepId: "move",
+  workflowId: null,
+} as unknown as Actor;
+
 const buildSessionActor = (grants: ReadonlyArray<string>): Actor =>
   ({
     _tag: "session",
@@ -443,11 +450,10 @@ describe("reverseEntityHandoff", () => {
           const handoff = yield* handOff;
           const fact = (yield* readFacts).at(-1)!;
           const revisionBefore = yield* readStageRevision(handoff.taskId);
-          const moved = yield* tasks.update({
-            id: handoff.taskId,
-            stage: "in-review",
-            stageFactId: fact.id,
-          });
+          // The workflow that ships with the product writes it, as a run.
+          const moved = yield* tasks
+            .update({ id: handoff.taskId, stage: "in-review", stageFactId: fact.id })
+            .pipe(Effect.provideService(CurrentActor, RUN));
           const revisionAfter = yield* readStageRevision(handoff.taskId);
           const reversal = yield* reverse(handoff);
           const gone = yield* isGone(handoff.taskId);

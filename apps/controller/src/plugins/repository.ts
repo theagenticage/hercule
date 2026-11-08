@@ -51,8 +51,8 @@ export interface CatalogEntityKind {
   readonly kind: string;
   /** Every ref of this kind starts with it. */
   readonly refPrefix: string;
-  /** True for a kind of work (a card), false for a kind of context (a place). */
-  readonly work: boolean;
+  /** `work` for a kind of work (a card), `context` for a kind of context (a place). */
+  readonly classification: "work" | "context";
 }
 
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
@@ -207,29 +207,34 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the entity kinds that the catalog holds for plugins that are
-     * enabled, in a fixed order. The catalog is rewritten at every boot and
-     * keeps the contributions of a disabled plugin, so a kind of a disabled
-     * plugin is left out here and a kind of a removed plugin is gone.
+     * Returns the entity kinds that the catalog holds, in a fixed order,
+     * whether the plugin that declares them is enabled or not. A kind stays
+     * declared while its plugin is registered: disabling the plugin does not
+     * make a linked thing of that kind readable, so it must still count as
+     * work that is not finished. The catalog is rewritten at every boot, so
+     * the kinds of a plugin that was removed are gone.
      */
-    listEnabledEntityKinds: (): Effect.Effect<ReadonlyArray<CatalogEntityKind>, SqlError> =>
+    listDeclaredEntityKinds: (): Effect.Effect<ReadonlyArray<CatalogEntityKind>, SqlError> =>
       Effect.map(
         sql<{
           readonly kind: string;
           readonly ref_prefix: string;
-          readonly work: number;
+          readonly classification: "work" | "context";
         }>`
           SELECT json_extract(k.value, '$.kind') AS kind,
                  json_extract(k.value, '$.refPrefix') AS ref_prefix,
-                 json_extract(k.value, '$.work') AS work
+                 json_extract(k.value, '$.classification') AS classification
           FROM plugin_contributions c
-          LEFT JOIN plugins p ON p.id = c.owner
           JOIN json_each(c.definition, '$.entityKinds') k
-          WHERE c.extension_point = 'event-source' AND COALESCE(p.enabled, 1) = 1
+          WHERE c.extension_point = 'event-source'
           ORDER BY kind
         `,
         (rows) =>
-          rows.map((row) => ({ kind: row.kind, refPrefix: row.ref_prefix, work: row.work === 1 })),
+          rows.map((row) => ({
+            kind: row.kind,
+            refPrefix: row.ref_prefix,
+            classification: row.classification,
+          })),
       ),
 
     /** Returns one plugin's stored value under a key, or `none` when nothing is stored. */

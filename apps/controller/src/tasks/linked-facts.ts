@@ -14,7 +14,7 @@
  *   the write, `recordEntityFacts` after it);
  * - a link is added (`recordLinkFacts`);
  * - the last open link goes away and a completed one remains
- *   (`recordLandingFact`);
+ *   (`recordLandingFact`, called by `unlinkEntity`);
  * - a shipped workflow is installed for the first time
  *   (`recordFirstInstallFacts`).
  *
@@ -33,7 +33,8 @@ import {
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { PlatformEvents } from "../events";
-import { entityFactRepository, type TaskLink } from "./entity-facts";
+import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
+import { groupByTask, removeDuplicates } from "./lists";
 import { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 import {
   classifyLink,
@@ -54,28 +55,18 @@ import { taskRepository } from "./repository";
  */
 export interface LinkedEntitySnapshot {
   /** The live `(Task, ref)` links to the refs the write may change. */
-  readonly links: ReadonlyArray<TaskLink>;
+  readonly links: ReadonlyArray<EntityLinkPair>;
   /** Every link of each Task in `links`, not only the ones to changed refs. */
   readonly linksOfTask: ReadonlyMap<string, ReadonlyArray<string>>;
   /** The state of every ref in `linksOfTask`, before the write. */
   readonly states: ReadonlyMap<string, LinkedEntityState>;
 }
 
-/** Returns the refs of `links` without repeats. */
-const listRefs = (links: Iterable<string>): ReadonlyArray<string> => [...new Set(links)];
-
-/** Groups links by Task, keeping the order of `links` within each Task. */
-const groupByTask = (
-  links: ReadonlyArray<TaskLink>,
-): ReadonlyMap<string, ReadonlyArray<string>> => {
-  const byTask = new Map<string, Array<string>>();
-  for (const { taskId, ref } of links) {
-    const refs = byTask.get(taskId);
-    if (refs === undefined) byTask.set(taskId, [ref]);
-    else refs.push(ref);
-  }
-  return byTask;
-};
+/** Groups the refs of `links` by Task, keeping the order of `links` within each Task. */
+const groupRefsByTask = (
+  links: ReadonlyArray<EntityLinkPair>,
+): ReadonlyMap<string, ReadonlyArray<string>> =>
+  new Map([...groupByTask(links)].map(([taskId, group]) => [taskId, group.map(({ ref }) => ref)]));
 
 /** Counts the links in `refs` by the states in `states`. */
 const countStates = (
@@ -188,7 +179,10 @@ export const makeLinkedFacts = Effect.gen(function* () {
   ): Effect.Effect<LinkedWorkCounts, SqlError> =>
     Effect.gen(function* () {
       const id = yield* tasks.resolveTaskId(taskId);
-      const refs = listRefs([...((yield* facts.listLinkRefs([id])).get(id) ?? []), ...alsoLinking]);
+      const refs = removeDuplicates([
+        ...((yield* tasks.listEntityLinks([id])).get(id) ?? []),
+        ...alsoLinking,
+      ]);
       return countStates(refs, yield* linkedEntities.readMany(refs));
     });
 
@@ -244,8 +238,7 @@ export const makeLinkedFacts = Effect.gen(function* () {
         if (isFinishedStage(task.stage) || fact.value.voidedAt !== null) {
           return { _tag: "refused" } as const;
         }
-        if (claim.factId <= (yield* facts.readFence(task.id)).fence)
-          return { _tag: "refused" } as const;
+        if (claim.factId <= (yield* facts.readFence(task.id))) return { _tag: "refused" } as const;
         if (claim.onlyWhenLinkedWorkFinished) {
           const counts = yield* countTaskLinks(task.id, claim.alsoLinking);
           if (counts.openLinks > 0 || counts.completedLinks === 0)
@@ -264,13 +257,15 @@ export const makeLinkedFacts = Effect.gen(function* () {
       refs: ReadonlyArray<string>,
     ): Effect.Effect<LinkedEntitySnapshot, SqlError> =>
       Effect.gen(function* () {
-        const links = yield* facts.listLiveLinksTo(listRefs(refs));
-        const taskIds = listRefs(links.map(({ taskId }) => taskId));
+        const links = yield* facts.listLiveLinksTo(removeDuplicates(refs));
+        const taskIds = removeDuplicates(links.map(({ taskId }) => taskId));
         const linksOfTask =
           taskIds.length === 0
             ? new Map<string, ReadonlyArray<string>>()
-            : yield* facts.listLinkRefs(taskIds);
-        const states = yield* linkedEntities.readMany(listRefs([...linksOfTask.values()].flat()));
+            : yield* tasks.listEntityLinks(taskIds);
+        const states = yield* linkedEntities.readMany(
+          removeDuplicates([...linksOfTask.values()].flat()),
+        );
         return { links, linksOfTask, states };
       }),
 
@@ -290,9 +285,9 @@ export const makeLinkedFacts = Effect.gen(function* () {
             Effect.gen(function* () {
               const at = yield* nowIso;
               const now = yield* linkedEntities.readMany(
-                listRefs([...snapshot.linksOfTask.values()].flat()),
+                removeDuplicates([...snapshot.linksOfTask.values()].flat()),
               );
-              for (const [taskId, changedRefs] of groupByTask(snapshot.links)) {
+              for (const [taskId, changedRefs] of groupRefsByTask(snapshot.links)) {
                 const allRefs = snapshot.linksOfTask.get(taskId) ?? [];
                 const before = countStates(allRefs, snapshot.states);
                 const after = countStates(allRefs, now);
@@ -337,7 +332,7 @@ export const makeLinkedFacts = Effect.gen(function* () {
               const states = yield* linkedEntities.readMany(allRefs);
               yield* writeFirstFacts(
                 taskId,
-                listRefs(refs).toSorted(),
+                removeDuplicates(refs).toSorted(),
                 states,
                 countStates(allRefs, states),
                 yield* nowIso,
@@ -357,11 +352,12 @@ export const makeLinkedFacts = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           if ((yield* facts.listLiveLinkRefsOf(taskId)).length === 0) return;
-          const newestFirst = (yield* facts.listLinkRefs([taskId])).get(taskId) ?? [];
-          const states = yield* linkedEntities.readMany(newestFirst);
-          const counts = countStates(newestFirst, states);
+          // The links come oldest first, so the newest completed one is the last.
+          const oldestFirst = (yield* tasks.listEntityLinks([taskId])).get(taskId) ?? [];
+          const states = yield* linkedEntities.readMany(oldestFirst);
+          const counts = countStates(oldestFirst, states);
           if (counts.openLinks > 0 || counts.completedLinks === 0) return;
-          const ref = newestFirst.find(
+          const ref = oldestFirst.findLast(
             (candidate) => classifyLink(states.get(candidate)) === "completed",
           )!;
           const state = states.get(ref)!;
@@ -387,8 +383,10 @@ export const makeLinkedFacts = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const links = groupByTask(yield* facts.listAllLiveLinks());
-          const states = yield* linkedEntities.readMany(listRefs([...links.values()].flat()));
+          const links = groupRefsByTask(yield* facts.listAllLiveLinks());
+          const states = yield* linkedEntities.readMany(
+            removeDuplicates([...links.values()].flat()),
+          );
           const at = yield* nowIso;
           for (const [taskId, refs] of links) {
             yield* writeFirstFacts(taskId, refs, states, countStates(refs, states), at);

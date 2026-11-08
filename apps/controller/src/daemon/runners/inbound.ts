@@ -47,7 +47,7 @@ import { absorbFailures, forkAndAbsorbFailures } from "../../absorbing";
 import { DiscussionInputs } from "../discussions";
 import { ProviderAccountProbing } from "../provider-accounts";
 import { Dispatch, Live, makeGithubTokenAnswers } from "../sessions";
-import { EntityLinks, EntityLinksLayer } from "../tasks";
+import { BranchLinks, BranchLinksLayer } from "../tasks";
 import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
@@ -65,7 +65,7 @@ const make = Effect.gen(function* () {
   const { sendClaimed, deliverQueuedInput } = yield* Live;
   const { tellSession } = yield* DiscussionInputs;
   const { answerGithubTokenRequest } = yield* makeGithubTokenAnswers;
-  const entityLinks = yield* EntityLinks;
+  const branchLinks = yield* BranchLinks;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
           if (branchChanged) {
             yield* absorbFailures(
               "Linking the pull requests on a Task's branch failed",
-              promotion.whenServing(Effect.asVoid(entityLinks.linkEntitiesByBranch())),
+              promotion.whenServing(Effect.asVoid(branchLinks.linkEntitiesByBranch())),
             );
           }
           // A workspace that became ready lets its waiting sessions start. The
@@ -368,7 +368,7 @@ export const InboundLayer: Layer.Layer<
   | DiscussionInputs
   | TaskService
 > = Layer.effect(Inbound)(make).pipe(
-  Layer.provide(EntityLinksLayer),
+  Layer.provide(BranchLinksLayer),
   // The runner service is built here from the same layer the HTTP routes use, so
   // the controller keeps one runner service and the boot offers it to nobody
   // else.

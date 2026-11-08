@@ -155,6 +155,9 @@ export const buildSessionStamp = (sessionId: string): string =>
 export const parseSessionStamp = (stamp: string): string | undefined =>
   stamp.startsWith(SESSION_STAMP_PREFIX) ? stamp.slice(SESSION_STAMP_PREFIX.length) : undefined;
 
+/** Returns true when the actor stamp names a workflow run (`run:<id>`). */
+export const isRunStamp = (stamp: string): boolean => stamp.startsWith("run:");
+
 /**
  * Returns the actor a run's step executes as. The run engine executes both
  * action steps and agent steps as this actor, so both read the run's fields the

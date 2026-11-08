@@ -55,6 +55,7 @@ import { LIVE_TASK_LINKS_SQL, makeSummaryDirtyMarker, taskRepository } from "../
 import {
   buildEntityFields,
   buildPlace,
+  buildWorkRecordCondition,
   decideContextComplete,
   deriveAccess,
   deriveStale,
@@ -261,6 +262,7 @@ const buildIncomingValues = ({
         observation.progress === undefined ? undefined : JSON.stringify(observation.progress),
       target_date: observation.targetDate,
       source_updated_at: observation.sourceUpdatedAt,
+      source_created_at: observation.createdAt,
       source_revision: observation.sourceRevision,
     });
   }
@@ -291,6 +293,7 @@ const buildIncomingValues = ({
     target_date: observation.targetDate ?? null,
     waiting_since: observation.waitingSince ?? null,
     source_updated_at: observation.sourceUpdatedAt,
+    source_created_at: observation.createdAt ?? null,
     source_revision: observation.sourceRevision ?? null,
   };
 };
@@ -1518,29 +1521,52 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the stored state (`StoredRecordState`) of each of `refs` that
-     * has a record, by ref. A ref with no record is left out. Two statements
-     * however many refs there are, and no Connection or plugin is consulted:
-     * it answers from the rows alone.
+     * has a record, by ref. A ref with no record is left out. One statement
+     * however many refs there are, reading only the columns the state needs;
+     * the access is derived in the statement (`deriveAccess`: one good read
+     * is enough, else a deleted one, else none). No Connection or plugin is
+     * consulted: it answers from the rows alone.
      */
     readStoredRecordStates: (
       refs: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, StoredRecordState>, SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* readEntities(refs);
-        const observations = yield* readObservations([...rows.keys()]);
-        return new Map(
-          [...rows].map(([ref, row]): [string, StoredRecordState] => [
-            ref,
-            {
-              kind: (row.kind as string | null) ?? "",
-              completeness: row.completeness as "full" | "partial",
-              isWorkRecord: isWorkRecord(row),
-              lifecycle: row.lifecycle as EntityLifecycle | null,
-              access: deriveAccess(observations.get(ref) ?? []),
-            },
-          ]),
-        );
-      }),
+      refs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly kind: string | null;
+              readonly completeness: "full" | "partial";
+              readonly is_work_record: number;
+              readonly lifecycle: EntityLifecycle | null;
+              readonly access: "ok" | "inaccessible" | "deleted";
+            }>`
+              SELECT e.ref, e.kind, e.completeness, e.lifecycle,
+                     CASE WHEN ${sql.literal(buildWorkRecordCondition("e"))}
+                          THEN 1 ELSE 0 END AS is_work_record,
+                     CASE
+                       WHEN EXISTS (SELECT 1 FROM external_entity_observations o
+                                    WHERE o.ref = e.ref AND o.access = 'ok') THEN 'ok'
+                       WHEN EXISTS (SELECT 1 FROM external_entity_observations o
+                                    WHERE o.ref = e.ref AND o.access = 'deleted') THEN 'deleted'
+                       ELSE 'inaccessible'
+                     END AS access
+              FROM external_entities e
+              WHERE e.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
+            (rows) =>
+              new Map(
+                rows.map((row): [string, StoredRecordState] => [
+                  row.ref,
+                  {
+                    kind: row.kind ?? "",
+                    completeness: row.completeness,
+                    isWorkRecord: row.is_work_record === 1,
+                    lifecycle: row.lifecycle,
+                    access: row.access,
+                  },
+                ]),
+              ),
+          ),
 
     /**
      * Returns the refs the Connection holds a row for (what it reads, and what

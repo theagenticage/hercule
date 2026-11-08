@@ -7,7 +7,7 @@
  */
 export { TaskBoardFactsLayer } from "./board-facts";
 export { TaskDetailFactsLayer } from "./detail-facts";
-export { EntityLinks, EntityLinksLayer } from "./entity-links";
+export { BranchLinks, BranchLinksLayer } from "./branch-links";
 export { LinkedEntitiesLayer } from "./linked-entities";
 export { TaskLinkOwnersLayer } from "./link-owners";
 export { makeTaskSessionObserver } from "./summary-observer";

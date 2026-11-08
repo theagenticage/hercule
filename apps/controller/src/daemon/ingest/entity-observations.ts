@@ -7,7 +7,7 @@ import { Notifier } from "../../notifications";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { EntityObservations } from "../../plugins";
 import { absorbFailures } from "../../absorbing";
-import { EntityLinks, EntityLinksLayer, TaskServiceWithPortsLayer } from "../tasks";
+import { BranchLinks, BranchLinksLayer, TaskServiceWithPortsLayer } from "../tasks";
 
 /** Tells whether an observation names the branch its work comes from, so it may belong to a Task's branch. */
 const hasHead = (observation: EntityObservation): boolean =>
@@ -15,7 +15,7 @@ const hasHead = (observation: EntityObservation): boolean =>
 
 const make = Effect.gen(function* () {
   const ingest = yield* ExternalEntityIngest;
-  const entityLinks = yield* EntityLinks;
+  const branchLinks = yield* BranchLinks;
 
   // The scan or refresh is committed when this runs, and the plugin must not
   // see it fail because the link step did: the next scan runs the step again.
@@ -25,7 +25,7 @@ const make = Effect.gen(function* () {
     observations.some(hasHead)
       ? absorbFailures(
           "Linking the pull requests on a Task's branch failed",
-          Effect.asVoid(entityLinks.linkEntitiesByBranch()),
+          Effect.asVoid(branchLinks.linkEntitiesByBranch()),
         )
       : Effect.void;
 
@@ -41,7 +41,7 @@ const make = Effect.gen(function* () {
     listWanted: (reporter, kind, limit) => Effect.orDie(ingest.listWanted(reporter, kind, limit)),
     listTrackedBranches: (reporter, remotePrefix, limit) =>
       Effect.orDie(
-        entityLinks.listTrackedBranches({
+        branchLinks.listTrackedBranches({
           connectionId: reporter.connectionId,
           remotePrefix,
           limit,
@@ -65,7 +65,7 @@ const make = Effect.gen(function* () {
  * layer.
  *
  * After a complete scan or a refresh that wrote entities with a head, it also
- * links the entities that sit on a Task's branch (`EntityLinks`), and it
+ * links the entities that sit on a Task's branch (`BranchLinks`), and it
  * answers which branches a plugin should look up pull requests for.
  */
 export const EntityObservationsLayer: Layer.Layer<
@@ -74,7 +74,7 @@ export const EntityObservationsLayer: Layer.Layer<
   SqlClient.SqlClient | AuditLog | PlatformEvents | Notifier
 > = Layer.effect(EntityObservations)(make).pipe(
   Layer.provide(
-    Layer.mergeAll(ExternalEntityIngestLayer, EntityLinksLayer).pipe(
+    Layer.mergeAll(ExternalEntityIngestLayer, BranchLinksLayer).pipe(
       Layer.provide(TaskServiceWithPortsLayer),
     ),
   ),

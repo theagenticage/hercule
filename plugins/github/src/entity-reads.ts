@@ -44,7 +44,7 @@ export type EntityConcern = "opened" | "review-requested" | "assigned";
 const REPOSITORY_FRAGMENT = `fragment RepositoryFields on Repository { nameWithOwner createdAt }`;
 
 const PULL_REQUEST_FRAGMENT = `fragment PullRequestFields on PullRequest {
-  __typename number title url bodyText isDraft state updatedAt
+  __typename number title url bodyText isDraft state createdAt updatedAt
   author { login }
   repository { ...RepositoryFields }
   headRefName
@@ -100,6 +100,7 @@ const PullRequestNode = Schema.Struct({
   isDraft: Schema.Boolean,
   /** `OPEN`, `CLOSED` or `MERGED`. */
   state: Schema.String,
+  createdAt: Schema.String,
   updatedAt: Schema.String,
   author: AccountNode,
   repository: RepositoryNode,
@@ -286,6 +287,7 @@ const buildPullRequestObservation = (
     concerns,
     ownedByYou,
     ...(reason === undefined ? {} : { reason }),
+    createdAt: node.createdAt,
     sourceUpdatedAt: node.updatedAt,
   };
 };

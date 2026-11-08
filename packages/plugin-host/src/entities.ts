@@ -365,6 +365,13 @@ const optionalObservationFields = {
   repository: Schema.optionalKey(EntityRepository),
   progress: Schema.optionalKey(EntityProgress),
   targetDate: Schema.optionalKey(Timestamp),
+  /**
+   * When the source created the thing. Unlike `sourceUpdatedAt` it never
+   * changes, so the core can tell a thing made before some moment from one
+   * made after it. The branch link step reads it to keep an old pull request
+   * on a reused branch name from linking to a new Task.
+   */
+  createdAt: Schema.optionalKey(Timestamp),
   relations: Schema.optionalKey(EntityObservationRelations),
   /**
    * The source's revision of this thing. An unchanged revision means the

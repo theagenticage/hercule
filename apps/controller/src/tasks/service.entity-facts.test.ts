@@ -5,7 +5,8 @@
  * - what a Task's links count as (`countLinkedWork`)
  * - the facts an entity write makes (`snapshotLinkedEntities` and
  *   `recordEntityFacts`)
- * - the facts a new link, an unlink and a first install make
+ * - the facts a new link and a first install make (the fact of an unlink is
+ *   tested with `unlinkEntity`, in `service.link-by-hand.test.ts`)
  *
  * An entity write is played as the ingest plays it: take the snapshot, change
  * the rows, record the facts, all in one transaction.
@@ -14,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ExternalRef } from "@hercule/contract";
-import { uuidFromString, withTransaction } from "../db";
+import { withTransaction } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { TestClock } from "effect/testing";
 import { TaskService } from "./index";
@@ -101,7 +102,7 @@ describe("counting a Task's linked work", () => {
     expect(counts).toEqual({ openLinks, completedLinks });
   });
 
-  it("ignores the kinds of a plugin that is disabled", async () => {
+  it("counts a thing nobody has read from a disabled plugin as open: its declared kind still holds", async () => {
     const counts = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -113,7 +114,7 @@ describe("counting a Task's linked work", () => {
         return yield* tasks.countLinkedWork(task.id);
       }),
     );
-    expect(counts).toEqual({ openLinks: 0, completedLinks: 0 });
+    expect(counts).toEqual({ openLinks: 1, completedLinks: 0 });
   });
 
   it("counts a context record as neither", async () => {
@@ -382,45 +383,6 @@ describe("the facts a new link makes", () => {
       }),
     );
     expect(facts).toEqual([]);
-  });
-});
-
-describe("the fact an unlink makes", () => {
-  it("lands the newest completed link when nothing open is left, and writes nothing while a link is open", async () => {
-    const { whileOpen, landed } = await run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const tasks = yield* TaskService;
-        yield* arrangeConnection;
-        yield* arrange(
-          { ref: pr(1), lifecycle: "completed" },
-          { ref: pr(2), lifecycle: "completed" },
-          { ref: pr(3), lifecycle: "open" },
-        );
-        const task = yield* createTaskLinking("Linked", pr(1));
-        yield* TestClock.adjust(A_MINUTE);
-        yield* tasks.update({ id: task.id, provenance: [{ ref: pr(2) }, { ref: pr(3) }] });
-        const before = (yield* readFacts).length;
-        yield* withTransaction(sql, tasks.recordLandingFact(task.id));
-        const whileOpen = (yield* readFacts).length - before;
-        yield* withTransaction(
-          sql,
-          Effect.andThen(
-            sql`DELETE FROM task_entity_links WHERE task_id = ${uuidFromString(task.id)} AND ref = ${pr(3)}`,
-            tasks.recordLandingFact(task.id),
-          ),
-        );
-        return { whileOpen, landed: (yield* readFacts).slice(before) };
-      }),
-    );
-    expect(whileOpen).toBe(0);
-    expect(landed).toEqual([
-      expect.objectContaining({
-        ref: pr(2),
-        lifecycle: "completed",
-        previousLifecycle: "completed",
-      }),
-    ]);
   });
 });
 

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { LiveMessage } from "@hercule/contract";
 import { HOST_API, registerEventSource, type Plugin } from "@hercule/plugin-host";
 import {
@@ -23,6 +24,7 @@ import {
   waitWithin,
   type ServerHarness,
 } from "../http/testing";
+import { pluginRepository } from "./repository";
 import { registry as shipped } from "./registry";
 import {
   buildHarnessDefinition,
@@ -998,15 +1000,44 @@ describe("the event kinds the shipped github plugin declares", () => {
       async ({ sql }) => {
         const rows = await readContributionRows(sql, "event-source", "github");
         const definition = JSON.parse(rows[0]!.definition) as {
-          readonly entityKinds: ReadonlyArray<{ kind: string; refPrefix: string; work: boolean }>;
+          readonly entityKinds: ReadonlyArray<{
+            kind: string;
+            refPrefix: string;
+            classification: "work" | "context";
+          }>;
         };
         expect(definition.entityKinds).toEqual(
           expect.arrayContaining([
-            { kind: "github/pull-request", refPrefix: "github:pr:", work: true },
-            { kind: "github/issue", refPrefix: "github:issue:", work: true },
-            { kind: "github/repository", refPrefix: "github:repo:", work: false },
+            { kind: "github/pull-request", refPrefix: "github:pr:", classification: "work" },
+            { kind: "github/issue", refPrefix: "github:issue:", classification: "work" },
+            { kind: "github/repository", refPrefix: "github:repo:", classification: "context" },
           ]),
         );
+      },
+      { plugins: shipped },
+    );
+  });
+
+  it("still lists the declared entity kinds of a plugin once it is disabled, because its things stay unread work", async () => {
+    await withServer(
+      async ({ base, sql }) => {
+        const token = await completeSetup(base);
+        const listKinds = () =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(pluginRepository, (plugins) => plugins.listDeclaredEntityKinds()),
+            ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+          );
+        const pullRequest = {
+          kind: "github/pull-request",
+          refPrefix: "github:pr:",
+          classification: "work",
+        };
+        expect(await listKinds()).toContainEqual(pullRequest);
+
+        expect((await movePlugin(base, token, "github", "disable")).status).toBe(200);
+
+        expect(await listKinds()).toContainEqual(pullRequest);
       },
       { plugins: shipped },
     );

@@ -40,7 +40,7 @@ export const LinkedEntitiesLayer: Layer.Layer<LinkedEntities, never, SqlClient.S
             if (refs.length === 0) return states;
             const records = yield* entities.readStoredRecordStates(refs);
             const needsCatalog = refs.some((ref) => records.get(ref)?.completeness !== "full");
-            const declared = needsCatalog ? yield* plugins.listEnabledEntityKinds() : [];
+            const declared = needsCatalog ? yield* plugins.listDeclaredEntityKinds() : [];
             for (const ref of refs) {
               const record = records.get(ref);
               if (record?.completeness === "full") {
@@ -57,7 +57,7 @@ export const LinkedEntitiesLayer: Layer.Layer<LinkedEntities, never, SqlClient.S
               if (kind === undefined) continue;
               states.set(ref, {
                 kind: record?.kind || kind.kind,
-                classification: kind.work ? "work" : "context",
+                classification: kind.classification,
                 isFullRecord: false,
                 lifecycle: record?.lifecycle ?? null,
                 isReadable: record?.access === "ok",

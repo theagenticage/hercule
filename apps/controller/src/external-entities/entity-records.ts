@@ -53,6 +53,7 @@ export const SHARED_COLUMNS = [
   "target_date",
   "waiting_since",
   "source_updated_at",
+  "source_created_at",
   "source_revision",
 ] as const;
 
@@ -63,10 +64,10 @@ export type SharedValues = { readonly [Column in SharedColumn]: string | number 
 
 /**
  * The shared columns a card or a place shows. A change to `source_revision`
- * alone changes nothing on screen, so it is not here.
+ * or `source_created_at` alone changes nothing on screen, so they are not here.
  */
 export const VISIBLE_COLUMNS: ReadonlyArray<SharedColumn> = SHARED_COLUMNS.filter(
-  (column) => column !== "source_revision",
+  (column) => column !== "source_revision" && column !== "source_created_at",
 );
 
 /** One row of `external_entities`. */

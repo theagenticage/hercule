@@ -25,7 +25,7 @@
  * only if the database does not change while it is read. A rank is not a key
  * to resume from, and there is nothing else to page by.
  */
-import type * as Arr from "effect/Array";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -269,6 +269,9 @@ export interface SummaryAttempt {
   readonly dirtyRevision: number;
 }
 
+/** The most Task ids one statement lists links for, well under SQLite's limit on bound values. */
+const MAX_TASKS_PER_LINK_STATEMENT = 500;
+
 /** The columns an edit may set. An absent one is left as it was. */
 export interface TaskEdit {
   readonly title?: string;
@@ -281,9 +284,9 @@ export interface TaskEdit {
    */
   readonly decidesStage?: boolean;
   /**
-   * True when the stage write comes from a fact, which is not anyone deciding
-   * the stage. Such a write leaves the stage revision as it was, and the
-   * revision too when the stage is all it changes.
+   * True when a workflow run writes the stage from a fact, which is not anyone
+   * deciding the stage. Such a write leaves the stage revision as it was, and
+   * the revision too when the stage is all it changes.
    */
   readonly stageFromFact?: boolean;
   /** Must be the coarse reading of `stage`; it is written only when it changed. */
@@ -340,7 +343,7 @@ const COLUMNS =
  * definition of a joinable Task, shared by `LIVE_TASK_LINKS_SQL` and by reads
  * that need the links of a single Task and so cannot go through its ranking.
  */
-export const LIVE_TASK_SQL = `tasks.deleted_at IS NULL
+export const JOINABLE_TASK_SQL = `tasks.deleted_at IS NULL
     AND tasks.merged_into_id IS NULL
     AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
 
@@ -358,7 +361,7 @@ export const LIVE_TASK_LINKS_SQL = `
   SELECT l.task_id, l.ref, l.linked_at, l.following,
          ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
   FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
-  WHERE ${LIVE_TASK_SQL}`;
+  WHERE ${JOINABLE_TASK_SQL}`;
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -1427,30 +1430,32 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the refs each of the Tasks links, in the order they were linked
-     * (then by ref). A Task with no link has no entry. One statement however
-     * many Tasks there are.
+     * (then by ref). A Task with no link has no entry. One statement for each
+     * 500 Tasks.
      */
     listEntityLinks: (
       taskIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
-      taskIds.length === 0
-        ? Effect.succeed(new Map())
-        : Effect.map(
+      Effect.map(
+        Effect.forEach(
+          Arr.chunksOf(taskIds, MAX_TASKS_PER_LINK_STATEMENT),
+          (chunk) =>
             sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
               SELECT task_id, ref FROM task_entity_links
-              WHERE task_id IN ${sql.in(taskIds.map(uuidFromString))}
+              WHERE task_id IN ${sql.in(chunk.map(uuidFromString))}
               ORDER BY linked_at, ref`,
-            (rows) => {
-              const links = new Map<string, Array<string>>();
-              for (const row of rows) {
-                const taskId = uuidToString(row.task_id);
-                const refs = links.get(taskId);
-                if (refs === undefined) links.set(taskId, [row.ref]);
-                else refs.push(row.ref);
-              }
-              return links;
-            },
-          ),
+        ),
+        (chunks) => {
+          const links = new Map<string, Array<string>>();
+          for (const row of chunks.flat()) {
+            const taskId = uuidToString(row.task_id);
+            const refs = links.get(taskId);
+            if (refs === undefined) links.set(taskId, [row.ref]);
+            else refs.push(row.ref);
+          }
+          return links;
+        },
+      ),
 
     /**
      * Returns every Task that is not finished and has a handoff entry, the

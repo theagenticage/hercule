@@ -20,7 +20,7 @@ import { mintUuid, uuidFromString, withTransaction } from "../../db";
 import { get, post, send, type ServerHarness } from "../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
-import { SHIPPED_WORKFLOWS } from "../../workflows";
+import { SHIPPED_WORKFLOWS, type ShippedWorkflowSource } from "../../workflows";
 import { TaskService } from "../../tasks";
 import {
   ACCEPTED_GITHUB_TOKEN,
@@ -268,6 +268,32 @@ describe("the first install", () => {
       // A later start installs nothing, so it writes no fact that could undo a drag.
       await harness.runWithShippedWorkflowServices(installShippedWorkflows(SHIPPED_WORKFLOWS));
       expect(await countFacts(harness)).toBe(factsBefore + 1);
+    });
+  });
+
+  it("is not repeated when a later start installs a shipped workflow that moves no card", async () => {
+    await withCardController(async (controller) => {
+      const { harness } = controller;
+      const { connectionId } = await installShipped(controller);
+      await createTask(controller, "Fix the cart badge", PULL_REQUEST_REF);
+      await storePullRequest(harness, connectionId, PULL_REQUEST_REF, "open");
+      await waitUntilCaughtUp(harness);
+      const factsBefore = await countFacts(harness);
+      const another: ShippedWorkflowSource = {
+        key: "something-else",
+        source: SHIPPED_WORKFLOWS[0]!.source.replace(
+          "name: Move a card to In review when its pull request opens",
+          "name: Something else that ships",
+        ),
+      };
+
+      const exit = await harness.runWithShippedWorkflowServices(
+        installShippedWorkflows([...SHIPPED_WORKFLOWS, another]),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(await runEffect(harness.sql`SELECT key FROM shipped_workflows`)).toHaveLength(3);
+      expect(await countFacts(harness)).toBe(factsBefore);
     });
   });
 

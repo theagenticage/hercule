@@ -17,6 +17,7 @@ import { Effect } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ExternalRef, TaskStage } from "@hercule/contract";
+import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService } from "./index";
@@ -39,8 +40,12 @@ type WriteKind =
   | "nothing"
   /** Only the fence moved. */
   | "fence-only"
-  /** The stage changed, with its event and revision. */
+  /** The stage changed, with its event, and no revision of any kind rose. */
   | "moved"
+  /** Only the fence moved, and the stage revision rose: someone decided to keep the stage. */
+  | "fence-only as a decision"
+  /** The stage changed, with its event, and both revisions rose: someone decided. */
+  | "moved as a decision"
   /** The write failed with a `Validation` error that names `stageFactId`. */
   | "refused-as-invalid"
   | "something else";
@@ -97,24 +102,25 @@ const readObservation = (taskId: string) =>
 
 /**
  * Tells what happened to the Task between two observations of it. A write
- * that comes from a fact never raises the stage revision or the revision,
- * because a fact is not someone deciding or editing: any change of them is
- * "something else".
+ * that a workflow run makes from a fact never raises the stage revision or the
+ * revision, because a fact is not someone deciding or editing: it is "moved"
+ * or "fence-only". The same write by a user or a session is a decision, and
+ * raises them.
  */
 const classifyWrite = (before: Observation, after: Observation): WriteKind => {
   const sameRow = before.revision === after.revision && before.updatedAt === after.updatedAt;
   const noEvent = before.updatedEvents === after.updatedEvents;
   const sameStageRevision = before.stageRevision === after.stageRevision;
-  if (sameRow && noEvent && sameStageRevision && before.stage === after.stage) {
-    return before.fence === after.fence ? "nothing" : "fence-only";
+  const decided = after.stageRevision === before.stageRevision + 1;
+  const stageMoved = before.stage !== after.stage;
+  const oneEvent = after.updatedEvents === before.updatedEvents + 1;
+  if (sameRow && noEvent && !stageMoved) {
+    if (sameStageRevision) return before.fence === after.fence ? "nothing" : "fence-only";
+    if (decided) return "fence-only as a decision";
   }
-  if (
-    sameStageRevision &&
-    before.stage !== after.stage &&
-    after.revision === before.revision &&
-    after.updatedEvents === before.updatedEvents + 1
-  ) {
-    return "moved";
+  if (stageMoved && oneEvent) {
+    if (sameStageRevision && after.revision === before.revision) return "moved";
+    if (decided && after.revision === before.revision + 1) return "moved as a decision";
   }
   return "something else";
 };
@@ -148,17 +154,44 @@ const createTaskAt = (stage: TaskStage, ...refs: ReadonlyArray<ExternalRef>) =>
     });
   });
 
+/** Who can send a stage write that names a fact. A workflow run does in the product. */
+const ACTORS = {
+  run: {
+    _tag: "run",
+    runId: "0199e0e7-0004-7000-8000-000000000000",
+    stepId: "move",
+    workflowId: null,
+  },
+  user: {
+    _tag: "user",
+    userId: "0199e0e7-0000-7000-8000-000000000000",
+    credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
+  },
+  session: {
+    _tag: "session",
+    sessionId: "0199e0e7-0002-7000-8000-000000000000",
+    profileId: "0199e0e7-0003-7000-8000-000000000000",
+    grants: ["task.update"],
+    profileGrants: ["task.update"],
+    assistantId: null,
+    agentId: null,
+  },
+} as unknown as Record<"run" | "user" | "session", Actor>;
+
 /** Sends the stage write a workflow sends when a fact arrives. */
 const deliverFact = (
   taskId: string,
   factId: number,
   stage: TaskStage,
-  options: { readonly onlyWhenLinkedWorkFinished?: true } = {},
+  options: { readonly onlyWhenLinkedWorkFinished?: true; readonly by?: keyof typeof ACTORS } = {},
 ) =>
   Effect.gen(function* () {
     yield* TestClock.adjust(A_MINUTE);
     const tasks = yield* TaskService;
-    return yield* tasks.update({ id: taskId, stage, stageFactId: factId, ...options });
+    const { by = "run", ...fields } = options;
+    return yield* tasks
+      .update({ id: taskId, stage, stageFactId: factId, ...fields })
+      .pipe(Effect.provideService(CurrentActor, ACTORS[by]));
   });
 
 /** Takes away a Task's link by hand, as a person does. */
@@ -653,6 +686,60 @@ const ROWS: ReadonlyArray<Row> = [
         return task.id;
       }),
     expected: { stage: "planned", fence: 2, cause: null, deliveries: ["moved"] },
+  },
+  {
+    name: "a user who passes a fact is fenced like a run, but decides: both revisions rise, and the fact is used up",
+    story: (deliver) =>
+      Effect.gen(function* () {
+        yield* arrangeConnection;
+        yield* arrange(open(1));
+        const task = yield* createTaskAt("building", pr(1));
+        yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
+        yield* deliver(task.id, deliverFact(task.id, 2, "in-review", { by: "user" }));
+        yield* deliver(task.id, deliverFact(task.id, 2, "in-review"));
+        return task.id;
+      }),
+    expected: {
+      stage: "in-review",
+      fence: 2,
+      cause: 2,
+      deliveries: ["moved as a decision", "nothing"],
+    },
+  },
+  {
+    name: "a session that passes a fact is fenced like a run, but decides: it raises the revisions, also when the stage is held",
+    story: (deliver) =>
+      Effect.gen(function* () {
+        yield* arrangeConnection;
+        yield* arrange(open(1), open(2));
+        const task = yield* createTaskAt("in-review", pr(1), pr(2));
+        yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 3
+        yield* writeEntities([pr(2)], setLifecycle(pr(2), "completed")); // fact 4
+        yield* deliver(task.id, deliverFact(task.id, 3, "landed", { by: "session" }));
+        yield* deliver(task.id, deliverFact(task.id, 4, "landed", { by: "session" }));
+        return task.id;
+      }),
+    expected: {
+      stage: "landed",
+      fence: 4,
+      cause: 3,
+      deliveries: ["moved as a decision", "fence-only as a decision"],
+    },
+  },
+  {
+    name: "a user whose fact is refused changes nothing, as a run's would",
+    story: (deliver) =>
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        yield* arrangeConnection;
+        yield* arrange(open(1));
+        const task = yield* createTaskAt("building", pr(1));
+        yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
+        yield* tasks.move({ id: task.id, stage: "planned" });
+        yield* deliver(task.id, deliverFact(task.id, 2, "in-review", { by: "user" }));
+        return task.id;
+      }),
+    expected: { stage: "planned", fence: 2, cause: null, deliveries: ["nothing"] },
   },
   {
     name: "a merge overrules a fact queued before it, and a fact after the merge applies",

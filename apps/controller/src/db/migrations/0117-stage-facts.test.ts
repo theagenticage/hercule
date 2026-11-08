@@ -169,4 +169,21 @@ describe("the stage facts migration", () => {
     );
     expect(plan).toMatch(/SEARCH external_entities USING INDEX external_entities_head/);
   });
+
+  it("gives every entity already stored a source creation time of null", async () => {
+    const rows = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations(BEFORE);
+        yield* sql`INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
+                                                  first_observed_at, updated_at)
+                   VALUES (${buildTestId("entity")}, 'github:pr:acme/api#1', 'github/pull-request',
+                           'Pull request', 'full', 'A change', ${AT}, ${AT})`;
+        yield* runMigrations(UP_TO_STAGE_FACTS);
+        return yield* sql<{ readonly source_created_at: string | null }>`
+          SELECT source_created_at FROM external_entities`;
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
+    );
+    expect(rows).toEqual([{ source_created_at: null }]);
+  });
 });

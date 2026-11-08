@@ -47,6 +47,7 @@ const pullRequestNode = (number: number, overrides: Record<string, unknown> = {}
   bodyText: "",
   isDraft: false,
   state: "OPEN",
+  createdAt: "2026-10-30T08:00:00Z",
   updatedAt: "2026-11-01T10:00:00Z",
   author: { login: "octocat" },
   repository: { nameWithOwner: "Acme/storefront-web", createdAt: "2024-01-05T08:00:00Z" },
@@ -715,6 +716,10 @@ describe("the entities feed's tracked branches", () => {
       status: "merged",
       concerns: [],
       repository: { head: { remote: BRANCH.remote, branch: BRANCH.branch } },
+      // The creation time never moves, so the core can tell an old pull request
+      // on a reused branch name from a new one, whatever happened to it since.
+      createdAt: "2026-10-30T08:00:00Z",
+      sourceUpdatedAt: "2026-11-01T10:00:00Z",
     });
   });
 

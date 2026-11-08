@@ -6,8 +6,6 @@ export {
   type CreatedTaskUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
-  type EntityLinkPair,
-  type EntityLinkInput,
   type FailureRestoration,
   type FailureRestoreRefusal,
   type QueryInput,
@@ -15,9 +13,11 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
+export { groupByTask } from "./lists";
+export type { EntityLinkPair } from "./entity-facts";
 export {
   LIVE_TASK_LINKS_SQL,
-  LIVE_TASK_SQL,
+  JOINABLE_TASK_SQL,
   taskRepository,
   type BoardTask,
   type NewTask,
@@ -35,8 +35,6 @@ export { TaskLinkOwners } from "./link-owners";
 export { entityFactRepository, type StageCauseRecord } from "./entity-facts";
 export { describeStageCause } from "./stage-cause";
 export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
-export type { LinkedEntitySnapshot } from "./linked-facts";
-export type { LinkedWorkCounts } from "./linked-work";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";
 export {

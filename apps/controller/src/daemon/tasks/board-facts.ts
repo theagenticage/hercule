@@ -19,6 +19,7 @@ import { sessionRepository } from "../../sessions";
 import {
   describeStageCause,
   entityFactRepository,
+  groupByTask,
   TaskBoardFacts,
   taskRepository,
   type BoardCardFacts,
@@ -28,19 +29,6 @@ import {
   type StageCauseRecord,
 } from "../../tasks";
 import { readEntityEnvironment } from "./entity-environment";
-
-/** Groups the items by their Task id, keeping their order. */
-const groupByTask = <Item extends { readonly taskId: string }>(
-  items: ReadonlyArray<Item>,
-): ReadonlyMap<string, ReadonlyArray<Item>> => {
-  const byTask = new Map<string, Array<Item>>();
-  for (const item of items) {
-    const group = byTask.get(item.taskId);
-    if (group === undefined) byTask.set(item.taskId, [item]);
-    else group.push(item);
-  }
-  return byTask;
-};
 
 /** Orders text by code unit, which is how refs sort in the database. */
 const compareText = (left: string, right: string): number =>

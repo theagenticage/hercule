@@ -8,7 +8,7 @@ import { absorbFailures } from "../../absorbing";
 import { withTransaction } from "../../db";
 import { formatInlineCode, Notifier } from "../../notifications";
 import { TaskService } from "../../tasks";
-import { WorkflowService, type ShippedWorkflowSource } from "../../workflows";
+import { CARD_WORKFLOW_KEYS, WorkflowService, type ShippedWorkflowSource } from "../../workflows";
 
 /** The kind of the notification raised for a shipped workflow that failed validation. */
 const FAILED_KIND = "core.shipped-workflow-failed";
@@ -60,8 +60,9 @@ const describeRejectedSource = (errors: RejectedSource["errors"]): string => {
  * shipped workflow keeps its key, so it is never installed again).
  *
  * The missing keys install together in one transaction: each workflow with
- * its triggers and its key, then the first-install reconciliation, which
- * writes a fact for every live Task's link to a thing that has a lifecycle.
+ * its triggers and its key, then, when one of them moves cards
+ * (`CARD_WORKFLOW_KEYS`), the first-install reconciliation, which writes a
+ * fact for every live Task's link to a thing that has a lifecycle.
  * The transaction commits only if every source validates and the
  * reconciliation succeeds. Then the Event Router, which reads the log after
  * the commit, finds the triggers in place. A boot that installs a key
@@ -111,10 +112,13 @@ export const installShippedWorkflows = (
           );
           // Cards whose pull request was linked before the workflows existed
           // get their first fact now, in the transaction that installs the
-          // triggers. It runs only here, never on an ordinary start: a fact
-          // written at every start would be newer than a drag's fence and
-          // would undo the drag.
-          yield* tasks.recordFirstInstallFacts();
+          // triggers. It runs only here, never on an ordinary start, and only
+          // when a workflow that moves cards is installed: a fact written at
+          // any other start would be newer than a drag's fence and would undo
+          // the drag.
+          if (missing.some((shipped) => CARD_WORKFLOW_KEYS.has(shipped.key))) {
+            yield* tasks.recordFirstInstallFacts();
+          }
         }),
       ),
     );

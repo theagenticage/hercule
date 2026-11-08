@@ -237,6 +237,30 @@ describe("unlinking a thing by hand", () => {
     ]);
   });
 
+  it("writes the landing fact for the newest of several completed links", async () => {
+    const facts = await run(
+      Effect.gen(function* () {
+        yield* arrangeConnection;
+        yield* arrange(
+          { ref: pr(1), lifecycle: "completed" },
+          { ref: pr(2), lifecycle: "completed" },
+          { ref: pr(3), lifecycle: "open" },
+        );
+        const task = yield* createTaskLinking("Several", pr(1)); // fact 1
+        yield* (yield* minuteLater).linkEntity({ id: task.id, ref: pr(2) }); // fact 2
+        yield* (yield* minuteLater).linkEntity({ id: task.id, ref: pr(3) }); // fact 3
+        yield* (yield* minuteLater).unlinkEntity({ id: task.id, ref: pr(3) });
+        return yield* readFacts;
+      }),
+    );
+    expect(facts.map((fact) => [fact.ref, fact.lifecycle, fact.previousLifecycle]).at(-1)).toEqual([
+      pr(2),
+      "completed",
+      "completed",
+    ]);
+    expect(facts).toHaveLength(4);
+  });
+
   it("writes no landing fact while something is still open, or when nothing completed", async () => {
     const counts = await run(
       Effect.gen(function* () {

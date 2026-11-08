@@ -1,7 +1,7 @@
 /**
  * Tests how a Task's branch finds its pull request, on real rows and the real
  * Task service, through the Entity Observations port that plugins report
- * through and through `EntityLinks`:
+ * through and through `BranchLinks`:
  *
  * - the link step: both orders of branch and pull request, a rename, the
  *   workspaces and branches that never link, the Tasks that share a branch, a
@@ -12,7 +12,7 @@
  * - the plan of the match, which must use the index on the head.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Logger } from "effect";
+import { Context, Effect, Layer, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { EntityObservation, QualifiedEntityKindDeclaration } from "@hercule/plugin-host";
@@ -35,7 +35,7 @@ import {
   USER,
 } from "../../tasks/testing";
 import { EntityObservationsLayer } from "../ingest";
-import { buildBranchMatch, EntityLinks, EntityLinksLayer } from "./entity-links";
+import { buildBranchMatch, BranchLinks, BranchLinksLayer } from "./branch-links";
 
 const REMOTE = "github.com/northwind/web";
 const FORK_REMOTE = "github.com/octo-fork/web";
@@ -61,7 +61,7 @@ const reporter: EntityReporter = {
   kinds: [PULL_REQUEST_KIND],
 };
 
-const layer = Layer.mergeAll(EntityObservationsLayer, EntityLinksLayer).pipe(
+const layer = Layer.mergeAll(EntityObservationsLayer, BranchLinksLayer).pipe(
   Layer.provideMerge(TaskTestLayer),
 );
 
@@ -70,7 +70,7 @@ const run = <A>(
   body: Effect.Effect<
     A,
     unknown,
-    EntityObservations | EntityLinks | TaskService | SqlClient.SqlClient
+    EntityObservations | BranchLinks | TaskService | SqlClient.SqlClient
   >,
   logged: Array<string> = [],
 ) =>
@@ -100,6 +100,7 @@ const pullRequest = (
   number: number,
   head: { readonly branch: string; readonly remote?: string } | undefined,
   lifecycle: "open" | "completed" | "abandoned" = "open",
+  createdAt: string | null = AT,
   sourceUpdatedAt = AT,
 ): EntityObservation => ({
   kind: "pull-request",
@@ -109,6 +110,7 @@ const pullRequest = (
   lifecycle,
   fields: { key: String(number) },
   concerns: ["assigned"],
+  ...(createdAt === null ? {} : { createdAt }),
   sourceUpdatedAt,
   repository: {
     target: { remote: REMOTE },
@@ -238,7 +240,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
   it("links a pull request that is stored first, once the checkout reports the branch", async () => {
     const { before, after } = await run(
       Effect.gen(function* () {
-        const links = yield* EntityLinks;
+        const links = yield* BranchLinks;
         const task = yield* createTask("Fix login");
         const checkout = yield* arrangeBranch({ branch: "hercule/thread-1", taskIds: [task.id] });
         yield* scan(pullRequest(1, { branch: "fix-login" }));
@@ -255,7 +257,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
   it("follows a branch the agent renamed", async () => {
     const refs = await run(
       Effect.gen(function* () {
-        const links = yield* EntityLinks;
+        const links = yield* BranchLinks;
         const task = yield* createTask("Fix login");
         const checkout = yield* arrangeBranch({ branch: "old-name", taskIds: [task.id] });
         yield* scan(pullRequest(1, { branch: "old-name" }));
@@ -439,7 +441,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
     expect(facts).toMatchObject([{ ref: pr(1), lifecycle: "completed", previousLifecycle: null }]);
   });
 
-  it("does not link an old merged or closed pull request on a branch name that was reused", async () => {
+  it("does not link an old merged or closed pull request on a branch name that was reused, even when it was changed since", async () => {
     const refs = await run(
       Effect.gen(function* () {
         const task = yield* createTask("Fix a typo again");
@@ -448,9 +450,23 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
           createdAt: "2026-11-01T00:00:00.000Z",
           taskIds: [task.id],
         });
+        // Both were made before the workspace. The merged one was retitled and
+        // the closed one was commented on after it, so their last change is new.
         yield* refresh(
-          pullRequest(1, { branch: "fix-typo" }, "completed", "2026-09-01T00:00:00.000Z"),
-          pullRequest(2, { branch: "fix-typo" }, "abandoned", "2026-10-15T00:00:00.000Z"),
+          pullRequest(
+            1,
+            { branch: "fix-typo" },
+            "completed",
+            "2026-09-01T00:00:00.000Z",
+            "2026-11-02T00:00:00.000Z",
+          ),
+          pullRequest(
+            2,
+            { branch: "fix-typo" },
+            "abandoned",
+            "2026-10-15T00:00:00.000Z",
+            "2026-11-03T00:00:00.000Z",
+          ),
         );
         return yield* readLinkedRefs(task.id);
       }),
@@ -458,7 +474,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
     expect(refs).toEqual([]);
   });
 
-  it("links an open pull request however old, and one merged after the workspace was created", async () => {
+  it("links an open pull request however old, and one made after the workspace and merged", async () => {
     const { refs, facts } = await run(
       Effect.gen(function* () {
         const task = yield* createTask("Fix a typo again");
@@ -469,7 +485,13 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
         });
         yield* refresh(
           pullRequest(1, { branch: "fix-typo" }, "open", "2026-09-01T00:00:00.000Z"),
-          pullRequest(2, { branch: "fix-typo" }, "completed", "2026-11-02T00:00:00.000Z"),
+          pullRequest(
+            2,
+            { branch: "fix-typo" },
+            "completed",
+            "2026-11-01T06:00:00.000Z",
+            "2026-11-02T00:00:00.000Z",
+          ),
         );
         return { refs: yield* readLinkedRefs(task.id), facts: yield* readFacts };
       }),
@@ -479,6 +501,18 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
       { ref: pr(1), lifecycle: "open", previousLifecycle: null },
       { ref: pr(2), lifecycle: "completed", previousLifecycle: null },
     ]);
+  });
+
+  it("does not link a merged pull request whose creation time is not known", async () => {
+    const refs = await run(
+      Effect.gen(function* () {
+        const task = yield* createTask("Fix login");
+        yield* arrangeBranch({ branch: "fix-login", taskIds: [task.id] });
+        yield* refresh(pullRequest(1, { branch: "fix-login" }, "completed", null));
+        return yield* readLinkedRefs(task.id);
+      }),
+    );
+    expect(refs).toEqual([]);
   });
 
   it("finds a pull request that was opened and merged between two scans, through its branch", async () => {
@@ -495,7 +529,13 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
         yield* scan();
         const asked = yield* observed.listTrackedBranches(reporter, "github.com/", 50);
         yield* refresh(
-          pullRequest(7, { branch: "fix-login" }, "completed", "2026-11-01T12:00:00.000Z"),
+          pullRequest(
+            7,
+            { branch: "fix-login" },
+            "completed",
+            "2026-11-01T06:00:00.000Z",
+            "2026-11-01T12:00:00.000Z",
+          ),
         );
         return {
           asked,
@@ -546,7 +586,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
     const result = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const links = yield* EntityLinks;
+        const links = yield* BranchLinks;
         const task = yield* createTask("Fix login");
         yield* arrangeBranch({ branch: "fix-login", taskIds: [task.id] });
         yield* scan(pullRequest(1, { branch: "fix-login" }));
@@ -574,10 +614,63 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
     });
   });
 
+  it("reads the match and writes the links in one transaction, so no write lands between them", async () => {
+    const { seenWhileLinking, branchAfter, refs } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const tasks = yield* TaskService;
+        const task = yield* createTask("Fix login");
+        const checkout = yield* arrangeBranch({ branch: "fix-login", taskIds: [task.id] });
+        yield* scan(pullRequest(1, { branch: "fix-login" }));
+        yield* withTransaction(sql, sql`DELETE FROM task_entity_links`);
+        let seenWhileLinking: string | undefined;
+        let competitor: Promise<unknown> | undefined;
+        // A task service that, just before it writes, lets another writer try to
+        // move the checkout, waits, and looks at the branch.
+        const racing = {
+          ...tasks,
+          linkMatchedEntities: (pairs: Parameters<typeof tasks.linkMatchedEntities>[0]) =>
+            Effect.gen(function* () {
+              // A fresh fiber tree has no ambient transaction, as another request has none.
+              competitor = Effect.runPromise(
+                withTransaction(
+                  sql,
+                  sql`UPDATE checkouts SET branch = 'elsewhere' WHERE id = ${uuidFromString(checkout)}`,
+                ),
+              );
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)));
+              const rows = yield* sql<{ readonly branch: string }>`
+                SELECT branch FROM checkouts WHERE id = ${uuidFromString(checkout)}`;
+              seenWhileLinking = rows[0]!.branch;
+              return yield* tasks.linkMatchedEntities(pairs);
+            }),
+        };
+        const links = yield* Effect.scoped(
+          Effect.map(Layer.build(Layer.fresh(BranchLinksLayer)), (context) =>
+            Context.get(context, BranchLinks),
+          ),
+        ).pipe(Effect.provideService(TaskService, racing));
+        const linkedNow = yield* links.linkEntitiesByBranch();
+        if (competitor === undefined) throw new Error(`no race: ${JSON.stringify(linkedNow)}`);
+        yield* Effect.promise(() => competitor!);
+        const after = yield* sql<{ readonly branch: string }>`
+          SELECT branch FROM checkouts WHERE id = ${uuidFromString(checkout)}`;
+        return {
+          seenWhileLinking,
+          branchAfter: after[0]!.branch,
+          refs: yield* readLinkedRefs(task.id),
+        };
+      }),
+    );
+    expect(seenWhileLinking).toBe("fix-login");
+    expect(branchAfter).toBe("elsewhere");
+    expect(refs).toEqual([pr(1)]);
+  });
+
   it("writes nothing when nothing matches, and nothing the second time", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const links = yield* EntityLinks;
+        const links = yield* BranchLinks;
         const task = yield* createTask("Fix login");
         yield* arrangeBranch({ branch: "fix-login", taskIds: [task.id] });
         const none = yield* links.linkEntitiesByBranch();
@@ -749,7 +842,7 @@ describe("the branches a plugin is asked to look up", () => {
 });
 
 describe("the plan of the match", () => {
-  it("reads the live Tasks first and reaches everything else by key, with no scan of sessions, workspaces or entities", async () => {
+  it("reads only the joinable Tasks and reaches everything else by key, with no scan of sessions, workspaces or entities", async () => {
     const plan = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -763,6 +856,10 @@ describe("the plan of the match", () => {
     );
     const searches = (table: string) => plan.filter((line) => line.startsWith(`SEARCH ${table} `));
     const scans = plan.filter((line) => line.startsWith("SCAN "));
+    // `INDEXED BY tasks_board_rank` makes it read the joinable Tasks and not the finished ones.
+    expect(scans.filter((line) => /^SCAN tasks\b/.test(line))).toEqual([
+      expect.stringMatching(/^SCAN tasks USING (COVERING )?INDEX tasks_board_rank/),
+    ]);
     expect(searches("s")).toEqual([expect.stringMatching(/USING INDEX \w+ \(task_id=\?\)/)]);
     expect(searches("w")).toHaveLength(1);
     expect(searches("c")).toEqual([
@@ -771,7 +868,7 @@ describe("the plan of the match", () => {
     expect(searches("e")).toEqual([
       expect.stringContaining("external_entities_head (<expr>=? AND <expr>=?)"),
     ]);
-    // The only reads of a whole table are the Tasks and the few rows of the branches.
+    // The only reads of a whole table are the joinable Tasks and the few rows of the branches.
     expect(scans.filter((line) => /^SCAN (s|w|c|r|e)\b/.test(line))).toEqual([]);
   });
 });

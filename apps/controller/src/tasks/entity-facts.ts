@@ -16,11 +16,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { EntityLifecycle } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
-import { LIVE_TASK_LINKS_SQL, LIVE_TASK_SQL } from "./repository";
+import { LIVE_TASK_LINKS_SQL, JOINABLE_TASK_SQL } from "./repository";
 import type { StageCauseThing } from "./stage-cause";
 
-/** The most Task ids one statement lists links for, well under SQLite's limit on bound values. */
-const MAX_TASKS_PER_STATEMENT = 500;
+/** The most refs one statement lists links for, well under SQLite's limit on bound values. */
+const MAX_REFS_PER_STATEMENT = 500;
 
 /** One fact, as the row holds it. */
 export interface EntityFact {
@@ -60,8 +60,8 @@ interface StageCauseRow {
 /** A fact to write. */
 export type NewEntityFact = Omit<EntityFact, "id" | "voidedAt">;
 
-/** A Task's link to a ref. */
-export interface TaskLink {
+/** A Task and a thing outside Hercule it links, or that a scan matched to it. */
+export interface EntityLinkPair {
   readonly taskId: string;
   readonly ref: string;
 }
@@ -87,7 +87,7 @@ const buildFact = (row: FactRow): EntityFact => ({
 });
 
 /** Orders links by Task id, then ref, the way text sorts. */
-const sortLinks = (links: ReadonlyArray<TaskLink>): ReadonlyArray<TaskLink> =>
+const sortLinks = (links: ReadonlyArray<EntityLinkPair>): ReadonlyArray<EntityLinkPair> =>
   links.toSorted((left, right) =>
     left.taskId === right.taskId
       ? left.ref < right.ref
@@ -181,18 +181,14 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the Task's fence, the highest fact id its stage already accounts
-     * for, and the fact that placed its current stage (null when a person, an
-     * agent or the status did). Taken as it is, never followed to a survivor.
-     * Dies on an id that has no Task: the caller has read the Task.
+     * for. Taken as it is, never followed to a survivor. Dies on an id that
+     * has no Task: the caller has read the Task.
      */
-    readFence: (
-      taskId: string,
-    ): Effect.Effect<{ readonly fence: number; readonly causeFactId: number | null }, SqlError> =>
+    readFence: (taskId: string): Effect.Effect<number, SqlError> =>
       Effect.map(
-        sql<{ readonly fence: number; readonly cause: number | null }>`
-          SELECT stage_fact_fence AS fence, stage_cause_fact_id AS cause
-          FROM tasks WHERE id = ${uuidFromString(taskId)}`,
-        (rows) => ({ fence: rows[0]!.fence, causeFactId: rows[0]!.cause }),
+        sql<{ readonly fence: number }>`
+          SELECT stage_fact_fence AS fence FROM tasks WHERE id = ${uuidFromString(taskId)}`,
+        (rows) => rows[0]!.fence,
       ),
 
     /** Sets the Task's fence. */
@@ -262,27 +258,30 @@ const make = Effect.gen(function* () {
     /**
      * Returns the live links to any of `refs`, as `(Task, ref)` pairs sorted by
      * Task and ref. A link is live by `LIVE_TASK_LINKS_SQL`: the one definition
-     * of a joinable Task. One statement however many refs there are, and none
-     * for no refs. The refs are listed in the statement, not read from a
-     * subquery, so SQLite narrows the links by the index on `ref` before it
-     * numbers them; a subquery would make every poll read every link. Pass at
-     * most a few thousand refs.
+     * of a joinable Task. One statement for each 500 refs, and none for no
+     * refs. The refs are listed in the statement, not read from a subquery, so
+     * SQLite narrows the links by the index on `ref` before it numbers them; a
+     * subquery would make every poll read every link.
      */
     listLiveLinksTo: (
       refs: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<TaskLink>, SqlError> =>
-      refs.length === 0
-        ? Effect.succeed([])
-        : Effect.map(
+    ): Effect.Effect<ReadonlyArray<EntityLinkPair>, SqlError> =>
+      Effect.map(
+        Effect.forEach(
+          Arr.chunksOf(refs, MAX_REFS_PER_STATEMENT),
+          (chunk) =>
             sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
               SELECT task_id, ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
-              WHERE ref IN ${sql.in(refs)}`,
-            (rows) =>
-              sortLinks(rows.map((row) => ({ taskId: uuidToString(row.task_id), ref: row.ref }))),
+              WHERE ref IN ${sql.in(chunk)}`,
+        ),
+        (chunks) =>
+          sortLinks(
+            chunks.flat().map((row) => ({ taskId: uuidToString(row.task_id), ref: row.ref })),
           ),
+      ),
 
     /** Returns every live link of every live Task, sorted by Task and ref. */
-    listAllLiveLinks: (): Effect.Effect<ReadonlyArray<TaskLink>, SqlError> =>
+    listAllLiveLinks: (): Effect.Effect<ReadonlyArray<EntityLinkPair>, SqlError> =>
       Effect.map(
         sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
           SELECT task_id, ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})`,
@@ -300,39 +299,9 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly ref: string }>`
           SELECT l.ref FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
-          WHERE l.task_id = ${uuidFromString(taskId)} AND ${sql.literal(LIVE_TASK_SQL)}
+          WHERE l.task_id = ${uuidFromString(taskId)} AND ${sql.literal(JOINABLE_TASK_SQL)}
           ORDER BY l.ref`,
         (rows) => rows.map((row) => row.ref),
-      ),
-
-    /**
-     * Returns every link of each of `taskIds`, live Task or not, as the refs
-     * per Task, newest link first and then by ref. A Task with no link has no
-     * entry. One statement however
-     * many Tasks there are.
-     */
-    listLinkRefs: (
-      taskIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
-      Effect.map(
-        Effect.forEach(
-          Arr.chunksOf(taskIds, MAX_TASKS_PER_STATEMENT),
-          (chunk) =>
-            sql<{ readonly task_id: Uint8Array; readonly ref: string }>`
-              SELECT task_id, ref FROM task_entity_links
-              WHERE task_id IN ${sql.in(chunk.map(uuidFromString))}
-              ORDER BY linked_at DESC, ref`,
-        ),
-        (chunks) => {
-          const byTask = new Map<string, Array<string>>();
-          for (const row of chunks.flat()) {
-            const id = uuidToString(row.task_id);
-            const refs = byTask.get(id);
-            if (refs === undefined) byTask.set(id, [row.ref]);
-            else refs.push(row.ref);
-          }
-          return byTask;
-        },
       ),
   };
 });
