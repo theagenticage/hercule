@@ -237,6 +237,11 @@ export default defineConfig({
           name: "desktop",
           environment: "node",
           include: ["e2e/desktop/**/*.test.ts"],
+          // Starts the app once before any test, so that Mesa's shader cache
+          // (`~/.cache/mesa_shader_cache`) is warm: the first launch in a fresh
+          // container compiles shaders for seconds, and every worker would
+          // pay for it at the same time. See the file.
+          globalSetup: ["e2e/desktop/warm-up.global-setup.ts"],
           // Each test starts the packaged app, which takes seconds.
           testTimeout: HANG_LIMIT_MS,
           hookTimeout: HANG_LIMIT_MS,
