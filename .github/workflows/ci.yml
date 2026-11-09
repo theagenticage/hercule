@@ -515,8 +515,19 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      # The image's name is computed by a Node script that needs a recent
+      # Node, which the runner does not have. The setup action installs one
+      # too, later.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The image loads in the background while the setup action installs the
+      # dependencies, and `desktop-e2e-image-ready` waits for it.
       - uses: ./.github/actions/desktop-e2e-image
+        with:
+          background: "true"
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/desktop-e2e-image-ready
       - name: Run this shard's tests
         run: |
           files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}" --record desktop-e2e-report/plan.json)
@@ -548,7 +559,8 @@ jobs:
   # a cache entry that nothing has restored for 7 days, and the next run then
   # builds the image again.
   desktop-e2e-image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # TEMPORARY: also for this branch's pull request, to prove the save and the hit.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

@@ -1,0 +1,28 @@
+name: Wait for the desktop end-to-end image
+description: >-
+  Finishes what `desktop-e2e-image` with `background: "true"` started: waits for
+  the background `docker load` to end, prints its log, and fails the job when
+  the load failed. Then builds the image when Docker still does not have it,
+  which is the case after a cache miss. Runs after the setup action, because
+  the build needs the repository's Node script.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        LOG: ${{ runner.temp }}/desktop-e2e-image-load.log
+        STATUS: ${{ runner.temp }}/desktop-e2e-image-load.status
+      run: |
+        # The log exists only when the cache had the image and its load started.
+        if [ -f "$LOG" ]; then
+          start=$(date +%s)
+          until [ -f "$STATUS" ]; do sleep 0.5; done
+          echo "Waited $(( $(date +%s) - start )) s for the background docker load."
+          cat "$LOG"
+          if [ "$(cat "$STATUS")" != 0 ]; then
+            echo "::error::The background docker load failed with status $(cat "$STATUS")."
+            exit 1
+          fi
+        fi
+        node apps/desktop/container/image.ts ensure > /dev/null
