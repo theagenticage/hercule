@@ -175,6 +175,19 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --fleet-only
  *
+ * Spec 17 §What Work costs and §What the Inbox costs ask for processes,
+ * memory, idle and per streamed token with Work and with the Inbox open, for
+ * the reads that pushes cause, and for the frames of Work's motion. Pass
+ * `--work-only` for Work: 300 invented Tasks in 10 Projects with 20
+ * Initiatives, a thread open to compare with, Work by Project and by
+ * repository, then Work at 1,000 Tasks (see `perf-work.ts`). Pass
+ * `--inbox-only` for the Inbox: 300 cards with 300 open signals, a thread
+ * open to compare with, then the Inbox (see `perf-inbox.ts`). The full run
+ * measures neither:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --work-only
+ *        pnpm --filter @hercule/desktop perf -- --inbox-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -377,6 +390,8 @@ import {
   seedFleet,
   type FleetLaunchPlan,
 } from "./perf-fleet.ts";
+import { measureInbox } from "./perf-inbox.ts";
+import { measureWork } from "./perf-work.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
@@ -1494,6 +1509,12 @@ const PROVIDERS_ONLY = process.argv.includes("--providers-only");
  */
 const FLEET_ONLY = process.argv.includes("--fleet-only");
 
+/** Whether the run measures only Work (see `measureWork`), and skips every other launch. */
+const WORK_ONLY = process.argv.includes("--work-only");
+
+/** Whether the run measures only the Inbox (see `measureInbox`), and skips every other launch. */
+const INBOX_ONLY = process.argv.includes("--inbox-only");
+
 /**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
@@ -1852,6 +1873,14 @@ const launches = await runWithThreadFixture(async (fixture) => {
     }
     if (FLEET_ONLY) {
       await measureFleet(fixture, userDataDir);
+      return null;
+    }
+    if (WORK_ONLY) {
+      await measureWork(fixture, userDataDir);
+      return null;
+    }
+    if (INBOX_ONLY) {
+      await measureInbox(fixture, userDataDir);
       return null;
     }
     if (SIDEBAR_ONLY) {

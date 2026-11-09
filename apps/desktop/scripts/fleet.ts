@@ -107,7 +107,8 @@ export interface Fleet {
    *   Add a machine dialog showed. Without it, a token is minted.
    * - `machine` sets the memory and disk size the runner reports, which a
    *   machine page needs for its Memory graph and its disk gauge, and whether
-   *   the runner claims to measure disk usage (see `ScriptedMachine`).
+   *   the runner claims to measure disk usage or makes text generations (see
+   *   `ScriptedMachine`).
    */
   readonly enlistRunner: (
     name: string,

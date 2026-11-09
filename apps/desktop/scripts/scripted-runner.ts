@@ -30,7 +30,9 @@
  *   `request.resolved`;
  * - a request for the repository skills of a workspace or of a draft with the
  *   list `setSkills` gave, which is empty until it is called. A user message
- *   lists in `detail.skills` the Skill References it names from that list.
+ *   lists in `detail.skills` the Skill References it names from that list;
+ * - a text generation, when it was enlisted with `answersTextGeneration`, at
+ *   once with the texts of a Task summary (`SCRIPTED_TEXT_GENERATION`).
  *
  * Any agent can ask: the session's own agent, or a subagent at any depth. A
  * Request a subagent opens carries its `subagentId`.
@@ -84,6 +86,7 @@ import type {
   SessionInput,
   SessionStart,
   SKILLS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
   ToolResultAttachment,
   ToolResultImage,
   TurnState,
@@ -479,7 +482,25 @@ export interface ScriptedMachine extends Partial<
    * saying that the runner is too old. Off unless set.
    */
   readonly measuresDiskUsage?: boolean;
+  /**
+   * Whether the runner makes text generations (the `textGeneration`
+   * capability). It answers each at once with `SCRIPTED_TEXT_GENERATION`,
+   * which has the three texts of a Task summary, so the controller's summary
+   * writer can run against it. Off unless set.
+   */
+  readonly answersTextGeneration?: boolean;
 }
+
+/**
+ * The value a scripted runner answers every text generation with: the three
+ * texts of a Task summary, each about as long as a model writes them.
+ */
+export const SCRIPTED_TEXT_GENERATION = {
+  line: "Two designs drafted, depots still worried",
+  standing:
+    "Two designs for the delivery slot cache are drafted, and the second one is in review. The depots asked for a fallback when the cache is cold.",
+  left: "The fallback for a cold cache and a load test against the Friday peak.",
+};
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
 export interface ScriptedSkills {
@@ -521,7 +542,7 @@ export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
   identityPort: number,
-  { measuresDiskUsage = false, ...machine }: ScriptedMachine = {},
+  { measuresDiskUsage = false, answersTextGeneration = false, ...machine }: ScriptedMachine = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",
@@ -1214,6 +1235,12 @@ export async function enlistScriptedRunner(
         });
       case "loginStart":
         return send({ _tag: "loginUrl", requestId: frame.requestId, url: SIGN_IN_URL });
+      case "textGenerationRequest":
+        return send({
+          _tag: "textGenerationReport",
+          requestId: frame.requestId,
+          outcome: { outcome: "ok", value: SCRIPTED_TEXT_GENERATION, usage: null },
+        });
       case "workspaceProvision": {
         const report: WorkspaceReport = {
           _tag: "workspaceReport",
@@ -1382,6 +1409,9 @@ export async function enlistScriptedRunner(
               "skills" satisfies typeof SKILLS_CAPABILITY,
               "repositorySkills" satisfies typeof REPOSITORY_SKILLS_CAPABILITY,
               ...(measuresDiskUsage ? ["diskUsage" satisfies typeof DISK_USAGE_CAPABILITY] : []),
+              ...(answersTextGeneration
+                ? ["textGeneration" satisfies typeof TEXT_GENERATION_CAPABILITY]
+                : []),
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
