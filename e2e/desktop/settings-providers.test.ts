@@ -23,21 +23,22 @@
  * plan. The machine is a scripted runner. It answers a sign-in with a page
  * that nothing serves and never accepts a code, so no vendor's login runs.
  *
- * The test that adds a key account cannot see one accepted: the controller
- * checks the key with the provider, over the network, and a test has no key
- * the provider accepts. It checks the refusal, which reads the same whether
- * the provider refused the key or could not be reached.
+ * The test that adds a key account starts its controller against a stand-in
+ * for Z.ai's API (see `startHttpsStandIn`), which refuses every key with 401,
+ * so it neither needs the network nor waits for Z.ai. It cannot see a key
+ * accepted: a test has no key the provider accepts.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import type { Locator, Page } from "playwright";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import {
   writeProviderAccounts,
   type ProviderAccountFixture,
 } from "../../apps/desktop/scripts/provider-account-fixtures";
 import type { ProviderAccount } from "../../packages/contract/src/index";
 import { arrangeFleet, openSignedIn, type ArrangedFleet } from "./harness";
+import { startHttpsStandIn } from "../https-stand-in";
 
 const ANTHROPIC = "anthropic/anthropic";
 const SUBSCRIPTION = "subscription-per-machine";
@@ -79,10 +80,10 @@ const FIXTURES: ReadonlyArray<ProviderAccountFixture> = [
  * Starts a controller with the accounts of `FIXTURES` and a scripted machine
  * called "moss", which every account is probed on and found signed in. The
  * accounts are written first, because restarting the controller disconnects
- * every runner.
+ * every runner. `controllerEnv` is added to the controller's environment.
  */
-async function arrangeAccounts() {
-  const arranged = await arrangeFleet();
+async function arrangeAccounts(controllerEnv?: Readonly<Record<string, string>>) {
+  const arranged = await arrangeFleet(controllerEnv === undefined ? {} : { controllerEnv });
   await arranged.restartController(() => {
     writeProviderAccounts(arranged.home, FIXTURES);
   });
@@ -288,8 +289,14 @@ describe("Settings > Providers", () => {
     expect((await readAccounts(arranged)).map((account) => account.id)).toContain(work.id);
   });
 
-  it("refuses a key the controller cannot accept, shows why, and keeps the typed key", async () => {
-    const arranged = await arrangeAccounts();
+  it("refuses a key the provider refuses, shows why, and keeps the typed key", async () => {
+    // Z.ai answers a key it does not know with 401 and its own words.
+    const standIn = await startHttpsStandIn({
+      host: "api.z.ai",
+      answer: () => ({ status: 401, json: { error: { message: "Invalid API key" } } }),
+    });
+    onTestFinished(standIn.stop);
+    const arranged = await arrangeAccounts(standIn.controllerEnv);
     const { page } = await openSignedIn(arranged.url);
     await openProviders(page);
 
@@ -305,11 +312,13 @@ describe("Settings > Providers", () => {
     await sheet.getByRole("textbox", { name: "Name", exact: true }).fill("Second");
     await sheet.getByRole("button", { name: "Done", exact: true }).click();
 
-    // The message is the controller's: the provider's own words, or that the
-    // provider could not be reached. Either way the sheet stays and nothing is stored.
+    // The message is the provider's own words. The sheet stays and nothing is stored.
     const refusal = sheet.getByRole("alert");
     await refusal.waitFor();
-    expect((await refusal.textContent())?.trim()).not.toBe("");
+    expect((await refusal.textContent())?.trim()).toBe("Invalid API key");
+    expect(
+      standIn.requests.map(({ method, path, headers }) => [method, path, headers["authorization"]]),
+    ).toEqual([["GET", "/api/coding/paas/v4/models", "Bearer e2e-key-the-provider-refuses"]]);
     expect(
       (await readAccounts(arranged)).filter((account) => account.providerId === "zai/zai"),
     ).toHaveLength(1);

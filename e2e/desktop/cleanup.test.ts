@@ -14,13 +14,24 @@
  * the test moves that time back 8 days while the controller is stopped,
  * which is the only moment the database is not locked.
  *
- * The runner reports its free space once a minute, so the test waits for a
- * report before the removal and one after it. It checks a function, not a
- * speed.
+ * The runner reports its free space once a minute, and right after it removes
+ * a workspace. The test reads a report taken with the file in place, and one
+ * taken after the removal, and tells them apart by what they hold and by the
+ * order the controller stores them in (see `waitForFreeBytes`), never by the
+ * minute a report falls in: the controller keeps one row per minute, so a
+ * second report in the same minute replaces the first.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  statfsSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -35,26 +46,30 @@ import { arrangeFleet, locateCard, openFleet, openSignedIn } from "./harness";
 const BULK_BYTES = 1024 * 1024 * 1024;
 
 /**
- * How much more free space the test requires after the removal. The scratch
- * home shares its disk with the rest of the machine, and other processes write
- * to it during the wait for the reports (up to a few minutes). The file is
- * 1 GiB and the test requires half of it, so ordinary writes by others
- * (a build, a log, a download) are unlikely to hide the removal. A process
- * that writes more than 512 MiB during the wait can still fail a correct
- * cleanup. That risk is accepted, because the runner's storage cannot
- * portably sit on its own volume.
+ * How much more free space the test requires after the removal, and the line
+ * that tells a report taken with the file in place from one taken without it.
+ * The scratch home shares its disk with the rest of the machine, and other
+ * processes write to it during the test. The file is 1 GiB and the test
+ * requires half of it, so ordinary writes by others (a build, a log, a
+ * download) are unlikely to hide the removal. A process that writes or frees
+ * more than 512 MiB between two reports can still fail a correct cleanup, or
+ * pass a report taken at the wrong moment. That risk is accepted, because the
+ * runner's storage cannot portably sit on its own volume.
  */
 const REQUIRED_GROWTH_BYTES = BULK_BYTES / 2;
 
-const HOUR_MS = 60 * 60 * 1000;
-
-const DAY_MS = 24 * HOUR_MS;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * The runner reports its free space every 60 seconds, so a report that
- * follows a given moment arrives within two minutes at the latest.
+ * How long to wait for a report. A runner reports within a second of
+ * connecting. After a removal it starts the measurement within 5 seconds and
+ * sends the report when the read ends, which takes milliseconds here. A slow
+ * machine needs more time but not 60 seconds. A runner that sent no report
+ * after its removals would usually fail this wait, but not always, because the
+ * periodic report can fall inside it. The runner's own tests (`metrics.test.ts`)
+ * prove the report after a removal exactly.
  */
-const FREE_SPACE_REPORT_TIMEOUT_MS = 150_000;
+const FREE_SPACE_REPORT_TIMEOUT_MS = 20_000;
 
 /**
  * Writes a `claude` command into a new scratch folder that runs the stand-in
@@ -79,42 +94,40 @@ function writeStandInAgent(): string {
 }
 
 /**
- * Returns how many reports of the runner's metrics the controller has stored
- * in the last hour. The runner's metrics carry no time, but the controller
- * stores one row per minute and a report is 60 seconds after the one before,
- * so the count goes up by one with each report. A count higher than an
- * earlier one shows that a report arrived in between.
+ * Returns the free bytes of the disk that holds `folder`, as the operating
+ * system reports them to the runner, which reads the blocks an unprivileged
+ * user may still write.
  */
-async function countMetricsReports(client: HerculeClient, runnerId: string): Promise<number> {
-  const { items } = await client.runnerMetrics.query({
-    query: {
-      runnerId,
-      since: new Date(Date.now() - HOUR_MS).toISOString(),
-      resolution: "fiveMinutes",
-      limit: 500,
-    },
-  });
-  return items.reduce((count, point) => count + point.minutes, 0);
+function readDiskFreeBytes(folder: string): number {
+  const stats = statfsSync(folder);
+  return stats.bavail * stats.bsize;
 }
 
 /**
- * Waits for a report of the runner's metrics that arrives after this call, and
- * returns the free disk space it holds. Both sides of the free space check read
- * it through here, so each is a report taken after the moment it stands for,
- * never an older one the controller still holds.
+ * Waits until the free disk space in the runner's latest report is one that
+ * `accept` takes, and returns it. The controller stores only the latest report
+ * of a runner, and a report never replaces a newer one, so every read is the
+ * report an earlier read saw or a later one. A caller therefore tells a report
+ * apart from the ones before it by what it holds: `accept` is true only for a
+ * value that no report taken earlier can hold. That does not depend on the
+ * minute a report arrives in.
  */
-async function readFreeBytesOfNextReport(client: HerculeClient, runnerId: string): Promise<number> {
-  const reportsBefore = await countMetricsReports(client, runnerId);
+async function waitForFreeBytes(
+  client: HerculeClient,
+  runnerId: string,
+  accept: (freeBytes: number) => boolean,
+  what: string,
+): Promise<number> {
+  let lastSeen: number | undefined;
   return pollUntil(
     async () => {
-      if ((await countMetricsReports(client, runnerId)) <= reportsBefore) return undefined;
-      // The report that raised the count is stored with the metrics, so these are it or a later one.
-      return (await client.runner.read({ params: { id: runnerId } })).metrics?.diskFreeBytes;
+      lastSeen = (await client.runner.read({ params: { id: runnerId } })).metrics?.diskFreeBytes;
+      return lastSeen !== undefined && accept(lastSeen) ? lastSeen : undefined;
     },
     {
       timeoutMs: FREE_SPACE_REPORT_TIMEOUT_MS,
-      intervalMs: 1_000,
-      timeoutMessage: "the runner reported no metrics",
+      intervalMs: 250,
+      timeoutMessage: () => `${what}; the latest report holds ${String(lastSeen)} free bytes`,
     },
   );
 }
@@ -199,7 +212,18 @@ it("archives and removes an idle workspace from the cleanup dialog, and the mach
     })
     .toBe("online");
   // The bulk file is in the workspace and measured, and nothing is removed yet.
-  const freeBefore = await readFreeBytesOfNextReport(client, runner!.id);
+  // The report the runner sends as it reconnects is taken with the file in
+  // place. The report the controller held before the restart may have been
+  // taken before the file was written, which is 1 GiB more free space than now,
+  // so it is told by that: with the file in place the free space is below the
+  // line halfway between the two.
+  const freeWithFile = readDiskFreeBytes(readRunnerStorageDir(home));
+  const freeBefore = await waitForFreeBytes(
+    client,
+    runner!.id,
+    (freeBytes) => freeBytes < freeWithFile + REQUIRED_GROWTH_BYTES,
+    "the runner sent no report taken with the file in place",
+  );
 
   const { page } = await openSignedIn(url);
   await openFleet(page);
@@ -232,7 +256,15 @@ it("archives and removes an idle workspace from the cleanup dialog, and the mach
   expect(existsSync(workspaceFolder)).toBe(false);
   await idleRow.waitFor({ state: "detached" });
 
-  // The folder is gone, so the next report shows the file's size back.
-  const freeAfter = await readFreeBytesOfNextReport(client, runner!.id);
+  // The runner reports as soon as the removal ends, so the user sees the freed
+  // space at once. Only a report taken after the removal holds the file's size
+  // back, and the report read before is the newest one the first read can have
+  // seen, so a report that holds it is a later one.
+  const freeAfter = await waitForFreeBytes(
+    client,
+    runner!.id,
+    (freeBytes) => freeBytes - freeBefore >= REQUIRED_GROWTH_BYTES,
+    "the runner sent no report after the removal that shows the freed space",
+  );
   expect(freeAfter - freeBefore).toBeGreaterThanOrEqual(REQUIRED_GROWTH_BYTES);
-}, 360_000);
+}, 120_000);

@@ -469,7 +469,7 @@ jobs:
   # The desktop app's whole end-to-end suite, `pnpm test:desktop`, on Linux in
   # the container of `apps/desktop/container`: Ubuntu 24.04 with a virtual
   # screen, a window manager and a D-Bus session. It builds the compiled binary
-  # and the desktop app in the container, then runs every test. A developer
+  # and the desktop app in the container, then runs the tests. A developer
   # runs the same command on any Linux machine with Docker, so a failure here
   # can be reproduced there.
   #
@@ -482,17 +482,81 @@ jobs:
   # applies to the whole workflow. The tests start the real controller, so
   # almost any file can change their result.
   #
-  # The host installs the dependencies, which the container mounts. The
-  # container downloads Electron and Playwright's Chromium into a Docker volume
-  # that lives only as long as the runner, so every run downloads them again,
-  # about 250 MB, which takes seconds on a runner.
+  # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
+  # it is split over several runners, one per entry of `shard`, and the job
+  # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
+  # shard its files, balanced by the run times recorded in
+  # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
+  # one shard. The target is a job of under 5 minutes; the spec's Testing
+  # section records what was measured. More shards finish sooner, but queue
+  # for runners and use more of them. Add a shard when the slowest one grows.
+  # Refresh the weights from a green run's reports with
+  # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
+  # refuses a run that is unfinished, failed or incomplete. Each shard uploads
+  # its Vitest report and its plan for that.
+  #
+  # Each shard prepares itself: it installs the dependencies on the host,
+  # which the container mounts, gets the container image, builds the compiled
+  # binary and the unpacked desktop app in the container, and runs its files.
+  # The image comes from the Actions cache when it has it (see
+  # `.github/actions/desktop-e2e-image`), with Playwright's headless Chromium inside.
+  # Electron's zip is downloaded into a Docker volume that lives only as long
+  # as the runner, about 100 MB, which takes seconds.
   desktop-e2e-linux:
+    name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      # A failed shard must not hide what the others show.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:desktop:container
+      - uses: ./.github/actions/desktop-e2e-image
+      - name: Run this shard's tests
+        run: |
+          files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}" --record desktop-e2e-report/plan.json)
+          echo "$files"
+          pnpm test:desktop:container \
+            --reporter=default --reporter=json --outputFile.json=desktop-e2e-report/report.json \
+            $files
+      # The run times of this shard's files and the plan they ran under, which
+      # refresh the shard weights. The repository keeps artifacts for 3 days.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-e2e-report-${{ matrix.shard }}
+          path: |
+            desktop-e2e-report/report.json
+            desktop-e2e-report/plan.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # Saves the container image of the end-to-end shards to the Actions cache,
+  # so that the shards load it and do not build it. Only a push to `main` runs
+  # it: a pull request, from a fork or not, never saves, because every later
+  # run restores what is saved. A pull request can still restore what `main`
+  # saved, a fork's too. After a change to the image's inputs (see
+  # `apps/desktop/container/image.ts`), pull requests build the image in each
+  # shard until the change is on `main` and this job has saved it, and the
+  # first run on `main` builds it in each shard too, since it runs beside this
+  # job. It does nothing when the cache has the image already. GitHub deletes
+  # a cache entry that nothing has restored for 7 days, and the next run then
+  # builds the image again.
+  desktop-e2e-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: ./.github/actions/desktop-e2e-image
+        with:
+          publish: "true"
 
   # Builds the desktop app's Linux packages, a `.deb` and an Arch Linux
   # package, installs each the way a user would, and starts the app. The `.deb`
