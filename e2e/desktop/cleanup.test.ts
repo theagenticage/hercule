@@ -135,7 +135,8 @@ function setWorkspaceLastUsedAt(home: string, workspaceId: string, usedAt: Date)
 it("archives and removes an idle workspace from the cleanup dialog, and the machine's free space grows", async () => {
   const agentFolder = writeStandInAgent();
   const { url, home, fleet, client, waitForStatus, restartController } = await arrangeFleet({
-    ownRunnerEnv: { PATH: `${agentFolder}${delimiter}${process.env["PATH"] ?? ""}` },
+    controllerEnv: { PATH: `${agentFolder}${delimiter}${process.env["PATH"] ?? ""}` },
+    keepOwnRunner: true,
   });
   const [runner] = (await client.runner.query({ query: { limit: 10 } })).items;
   await client.runner.update({ params: { id: runner!.id }, payload: { name: "atlas" } });
