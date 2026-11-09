@@ -814,6 +814,40 @@ export function runSecondInstance(
  */
 export const WINDOW_VISIBILITY_TIMEOUT_MS = 30_000;
 
+/**
+ * Builds the expression that moves the window `window` (an expression in main)
+ * to one corner of the screen's work area, chosen by `worker`: 0 to 3 are the
+ * four corners, and larger numbers start again. The expression evaluates to
+ * true once it has moved the window, and to false until main has a window on
+ * screen, because a window moved before it shows could be placed again when
+ * it does.
+ *
+ * A plain app, unlike one Playwright drives, reads `document.visibilityState`
+ * as "hidden" while another window covers it completely, and its page then
+ * does what it does for a hidden window. Every app window opens at the same
+ * place, and the tests of other workers keep theirs on top (see
+ * `keepWindowOnTop`), so one of them could cover this window, and a test that
+ * counts what the page does on hide and show would count that too. A window
+ * in a corner is never covered by a window at the usual place, and two
+ * workers' windows are never in the same corner, so each keeps its own corner
+ * of the screen uncovered and reads as visible.
+ */
+function buildMoveToCorner(window: string, worker: number): string {
+  return `(() => {
+    if (${window} === undefined || !${window}.isVisible()) return false;
+    const { screen } = require("electron");
+    const area = screen.getPrimaryDisplay().workArea;
+    const bounds = ${window}.getBounds();
+    const corner = ${String(worker % 4)};
+    ${window}.setBounds({
+      ...bounds,
+      x: corner % 2 === 0 ? area.x : area.x + area.width - bounds.width,
+      y: corner < 2 ? area.y : area.y + area.height - bounds.height,
+    });
+    return true;
+  })()`;
+}
+
 /** The test package, started as a plain process by `launchPlainAppForTest`. */
 export interface PlainAppForTest {
   /**
@@ -835,6 +869,10 @@ export interface PlainAppForTest {
  * `launchPlainApp` and `signInOnce`). The app is stopped when the test
  * finishes, and the test fails if the app did not quit cleanly.
  *
+ * Once its window shows, it is moved to a corner of the screen that no other
+ * worker's window takes (see `buildMoveToCorner`), so that no window covers
+ * it and its page keeps reading as visible.
+ *
  * Nothing attaches to the page: the returned functions reach it through
  * main's Node inspector, one connection per call. A test uses this app where
  * Playwright would change what it checks, such as how the page runs while
@@ -850,6 +888,20 @@ export async function launchPlainAppForTest(url: string): Promise<PlainAppForTes
     assertExitedCleanly(app.process);
   });
   const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
+  await pollUntil(
+    async () =>
+      (await evaluateInMain(
+        app.inspectorUrl,
+        buildMoveToCorner(window, Number(process.env["VITEST_POOL_ID"] ?? "1")),
+      )) === true
+        ? true
+        : undefined,
+    {
+      timeoutMs: 30_000,
+      intervalMs: 50,
+      timeoutMessage: "the app's window never showed, so it could not be moved to its corner",
+    },
+  );
   return {
     evaluateInPage: (expression) =>
       evaluateInMain(
