@@ -17,9 +17,9 @@
  * pasted token against api.github.com, and Sentry against sentry.io. So the
  * table's rows are written into the scratch database while the controller
  * is stopped (see `replaceConnections`), with the events that arrived
- * through them (see `insertConnectionEvents`), and the setup test pastes a fake
- * token, which GitHub refuses when the machine is online and which fails to
- * reach GitHub when it is not. Both end in the same refusal under the field.
+ * through them (see `insertConnectionEvents`). The setup test starts its
+ * controller against a stand-in for api.github.com that answers 401 (see
+ * `startHttpsStandIn`), so it neither needs the network nor waits for GitHub.
  *
  * With `HERCULE_E2E_GITHUB_TOKEN` set to a real token, one more test creates
  * a GitHub Connection from it and sees its row healthy. Without it, that test
@@ -28,7 +28,7 @@
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import type { Locator, Page } from "playwright";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
 import type { Connection } from "../../packages/contract/src/index";
 import {
@@ -37,6 +37,7 @@ import {
   type ConnectionFixture,
 } from "../../apps/desktop/scripts/connection-fixtures";
 import { arrangeFleet, openSignedIn } from "./harness";
+import { startHttpsStandIn } from "../https-stand-in";
 
 /**
  * The Connections the table test writes, in the order the table lists them.
@@ -243,7 +244,13 @@ describe("Settings > Connections", () => {
   });
 
   it("shows GitHub's refusal of a pasted token under the token field, and creates no Connection", async () => {
-    const { url, client } = await arrangeFleet();
+    // GitHub answers a token it does not know with 401, whatever the token.
+    const standIn = await startHttpsStandIn({
+      host: "api.github.com",
+      answer: () => ({ status: 401, json: { message: "Bad credentials" } }),
+    });
+    onTestFinished(standIn.stop);
+    const { url, client } = await arrangeFleet({ ownRunnerEnv: standIn.controllerEnv });
     const { page } = await openSignedIn(url);
     await openConnections(page);
 
@@ -253,9 +260,11 @@ describe("Settings > Connections", () => {
       .filter({ has: page.getByLabel("Personal access token", { exact: true }) });
     const error = field.getByRole("alert");
     await error.waitFor();
-    // The words are GitHub's when it is reachable and the controller's when
-    // it is not, so the test checks only that there are some.
-    expect((await error.textContent())?.trim()).not.toBe("");
+    expect((await error.textContent())?.trim()).toBe("GitHub rejected the token.");
+    // The controller asked GitHub who the token belongs to, with the pasted token.
+    expect(
+      standIn.requests.map(({ method, path, headers }) => [method, path, headers["authorization"]]),
+    ).toEqual([["GET", "/user", `Bearer ${FAKE_TOKEN}`]]);
     expect(await readConnections(client)).toEqual([]);
 
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();

@@ -512,7 +512,8 @@ export default tseslint.config(
     // the binary. The desktop end-to-end suite runs on Node, never inside the
     // binary, and starts a second copy of the packaged app itself, because
     // Playwright cannot start one that exits at once. The skill folder test
-    // runs `mkfifo`, because Node cannot create a named pipe itself.
+    // runs `mkfifo`, because Node cannot create a named pipe itself. The
+    // HTTPS stand-in runs `openssl`, because Node cannot make a certificate.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
@@ -520,6 +521,7 @@ export default tseslint.config(
       "packages/client-core/src/skill-folder.test.ts",
       "apps/desktop/scripts/**/*.ts",
       "e2e/desktop/**/*.ts",
+      "e2e/https-stand-in.ts",
     ],
     rules: {
       "no-restricted-imports": [
