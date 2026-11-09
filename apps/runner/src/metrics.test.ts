@@ -7,7 +7,7 @@
  * - skips a report whose disk and memory read fails or hangs, instead of
  *   reporting zero free bytes, which would take the machine out of service
  *   because of one failed `statfs`;
- * - sends a report soon after a workspace removal ends, once for removals that
+ * - starts a measurement soon after a workspace removal ends, once for removals that
  *   come together, at most once in `REMOVAL_REPORT_DELAY` however long a bulk
  *   removal lasts, and without taking a CPU minute away from the periodic
  *   report;
@@ -539,6 +539,188 @@ describe("reportMetrics after a workspace removal", () => {
         readable = true;
         yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toHaveLength(2);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  /**
+   * Starts the loop with reads that take `readMs` from `readTimes[n]`, so a
+   * test can hold the measurement open while a removal ends. `reads` records
+   * the clock time each read started at.
+   */
+  const startWithSlowReads = (options: {
+    readonly readMs: (readNumber: number) => number;
+    readonly fails?: boolean;
+    /** Runs as read `readNumber` starts, after it captured the disk, to change the world under it. */
+    readonly duringRead?: (
+      readNumber: number,
+      change: { removalEnds: () => void; state: { diskFreeBytes: number } },
+    ) => void;
+  }) =>
+    Effect.gen(function* () {
+      const sent: Array<{ readonly at: number; readonly metrics: RunnerMetrics }> = [];
+      const state = { diskFreeBytes: 100 * GIB };
+      const reads: Array<{ readonly at: number; readonly disk: number }> = [];
+      const workspaceRemovals = yield* Queue.sliding<void>(1);
+      const removalEnds = () => void Queue.offerUnsafe(workspaceRemovals, undefined);
+      const loop = yield* Effect.forkChild(
+        reportMetrics({
+          readCpuTimes: STEADY(),
+          // The value is read when the read starts, like a real `statfs`.
+          readDiskAndMemory: Effect.gen(function* () {
+            const disk = state.diskFreeBytes;
+            reads.push({ at: yield* Clock.currentTimeMillis, disk });
+            options.duringRead?.(reads.length, { removalEnds, state });
+            yield* Effect.sleep(Duration.millis(options.readMs(reads.length)));
+            if (options.fails === true && reads.length > 1) {
+              return yield* Effect.fail(new Cause.UnknownError(new Error("no answer")));
+            }
+            return { ...ROOMY, diskFreeBytes: disk };
+          }),
+          send: (metrics) =>
+            Effect.gen(function* () {
+              sent.push({ at: yield* Clock.currentTimeMillis, metrics });
+            }),
+          workspaceRemovals,
+        }),
+      );
+      yield* settle;
+      return { sent, state, reads, loop, removalEnds: Effect.sync(removalEnds) };
+    });
+
+  it("repeats the CPU of the periodic report that was ahead of it in line, never an older one", async () => {
+    await run(
+      Effect.gen(function* () {
+        // The periodic report at 60 s reads for 8 s, longer than the delay, and a removal ends while it does.
+        const { sent, loop, removalEnds } = yield* startWithSlowReads({
+          readMs: (readNumber) => (readNumber === 2 ? 8_000 : 0),
+        });
+        expect(sent[0]?.metrics.cpu).toBeNull();
+
+        yield* TestClock.adjust(METRICS_INTERVAL);
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(20));
+
+        const cpus = sent.map((report) => report.metrics.cpu);
+        expect(cpus[1], "the periodic report of the first minute").toEqual({
+          averagePercent: 20,
+          peakPercent: 20,
+        });
+        // The report for the removal comes after it and must not take the CPU back to `null`.
+        expect(cpus).toHaveLength(3);
+        expect(cpus[2]).toEqual(cpus[1]);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("starts a removal's measurement the delay after the periodic one that was reading when it ended", async () => {
+    await run(
+      Effect.gen(function* () {
+        // The periodic measurement starts at 60 s and reads for 2 s.
+        const { reads, loop, removalEnds } = yield* startWithSlowReads({
+          readMs: (readNumber) => (readNumber === 2 ? 2_000 : 0),
+        });
+
+        yield* TestClock.adjust(Duration.seconds(61));
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(10));
+
+        // Not at 62 s when the periodic read ends, and never at the same time as it.
+        expect(reads.map((read) => read.at)).toEqual([0, 60_000, 60_000 + DELAY_MS]);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("sends a removal that ends while the first measurement reads, which the first report did not include", async () => {
+    await run(
+      Effect.gen(function* () {
+        // The first read captures the disk, then a removal frees 100 GiB while the read goes on.
+        const { sent, loop } = yield* startWithSlowReads({
+          readMs: (readNumber) => (readNumber === 1 ? 1_000 : 0),
+          duringRead: (readNumber, { removalEnds, state }) => {
+            if (readNumber !== 1) return;
+            state.diskFreeBytes = 200 * GIB;
+            removalEnds();
+          },
+        });
+        yield* TestClock.adjust(Duration.seconds(10));
+
+        expect(sent.map((report) => report.metrics.diskFreeBytes)).toEqual([100 * GIB, 200 * GIB]);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("starts the measurement within the delay and sends the report when a slow read ends", async () => {
+    await run(
+      Effect.gen(function* () {
+        // The report after connecting was sent at 0 s. A removal ends at 1 s, and its read takes 8 s.
+        const { sent, reads, loop, removalEnds } = yield* startWithSlowReads({
+          readMs: (readNumber) => (readNumber > 1 ? 8_000 : 0),
+        });
+        yield* TestClock.adjust(Duration.seconds(1));
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(12));
+
+        expect(reads.map((read) => read.at)).toEqual([0, DELAY_MS]);
+        // A valid slow read is waited for, never cut short to meet the delay.
+        expect(sent.map((report) => report.at)).toEqual([0, DELAY_MS + 8_000]);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("makes one attempt in the delay when removals keep ending and the disk cannot be read", async () => {
+    await run(
+      Effect.gen(function* () {
+        const { sent, reads, loop, removalEnds } = yield* startWithSlowReads({
+          readMs: () => 0,
+          fails: true,
+        });
+
+        // A removal ends every second for 30 seconds, and every read after the first fails.
+        for (let second = 0; second < 30; second++) {
+          yield* removalEnds;
+          yield* TestClock.adjust(Duration.seconds(1));
+        }
+
+        expect(sent, "only the report after connecting was sent").toHaveLength(1);
+        const starts = reads.map((read) => read.at);
+        for (let index = 1; index < starts.length; index++) {
+          expect(starts[index]! - starts[index - 1]!).toBeGreaterThanOrEqual(DELAY_MS);
+        }
+        expect(reads.length).toBeLessThanOrEqual(Math.ceil(30_000 / DELAY_MS) + 1);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("sends no second report for a removal that a periodic report started after it already includes", async () => {
+    await run(
+      Effect.gen(function* () {
+        const { sent, state, loop, removalEnds } = yield* startWithSlowReads({ readMs: () => 0 });
+
+        // A first removal's measurement starts at 57 s, so a second removal at 58 s waits until 62 s.
+        yield* TestClock.adjust(Duration.seconds(57));
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(1));
+        state.diskFreeBytes = 150 * GIB;
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(1));
+        // The periodic report at 60 s starts after the second removal and includes it.
+        yield* TestClock.adjust(Duration.seconds(10));
+
+        expect(sent.map((report) => report.at)).toEqual([0, 57_000, 60_000]);
+        expect(sent[2]?.metrics.diskFreeBytes).toBe(150 * GIB);
 
         yield* Fiber.interrupt(loop);
       }),

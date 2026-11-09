@@ -22,10 +22,12 @@ import { startCpuSampler, type CpuTimes } from "./machine-cpu";
 export const METRICS_INTERVAL: Duration.Duration = Duration.seconds(60);
 
 /**
- * The longest a workspace removal waits for its report: a removal that ends is
- * reported within this time, and a bulk cleanup that removes workspaces one
- * after the other is reported at most once in this time. The controller keeps
- * one row per minute, so a faster rhythm would only replace the same row.
+ * The longest a workspace removal waits before the runner starts the
+ * measurement that includes it, and the shortest time between the starts of
+ * two measurements that removals ask for. A bulk cleanup that removes
+ * workspaces one after the other therefore starts one measurement every
+ * `REMOVAL_REPORT_DELAY` at most. The controller keeps one row per minute, so
+ * a faster rhythm would only replace the same row.
  */
 export const REMOVAL_REPORT_DELAY: Duration.Duration = Duration.seconds(5);
 
@@ -61,8 +63,8 @@ export interface MetricsCheck<E> {
    * because a removal that failed can have deleted files before it failed. The
    * queue holds at most one signal: signals that arrive together are one. It
    * outlives the connection, so `reportMetrics` drops the signals it finds
-   * when it starts: the first report covers them. A test that does not remove
-   * workspaces leaves it out.
+   * before it starts any measurement: the first report covers them. A test
+   * that does not remove workspaces leaves it out.
    */
   readonly workspaceRemovals?: Queue.Dequeue<void>;
 }
@@ -88,18 +90,33 @@ export interface MetricsCheck<E> {
  * - a report's minute ends when its round starts, so the minute is at most
  *   `DISK_AND_MEMORY_TIMEOUT` old when the report is sent.
  *
- * A removal's report is sent within `REMOVAL_REPORT_DELAY` of a signal on
- * `check.workspaceRemovals`, and no sooner than `REMOVAL_REPORT_DELAY` after
- * the last report sent before the signal. So a bulk cleanup sends one report every
- * `REMOVAL_REPORT_DELAY` at most, never one per removal, and never keeps
- * waiting while more removals come: the wait is counted from the first signal.
- * A removal's report takes no CPU minute, because a minute cut short would
- * average a few seconds and put that in the history as a minute. It repeats the
- * CPU of the report before it, so the periodic report that follows still covers
- * its whole minute. The controller keeps one row per minute and a report in the
- * same minute replaces the row, so the repeated CPU leaves the row as it was
- * when the periodic report of that minute came first, and until the periodic
- * report comes when it did not.
+ * A removal asks for a report with a signal on `check.workspaceRemovals`:
+ *
+ * - The measurement that includes it starts within `REMOVAL_REPORT_DELAY` of
+ *   the signal, and no sooner than `REMOVAL_REPORT_DELAY` after the start of
+ *   the last measurement, whether that one worked or failed. The report is
+ *   sent when the measurement ends, so it can be up to `DISK_AND_MEMORY_TIMEOUT`
+ *   later. When another measurement is still running, this one starts when that
+ *   one ends, which is also at most `DISK_AND_MEMORY_TIMEOUT` later. A slow
+ *   valid read is never cut short to meet `REMOVAL_REPORT_DELAY`.
+ * - A bulk cleanup starts one measurement every `REMOVAL_REPORT_DELAY` at most,
+ *   never one per removal, and never keeps waiting while more removals come:
+ *   the wait is counted from the first signal. A failed read counts as a
+ *   measurement, so a stream of removals with a disk that cannot be read logs
+ *   its warning at most once every `REMOVAL_REPORT_DELAY`, not once per removal.
+ * - A signal is included in a measurement that starts after it, whichever loop
+ *   starts it, so a periodic report that starts while a removal waits sends the
+ *   removal's change and the wait ends without a second report. A signal that
+ *   comes while a measurement is already reading is not included in it, and
+ *   asks for the next one.
+ * - It takes no CPU minute, because a minute cut short would average a few
+ *   seconds and put that in the history as a minute. It repeats the CPU of the
+ *   last report sent, chosen when its measurement starts, so a periodic report
+ *   that was ahead of it in line has already set it. The periodic report that
+ *   follows still covers its whole minute. The controller keeps one row per
+ *   minute and a report in the same minute replaces the row, so the repeated
+ *   CPU leaves the row as it was when the periodic report of that minute came
+ *   first, and fills it until the periodic report comes when it did not.
  *
  * A read that fails or takes longer than `DISK_AND_MEMORY_TIMEOUT` is logged
  * and skipped: sending zero free bytes instead would take the machine out of
@@ -109,7 +126,9 @@ export interface MetricsCheck<E> {
  * while the read keeps failing, the controller keeps the last free disk it was
  * sent and places sessions on it. The warning, once a minute, is how that
  * shows. A removal's report that is skipped is not tried again: the next
- * periodic report is at most a minute away.
+ * periodic report is at most a minute away. A removal's skipped report logs the
+ * same warning, which therefore comes more than once a minute only while
+ * removals keep asking, and then at most once every `REMOVAL_REPORT_DELAY`.
  *
  * The controller decides whether a report means the machine can take work,
  * by comparing the free disk with the disk watermark it holds. The runner only
@@ -118,59 +137,76 @@ export interface MetricsCheck<E> {
 export const reportMetrics = <E>(check: MetricsCheck<E>): Effect.Effect<never, E> =>
   Effect.scoped(
     Effect.gen(function* () {
+      const workspaceRemovals = check.workspaceRemovals;
+      // Signals from before this connection are covered by the first report.
+      // This happens before any measurement starts, so a signal that comes
+      // after it is never dropped here.
+      if (workspaceRemovals !== undefined) yield* Queue.clear(workspaceRemovals);
       const sampler = yield* startCpuSampler(check.readCpuTimes);
-      // The periodic loop and the removal loop never read or send at the same
-      // time, so the report sent last is the one read last.
-      const oneReportAtATime = yield* Semaphore.make(1);
-      let lastReportAt = Number.NEGATIVE_INFINITY;
-      let lastReportCpu: RunnerCpu | null = null;
 
-      const readAndSend = (cpu: RunnerCpu | null): Effect.Effect<void, E> =>
-        oneReportAtATime.withPermits(1)(
-          Effect.gen(function* () {
-            const diskAndMemory = yield* Effect.option(
-              Effect.tapCause(
-                Effect.timeout(check.readDiskAndMemory, DISK_AND_MEMORY_TIMEOUT),
-                (cause) =>
-                  Effect.logWarning(
-                    "The runner could not read its free disk space and memory, so it skipped this metrics report",
-                    cause,
-                  ),
-              ),
-            );
-            if (Option.isNone(diskAndMemory)) return;
-            yield* check.send({ ...diskAndMemory.value, cpu });
-            lastReportAt = yield* Clock.currentTimeMillis;
-            lastReportCpu = cpu;
-          }),
-        );
+      // Only one measurement runs at a time, so the report sent last is the one
+      // read last. These three change only while the permit is held, which
+      // makes each decision that reads them one with nothing between the read
+      // and the change.
+      const oneMeasurementAtATime = yield* Semaphore.make(1);
+      let measurementsStarted = 0;
+      let lastMeasurementStartedAt = Number.NEGATIVE_INFINITY;
+      let lastSentCpu: RunnerCpu | null = null;
+
+      /** Measures the disk and memory and sends the report. Call it with the permit held. */
+      const measureAndSend = (cpu: RunnerCpu | null): Effect.Effect<void, E> =>
+        Effect.gen(function* () {
+          // Every signal that came before this point is included in what is
+          // read next. One that comes later waits for the measurement after.
+          if (workspaceRemovals !== undefined) yield* Queue.clear(workspaceRemovals);
+          measurementsStarted += 1;
+          lastMeasurementStartedAt = yield* Clock.currentTimeMillis;
+          const diskAndMemory = yield* Effect.option(
+            Effect.tapCause(
+              Effect.timeout(check.readDiskAndMemory, DISK_AND_MEMORY_TIMEOUT),
+              (cause) =>
+                Effect.logWarning(
+                  "The runner could not read its free disk space and memory, so it skipped this metrics report",
+                  cause,
+                ),
+            ),
+          );
+          if (Option.isNone(diskAndMemory)) return;
+          yield* check.send({ ...diskAndMemory.value, cpu });
+          lastSentCpu = cpu;
+        });
 
       const reportEveryMinute = Effect.gen(function* () {
         while (true) {
           const minute = yield* sampler.takeMinute;
-          yield* readAndSend(minute);
+          yield* oneMeasurementAtATime.withPermits(1)(measureAndSend(minute));
           yield* Effect.sleep(METRICS_INTERVAL);
         }
       });
 
-      const workspaceRemovals = check.workspaceRemovals;
       const reportAfterRemovals =
         workspaceRemovals === undefined
           ? Effect.never
           : Effect.gen(function* () {
-              // Signals from before this connection are covered by the first report.
-              yield* Queue.clear(workspaceRemovals);
               while (true) {
                 yield* Queue.take(workspaceRemovals);
+                const startedBeforeSignal = measurementsStarted;
                 const now = yield* Clock.currentTimeMillis;
-                const sendAt = Math.max(
+                const startAt = Math.max(
                   now,
-                  lastReportAt + Duration.toMillis(REMOVAL_REPORT_DELAY),
+                  lastMeasurementStartedAt + Duration.toMillis(REMOVAL_REPORT_DELAY),
                 );
-                yield* Effect.sleep(Duration.millis(sendAt - now));
-                // Removals that ended while this waited are in the report it sends now.
-                yield* Queue.clear(workspaceRemovals);
-                yield* readAndSend(lastReportCpu);
+                yield* Effect.sleep(Duration.millis(startAt - now));
+                yield* oneMeasurementAtATime.withPermits(1)(
+                  // Decided once the permit is held, so it sees the measurements
+                  // and the report that were ahead in line. A measurement that
+                  // started after the signal already includes the removal.
+                  Effect.suspend(() =>
+                    measurementsStarted > startedBeforeSignal
+                      ? Effect.void
+                      : measureAndSend(lastSentCpu),
+                  ),
+                );
               }
             });
 

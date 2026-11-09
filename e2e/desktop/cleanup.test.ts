@@ -62,11 +62,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * How long to wait for a report. A runner reports within a second of
- * connecting and within 5 seconds of a removal, and a slow machine needs more
- * time but not 60 seconds. A runner that sent no report after its removals
- * would usually fail this wait, but not always, because the periodic report can
- * fall inside it. The runner's own tests (`metrics.test.ts`) prove the report
- * after a removal exactly.
+ * connecting. After a removal it starts the measurement within 5 seconds and
+ * sends the report when the read ends, which takes milliseconds here. A slow
+ * machine needs more time but not 60 seconds. A runner that sent no report
+ * after its removals would usually fail this wait, but not always, because the
+ * periodic report can fall inside it. The runner's own tests (`metrics.test.ts`)
+ * prove the report after a removal exactly.
  */
 const FREE_SPACE_REPORT_TIMEOUT_MS = 20_000;
 
