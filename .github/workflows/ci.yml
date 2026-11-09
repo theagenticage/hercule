@@ -549,8 +549,7 @@ jobs:
   # repository read it with their token, because the Dockerfile's `source` label
   # links the package to the repository.
   desktop-e2e-image:
-    # TEMPORARY: also for this branch's pull request, to measure the pull.
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -564,76 +563,6 @@ jobs:
       - uses: ./.github/actions/desktop-e2e-image
         with:
           publish: "true"
-      # TEMPORARY: the same image as a cache entry, to measure a restore.
-      - id: image
-        run: echo "name=$(node apps/desktop/container/image.ts name)" >> "$GITHUB_OUTPUT"
-      - run: docker save "${{ steps.image.outputs.name }}" --output image.tar && ls -l image.tar
-      - uses: actions/cache/save@v6
-        with:
-          path: image.tar
-          key: desktop-e2e-image-${{ steps.image.outputs.name }}
-
-  # TEMPORARY: measures a pull of the published image in 8 runners at once.
-  desktop-e2e-image-measure-registry:
-    if: github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed'
-    needs: desktop-e2e-image
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Pull the image from the registry
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          name=$(node apps/desktop/container/image.ts name)
-          remote=ghcr.io/${GITHUB_REPOSITORY,,}/$name
-          echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          start=$(date +%s.%N)
-          docker pull "$remote"
-          end=$(date +%s.%N)
-          echo "MEASURE registry pull: $(awk -v a="$end" -v b="$start" 'BEGIN { print a - b }') s"
-          docker image inspect "$remote" --format 'MEASURE image size on disk: {{.Size}} bytes'
-
-  # TEMPORARY: measures a cache restore and a docker load in 8 runners at once.
-  desktop-e2e-image-measure-cache:
-    if: github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed'
-    needs: desktop-e2e-image
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - id: image
-        run: echo "name=$(node apps/desktop/container/image.ts name)" >> "$GITHUB_OUTPUT"
-      - id: restore
-        uses: actions/cache/restore@v6
-        with:
-          path: image.tar
-          key: desktop-e2e-image-${{ steps.image.outputs.name }}
-          fail-on-cache-miss: true
-      - name: Load the image
-        run: |
-          ls -l image.tar
-          start=$(date +%s.%N)
-          docker load --input image.tar
-          end=$(date +%s.%N)
-          echo "MEASURE docker load: $(awk -v a="$end" -v b="$start" 'BEGIN { print a - b }') s"
 
   # Builds the desktop app's Linux packages, a `.deb` and an Arch Linux
   # package, installs each the way a user would, and starts the app. The `.deb`
