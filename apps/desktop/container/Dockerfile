@@ -78,11 +78,14 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
     && unzip -q -j /tmp/bun.zip -d /usr/local/bin && rm /tmp/bun.zip \
     && npm install --global "pnpm@${PNPM_VERSION}"
 
-# The Chromium that this Playwright version drives, which the repository's
-# `pnpm install` does not download. Without it each run would download about
-# 150 MB. `--yes` lets npx fetch the Playwright CLI, which only runs here, and
-# the cache that npx fills is deleted again to keep the image small.
-RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install chromium \
+# The headless Chromium that this Playwright version drives, which the
+# repository's `pnpm install` does not download. `--only-shell` leaves out the
+# full Chromium: `chromium.launch()` with no options runs headless, and
+# Playwright then starts the headless shell, so the full browser would only add
+# about 400 MB. Without the shell each run would download it. `--yes` lets npx
+# fetch the Playwright CLI, which only runs here, and the cache that npx fills
+# is deleted again to keep the image small.
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --only-shell chromium \
     && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
     && rm -rf /root/.npm
 
