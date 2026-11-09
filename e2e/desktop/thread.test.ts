@@ -540,7 +540,7 @@ describe("the thread view", () => {
     // Playwright's focus emulation keeps a hidden page "visible", and the tap
     // is unsubscribed and the rows are kept aside only on a real hide. This
     // test starts the app as a plain process instead.
-    const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
+    const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url, "top-right");
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readLastSnapshot = () =>
       evaluateInPage(READ_LAST_AGENT_TEXT) as Promise<AgentTextSnapshot | undefined>;

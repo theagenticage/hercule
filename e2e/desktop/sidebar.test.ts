@@ -490,7 +490,7 @@ describe("the sidebar", () => {
       // Playwright's focus emulation keeps a hidden page "visible", so its
       // timers are never throttled. This test starts the app as a plain
       // process instead.
-      const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
+      const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url, "bottom-left");
       const hasWaitingRow = `document.querySelector("a.side-row--wait") !== null`;
       await expect
         .poll(

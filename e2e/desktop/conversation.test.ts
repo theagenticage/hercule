@@ -225,7 +225,7 @@ describe("the Conversation", () => {
     // Playwright's focus emulation keeps a hidden page "visible", and the tap
     // is unsubscribed and the rows are kept aside only on a real hide, so the
     // app runs as a plain process.
-    const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
+    const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url, "top-left");
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readTaps = () => evaluateInPage(buildTapCheck(session.id)) as Promise<TapSubscriptions>;
     const readLastSnapshot = () =>
