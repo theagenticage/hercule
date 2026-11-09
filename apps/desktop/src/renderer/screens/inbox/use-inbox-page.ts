@@ -14,6 +14,7 @@ import { readInboxKey, type InboxKeyCommand } from "./read-inbox-key";
 import type { OpenCardControls, RunAndMoveOn } from "./use-run-and-move-on";
 import type { CurrentBy, CurrentCard } from "./use-current-card";
 import type { HandOff } from "./use-hand-off";
+import type { InboxViewChoices } from "./use-inbox-view";
 
 /** How near, in pixels, and how soon after a dismissal, a click counts as the same click again. */
 const SAME_SPOT_PX = 4;
@@ -33,6 +34,15 @@ export interface InboxPageInput {
   /** The element that scrolls the page. */
   readonly scrollRef: RefObject<HTMLElement | null>;
   readonly current: CurrentCard;
+  /**
+   * What the user chose to see. A change of any of these clears what a
+   * repeated click or a walk remembers, because the page under the pointer is
+   * then another page.
+   */
+  readonly view: Pick<
+    InboxViewChoices,
+    "grouping" | "filter" | "requestsShow" | "requestsGrouping" | "requestsSort" | "collapsedGroups"
+  >;
   /** Returns the card `id` on the Inbox as the screen draws it. */
   readonly findCard: (id: string) => InboxCard | undefined;
   readonly open: OpenCardControls;
@@ -90,9 +100,13 @@ export interface InboxPage {
  *   act at once, even after a click on the sidebar. Focus in a text field
  *   stays there.
  * - A roving tab stop gives the Tab key one card to land on.
+ * - When a draw leaves the current card off the page (its group is folded, or
+ *   Show or the filter hides it), there is no current card any more. No other
+ *   card takes its place: reaching a card clears its new mark and changes what
+ *   the page draws.
  */
 export const useInboxPage = (input: InboxPageInput): InboxPage => {
-  const { scrollRef, current, open } = input;
+  const { scrollRef, current, open, view } = input;
   const [isKeysSheetOpen, setKeysSheetOpen] = useState(false);
   const cameFrom = useRef<WalkedFrom | undefined>(undefined);
   const lastDismissal = useRef<{ x: number; y: number; at: number } | null>(null);
@@ -363,10 +377,22 @@ export const useInboxPage = (input: InboxPageInput): InboxPage => {
     };
   }, [scrollRef]);
 
-  // After each draw, the Tab key has one card to land on: the current card, else the first.
+  // A different view is a different page, so a click at the old spot is no repeat of the last dismissal.
+  const { grouping, filter, requestsShow, requestsGrouping, requestsSort, collapsedGroups } = view;
+  useEffect(() => {
+    lastDismissal.current = null;
+    cameFrom.current = undefined;
+  }, [grouping, filter, requestsShow, requestsGrouping, requestsSort, collapsedGroups]);
+
+  // After each draw, a current card that is no longer on the page is let go, and the Tab key has one
+  // card to land on: the current card, else the first.
   useEffect(() => {
     const scroller = scrollRef.current;
     if (scroller === null) return;
+    const gone = current.read();
+    if (gone !== null && findCardElement(scroller, gone.id) === null) {
+      current.set(null, gone.by);
+    }
     const here = current.read();
     const stop =
       (here === null ? null : findCardElement(scroller, here.id)) ??

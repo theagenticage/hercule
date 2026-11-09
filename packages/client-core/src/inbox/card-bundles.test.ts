@@ -4,6 +4,7 @@
  * holds so that a read never moves a card the user has seen. The world is the
  * invented one of `cards.testing.ts`: a ticket is a lead, a review rides on it.
  */
+import { SHOW_ALL } from "./requests-view";
 import type { Inbox } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { toggleFilterValue } from "../desk/filter";
@@ -26,7 +27,13 @@ import {
   type VisitPlacement,
 } from "./visit-placement";
 
-const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
+const VIEW: InboxView = {
+  grouping: HOME_GROUPING,
+  filter: {},
+  requestsGrouping: "none",
+  requestsShow: SHOW_ALL,
+  requestsSort: "oldest",
+};
 
 const layOut = (
   inbox: Inbox,

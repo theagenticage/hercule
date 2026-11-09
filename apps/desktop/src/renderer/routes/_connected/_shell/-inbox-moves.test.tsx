@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
-import { advanceInboxVisit, decideDrawnRiding, HOME_GROUPING } from "@hercule/client-core/inbox";
+import {
+  advanceInboxVisit,
+  decideDrawnRiding,
+  HOME_GROUPING,
+  SHOW_ALL,
+} from "@hercule/client-core/inbox";
 import {
   buildInbox,
   buildInboxCard,
@@ -137,7 +142,13 @@ const setUp = (
       // The visit draws the page as the screen does, so the test can ask where each card rides.
       const drawn = advanceInboxVisit(visit.history, {
         received: moves.inbox,
-        view: { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" },
+        view: {
+          grouping: HOME_GROUPING,
+          filter: {},
+          requestsGrouping: "none",
+          requestsShow: SHOW_ALL,
+          requestsSort: "oldest",
+        },
         released: new Set(),
         isFresh: true,
         hasUserMove: moves.hasPendingEdits,

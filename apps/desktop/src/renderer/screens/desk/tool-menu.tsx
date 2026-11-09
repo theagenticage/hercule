@@ -130,9 +130,23 @@ export function MenuBack({
   );
 }
 
-/** Renders a quiet heading over a group of rows, such as "From your sources". */
-export function MenuHeading({ children }: { readonly children: ReactNode }): JSX.Element {
-  return <p className="menu-h">{children}</p>;
+/**
+ * Renders a quiet heading over a group of rows, such as "From your sources".
+ * Pass an `id` when a `role="group"` around the rows is named by the heading
+ * (`aria-labelledby`).
+ */
+export function MenuHeading({
+  id,
+  children,
+}: {
+  readonly id?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <p id={id} className="menu-h">
+      {children}
+    </p>
+  );
 }
 
 /** Renders a hairline between two groups of rows. */

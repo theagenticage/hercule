@@ -64,6 +64,7 @@
   margin: 0 0 8px;
 }
 .inbox-section-head .desk-heading {
+  flex: none;
   gap: 8px;
 }
 .inbox-none {
@@ -87,32 +88,49 @@
   font: var(--type-summary);
 }
 
-/* ---------- The order of Requests ---------- */
-.inbox-order {
-  position: relative;
+/* ---------- The view of Requests ---------- */
+/* One 24px button at the end of the heading: the sliders icon, then the words for what is not the default. The
+   words give way (an ellipsis) before the heading does, so the heading never wraps or leaves the column. */
+.inbox-view {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  min-width: 0;
   height: 24px;
-  padding: 0 20px 0 6px;
+  padding: 0 4px;
   border-radius: var(--r-xs);
-  color: var(--muted);
+  color: var(--faint);
   font: var(--type-summary);
   white-space: nowrap;
 }
-/* The chevron is the drawing's: 10 by 6 pixels, 6px from the right edge. The icon's box is larger than its stroke, so it is placed by its middle. */
-.inbox-order .ic {
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  margin-top: -8px;
-  color: var(--faint);
+.inbox-view .ic {
+  flex: none;
 }
-.inbox-order:hover {
+.inbox-view:has(.inbox-view-summary) {
+  padding-right: 6px;
+}
+.inbox-view:has(.inbox-view-summary) .ic {
+  color: var(--ink);
+}
+.inbox-view-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.inbox-view:hover {
   color: var(--ink);
   background: var(--hover);
 }
-.inbox-order:focus-visible {
+.inbox-view:has(+ .menu--tool:popover-open) {
+  color: var(--ink);
+  background: var(--selected);
+}
+.inbox-view:has(+ .menu--tool:popover-open) .inbox-view-summary {
+  color: var(--ink);
+}
+.inbox-view:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
@@ -437,10 +455,45 @@
   flex-direction: column;
   gap: 6px;
 }
+.inbox-requests-group[hidden] {
+  display: none;
+}
+/* A group's header is one button: a chevron in the column of the cards' marks, the place's name where the
+   cards' titles start (10px of padding + 16px + 8px = 34px), and, only while the group is folded, its count. */
 .inbox-requests-label {
-  margin: 10px 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 24px;
+  margin: 4px 0 -2px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-xs);
   color: var(--faint);
   font: var(--type-summary);
+  text-align: left;
+}
+.inbox-requests-label .ic {
+  flex: none;
+}
+.inbox-requests-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-requests-count {
+  flex: none;
+  margin-left: -2px;
+  font-variant-numeric: tabular-nums;
+}
+.inbox-requests-label:hover {
+  color: var(--muted);
+  background: var(--hover);
+}
+.inbox-requests-label:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 /* A request has a quiet surface at rest: half way from the desk to the stock, with a hairline and a
    mark at muted strength. It reads as a card, and stays a step below the places, which alone stand

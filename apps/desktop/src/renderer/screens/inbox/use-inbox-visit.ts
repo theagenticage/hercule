@@ -118,18 +118,29 @@ export const useInboxVisit = ({
 
   // Laying out the page is the costly part of a draw, so it runs again only for a different read or choice.
   const { received, view, isFresh, hasUserMove } = step;
-  const { grouping, filter, requestsOrder } = view;
+  const { grouping, filter, requestsGrouping, requestsShow, requestsSort } = view;
   const next = useMemo(
     () =>
       advanceInboxVisit(history, {
         received,
-        view: { grouping, filter, requestsOrder },
+        view: { grouping, filter, requestsGrouping, requestsShow, requestsSort },
         released,
         isFresh,
         hasUserMove,
         isMotionReduced,
       }),
-    [history, received, grouping, filter, requestsOrder, released, isFresh, hasUserMove],
+    [
+      history,
+      received,
+      grouping,
+      filter,
+      requestsGrouping,
+      requestsShow,
+      requestsSort,
+      released,
+      isFresh,
+      hasUserMove,
+    ],
   );
   // Set while drawing, so the draw that shows a new read already holds its cards.
   if (next.history !== history) setHistory(next.history);
@@ -172,8 +183,18 @@ export const useInboxVisit = ({
         return;
       }
       const { born } = flipInboxPage(scroller, "hand", letIn);
+      const arrivedIds = new Set<string>();
       for (const card of born) {
-        if (card.dataset["cardId"] !== undefined) comeDownIntoPlace(card);
+        const { cardId } = card.dataset;
+        if (cardId === undefined) continue;
+        arrivedIds.add(cardId);
+        comeDownIntoPlace(card);
+      }
+      // The hints under an arriving card are siblings of it, so they come down with it.
+      for (const hint of born) {
+        if (hint.matches(".inbox-hint") && arrivedIds.has(hint.dataset["leadId"] ?? "")) {
+          comeDownIntoPlace(hint);
+        }
       }
     });
     return () => {

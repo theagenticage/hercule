@@ -207,3 +207,51 @@
 .inbox-hint[data-open-id]:hover > span {
   color: var(--ink);
 }
+
+/* ---------- The tray: the lines under a request ---------- */
+/* The lines under a request card lie in a recessed tray tucked under it, 8px in from each side of the card.
+   There is no wrapper: each line paints its own slice of the tray (the fill and the two side hairlines), so the
+   page's motion, which moves each line by its own key, moves the tray with its words. Lines that follow each
+   other join with no gap, because none has a margin between them. */
+.inbox-requests-group {
+  --tray-fill: color-mix(in oklab, black 3%, var(--desk));
+}
+/* The card is above the tray, so its shadow falls on it and its own bottom edge hides the top of the tray. */
+.inbox-requests-group .inbox-bundle > .inbox-request {
+  z-index: 1;
+}
+/* Sets the narrow line's own margin and padding again for the tray. The tray is inset 8px, so the left padding
+   is 26px and the words stay 34px from the card's edge, where its title starts. The bottom margin is 0: a line
+   never reaches outside its tray, so its hit area never overlaps the next card. */
+.inbox-requests-group .inbox-bundle > .inbox-hint {
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 3px 12px 3px 26px;
+  background: var(--tray-fill);
+  box-shadow:
+    inset 1px 0 0 var(--line-soft),
+    inset -1px 0 0 var(--line-soft);
+}
+/* The first line reaches 12px up under the card, the height of its corner radius, and its padding pushes the
+   words back down to where they would be. */
+.inbox-requests-group .inbox-bundle > .inbox-request + .inbox-hint {
+  margin-top: -12px;
+  padding-top: 15px;
+}
+/* The last line closes the tray: the bottom hairline, the rounded corners, and a little room under the words. */
+.inbox-requests-group .inbox-bundle > .inbox-hint:last-child {
+  padding-bottom: 5px;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  box-shadow:
+    inset 1px 0 0 var(--line-soft),
+    inset -1px 0 0 var(--line-soft),
+    inset 0 -1px 0 var(--line-soft);
+}
+/* The ring of the keyboard focus lies inside the line, so the tray's corners and the neighbouring lines do not
+   cut it. It is an outline, drawn over the side hairlines, as for every other control. The focused line rises
+   above the card, so the ring of the first line is whole where that line reaches up under the card. */
+.inbox-requests-group .inbox-bundle > .inbox-hint:focus-visible {
+  z-index: 2;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}

@@ -1,4 +1,5 @@
 /** Tests Link and Unlink as edits to the Inbox the screen holds, planned over the place the visit holds. */
+import { SHOW_ALL } from "./requests-view";
 import { describe, expect, it } from "vitest";
 import type { Inbox } from "@hercule/contract";
 import { applyInboxEdit } from "./card-moves";
@@ -28,8 +29,17 @@ const LEAD_9 = buildInboxCard("9");
 
 /** The place a visit holds after it has read `inbox`. */
 const placeOf = (inbox: Inbox): VisitPlacement =>
-  layOutInbox(inbox, { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" }, NO_PLACEMENT)
-    .placement;
+  layOutInbox(
+    inbox,
+    {
+      grouping: HOME_GROUPING,
+      filter: {},
+      requestsGrouping: "none",
+      requestsShow: SHOW_ALL,
+      requestsSort: "oldest",
+    },
+    NO_PLACEMENT,
+  ).placement;
 
 describe("planLink", () => {
   it("links the pair as the user's claim, and moves the request onto the card of lasting work it is linked to", () => {

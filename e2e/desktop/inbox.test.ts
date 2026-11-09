@@ -36,7 +36,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { replaceConnections } from "../../apps/desktop/scripts/connection-fixtures";
-import { arrangeFleet, openSignedIn } from "./harness";
+import { arrangeFleet, ON_HOSTED_MAC, openSignedIn } from "./harness";
 
 const CONNECTION_ID = "019a1234-5678-7000-8000-0000000000a1";
 const REPOSITORY_ID = "019a1234-5678-7000-8000-0000000000b1";
@@ -415,4 +415,71 @@ describe("Inbox", () => {
     await answers.getByRole("button", { name: "Comment" }).waitFor();
     await answers.getByRole("button", { name: "Done" }).waitFor();
   });
+
+  // Needs the window to hold the keyboard focus, which a hosted Mac's virtual
+  // screen never grants (see `ON_HOSTED_MAC`). jsdom has no popover API, so
+  // only a real browser proves that picking keeps the menu open.
+  it.skipIf(ON_HOSTED_MAC)(
+    "sets the Requests view with the keyboard in one open menu, returns focus to its button on Esc, and folds a group by its header",
+    async () => {
+      const arranged = await arrangeFleet();
+      await arranged.restartController(() => {
+        seedEntities(arranged.home);
+      });
+      const { page } = await openSignedIn(arranged.url);
+      await page
+        .getByRole("tablist", { name: "Sidebar" })
+        .getByRole("tab", { name: "Hercule" })
+        .click();
+      await page
+        .getByRole("navigation", { name: "Hercule", exact: true })
+        .getByRole("link", { name: /^Inbox/ })
+        .click();
+      const requests = page.getByRole("complementary", { name: "Requests" });
+      const request = requests.locator(`.inbox-request[data-card-id="${PULL_REQUEST_ID}"]`);
+      await request.waitFor();
+
+      // Enter on the focused button opens the menu, and the arrow keys move
+      // through its rows. Enter on a row picks it and leaves the menu open.
+      const trigger = requests.getByRole("button", { name: /Show, group and sort/ });
+      const menu = page.getByRole("menu", { name: "Show, group and sort" });
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await menu.waitFor();
+      const byPlace = menu.getByRole("menuitemradio", { name: "By place" });
+      const newest = menu.getByRole("menuitemradio", { name: "Newest first" });
+      while (!(await byPlace.evaluate((row) => row === document.activeElement))) {
+        await page.keyboard.press("ArrowDown");
+      }
+      await page.keyboard.press("Enter");
+      await expect.poll(() => byPlace.getAttribute("aria-checked")).toBe("true");
+      while (!(await newest.evaluate((row) => row === document.activeElement))) {
+        await page.keyboard.press("ArrowDown");
+      }
+      await page.keyboard.press("Enter");
+      await expect.poll(() => newest.getAttribute("aria-checked")).toBe("true");
+      expect(await menu.isVisible()).toBe(true);
+      expect(await byPlace.getAttribute("aria-checked")).toBe("true");
+
+      // Esc closes the menu and the focus goes back to the button, which now
+      // says what is not the default.
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "hidden" });
+      expect(await trigger.evaluate((button) => button === document.activeElement)).toBe(true);
+      await expect.poll(() => trigger.textContent()).toContain("By place · Newest first");
+
+      // The card now lies in a group headed by its place. Folding the group
+      // hides its card and shows how many it holds; unfolding brings it back.
+      const header = requests.getByRole("button", { name: /storefront-web/ });
+      await header.waitFor();
+      expect(await header.getAttribute("aria-expanded")).toBe("true");
+      await header.click();
+      await expect.poll(() => header.getAttribute("aria-expanded")).toBe("false");
+      expect(await header.locator(".inbox-requests-count").textContent()).toBe("1");
+      expect(await request.count()).toBe(0);
+      await header.click();
+      await expect.poll(() => header.getAttribute("aria-expanded")).toBe("true");
+      await request.waitFor();
+    },
+  );
 });
