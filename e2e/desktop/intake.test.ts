@@ -1,6 +1,8 @@
 /**
  * Tests Intake in the packaged app, signed in to a real controller whose
- * signals the test raises with `hercule signal raise` (spec 17 §Testing):
+ * signals the test raises with `hercule signal raise` (spec 17 §Testing).
+ * `intake-moves.test.ts` and `intake-notification.test.ts` test the rest of
+ * it:
  *
  * - Intake opens from the Hercule face's row and from Go › Intake, ⌘⇧I, and
  *   shows the Hercule face; View's two items change the face without
@@ -9,139 +11,44 @@
  *   signal and one answered elsewhere;
  * - the keys answer a signal: `J` moves the selection, `↩` opens the pane on
  *   the suggested answer, and a second `↩` presses it; Esc steps back;
- * - a new Now signal notifies while the window is not focused, and a click
- *   on the notification opens Intake with the signal selected;
- * - the moves: `H` and a number snooze a signal into Later, `U`
- *   brings it back, `E` marks one done, `X` and `⇧J` check two rows whose
- *   Done the bulk bar sends, and Done lists all three.
+ * - a GitHub failed-checks signal draws its Checks block with the log lines
+ *   of each failed check.
  *
- * With `HERCULE_INTAKE_EVIDENCE=<dir>` set, one more test walks through the
- * moves for a reviewer, at a pace a person can follow, and records a video
- * of itself at 1440 × 900 into `<dir>`. Without it, that test is skipped,
- * because the test of the moves above already checks every step it shows.
- * The failed-checks test also writes `checks-failed-light.png` and
- * `checks-failed-dark.png` of the open signal there, at 1440 × 900.
+ * With `HERCULE_INTAKE_EVIDENCE=<dir>` set, the failed-checks test also
+ * writes `checks-failed-light.png` and `checks-failed-dark.png` of the open
+ * signal there, at 1440 × 900.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
-import { describe, expect, it, onTestFinished } from "vitest";
-import { isWindowVisible, writeSettings } from "../../apps/desktop/scripts/packaged-app";
-import { buildCleanEnv, findCompiledBinary, runCli } from "../../scripts/controller-process";
+import { describe, expect, it } from "vitest";
 import {
   arrangeFleet,
   chooseMenuItem,
-  clickWaitingNotification,
-  createUserDataDirForTest,
-  hideWindow,
-  keepWindowOnTop,
-  launchForTest,
   openSignedIn,
   readMenuItems,
-  readWaitingNotifications,
-  signInAndReadToken,
   type ArrangedFleet,
 } from "./harness";
-
-/**
- * Raises a signal with `hercule signal raise`, as the user `fleet` signed in
- * as, and returns its id. `args` are the command's flags after `--reason`.
- * Fails when the command fails.
- */
-async function raiseSignal(
-  { url, home, fleet }: ArrangedFleet,
-  kind: string,
-  title: string,
-  args: ReadonlyArray<string> = [],
-): Promise<string> {
-  const ran = await runCli(
-    [
-      "signal",
-      "raise",
-      "--kind",
-      kind,
-      "--title",
-      title,
-      "--reason",
-      "Raised by a test",
-      // The CLI asks for at least one event. Nothing checks that the event
-      // exists, and no plugin in the test binary can emit one.
-      "--event-id",
-      "1",
-      ...args,
-      "--json",
-    ],
-    {
-      home,
-      binary: findCompiledBinary(),
-      env: { HERCULE_API_URL: url, HERCULE_TOKEN: fleet.token },
-    },
-  );
-  expect(ran.code, ran.stderr).toBe(0);
-  return (JSON.parse(ran.stdout) as { signalId: string }).signalId;
-}
+import {
+  raiseSignal,
+  editDatabase,
+  writeSignalColumns,
+  readScreenTitle,
+  readRowTitles,
+  readSelectedTitle,
+  readToDoCounts,
+  selectRow,
+  openSignalPane,
+  evidence,
+  PAUSE_MS,
+} from "./intake-helpers";
 
 /** Raises a proposal titled `title`, whose Accept creates a task of the same title. */
 const raiseProposal = (arranged: ArrangedFleet, title: string): Promise<string> =>
   raiseSignal(arranged, "proposal", title, ["--task", JSON.stringify({ title, description: "" })]);
-
-/**
- * Runs `script` against the controller's database, for the rare arrangement
- * no operation can make: only a plugin's kind may be urgent or carry its own
- * blocks, no plugin raises signals in the test binary, and a Connection to
- * GitHub cannot be signed in to offline. The script sees `database` (a
- * `bun:sqlite` database) and `args`, and its failure fails the test. The
- * controller must be stopped, because it holds its database locked while it
- * runs.
- */
-function editDatabase(home: string, script: string, args: ReadonlyArray<unknown>): void {
-  const written = spawnSync(
-    "bun",
-    [
-      "--eval",
-      `
-    import { Database } from "bun:sqlite";
-    const database = new Database(process.argv[1]);
-    const args = JSON.parse(process.argv[2]);
-    ${script}
-    database.close();
-  `,
-      join(home, "data", "hercule.db"),
-      JSON.stringify(args),
-    ],
-    { encoding: "utf8", env: buildCleanEnv() },
-  );
-  expect(written.status, written.stderr).toBe(0);
-}
-
-/**
- * Sets columns of the signal `signalId`, to the values in `columns` (column
- * name to value). See `editDatabase`.
- */
-function writeSignalColumns(
-  home: string,
-  signalId: string,
-  columns: Readonly<Record<string, string>>,
-): void {
-  editDatabase(
-    home,
-    String.raw`
-    const [signalId, columns] = args;
-    const id = Buffer.from(signalId.replaceAll("-", ""), "hex");
-    const entries = Object.entries(columns);
-    const assignments = entries.map(([name]) => name + " = ?").join(", ");
-    const { changes } = database
-      .query("UPDATE signals SET " + assignments + " WHERE id = ?")
-      .run(...entries.map(([, value]) => value), id);
-    if (changes !== 1) throw new Error("no signal " + signalId);
-  `,
-    [signalId, columns],
-  );
-}
 
 /**
  * Adds a GitHub Connection with the id `connectionId`, with no credentials.
@@ -164,10 +71,6 @@ function addGithubConnection(home: string, connectionId: string): void {
     [connectionId],
   );
 }
-
-/** Raises the signal `signalId` to the priority `urgent`, in the controller's database. */
-const makeSignalUrgent = (home: string, signalId: string): void =>
-  writeSignalColumns(home, signalId, { priority: "urgent" });
 
 /**
  * The failed-checks signal GitHub raises for a pull request, as the build of
@@ -253,59 +156,6 @@ async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: 
 
 const THREADS_FACE = { tab: "Threads", list: "Threads" };
 const ORCHESTRATION_FACE = { tab: "Hercule", list: "Hercule" };
-
-/**
- * Returns the title of the screen in the main pane's bar, such as "Intake",
- * or null when the screen draws no such bar, as the Office does.
- */
-async function readScreenTitle(page: Page): Promise<string | null> {
-  const [title] = await page.locator("main .bar .title").allTextContents();
-  return title ?? null;
-}
-
-/** Returns the titles of Intake's rows, top to bottom. */
-const readRowTitles = (page: Page): Promise<string[]> =>
-  page.locator('section[aria-label="Signals"] .ask-title').allTextContents();
-
-/** Returns the selected row's title, or null when no row is selected. */
-async function readSelectedTitle(page: Page): Promise<string | null> {
-  const selected = page.locator('section[aria-label="Signals"] .ask-row[aria-current="true"]');
-  return (await selected.count()) === 0 ? null : selected.locator(".ask-title").textContent();
-}
-
-/** Returns the accessible names of the Hercule segment and the Intake row's count, "" when hidden. */
-async function readToDoCounts(page: Page): Promise<{ segment: string; row: string }> {
-  const segment = page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab").nth(1);
-  const rowCount = page.locator("a.nav-row", { hasText: "Intake" }).locator(".count");
-  return {
-    // The segment carries an accessible name only while it has a count.
-    segment:
-      (await segment.getAttribute("aria-label")) ?? ((await segment.textContent()) ?? "").trim(),
-    row: (await rowCount.count()) === 0 ? "" : ((await rowCount.textContent()) ?? ""),
-  };
-}
-
-/** Shows the view of Intake's list named `label`: "To do", "Later" or "Done". */
-async function showView(page: Page, label: string): Promise<void> {
-  const button = page.getByRole("group", { name: "View" }).getByRole("button", { name: label });
-  await button.click();
-  await expect.poll(() => button.getAttribute("aria-pressed")).toBe("true");
-}
-
-/** Selects the row titled `title` with a click, which also gives it the focus the keys need. */
-async function selectRow(page: Page, title: string): Promise<void> {
-  await page.locator(".ask-row", { hasText: title }).click();
-  await expect.poll(() => readSelectedTitle(page)).toBe(title);
-}
-
-/** The pane of the open signal. */
-const openSignalPane = (page: Page) => page.getByRole("region", { name: "The open signal" });
-
-/** The folder the journey's video is written to, when one is asked for. */
-const evidence = process.env["HERCULE_INTAKE_EVIDENCE"];
-
-/** How long the journey waits after each step, so a reviewer can see what changed. */
-const PAUSE_MS = 1200;
 
 describe("Intake", () => {
   it("opens from the Hercule face's row and from Go › Intake, shows the Hercule face, and keeps Intake open while View changes the face", async () => {
@@ -438,109 +288,6 @@ describe("Intake", () => {
     expect(await readToDoCounts(page)).toEqual({ segment: "Hercule, 1 to do", row: "1" });
   });
 
-  it("snoozes a signal into Later with H, brings it back with U, marks one done with E, and marks two checked rows done from the bulk bar", async () => {
-    const arranged = await arrangeFleet();
-    const titles = ["Release 4.2 shipped", "Docs moved to the wiki", "Staging was rebuilt"];
-    for (const title of titles) await raiseSignal(arranged, "fyi", title);
-    const { app, page } = await openSignedIn(arranged.url);
-    await chooseMenuItem(app, "Go", "Intake");
-    await expect
-      .poll(async () => (await readRowTitles(page)).toSorted())
-      .toEqual(titles.toSorted());
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
-
-    // H opens the snooze menu on the selected row, and a choice's number
-    // snoozes it. Tomorrow is always open to choose.
-    await selectRow(page, "Release 4.2 shipped");
-    await page.keyboard.press("h");
-    const menu = page.getByRole("menu", { name: "Snooze until" });
-    const tomorrow = menu.getByRole("menuitem", { name: /^Tomorrow/ });
-    const tomorrowKey = (await tomorrow.locator("kbd").textContent()) ?? "";
-    await page.keyboard.press(tomorrowKey);
-    await expect.poll(() => menu.count()).toBe(0);
-    await expect
-      .poll(async () => (await readRowTitles(page)).toSorted())
-      .toEqual(["Docs moved to the wiki", "Staging was rebuilt"]);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
-    // A move ignores the keys until the one before it ends, and the toast
-    // shows when it has.
-    await expect
-      .poll(() => page.locator(".asks-toast[role=status]").textContent())
-      .toBe("Snoozed until tomorrow 09:00");
-
-    // Later lists it under the day it comes back, with the time at the row's
-    // end; U brings it back to To do.
-    await showView(page, "Later");
-    await expect.poll(() => readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
-    expect(await page.locator(".asks-sec").textContent()).toBe("Back tomorrow1");
-    expect(await page.locator(".ask-until").textContent()).toBe("09:00");
-    await selectRow(page, "Release 4.2 shipped");
-    await page.keyboard.press("u");
-    await expect.poll(() => readRowTitles(page)).toEqual([]);
-    await expect
-      .poll(() => page.locator(".asks-toast[role=status]").textContent())
-      .toBe("Back on To do");
-    await showView(page, "To do");
-    await expect
-      .poll(async () => (await readRowTitles(page)).toSorted())
-      .toEqual(titles.toSorted());
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
-
-    // E marks the selected row done, and the toast says so.
-    await selectRow(page, "Docs moved to the wiki");
-    await page.keyboard.press("e");
-    await expect
-      .poll(async () => (await readRowTitles(page)).toSorted())
-      .toEqual(["Release 4.2 shipped", "Staging was rebuilt"]);
-    await expect
-      .poll(() => page.locator(".asks-toast[role=status]").textContent())
-      .toBe("Done · Docs moved to the wiki");
-
-    // X checks the first row and ⇧J adds the next one; the bulk bar's Done
-    // sends both.
-    const [first] = await readRowTitles(page);
-    await selectRow(page, first!);
-    await page.keyboard.press("x");
-    await page.keyboard.press("Shift+J");
-    const bar = page.getByRole("toolbar", { name: "Checked rows" });
-    await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toBe("2 selected");
-    await bar.getByRole("button", { name: /^Done/ }).click();
-    await expect.poll(() => readRowTitles(page)).toEqual([]);
-    await expect.poll(() => bar.count()).toBe(0);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule" });
-
-    await showView(page, "Done");
-    await expect
-      .poll(async () => (await readRowTitles(page)).toSorted())
-      .toEqual(titles.toSorted());
-  });
-
-  it("notifies a new Now signal while the window is not focused, and opens Intake on it when the notification is clicked", async () => {
-    const arranged = await arrangeFleet();
-    await raiseSignal(arranged, "fyi", "Earlier news");
-    const { app, page } = await openSignedIn(arranged.url);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 1 to do" });
-    await hideWindow(app);
-
-    const urgent = await raiseSignal(arranged, "fyi", "Checkout is down", ["--priority", "high"]);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
-    expect(await readWaitingNotifications(app)).toEqual([]);
-    // The app reads To do again once it reconnects, and the list then holds
-    // an urgent signal it has not seen.
-    await arranged.restartController(() => makeSignalUrgent(arranged.home, urgent));
-
-    await expect
-      .poll(() => readWaitingNotifications(app))
-      .toEqual([{ title: expect.any(String) as string, body: "Checkout is down", state: "shown" }]);
-
-    await clickWaitingNotification(app, 0);
-    await expect.poll(() => isWindowVisible(app)).toBe(true);
-    await expect.poll(() => readScreenTitle(page)).toBe("Intake");
-    await expect.poll(() => readSelectedTitle(page)).toBe("Checkout is down");
-    expect(await openSignalPane(page).locator(".ad-title").textContent()).toBe("Checkout is down");
-    expect(await page.locator(".asks-sec", { hasText: "Now" }).count()).toBe(1);
-  });
-
   it("draws a GitHub failed-checks signal's Checks block with the log lines of each failed check", async () => {
     const arranged = await arrangeFleet();
     const signalId = await raiseSignal(arranged, "fyi", "Raised to be failed checks");
@@ -585,106 +332,4 @@ describe("Intake", () => {
       await page.screenshot({ path: join(evidence, `checks-failed-${theme}.png`) });
     }
   });
-
-  it.skipIf(evidence === undefined)(
-    "walks through the moves for the evidence: snooze, Later, unsnooze, Done, the bulk bar and the Done view",
-    async () => {
-      mkdirSync(evidence!, { recursive: true });
-      const arranged = await arrangeFleet();
-      const titles = [
-        "Release 4.2 shipped",
-        "Docs moved to the wiki",
-        "Staging was rebuilt",
-        "Nightly backup finished",
-      ];
-      for (const title of titles) await raiseSignal(arranged, "fyi", title);
-      const userDataDir = createUserDataDirForTest();
-      writeSettings(userDataDir, {
-        controllerUrl: arranged.url,
-        window: { bounds: { x: 0, y: 0, width: 1440, height: 940 }, fullScreen: false },
-      });
-      const { app, page, close } = await launchForTest(
-        userDataDir,
-        async (application) => {
-          await application.evaluate(({ BrowserWindow }) => {
-            BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
-          });
-        },
-        { recordVideo: { dir: evidence!, size: { width: 1440, height: 900 } } },
-      );
-      onTestFinished(async () => {
-        await close();
-        const videoPath = page.video()?.path();
-        if (videoPath !== undefined) console.log("Intake journey recording:", await videoPath);
-      });
-      await signInAndReadToken(page, arranged.url);
-      await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
-      // The video records only frames that are drawn, and macOS draws none
-      // for a window that another test's window covers.
-      await keepWindowOnTop(app);
-      const toast = page.locator(".asks-toast[role=status]");
-
-      await chooseMenuItem(app, "Go", "Intake");
-      await expect.poll(async () => (await readRowTitles(page)).length).toBe(titles.length);
-      await sleep(PAUSE_MS);
-
-      // A row shows its moves while the pointer is over it; its Snooze
-      // button opens the snooze menu, and a choice snoozes the row.
-      const snoozed = page.locator(".ask-item", { hasText: "Release 4.2 shipped" });
-      await snoozed.hover();
-      await sleep(PAUSE_MS);
-      await snoozed.getByRole("button", { name: "Snooze" }).click();
-      const menu = page.getByRole("menu", { name: "Snooze until" });
-      await menu.waitFor();
-      await sleep(PAUSE_MS);
-      await menu.getByRole("menuitem", { name: /^Tomorrow/ }).click();
-      await expect.poll(() => toast.textContent()).toBe("Snoozed until tomorrow 09:00");
-      await sleep(PAUSE_MS);
-
-      // Later lists the row with the time it comes back; U brings it back.
-      await showView(page, "Later");
-      await expect.poll(() => readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
-      await sleep(PAUSE_MS);
-      await selectRow(page, "Release 4.2 shipped");
-      await page.keyboard.press("u");
-      await expect.poll(() => toast.textContent()).toBe("Back on To do");
-      await sleep(PAUSE_MS);
-      await showView(page, "To do");
-      await expect.poll(async () => (await readRowTitles(page)).length).toBe(titles.length);
-      await sleep(PAUSE_MS);
-
-      // E marks the selected row done.
-      await selectRow(page, "Docs moved to the wiki");
-      await sleep(PAUSE_MS / 2);
-      await page.keyboard.press("e");
-      await expect.poll(() => toast.textContent()).toBe("Done · Docs moved to the wiki");
-      await sleep(PAUSE_MS);
-
-      // X checks rows; the bulk bar previews what its Done does under the
-      // pointer, and a click sends it.
-      const [first] = await readRowTitles(page);
-      await selectRow(page, first!);
-      await page.keyboard.press("x");
-      await sleep(PAUSE_MS / 2);
-      await page.keyboard.press("Shift+J");
-      await sleep(PAUSE_MS / 2);
-      await page.keyboard.press("Shift+J");
-      const bar = page.getByRole("toolbar", { name: "Checked rows" });
-      await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toBe("3 selected");
-      await sleep(PAUSE_MS);
-      const bulkDone = bar.getByRole("button", { name: /^Done/ });
-      await bulkDone.hover();
-      await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toMatch(/^Done 3/);
-      await sleep(PAUSE_MS * 1.5);
-      await bulkDone.click();
-      await expect.poll(() => readRowTitles(page)).toEqual([]);
-      await sleep(PAUSE_MS);
-
-      await showView(page, "Done");
-      await expect
-        .poll(async () => (await readRowTitles(page)).toSorted())
-        .toEqual(titles.toSorted());
-      await sleep(PAUSE_MS * 1.5);
-    },
-  );
 });

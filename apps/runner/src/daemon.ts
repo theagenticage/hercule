@@ -7,6 +7,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import { locateCompiledBinary, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { IDENTITY_PORT, type ForwardingPointer } from "@hercule/protocol";
@@ -205,11 +206,14 @@ export const runDaemon = (
         measureFolder: makeFolderMeasurer(),
       });
       sessions.observeWorkspaceSessions(diskMeasurements.sessionChanges);
+      // Lives as long as the daemon, like the workspaces that signal it.
+      const workspaceRemovals = yield* Queue.sliding<void>(1);
       const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
         deleteArchivedSessionFiles: (sessions) => deleteArchivedSessionFiles(storageDir, sessions),
         observer: diskMeasurements,
+        workspaceRemovals,
       });
       const workspaceSteps = makeWorkspaceSteps({
         storageDir,
@@ -303,6 +307,7 @@ export const runDaemon = (
             }),
             sessionSkillsFolders,
             workspaces,
+            workspaceRemovals,
             diskMeasurements,
             workspaceSteps,
             socketPath,

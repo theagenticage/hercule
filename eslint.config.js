@@ -513,7 +513,8 @@ export default tseslint.config(
     // binary, and starts a second copy of the packaged app itself, because
     // Playwright cannot start one that exits at once. The skill folder test
     // runs `mkfifo`, because Node cannot create a named pipe itself. The
-    // container image's script runs `docker`.
+    // HTTPS stand-in runs `openssl`, because Node cannot make a certificate.
+    // The container image's script runs `docker`.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
@@ -522,6 +523,7 @@ export default tseslint.config(
       "apps/desktop/scripts/**/*.ts",
       "apps/desktop/container/*.ts",
       "e2e/desktop/**/*.ts",
+      "e2e/https-stand-in.ts",
     ],
     rules: {
       "no-restricted-imports": [

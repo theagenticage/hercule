@@ -3,10 +3,7 @@
  * every state the desktop tests put a thread or a runner in can be reached,
  * and is read back through the public API with the same client the app uses.
  * No app window is started. Run `pnpm build:binary` first.
- *
- * The 500-thread case is part of the default run while it stays fast. It
- * prints how long spawning, settling and listing took; vitest shows that
- * output only with `--reporter=verbose`.
+ * `fleet-many-threads.test.ts` proves the case of 500 threads.
  */
 import { describe, expect, it, onTestFinished } from "vitest";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
@@ -329,37 +326,5 @@ describe("the scripted fleet", () => {
     await expect
       .poll(() => pushes.slice(settled))
       .toContainEqual(buildQueryKeys("session", [thread!.id], { [thread!.id]: null }));
-  });
-
-  it("spawns 500 threads over two runners and lists them in one page", async () => {
-    const { fleet, client } = await arrangeFleet();
-    const runners = await Promise.all(
-      ["scripted-1", "scripted-2"].map((name) =>
-        fleet.enlistRunner(name, { maxConcurrentSessions: 250 }),
-      ),
-    );
-
-    const began = performance.now();
-    await Promise.all(runners.map((runner) => fleet.spawnThreads(250, { runner })));
-    const spawned = performance.now();
-    await expect
-      .poll(
-        async () => {
-          const { items } = await client.session.query({ query: { kind: "thread", limit: 500 } });
-          return items.filter((session) => session.status === "busy").length;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(500);
-    const settled = performance.now();
-    const { items } = await client.session.query({ query: { kind: "thread", limit: 500 } });
-    const listed = performance.now();
-
-    expect(items).toHaveLength(500);
-    console.info(
-      `500 threads: spawned in ${Math.round(spawned - began)} ms, ` +
-        `all busy ${Math.round(settled - spawned)} ms later, ` +
-        `listed in ${Math.round(listed - settled)} ms`,
-    );
   });
 });
