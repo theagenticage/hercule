@@ -487,12 +487,10 @@ jobs:
   # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
   # shard its files, balanced by the run times recorded in
   # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. The target is a job of under 5 minutes. A calculation from the
-  # measured phases, not yet a measurement of this job, expects about 3.5
-  # minutes with 6 shards: about 1.5 minutes of tests plus about 2 minutes to
-  # prepare a runner. More shards finish sooner, but queue for runners and use
-  # more of them. Add a shard when the slowest one grows. Refresh the weights from a
-  # green run's reports with
+  # one shard. The target is a job of under 5 minutes; the spec's Testing
+  # section records what was measured. More shards finish sooner, but queue
+  # for runners and use more of them. Add a shard when the slowest one grows.
+  # Refresh the weights from a green run's reports with
   # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
   # refuses a run that is unfinished, failed or incomplete. Each shard uploads
   # its Vitest report and its plan for that.
@@ -501,7 +499,7 @@ jobs:
   # which the container mounts, gets the container image, builds the compiled
   # binary and the unpacked desktop app in the container, and runs its files.
   # The image comes from the Actions cache when it has it (see
-  # `.github/actions/desktop-e2e-image`), with Playwright's Chromium inside.
+  # `.github/actions/desktop-e2e-image`), with Playwright's headless Chromium inside.
   # Electron's zip is downloaded into a Docker volume that lives only as long
   # as the runner, about 100 MB, which takes seconds.
   desktop-e2e-linux:
