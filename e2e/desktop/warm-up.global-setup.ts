@@ -14,17 +14,32 @@
  * (see `launch.test.ts`) could run out of time. Here the cost is paid once,
  * by this launch, and this launch is the one cold start the suite checks.
  *
- * The launch uses the same environment as the tests (the `HOME` the cache
- * lives under included), a new user data directory and the mock keychain, and
- * saves no controller, so the app opens on its first-run welcome.
+ * The launch is a plain process, as `launchPlainApp` starts it, so that main's
+ * output is kept from the first byte: Playwright would attach to the app only
+ * after it had started, and the line main logs when it shows the window on
+ * its time limit could come before that. It uses the same environment as the
+ * tests (the `HOME` the cache lives under included), a new user data
+ * directory and the mock keychain, and saves no controller, so the app opens
+ * on its first-run welcome.
  *
  * Does nothing on macOS, which has no such driver.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../../apps/desktop/src/main/window-visibility";
-import { launchTestPackage, quitApp, RUNS_ON_MAC } from "../../apps/desktop/scripts/packaged-app";
+import {
+  FIRST_SCREEN_TIMEOUT_MS,
+  SHOWN_WITHOUT_FIRST_SCREEN_ERROR,
+} from "../../apps/desktop/src/main/window-visibility";
+import {
+  assertExitedCleanly,
+  evaluateInMain,
+  launchPlainApp,
+  RUNS_ON_MAC,
+  stopPlainApp,
+  type PlainApp,
+} from "../../apps/desktop/scripts/packaged-app";
+import { pollUntil } from "../../apps/desktop/scripts/poll";
 
 /**
  * How long the page may take to present its first frame on a machine with a
@@ -34,45 +49,128 @@ import { launchTestPackage, quitApp, RUNS_ON_MAC } from "../../apps/desktop/scri
 const FIRST_FRAME_LIMIT_MS = 60_000;
 
 /**
+ * How long to wait, after the first frame, for main's output to arrive. Main
+ * logs its error just before it shows the window, but the output travels
+ * through a pipe the setup reads on its own schedule.
+ */
+const OUTPUT_SETTLE_MS = 200;
+
+/** When main showed the window and the page reached its first paint and first screen, in ms since the epoch. */
+interface LaunchTimes {
+  readonly windowShownAt: number;
+  readonly firstPaintAt: number;
+  readonly firstScreenAt: number;
+}
+
+/**
+ * Asks the app for `LaunchTimes`, through main's inspector. Returns undefined
+ * until the window exists and has recorded all three, and fails when the app
+ * has exited.
+ */
+async function readLaunchTimes(app: PlainApp): Promise<LaunchTimes | undefined> {
+  if (app.process.exitCode !== null || app.process.signalCode !== null) {
+    throw new Error("the app exited before its page presented a frame");
+  }
+  const readPageTimes = `(() => {
+    const read = (name) => {
+      const [entry] = performance.getEntriesByName(name);
+      return entry === undefined ? null : performance.timeOrigin + entry.startTime;
+    };
+    return { firstPaintAt: read("first-paint"), firstScreenAt: read("first-screen") };
+  })()`;
+  const times = (await evaluateInMain(
+    app.inspectorUrl,
+    `(async () => {
+      const [window] = require("electron").BrowserWindow.getAllWindows();
+      if (window === undefined) return null;
+      const [shown] = performance.getEntriesByName("window-shown");
+      return {
+        windowShownAt: shown === undefined ? null : performance.timeOrigin + shown.startTime,
+        ...(await window.webContents.executeJavaScript(${JSON.stringify(readPageTimes)})),
+      };
+    })()`,
+  ).catch((error: unknown) => {
+    // An app that exited while the call was in flight refuses the connection.
+    if (app.process.exitCode !== null || app.process.signalCode !== null) {
+      throw new Error("the app exited before its page presented a frame", { cause: error });
+    }
+    throw error;
+  })) as {
+    windowShownAt: number | null;
+    firstPaintAt: number | null;
+    firstScreenAt: number | null;
+  } | null;
+  if (times === null) return undefined;
+  const { windowShownAt, firstPaintAt, firstScreenAt } = times;
+  if (windowShownAt === null || firstPaintAt === null || firstScreenAt === null) return undefined;
+  return { windowShownAt, firstPaintAt, firstScreenAt };
+}
+
+/**
+ * Checks, from the times and from main's output, that main showed the window
+ * because the page reported its first screen, not because its time limit ran
+ * out. These are the checks of `launch.test.ts`, and the fallback's log line.
+ * Returns the reason it did not, or undefined when it did.
+ */
+function findFallbackShow(times: LaunchTimes, mainOutput: string): string | undefined {
+  if (mainOutput.includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
+    return "main logged that it showed the window without waiting for the first screen";
+  }
+  // A hidden window under X11 presents no frame, so the frame the page marks
+  // is the one that showing the window caused.
+  if (times.firstScreenAt - times.windowShownAt <= 0) {
+    return "the first screen was marked as presented before the window was shown";
+  }
+  if (times.windowShownAt - times.firstPaintAt >= FIRST_SCREEN_TIMEOUT_MS) {
+    return "the window was shown by main's time limit, not by the page's report";
+  }
+  return undefined;
+}
+
+/**
  * Launches the test package on a new user data directory, waits until its page
  * has presented its first screen, and quits it. Fails, with the timings and
  * main's output, when the app does not present a frame within
  * `FIRST_FRAME_LIMIT_MS`, when main shows the window on its time limit
- * instead of on the page's report, or when the app does not quit cleanly. A
- * run whose app cannot start would fail every test, and this names the cause.
- * `launch.test.ts` checks the same report on every launch after this one.
+ * instead of on the page's report, when the app exits early, or when it does
+ * not quit cleanly. A run whose app cannot start would fail every test, and
+ * this names the cause.
  */
 export default async function warmUpGraphicsCache(): Promise<void> {
   if (RUNS_ON_MAC) return;
   const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-warm-up-"));
   try {
     const startedAt = Date.now();
-    const app = await launchTestPackage(userDataDir);
-    let mainOutput = "";
-    const appendMainOutput = (chunk: Buffer) => (mainOutput += chunk.toString());
-    app.process().stdout?.on("data", appendMainOutput);
-    app.process().stderr?.on("data", appendMainOutput);
-    let timings = "no timings yet";
+    const app = await launchPlainApp(userDataDir);
+    let failure: unknown;
+    let timings: string | undefined;
     try {
-      const page = await app.firstWindow();
-      // The page sets `first-screen` once the frame that draws its first
-      // screen has been presented, which is the work the cache speeds up.
-      await page.waitForFunction(() => performance.getEntriesByName("first-screen").length > 0, {
-        timeout: FIRST_FRAME_LIMIT_MS,
+      const times = await pollUntil(() => readLaunchTimes(app), {
+        timeoutMs: FIRST_FRAME_LIMIT_MS,
+        intervalMs: 100,
+        timeoutMessage: () =>
+          `the page presented no first frame within ${String(FIRST_FRAME_LIMIT_MS)} ms`,
       });
-      timings = `the first frame was presented ${String(Date.now() - startedAt)} ms after the launch`;
-      // Main logs this error just before it shows the window, which is before
-      // the page presents the frame it waited for, so it would be here by now.
-      if (mainOutput.includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
-        throw new Error("main showed the window on its time limit, not on the page's report");
-      }
+      timings = `the first frame was presented ${String(Math.round(times.firstScreenAt - startedAt))} ms after the launch`;
+      await new Promise((resolve) => setTimeout(resolve, OUTPUT_SETTLE_MS));
+      const fallback = findFallbackShow(times, app.readMainOutput());
+      if (fallback !== undefined) throw new Error(fallback);
     } catch (error) {
+      failure = error;
+    }
+    // The app is stopped on every path, and a failure to stop it never hides
+    // why the launch failed.
+    try {
+      await stopPlainApp(app);
+      assertExitedCleanly(app.process);
+    } catch (error) {
+      failure ??= error;
+    }
+    if (failure !== undefined) {
       throw new Error(
-        `the first launch of the test package failed (${timings}): ${String(error)}\nmain's output:\n${mainOutput}`,
-        { cause: error },
+        `the first launch of the test package failed (${timings ?? `no first frame ${String(Date.now() - startedAt)} ms after the launch`}): ${String(failure)}\nmain's output:\n${app.readMainOutput()}`,
+        { cause: failure },
       );
-    } finally {
-      await quitApp(app);
     }
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });
