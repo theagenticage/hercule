@@ -47,7 +47,7 @@ runs:
           pulled=true
           echo "Pulled $remote"
         elif grep -qiE 'manifest unknown|not found' <<< "$pull_output"; then
-          echo "::notice::The registry has no $remote, so the image is built here."
+          echo "::notice::The registry has no $remote, so the image is built here. The registry said: $pull_output"
         else
           echo "::warning::Could not pull $remote, so the image is built here instead. The registry said: $pull_output"
         fi

@@ -1,22 +1,45 @@
+import { spawnSync } from "node:child_process";
+import { relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   listDesktopE2eFiles,
   parseShardSpecifier,
   planShards,
   readShardWeights,
+  type ShardRecord,
 } from "./desktop-e2e-shards";
-import { readWeightsFromReports } from "./update-desktop-e2e-shard-weights";
+import { readWeightsFromShards, type ShardArtifact } from "./update-desktop-e2e-shard-weights";
 
-describe("planShards", () => {
-  it("puts every desktop test file in exactly one shard, for any number of shards", () => {
+const repositoryRoot = new URL("..", import.meta.url).pathname;
+
+describe("the files that are planned", () => {
+  it("are exactly the files the desktop project runs, according to Vitest", () => {
+    const listing = spawnSync(
+      "pnpm",
+      ["exec", "vitest", "list", "--project", "desktop", "--filesOnly", "--json"],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+      },
+    );
+    expect(listing.status, listing.stderr).toBe(0);
+    const listed = (JSON.parse(listing.stdout) as Array<{ file: string }>)
+      .map(({ file }) => relative(repositoryRoot, file))
+      .sort();
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listDesktopE2eFiles()).toEqual(listed);
+  }, 60_000);
+
+  it("are each in exactly one shard, for any number of shards", () => {
     const files = listDesktopE2eFiles();
-    expect(files.length).toBeGreaterThan(0);
     for (let count = 1; count <= 12; count++) {
       const planned = planShards(files, readShardWeights(), count).flat();
       expect(planned.toSorted()).toEqual(files);
     }
   });
+});
 
+describe("planShards", () => {
   it("plans a file with no recorded weight, and ignores a weight for a file that is gone", () => {
     const shards = planShards(
       ["a.test.ts", "b.test.ts", "new.test.ts"],
@@ -57,20 +80,70 @@ describe("parseShardSpecifier", () => {
   });
 });
 
-describe("readWeightsFromReports", () => {
-  it("names each file by its path from e2e/desktop, in seconds rounded to a tenth, across reports", () => {
-    const weights = readWeightsFromReports([
-      {
-        success: true,
-        testResults: [{ name: "/repo/e2e/desktop/b.test.ts", startTime: 1000, endTime: 13_340 }],
-      },
-      {
-        success: true,
-        testResults: [
-          { name: "/home/me/hercule/e2e/desktop/a.test.ts", startTime: 0, endTime: 49 },
-        ],
-      },
-    ]);
-    expect(weights).toEqual({ "e2e/desktop/a.test.ts": 0, "e2e/desktop/b.test.ts": 12.3 });
+describe("readWeightsFromShards", () => {
+  const allFiles = [
+    "e2e/desktop/a.test.ts",
+    "e2e/desktop/nested/b.test.ts",
+    "e2e/desktop/c.test.ts",
+  ];
+
+  /** A passing shard of a run of two, which ran `files`, with each file taking 1.25 seconds. */
+  const buildShard = (
+    index: number,
+    files: ReadonlyArray<string>,
+    overrides: Partial<ShardRecord> = {},
+  ): ShardArtifact => ({
+    record: { index, count: 2, files, allFiles, ...overrides },
+    report: {
+      success: true,
+      testResults: files.map((file) => ({ name: `/repo/${file}`, startTime: 1000, endTime: 2250 })),
+    },
+  });
+  const passingRun = () => [
+    buildShard(1, [allFiles[0]!, allFiles[1]!]),
+    buildShard(2, [allFiles[2]!]),
+  ];
+
+  it("names each file by its path from e2e/desktop, in seconds rounded to a tenth", () => {
+    expect(readWeightsFromShards(passingRun())).toEqual({
+      "e2e/desktop/a.test.ts": 1.3,
+      "e2e/desktop/c.test.ts": 1.3,
+      "e2e/desktop/nested/b.test.ts": 1.3,
+    });
+  });
+
+  it.each([
+    ["no shard uploaded anything", () => [], /no shard artifacts/],
+    ["a shard is missing", () => [passingRun()[0]!], /not each of 1 to 2 once/],
+    [
+      "a shard appears twice",
+      () => [passingRun()[0]!, passingRun()[0]!],
+      /not each of 1 to 2 once/,
+    ],
+    [
+      "a test failed",
+      () => [
+        passingRun()[0]!,
+        { ...passingRun()[1]!, report: { ...passingRun()[1]!.report, success: false } },
+      ],
+      /Shard 2 has a failed test/,
+    ],
+    [
+      "the shards saw different files",
+      () => [passingRun()[0]!, buildShard(2, [allFiles[2]!], { allFiles: [allFiles[2]!] })],
+      /disagree/,
+    ],
+    [
+      "a shard reports a file it was not planned to run",
+      () => [passingRun()[0]!, buildShard(2, [allFiles[2]!], { files: [allFiles[0]!] })],
+      /other files than it was planned/,
+    ],
+    [
+      "a file of the checkout was planned for no shard",
+      () => [buildShard(1, [allFiles[0]!]), buildShard(2, [allFiles[2]!])],
+      /Missing: e2e\/desktop\/nested\/b.test.ts/,
+    ],
+  ])("refuses the run when %s", (_case, build, message) => {
+    expect(() => readWeightsFromShards(build())).toThrow(message);
   });
 });

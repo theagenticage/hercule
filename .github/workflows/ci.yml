@@ -489,8 +489,9 @@ jobs:
   # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
   # one shard. Add a shard here when the slowest one grows, and refresh the
   # weights from a green run's reports with
-  # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`. Each shard
-  # uploads its Vitest report for that.
+  # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
+  # refuses a run that is unfinished, failed or incomplete. Each shard uploads
+  # its Vitest report and its plan for that.
   #
   # Each shard prepares itself: it installs the dependencies on the host,
   # which the container mounts, gets the container image, builds the compiled
@@ -518,18 +519,21 @@ jobs:
       - uses: ./.github/actions/desktop-e2e-image
       - name: Run this shard's tests
         run: |
-          files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}")
+          files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}" --record desktop-e2e-report/plan.json)
           echo "$files"
           pnpm test:desktop:container \
             --reporter=default --reporter=json --outputFile.json=desktop-e2e-report/report.json \
             $files
-      # The run times of this shard's files, which refresh the shard weights.
+      # The run times of this shard's files and the plan they ran under, which
+      # refresh the shard weights. The repository keeps artifacts for 3 days.
       - if: always()
         uses: actions/upload-artifact@v7
         with:
           name: desktop-e2e-report-${{ matrix.shard }}
-          path: desktop-e2e-report/report.json
-          retention-days: 14
+          path: |
+            desktop-e2e-report/report.json
+            desktop-e2e-report/plan.json
+          retention-days: 3
           if-no-files-found: ignore
 
   # Publishes the container image of the end-to-end shards to the registry, so
