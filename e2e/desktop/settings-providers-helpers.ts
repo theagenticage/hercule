@@ -55,9 +55,7 @@ export const FIXTURES: ReadonlyArray<ProviderAccountFixture> = [
  * every runner. `controllerEnv` is added to the controller's environment.
  */
 export async function arrangeAccounts(controllerEnv?: Readonly<Record<string, string>>) {
-  const arranged = await arrangeFleet(
-    controllerEnv === undefined ? {} : { ownRunnerEnv: controllerEnv },
-  );
+  const arranged = await arrangeFleet(controllerEnv === undefined ? {} : { controllerEnv });
   await arranged.restartController(() => {
     writeProviderAccounts(arranged.home, FIXTURES);
   });

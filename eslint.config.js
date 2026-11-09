@@ -514,12 +514,14 @@ export default tseslint.config(
     // Playwright cannot start one that exits at once. The skill folder test
     // runs `mkfifo`, because Node cannot create a named pipe itself. The
     // HTTPS stand-in runs `openssl`, because Node cannot make a certificate.
+    // The container image's script runs `docker`.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
       "install.test.ts",
       "packages/client-core/src/skill-folder.test.ts",
       "apps/desktop/scripts/**/*.ts",
+      "apps/desktop/container/*.ts",
       "e2e/desktop/**/*.ts",
       "e2e/https-stand-in.ts",
     ],

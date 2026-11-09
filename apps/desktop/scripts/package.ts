@@ -9,6 +9,11 @@
  *   is signed ad hoc, so the real signature never covers that fuse. On Linux
  *   it is an unpacked folder, because the tests run its executable in place.
  *
+ * With `--unpacked-only`, the Linux release package is the unpacked folder
+ * too, so no `.deb` or Arch Linux package is built. The end-to-end tests read
+ * only that folder, and fpm takes about a minute to build the two packages.
+ * On macOS both packages are unpacked already, so the flag changes nothing.
+ *
  * Fails with electron-builder's exit code when either build fails, and on a
  * platform the app is not packaged for.
  */
@@ -19,10 +24,19 @@ const TEST_PACKAGE = [
   "--config.electronFuses.enableNodeCliInspectArguments=true",
 ];
 
+const unknownArguments = process.argv.slice(2).filter((argument) => argument !== "--unpacked-only");
+if (unknownArguments.length > 0) {
+  console.error(
+    `Unknown arguments: ${unknownArguments.join(" ")}. The only one is --unpacked-only.`,
+  );
+  process.exit(1);
+}
+const unpackedOnly = process.argv.includes("--unpacked-only");
+
 const BUILDS_BY_PLATFORM: Record<string, ReadonlyArray<ReadonlyArray<string>>> = {
   darwin: [["--mac"], ["--mac", ...TEST_PACKAGE, "--config.mac.identity=null"]],
   linux: [
-    ["--linux", "deb", "pacman"],
+    unpackedOnly ? ["--linux", "dir"] : ["--linux", "deb", "pacman"],
     ["--linux", "dir", ...TEST_PACKAGE],
   ],
 };

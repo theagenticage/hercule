@@ -12,6 +12,7 @@
     "src/preload/**/*.ts",
     "src/ipc/**/*.ts",
     "scripts/**/*.ts",
+    "container/*.ts",
     "vite.*.config.ts",
     "vitest.*.config.ts",
     // The motion, font features and tokens tests read every stylesheet of the

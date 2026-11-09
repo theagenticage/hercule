@@ -250,7 +250,7 @@ describe("Settings > Connections", () => {
       answer: () => ({ status: 401, json: { message: "Bad credentials" } }),
     });
     onTestFinished(standIn.stop);
-    const { url, client } = await arrangeFleet({ ownRunnerEnv: standIn.controllerEnv });
+    const { url, client } = await arrangeFleet({ controllerEnv: standIn.controllerEnv });
     const { page } = await openSignedIn(url);
     await openConnections(page);
 
