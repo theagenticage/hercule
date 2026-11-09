@@ -5,30 +5,34 @@ const CLICK_GUARD_MS = 50;
  * Swallows the click that follows a carry, which would otherwise open the card
  * that was dropped. `isPointerUp` is whether the button is already up. When
  * it is not (Esc was pressed with the button held), the click comes when the
- * user lets go, so the guard waits for that. A new press ends the guard, so a
- * release that never arrives cannot swallow a later click.
+ * user lets go, so the guard counts its 50 ms from that release. A new press
+ * ends the guard, so a release that never arrives cannot swallow a later click.
+ *
+ * The guard keeps no timer. It stays on the window until the next click or
+ * press, and a click that comes after the 50 ms passes through and ends it. A
+ * timer would fire in whatever page is left when it runs, and in a test
+ * environment that is torn down within the 50 ms the window's methods are gone
+ * by then, so the timer would throw.
  */
 export const swallowNextClick = (isPointerUp: boolean): void => {
-  // The guard can outlive the page that made it, such as a test environment that is torn down within the 50 ms.
-  // It keeps the window it started on, so ending the guard never reads a global that is gone.
-  const target = window;
-  let timer: number | undefined;
-  const stop = (event: Event): void => {
+  let guardEndsAt = isPointerUp ? performance.now() + CLICK_GUARD_MS : Number.POSITIVE_INFINITY;
+  const endGuard = (): void => {
+    window.removeEventListener("click", swallow, true);
+    window.removeEventListener("pointerup", startCountdown, true);
+    window.removeEventListener("pointerdown", endGuard, true);
+  };
+  const swallow = (event: Event): void => {
+    endGuard();
+    // Later than the guard: this click is the user's own.
+    if (performance.now() >= guardEndsAt) return;
     event.stopPropagation();
     event.preventDefault();
-    clear();
   };
-  const startTimer = (): void => {
-    timer = target.setTimeout(clear, CLICK_GUARD_MS);
+  const startCountdown = (): void => {
+    guardEndsAt = performance.now() + CLICK_GUARD_MS;
   };
-  function clear(): void {
-    target.removeEventListener("click", stop, true);
-    target.removeEventListener("pointerup", startTimer, true);
-    target.removeEventListener("pointerdown", clear, true);
-    target.clearTimeout(timer);
-  }
-  target.addEventListener("click", stop, true);
-  target.addEventListener("pointerdown", clear, true);
-  if (isPointerUp) startTimer();
-  else target.addEventListener("pointerup", startTimer, { capture: true, once: true });
+  window.addEventListener("click", swallow, true);
+  window.addEventListener("pointerdown", endGuard, true);
+  if (!isPointerUp)
+    window.addEventListener("pointerup", startCountdown, { capture: true, once: true });
 };

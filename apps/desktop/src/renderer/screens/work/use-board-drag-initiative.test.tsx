@@ -207,9 +207,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // A drop leaves a 50 ms guard on the window that swallows the next click (`swallowNextClick`). The
-  // last test's guard would fire after the test environment is torn down and throw there, so a press
-  // ends it now.
+  // A drop leaves a click guard on the window (`swallowNextClick`) until the next click or press, so a
+  // press ends it now and it cannot swallow a click of the next test.
   window.dispatchEvent(new Event("pointerdown"));
   // Unmounts first: a card still in the hand is put down on the page's real layout, not on the
   // test's, and no window listener of this test's drag outlives it into the next test.
