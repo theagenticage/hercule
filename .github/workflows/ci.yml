@@ -482,13 +482,16 @@ jobs:
   # applies to the whole workflow. The tests start the real controller, so
   # almost any file can change their result.
   #
-  # The suite is CPU-bound: one runner needs about six minutes for it. So it
-  # is split over several runners, one per entry of `shard`, and the job
+  # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
+  # it is split over several runners, one per entry of `shard`, and the job
   # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
   # shard its files, balanced by the run times recorded in
   # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. Add a shard here when the slowest one grows, and refresh the
-  # weights from a green run's reports with
+  # one shard. With 6 shards the tests take about 1.5 minutes each and the
+  # preparation of a runner about 2 minutes, so the job takes about 3.5
+  # minutes. More shards finish sooner, but queue for runners and use more of
+  # them. Add a shard when the slowest one grows. Refresh the weights from a
+  # green run's reports with
   # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
   # refuses a run that is unfinished, failed or incomplete. Each shard uploads
   # its Vitest report and its plan for that.
@@ -496,7 +499,7 @@ jobs:
   # Each shard prepares itself: it installs the dependencies on the host,
   # which the container mounts, gets the container image, builds the compiled
   # binary and the unpacked desktop app in the container, and runs its files.
-  # The image comes from the registry when it has it (see
+  # The image comes from the Actions cache when it has it (see
   # `.github/actions/desktop-e2e-image`), with Playwright's Chromium inside.
   # Electron's zip is downloaded into a Docker volume that lives only as long
   # as the runner, about 100 MB, which takes seconds.
@@ -504,15 +507,11 @@ jobs:
     name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
-      # Pulls the image from the registry.
-      packages: read
     strategy:
       # A failed shard must not hide what the others show.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -536,25 +535,21 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
-  # Publishes the container image of the end-to-end shards to the registry, so
-  # that the shards pull it and do not build it. Only a push to `main` runs it:
-  # a pull request, from a fork or not, never publishes, because every later
-  # run pulls what is published. After a change to the image's inputs (see
+  # Saves the container image of the end-to-end shards to the Actions cache,
+  # so that the shards load it and do not build it. Only a push to `main` runs
+  # it: a pull request, from a fork or not, never saves, because every later
+  # run restores what is saved. A pull request can still restore what `main`
+  # saved, a fork's too. After a change to the image's inputs (see
   # `apps/desktop/container/image.ts`), pull requests build the image in each
-  # shard until the change is on `main` and this job has published it, and the
+  # shard until the change is on `main` and this job has saved it, and the
   # first run on `main` builds it in each shard too, since it runs beside this
-  # job. It does nothing when the registry has the image already.
-  #
-  # The package is private when it is first published. Pull requests of this
-  # repository read it with their token, because the Dockerfile's `source` label
-  # links the package to the repository.
+  # job. It does nothing when the cache has the image already. GitHub deletes
+  # a cache entry that nothing has restored for 7 days, and the next run then
+  # builds the image again.
   desktop-e2e-image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

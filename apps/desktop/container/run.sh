@@ -10,7 +10,7 @@
 #
 # The image is named after what it is built from (`image.ts`), so a checkout
 # that needs another image gets its own, and never replaces one that another
-# checkout on this machine is using. CI pulls it from the registry first.
+# checkout on this machine is using. CI loads it from the Actions cache first.
 #
 # The commands run as the host user, so the files they write are the host
 # user's. They get a scratch HOME inside the container and Docker's default

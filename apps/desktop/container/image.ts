@@ -18,8 +18,8 @@
  *   Chromium, and each Playwright release wants its own build of it.
  *
  * Bun, pnpm and Playwright are passed to the build as `--build-arg`s, so each
- * version is written once in the repository. CI pulls an image of this name
- * from the registry before it builds one (`.github/actions/desktop-e2e-image`).
+ * version is written once in the repository. CI loads an image of this name
+ * from the Actions cache before it builds one (`.github/actions/desktop-e2e-image`).
  *
  * Fails when `docker build` fails, or when a version cannot be read.
  */
