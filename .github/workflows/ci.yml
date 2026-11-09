@@ -548,8 +548,7 @@ jobs:
   # a cache entry that nothing has restored for 7 days, and the next run then
   # builds the image again.
   desktop-e2e-image:
-    # TEMPORARY: also for this branch's pull request, to prove the save and the hit.
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
