@@ -31,6 +31,7 @@ import {
   keepWindowOnTop,
   createUserDataDirForTest,
   launchForTest,
+  readOpenThreadTitle,
   signInAndReadToken,
   startIdentityServerForTest,
 } from "./harness";
@@ -717,7 +718,12 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .waitFor();
   await page.getByRole("button", { name: /workspace.*details|details.*workspace/i }).click();
   const adoptedDetails = page.getByRole("dialog", { name: "Workspace details", exact: true });
-  await adoptedDetails.waitFor();
+  await adoptedDetails.waitFor().catch(async (error: unknown) => {
+    throw new Error(
+      `the Workspace details dialog never showed; the page has ${String(await page.getByRole("dialog").count())} dialog(s) and shows the thread titled ${JSON.stringify(await readOpenThreadTitle(page))}`,
+      { cause: error },
+    );
+  });
   await expect
     .poll(() =>
       adoptedDetails
@@ -726,7 +732,22 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     )
     .toBe(true);
   await capture("adopted-details");
-  await page.getByRole("button", { name: /^Detach existing checkout$/ }).click();
+  const detachButton = page.getByRole("button", { name: /^Detach existing checkout$/ });
+  // A failure says what the dialog shows, such as the reason it gives for not
+  // offering the button, because the same step has failed on CI with only
+  // "waiting for the button" to go on.
+  await detachButton.waitFor().catch(async (error: unknown) => {
+    const shown = await adoptedDetails
+      .textContent({ timeout: 1_000 })
+      .catch(() => "the dialog is no longer on the page");
+    throw new Error(
+      `the Detach button never showed; the details dialog shows: ${JSON.stringify(shown)}`,
+      {
+        cause: error,
+      },
+    );
+  });
+  await detachButton.click();
   const detach = page.getByRole("dialog", { name: /detach/i });
   await expect.poll(() => detach.textContent()).toMatch(/files.*(stay|remain|kept)|keep.*files/i);
   await expect
