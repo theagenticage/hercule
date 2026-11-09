@@ -3,6 +3,7 @@ import { describeHandOffEnds, type CardOffers } from "@hercule/client-core/inbox
 import type { ActingConnection } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import { HandAccount } from "./hand-account";
+import { OpenCardRowName } from "./open-card-row-name";
 
 /** The size of a workflow's face on a row of the open card, in pixels. */
 const FACE_SIZE = 22;
@@ -57,9 +58,7 @@ export function OpenCardHandRows({
         >
           <span className="open-card-label">
             <Face look={buildLook(offer.workflowId)} pose="idle" size={FACE_SIZE} />
-            <span className="open-card-name" title={offer.name}>
-              {offer.name}
-            </span>
+            <OpenCardRowName name={offer.name} />
           </span>
           <span className="open-card-says">{describeHandOffEnds(offer, openKinds)}</span>
           {index < NUMBERED_ROWS && <kbd>{available.length === 1 ? "H" : index + 1}</kbd>}
@@ -74,9 +73,7 @@ export function OpenCardHandRows({
         <div key={offer.workflowId} className="open-card-row is-unavailable">
           <span className="open-card-label">
             <Face look={buildLook(offer.workflowId)} pose="idle" size={FACE_SIZE} />
-            <span className="open-card-name" title={offer.name}>
-              {offer.name}
-            </span>
+            <OpenCardRowName name={offer.name} />
           </span>
           <span className="open-card-says">{offer.unavailable?.message}</span>
         </div>
