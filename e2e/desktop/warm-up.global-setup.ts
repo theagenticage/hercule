@@ -27,10 +27,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  FIRST_SCREEN_TIMEOUT_MS,
-  SHOWN_WITHOUT_FIRST_SCREEN_ERROR,
-} from "../../apps/desktop/src/main/window-visibility";
+import { setTimeout as sleep } from "node:timers/promises";
+import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../../apps/desktop/src/main/window-visibility";
 import {
   assertExitedCleanly,
   evaluateInMain,
@@ -49,92 +47,79 @@ import { pollUntil } from "../../apps/desktop/scripts/poll";
 const FIRST_FRAME_LIMIT_MS = 60_000;
 
 /**
- * How long to wait, after the first frame, for main's output to arrive. Main
- * logs its error just before it shows the window, but the output travels
- * through a pipe the setup reads on its own schedule.
+ * How long to wait, after the app has exited, for the pipes that carry its
+ * output to reach their end. A process the app started that outlives it can
+ * hold a pipe open, and the check then reads what has arrived.
  */
-const OUTPUT_SETTLE_MS = 200;
-
-/** When main showed the window and the page reached its first paint and first screen, in ms since the epoch. */
-interface LaunchTimes {
-  readonly windowShownAt: number;
-  readonly firstPaintAt: number;
-  readonly firstScreenAt: number;
-}
+const OUTPUT_DRAIN_LIMIT_MS = 5_000;
 
 /**
- * Asks the app for `LaunchTimes`, through main's inspector. Returns undefined
- * until the window exists and has recorded all three, and fails when the app
- * has exited.
+ * Returns true when the app's page has set its `first-screen` mark, which
+ * means the frame that draws its first screen has been presented, and false
+ * before that. Fails when the app has exited. Reaches the page through main's
+ * inspector, so it has no limit of its own: the caller bounds it.
  */
-async function readLaunchTimes(app: PlainApp): Promise<LaunchTimes | undefined> {
+async function hasPresentedFirstScreen(app: PlainApp): Promise<boolean> {
   if (app.process.exitCode !== null || app.process.signalCode !== null) {
     throw new Error("the app exited before its page presented a frame");
   }
-  const readPageTimes = `(() => {
-    const read = (name) => {
-      const [entry] = performance.getEntriesByName(name);
-      return entry === undefined ? null : performance.timeOrigin + entry.startTime;
-    };
-    return { firstPaintAt: read("first-paint"), firstScreenAt: read("first-screen") };
-  })()`;
-  const times = (await evaluateInMain(
+  const presented = await evaluateInMain(
     app.inspectorUrl,
     `(async () => {
       const [window] = require("electron").BrowserWindow.getAllWindows();
-      if (window === undefined) return null;
-      const [shown] = performance.getEntriesByName("window-shown");
-      return {
-        windowShownAt: shown === undefined ? null : performance.timeOrigin + shown.startTime,
-        ...(await window.webContents.executeJavaScript(${JSON.stringify(readPageTimes)})),
-      };
+      if (window === undefined) return false;
+      return window.webContents.executeJavaScript(
+        'performance.getEntriesByName("first-screen").length > 0',
+      );
     })()`,
-  ).catch((error: unknown) => {
-    // An app that exited while the call was in flight refuses the connection.
-    if (app.process.exitCode !== null || app.process.signalCode !== null) {
-      throw new Error("the app exited before its page presented a frame", { cause: error });
-    }
-    throw error;
-  })) as {
-    windowShownAt: number | null;
-    firstPaintAt: number | null;
-    firstScreenAt: number | null;
-  } | null;
-  if (times === null) return undefined;
-  const { windowShownAt, firstPaintAt, firstScreenAt } = times;
-  if (windowShownAt === null || firstPaintAt === null || firstScreenAt === null) return undefined;
-  return { windowShownAt, firstPaintAt, firstScreenAt };
+  );
+  return presented === true;
 }
 
 /**
- * Checks, from the times and from main's output, that main showed the window
- * because the page reported its first screen, not because its time limit ran
- * out. These are the checks of `launch.test.ts`, and the fallback's log line.
- * Returns the reason it did not, or undefined when it did.
+ * Waits until the page has presented its first screen, and returns how many
+ * milliseconds after `startedAt` that was. Fails when the app exits first, and
+ * when `FIRST_FRAME_LIMIT_MS` has passed, however the app and its inspector
+ * behave: the limit is a timer of its own, so an inspector that never answers
+ * cannot hold the wait. The reads that are then still pending end when the
+ * caller stops the app.
  */
-function findFallbackShow(times: LaunchTimes, mainOutput: string): string | undefined {
-  if (mainOutput.includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
-    return "main logged that it showed the window without waiting for the first screen";
-  }
-  // A hidden window under X11 presents no frame, so the frame the page marks
-  // is the one that showing the window caused.
-  if (times.firstScreenAt - times.windowShownAt <= 0) {
-    return "the first screen was marked as presented before the window was shown";
-  }
-  if (times.windowShownAt - times.firstPaintAt >= FIRST_SCREEN_TIMEOUT_MS) {
-    return "the window was shown by main's time limit, not by the page's report";
-  }
-  return undefined;
+async function waitForFirstFrame(app: PlainApp, startedAt: number): Promise<number> {
+  const reading = pollUntil(
+    async () => ((await hasPresentedFirstScreen(app)) ? Date.now() - startedAt : undefined),
+    {
+      timeoutMs: FIRST_FRAME_LIMIT_MS,
+      intervalMs: 100,
+      timeoutMessage: `the page presented no first frame within ${String(FIRST_FRAME_LIMIT_MS)} ms`,
+    },
+  );
+  // After the limit passes nobody awaits the reads, and their late failure
+  // must not become an unhandled rejection. The timers are not ref'd, so a
+  // wait that has ended does not keep the process alive.
+  reading.catch(() => undefined);
+  return Promise.race([
+    reading,
+    sleep(FIRST_FRAME_LIMIT_MS + 1_000, undefined, { ref: false }).then(() => {
+      throw new Error(
+        `the app did not answer within ${String(FIRST_FRAME_LIMIT_MS)} ms, so its page cannot be asked for a first frame`,
+      );
+    }),
+  ]);
 }
 
 /**
  * Launches the test package on a new user data directory, waits until its page
  * has presented its first screen, and quits it. Fails, with the timings and
- * main's output, when the app does not present a frame within
- * `FIRST_FRAME_LIMIT_MS`, when main shows the window on its time limit
- * instead of on the page's report, when the app exits early, or when it does
- * not quit cleanly. A run whose app cannot start would fail every test, and
- * this names the cause.
+ * main's complete output, when the app does not present a frame within
+ * `FIRST_FRAME_LIMIT_MS`, when it stops answering, when main logged that it
+ * showed the window on its time limit instead of on the page's report, or when
+ * it does not quit cleanly. A run whose app cannot start would fail every test,
+ * and this names the cause.
+ *
+ * The app is stopped on every path, through its own process (`stopPlainApp`
+ * kills it when it does not quit in time), never through anything that has
+ * to answer. Main's output is read only after the process has ended and its
+ * pipes have been read to the end.
  */
 export default async function warmUpGraphicsCache(): Promise<void> {
   if (RUNS_ON_MAC) return;
@@ -142,33 +127,32 @@ export default async function warmUpGraphicsCache(): Promise<void> {
   try {
     const startedAt = Date.now();
     const app = await launchPlainApp(userDataDir);
+    const outputEnded = new Promise<void>((resolve) => app.process.once("close", () => resolve()));
     let failure: Error | undefined;
-    let timings: string | undefined;
+    let timings = "no first frame";
+    const fail = (error: unknown) => {
+      failure ??= error instanceof Error ? error : new Error(String(error));
+    };
     try {
-      const times = await pollUntil(() => readLaunchTimes(app), {
-        timeoutMs: FIRST_FRAME_LIMIT_MS,
-        intervalMs: 100,
-        timeoutMessage: () =>
-          `the page presented no first frame within ${String(FIRST_FRAME_LIMIT_MS)} ms`,
-      });
-      timings = `the first frame was presented ${String(Math.round(times.firstScreenAt - startedAt))} ms after the launch`;
-      await new Promise((resolve) => setTimeout(resolve, OUTPUT_SETTLE_MS));
-      const fallback = findFallbackShow(times, app.readMainOutput());
-      if (fallback !== undefined) throw new Error(fallback);
+      timings = `the first frame was presented ${String(await waitForFirstFrame(app, startedAt))} ms after the launch`;
     } catch (error) {
-      failure = error instanceof Error ? error : new Error(String(error));
+      fail(error);
     }
-    // The app is stopped on every path, and a failure to stop it never hides
-    // why the launch failed.
     try {
       await stopPlainApp(app);
       assertExitedCleanly(app.process);
     } catch (error) {
-      failure ??= error instanceof Error ? error : new Error(String(error));
+      fail(error);
+    }
+    await Promise.race([outputEnded, sleep(OUTPUT_DRAIN_LIMIT_MS, undefined, { ref: false })]);
+    // The error is logged just before main shows the window on its time limit,
+    // and a normal show, on the page's report, logs nothing.
+    if (app.readMainOutput().includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
+      fail(new Error("main showed the window on its time limit, not on the page's report"));
     }
     if (failure !== undefined) {
       throw new Error(
-        `the first launch of the test package failed (${timings ?? `no first frame ${String(Date.now() - startedAt)} ms after the launch`}): ${failure.message}\nmain's output:\n${app.readMainOutput()}`,
+        `the first launch of the test package failed (${timings}): ${failure.message}\nmain's output:\n${app.readMainOutput()}`,
         { cause: failure },
       );
     }

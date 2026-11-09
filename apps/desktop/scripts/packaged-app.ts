@@ -495,8 +495,8 @@ const TEARDOWN_LIMIT_MS = 30_000;
  * `REPORT_MAIN_EXIT` in main before it starts the quit, so that main reports
  * when it has finished quitting. `since` names the quit in the failures.
  *
- * When `startQuit` fails, the process is killed and this fails with the same
- * error. The wait has two parts, each with its own limit. When a limit
+ * When `startQuit` fails, or does not finish within `MAIN_QUIT_LIMIT_MS`, the
+ * process is killed and this fails with the same error. The wait has two parts, each with its own limit. When a limit
  * passes, the process is killed, so nothing is left running, and this fails
  * saying which part took too long:
  *
@@ -544,7 +544,29 @@ async function quitAndWaitForExit(
   };
 
   try {
-    await startQuit();
+    // Reaching main goes through its inspector, which never answers when main
+    // is stuck, so the start of the quit has a limit of its own.
+    const started = startQuit();
+    // After the limit passes nobody awaits this, and its late failure must
+    // not become an unhandled rejection.
+    started.catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    const limit = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `main did not accept the quit within ${String(MAIN_QUIT_LIMIT_MS / 1000)} s of ${since}, so the app was killed`,
+            ),
+          ),
+        MAIN_QUIT_LIMIT_MS,
+      );
+    });
+    try {
+      await Promise.race([started, limit]);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (error) {
     // Main did not answer, so it cannot be quit: the callers stop the app
     // after a test, and nothing may be left running.
