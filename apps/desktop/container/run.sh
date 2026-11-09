@@ -5,7 +5,7 @@
 # root as `pnpm test:desktop:container` on a Linux machine with Docker; any
 # arguments go to `vitest`, such as test files to run on their own.
 #
-# The app is built as unpacked folders only (`--unpacked-only`): the tests run
+# The app is built as unpacked folders only (`build:desktop:unpacked`): the tests run
 # the executable in place and never read a `.deb` or an Arch package.
 #
 # The image is named after what it is built from (`image.ts`), so a checkout
@@ -24,4 +24,4 @@ image=$(node apps/desktop/container/image.ts ensure)
 exec docker run --rm --init --shm-size=1g --security-opt seccomp=unconfined \
   --user "$(id -u):$(id -g)" -e HOME=/tmp/home -v hercule-desktop-cache:/cache \
   -v "$PWD":/repo -w /repo "$image" \
-  sh -c 'mkdir -p "$HOME" && pnpm build:binary && pnpm build:desktop --unpacked-only && pnpm test:desktop "$@"' sh "$@"
+  sh -c 'mkdir -p "$HOME" && pnpm build:binary && pnpm build:desktop:unpacked && pnpm test:desktop "$@"' sh "$@"

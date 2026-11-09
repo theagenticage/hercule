@@ -168,7 +168,7 @@ The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` l
 
 ```
 pnpm build:desktop           # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
-                             # (`--unpacked-only` skips the Linux .deb and Arch package, which the tests never read)
+pnpm build:desktop:unpacked  # the same, but on Linux the release package is the unpacked folder only: no .deb or Arch package, which no test reads
 pnpm test:desktop            # Playwright drives the test package: window, security, fuses, IPC
 pnpm test:desktop:container  # the same on a headless Linux machine: Docker, a virtual screen
 ```

@@ -11,13 +11,20 @@
  * `desktop-e2e-shard-weights.json` (refreshed by
  * `update-desktop-e2e-shard-weights.ts`). Every file is in exactly one shard.
  *
+ *   bun run scripts/desktop-e2e-shards.ts 2/8 --record plan.json
+ *
+ * also writes a `ShardRecord` to `plan.json`: which shard this is, its files,
+ * and every file of the checkout. CI uploads it beside the shard's Vitest
+ * report, so the weights refresh can check that a run's reports cover the
+ * files of the commit that run tested.
+ *
  * Vitest's own `--shard` splits by file name, which leaves one shard with
  * the long files. A sequencer that weighs files cannot do it here either:
  * Vitest has one sequencer for all its projects, and the other CI jobs shard
  * by name with `--shard`.
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const REPOSITORY_ROOT = join(import.meta.dirname, "..");
 const TEST_FOLDER = "e2e/desktop";
@@ -27,15 +34,26 @@ export const WEIGHTS_PATH = join(import.meta.dirname, "desktop-e2e-shard-weights
 /** Run times in seconds, by file path relative to the repository root. */
 export type ShardWeights = Readonly<Record<string, number>>;
 
+/** What a shard of a CI run recorded about its plan, uploaded beside its Vitest report. */
+export interface ShardRecord {
+  /** This shard, counted from 1. */
+  readonly index: number;
+  /** The number of shards in the run. */
+  readonly count: number;
+  /** The files this shard ran. */
+  readonly files: ReadonlyArray<string>;
+  /** Every desktop test file of the checkout the shard ran on. */
+  readonly allFiles: ReadonlyArray<string>;
+}
+
 /**
  * Returns the paths of the desktop end-to-end test files, relative to the
- * repository root and sorted by name.
+ * repository root and sorted by name: every `*.test.ts` under `e2e/desktop`,
+ * in subfolders too. This is the pattern of the `desktop` project in
+ * `vitest.config.ts`, and a test compares the two.
  */
 export function listDesktopE2eFiles(): ReadonlyArray<string> {
-  return readdirSync(join(REPOSITORY_ROOT, TEST_FOLDER))
-    .filter((name) => name.endsWith(".test.ts"))
-    .map((name) => `${TEST_FOLDER}/${name}`)
-    .sort();
+  return globSync(`${TEST_FOLDER}/**/*.test.ts`, { cwd: REPOSITORY_ROOT }).sort();
 }
 
 /** Reads the recorded run times of the test files. Fails when the file is missing or not JSON. */
@@ -108,11 +126,23 @@ export function parseShardSpecifier(text: string): { index: number; count: numbe
 
 if (import.meta.main) {
   try {
-    const { index, count } = parseShardSpecifier(process.argv[2] ?? "");
-    const files = planShards(listDesktopE2eFiles(), readShardWeights(), count)[index - 1]!;
+    const [, , specifier = "", flag, recordPath] = process.argv;
+    if (flag !== undefined && (flag !== "--record" || recordPath === undefined)) {
+      throw new Error(
+        "Usage: bun run scripts/desktop-e2e-shards.ts <index>/<count> [--record <path>]",
+      );
+    }
+    const { index, count } = parseShardSpecifier(specifier);
+    const allFiles = listDesktopE2eFiles();
+    const files = planShards(allFiles, readShardWeights(), count)[index - 1]!;
     // An empty list would make `vitest run` start every file, not none.
     if (files.length === 0)
       throw new Error(`Shard ${index}/${count} has no files: there are fewer files than shards.`);
+    if (recordPath !== undefined) {
+      const record: ShardRecord = { index, count, files, allFiles };
+      mkdirSync(dirname(recordPath), { recursive: true });
+      writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+    }
     console.log(files.join("\n"));
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
