@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
+import {
+  buildInbox,
+  buildInboxCard,
+  buildInboxPlace,
+  buildSourceConnection,
+  buildSourcePlugin,
+} from "@hercule/client-core/inbox/testing";
+import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
+import openingSheetCss from "../screens/desk/opening-sheet.css?raw";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
 import firstRunCss from "../screens/first-run/first-run.css?raw";
 import shellCss from "../shell/shell.css?raw";
@@ -13,6 +22,7 @@ import {
   SIDEBAR_FIXTURE,
   startApp,
   stubApi,
+  stubIntersectionObserver,
 } from "./testing";
 
 /**
@@ -64,6 +74,62 @@ const findDragSelectors = (stylesheets: ReadonlyArray<string>): Array<string> =>
       (match) => match[1]!.trim(),
     ),
   );
+
+/** Returns the selector of each rule in `stylesheets` that declares `-webkit-app-region: no-drag`. */
+const findNoDragSelectors = (stylesheets: ReadonlyArray<string>): Array<string> =>
+  stylesheets.flatMap((css) =>
+    Array.from(
+      css
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .matchAll(/([^{}]+)\{[^}]*-webkit-app-region:\s*no-drag;/g),
+      (match) => match[1]!.trim(),
+    ).flatMap((selectorList) => selectorList.split(/,(?![^(]*\))/).map((each) => each.trim())),
+  );
+
+/**
+ * Returns the selectors of `selectors` that jsdom can match against an
+ * element. A selector with a pseudo-element (`::after`) matches no element.
+ */
+const keepMatchableSelectors = (selectors: ReadonlyArray<string>): Array<string> =>
+  selectors.filter((selector) => {
+    if (selector.includes("::")) return false;
+    try {
+      document.querySelector(selector);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+const CONTROLS = [
+  "a[href]",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+/**
+ * Returns the controls of the screen frame `frameSelector` that are not in its
+ * scrolling page `pageSelector`, and that no `no-drag` rule covers: the
+ * control itself or an element around it.
+ */
+const findDraggableControls = (frameSelector: string, pageSelector: string): Array<string> => {
+  const frame = document.querySelector(frameSelector);
+  expect(frame, `the screen ${frameSelector} is on the page`).not.toBeNull();
+  const noDrag = keepMatchableSelectors(findNoDragSelectors(APP_STYLESHEETS)).join(",");
+  return Array.from(frame!.querySelectorAll<HTMLElement>(CONTROLS))
+    .filter((control) => control.closest(pageSelector) === null)
+    .filter((control) => control.closest(noDrag) === null)
+    .map((control) => control.outerHTML.slice(0, 120));
+};
+
+const HOW_TO_FIX =
+  "These controls float over the screen but are not `-webkit-app-region: no-drag`. In the window's top 52px, a click on one drags the window. Add a no-drag rule for them in their stylesheet.";
 
 describe("where the app starts", () => {
   it("shows the first run when no controller is saved", async () => {
@@ -224,5 +290,94 @@ describe("the drag regions", () => {
     expect(firstRunCss).toMatch(
       /\.fr-panel,\s*\.fr-ladder\s*\{[^}]*-webkit-app-region:\s*no-drag;/,
     );
+  });
+});
+
+const PRICING = buildInboxPlace("acme:project:pricing", "Pricing rules");
+
+/*
+ * The shell's drag strip lies over the top 52px of the window, and a click on
+ * a control in it drags the window unless the control, or an element around
+ * it, is `-webkit-app-region: no-drag`. Playwright on Linux sends clicks
+ * straight into the page, so the end-to-end tests never see the region, and
+ * jsdom has no layout to say which controls are in the strip. So these tests
+ * apply a stricter rule that needs no layout: on a screen with a floating
+ * frame (a toolbar, a sheet, a bar), every control outside the screen's own
+ * scrolling page is `no-drag`. The next screen that floats a row of controls
+ * over its page has to opt out, wherever it puts the row.
+ */
+describe("the controls that float over a screen", () => {
+  beforeEach(() => {
+    stubIntersectionObserver();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("are no part of the drag strip on Work", async () => {
+    stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      "GET /api/v1/tasks/board": {
+        body: buildBoard(
+          buildCard("01a06d02-7e00-7000-8000-000000000001", {
+            title: "Cache delivery slot lookups",
+            projectId: SIDEBAR_FIXTURE.projects[0]!.id,
+          }),
+        ),
+      },
+      "GET /api/v1/tasks": { body: { items: [] } },
+    });
+    await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+      path: "/work",
+    });
+    await screen.findByRole("button", { name: /^Cache delivery slot lookups/ });
+    expect(document.querySelector(".work-desk .desk-toolbar")).not.toBeNull();
+    expect(findDraggableControls(".work-desk", ".board-scroll"), HOW_TO_FIX).toEqual([]);
+  });
+
+  it("are no part of the drag strip in the Inbox", async () => {
+    stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      "GET /api/v1/external-entities/inbox": {
+        body: buildInbox(
+          [
+            buildInboxCard("1", {
+              id: "01a1b576-c999-7000-8000-000000000001",
+              title: "Fix the basket rounding",
+              status: { shape: "ring", tone: "quiet", label: "Open" },
+              ancestors: [PRICING.ref],
+            }),
+          ],
+          { places: [PRICING] },
+        ),
+      },
+      "GET /api/v1/external-entities/inbox/count": {
+        body: { onTheClock: 1, requests: 0, withSomeoneElse: 0, newestArrival: 1 },
+      },
+      "GET /api/v1/plugins": {
+        body: [
+          buildSourcePlugin("acme", "Acme", [
+            { word: "acme/ticket", connect: "Tickets, with their projects" },
+          ]),
+        ],
+      },
+      "GET /api/v1/connections": {
+        body: {
+          items: [buildSourceConnection("01a1b576-c999-7000-8000-000000000800", "acme/account")],
+        },
+      },
+    });
+    await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+      path: "/inbox",
+    });
+    await screen.findByText("Fix the basket rounding");
+    expect(document.querySelector(".inbox-desk .desk-toolbar")).not.toBeNull();
+    expect(findDraggableControls(".inbox-desk", ".inbox-scroll"), HOW_TO_FIX).toEqual([]);
+  });
+
+  it("are no part of the drag strip in an opened sheet, which can reach the top of the window", () => {
+    // The Inbox holds its open card 12px from the top, and a tall sheet fills the window.
+    expect(findNoDragSelectors([openingSheetCss])).toContain(".opening-sheet");
   });
 });

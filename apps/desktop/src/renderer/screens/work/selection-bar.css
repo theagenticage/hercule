@@ -1,6 +1,8 @@
 /* The bar over the board while cards are selected: the drawing's
    `.select-bar`. It sits one line above the undo line, centred on the part
-   of the board in view like the undo line (`--undo-line-x`). */
+   of the board in view like the undo line (`--undo-line-x`). It sits near the
+   bottom, but a floating control opts out of the window's drag strip wherever
+   the window's height puts it, and a test holds every screen to that. */
 .select-bar {
   position: absolute;
   z-index: 42;
@@ -26,6 +28,9 @@
   transition:
     transform var(--m-slow) var(--m-ease),
     opacity var(--m-base) var(--m-ease);
+}
+.select-bar :is(a, button) {
+  -webkit-app-region: no-drag;
 }
 .select-bar.is-on {
   transform: translate(calc(-50% + var(--undo-line-x, 0px)), 0);

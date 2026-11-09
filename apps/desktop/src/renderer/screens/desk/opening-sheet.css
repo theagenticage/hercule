@@ -20,6 +20,10 @@
   flex-direction: column;
   pointer-events: auto;
   border-radius: var(--r-md);
+  /* A sheet can reach into the window's drag strip (shell.css): the Inbox's
+     open card is held 12px from the top, and a tall sheet fills the window.
+     Its controls must take clicks there, so the whole sheet is no part of the strip. */
+  -webkit-app-region: no-drag;
 }
 .opening-sheet[inert] {
   pointer-events: none;
