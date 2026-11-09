@@ -487,10 +487,11 @@ jobs:
   # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
   # shard its files, balanced by the run times recorded in
   # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. With 6 shards the tests take about 1.5 minutes each and the
-  # preparation of a runner about 2 minutes, so the job takes about 3.5
-  # minutes. More shards finish sooner, but queue for runners and use more of
-  # them. Add a shard when the slowest one grows. Refresh the weights from a
+  # one shard. The target is a job of under 5 minutes. A calculation from the
+  # measured phases, not yet a measurement of this job, expects about 3.5
+  # minutes with 6 shards: about 1.5 minutes of tests plus about 2 minutes to
+  # prepare a runner. More shards finish sooner, but queue for runners and use
+  # more of them. Add a shard when the slowest one grows. Refresh the weights from a
   # green run's reports with
   # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
   # refuses a run that is unfinished, failed or incomplete. Each shard uploads
