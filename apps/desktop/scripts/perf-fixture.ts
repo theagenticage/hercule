@@ -544,6 +544,13 @@ export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
   readonly url: string;
   /**
+   * The path of the controller's database file. A scenario writes into it
+   * what no operation makes: while the controller is stopped through
+   * `prepareLaunch`'s `writeDatabase`, or, for a row the controller is to find
+   * at its next read, while it runs.
+   */
+  readonly databasePath: string;
+  /**
    * Spawns threads until the controller holds `count`, spread over the
    * projects and the runners as the top of this file describes, and returns
    * once each new thread has settled. The first call picks the busy and the
@@ -1060,6 +1067,7 @@ export async function runWithThreadFixture<T>(
 
       return await use({
         url,
+        databasePath: join(home, ...DATABASE_PATH),
         growTo,
         growGroups,
         prepareLaunch,
