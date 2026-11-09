@@ -9,6 +9,7 @@
 import { realpathSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import {
@@ -123,6 +124,14 @@ export const makeWorkspaces = (options: {
    * Tests that do not measure disk usage leave it out.
    */
   readonly observer?: WorkspaceLifecycleObserver;
+  /**
+   * Receives a signal each time a dispose ends, completed or not, because a
+   * dispose that failed can have deleted files before it failed. A detach
+   * deletes nothing, so it sends none. The runner's metrics report listens, so
+   * the controller learns of the freed disk space at once. Tests that do not
+   * report metrics leave it out.
+   */
+  readonly workspaceRemovals?: Queue.Enqueue<void>;
 }): Effect.Effect<Workspaces, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -336,6 +345,11 @@ export const makeWorkspaces = (options: {
               report.status === "deleted"
                 ? (options.observer?.forget(report.workspaceId) ?? Effect.void)
                 : (options.observer?.endChange(report.workspaceId) ?? Effect.void),
+            ),
+            Effect.tap(() =>
+              instruction._tag === "workspaceDispose" && options.workspaceRemovals !== undefined
+                ? Effect.sync(() => void Queue.offerUnsafe(options.workspaceRemovals!, undefined))
+                : Effect.void,
             ),
           );
           yield* startWorkspaceOperation(result, restore(work), () =>

@@ -7,6 +7,10 @@
  * - skips a report whose disk and memory read fails or hangs, instead of
  *   reporting zero free bytes, which would take the machine out of service
  *   because of one failed `statfs`;
+ * - sends a report soon after a workspace removal ends, once for removals that
+ *   come together, at most once in `REMOVAL_REPORT_DELAY` however long a bulk
+ *   removal lasts, and without taking a CPU minute away from the periodic
+ *   report;
  * - carries the CPU use: `null` on the first report, however long the first
  *   read takes, then the average and the peak of the minute before the report,
  *   from a fake sequence of the kernel's counters. The minute is taken before
@@ -21,7 +25,7 @@
  * disk or load the machine's processors.
  */
 import { describe, expect, it } from "vitest";
-import { Cause, Duration, Effect, Fiber } from "effect";
+import { Cause, Clock, Duration, Effect, Fiber, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { freemem, tmpdir, totalmem } from "node:os";
 import type { RunnerMetrics } from "@hercule/protocol";
@@ -29,6 +33,7 @@ import type { CpuTimes } from "./machine-cpu";
 import {
   DISK_AND_MEMORY_TIMEOUT,
   METRICS_INTERVAL,
+  REMOVAL_REPORT_DELAY,
   readDiskAndMemory,
   reportMetrics,
   type DiskAndMemory,
@@ -327,6 +332,215 @@ describe("reportMetrics", () => {
         // The CPU sampler stopped with the loop: it does not keep a timer
         // running on a connection that is gone.
         expect(cpu.calls()).toBe(readsWhileRunning);
+      }),
+    );
+  });
+});
+
+describe("reportMetrics after a workspace removal", () => {
+  const DELAY_MS = Duration.toMillis(REMOVAL_REPORT_DELAY);
+
+  /**
+   * Starts the loop with a disk the test can change, and a queue the test
+   * signals removals on. Returns the reports sent so far, each with the clock
+   * time it was sent at.
+   */
+  const startReporting = (cpu: () => CpuTimes = STEADY()) =>
+    Effect.gen(function* () {
+      const sent: Array<{ readonly at: number; readonly metrics: RunnerMetrics }> = [];
+      const state = { diskFreeBytes: 100 * GIB };
+      const workspaceRemovals = yield* Queue.sliding<void>(1);
+      const loop = yield* Effect.forkChild(
+        reportMetrics({
+          readCpuTimes: cpu,
+          readDiskAndMemory: Effect.sync(() => ({ ...ROOMY, ...state })),
+          send: (metrics) =>
+            Effect.gen(function* () {
+              sent.push({ at: yield* Clock.currentTimeMillis, metrics });
+            }),
+          workspaceRemovals,
+        }),
+      );
+      yield* settle;
+      const removalEnds = Effect.sync(() => void Queue.offerUnsafe(workspaceRemovals, undefined));
+      return { sent, state, loop, workspaceRemovals, removalEnds };
+    });
+
+  it("reports the freed disk at once when no report went out lately, without waiting for the minute", async () => {
+    await run(
+      Effect.gen(function* () {
+        const { sent, state, loop, removalEnds } = yield* startReporting();
+        // The report after connecting is all there is, for longer than the delay.
+        yield* TestClock.adjust(Duration.millis(DELAY_MS + 1));
+        expect(sent).toHaveLength(1);
+
+        state.diskFreeBytes = 150 * GIB;
+        yield* removalEnds;
+        yield* settle;
+
+        expect(sent).toHaveLength(2);
+        expect(sent[1]?.metrics.diskFreeBytes).toBe(150 * GIB);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("sends one report for removals that end together, and not before the delay since the last report", async () => {
+    await run(
+      Effect.gen(function* () {
+        const { sent, state, loop, removalEnds } = yield* startReporting();
+        // A report went out 2 seconds ago (the one after connecting).
+        yield* TestClock.adjust(Duration.seconds(2));
+
+        state.diskFreeBytes = 150 * GIB;
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(1));
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(1));
+        yield* removalEnds;
+        expect(sent, "still inside the delay").toHaveLength(1);
+
+        // The delay ends 5 seconds after the first report, 3 seconds after the first removal.
+        yield* TestClock.adjust(Duration.millis(DELAY_MS - 4_000 - 1));
+        expect(sent, "a millisecond before the delay ends").toHaveLength(1);
+        yield* TestClock.adjust(Duration.millis(1));
+        expect(sent).toHaveLength(2);
+        expect(sent[1]?.at).toBe(DELAY_MS);
+        expect(sent[1]?.metrics.diskFreeBytes).toBe(150 * GIB);
+
+        // Nothing is left over: the removals before the report did not queue a second one.
+        yield* TestClock.adjust(Duration.millis(DELAY_MS * 2));
+        expect(sent).toHaveLength(2);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("reports a removal within the delay however long removals go on, and at most once in the delay", async () => {
+    await run(
+      Effect.gen(function* () {
+        const { sent, loop, removalEnds } = yield* startReporting();
+        yield* TestClock.adjust(Duration.millis(DELAY_MS));
+
+        // A removal ends every second for 40 seconds, which is between two periodic reports.
+        const removedAt: Array<number> = [];
+        for (let second = 0; second < 40; second++) {
+          yield* removalEnds;
+          removedAt.push(yield* Clock.currentTimeMillis);
+          yield* TestClock.adjust(Duration.seconds(1));
+        }
+        yield* TestClock.adjust(Duration.millis(DELAY_MS));
+
+        const reportedAt = sent.map((report) => report.at);
+        // Every removal is followed by a report no later than the delay.
+        for (const removal of removedAt) {
+          const next = reportedAt.find((at) => at >= removal);
+          expect(next, `a report after the removal at ${String(removal)} ms`).toBeDefined();
+          expect(next! - removal).toBeLessThanOrEqual(DELAY_MS);
+        }
+        // Reports that follow removals keep the delay between them, so 40 removals are far fewer reports.
+        const periodic = reportedAt.filter((at) => at % Duration.toMillis(METRICS_INTERVAL) === 0);
+        const early = reportedAt.filter((at) => !periodic.includes(at));
+        for (let index = 1; index < early.length; index++) {
+          expect(early[index]! - early[index - 1]!).toBeGreaterThanOrEqual(DELAY_MS);
+        }
+        expect(early.length).toBeLessThanOrEqual(Math.ceil(40_000 / DELAY_MS) + 1);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("repeats the CPU of the report before it, and leaves the periodic report its whole minute", async () => {
+    await run(
+      Effect.gen(function* () {
+        // Reads 1 to 29 are 20% and every later read is 60%.
+        const cpu = fakeCpuTimes([...Array.from({ length: 29 }, () => 20), 60]);
+        const { sent, loop, removalEnds } = yield* startReporting(cpu.readCpuTimes);
+        expect(sent[0]?.metrics.cpu).toBeNull();
+
+        // The periodic report of the first full minute: 29 seconds of 20% and 31 of 60%.
+        yield* TestClock.adjust(METRICS_INTERVAL);
+        const firstMinute = sent[1]?.metrics.cpu;
+        expect(firstMinute?.peakPercent).toBe(60);
+
+        // A removal ends ten seconds into the next minute.
+        yield* TestClock.adjust(Duration.seconds(10));
+        yield* removalEnds;
+        yield* settle;
+        expect(sent).toHaveLength(3);
+        expect(sent[2]?.metrics.cpu, "the CPU of the report before it").toEqual(firstMinute);
+
+        // The next periodic report covers the whole minute, 60% all through.
+        // Its minute started with the previous periodic report, not with the removal's.
+        yield* TestClock.adjust(Duration.seconds(50));
+        expect(sent).toHaveLength(4);
+        expect(sent[3]?.metrics.cpu).toEqual({ averagePercent: 60, peakPercent: 60 });
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("drops a signal from before the connection, because the first report covers it", async () => {
+    await run(
+      Effect.gen(function* () {
+        const sent: Array<RunnerMetrics> = [];
+        const workspaceRemovals = yield* Queue.sliding<void>(1);
+        // The runner was disconnected when this removal ended.
+        Queue.offerUnsafe(workspaceRemovals, undefined);
+
+        const loop = yield* Effect.forkChild(
+          reportMetrics({
+            readCpuTimes: STEADY(),
+            readDiskAndMemory: Effect.succeed(ROOMY),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
+            workspaceRemovals,
+          }),
+        );
+        yield* settle;
+        yield* TestClock.adjust(Duration.millis(DELAY_MS * 2));
+
+        expect(sent).toHaveLength(1);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("skips a removal's report when the disk cannot be read, and the periodic report goes on", async () => {
+    await run(
+      Effect.gen(function* () {
+        const sent: Array<RunnerMetrics> = [];
+        let readable = true;
+        const workspaceRemovals = yield* Queue.sliding<void>(1);
+        const loop = yield* Effect.forkChild(
+          reportMetrics({
+            readCpuTimes: STEADY(),
+            readDiskAndMemory: Effect.suspend(() =>
+              readable
+                ? Effect.succeed(ROOMY)
+                : Effect.fail(new Cause.UnknownError(new Error("the filesystem did not answer"))),
+            ),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
+            workspaceRemovals,
+          }),
+        );
+        yield* settle;
+        yield* TestClock.adjust(Duration.millis(DELAY_MS));
+
+        readable = false;
+        Queue.offerUnsafe(workspaceRemovals, undefined);
+        yield* TestClock.adjust(Duration.millis(DELAY_MS * 2));
+        expect(sent, "no report, and no retry").toHaveLength(1);
+
+        readable = true;
+        yield* TestClock.adjust(METRICS_INTERVAL);
+        expect(sent).toHaveLength(2);
+
+        yield* Fiber.interrupt(loop);
       }),
     );
   });

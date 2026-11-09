@@ -1,5 +1,6 @@
 import { makeTestWorkspaces } from "./testing";
 import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
 import {
   existsSync,
   mkdirSync,
@@ -224,6 +225,31 @@ describe("safe managed disposal", () => {
 
     expect((await dispose(true)).status).toBe("deleted");
     expect(calls).toEqual(["began", "ended", "began", "forgot"]);
+  });
+
+  it("signals the metrics report each time a dispose ends, whether it failed or completed", async () => {
+    const fixture = await createManaged();
+    makeRemainingFile(fixture.cwd, "untracked");
+    const removals = Effect.runSync(Queue.unbounded<void>());
+    const manager = makeTestWorkspaces({
+      storageDir: fixture.storageDir,
+      workspaceRemovals: removals,
+    });
+    const dispose = (discardChanges?: true) =>
+      Effect.runPromise(
+        manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: fixture.frame.workspaceId,
+          ...(discardChanges === undefined ? {} : { discardChanges }),
+        }),
+      );
+    const countSignals = () => Effect.runSync(Queue.size(removals));
+
+    expect((await dispose()).status).toBe("failed");
+    expect(countSignals()).toBe(1);
+
+    expect((await dispose(true)).status).toBe("deleted");
+    expect(countSignals()).toBe(2);
   });
 
   it.each(["dirty second checkout", "root file"] as const)(
@@ -462,7 +488,8 @@ describe("attached sources and detachment", () => {
       GIT_CONFIG_KEY_0: `url.${remote.url}.insteadOf`,
       GIT_CONFIG_VALUE_0: remoteUrl,
     };
-    const manager = makeTestWorkspaces({ storageDir, gitEnv });
+    const removals = Effect.runSync(Queue.unbounded<void>());
+    const manager = makeTestWorkspaces({ storageDir, gitEnv, workspaceRemovals: removals });
     const resourceId = createId();
     const primary = {
       ...buildProvisionFrame({
@@ -504,6 +531,9 @@ describe("attached sources and detachment", () => {
       }),
     );
     expect(detached.status, detached.message).toBe("deleted");
+    // The two refused disposes signalled the metrics report. The detach deletes
+    // no file, so it signals nothing.
+    expect(Effect.runSync(Queue.size(removals))).toBe(2);
     expect(hashContents(source)).toBe(sourceBefore);
     expect(Effect.runSync(manager.resolve(primary.workspaceId))).toBeUndefined();
     expect(Effect.runSync(manager.resolve(derived.workspaceId))?.cwd).toBe(derivedRoot);

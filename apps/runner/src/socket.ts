@@ -197,6 +197,12 @@ export interface ConnectOptions {
   readonly sessionSkillsFolders: SessionSkillsFolders;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
+  /**
+   * Signalled when a workspace removal ends, so the metrics report goes out
+   * soon after it. It outlives this connection. Tests that remove no
+   * workspaces leave it out.
+   */
+  readonly workspaceRemovals?: Queue.Dequeue<void>;
   /** The disk usage of those workspaces. It outlives this connection. */
   readonly diskMeasurements: Pick<DiskMeasurements, "reportTo">;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -1109,6 +1115,9 @@ export const connect = (
           reportMetrics({
             readDiskAndMemory: options.readDiskAndMemory,
             send: (metrics) => write(encodeFrameText({ _tag: "watermarkReport", metrics })),
+            ...(options.workspaceRemovals === undefined
+              ? {}
+              : { workspaceRemovals: options.workspaceRemovals }),
           }),
           // An older controller closes the connection on a frame it cannot
           // read, so the disk usage is reported only when the hello lists it.
