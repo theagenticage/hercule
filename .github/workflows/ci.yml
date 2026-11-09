@@ -482,13 +482,17 @@ jobs:
   # applies to the whole workflow. The tests start the real controller, so
   # almost any file can change their result.
   #
-  # The suite is CPU-bound: one runner needs about six minutes for it. So it
-  # is split over several runners, one per entry of `shard`, and the job
+  # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
+  # it is split over several runners, one per entry of `shard`, and the job
   # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
   # shard its files, balanced by the run times recorded in
   # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. Add a shard here when the slowest one grows, and refresh the
-  # weights from a green run's reports with
+  # one shard. The target is a job of under 5 minutes. A calculation from the
+  # measured phases, not yet a measurement of this job, expects about 3.5
+  # minutes with 6 shards: about 1.5 minutes of tests plus about 2 minutes to
+  # prepare a runner. More shards finish sooner, but queue for runners and use
+  # more of them. Add a shard when the slowest one grows. Refresh the weights from a
+  # green run's reports with
   # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
   # refuses a run that is unfinished, failed or incomplete. Each shard uploads
   # its Vitest report and its plan for that.
@@ -496,7 +500,7 @@ jobs:
   # Each shard prepares itself: it installs the dependencies on the host,
   # which the container mounts, gets the container image, builds the compiled
   # binary and the unpacked desktop app in the container, and runs its files.
-  # The image comes from the registry when it has it (see
+  # The image comes from the Actions cache when it has it (see
   # `.github/actions/desktop-e2e-image`), with Playwright's Chromium inside.
   # Electron's zip is downloaded into a Docker volume that lives only as long
   # as the runner, about 100 MB, which takes seconds.
@@ -504,15 +508,11 @@ jobs:
     name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
-      # Pulls the image from the registry.
-      packages: read
     strategy:
       # A failed shard must not hide what the others show.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -536,26 +536,22 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
-  # Publishes the container image of the end-to-end shards to the registry, so
-  # that the shards pull it and do not build it. Only a push to `main` runs it:
-  # a pull request, from a fork or not, never publishes, because every later
-  # run pulls what is published. After a change to the image's inputs (see
+  # Saves the container image of the end-to-end shards to the Actions cache,
+  # so that the shards load it and do not build it. Only a push to `main` runs
+  # it: a pull request, from a fork or not, never saves, because every later
+  # run restores what is saved. A pull request can still restore what `main`
+  # saved, a fork's too. After a change to the image's inputs (see
   # `apps/desktop/container/image.ts`), pull requests build the image in each
-  # shard until the change is on `main` and this job has published it, and the
+  # shard until the change is on `main` and this job has saved it, and the
   # first run on `main` builds it in each shard too, since it runs beside this
-  # job. It does nothing when the registry has the image already.
-  #
-  # The package is private when it is first published. Pull requests of this
-  # repository read it with their token, because the Dockerfile's `source` label
-  # links the package to the repository.
+  # job. It does nothing when the cache has the image already. GitHub deletes
+  # a cache entry that nothing has restored for 7 days, and the next run then
+  # builds the image again.
   desktop-e2e-image:
-    # TEMPORARY: also for this branch's pull request, to measure the pull.
+    # TEMPORARY: also for this branch's pull request, to prove the save and the hit.
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -564,76 +560,6 @@ jobs:
       - uses: ./.github/actions/desktop-e2e-image
         with:
           publish: "true"
-      # TEMPORARY: the same image as a cache entry, to measure a restore.
-      - id: image
-        run: echo "name=$(node apps/desktop/container/image.ts name)" >> "$GITHUB_OUTPUT"
-      - run: docker save "${{ steps.image.outputs.name }}" --output image.tar && ls -l image.tar
-      - uses: actions/cache/save@v6
-        with:
-          path: image.tar
-          key: desktop-e2e-image-${{ steps.image.outputs.name }}
-
-  # TEMPORARY: measures a pull of the published image in 8 runners at once.
-  desktop-e2e-image-measure-registry:
-    if: github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed'
-    needs: desktop-e2e-image
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Pull the image from the registry
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          name=$(node apps/desktop/container/image.ts name)
-          remote=ghcr.io/${GITHUB_REPOSITORY,,}/$name
-          echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          start=$(date +%s.%N)
-          docker pull "$remote"
-          end=$(date +%s.%N)
-          echo "MEASURE registry pull: $(awk -v a="$end" -v b="$start" 'BEGIN { print a - b }') s"
-          docker image inspect "$remote" --format 'MEASURE image size on disk: {{.Size}} bytes'
-
-  # TEMPORARY: measures a cache restore and a docker load in 8 runners at once.
-  desktop-e2e-image-measure-cache:
-    if: github.event_name == 'pull_request' && github.head_ref == 'ci/1097-desktop-e2e-speed'
-    needs: desktop-e2e-image
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - id: image
-        run: echo "name=$(node apps/desktop/container/image.ts name)" >> "$GITHUB_OUTPUT"
-      - id: restore
-        uses: actions/cache/restore@v6
-        with:
-          path: image.tar
-          key: desktop-e2e-image-${{ steps.image.outputs.name }}
-          fail-on-cache-miss: true
-      - name: Load the image
-        run: |
-          ls -l image.tar
-          start=$(date +%s.%N)
-          docker load --input image.tar
-          end=$(date +%s.%N)
-          echo "MEASURE docker load: $(awk -v a="$end" -v b="$start" 'BEGIN { print a - b }') s"
 
   # Builds the desktop app's Linux packages, a `.deb` and an Arch Linux
   # package, installs each the way a user would, and starts the app. The `.deb`

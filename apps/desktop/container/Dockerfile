@@ -34,10 +34,6 @@
 #   Playwright's Chromium is in the image itself, not in the volume.
 FROM ubuntu:24.04
 
-# Lets the registry show which repository the image belongs to, which is also
-# what gives that repository's CI jobs access to the image.
-LABEL org.opencontainers.image.source="https://github.com/theagenticage/hercule"
-
 # Node is pinned here. The other three have no default: `image.ts` passes them
 # in from `.bun-version` and `package.json`, so each version is written once in
 # the repository, and a build that does not pass them fails at once.
