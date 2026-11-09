@@ -732,22 +732,21 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     )
     .toBe(true);
   await capture("adopted-details");
-  const detachButton = page.getByRole("button", { name: /^Detach existing checkout$/ });
-  // A failure says what the dialog shows, such as the reason it gives for not
-  // offering the button, because the same step has failed on CI with only
-  // "waiting for the button" to go on.
-  await detachButton.waitFor().catch(async (error: unknown) => {
-    const shown = await adoptedDetails
-      .textContent({ timeout: 1_000 })
-      .catch(() => "the dialog is no longer on the page");
-    throw new Error(
-      `the Detach button never showed; the details dialog shows: ${JSON.stringify(shown)}`,
-      {
-        cause: error,
-      },
-    );
-  });
-  await detachButton.click();
+  // A failure of this click says what the dialog shows, such as the reason it
+  // gives for not offering the button, because the step has failed on CI with
+  // only "waiting for the button" to go on.
+  await page
+    .getByRole("button", { name: /^Detach existing checkout$/ })
+    .click()
+    .catch(async (error: unknown) => {
+      const shown = await adoptedDetails
+        .textContent({ timeout: 1_000 })
+        .catch(() => "the dialog is no longer on the page");
+      throw new Error(
+        `the Detach button could not be pressed; the details dialog shows: ${JSON.stringify(shown)}`,
+        { cause: error },
+      );
+    });
   const detach = page.getByRole("dialog", { name: /detach/i });
   await expect.poll(() => detach.textContent()).toMatch(/files.*(stay|remain|kept)|keep.*files/i);
   await expect
