@@ -512,13 +512,15 @@ export default tseslint.config(
     // the binary. The desktop end-to-end suite runs on Node, never inside the
     // binary, and starts a second copy of the packaged app itself, because
     // Playwright cannot start one that exits at once. The skill folder test
-    // runs `mkfifo`, because Node cannot create a named pipe itself.
+    // runs `mkfifo`, because Node cannot create a named pipe itself. The
+    // container image's script runs `docker`.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
       "install.test.ts",
       "packages/client-core/src/skill-folder.test.ts",
       "apps/desktop/scripts/**/*.ts",
+      "apps/desktop/container/*.ts",
       "e2e/desktop/**/*.ts",
     ],
     rules: {

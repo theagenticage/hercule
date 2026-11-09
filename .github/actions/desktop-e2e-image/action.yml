@@ -1,0 +1,60 @@
+name: Get the desktop end-to-end image
+description: >-
+  Makes the container image of apps/desktop/container available to Docker on
+  this runner: pulls it from the registry when the registry has it, and builds
+  it otherwise. Runs after the setup action, because the image's name is
+  computed by a Node script of the repository. With `publish`, it also pushes a
+  built image to the registry.
+
+inputs:
+  publish:
+    description: >-
+      Pushes the image to the registry when the registry did not have it. Only
+      a trusted run may set it, one that is a push to `main`: the image is
+      pulled by every later run, so one built from a pull request's files
+      must never be published.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # The image's name holds a hash of everything it is built from (see
+    # `apps/desktop/container/image.ts`), so a registry that has the name has
+    # the right image: a change to the Dockerfile, Bun, pnpm or Playwright
+    # makes a new name, which the registry does not have yet.
+    #
+    # Only a reply that says the image is missing means "build it quietly". Any
+    # other failure, such as a refused login or an unreachable registry, still
+    # ends in a build, which gives the same image, but prints a warning that
+    # holds the registry's answer, so a broken registry is seen and not
+    # mistaken for a missing image.
+    - name: Pull the image, or build it when the registry does not have it
+      shell: bash
+      env:
+        PUBLISH: ${{ inputs.publish }}
+        TOKEN: ${{ github.token }}
+      run: |
+        name=$(node apps/desktop/container/image.ts name)
+        remote=ghcr.io/${GITHUB_REPOSITORY,,}/$name
+        echo "Image: $name"
+
+        login_output=$(echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin 2>&1) ||
+          echo "::warning::Could not log in to ghcr.io: $login_output"
+
+        pulled=false
+        if pull_output=$(docker pull "$remote" 2>&1); then
+          docker tag "$remote" "$name"
+          pulled=true
+          echo "Pulled $remote"
+        elif grep -qiE 'manifest unknown|not found' <<< "$pull_output"; then
+          echo "::notice::The registry has no $remote, so the image is built here."
+        else
+          echo "::warning::Could not pull $remote, so the image is built here instead. The registry said: $pull_output"
+        fi
+
+        node apps/desktop/container/image.ts ensure > /dev/null
+
+        if [ "$PUBLISH" = true ] && [ "$pulled" = false ]; then
+          docker tag "$name" "$remote"
+          docker push "$remote"
+        fi
