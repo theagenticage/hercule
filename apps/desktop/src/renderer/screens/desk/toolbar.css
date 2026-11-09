@@ -280,6 +280,13 @@
 .desk-toolbar > * {
   pointer-events: auto;
 }
+/* The row lies in the window's drag strip (shell.css), where a click on a
+   control would drag the window instead. Each control opts out, so the gaps
+   and the glass between them still drag the window, as everywhere else in the
+   band. */
+.desk-toolbar :is(a, button, input, label) {
+  -webkit-app-region: no-drag;
+}
 .tools {
   flex: 1 1 240px;
   display: flex;
