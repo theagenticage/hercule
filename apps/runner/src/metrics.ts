@@ -90,7 +90,7 @@ export interface MetricsCheck<E> {
  *
  * A removal's report is sent within `REMOVAL_REPORT_DELAY` of a signal on
  * `check.workspaceRemovals`, and no sooner than `REMOVAL_REPORT_DELAY` after
- * the report before it. So a bulk cleanup sends one report every
+ * the last report sent before the signal. So a bulk cleanup sends one report every
  * `REMOVAL_REPORT_DELAY` at most, never one per removal, and never keeps
  * waiting while more removals come: the wait is counted from the first signal.
  * A removal's report takes no CPU minute, because a minute cut short would
