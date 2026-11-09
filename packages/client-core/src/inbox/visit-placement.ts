@@ -12,11 +12,13 @@
  *   joined the visit in;
  * - on the wide side, the surfaces it lies on and which of them draws it in
  *   full, and the order of the surfaces;
- * - in Requests, the group it lies in, and the order of the groups.
+ * - in Requests, the group it lies in (named by the ref of its home), the
+ *   order of the groups, and the label of each. Show and Sort are not held
+ *   here: they never move a card.
  *
  * A card new to the visit is placed as the read says. It joins the end of its
  * list, and its surface or group, if it is new too, joins at the end. The
- * user's own Group by or Requests order starts the surfaces or groups over, and
+ * user's own Group by or Requests grouping starts the surfaces or groups over, and
  * so does the next visit. The user's own Link and Unlink are the one thing that
  * changes what a card rides on during a visit, and the placement is where that
  * is decided too: it holds the moves the controller has not answered yet
@@ -27,29 +29,31 @@
  */
 import type { EntityUnlinkResult, Inbox, InboxCard, InboxSide } from "@hercule/contract";
 import { PLACE_GROUPING, resolveGrouping, type InboxGrouping } from "./groupings";
+import type { RequestsGrouping } from "./requests-view";
 import {
   compareSurfaceHeads,
-  findHomeName,
+  findHome,
   findSurfaceHeads,
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
 
-/** How the Requests column is ordered. */
-export type RequestsOrder = "oldest" | "mine" | "place";
+/** The words that label the group of requests that lie under no place. */
+const ELSEWHERE_LABEL = "Elsewhere";
 
-/** The group label of a request that lies under no place. */
-const ELSEWHERE = "Elsewhere";
-
-/** The group keys of "yours first": they sort in the order the halves are drawn. */
-const YOURS_KEY = "0";
-const OTHERS_KEY = "1";
+/**
+ * The group id of the requests that lie under no place. A group of a place is
+ * named by the place's ref, and a ref always holds colons (`plugin:kind:id`),
+ * so an id without one can never be a ref. The ungrouped column uses `""`.
+ */
+export const ELSEWHERE_GROUP_ID = "elsewhere";
 
 /** The user's choices that decide where cards lie. */
 export interface PlacementChoice {
   /** The Group by choice: `HOME_GROUPING`, `STATUS_GROUPING` or the word of a kind of place. */
   readonly grouping: string;
-  readonly requestsOrder: RequestsOrder;
+  /** Whether Requests lie in one group for each place. */
+  readonly requestsGrouping: RequestsGrouping;
 }
 
 /** What a visit holds of one card. */
@@ -79,9 +83,10 @@ export interface HeldCard {
    */
   readonly heads: readonly SurfaceHead[] | undefined;
   /**
-   * Requests: the key of the group the card lies in. It is the label when
-   * ordered by place. Unset until the card is placed, and again after the user
-   * orders the requests differently.
+   * Requests: the id of the group the card lies in. It is the ref of the
+   * card's home when grouped by place (`ELSEWHERE_GROUP_ID` when it has none),
+   * and `""` when not grouped. Unset until the card is placed, and again after
+   * the user groups the requests differently.
    */
   readonly requestGroup: string | undefined;
 }
@@ -127,10 +132,17 @@ export interface VisitPlacement {
   readonly grouping: InboxGrouping;
   /** The position of each surface, by head id, in the order the surfaces joined the visit. */
   readonly surfaceRank: ReadonlyMap<string, number>;
-  /** The Requests order the groups below were held for. */
-  readonly requestsOrder: RequestsOrder;
-  /** The position of each group, by key, in the order the groups joined the visit. */
+  /** The Requests grouping the groups below were held for. */
+  readonly requestsGrouping: RequestsGrouping;
+  /** The position of each group, by id, in the order the groups joined the visit. */
   readonly groupRank: ReadonlyMap<string, number>;
+  /**
+   * The words that label each group of places, by group id. A read that still
+   * has a readable title for the place renames the label; a place that is gone
+   * from the reply or has become restricted keeps the label it had. Empty when
+   * the requests are not grouped.
+   */
+  readonly groupLabel: ReadonlyMap<string, string>;
   /**
    * The Links and Unlinks the user made that the controller has not answered,
    * in the order they were made. They show on the page at once, but they are
@@ -147,8 +159,9 @@ export const NO_PLACEMENT: VisitPlacement = {
   requestedGrouping: undefined,
   grouping: PLACE_GROUPING,
   surfaceRank: new Map(),
-  requestsOrder: "oldest",
+  requestsGrouping: "none",
   groupRank: new Map(),
+  groupLabel: new Map(),
   pendingMoves: [],
 };
 
@@ -232,20 +245,35 @@ export const refuseRidingMove = (placement: VisitPlacement, gesture: number): Vi
     : { ...placement, pendingMoves: kept };
 };
 
-/** Compares the keys of two request groups: the halves of "yours first" in order, places by name, and "Elsewhere" last. */
-const compareGroupKeys = (a: string, b: string): number =>
-  a === b ? 0 : a === ELSEWHERE ? 1 : b === ELSEWHERE ? -1 : a.localeCompare(b, "en");
-
 /** Sorts oldest first by when the card was first observed, then by id, so the order never depends on activity. */
 const compareOldestFirst = (a: InboxCard, b: InboxCard): number =>
   Date.parse(a.firstObservedAt) - Date.parse(b.firstObservedAt) || a.id.localeCompare(b.id, "en");
 
-/** Returns the key of the group a request lies in for `order`. */
-const decideGroupKey = (card: InboxCard, order: RequestsOrder, context: PlaceContext): string => {
-  if (order === "oldest") return "";
-  if (order === "mine") return card.yours ? YOURS_KEY : OTHERS_KEY;
-  return findHomeName(card, context) ?? ELSEWHERE;
+/** Returns the id and label of the group a request lies in. The ungrouped column has the id `""` and no label. */
+const decideRequestGroup = (
+  card: InboxCard,
+  grouping: RequestsGrouping,
+  context: PlaceContext,
+): { readonly id: string; readonly label: string | undefined } => {
+  if (grouping === "none") return { id: "", label: undefined };
+  const home = findHome(card, context);
+  return home === undefined
+    ? { id: ELSEWHERE_GROUP_ID, label: ELSEWHERE_LABEL }
+    : { id: home.ref, label: home.title };
 };
+
+/** Returns a comparison of group ids that join together: by label, then id, with Elsewhere last. */
+const compareNewGroups =
+  (labels: ReadonlyMap<string, string>) =>
+  (a: string, b: string): number =>
+    a === b
+      ? 0
+      : a === ELSEWHERE_GROUP_ID
+        ? 1
+        : b === ELSEWHERE_GROUP_ID
+          ? -1
+          : (labels.get(a) ?? "").localeCompare(labels.get(b) ?? "", "en") ||
+            a.localeCompare(b, "en");
 
 /**
  * Returns `ranks` with `added` appended in the order `compare` gives, each
@@ -275,7 +303,7 @@ const appendRanks = <Key extends string>(
  *   did.
  * - A surface or a group not seen before joins at the end, behind the others.
  *   Several that join together are put in the page's usual order.
- * - A different Group by (`choice.grouping`) or Requests order drops the
+ * - A different Group by (`choice.grouping`) or Requests grouping drops the
  *   surfaces or groups held for the old one, and places every card again. The
  *   Group by is resolved against what `inbox` offers only then, once, and the
  *   result is held with the choice, so a kind of place that leaves the replies
@@ -292,7 +320,7 @@ export const placeInboxCards = (
 ): VisitPlacement => {
   const keepsSurfaces = held.requestedGrouping === choice.grouping;
   const grouping = keepsSurfaces ? held.grouping : resolveGrouping(inbox, choice.grouping);
-  const keepsGroups = held.requestsOrder === choice.requestsOrder;
+  const keepsGroups = held.requestsGrouping === choice.requestsGrouping;
   const oldestFirst = [...inbox.cards].sort(compareOldestFirst);
 
   // A card keeps its side and position always; its surfaces and its group only for the same choice.
@@ -308,7 +336,8 @@ export const placeInboxCards = (
     });
   }
   const newHeads = new Map<string, SurfaceHead>();
-  const newGroups = new Set<string>();
+  const newGroups = new Map<string, string>();
+  const groupLabel = new Map(keepsGroups ? held.groupLabel : []);
 
   for (const card of oldestFirst) {
     const seen = cards.get(card.id);
@@ -324,12 +353,26 @@ export const placeInboxCards = (
       isChanged = true;
     }
     if (side === "requests" && requestGroup === undefined) {
-      requestGroup = decideGroupKey(card, choice.requestsOrder, context);
-      if (!(keepsGroups && held.groupRank.has(requestGroup))) newGroups.add(requestGroup);
+      const group = decideRequestGroup(card, choice.requestsGrouping, context);
+      requestGroup = group.id;
+      if (group.label !== undefined && !groupLabel.has(group.id)) {
+        groupLabel.set(group.id, group.label);
+      }
+      if (!(keepsGroups && held.groupRank.has(requestGroup))) {
+        newGroups.set(requestGroup, group.label ?? "");
+      }
       isChanged = true;
     }
     const ridesOn = seen === undefined ? card.ridesOn : seen.ridesOn;
     cards.set(card.id, { side, ridesOn, rank: seen?.rank ?? cards.size, heads, requestGroup });
+  }
+  // A place that still has a readable title renames its group. One that is gone or restricted keeps its label.
+  for (const [id, label] of groupLabel) {
+    const title = context.index.placeByRef.get(id)?.title;
+    if (title !== undefined && title !== label) {
+      groupLabel.set(id, title);
+      isChanged = true;
+    }
   }
   if (!isChanged) return held;
 
@@ -342,12 +385,13 @@ export const placeInboxCards = (
       [...newHeads.keys()],
       (a, b) => compareSurfaceHeads(newHeads.get(a)!, newHeads.get(b)!),
     ),
-    requestsOrder: choice.requestsOrder,
+    requestsGrouping: choice.requestsGrouping,
     groupRank: appendRanks(
       keepsGroups ? held.groupRank : new Map(),
-      [...newGroups],
-      compareGroupKeys,
+      [...newGroups.keys()],
+      compareNewGroups(newGroups),
     ),
+    groupLabel,
     pendingMoves: held.pendingMoves,
   };
 };

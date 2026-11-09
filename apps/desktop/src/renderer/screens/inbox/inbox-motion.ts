@@ -70,7 +70,8 @@ const readMotionKey = (element: HTMLElement): string | null => {
     return `hint:${element.dataset["leadId"]}:${element.dataset["hintRef"]}`;
   if (element.matches(".inbox-place > .card-stock")) return `stock:${place}`;
   if (element.matches(".inbox-place-head")) return `head:${place}`;
-  if (element.matches(".inbox-requests-label")) return `label:${element.textContent}`;
+  if (element.matches(".inbox-requests-label"))
+    return `label:${element.dataset["groupId"] ?? element.textContent}`;
   if (element.matches(".inbox-else-toggle")) return "else";
   if (element.matches(".inbox-requests-clear")) return "no-requests";
   if (element.matches(".inbox-none")) return `none:${element.textContent}`;

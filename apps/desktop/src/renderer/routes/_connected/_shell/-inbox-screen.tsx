@@ -3,7 +3,6 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { buildInitials, readErrorMessage } from "@hercule/client-core";
 import {
-  buildInboxFacets,
   decideEmptyInbox,
   describeFailingSources,
   describeTruncatedInbox,
@@ -65,12 +64,12 @@ const describeOffline = (since: Date): string =>
  * Renders the Inbox screen: the cards that concern the user, on the wide side
  * as rows on the surface of their place and in the narrow column as small
  * requests, with the toolbar over them. It reads the Inbox, holds what the user
- * chose (Group by, Filter and the order of Requests), asks the visit what the
+ * chose (Group by, Filter, and how Requests are shown, grouped and sorted), asks the visit what the
  * page draws (`useInboxVisit`: where each card lies, what waits for a still
  * hand), and hands the page to `screens/inbox/`.
  *
  * - The Inbox is read while the window is visible, and read again on each
- *   push. Group by, Filter and the order run in client-core over the read, so
+ *   push. Group by, Filter and the Requests view run in client-core over the read, so
  *   they cost no read and change no number in the sidebar.
  * - The first read of a visit holds the words of the cards of the last visit
  *   back, and fades them in. With nothing known yet, quiet bars stand in.
@@ -141,7 +140,13 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   } = useInboxVisit({
     step: {
       received: moves.inbox,
-      view: { grouping: view.grouping, filter: view.filter, requestsOrder: view.requestsOrder },
+      view: {
+        grouping: view.grouping,
+        filter: view.filter,
+        requestsGrouping: view.requestsGrouping,
+        requestsShow: view.requestsShow,
+        requestsSort: view.requestsSort,
+      },
       isFresh: hasOwnReply,
       hasUserMove: moves.hasPendingEdits,
     },
@@ -205,6 +210,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const page = useInboxPage({
     scrollRef,
     current,
+    view,
     findCard,
     open: openCard,
     runAndMoveOn,
@@ -284,8 +290,14 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
         />
         <RequestsSide
           layout={layout}
-          requestsOrder={view.requestsOrder}
-          onOrderChange={view.setRequestsOrder}
+          show={view.requestsShow}
+          grouping={view.requestsGrouping}
+          sort={view.requestsSort}
+          onShowChange={view.setRequestsShow}
+          onGroupingChange={view.setRequestsGrouping}
+          onSortChange={view.setRequestsSort}
+          collapsedGroups={view.collapsedGroups}
+          onToggleGroup={view.toggleGroup}
           plugins={plugins}
           monogram={monogram}
           freshIds={freshIds}
@@ -335,7 +347,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           groupings={groupings}
           grouping={layout?.grouping ?? view.grouping}
           onGroupingChange={view.setGrouping}
-          facets={inbox === undefined ? [] : buildInboxFacets(inbox)}
+          facets={layout?.facets ?? []}
           filter={view.filter}
           cards={inbox?.cards ?? []}
           onFilterChange={view.setFilter}

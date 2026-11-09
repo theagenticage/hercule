@@ -232,7 +232,12 @@ export const advanceInboxVisit = (
   const layout = layOutInbox(inbox, view, placementToLayOut, history.bundles);
 
   const everything = advanceEmptiness(history.everything, inbox.cards.length === 0, hasUserMove);
-  const requests = advanceEmptiness(history.requests, layout.requests.isEmpty, hasUserMove);
+  const requests = advanceEmptiness(
+    history.requests,
+    // A filter that hides every request is not the user finishing them: only a column with no request at all counts.
+    layout.requests.isEmpty && !layout.requests.isEmptiedByFilter,
+    hasUserMove,
+  );
   const placement = isFresh ? layout.placement : history.placement;
   // The bundles keep their identity already, so this is cheap, and the history is the same object when none changed.
   const bundles = isFresh ? replaceEqualDeep(history.bundles, layout.bundles) : history.bundles;

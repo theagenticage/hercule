@@ -1,12 +1,14 @@
 /**
  * The rules of the Inbox page, applied to one read. The wide side (Ongoing)
  * holds lasting work as rows on the surface of each place. The narrow column
- * holds Requests, with "With someone else" at its foot. Nothing folds, and
- * nothing the user did not ask for changes place: the order never reads
- * activity, only when a card was first observed and when it joined the visit.
+ * holds Requests, with "With someone else" at its foot. The layout itself folds
+ * nothing (the column may fold a group on the user's own gesture, which the
+ * layout does not know about), and nothing the user did not ask for changes
+ * place: the order never reads activity, only when a card was first observed
+ * and when it joined the visit.
  */
 import type { Inbox, InboxCard, InboxSide } from "@hercule/contract";
-import { filterItems, type Filter } from "../desk/filter";
+import { filterItems, type Filter, type FilterFacet } from "../desk/filter";
 import type { OpenPlaceRow } from "../desk/relation-rows";
 import {
   buildCardBundle,
@@ -27,16 +29,18 @@ import {
   type PlaceContext,
   type SurfaceHead,
 } from "./inbox-place";
-import {
-  placeInboxCards,
-  type PlacementChoice,
-  type RequestsOrder,
-  type VisitPlacement,
-} from "./visit-placement";
+import type { RequestsShow, RequestsSort } from "./requests-view";
+import { placeInboxCards, type PlacementChoice, type VisitPlacement } from "./visit-placement";
 
-/** What the user chose on the toolbar. Where cards lie is held apart, by `placeInboxCards`. */
+/**
+ * What the user chose on the toolbar and in the Requests menu. Where cards lie
+ * is held apart, by `placeInboxCards`, and it reads only the `PlacementChoice`
+ * part: Show and Sort never place a card again.
+ */
 export interface InboxView extends PlacementChoice {
   readonly filter: Filter;
+  readonly requestsShow: RequestsShow;
+  readonly requestsSort: RequestsSort;
 }
 
 /** A card on a surface. */
@@ -72,9 +76,15 @@ export interface ColumnRow {
   readonly bundle: CardBundle;
 }
 
-/** Requests, in one group, or one group for each place when ordered by place. */
+/** Requests, in one group, or one group for each place when grouped by place. */
 export interface RequestGroup {
-  /** The place's title, or "Elsewhere". Absent unless ordered by place. */
+  /**
+   * The group's identity for the visit: the ref of the place, a fixed id for
+   * "Elsewhere", or `""` for the one group of an ungrouped column. Use it as
+   * the key when drawing, and to remember which groups the user folded.
+   */
+  readonly id: string;
+  /** The place's title, or "Elsewhere". Absent unless grouped by place. */
   readonly label?: string;
   readonly rows: readonly ColumnRow[];
 }
@@ -96,6 +106,13 @@ export interface InboxLayout {
   readonly requests: ColumnState & {
     readonly groups: readonly RequestGroup[];
     /**
+     * The names of the people the Show menu offers: those on the requests that
+     * lie in the column and are not yours, after the page filter but before
+     * Show, by name. The person chosen in `InboxView.requestsShow` is always
+     * in it, also when no request of theirs is left.
+     */
+    readonly people: readonly string[];
+    /**
      * How many requests wait on the user, as the controller counts them: all
      * of them, not only the cards the page holds, and not those a filter
      * leaves. A card just taken keeps its place for the visit, but the
@@ -104,6 +121,11 @@ export interface InboxLayout {
     readonly awaitingCount: number;
   };
   readonly withSomeoneElse: { readonly rows: readonly ColumnRow[] };
+  /**
+   * The facets of the page Filter, built once for this read. The screen
+   * offers them in the Filter menu instead of building them again.
+   */
+  readonly facets: readonly FilterFacet<InboxCard>[];
   /** The bundle of each card that carries something, by card id. Pass it as `previousBundles` to the layout of the next read. */
   readonly bundles: Readonly<Record<string, CardBundle>>;
 }
@@ -121,35 +143,40 @@ const buildColumnRow = (
   bundle: side === "requests" ? buildCardBundle(card, sources) : EMPTY_BUNDLE,
 });
 
-/** Returns the Requests groups. Cards come in the order given; a group lies where `placement` ranks its key. */
+/**
+ * Returns the Requests groups. Cards come in the order given, which is the
+ * order they joined the visit; a group lies where `placement` ranks its id.
+ * `sort` "newest" reverses the rows inside each group, not the groups.
+ */
 const groupRequests = (
   cards: readonly InboxCard[],
-  order: RequestsOrder,
+  sort: RequestsSort,
   context: PlaceContext,
   placement: VisitPlacement,
   sources: BundleSources,
 ): readonly RequestGroup[] => {
-  const byKey = new Map<string, ColumnRow[]>();
+  const byId = new Map<string, ColumnRow[]>();
   for (const card of cards) {
-    const key = placement.cards.get(card.id)?.requestGroup ?? "";
-    const rows = byKey.get(key);
+    const id = placement.cards.get(card.id)?.requestGroup ?? "";
+    const rows = byId.get(id);
     const row = buildColumnRow(card, context, sources, "requests");
-    if (rows === undefined) byKey.set(key, [row]);
+    if (rows === undefined) byId.set(id, [row]);
     else rows.push(row);
   }
-  const groups = [...byKey]
+  return [...byId]
     .sort(
       ([a], [b]) =>
         (placement.groupRank.get(a) ?? Infinity) - (placement.groupRank.get(b) ?? Infinity) ||
         a.localeCompare(b, "en"),
     )
-    .map(([key, rows]) => ({ key, rows }));
-  // Only "by place" draws a label for each group; the other orders draw one list.
-  return order === "place"
-    ? groups.map(({ key, rows }) => ({ label: key, rows }))
-    : groups.length === 0
-      ? []
-      : [{ rows: groups.flatMap((group) => group.rows) }];
+    .map(([id, rows]) => {
+      const label = placement.groupLabel.get(id);
+      return {
+        id,
+        ...(label === undefined ? {} : { label }),
+        rows: sort === "newest" ? rows.reverse() : rows,
+      };
+    });
 };
 
 const buildSurfaces = (
@@ -193,6 +220,24 @@ const buildSurfaces = (
           (placement.surfaceRank.get(b.head.id) ?? Infinity) || compareSurfaceHeads(a.head, b.head),
     )
     .map(({ head, full, pointers }) => ({ head, rows: [...full, ...pointers] }));
+};
+
+/** Checks whether a request passes the Show choice of the Requests column. */
+const isRequestShown = (card: InboxCard, show: RequestsShow): boolean =>
+  show.kind === "all" || (show.kind === "mine" ? card.yours : card.person?.name === show.name);
+
+/**
+ * Returns the names of the people on `requests` that are not yours, by name,
+ * each once. The person `show` has chosen is always in the list, so a choice
+ * stays on the menu after their last request is gone.
+ */
+const listPeople = (requests: readonly InboxCard[], show: RequestsShow): readonly string[] => {
+  const names = new Set<string>();
+  for (const card of requests) {
+    if (!card.yours && card.person !== undefined) names.add(card.person.name);
+  }
+  if (show.kind === "person") names.add(show.name);
+  return [...names].sort((a, b) => a.localeCompare(b, "en"));
 };
 
 /** No bundle drawn before: the first layout of a visit. */
@@ -239,9 +284,17 @@ const decideColumnState = (shown: number, beforeFilter: number): ColumnState => 
  *   card's surface. On a surface the cards come in the order they joined the
  *   visit, then the pointers to cards drawn in full elsewhere. A card carries
  *   the small things that ride on it, and the hints under it (`bundle`).
- * - Requests: in that order, or yours first (still in that order within each
- *   half), or by place with a label for each place. Each request keeps its group.
- *   A request that rides on a card of the wide side is drawn there, not here.
+ * - Requests: in one group, or one group for each place when grouped by place.
+ *   Each request keeps its group. A request that rides on a card of the wide
+ *   side is drawn there, not here. Inside a group the rows come in the order
+ *   they joined the visit, or the reverse for `requestsSort` "newest". That is
+ *   newest to join the visit, not the latest `firstObservedAt`: a card that
+ *   arrives during the visit has joined last, so it lies on top, and one the
+ *   user dismissed and undid lies where it did. Sort never changes a rank, and
+ *   never the order of the groups, of Ongoing, or of the riders.
+ * - `requestsShow` narrows the Requests column only, after the page filter:
+ *   Mine keeps the requests that are yours, a person keeps the requests that
+ *   name that person. With someone else and the wide side are not touched.
  * - With someone else: in that order, at the foot of the column.
  *
  * The order the cards join the visit in is oldest first for the first read,
@@ -264,9 +317,8 @@ export const layOutInbox = (
   const inVisitOrder = inbox.cards.toSorted((a, b) => readRank(a.id) - readRank(b.id));
   const drawnRiding = decideDrawnRiding(inbox.cards, placement);
   const sources = indexBundleSources(inbox, drawnRiding, readRank, context, previousBundles);
-  const shown = new Set(
-    filterItems(inVisitOrder, view.filter, buildInboxFacets(inbox)).map((card) => card.id),
-  );
+  const facets = buildInboxFacets(inbox);
+  const shown = new Set(filterItems(inVisitOrder, view.filter, facets).map((card) => card.id));
   for (const [id, leadRef] of drawnRiding) {
     const lead = sources.cardByRef.get(leadRef);
     if (shown.has(id) && lead !== undefined) shown.add(lead.id);
@@ -280,9 +332,10 @@ export const layOutInbox = (
     );
 
   const ongoing = cardsOn("ongoing", true);
-  const requests = cardsOn("requests", true);
+  const filteredRequests = cardsOn("requests", true);
+  const requests = filteredRequests.filter((card) => isRequestShown(card, view.requestsShow));
   const surfaces = buildSurfaces(ongoing, context, placement, sources);
-  const groups = groupRequests(requests, view.requestsOrder, context, placement, sources);
+  const groups = groupRequests(requests, view.requestsSort, context, placement, sources);
   return {
     placement,
     grouping: placement.grouping.id,
@@ -292,6 +345,7 @@ export const layOutInbox = (
     },
     requests: {
       groups,
+      people: listPeople(filteredRequests, view.requestsShow),
       awaitingCount: inbox.counts.requests,
       ...decideColumnState(requests.length, cardsOn("requests", false).length),
     },
@@ -300,6 +354,7 @@ export const layOutInbox = (
         buildColumnRow(card, context, sources, "with-someone-else"),
       ),
     },
+    facets,
     bundles: indexBundles(surfaces, groups),
   };
 };

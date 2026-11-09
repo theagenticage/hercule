@@ -154,9 +154,26 @@ export const findSurfaceHeads = (
   ];
 };
 
+/** The ref and title of a place, as a request's group is named for it. */
+export interface HomeName {
+  readonly ref: string;
+  readonly title: string;
+}
+
+/**
+ * Returns the first home of `card` that has a title, or `undefined` when it
+ * has none or all of them are restricted.
+ */
+export const findHome = (card: InboxCard, context: PlaceContext): HomeName | undefined => {
+  for (const place of listHomes(card, context)) {
+    if (place.title !== undefined) return { ref: place.ref, title: place.title };
+  }
+  return undefined;
+};
+
 /** Returns the title of the first home of `card` that has one. */
 export const findHomeName = (card: InboxCard, context: PlaceContext): string | undefined =>
-  listHomes(card, context).find((place) => place.title !== undefined)?.title;
+  findHome(card, context)?.title;
 
 /**
  * Returns the places a row shows beside its title: the places the card is

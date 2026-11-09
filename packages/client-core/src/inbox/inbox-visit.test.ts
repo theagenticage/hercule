@@ -3,6 +3,7 @@
  * whole, what waits as an arrival, what stays where it lies, the Group by
  * menu, and what the user's own move emptied.
  */
+import { SHOW_ALL } from "./requests-view";
 import type { Inbox, InboxCard } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
@@ -29,7 +30,13 @@ import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
 import type { InboxView } from "./lay-out";
 import { hasPlacedCards } from "./visit-placement";
 
-const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
+const VIEW: InboxView = {
+  grouping: HOME_GROUPING,
+  filter: {},
+  requestsGrouping: "none",
+  requestsShow: SHOW_ALL,
+  requestsSort: "oldest",
+};
 
 const PRICING = "acme:project:pricing";
 const BETA = "acme:project:beta";
@@ -299,6 +306,26 @@ describe("advanceInboxVisit: what the user's own move emptied", () => {
     // A read, not the user, takes the last card.
     expect(visit.read(inboxOf([])).emptiedByMove).toEqual({ everything: false, requests: false });
   });
+
+  it.each([
+    ["the Show choice", { requestsShow: { kind: "mine" } }],
+    ["a page filter", { filter: { whose: ["mine"] } }],
+  ] as const)(
+    "does not mark a column that %s hides, not even once the hidden request is gone",
+    (_, hiding) => {
+      const visit = startVisit();
+      visit.read(inboxOf([ticket("1", [PRICING]), request("2")]));
+      const hidden = visit.read(inboxOf([ticket("1", [PRICING]), request("2")]), {
+        hasUserMove: true,
+        view: { ...VIEW, ...hiding },
+      });
+      expect(hidden.layout!.requests.isEmpty).toBe(true);
+      expect(hidden.emptiedByMove.requests).toBe(false);
+      // The hidden request goes away by itself, with the same choice still on.
+      const gone = visit.read(inboxOf([ticket("1", [PRICING])]), { view: { ...VIEW, ...hiding } });
+      expect(gone.emptiedByMove.requests).toBe(false);
+    },
+  );
 
   it("does not mark a page that opens empty", () => {
     expect(startVisit().read(inboxOf([])).emptiedByMove).toEqual({

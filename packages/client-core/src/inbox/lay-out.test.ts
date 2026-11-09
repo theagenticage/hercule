@@ -2,10 +2,12 @@
  * Tests the page of the Inbox: its surfaces, its two columns, the order, Group by,
  * Filter, and what the visit holds in place while reads change the cards.
  */
+import { SHOW_ALL } from "./requests-view";
 import type { EntityEdge, EntityPlace, Inbox, InboxCard } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { toggleFilterValue } from "../desk/filter";
 import {
+  buildInboxLink,
   buildInbox,
   buildInboxCard,
   buildInboxPlace,
@@ -17,7 +19,13 @@ import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
 import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
 import { NO_PLACEMENT, type VisitPlacement } from "./visit-placement";
 
-const VIEW: InboxView = { grouping: HOME_GROUPING, filter: {}, requestsOrder: "oldest" };
+const VIEW: InboxView = {
+  grouping: HOME_GROUPING,
+  filter: {},
+  requestsGrouping: "none",
+  requestsShow: SHOW_ALL,
+  requestsSort: "oldest",
+};
 
 const view = (overrides: Partial<InboxView> = {}): InboxView => ({ ...VIEW, ...overrides });
 
@@ -219,17 +227,13 @@ describe("layOutInbox: Requests", () => {
   it("lists oldest first", () => {
     const { groups } = layOut(inbox, view()).requests;
     expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ id: "" });
     expect(groups[0]?.label).toBeUndefined();
     expect(listCardIds(groups[0]?.rows ?? [])).toEqual(["1", "2", "3", "4"]);
   });
 
-  it("lists yours first, each half oldest first", () => {
-    const { groups } = layOut(inbox, view({ requestsOrder: "mine" })).requests;
-    expect(listCardIds(groups[0]?.rows ?? [])).toEqual(["2", "4", "1", "3"]);
-  });
-
   it("groups by place, each place labelled, by name, with no home last", () => {
-    const { groups } = layOut(inbox, view({ requestsOrder: "place" })).requests;
+    const { groups } = layOut(inbox, view({ requestsGrouping: "place" })).requests;
     expect(groups.map((group) => [group.label, listCardIds(group.rows)])).toEqual([
       ["shop-api", ["2"]],
       ["shop-web", ["1", "4"]],
@@ -494,22 +498,10 @@ describe("layOutInbox: what the visit holds in place", () => {
   });
 
   describe("in Requests", () => {
-    const reviews = [
-      review("1", [SHOP_WEB], { yours: false }),
-      review("2", [SHOP_API], { yours: false }),
-    ];
     const withPlaces = (cards: readonly InboxCard[]) =>
       buildInbox(cards, {
         places: [repository(SHOP_WEB, "shop-web"), repository(SHOP_API, "shop-api")],
       });
-
-    it("keeps a request in the half it was first seen in when it becomes yours, until the next visit", () => {
-      const mine = view({ requestsOrder: "mine" });
-      const before = withPlaces(reviews);
-      const becameYours = withPlaces([reviews[0]!, review("2", [SHOP_API], { yours: true })]);
-      expect(requestIds(layOutVisit([before, becameYours], mine))).toEqual(["1", "2"]);
-      expect(requestIds(layOutVisit([becameYours], mine))).toEqual(["2", "1"]);
-    });
 
     it("keeps the groups of Requests ordered by place in the order they joined, and a new group last", () => {
       const first = withPlaces([review("2", [SHOP_API]), review("3", [])]);
@@ -519,7 +511,7 @@ describe("layOutInbox: what the visit holds in place", () => {
         review("3", []),
         review("4", [SHOP_API]),
       ]);
-      const layout = layOutVisit([first, second], view({ requestsOrder: "place" }));
+      const layout = layOutVisit([first, second], view({ requestsGrouping: "place" }));
       expect(layout.requests.groups.map((g) => [g.label, listCardIds(g.rows)])).toEqual([
         ["shop-api", ["2", "4"]],
         ["Elsewhere", ["3"]],
@@ -532,8 +524,8 @@ describe("layOutInbox: what the visit holds in place", () => {
       const renamed = buildInbox([review("1", [SHOP_WEB])], {
         places: [repository(SHOP_WEB, "storefront")],
       });
-      const layout = layOutVisit([before, renamed], view({ requestsOrder: "place" }));
-      expect(layout.requests.groups.map((g) => g.label)).toEqual(["shop-web"]);
+      const layout = layOutVisit([before, renamed], view({ requestsGrouping: "place" }));
+      expect(layout.requests.groups.map((g) => g.label)).toEqual(["storefront"]);
       expect(layout.requests.groups[0]?.rows[0]?.homeName).toBe("storefront");
     });
   });
@@ -639,5 +631,225 @@ describe("layOutInbox: the offers of each row", () => {
     expect(offersOf(second.id)).toBe(offersOf(first.id));
     expect(offersOf(bare.id)).toEqual({ available: [], unavailable: [] });
     expect(layout.requests.groups[0]?.rows[0]?.offers.available).toEqual([offer]);
+  });
+});
+
+describe("layOutInbox: Requests grouped by place", () => {
+  const grouped = view({ requestsGrouping: "place" });
+  const read = (cards: readonly InboxCard[], places: readonly EntityPlace[]) =>
+    buildInbox(cards, { places });
+  const groupsOf = (layout: InboxLayout) =>
+    layout.requests.groups.map((group) => [group.id, group.label, listCardIds(group.rows)]);
+
+  it("keeps two places with the same title as two groups", () => {
+    const inbox = read(
+      [review("1", [SHOP_WEB]), review("2", [SHOP_API])],
+      [repository(SHOP_WEB, "shop"), repository(SHOP_API, "shop")],
+    );
+    expect(groupsOf(layOut(inbox, grouped))).toEqual([
+      [SHOP_API, "shop", ["2"]],
+      [SHOP_WEB, "shop", ["1"]],
+    ]);
+  });
+
+  it("renames a group when its place is renamed, and keeps the group where it was", () => {
+    const cards = [review("1", [SHOP_WEB]), review("2", [SHOP_API])];
+    const before = read(cards, [repository(SHOP_WEB, "alpha"), repository(SHOP_API, "beta")]);
+    const renamed = read(cards, [repository(SHOP_WEB, "omega"), repository(SHOP_API, "beta")]);
+    expect(groupsOf(layOutVisit([before, renamed], grouped))).toEqual([
+      [SHOP_WEB, "omega", ["1"]],
+      [SHOP_API, "beta", ["2"]],
+    ]);
+  });
+
+  it("keeps the label of a place that a later read leaves out", () => {
+    const cards = [review("1", [SHOP_WEB])];
+    const before = read(cards, [repository(SHOP_WEB, "shop-web")]);
+    const gone = read(cards, []);
+    expect(groupsOf(layOutVisit([before, gone], grouped))).toEqual([[SHOP_WEB, "shop-web", ["1"]]]);
+  });
+
+  it("keeps the label of a place that becomes restricted", () => {
+    const cards = [review("1", [SHOP_WEB])];
+    const before = read(cards, [repository(SHOP_WEB, "shop-web")]);
+    const locked = { ref: SHOP_WEB, kind: "acme/repository", noun: "Repository", restricted: true };
+    expect(groupsOf(layOutVisit([before, read(cards, [locked])], grouped))).toEqual([
+      [SHOP_WEB, "shop-web", ["1"]],
+    ]);
+  });
+
+  it("puts the group of a request with no home last, among groups that join together", () => {
+    const inbox = read(
+      [review("1", []), review("2", [SHOP_WEB]), review("3", [SHOP_API])],
+      [repository(SHOP_WEB, "zulu"), repository(SHOP_API, "alpha")],
+    );
+    expect(groupsOf(layOut(inbox, grouped)).map(([, label]) => label)).toEqual([
+      "alpha",
+      "zulu",
+      "Elsewhere",
+    ]);
+  });
+
+  it("starts over with one group when the requests are no longer grouped", () => {
+    const inbox = read(
+      [review("1", [SHOP_WEB]), review("2", [])],
+      [repository(SHOP_WEB, "shop-web")],
+    );
+    const held = layOut(inbox, grouped).placement;
+    const layout = layOut(inbox, view(), held);
+    expect(groupsOf(layout)).toEqual([["", undefined, ["1", "2"]]]);
+  });
+
+  it("returns the held placement when a later read changes nothing, titles included", () => {
+    const inbox = read([review("1", [SHOP_WEB])], [repository(SHOP_WEB, "shop-web")]);
+    const held = layOut(inbox, grouped).placement;
+    expect(layOut(inbox, grouped, held).placement).toBe(held);
+  });
+});
+
+describe("layOutInbox: Requests sorted newest first", () => {
+  const newest = view({ requestsSort: "newest" });
+  const reviews = [review("1", []), review("2", []), review("3", [])];
+
+  it("reverses the rows inside each group, and not the groups", () => {
+    const inbox = buildInbox(
+      [review("1", [SHOP_WEB]), review("2", [SHOP_API]), review("3", [SHOP_WEB])],
+      { places: [repository(SHOP_WEB, "web"), repository(SHOP_API, "api")] },
+    );
+    const layout = layOut(inbox, view({ requestsGrouping: "place", requestsSort: "newest" }));
+    expect(layout.requests.groups.map((group) => listCardIds(group.rows))).toEqual([
+      ["2"],
+      ["3", "1"],
+    ]);
+  });
+
+  it("puts two cards that arrive together on top, the older observed one under the other", () => {
+    const first = buildInbox([reviews[0]!]);
+    const second = buildInbox(reviews);
+    expect(requestIds(layOutVisit([first, second], newest))).toEqual(["3", "2", "1"]);
+  });
+
+  it("puts a card that arrives late on top even when it was observed first", () => {
+    const late = review("1", [], { firstObservedAt: "2026-10-01T09:00:00.000Z" });
+    const before = buildInbox([reviews[1]!, reviews[2]!]);
+    const after = buildInbox([late, reviews[1]!, reviews[2]!]);
+    expect(requestIds(layOutVisit([before, after], newest))).toEqual(["1", "3", "2"]);
+  });
+
+  it("puts a card that arrives on the bottom when sorted oldest first", () => {
+    const before = buildInbox([reviews[0]!, reviews[1]!]);
+    const after = buildInbox(reviews);
+    expect(requestIds(layOutVisit([before, after]))).toEqual(["1", "2", "3"]);
+  });
+
+  it("lets a dismissed card come back to where it was", () => {
+    const all = buildInbox(reviews);
+    const dismissed = buildInbox([reviews[0]!, reviews[2]!]);
+    expect(requestIds(layOutVisit([all, dismissed, all], newest))).toEqual(["3", "2", "1"]);
+  });
+
+  it("changes no placement and moves nothing in Ongoing, With someone else or the riders", () => {
+    const lead = ticket("5", [PRICING]);
+    const rider = review("6", [], { ridesOn: lead.ref });
+    const other = review("7", [], { side: "with-someone-else", taskId: "task-1" });
+    const inbox = buildInbox(
+      [ticket("4", [PRICING]), lead, reviews[0]!, reviews[1]!, rider, other],
+      {
+        places: [project(PRICING, "Pricing")],
+        links: [buildInboxLink(lead.ref, rider.ref)],
+      },
+    );
+    const oldest = layOut(inbox, view());
+    const sorted = layOut(inbox, newest, oldest.placement);
+    expect(sorted.placement).toBe(oldest.placement);
+    expect(sorted.ongoing).toEqual(oldest.ongoing);
+    expect(sorted.withSomeoneElse).toEqual(oldest.withSomeoneElse);
+    expect(requestIds(sorted)).toEqual(["2", "1"]);
+  });
+});
+
+describe("layOutInbox: Requests shown", () => {
+  const tessa = { name: "Tessa Vane" };
+  const omar = { name: "Omar Reyes" };
+  const inbox = buildInbox(
+    [
+      review("1", [SHOP_WEB], { yours: true }),
+      review("2", [SHOP_WEB], { person: tessa }),
+      review("3", [SHOP_API], { person: omar }),
+      review("4", [SHOP_API], { person: tessa }),
+      review("5", [], { side: "with-someone-else", taskId: "task-1", person: omar }),
+    ],
+    { places: [repository(SHOP_WEB, "shop-web"), repository(SHOP_API, "shop-api")] },
+  );
+  const shows = (requestsShow: InboxView["requestsShow"], overrides: Partial<InboxView> = {}) =>
+    layOut(inbox, view({ requestsShow, ...overrides }));
+
+  it("shows every request by default", () => {
+    expect(requestIds(shows({ kind: "all" }))).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("shows only yours for Mine", () => {
+    expect(requestIds(shows({ kind: "mine" }))).toEqual(["1"]);
+  });
+
+  it("shows only the requests of a person", () => {
+    expect(requestIds(shows({ kind: "person", name: "Tessa Vane" }))).toEqual(["2", "4"]);
+  });
+
+  it("narrows only the Requests column", () => {
+    const layout = shows({ kind: "mine" });
+    expect(listCardIds(layout.withSomeoneElse.rows)).toEqual(["5"]);
+  });
+
+  it("works on top of the page filter", () => {
+    const filter = toggleFilterValue({}, "acme/repository", SHOP_API);
+    const layout = shows({ kind: "person", name: "Tessa Vane" }, { filter });
+    expect(requestIds(layout)).toEqual(["4"]);
+  });
+
+  it("is an empty column emptied by the filter when Show alone hides every request", () => {
+    const layout = shows({ kind: "person", name: "Nobody" });
+    expect(layout.requests).toMatchObject({ isEmpty: true, isEmptiedByFilter: true });
+    expect(layOut(buildInbox([]), view()).requests.isEmptiedByFilter).toBe(false);
+  });
+
+  it("lists the people on requests that are not yours, by name, before Show narrows", () => {
+    expect(shows({ kind: "all" }).requests.people).toEqual(["Omar Reyes", "Tessa Vane"]);
+    expect(shows({ kind: "mine" }).requests.people).toEqual(["Omar Reyes", "Tessa Vane"]);
+  });
+
+  it("lists the people left by the page filter only", () => {
+    const filter = toggleFilterValue({}, "acme/repository", SHOP_WEB);
+    expect(shows({ kind: "all" }, { filter }).requests.people).toEqual(["Tessa Vane"]);
+  });
+
+  it("keeps a chosen person on the list when none of their requests is left", () => {
+    const layout = shows({ kind: "person", name: "Imani Cole" });
+    expect(layout.requests.people).toEqual(["Imani Cole", "Omar Reyes", "Tessa Vane"]);
+  });
+
+  it("leaves out a person who has only a request riding on a lead, or one with someone else", () => {
+    const lead = ticket("6", [PRICING]);
+    const rider = review("7", [], { ridesOn: lead.ref, person: { name: "Ada Quill" } });
+    const withLead = buildInbox([...inbox.cards, lead, rider], {
+      places: [...inbox.places, project(PRICING, "Pricing")],
+      links: [buildInboxLink(lead.ref, rider.ref)],
+    });
+    expect(layOut(withLead, view()).requests.people).toEqual(["Omar Reyes", "Tessa Vane"]);
+  });
+
+  it("changes no placement", () => {
+    const held = layOut(inbox, view()).placement;
+    expect(layOut(inbox, view({ requestsShow: { kind: "mine" } }), held).placement).toBe(held);
+  });
+});
+
+describe("layOutInbox: facets", () => {
+  it("returns the facets of the Filter menu built for the read", () => {
+    const inbox = buildInbox([review("1", [SHOP_WEB])], { places: [repository(SHOP_WEB, "web")] });
+    expect(layOut(inbox, view()).facets.map((facet) => facet.id)).toEqual([
+      "whose",
+      "acme/repository",
+    ]);
   });
 });
