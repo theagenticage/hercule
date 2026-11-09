@@ -552,6 +552,7 @@ describe("reportMetrics after a workspace removal", () => {
    */
   const startWithSlowReads = (options: {
     readonly readMs: (readNumber: number) => number;
+    readonly readCpuTimes?: () => CpuTimes;
     readonly fails?: boolean;
     /** Runs as read `readNumber` starts, after it captured the disk, to change the world under it. */
     readonly duringRead?: (
@@ -567,7 +568,7 @@ describe("reportMetrics after a workspace removal", () => {
       const removalEnds = () => void Queue.offerUnsafe(workspaceRemovals, undefined);
       const loop = yield* Effect.forkChild(
         reportMetrics({
-          readCpuTimes: STEADY(),
+          readCpuTimes: options.readCpuTimes ?? STEADY(),
           // The value is read when the read starts, like a real `statfs`.
           readDiskAndMemory: Effect.gen(function* () {
             const disk = state.diskFreeBytes;
@@ -721,6 +722,30 @@ describe("reportMetrics after a workspace removal", () => {
 
         expect(sent.map((report) => report.at)).toEqual([0, 57_000, 60_000]);
         expect(sent[2]?.metrics.diskFreeBytes).toBe(150 * GIB);
+
+        yield* Fiber.interrupt(loop);
+      }),
+    );
+  });
+
+  it("takes a periodic report's CPU minute when its measurement starts, not while it waits behind a removal's", async () => {
+    await run(
+      Effect.gen(function* () {
+        // Reads 1 to 60 are 20%, and every later read is 100%. A removal's
+        // measurement starts at 57 s and reads for 8 s, so the periodic report
+        // due at 60 s starts its measurement at 65 s.
+        const cpu = fakeCpuTimes([...Array.from({ length: 60 }, () => 20), 100]);
+        const { sent, loop, removalEnds } = yield* startWithSlowReads({
+          readMs: (readNumber) => (readNumber === 2 ? 8_000 : 0),
+          readCpuTimes: cpu.readCpuTimes,
+        });
+        yield* TestClock.adjust(Duration.seconds(57));
+        yield* removalEnds;
+        yield* TestClock.adjust(Duration.seconds(20));
+
+        const periodic = sent.find((report) => report.metrics.cpu !== null && report.at === 65_000);
+        // A minute taken at 60 s, before the wait, would have a peak of 20%.
+        expect(periodic?.metrics.cpu?.peakPercent).toBe(100);
 
         yield* Fiber.interrupt(loop);
       }),

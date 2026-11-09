@@ -87,7 +87,8 @@ export interface MetricsCheck<E> {
  * - a report skipped because its read failed drops its own minute, because the
  *   minute was already taken. The next report covers only the minute after it,
  *   never two minutes mixed;
- * - a report's minute ends when its round starts, so the minute is at most
+ * - a report's minute ends when its measurement starts, after the wait for the
+ *   permit that a removal's measurement may hold, so the minute is at most
  *   `DISK_AND_MEMORY_TIMEOUT` old when the report is sent.
  *
  * A removal asks for a report with a signal on `check.workspaceRemovals`:
@@ -178,8 +179,12 @@ export const reportMetrics = <E>(check: MetricsCheck<E>): Effect.Effect<never, E
 
       const reportEveryMinute = Effect.gen(function* () {
         while (true) {
-          const minute = yield* sampler.takeMinute;
-          yield* oneMeasurementAtATime.withPermits(1)(measureAndSend(minute));
+          yield* oneMeasurementAtATime.withPermits(1)(
+            // The minute is taken with the permit held, so a measurement for a
+            // removal that is still reading ahead of this one does not make it
+            // older than the read it waits for.
+            Effect.flatMap(sampler.takeMinute, measureAndSend),
+          );
           yield* Effect.sleep(METRICS_INTERVAL);
         }
       });
