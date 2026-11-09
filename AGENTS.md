@@ -158,16 +158,17 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a headless Linux machine with Docker, `pnpm test:desktop:container` builds both in a container and runs the suite on a virtual screen (`apps/desktop/container`).
+The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a headless Linux machine with Docker, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files; CI passes each of its shards the files that `bun run scripts/desktop-e2e-shards.ts <index>/<count>` prints.
 
 **A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
 
 - macOS runs `pnpm build:desktop`, `pnpm compare:bureau` and the end-to-end files that do not depend on a screen, timing or focus. `compare:bureau` runs only there, and nobody needs a Mac to run it.
-- Linux runs the whole end-to-end suite in the container, installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
+- Linux runs the whole end-to-end suite in the container, split over parallel runners by recorded run time (`desktop-e2e-linux`; the weights in `scripts/desktop-e2e-shard-weights.json` are refreshed from a green run with `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`), installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
 - On `main`, `edge-build` also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease.
 
 ```
 pnpm build:desktop           # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
+pnpm build:desktop:unpacked  # the same, but on Linux the release package is the unpacked folder only: no .deb or Arch package, which no test reads
 pnpm test:desktop            # Playwright drives the test package: window, security, fuses, IPC
 pnpm test:desktop:container  # the same on a headless Linux machine: Docker, a virtual screen
 ```

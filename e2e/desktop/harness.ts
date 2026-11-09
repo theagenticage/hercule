@@ -66,7 +66,6 @@ import { pollUntil } from "../../apps/desktop/scripts/poll";
 import {
   findCompiledBinary,
   PASSWORD,
-  completeSetup,
   startController,
   startSetUpController,
   USERNAME,
@@ -275,13 +274,12 @@ export async function signInAndReadToken(
 }
 
 /**
- * Starts a controller for the current test from the compiled binary,
- * `./hercule`, in a scratch Hercule Home, never the user's own. With
- * `setUp: true`, it also completes first-run setup as `username`, or as
- * `USERNAME` when it is not given, so the app can sign in; otherwise setup
- * is still pending. `env` is added to the environment of the controller and
- * of the runner it starts for itself. Returns the controller with the path
- * of its home.
+ * Starts a controller for the current test, in a scratch Hercule Home, never
+ * the user's own. With `setUp: true`, it also completes first-run setup as
+ * `username`, or as `USERNAME` when it is not given, so the app can sign in;
+ * otherwise setup is still pending. `env` is added to the environment of the
+ * controller and of the runner it starts for itself. Returns the controller
+ * with the path of its home.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
  * Fails when the binary has not been built, when the controller does not
@@ -294,25 +292,9 @@ export async function startControllerForTest(options: {
 }): Promise<Controller & { readonly home: string }> {
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
-  const binary = findCompiledBinary();
-  let controller: Controller;
-  if (options.setUp && options.env === undefined) {
-    controller = await startSetUpController({ home, username: options.username });
-  } else {
-    controller = await startController({ home, binary, env: options.env });
-    if (options.setUp) {
-      const setup = await completeSetup({
-        home,
-        url: controller.url,
-        binary,
-        username: options.username,
-      });
-      if (setup.code !== 0) {
-        await controller.stop();
-        throw new Error(`setup failed with exit code ${String(setup.code)}:\n${setup.stderr}`);
-      }
-    }
-  }
+  const controller = options.setUp
+    ? await startSetUpController({ home, username: options.username, env: options.env })
+    : await startController({ home, binary: findCompiledBinary(), env: options.env });
   onTestFinished(async () => {
     await controller.stop();
   });
@@ -343,8 +325,11 @@ export interface ArrangedFleet {
 
 /**
  * Starts a controller for the current test that is set up, and connects a
- * fleet to it, with no runners yet. The controller is stopped and the
- * runners disconnected when the test finishes.
+ * fleet to it, with no runners yet. When the test finishes, the runners
+ * disconnect first and the controller that is running then is stopped, the
+ * restarted one when `restartController` was called. A controller stopped
+ * while a socket from outside is still open, such as a scripted runner's or
+ * the app's, waits out its shutdown drain, ten seconds.
  *
  * The controller starts a runner of its own on this machine, which may be
  * logged in to a real provider. It is retired before this returns, so no
@@ -353,15 +338,30 @@ export interface ArrangedFleet {
  * scripted one and serves its identity (see `startIdentityServerForTest`).
  * Fails when that runner does not come online, or its retirement is refused.
  *
- * A test that needs the real runner keeps it with `ownRunnerEnv`, the
- * environment the controller and its runner start with, and again after a
- * restart. Nothing is retired then, so the caller places threads on that
- * runner with care: it may find a real agent on this machine.
+ * A test that needs the real runner passes `keepOwnRunner: true`. Nothing is
+ * retired then, so the caller places threads on that runner with care: it may
+ * find a real agent on this machine. The controller stops its own runner
+ * before its drain, so keeping it does not slow a restart.
+ *
+ * `controllerEnv` is added to the environment of the controller and of the
+ * runner it starts for itself, at the first start and again after every
+ * restart. It does not change whether the runner is kept.
  */
 export async function arrangeFleet(
-  options: { readonly ownRunnerEnv?: Readonly<Record<string, string>> } = {},
+  options: {
+    readonly controllerEnv?: Readonly<Record<string, string>>;
+    readonly keepOwnRunner?: boolean;
+  } = {},
 ): Promise<ArrangedFleet> {
-  const controller = await startControllerForTest({ setUp: true, env: options.ownRunnerEnv });
+  const { home, remove } = createTemporaryHome();
+  onTestFinished(remove);
+  const controller = await startSetUpController({ home, env: options.controllerEnv });
+  let running: Pick<Controller, "stop"> = controller;
+  // Finishing callbacks run last registered first, so this one runs after the
+  // runners below have disconnected.
+  onTestFinished(async () => {
+    await running.stop();
+  });
   const fleet = await connectFleet(controller.url);
   onTestFinished(fleet.disconnectRunners);
   const client = createClient({ baseUrl: controller.url, token: fleet.token });
@@ -371,25 +371,21 @@ export async function arrangeFleet(
       message: "the controller's own runner did not come online",
     })
     .toEqual(["online"]);
-  if (options.ownRunnerEnv === undefined) {
+  if (options.keepOwnRunner !== true) {
     const [own] = await readRunners();
     await client.runner.retire({ params: { id: own!.id }, payload: {} });
   }
-  let running: Pick<Controller, "stop"> = controller;
   return {
     url: controller.url,
-    home: controller.home,
+    home,
     restartController: async (whileStopped) => {
       await running.stop();
       whileStopped();
       const restarted = await startController({
-        home: controller.home,
+        home,
         binary: findCompiledBinary(),
         port: controller.port,
-        env: options.ownRunnerEnv,
-      });
-      onTestFinished(async () => {
-        await restarted.stop();
+        env: options.controllerEnv,
       });
       running = restarted;
     },
@@ -818,6 +814,31 @@ export function runSecondInstance(
  */
 export const WINDOW_VISIBILITY_TIMEOUT_MS = 30_000;
 
+/** A corner of the screen's work area, where `launchPlainAppForTest` puts the app's window. */
+export type ScreenCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+/**
+ * Builds the expression that moves the window `window` (an expression in main)
+ * to `corner` of the screen's work area. The expression evaluates to true once
+ * it has moved the window, and to false until main has a window on screen,
+ * because a window moved before it shows could be placed again when it does.
+ */
+function buildMoveToCorner(window: string, corner: ScreenCorner): string {
+  const [vertical, horizontal] = corner.split("-");
+  return `(() => {
+    if (${window} === undefined || !${window}.isVisible()) return false;
+    const { screen } = require("electron");
+    const area = screen.getPrimaryDisplay().workArea;
+    const bounds = ${window}.getBounds();
+    ${window}.setBounds({
+      ...bounds,
+      x: ${JSON.stringify(horizontal)} === "left" ? area.x : area.x + area.width - bounds.width,
+      y: ${JSON.stringify(vertical)} === "top" ? area.y : area.y + area.height - bounds.height,
+    });
+    return true;
+  })()`;
+}
+
 /** The test package, started as a plain process by `launchPlainAppForTest`. */
 export interface PlainAppForTest {
   /**
@@ -839,12 +860,30 @@ export interface PlainAppForTest {
  * `launchPlainApp` and `signInOnce`). The app is stopped when the test
  * finishes, and the test fails if the app did not quit cleanly.
  *
+ * Once its window shows, it is moved to `corner` of the screen. A plain app,
+ * unlike one Playwright drives, reads `document.visibilityState` as "hidden"
+ * while another window covers it completely, and its page then does what it
+ * does for a hidden window. Every app window opens at the same place, and the
+ * tests of other workers keep theirs on top (see `keepWindowOnTop`), so one of
+ * them could cover this window, and a test that counts what the page does on
+ * hide and show would count that too. A window in a corner is never covered by
+ * a window at the usual place. The tests of one file run one after another, so
+ * a caller needs a corner that no other caller uses: a new caller takes one
+ * that none of the existing ones does, and there are four.
+ *
+ * This holds on a screen larger than the window, such as the container's
+ * 1920 by 1080 for the 1440 by 900 window. On a screen about the size of the
+ * window the four corners are the same place, and a window can be covered.
+ *
  * Nothing attaches to the page: the returned functions reach it through
  * main's Node inspector, one connection per call. A test uses this app where
  * Playwright would change what it checks, such as how the page runs while
  * its window is hidden.
  */
-export async function launchPlainAppForTest(url: string): Promise<PlainAppForTest> {
+export async function launchPlainAppForTest(
+  url: string,
+  corner: ScreenCorner,
+): Promise<PlainAppForTest> {
   const userDataDir = createUserDataDirForTest();
   writeSettings(userDataDir, { controllerUrl: url });
   await signInOnce(userDataDir);
@@ -854,6 +893,17 @@ export async function launchPlainAppForTest(url: string): Promise<PlainAppForTes
     assertExitedCleanly(app.process);
   });
   const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
+  await pollUntil(
+    async () =>
+      (await evaluateInMain(app.inspectorUrl, buildMoveToCorner(window, corner))) === true
+        ? true
+        : undefined,
+    {
+      timeoutMs: 30_000,
+      intervalMs: 50,
+      timeoutMessage: "the app's window never showed, so it could not be moved to its corner",
+    },
+  );
   return {
     evaluateInPage: (expression) =>
       evaluateInMain(

@@ -444,16 +444,19 @@ export async function completeSetup(options: {
 /**
  * Starts a controller from the compiled binary against `home`, completes
  * first-run setup as `username` (`USERNAME` when it is not given), and
- * returns the controller once a client can sign in to it. Fails when there is no compiled binary, when the controller
- * does not start, or when setup fails; a controller that started is stopped
- * before a failed setup is reported.
+ * returns the controller once a client can sign in to it. `env` is added to
+ * the environment of the controller and of the runner it starts for itself.
+ * Fails when there is no compiled binary, when the controller does not start,
+ * or when setup fails; a controller that started is stopped before a failed
+ * setup is reported.
  */
 export async function startSetUpController(options: {
   readonly home: string;
   readonly username?: string | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller> {
   const binary = findCompiledBinary();
-  const controller = await startController({ home: options.home, binary });
+  const controller = await startController({ home: options.home, binary, env: options.env });
   const setup = await completeSetup({
     home: options.home,
     url: controller.url,

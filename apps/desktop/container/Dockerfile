@@ -7,9 +7,12 @@
 # Node, Bun and pnpm, so a `node_modules` installed on the host runs in it. The
 # repository is mounted, never copied in.
 #
-# Build, from the repository root:
+# Build, from the repository root, with the image's script. It names the image
+# after everything it is built from (this file and the Bun, pnpm and Playwright
+# versions the repository pins), passes those versions in as build arguments,
+# and does nothing when the machine has the image already:
 #
-#   docker build -t hercule-desktop-linux apps/desktop/container
+#   node apps/desktop/container/image.ts ensure
 #
 # Run a command on the virtual screen, as the host user so the files it writes
 # are the host user's, with a scratch HOME and the default network (never the
@@ -17,7 +20,7 @@
 #
 #   docker run --rm --init --shm-size=1g --security-opt seccomp=unconfined \
 #     --user "$(id -u):$(id -g)" -e HOME=/tmp/home -v hercule-desktop-cache:/cache \
-#     -v "$PWD":/repo -w /repo hercule-desktop-linux pnpm test:desktop
+#     -v "$PWD":/repo -w /repo "$(node apps/desktop/container/image.ts name)" pnpm test:desktop
 #
 # - `--shm-size` is needed because Chromium keeps shared memory in /dev/shm,
 #   and Docker's 64 MB default is too small for it.
@@ -27,18 +30,24 @@
 #   the sandbox (see `buildSandboxArgs` in `scripts/packaged-app.ts`), so only
 #   tests of the release package need this.
 # - The `hercule-desktop-cache` volume keeps what electron-builder downloads
-#   (Electron, and fpm which builds the `.deb`) and Playwright's Chromium
-#   between runs. Leave it out and each run downloads them again.
+#   (Electron) between runs. Leave it out and each run downloads it again.
+#   Playwright's Chromium is in the image itself, not in the volume.
 FROM ubuntu:24.04
 
+# Node is pinned here. The other three have no default: `image.ts` passes them
+# in from `.bun-version` and `package.json`, so each version is written once in
+# the repository, and a build that does not pass them fails at once.
 ARG NODE_VERSION=24.14.0
-ARG BUN_VERSION=1.4.4
-ARG PNPM_VERSION=10.12.1
+ARG BUN_VERSION
+ARG PNPM_VERSION
+ARG PLAYWRIGHT_VERSION
+RUN test -n "${BUN_VERSION}" && test -n "${PNPM_VERSION}" && test -n "${PLAYWRIGHT_VERSION}" \
+    || { echo "Build this image with 'node apps/desktop/container/image.ts ensure', which passes BUN_VERSION, PNPM_VERSION and PLAYWRIGHT_VERSION." >&2; exit 1; }
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ELECTRON_CACHE=/cache/electron \
     ELECTRON_BUILDER_CACHE=/cache/electron-builder \
-    PLAYWRIGHT_BROWSERS_PATH=/cache/playwright
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # `/etc/passwd` is writable so that `entry.sh` can add the user the container
 # runs as. The container runs as the host user (`--user`), whose ID this image
@@ -68,5 +77,16 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
     && curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
     && unzip -q -j /tmp/bun.zip -d /usr/local/bin && rm /tmp/bun.zip \
     && npm install --global "pnpm@${PNPM_VERSION}"
+
+# The headless Chromium that this Playwright version drives, which the
+# repository's `pnpm install` does not download. `--only-shell` leaves out the
+# full Chromium: `chromium.launch()` with no options runs headless, and
+# Playwright then starts the headless shell, so the full browser would only add
+# about 400 MB. Without the shell each run would download it. `--yes` lets npx
+# fetch the Playwright CLI, which only runs here, and the cache that npx fills
+# is deleted again to keep the image small.
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --only-shell chromium \
+    && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && rm -rf /root/.npm
 
 ENTRYPOINT ["/repo/apps/desktop/container/entry.sh"]

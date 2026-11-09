@@ -110,11 +110,18 @@ function buildStatusPrintCommand(fields: {
  * started is stopped by its PID, the master key it stored in the login
  * keychain is deleted, and the scratch Home is deleted. Fails when `kind` is
  * `serve` and the binary has not been built.
+ *
+ * `controllerEnv` is added to the environment of the controller the `serve`
+ * stand-in starts, which otherwise has only its Home and a minimal `PATH`.
  */
 export async function writeStandInBinaryForTest(
   userDataDir: string,
   kind: StandInKind,
+  options: { readonly controllerEnv?: Readonly<Record<string, string>> } = {},
 ): Promise<StandInBinary> {
+  const controllerEnv = Object.entries(options.controllerEnv ?? {})
+    .map(([name, value]) => `${name}=${quoteForShell(value)} `)
+    .join("");
   const compiled = kind === "serve" ? findCompiledBinary() : undefined;
   const { home, remove } = createTemporaryHome();
   // Nothing reserves the port, which is good enough for an address that
@@ -164,7 +171,7 @@ export async function writeStandInBinaryForTest(
       // open, and the app would not count as closed until the controller
       // stopped.
       `if [ ! -f ${quoteForShell(pidFile)} ]; then`,
-      `  HERCULE_HOME=${quoteForShell(home)} PATH=/usr/bin:/bin /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); POSIX::close($_) for 3..1023; exec @ARGV' ${quoteForShell(compiled ?? "")} serve -c bind.port=${port} > ${quoteForShell(join(home, "stand-in-serve.log"))} 2>&1 < /dev/null &`,
+      `  HERCULE_HOME=${quoteForShell(home)} PATH=/usr/bin:/bin ${controllerEnv}/usr/bin/perl -MPOSIX -e 'POSIX::setsid(); POSIX::close($_) for 3..1023; exec @ARGV' ${quoteForShell(compiled ?? "")} serve -c bind.port=${port} > ${quoteForShell(join(home, "stand-in-serve.log"))} 2>&1 < /dev/null &`,
       `  echo $! > ${quoteForShell(pidFile)}`,
       "  tries=0",
       `  while [ $tries -lt 100 ] && ! grep -q 'is listening' ${quoteForShell(join(home, "stand-in-serve.log"))}; do sleep 0.1; tries=$((tries + 1)); done`,

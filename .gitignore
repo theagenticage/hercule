@@ -23,3 +23,6 @@ apps/android/local.properties
 apps/android/.idea/
 apps/android/**/*.iml
 apps/android/captures/
+
+# The Vitest report of a desktop end-to-end run, which CI uploads.
+/desktop-e2e-report/

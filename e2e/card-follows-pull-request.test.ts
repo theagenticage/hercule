@@ -28,9 +28,6 @@
  * `pnpm test` does not. It requires the built release binary.
  */
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
-import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
-import { connect, createServer as createTcpServer, type AddressInfo, type Server } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -49,6 +46,7 @@ import {
   parseJsonOutputOrFail,
   type TemporaryHome,
 } from "./harness";
+import { startHttpsStandIn, type StandIn, type StandInAnswer } from "./https-stand-in";
 
 const REPOSITORY = "northwind/market";
 const BRANCH = "add-refund-button";
@@ -63,7 +61,6 @@ const THREAD_CREATED = "2026-11-01T09:00:00.000Z";
 const DEADLINE_MS = 60_000;
 
 let state: TemporaryHome;
-let certificates: TemporaryHome;
 const binary = findReleaseBinary();
 
 // ---------------------------------------------------------------------------
@@ -72,58 +69,6 @@ const binary = findReleaseBinary();
 
 /** What the stand-in says about the pull request on the Thread's branch. */
 type PullRequestState = "absent" | "OPEN" | "MERGED";
-
-/** A request the stand-in received. */
-interface GithubRequest {
-  readonly method: string;
-  readonly path: string;
-  /** The GraphQL document, when the request is one. */
-  readonly query?: string | undefined;
-}
-
-/** The stand-in: its address as a proxy, and the state it answers from. */
-interface GithubStandIn {
-  readonly proxyUrl: string;
-  readonly caFile: string;
-  readonly requests: Array<GithubRequest>;
-  setPullRequest: (next: PullRequestState) => void;
-  stop: () => Promise<void>;
-}
-
-/** Makes a self-signed certificate for `api.github.com` with `openssl`, and writes it into `folder`. */
-function writeCertificate(folder: string): {
-  readonly key: string;
-  readonly cert: string;
-  readonly caFile: string;
-} {
-  const keyFile = join(folder, "key.pem");
-  const caFile = join(folder, "cert.pem");
-  const made = Bun.spawnSync(
-    [
-      "openssl",
-      "req",
-      "-x509",
-      "-newkey",
-      "rsa:2048",
-      "-nodes",
-      "-keyout",
-      keyFile,
-      "-out",
-      caFile,
-      "-days",
-      "2",
-      "-subj",
-      "/CN=api.github.com",
-      "-addext",
-      "subjectAltName=DNS:api.github.com",
-    ],
-    { stderr: "pipe" },
-  );
-  if (made.exitCode !== 0) {
-    throw new Error(`openssl could not make the certificate:\n${made.stderr.toString()}`);
-  }
-  return { key: readFileSync(keyFile, "utf8"), cert: readFileSync(caFile, "utf8"), caFile };
-}
 
 /** Builds the pull request as GitHub's GraphQL API returns it, for the state the stand-in is in. */
 function buildPullRequestNode(pullRequest: "OPEN" | "MERGED") {
@@ -187,82 +132,41 @@ function answerGraphql(query: string, current: PullRequestState): unknown {
   return { data };
 }
 
-/**
- * Starts the stand-in: an HTTPS server holding the answers, and a proxy that
- * tunnels every `CONNECT` to it, whatever host the controller asked for.
- */
-async function startGithubStandIn(folder: string): Promise<GithubStandIn> {
-  const { key, cert, caFile } = writeCertificate(folder);
-  const requests: Array<GithubRequest> = [];
-  let current: PullRequestState = "absent";
+/** The pull request the stand-in answers with. The test changes it to move the card. */
+let currentPullRequest: PullRequestState = "absent";
 
-  const https: HttpsServer = createHttpsServer({ key, cert }, (request, response) => {
-    const chunks: Array<Buffer> = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => {
-      const path = new URL(request.url ?? "/", "https://api.github.com").pathname;
-      const body = Buffer.concat(chunks).toString("utf8");
-      const query = path === "/graphql" ? (JSON.parse(body) as { query: string }).query : undefined;
-      requests.push({ method: request.method ?? "GET", path, query });
-      const answer = (status: number, json: unknown, headers: Record<string, string> = {}) => {
-        response.writeHead(status, { "content-type": "application/json", ...headers });
-        response.end(JSON.stringify(json));
-      };
-      if (path === "/user") {
-        return answer(
-          200,
-          { login: "northwind-dev", id: 4242 },
-          { "x-oauth-scopes": "repo, read:org" },
-        );
-      }
-      if (path === "/graphql") return answer(200, answerGraphql(query!, current));
-      if (path === "/search/issues") return answer(200, { total_count: 0, items: [] });
-      // Every other feed (notifications, teams, repositories) has nothing to report.
-      return answer(200, []);
-    });
-  });
-  await new Promise<void>((resolve) => https.listen(0, "127.0.0.1", resolve));
-  const httpsPort = (https.address() as AddressInfo).port;
+/** Answers a request to `api.github.com` from `currentPullRequest`. */
+function answerGithub(request: { readonly path: string; readonly body: string }): StandInAnswer {
+  if (request.path === "/user") {
+    return {
+      status: 200,
+      json: { login: "northwind-dev", id: 4242 },
+      headers: { "x-oauth-scopes": "repo, read:org" },
+    };
+  }
+  if (request.path === "/graphql") {
+    const { query } = JSON.parse(request.body) as { query: string };
+    return { status: 200, json: answerGraphql(query, currentPullRequest) };
+  }
+  if (request.path === "/search/issues") {
+    return { status: 200, json: { total_count: 0, items: [] } };
+  }
+  // Every other feed (notifications, teams, repositories) has nothing to report.
+  return { status: 200, json: [] };
+}
 
-  const proxy: Server = createTcpServer((client) => {
-    client.once("data", (head) => {
-      if (!head.toString("latin1").startsWith("CONNECT ")) {
-        client.end("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
-        return;
-      }
-      const upstream = connect(httpsPort, "127.0.0.1", () => {
-        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        client.pipe(upstream);
-        upstream.pipe(client);
-      });
-      upstream.on("error", () => client.destroy());
-      client.on("error", () => upstream.destroy());
-    });
-    client.on("error", () => undefined);
-  });
-  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
-  const proxyPort = (proxy.address() as AddressInfo).port;
-
-  return {
-    proxyUrl: `http://127.0.0.1:${String(proxyPort)}`,
-    caFile,
-    requests,
-    setPullRequest: (next) => {
-      current = next;
-    },
-    stop: async () => {
-      https.closeAllConnections();
-      proxy.close();
-      await new Promise<void>((resolve) => https.close(() => resolve()));
-    },
-  };
+/** Returns the GraphQL document of a request the stand-in received, or `undefined` when it is not one. */
+function readGraphqlQuery(request: { readonly path: string; readonly body: string }) {
+  return request.path === "/graphql"
+    ? (JSON.parse(request.body) as { query: string }).query
+    : undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Driving the controller
 // ---------------------------------------------------------------------------
 
-let standIn: GithubStandIn;
+let standIn: StandIn;
 let controller: Controller | undefined;
 let port: number | undefined;
 
@@ -278,11 +182,7 @@ async function startControllerThroughStandIn(): Promise<Controller> {
     home: state.home,
     binary,
     port,
-    env: {
-      HTTPS_PROXY: standIn.proxyUrl,
-      NO_PROXY: "127.0.0.1,localhost",
-      NODE_EXTRA_CA_CERTS: standIn.caFile,
-    },
+    env: standIn.controllerEnv,
   });
   port = started.port;
   controller = started;
@@ -473,15 +373,13 @@ function readLastRefresh(): string | null {
 
 beforeAll(async () => {
   state = createTemporaryHome();
-  certificates = createTemporaryHome();
-  standIn = await startGithubStandIn(certificates.home);
+  standIn = await startHttpsStandIn({ host: "api.github.com", answer: answerGithub });
 });
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
   await standIn?.stop();
   state?.remove();
-  certificates?.remove();
 });
 
 describe("A card follows its pull request", () => {
@@ -526,11 +424,12 @@ describe("A card follows its pull request", () => {
     // The first poll looks the branch up and finds nothing, so the card stays.
     await waitUntil("the poll to ask GitHub about the branch", () =>
       Promise.resolve(
-        standIn.requests.some(
-          (request) =>
-            request.query?.includes("headRefName") === true &&
-            request.query.includes("pullRequests(headRefName"),
-        )
+        standIn.requests.some((request) => {
+          const query = readGraphqlQuery(request);
+          return (
+            query?.includes("headRefName") === true && query.includes("pullRequests(headRefName")
+          );
+        })
           ? true
           : undefined,
       ),
@@ -539,7 +438,7 @@ describe("A card follows its pull request", () => {
 
     // A pull request with that head opens: the next poll finds it, links it to the
     // Task, and the shipped workflow moves the card to In review.
-    standIn.setPullRequest("OPEN");
+    currentPullRequest = "OPEN";
     await restartController();
     await waitForStage(task.id, "in-review");
     const linked = await readJson<{ items: ReadonlyArray<{ id: string }> }>([
@@ -554,7 +453,7 @@ describe("A card follows its pull request", () => {
 
     // The pull request merges: the next poll reads the linked pull request again,
     // and the card lands.
-    standIn.setPullRequest("MERGED");
+    currentPullRequest = "MERGED";
     await restartController();
     await waitForStage(task.id, "landed");
     await waitForRuns([LANDED_RUN, IN_REVIEW_RUN]);
