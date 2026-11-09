@@ -49,7 +49,7 @@ const FIRST_FRAME_LIMIT_MS = 60_000;
 /**
  * How long to wait, after the app has exited, for the pipes that carry its
  * output to reach their end. A process the app started that outlives it can
- * hold a pipe open, and the check then reads what has arrived.
+ * hold a pipe open; the output is then incomplete, and the launch fails.
  */
 const OUTPUT_DRAIN_LIMIT_MS = 5_000;
 
@@ -144,7 +144,17 @@ export default async function warmUpGraphicsCache(): Promise<void> {
     } catch (error) {
       fail(error);
     }
-    await Promise.race([outputEnded, sleep(OUTPUT_DRAIN_LIMIT_MS, undefined, { ref: false })]);
+    const drained = await Promise.race([
+      outputEnded.then(() => true),
+      sleep(OUTPUT_DRAIN_LIMIT_MS, undefined, { ref: false }).then(() => false),
+    ]);
+    if (!drained) {
+      fail(
+        new Error(
+          `main's output did not end within ${String(OUTPUT_DRAIN_LIMIT_MS)} ms of the app exiting, so the check for the fallback line read only part of it`,
+        ),
+      );
+    }
     // The error is logged just before main shows the window on its time limit,
     // and a normal show, on the page's report, logs nothing.
     if (app.readMainOutput().includes(SHOWN_WITHOUT_FIRST_SCREEN_ERROR)) {
