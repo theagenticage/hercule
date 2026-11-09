@@ -24,7 +24,7 @@
  * reads `RUNS_ON_MAC`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -816,11 +816,10 @@ export const WINDOW_VISIBILITY_TIMEOUT_MS = 30_000;
 
 /**
  * Builds the expression that moves the window `window` (an expression in main)
- * to one corner of the screen's work area, chosen by `worker`: 0 to 3 are the
- * four corners, and larger numbers start again. The expression evaluates to
- * true once it has moved the window, and to false until main has a window on
- * screen, because a window moved before it shows could be placed again when
- * it does.
+ * to one corner of the screen's work area: 0 to 3 are the four corners. The
+ * expression evaluates to true once it has moved the window, and to false until
+ * main has a window on screen, because a window moved before it shows could be
+ * placed again when it does.
  *
  * A plain app, unlike one Playwright drives, reads `document.visibilityState`
  * as "hidden" while another window covers it completely, and its page then
@@ -828,24 +827,89 @@ export const WINDOW_VISIBILITY_TIMEOUT_MS = 30_000;
  * place, and the tests of other workers keep theirs on top (see
  * `keepWindowOnTop`), so one of them could cover this window, and a test that
  * counts what the page does on hide and show would count that too. A window
- * in a corner is never covered by a window at the usual place, and two
- * workers' windows are never in the same corner, so each keeps its own corner
- * of the screen uncovered and reads as visible.
+ * in a corner is never covered by a window at the usual place, and
+ * `claimScreenCorner` gives no two plain apps the same corner, so each keeps
+ * its own corner of the screen uncovered and reads as visible.
+ *
+ * This holds on a screen larger than the window, such as the container's
+ * 1920 by 1080 for the 1440 by 900 window. On a screen about the size of the
+ * window the four corners are the same place, and a window can be covered.
  */
-function buildMoveToCorner(window: string, worker: number): string {
+function buildMoveToCorner(window: string, corner: number): string {
   return `(() => {
     if (${window} === undefined || !${window}.isVisible()) return false;
     const { screen } = require("electron");
     const area = screen.getPrimaryDisplay().workArea;
     const bounds = ${window}.getBounds();
-    const corner = ${String(worker % 4)};
     ${window}.setBounds({
       ...bounds,
-      x: corner % 2 === 0 ? area.x : area.x + area.width - bounds.width,
-      y: corner < 2 ? area.y : area.y + area.height - bounds.height,
+      x: ${String(corner)} % 2 === 0 ? area.x : area.x + area.width - bounds.width,
+      y: ${String(corner)} < 2 ? area.y : area.y + area.height - bounds.height,
     });
     return true;
   })()`;
+}
+
+/** How many plain apps can be on screen at once, each in its own corner. */
+const SCREEN_CORNERS = 4;
+
+/**
+ * Claims a corner of the screen (0 to 3) for the current test, for
+ * `buildMoveToCorner`, and gives it back when the test finishes. Waits while
+ * all four are claimed. No two callers hold the same corner at once, whichever
+ * worker they run in, because a claim is a folder that only one caller can
+ * create. A claim records the process that holds it, and one whose process has
+ * ended is taken over.
+ */
+async function claimScreenCorner(): Promise<number> {
+  const claimOne = (): number | undefined => {
+    for (let corner = 0; corner < SCREEN_CORNERS; corner += 1) {
+      const claim = join(tmpdir(), `hercule-e2e-screen-corner-${String(corner)}`);
+      try {
+        mkdirSync(claim);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (!isClaimAbandoned(claim)) continue;
+        // Another caller may take the abandoned claim first, which makes this
+        // one fail to create it below, and the loop goes on to the next corner.
+        rmSync(claim, { recursive: true, force: true });
+        try {
+          mkdirSync(claim);
+        } catch {
+          continue;
+        }
+      }
+      writeFileSync(join(claim, "pid"), String(process.pid));
+      onTestFinished(() => rmSync(claim, { recursive: true, force: true }));
+      return corner;
+    }
+    return undefined;
+  };
+  return pollUntil(claimOne, {
+    timeoutMs: 120_000,
+    intervalMs: 250,
+    timeoutMessage: `all ${String(SCREEN_CORNERS)} screen corners stayed claimed for 2 minutes`,
+  });
+}
+
+/**
+ * Checks whether the process that made `claim` has ended. A claim with no
+ * process recorded yet is not abandoned: its owner is between creating the
+ * folder and writing the file.
+ */
+function isClaimAbandoned(claim: string): boolean {
+  let pid: number;
+  try {
+    pid = Number(readFileSync(join(claim, "pid"), "utf8"));
+  } catch {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
 }
 
 /** The test package, started as a plain process by `launchPlainAppForTest`. */
@@ -870,8 +934,8 @@ export interface PlainAppForTest {
  * finishes, and the test fails if the app did not quit cleanly.
  *
  * Once its window shows, it is moved to a corner of the screen that no other
- * worker's window takes (see `buildMoveToCorner`), so that no window covers
- * it and its page keeps reading as visible.
+ * plain app takes (see `buildMoveToCorner`), so that no window covers it and
+ * its page keeps reading as visible.
  *
  * Nothing attaches to the page: the returned functions reach it through
  * main's Node inspector, one connection per call. A test uses this app where
@@ -888,12 +952,10 @@ export async function launchPlainAppForTest(url: string): Promise<PlainAppForTes
     assertExitedCleanly(app.process);
   });
   const window = `require("electron").BrowserWindow.getAllWindows()[0]`;
+  const corner = await claimScreenCorner();
   await pollUntil(
     async () =>
-      (await evaluateInMain(
-        app.inspectorUrl,
-        buildMoveToCorner(window, Number(process.env["VITEST_POOL_ID"] ?? "1")),
-      )) === true
+      (await evaluateInMain(app.inspectorUrl, buildMoveToCorner(window, corner))) === true
         ? true
         : undefined,
     {
