@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Inbox Requests column - design mockup</title>
+<script>
+  // ?theme=whitehaven | styles | orient-express
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") || "whitehaven";
+</script>
+<!-- The app's own stylesheets, in the order main.tsx / the components bring them. -->
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/styles/base-layer.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/icons/icon.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/logos/logos.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/desk/card.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/desk/section-heading.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/thread/menus.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/desk/toolbar.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/inbox/inbox.css" />
+<link rel="stylesheet" href="../../../apps/desktop/src/renderer/screens/inbox/inbox-bundle.css" />
+<link rel="stylesheet" href="mockup.css" />
+</head>
+<body>
+<main class="sheet">
+  <section id="controls"><h1>1. Controls in the heading</h1><div class="rows" data-slot="controls"></div></section>
+  <section id="groups"><h1>2. Collapsible group headers</h1><div class="rows" data-slot="groups"></div></section>
+  <section id="lips"><h1>3. Link lines as a lip</h1><div class="rows" data-slot="lips"></div></section>
+</main>
+<script src="mockup.js"></script>
+</body>
+</html>

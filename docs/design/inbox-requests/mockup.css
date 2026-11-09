@@ -1,0 +1,118 @@
+/* Mockup-only rules. Everything the real column draws comes from the app's own CSS. */
+
+html, body { height: auto; overflow: visible; user-select: text; }
+body { background: var(--desk); }
+:root { --lip-fill: color-mix(in oklab, black 5%, var(--desk)); --lip-drop: oklch(0.3 0.03 70 / 0.16); }
+[data-theme="orient-express"] { --lip-fill: color-mix(in oklab, black 12%, var(--desk)); --lip-drop: oklch(0 0 0 / 0.4); }
+
+.sheet { padding: 40px 56px 64px; width: max-content; min-width: 100%; }
+section { margin: 0 0 72px; }
+section:last-child { margin-bottom: 0; }
+h1 { margin: 0 0 28px; font: var(--w-bold) 20px / 28px var(--font-ui); color: var(--ink); }
+.rows { display: flex; flex-direction: column; gap: 44px; }
+.variant > h2 { margin: 0 0 4px; font: var(--w-bold) 14px / 20px var(--font-ui); color: var(--ink); }
+.variant > p { margin: 0 0 18px; max-width: 760px; color: var(--muted); font: var(--w-regular) 12px / 17px var(--font-ui); }
+.frames { display: flex; gap: 56px; align-items: flex-start; }
+figure { margin: 0; }
+figcaption { margin: 22px 0 0; color: var(--muted); font: var(--w-regular) 11px / 14px var(--font-ui); }
+/* The column: 320px wide on the desk. The ring is a guide for the PNG only, 9px outside the column. */
+.col { position: relative; width: 320px; box-shadow: 0 0 0 9px var(--desk), 0 0 0 10px var(--line-soft); }
+.col .inbox-narrow { padding-top: 0; }
+.col .inbox-requests-label:first-child { margin-top: 0; }
+
+/* A card shown at its hover state: the page marks it `data-current`, which also hides the place for the moves.
+   The moves are not drawn in this mockup, so the place stays. */
+.inbox-request[data-current] .request-where { display: block; }
+.inbox-request .request-where { display: block; }
+.inbox-request .card-wait[data-level="fresh"],
+.inbox-request .card-wait[data-level="recent"] { color: var(--faint-on-stock, var(--faint)); }
+
+/* The hover of a hint line, drawn without a pointer. */
+.inbox-hint.is-hover { color: var(--muted); }
+.inbox-hint.is-hover b { opacity: 1; color: var(--ink); }
+
+/* ---------- Heading controls ---------- */
+.head-tools { position: relative; margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.tool-wrap { position: relative; }
+.pop.popover-menu.menu--tool.mock-menu { display: block; position: absolute; top: 100%; right: 0; left: auto; z-index: 10; width: 216px; margin-top: 8px; }
+.view-trigger, .icon-btn {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px;
+  border-radius: var(--r-xs); color: var(--faint); font: var(--type-summary); white-space: nowrap;
+}
+.view-trigger { padding: 0 6px 0 4px; }
+.view-trigger .summary { color: var(--muted); }
+.view-trigger:hover, .view-trigger.is-hover, .icon-btn:hover { background: var(--hover); color: var(--ink); }
+.view-trigger.is-on .ic { color: var(--ink); }
+.view-trigger.is-open, .icon-btn.is-open { background: var(--selected); color: var(--ink); }
+.view-trigger.is-open .summary { color: var(--ink); }
+.view-trigger.is-open .ic { color: var(--ink); }
+.icon-btn { position: relative; justify-content: center; width: 24px; padding: 0; }
+.icon-btn.is-on { color: var(--ink); }
+.icon-btn.is-on::after {
+  content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--you-ink); box-shadow: 0 0 0 1.5px var(--desk);
+}
+.menu--tool .menu-pick { cursor: default; }
+.menu--tool .menu-h:first-child { margin-top: 4px; }
+
+/* ---------- Group headers ---------- */
+.group-head {
+  display: flex; align-items: center; width: 100%; height: 24px; margin: 4px 0 -2px;
+  border-radius: var(--r-xs); color: var(--faint); font: var(--type-summary); text-align: left;
+}
+.group-head .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-head .group-count { color: var(--faint); font-variant-numeric: tabular-nums; }
+.group-head:hover, .group-head.is-hover { background: var(--hover); color: var(--muted); }
+.group-head:hover .ic, .group-head.is-hover .ic { color: var(--muted); }
+.group-head .ic { color: var(--faint); }
+/* G1: chevron first, in the column of the card marks; the name starts where the card titles do. */
+.g1 .group-head { gap: 8px; padding: 0 8px 0 10px; }
+.g1 .group-head .group-count { margin-left: -2px; }
+/* G2: name at the card's own text edge, count and chevron at the end. */
+.g2 .group-head { gap: 2px; padding: 0 8px 0 10px; }
+.g2 .group-head .name { margin-right: auto; }
+.g2 .group-head .group-count { margin-right: 2px; }
+.collapsed-next { margin-top: 4px; }
+
+/* ---------- L1 tray ---------- */
+.lip-tray > .inbox-request { z-index: 1; }
+.lip-tray .lip {
+  position: relative; margin: -12px 8px 0; padding: 14px 0 3px;
+  border-radius: 0 0 var(--card-r) var(--card-r);
+  background: var(--lip-fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft), inset 0 5px 5px -5px oklch(0 0 0 / 0.14);
+}
+.lip-tray .lip .inbox-hint { margin: 0; padding: 2px 12px 2px 26px; }
+
+/* ---------- L2 same sheet ---------- */
+.lip-sheet {
+  border-radius: var(--card-r);
+  background: color-mix(in oklab, var(--stock) 50%, var(--desk));
+  box-shadow: inset 0 0 0 1px var(--line-soft), 0 1px 2px oklch(0 0 0 / 0.04);
+  transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease);
+}
+.lip-sheet > .inbox-request > .card-stock { background: transparent; box-shadow: none; }
+.lip-sheet:has(> .inbox-request[data-current]) { background: var(--stock); box-shadow: var(--h-hover); }
+.lip-sheet .lip { margin: 0 12px; padding: 3px 0 6px; border-top: 1px solid var(--line-soft); }
+.lip-sheet .lip .inbox-hint { margin: 0; padding: 2px 0 2px 22px; }
+
+/* ---------- L3 tab ---------- */
+.lip-tab { --tab-fill: color-mix(in oklab, var(--stock) 50%, var(--desk)); --tab-rim: var(--line-soft); --tab-drop: oklch(0 0 0 / 0.04); }
+.lip-tab:has(> .inbox-request[data-current]) { --tab-fill: var(--stock); --tab-rim: var(--stock-rim); --tab-drop: var(--lip-drop); }
+.lip-tab .lip {
+  position: relative; z-index: 1; width: fit-content; max-width: calc(100% - 24px);
+  margin: -1px 0 0 22px; padding: 2px 0 4px;
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: var(--tab-fill);
+  box-shadow: inset 1px 0 0 var(--tab-rim), inset -1px 0 0 var(--tab-rim), inset 0 -1px 0 var(--tab-rim), 0 2px 3px -1px var(--tab-drop);
+  transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-quick) var(--m-ease);
+}
+.lip-tab .lip .inbox-hint { margin: 0; padding: 2px 12px 2px 12px; }
+
+/* Room around each section so the guide ring is not clipped in the PNG. */
+section { padding: 24px 24px 24px; margin-bottom: 24px; background: var(--desk); }
+.col.is-open { min-height: 420px; }
+.col.is-open-small { min-height: 280px; }
+.icon-btn { background: transparent; box-shadow: none; }
+.icon-btn:hover { background: var(--hover); }
+.icon-btn.is-open { background: var(--selected); }
