@@ -142,7 +142,7 @@ export default async function warmUpGraphicsCache(): Promise<void> {
   try {
     const startedAt = Date.now();
     const app = await launchPlainApp(userDataDir);
-    let failure: unknown;
+    let failure: Error | undefined;
     let timings: string | undefined;
     try {
       const times = await pollUntil(() => readLaunchTimes(app), {
@@ -156,7 +156,7 @@ export default async function warmUpGraphicsCache(): Promise<void> {
       const fallback = findFallbackShow(times, app.readMainOutput());
       if (fallback !== undefined) throw new Error(fallback);
     } catch (error) {
-      failure = error;
+      failure = error instanceof Error ? error : new Error(String(error));
     }
     // The app is stopped on every path, and a failure to stop it never hides
     // why the launch failed.
@@ -164,11 +164,11 @@ export default async function warmUpGraphicsCache(): Promise<void> {
       await stopPlainApp(app);
       assertExitedCleanly(app.process);
     } catch (error) {
-      failure ??= error;
+      failure ??= error instanceof Error ? error : new Error(String(error));
     }
     if (failure !== undefined) {
       throw new Error(
-        `the first launch of the test package failed (${timings ?? `no first frame ${String(Date.now() - startedAt)} ms after the launch`}): ${String(failure)}\nmain's output:\n${app.readMainOutput()}`,
+        `the first launch of the test package failed (${timings ?? `no first frame ${String(Date.now() - startedAt)} ms after the launch`}): ${failure.message}\nmain's output:\n${app.readMainOutput()}`,
         { cause: failure },
       );
     }
