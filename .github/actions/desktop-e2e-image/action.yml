@@ -14,14 +14,6 @@ inputs:
       forks' included, restore what `main` saved, so one built from a pull
       request's files must never be saved under a name that `main` restores.
     default: "false"
-  background:
-    description: >-
-      After a cache hit, starts `docker load` in the background and returns, so
-      that the next steps, such as the install of the dependencies, run while
-      the image loads. `desktop-e2e-image-ready` must run later: it waits for
-      the load and builds the image when the cache had none. Not for `publish`,
-      which saves the image the foreground load or the build produced.
-    default: "false"
 
 runs:
   using: composite
@@ -41,32 +33,20 @@ runs:
         key: desktop-e2e-image-${{ steps.image.outputs.name }}
 
     # `ensure` builds the image unless Docker has it, so on a cache miss this
-    # step is the build. In the background, a hit starts the load and returns,
-    # and a miss does nothing yet: `desktop-e2e-image-ready` builds.
+    # step is the build.
     - name: Load the image from the cache, or build it
       shell: bash
       env:
         CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
-        BACKGROUND: ${{ inputs.background }}
         TAR: ${{ runner.temp }}/desktop-e2e-image.tar
-        LOG: ${{ runner.temp }}/desktop-e2e-image-load.log
-        STATUS: ${{ runner.temp }}/desktop-e2e-image-load.status
       run: |
-        if [ "$CACHE_HIT" != true ]; then
-          echo "::notice::The cache has no ${{ steps.image.outputs.name }}, so the image is built here."
-        elif [ "$BACKGROUND" = true ]; then
-          # `setsid` and `nohup` keep the load running after this step ends.
-          # It writes its exit status last, which is how the later step knows
-          # it is done and whether it worked.
-          setsid nohup bash -c 'docker load --input "$TAR" > "$LOG" 2>&1; echo $? > "$STATUS"; rm -f "$TAR"' > /dev/null 2>&1 &
-          echo "The image loads in the background."
-        else
+        if [ "$CACHE_HIT" = true ]; then
           docker load --input "$TAR"
           rm "$TAR"
+        else
+          echo "::notice::The cache has no ${{ steps.image.outputs.name }}, so the image is built here."
         fi
-        if [ "$BACKGROUND" != true ]; then
-          node apps/desktop/container/image.ts ensure > /dev/null
-        fi
+        node apps/desktop/container/image.ts ensure > /dev/null
 
     - name: Save the image to the cache
       if: inputs.publish == 'true' && steps.restore.outputs.cache-hit != 'true'
