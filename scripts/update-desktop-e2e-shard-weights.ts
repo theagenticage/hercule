@@ -9,12 +9,14 @@
  * `gh`, and writes each file's run time. The weights come from CI, where the
  * shards run, because a laptop's timings are not a runner's.
  *
- * It writes nothing, and says why, unless the run qualifies:
+ * It writes nothing, and says why, unless the run qualifies. It judges the
+ * run's desktop reports and nothing else: other jobs of the run may have
+ * failed. The run must be:
  *
- * - the run has finished;
+ * - completed;
  * - every shard of the run uploaded its report and its plan, once;
- * - every test passed, because a test that failed or timed out says nothing
- *   about how long its file takes;
+ * - passing in every shard's report, because a test that failed or timed out
+ *   says nothing about how long its file takes;
  * - the reports hold every desktop test file of the commit the run tested,
  *   each exactly once. The shards record that commit's file list in their
  *   plans, so the check does not depend on the files in this checkout.
@@ -60,6 +62,7 @@ function cutToRepositoryPath(reportedPath: string): string {
  *   checkout, or one shard is missing or appears twice;
  * - a shard's report has a failed test;
  * - a shard's report holds other files than its plan says it ran;
+ * - two shards report the same file;
  * - the files of the reports are not exactly the files of the checkout.
  */
 export function readWeightsFromShards(shards: ReadonlyArray<ShardArtifact>): ShardWeights {
@@ -91,10 +94,9 @@ export function readWeightsFromShards(shards: ReadonlyArray<ShardArtifact>): Sha
       throw new Error(`Shard ${record.index} reported other files than it was planned to run.`);
     }
     for (const file of report.testResults) {
-      reported.set(
-        cutToRepositoryPath(file.name),
-        Math.round((file.endTime - file.startTime) / 100) / 10,
-      );
+      const path = cutToRepositoryPath(file.name);
+      if (reported.has(path)) throw new Error(`${path} is reported by more than one shard.`);
+      reported.set(path, Math.round((file.endTime - file.startTime) / 100) / 10);
     }
   }
   const missing = allFiles.filter((file) => !reported.has(file));

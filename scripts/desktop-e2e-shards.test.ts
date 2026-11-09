@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   listDesktopE2eFiles,
@@ -10,7 +10,7 @@ import {
 } from "./desktop-e2e-shards";
 import { readWeightsFromShards, type ShardArtifact } from "./update-desktop-e2e-shard-weights";
 
-const repositoryRoot = new URL("..", import.meta.url).pathname;
+const repositoryRoot = join(import.meta.dirname, "..");
 
 describe("the files that are planned", () => {
   it("are exactly the files the desktop project runs, according to Vitest", () => {
@@ -137,6 +137,14 @@ describe("readWeightsFromShards", () => {
       "a shard reports a file it was not planned to run",
       () => [passingRun()[0]!, buildShard(2, [allFiles[2]!], { files: [allFiles[0]!] })],
       /other files than it was planned/,
+    ],
+    [
+      "two shards report the same file",
+      () => [
+        buildShard(1, [allFiles[0]!, allFiles[1]!]),
+        buildShard(2, [allFiles[1]!, allFiles[2]!]),
+      ],
+      /e2e\/desktop\/nested\/b.test.ts is reported by more than one shard/,
     ],
     [
       "a file of the checkout was planned for no shard",
