@@ -66,7 +66,6 @@ import { pollUntil } from "../../apps/desktop/scripts/poll";
 import {
   findCompiledBinary,
   PASSWORD,
-  completeSetup,
   startController,
   startSetUpController,
   USERNAME,
@@ -275,13 +274,12 @@ export async function signInAndReadToken(
 }
 
 /**
- * Starts a controller for the current test from the compiled binary,
- * `./hercule`, in a scratch Hercule Home, never the user's own. With
- * `setUp: true`, it also completes first-run setup as `username`, or as
- * `USERNAME` when it is not given, so the app can sign in; otherwise setup
- * is still pending. `env` is added to the environment of the controller and
- * of the runner it starts for itself. Returns the controller with the path
- * of its home.
+ * Starts a controller for the current test, in a scratch Hercule Home, never
+ * the user's own. With `setUp: true`, it also completes first-run setup as
+ * `username`, or as `USERNAME` when it is not given, so the app can sign in;
+ * otherwise setup is still pending. `env` is added to the environment of the
+ * controller and of the runner it starts for itself. Returns the controller
+ * with the path of its home.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
  * Fails when the binary has not been built, when the controller does not
@@ -294,25 +292,9 @@ export async function startControllerForTest(options: {
 }): Promise<Controller & { readonly home: string }> {
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
-  const binary = findCompiledBinary();
-  let controller: Controller;
-  if (options.setUp && options.env === undefined) {
-    controller = await startSetUpController({ home, username: options.username });
-  } else {
-    controller = await startController({ home, binary, env: options.env });
-    if (options.setUp) {
-      const setup = await completeSetup({
-        home,
-        url: controller.url,
-        binary,
-        username: options.username,
-      });
-      if (setup.code !== 0) {
-        await controller.stop();
-        throw new Error(`setup failed with exit code ${String(setup.code)}:\n${setup.stderr}`);
-      }
-    }
-  }
+  const controller = options.setUp
+    ? await startSetUpController({ home, username: options.username, env: options.env })
+    : await startController({ home, binary: findCompiledBinary(), env: options.env });
   onTestFinished(async () => {
     await controller.stop();
   });
@@ -343,8 +325,10 @@ export interface ArrangedFleet {
 
 /**
  * Starts a controller for the current test that is set up, and connects a
- * fleet to it, with no runners yet. The controller is stopped and the
- * runners disconnected when the test finishes.
+ * fleet to it, with no runners yet. When the test finishes, the runners
+ * disconnect first and the controller that is running then is stopped, the
+ * restarted one when `restartController` was called. A controller stopped
+ * while a runner is still connected waits out its shutdown drain, ten seconds.
  *
  * The controller starts a runner of its own on this machine, which may be
  * logged in to a real provider. It is retired before this returns, so no
@@ -353,15 +337,30 @@ export interface ArrangedFleet {
  * scripted one and serves its identity (see `startIdentityServerForTest`).
  * Fails when that runner does not come online, or its retirement is refused.
  *
- * A test that needs the real runner keeps it with `ownRunnerEnv`, the
- * environment the controller and its runner start with, and again after a
- * restart. Nothing is retired then, so the caller places threads on that
- * runner with care: it may find a real agent on this machine.
+ * A test that needs the real runner passes `keepOwnRunner: true`. Nothing is
+ * retired then, so the caller places threads on that runner with care: it may
+ * find a real agent on this machine. A runner that stays connected also makes
+ * every `restartController` wait out the shutdown drain, ten seconds.
+ *
+ * `controllerEnv` is added to the environment of the controller and of the
+ * runner it starts for itself, at the first start and again after every
+ * restart. It does not change whether the runner is kept.
  */
 export async function arrangeFleet(
-  options: { readonly ownRunnerEnv?: Readonly<Record<string, string>> } = {},
+  options: {
+    readonly controllerEnv?: Readonly<Record<string, string>>;
+    readonly keepOwnRunner?: boolean;
+  } = {},
 ): Promise<ArrangedFleet> {
-  const controller = await startControllerForTest({ setUp: true, env: options.ownRunnerEnv });
+  const { home, remove } = createTemporaryHome();
+  onTestFinished(remove);
+  const controller = await startSetUpController({ home, env: options.controllerEnv });
+  let running: Pick<Controller, "stop"> = controller;
+  // Finishing callbacks run last registered first, so this one runs after the
+  // runners below have disconnected.
+  onTestFinished(async () => {
+    await running.stop();
+  });
   const fleet = await connectFleet(controller.url);
   onTestFinished(fleet.disconnectRunners);
   const client = createClient({ baseUrl: controller.url, token: fleet.token });
@@ -371,25 +370,21 @@ export async function arrangeFleet(
       message: "the controller's own runner did not come online",
     })
     .toEqual(["online"]);
-  if (options.ownRunnerEnv === undefined) {
+  if (options.keepOwnRunner !== true) {
     const [own] = await readRunners();
     await client.runner.retire({ params: { id: own!.id }, payload: {} });
   }
-  let running: Pick<Controller, "stop"> = controller;
   return {
     url: controller.url,
-    home: controller.home,
+    home,
     restartController: async (whileStopped) => {
       await running.stop();
       whileStopped();
       const restarted = await startController({
-        home: controller.home,
+        home,
         binary: findCompiledBinary(),
         port: controller.port,
-        env: options.ownRunnerEnv,
-      });
-      onTestFinished(async () => {
-        await restarted.stop();
+        env: options.controllerEnv,
       });
       running = restarted;
     },
