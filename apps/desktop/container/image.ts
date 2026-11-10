@@ -7,10 +7,16 @@
  *                                                machine has it, then prints
  *                                                its name
  *
- * The name is `hercule-desktop-linux:<key>`. The key is a hash of everything
- * the image is built from, so two checkouts that need different images never
- * share a name, and one that needs the same image finds it ready:
+ * Both take `--platform linux/amd64` or `--platform linux/arm64`. Without it
+ * the image is for this machine's own architecture, so it runs without
+ * emulation. The UI goldens are recorded on linux/amd64 only, so `ui:metrics`
+ * asks for that platform on every machine.
  *
+ * The name is `hercule-desktop-linux:<arch>-<key>`. The key is a hash of
+ * everything the image is built from, so two checkouts that need different
+ * images never share a name, and one that needs the same image finds it ready:
+ *
+ * - the platform;
  * - the Dockerfile, which pins Node;
  * - the Bun version, from `.bun-version`;
  * - the pnpm version, from `packageManager` in `package.json`;
@@ -68,36 +74,65 @@ export function readImageVersions(): ImageVersions {
   return { BUN_VERSION: bun, PNPM_VERSION: pnpm!, PLAYWRIGHT_VERSION: playwright! };
 }
 
-/**
- * Returns the name of the image built from this Dockerfile text and these
- * versions: `hercule-desktop-linux:` and the first 16 hex digits of a SHA-256
- * over both.
- */
-export function buildImageName(dockerfile: string, versions: ImageVersions): string {
-  const hash = createHash("sha256");
-  hash.update(dockerfile);
-  for (const [name, version] of Object.entries(versions)) hash.update(`\n${name}=${version}`);
-  return `${IMAGE_REPOSITORY}:${hash.digest("hex").slice(0, 16)}`;
+/** The Linux platforms the image builds for, in Docker's spelling. */
+export type ImagePlatform = "linux/amd64" | "linux/arm64";
+
+/** Returns the platform that runs on this machine without emulation. */
+export function findNativePlatform(): ImagePlatform {
+  return process.arch === "arm64" ? "linux/arm64" : "linux/amd64";
 }
 
-/** Returns the name of the image the checked-out repository needs. */
-export function readImageName(): string {
+/**
+ * Returns the name of the image built for this platform from this Dockerfile
+ * text and these versions: `hercule-desktop-linux:`, the architecture, and
+ * the first 16 hex digits of a SHA-256 over all three.
+ */
+export function buildImageName(
+  platform: ImagePlatform,
+  dockerfile: string,
+  versions: ImageVersions,
+): string {
+  const hash = createHash("sha256");
+  hash.update(platform);
+  hash.update(`\n${dockerfile}`);
+  for (const [name, version] of Object.entries(versions)) hash.update(`\n${name}=${version}`);
+  const architecture = platform.slice("linux/".length);
+  return `${IMAGE_REPOSITORY}:${architecture}-${hash.digest("hex").slice(0, 16)}`;
+}
+
+/** Returns the name of the image the checked-out repository needs on this platform. */
+export function readImageName(platform: ImagePlatform): string {
   return buildImageName(
+    platform,
     readFileSync(join(CONTAINER_FOLDER, "Dockerfile"), "utf8"),
     readImageVersions(),
   );
 }
 
+/**
+ * Returns the name of the image the checked-out repository needs on this
+ * platform, after building it when Docker does not have it yet. Fails when
+ * the build fails.
+ */
+export function ensureImage(platform: ImagePlatform): string {
+  const name = readImageName(platform);
+  const inspect = spawnSync("docker", ["image", "inspect", name], { stdio: "ignore" });
+  if (inspect.status !== 0) buildImage(platform, name);
+  return name;
+}
+
 /** Builds the image the checked-out repository needs, under its name. Fails when the build fails. */
-function buildImage(name: string): void {
+function buildImage(platform: ImagePlatform, name: string): void {
   const buildArguments = Object.entries(readImageVersions()).flatMap(([key, value]) => [
     "--build-arg",
     `${key}=${value}`,
   ]);
   // Build output goes to stderr, so stdout stays the image's name alone.
-  const build = spawnSync("docker", ["build", "--tag", name, ...buildArguments, CONTAINER_FOLDER], {
-    stdio: ["ignore", process.stderr, process.stderr],
-  });
+  const build = spawnSync(
+    "docker",
+    ["build", "--platform", platform, "--tag", name, ...buildArguments, CONTAINER_FOLDER],
+    { stdio: ["ignore", process.stderr, process.stderr] },
+  );
   if (build.status !== 0) {
     throw new Error(
       `docker build of ${name} failed${build.error ? `: ${build.error.message}` : ""}.`,
@@ -105,16 +140,28 @@ function buildImage(name: string): void {
   }
 }
 
+/**
+ * Reads the value of `--platform` from command-line arguments, or returns
+ * this machine's own platform when there is none. Fails on any other value.
+ */
+export function parsePlatformOption(argumentList: ReadonlyArray<string>): ImagePlatform {
+  const index = argumentList.indexOf("--platform");
+  if (index === -1) return findNativePlatform();
+  const value = argumentList[index + 1];
+  if (value !== "linux/amd64" && value !== "linux/arm64") {
+    throw new Error(`--platform must be linux/amd64 or linux/arm64, not ${value ?? "nothing"}.`);
+  }
+  return value;
+}
+
 if (import.meta.main) {
   const command = process.argv[2];
   if (command !== "name" && command !== "ensure") {
-    console.error("Usage: node apps/desktop/container/image.ts name|ensure");
+    console.error(
+      "Usage: node apps/desktop/container/image.ts name|ensure [--platform linux/amd64|linux/arm64]",
+    );
     process.exit(1);
   }
-  const name = readImageName();
-  if (command === "ensure") {
-    const inspect = spawnSync("docker", ["image", "inspect", name], { stdio: "ignore" });
-    if (inspect.status !== 0) buildImage(name);
-  }
-  console.log(name);
+  const platform = parsePlatformOption(process.argv.slice(3));
+  console.log(command === "ensure" ? ensureImage(platform) : readImageName(platform));
 }

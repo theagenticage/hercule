@@ -158,7 +158,7 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a headless Linux machine with Docker, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files; CI passes each of its shards the files that `bun run scripts/desktop-e2e-shards.ts <index>/<count>` prints.
+The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. With Docker, on a headless Linux machine or on a Mac, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files; CI passes each of its shards the files that `bun run scripts/desktop-e2e-shards.ts <index>/<count>` prints.
 
 **A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
 
@@ -170,7 +170,7 @@ The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` l
 pnpm build:desktop           # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
 pnpm build:desktop:unpacked  # the same, but on Linux the release package is the unpacked folder only: no .deb or Arch package, which no test reads
 pnpm test:desktop            # Playwright drives the test package: window, security, fuses, IPC
-pnpm test:desktop:container  # the same on a headless Linux machine: Docker, a virtual screen
+pnpm test:desktop:container  # the same in Docker on a virtual screen, on Linux or a Mac
 ```
 
 The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
@@ -184,7 +184,7 @@ pnpm --filter @hercule/desktop ui:metrics --write-goldens   # re-record the gold
 pnpm --filter @hercule/desktop ui:metrics --write-baseline  # re-write the metrics baseline; a worse number needs its reason in the PR body
 ```
 
-On a machine that has no Chromium libraries, run `ui:metrics` in the container: use the `docker run` line of `apps/desktop/container/run.sh` with that command in place of the test command.
+On a Mac, or a Linux machine without Chromium's libraries, run `pnpm --filter @hercule/desktop ui:metrics:container`, which takes the same flags. It runs on linux/amd64, the platform the goldens are recorded on, which a Mac emulates (several minutes). On a Mac it works in a copy of the checkout and copies the goldens, the baseline and the report back. Any other command runs in the container with `node apps/desktop/container/run.ts -- <command>`.
 
 The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
 
