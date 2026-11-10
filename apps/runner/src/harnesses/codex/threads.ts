@@ -567,7 +567,13 @@ export const makeCodexThreads = (options: {
   const settlePreparation = (work: Preparation, interrupted: boolean): void => {
     if (preparation !== work) return;
     for (const id of restoreIds) {
-      requireUsageBaseline(threads.get(id)!.state);
+      // A replayed report can arrive before the deadline even though the
+      // preparation did not finish for this child. That report is the child's
+      // real total, so it stays the baseline; only a child without one waits
+      // for the next usable report.
+      const state = threads.get(id)!.state;
+      if (state.previousTotal === undefined) requireUsageBaseline(state);
+      else markUsageIncomplete(state);
       if (phase !== "exited") {
         let discovery: Discovery | undefined = discoveries.get(id) ?? createDiscovery(id);
         const visited = new Set<string>();

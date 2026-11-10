@@ -148,6 +148,13 @@ pnpm test        # vitest across every package: the backend on Bun, the React pa
 pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
 ```
 
+To run only some tests, pass paths to one half of `pnpm test`. Plain `vitest run <path>` fails on backend files, which need Bun.
+
+```
+pnpm test:react apps/web packages/ui apps/desktop   # these three folders run on Node, with jsdom for the React code
+pnpm test:node <any other path>                     # everything else, on Bun
+```
+
 Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
 release binary rather than building one, so it needs the build before it and fails
 saying so when there is none. Building rewrites `apps/web/dist` and the generated
