@@ -30,7 +30,7 @@
  * - `useFocusPageOnArrival`: gives the page that scrolls the keyboard focus as
  *   it opens, so its keys act after a click on the sidebar.
  * - `ViewPill`: the pill that names a place and switches between its views.
- * - `SectionHeading`, `StatusShape`, `FailedMark`: the small marks and
+ * - `SectionHeading`, `StatusShape`, `EntityStatusIcon`, `FailedMark`: the small marks and
  *   headings.
  * - `RelationRows`, `ProgressBar`: the rows that draw the places above a
  *   thing, and the 4px bar of a source's reported progress. A place the user
@@ -66,7 +66,13 @@ export { OpeningSheet, type SheetOrigin, type SheetPlaces } from "./opening-shee
 export type { SheetRect } from "./opening-sheet-geometry";
 export { SideSheet } from "./side-sheet";
 export { SignalAnswers } from "./signal-answers";
-export { FailedMark, StatusShape, type StatusShapeName, type StatusTone } from "./status-shape";
+export {
+  EntityStatusIcon,
+  FailedMark,
+  StatusShape,
+  type StatusShapeName,
+  type StatusTone,
+} from "./status-shape";
 export { Sunrise } from "./sunrise";
 export {
   ClearChipsButton,

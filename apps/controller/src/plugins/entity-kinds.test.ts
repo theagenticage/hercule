@@ -180,8 +180,88 @@ describe("decodeEntityKinds", () => {
       taken: NOTHING_TAKEN,
       message: "facts",
     },
+    {
+      name: "a status icon with something other than path data",
+      declarations: [
+        buildKind("ticket", {
+          status: {
+            open: { shape: "ring", tone: "quiet", word: "Open", icon: { paths: ['M0 0"/>'] } },
+          },
+        }),
+      ],
+      taken: NOTHING_TAKEN,
+      message: "something other than SVG path data",
+    },
+    {
+      name: "a status with both a hue and a colour",
+      declarations: [
+        buildKind("ticket", {
+          status: {
+            open: { shape: "ring", tone: "quiet", word: "Open", hue: 140, color: "green" } as never,
+          },
+        }),
+      ],
+      taken: NOTHING_TAKEN,
+      message: "status.open",
+    },
+    {
+      name: "a status colour written as a CSS function",
+      declarations: [
+        buildKind("ticket", {
+          status: { open: { shape: "ring", tone: "quiet", word: "Open", color: "rgb(0,0,0)" } },
+        }),
+      ],
+      taken: NOTHING_TAKEN,
+      message: "a hex code",
+    },
+    {
+      name: "a status colour that is no CSS colour name",
+      declarations: [
+        buildKind("ticket", {
+          status: {
+            open: {
+              shape: "ring",
+              tone: "quiet",
+              word: "Open",
+              color: { light: "#fff", dark: "purpel" },
+            },
+          },
+        }),
+      ],
+      taken: NOTHING_TAKEN,
+      message:
+        'the colour { light: "#fff", dark: "purpel" } of its status "open" is not a CSS colour',
+    },
   ])("refuses $name", async ({ declarations, taken, message }) => {
     expect(await decode(declarations, taken)).toContain(message);
+  });
+
+  it("returns status colours as hex codes, and icons and hues as declared", async () => {
+    const icon = { paths: ["M0 0h16v16H0z"] };
+    const kinds = await decode([
+      buildKind("ticket", {
+        status: {
+          open: { shape: "ring", tone: "quiet", word: "Open", icon, color: "green" },
+          done: {
+            shape: "check",
+            tone: "good",
+            word: "Done",
+            color: { light: "#8250DF", dark: "plum" },
+          },
+          later: { shape: "dashed", tone: "quiet", word: "Later", hue: 85 },
+        },
+      }),
+    ]);
+
+    expect(kinds).toMatchObject([
+      {
+        status: {
+          open: { icon, color: "#008000" },
+          done: { color: { light: "#8250df", dark: "#dda0dd" } },
+          later: { hue: 85 },
+        },
+      },
+    ]);
   });
 
   it("lets a status map to exactly the stages a Task has", () => {

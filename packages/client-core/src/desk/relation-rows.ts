@@ -99,6 +99,8 @@ export interface OpenPlaceRow {
   readonly title: string;
   /** How the source names it, such as "SHOP-123", when it has one. */
   readonly identifier?: string;
+  /** Where the source shows it, when the source reports it. The row opens it in the browser. */
+  readonly url?: string;
   readonly status?: EntityStatus;
   readonly progress?: RelationProgress;
   /** An ISO timestamp the source reports. Write it with `formatTargetDate`. */
@@ -138,6 +140,7 @@ export const buildPlaceRow = (place: EntityPlace): PlaceRow => {
     isLocked: false,
     title: place.title ?? place.noun,
     ...(place.identifier === undefined ? {} : { identifier: place.identifier }),
+    ...(place.url === undefined ? {} : { url: place.url }),
     ...(place.caption === undefined ? {} : { caption: place.caption }),
     ...(place.status === undefined ? {} : { status: place.status }),
     ...(place.progress === undefined ? {} : { progress: buildRelationProgress(place.progress) }),
@@ -171,6 +174,7 @@ export const buildPeerRow = (peer: EntityPeer): PlaceRow => {
     isLocked: false,
     title: peer.title ?? peer.noun,
     ...(peer.identifier === undefined ? {} : { identifier: peer.identifier }),
+    ...(peer.url === undefined ? {} : { url: peer.url }),
     ...(peer.status === undefined ? {} : { status: peer.status }),
     ...(peer.latestChange === undefined
       ? {}

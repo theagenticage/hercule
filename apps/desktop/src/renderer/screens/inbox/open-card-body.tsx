@@ -11,7 +11,7 @@ import type { EntityStatus } from "@hercule/contract";
 import { CloseIcon } from "../../icons/close";
 import { ExternalIcon } from "../../icons/external";
 import { PluginMark } from "../../marks";
-import { ProgressBar, RelationRows, StatusShape } from "../desk";
+import { EntityStatusIcon, ProgressBar, RelationRows } from "../desk";
 import { CardFactText, CardStatus } from "./card-parts";
 import "./open-card.css";
 
@@ -102,7 +102,7 @@ function WalkRow({
       <span className="open-card-go-title">{title}</span>
       {status !== undefined && (
         <span className="open-card-go-status">
-          <StatusShape shape={status.shape} tone={status.tone} size={13} />
+          <EntityStatusIcon status={status} size={13} />
           {status.label}
         </span>
       )}

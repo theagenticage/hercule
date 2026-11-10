@@ -89,7 +89,7 @@ import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
 import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
-import type { EntitySlots } from "./slots";
+import type { EntitySlots, StoredEntityStatus } from "./slots";
 import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from "./timeline";
 
 export type { EntityEnvironment } from "./entity-records";
@@ -1835,6 +1835,27 @@ const make = Effect.gen(function* () {
      *   (`WANTED_REFS_SQL`) and has no open signal, so the retry state of a
      *   ref a signal waits on is not lost.
      */
+    /**
+     * Replaces the stored status of every entity of `kind` whose status key is
+     * `key` with `status`, and returns how many entities changed. An entity
+     * whose stored status is already `status` is left alone.
+     *
+     * The time the entity was updated stays as it is, because nothing changed
+     * at the source.
+     */
+    rewriteStatus: (
+      kind: string,
+      key: string,
+      status: StoredEntityStatus,
+    ): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql`
+          UPDATE external_entities SET status = ${JSON.stringify(status)}
+          WHERE kind = ${kind} AND status_key = ${key} AND status IS NOT ${JSON.stringify(status)}
+          RETURNING id`,
+        (rows) => rows.length,
+      ),
+
     pruneEntities: (now: string): Effect.Effect<PruneResult, SqlError> =>
       Effect.gen(function* () {
         const cutoff = new Date(Date.parse(now) - PRUNE_AFTER_MS).toISOString();

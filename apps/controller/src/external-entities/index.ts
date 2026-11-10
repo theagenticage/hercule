@@ -26,3 +26,4 @@ export {
   type StoredRecordState,
 } from "./repository";
 export { ExternalEntityService, ExternalEntityServiceLayer } from "./service";
+export { refreshStoredStatuses, refreshStoredStatusesOrLog } from "./refresh-statuses";

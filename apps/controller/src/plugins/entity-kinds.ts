@@ -12,9 +12,11 @@ import * as Schema from "effect/Schema";
 import {
   EntityKindDeclaration,
   PluginError,
+  type EntityStatusDeclaration,
   QualifiedEntityKindDeclaration,
   type PluginManifest,
 } from "@hercule/plugin-host";
+import { convertExactColorToHex, describeExactColor } from "./colors";
 import { describeFieldIssues } from "./errors";
 
 /** A kind that another source of the plugin, or another plugin, has already registered. */
@@ -26,6 +28,30 @@ export interface TakenEntityKinds {
 }
 
 const decodeDeclaration = Schema.decodeUnknownEffect(EntityKindDeclaration, { errors: "all" });
+
+/**
+ * Returns the status table of a kind with every colour as a hex code (see
+ * `convertExactColorToHex`), or the key and colour of the first status whose
+ * colour is no CSS colour.
+ */
+const convertStatusColors = (
+  table: EntityKindDeclaration["status"],
+):
+  | { readonly status: EntityKindDeclaration["status"] }
+  | { readonly key: string; readonly color: string } => {
+  if (table === null) return { status: table };
+  const converted: Record<string, EntityStatusDeclaration> = {};
+  for (const [key, declaration] of Object.entries(table)) {
+    if (declaration.color === undefined) {
+      converted[key] = declaration;
+      continue;
+    }
+    const color = convertExactColorToHex(declaration.color);
+    if (color === undefined) return { key, color: describeExactColor(declaration.color) };
+    converted[key] = { ...declaration, color };
+  }
+  return { status: converted };
+};
 
 const decodeQualified = Schema.decodeUnknownEffect(QualifiedEntityKindDeclaration, {
   errors: "all",
@@ -48,7 +74,10 @@ const decodeQualified = Schema.decodeUnknownEffect(QualifiedEntityKindDeclaratio
  * - its `refPrefix` and the `refPrefix` of another kind registered so far, in
  *   this plugin or another, are equal or one starts with the other. A ref could
  *   then belong to two kinds;
- * - its `home` or `section` is not the word of a kind of this same source.
+ * - its `home` or `section` is not the word of a kind of this same source;
+ * - the colour of one of its statuses is a word that is no CSS colour name.
+ *
+ * Every status colour of the kinds it returns is a hex code.
  */
 export const decodeEntityKinds = (
   manifest: PluginManifest,
@@ -109,11 +138,20 @@ export const decodeEntityKinds = (
           );
         }
       }
+      const statuses = convertStatusColors(declaration.status);
+      if ("key" in statuses) {
+        return yield* Effect.fail(
+          invalid(
+            `the colour ${statuses.color} of its status "${statuses.key}" is not a CSS colour. Write a hex code such as "#8250df" or a CSS colour name such as "purple".`,
+          ),
+        );
+      }
       prefixes.push({ kind, refPrefix: declaration.refPrefix });
       registered.push(
         yield* Effect.mapError(
           decodeQualified({
             ...declaration,
+            status: statuses.status,
             word: kind,
             ...(declaration.home === undefined ? {} : { home: qualify(declaration.home) }),
             ...(declaration.section === undefined ? {} : { section: qualify(declaration.section) }),

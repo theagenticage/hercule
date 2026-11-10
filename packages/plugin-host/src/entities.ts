@@ -22,6 +22,7 @@ import {
   MAX_EVENT_URL_LENGTH,
   MAX_EXTERNAL_REF_LENGTH,
 } from "./limits";
+import { StatusIcon, withPluginColor } from "./drawing";
 import type { PluginError } from "./plugin";
 
 /** An array of at most `max` items. */
@@ -115,14 +116,21 @@ export const EntityTemplate = buildBoundedString(1, MAX_DECLARED_NAME_LENGTH).ch
 );
 
 /**
- * One status a kind can have, by key. `norm` marks the usual state of a
- * request. `stage` is the Task stage a Task takes when its entity gets this
- * status.
+ * One status a kind can have, by key.
+ *
+ * - `shape` and `tone` are what the status means to Hercule. The apps draw
+ *   them when the status has no `icon`.
+ * - `icon` is the plugin's own drawing of the status, such as GitHub's merged
+ *   icon, and `hue` or `color` colours it (see `withPluginColor`). An icon
+ *   with no colour is drawn grey.
+ * - `norm` marks the usual state of a request.
+ * - `stage` is the Task stage a Task takes when its entity gets this status.
  */
-export const EntityStatusDeclaration = Schema.Struct({
+export const EntityStatusDeclaration = withPluginColor({
   shape: Schema.Literals(ENTITY_STATUS_SHAPES),
   tone: Schema.Literals(ENTITY_STATUS_TONES),
   word: buildBoundedString(1, MAX_DECLARED_TEXT_LENGTH),
+  icon: Schema.optionalKey(StatusIcon),
   norm: Schema.optionalKey(Schema.Boolean),
   stage: Schema.optionalKey(Schema.Literals(ENTITY_STATUS_STAGES)),
 });

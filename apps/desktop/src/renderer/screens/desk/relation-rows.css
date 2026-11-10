@@ -27,8 +27,13 @@
   text-align: left;
   color: inherit;
 }
-button.relation-go:hover {
+button.relation-go:hover,
+a.relation-go:hover {
   background: var(--hover);
+}
+a.relation-go {
+  text-decoration: none;
+  cursor: default;
 }
 .relation-mark {
   display: inline-grid;
@@ -98,17 +103,21 @@ button.relation-go:hover {
   background: color-mix(in oklab, var(--ink) 55%, transparent);
 }
 
-/* A row that draws a thing linked to another (the open card's Linked section).
-   Its end is the status shape and word, and who says the two are linked
-   stands over that end while the row is reached for. The drawing does this
-   with `:has()`, which the app does not use in rows that are drawn by the
-   hundred, so the row carries the class instead. */
+/* The end of a row and the words of who says its thing is linked, which stand over the end while
+   the row is reached for. The drawing does this with `:has()`, which the app does not use in rows
+   that are drawn by the hundred, so the row carries the class instead. */
+.relation-tail {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
 .relation-end.is-status {
   gap: 4px;
 }
 .relation-row.has-claim .relation-claim {
   position: absolute;
-  right: 4px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   padding: 0 6px;
@@ -116,6 +125,7 @@ button.relation-go:hover {
   background: var(--stock);
   color: var(--faint);
   font: var(--type-meta);
+  white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--m-quick);
@@ -128,19 +138,42 @@ button.relation-go:hover {
 .relation-row.has-claim:focus-within .relation-end {
   opacity: 0;
 }
-/* The button that removes a link the user made. It shows with the claim. */
+/* The external icon of a row that opens in the browser, and the button that removes a link. Both
+   take no room at rest, so the row's end sits against the right edge in the same column as the
+   rows around it. While the row is reached for, they take their room at once, the end moves left,
+   and they fade in. Only the fade is a transition: the motion rule keeps layout out of
+   transitions. The negative margins take back the gap each would leave at rest. */
+.relation-external,
 .relation-unlink {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 22px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--m-quick);
+}
+.relation-external {
+  width: 0;
+  margin-left: -7px;
+  color: var(--muted);
+}
+.relation-unlink {
+  width: 0;
   height: 22px;
+  margin-left: -8px;
   border-radius: var(--r-xs);
   color: var(--faint);
-  opacity: 0;
+}
+.relation-row:hover .relation-external,
+.relation-row:focus-within .relation-external {
+  width: 13px;
+  margin-left: 0;
+  opacity: 1;
 }
 .relation-row:hover .relation-unlink,
-.relation-unlink:focus-visible {
+.relation-row:focus-within .relation-unlink {
+  width: 22px;
+  margin-left: 0;
   opacity: 1;
 }
 .relation-unlink:hover {

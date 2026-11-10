@@ -1,4 +1,7 @@
+import { decidePluginColor } from "@hercule/client-core";
+import type { EntityStatus } from "@hercule/contract";
 import type { JSX } from "react";
+import { buildPluginColorStyle } from "../../marks/plugin-color";
 import "./status-shape.css";
 
 const RING = <circle cx="8" cy="8" r="5.6" />;
@@ -113,6 +116,44 @@ export function StatusShape({
       aria-hidden="true"
     >
       {SHAPES[shape]}
+    </svg>
+  );
+}
+
+/**
+ * Renders the status of an External Entity, `size` CSS pixels square:
+ *
+ * - the icon its plugin draws for it, such as GitHub's merged icon, filled in
+ *   the plugin's colour (see `buildPluginColorStyle`), or grey when the plugin
+ *   gives it none;
+ * - otherwise the status's shape in its tone (`StatusShape`).
+ *
+ * The icon is hidden from assistive technology, because the status's word
+ * always stands beside it.
+ */
+export function EntityStatusIcon({
+  status,
+  size,
+}: {
+  readonly status: EntityStatus;
+  readonly size: number;
+}): JSX.Element {
+  if (status.icon === undefined) {
+    return <StatusShape shape={status.shape} tone={status.tone} size={size} />;
+  }
+  return (
+    <svg
+      className="shape status-icon"
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="currentColor"
+      style={buildPluginColorStyle(decidePluginColor(status))}
+      aria-hidden="true"
+    >
+      {status.icon.paths.map((path, index) => (
+        <path key={index} d={path} />
+      ))}
     </svg>
   );
 }

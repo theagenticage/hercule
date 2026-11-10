@@ -1,13 +1,7 @@
-import { decidePluginMark, type PluginIdentity } from "@hercule/client-core";
+import { decidePluginColor, decidePluginMark, type PluginIdentity } from "@hercule/client-core";
 import type { JSX } from "react";
+import { buildPluginColorStyle } from "./plugin-color";
 import "../logos/logos.css";
-
-declare module "react" {
-  interface CSSProperties {
-    /** The hue, in degrees, that a plugin declares for its mark. */
-    "--mark-hue"?: number;
-  }
-}
 
 /** A solid mark carries more weight than a line drawing, so it is drawn this much smaller to look the same size. */
 const SOLID_MARK_SCALE = 0.9;
@@ -23,9 +17,8 @@ const SOLID_MARK_SCALE = 0.9;
  *   square.
  *
  * A mark that declares `solid` is drawn at 90% of `size`. A mark that
- * declares a `hue` takes it, at the lightness and chroma of the theme
- * (`--mark-l`, `--mark-c`), so no plugin's colour is louder than a name in any
- * theme. A mark with no hue takes the text colour.
+ * declares a `hue` or a `color` is drawn in it (see `buildPluginColorStyle`),
+ * and a mark with neither takes the text colour.
  *
  * The app never draws an SVG of the plugin's own, so a plugin's mark is
  * always drawn here. The mark is hidden from assistive technology, because
@@ -46,8 +39,10 @@ export function PluginMark({
   const drawnSize = declared?.solid === true ? Math.round(size * SOLID_MARK_SCALE) : size;
   return (
     <svg
-      className={declared?.hue === undefined ? "br" : "br br--hue"}
-      style={declared?.hue === undefined ? undefined : { "--mark-hue": declared.hue }}
+      className="br"
+      style={
+        declared === undefined ? undefined : buildPluginColorStyle(decidePluginColor(declared))
+      }
       viewBox="0 0 16 16"
       width={drawnSize}
       height={drawnSize}

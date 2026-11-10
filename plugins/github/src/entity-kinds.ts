@@ -6,11 +6,35 @@
  * `entity-reads.ts` builds the status keys and reason keys written here.
  */
 import type { EntityKindDeclaration } from "@hercule/plugin-host";
+import {
+  CLOSED_COLOR,
+  DONE_COLOR,
+  ISSUE_CLOSED_ICON,
+  ISSUE_OPEN_ICON,
+  MUTED_COLOR,
+  OPEN_COLOR,
+  PULL_REQUEST_CLOSED_ICON,
+  PULL_REQUEST_DRAFT_ICON,
+  PULL_REQUEST_MERGED_ICON,
+  PULL_REQUEST_OPEN_ICON,
+} from "./status-icons";
 
 /** The kinds' words, as the plugin writes them. The host adds the plugin's id. */
 export const PULL_REQUEST_KIND = "pull-request";
 export const ISSUE_KIND = "issue";
 export const REPOSITORY_KIND = "repository";
+
+/**
+ * What every state of an open pull request shares. GitHub draws an open pull
+ * request with one icon whatever its checks and reviews say, so these states
+ * do too, and the status word tells them apart. The shape and tone keep what
+ * each state means to Hercule.
+ */
+const OPEN_PULL_REQUEST = {
+  stage: "in-review",
+  icon: PULL_REQUEST_OPEN_ICON,
+  color: OPEN_COLOR,
+} as const;
 
 const PULL_REQUEST: EntityKindDeclaration = {
   word: PULL_REQUEST_KIND,
@@ -25,13 +49,33 @@ const PULL_REQUEST: EntityKindDeclaration = {
   owner: "author",
   home: REPOSITORY_KIND,
   status: {
-    open: { shape: "fork", tone: "quiet", word: "Open", norm: true, stage: "in-review" },
-    failing: { shape: "cross", tone: "bad", word: "Checks failed", stage: "in-review" },
-    changes: { shape: "hold", tone: "attention", word: "Changes requested", stage: "in-review" },
-    approved: { shape: "check", tone: "good", word: "Approved", stage: "in-review" },
-    draft: { shape: "dashed", tone: "quiet", word: "Draft", stage: "building" },
-    merged: { shape: "join", tone: "quiet", word: "Merged", stage: "landed" },
-    closed: { shape: "cross", tone: "quiet", word: "Closed" },
+    open: { ...OPEN_PULL_REQUEST, shape: "fork", tone: "quiet", word: "Open", norm: true },
+    failing: { ...OPEN_PULL_REQUEST, shape: "cross", tone: "bad", word: "Checks failed" },
+    changes: { ...OPEN_PULL_REQUEST, shape: "hold", tone: "attention", word: "Changes requested" },
+    approved: { ...OPEN_PULL_REQUEST, shape: "check", tone: "good", word: "Approved" },
+    draft: {
+      shape: "dashed",
+      tone: "quiet",
+      word: "Draft",
+      stage: "building",
+      icon: PULL_REQUEST_DRAFT_ICON,
+      color: MUTED_COLOR,
+    },
+    merged: {
+      shape: "join",
+      tone: "quiet",
+      word: "Merged",
+      stage: "landed",
+      icon: PULL_REQUEST_MERGED_ICON,
+      color: DONE_COLOR,
+    },
+    closed: {
+      shape: "cross",
+      tone: "quiet",
+      word: "Closed",
+      icon: PULL_REQUEST_CLOSED_ICON,
+      color: CLOSED_COLOR,
+    },
   },
   facts: [
     { field: "diff", form: "delta" },
@@ -61,8 +105,21 @@ const ISSUE: EntityKindDeclaration = {
   owner: "assignee",
   home: REPOSITORY_KIND,
   status: {
-    open: { shape: "ring", tone: "quiet", word: "Open", norm: true },
-    closed: { shape: "check", tone: "good", word: "Closed" },
+    open: {
+      shape: "ring",
+      tone: "quiet",
+      word: "Open",
+      norm: true,
+      icon: ISSUE_OPEN_ICON,
+      color: OPEN_COLOR,
+    },
+    closed: {
+      shape: "check",
+      tone: "good",
+      word: "Closed",
+      icon: ISSUE_CLOSED_ICON,
+      color: DONE_COLOR,
+    },
   },
   facts: [{ field: "labels", form: "word" }],
   reasons: {

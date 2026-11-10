@@ -16,6 +16,18 @@ export {
 } from "./manifest";
 
 export {
+  CssColor,
+  ExactColor,
+  Hue,
+  MAX_ICON_BYTES,
+  MAX_ICON_PATHS,
+  StatusIcon,
+  SVG_PATH_DATA_PATTERN,
+  findIconPathsProblem,
+  withPluginColor,
+} from "./drawing";
+
+export {
   deriveConfigJsonSchema,
   decodeAgainst,
   listChoiceFields,

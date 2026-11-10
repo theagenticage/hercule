@@ -214,7 +214,7 @@ export const readFarEnd = (
 /**
  * Builds the peer a record draws as. A record no Connection can read now is
  * restricted: it keeps its kind and noun and shows no title, identifier,
- * status or change, and it is never the user's.
+ * URL, status or change, and it is never the user's.
  */
 const buildPeer = (
   row: EntityRow,
@@ -230,6 +230,7 @@ const buildPeer = (
     ...base,
     ...(row.identifier === null ? {} : { identifier: row.identifier as string }),
     ...(row.title === null ? {} : { title: row.title as string }),
+    ...(row.url === null ? {} : { url: row.url as string }),
     ...(status === undefined ? {} : { status }),
     yours: deriveYours(observations),
     restricted: false,

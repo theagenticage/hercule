@@ -13,7 +13,7 @@ import {
 } from "@hercule/client-core/inbox";
 import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
-import { StatusShape } from "../desk";
+import { EntityStatusIcon } from "../desk";
 import { CardColleague, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
 import { useCardTime } from "./use-card-time";
@@ -79,9 +79,7 @@ function AskingPartRow({
         wait !== null && <CardWaitFigure wait={wait} />
       )}
       <span className="part-line" data-landing-line>
-        {face.status !== undefined && (
-          <StatusShape shape={face.status.shape} tone={face.status.tone} size={12} />
-        )}
+        {face.status !== undefined && <EntityStatusIcon status={face.status} size={12} />}
         <span className="part-title" title={face.title}>
           {face.title}
         </span>

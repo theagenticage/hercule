@@ -29,7 +29,7 @@ export const MAX_PLUGIN_MESSAGE_LENGTH = 2048;
 const PluginMessage = Schema.String.check(Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH));
 
 /** Re-exported from the package plugins are written against, so both use the same list. */
-export { PluginCapability, PluginMark } from "@hercule/plugin-host";
+export { ExactColor, PluginCapability, PluginMark } from "@hercule/plugin-host";
 
 /**
  * Why the controller refused to load a plugin. Each reason is decided from the

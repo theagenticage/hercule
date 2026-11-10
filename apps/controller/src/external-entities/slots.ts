@@ -24,6 +24,7 @@ import {
 import {
   PluginError,
   type EntityFactDeclaration,
+  type EntityStatusDeclaration,
   type EntityObservation,
   type QualifiedEntityKindDeclaration,
 } from "@hercule/plugin-host";
@@ -41,6 +42,26 @@ export const StoredEntityStatus = Schema.Struct({
 });
 
 export type StoredEntityStatus = Schema.Schema.Type<typeof StoredEntityStatus>;
+
+/**
+ * Builds the status stored on an entity of the kind `declaration` from one row
+ * of its status table: what a card draws (the shape, tone, word, icon and
+ * colour), and the Task stage. A place never becomes a Task, so a place's
+ * status has no stage.
+ */
+export const buildStoredStatus = (
+  declaration: QualifiedEntityKindDeclaration,
+  status: EntityStatusDeclaration,
+): StoredEntityStatus => ({
+  shape: status.shape,
+  tone: status.tone,
+  label: status.word,
+  ...(status.icon === undefined ? {} : { icon: status.icon }),
+  ...(status.hue === undefined ? {} : { hue: status.hue }),
+  ...(status.color === undefined ? {} : { color: status.color }),
+  ...(status.norm === undefined ? {} : { norm: status.norm }),
+  ...(status.stage === undefined || declaration.pace === "context" ? {} : { stage: status.stage }),
+});
 
 /** The slots of a kind that has cards: everything a card draws, apart from what changes per read. */
 const WorkEntitySlots = Schema.Struct({
@@ -169,16 +190,7 @@ export const renderEntitySlots = (
       if (status === undefined) {
         return yield* refuse(`the status "${key}" is not in the kind's status table.`);
       }
-      return {
-        shape: status.shape,
-        tone: status.tone,
-        label: status.word,
-        ...(status.norm === undefined ? {} : { norm: status.norm }),
-        // A place never becomes a Task, so only a kind with cards keeps the stage.
-        ...(status.stage === undefined || declaration.pace === "context"
-          ? {}
-          : { stage: status.stage }),
-      };
+      return buildStoredStatus(declaration, status);
     });
 
     const status = yield* renderStatus;
