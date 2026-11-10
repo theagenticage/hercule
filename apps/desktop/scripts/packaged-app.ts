@@ -44,8 +44,8 @@ export const RUNS_ON_MAC = process.platform === "darwin";
  *
  * - macOS: `Hercule.app` inside `mac-arm64` on Apple silicon or `mac` on
  *   Intel;
- * - Linux: the `linux-unpacked` folder, which holds the executable and its
- *   `resources` folder directly.
+ * - Linux: the `linux-unpacked` folder on x64 or `linux-arm64-unpacked` on
+ *   arm64, which holds the executable and its `resources` folder directly.
  *
  * Every other path to something in the package starts from here, so this is
  * the one place that tells the two platforms apart.
@@ -56,7 +56,11 @@ const PACKAGE_LAYOUT = RUNS_ON_MAC
       executable: "Contents/MacOS/Hercule",
       archive: "Contents/Resources/app.asar",
     }
-  : { app: "linux-unpacked", executable: "hercule-desktop", archive: "resources/app.asar" };
+  : {
+      app: process.arch === "arm64" ? "linux-arm64-unpacked" : "linux-unpacked",
+      executable: "hercule-desktop",
+      archive: "resources/app.asar",
+    };
 
 /**
  * The two packages `pnpm build:desktop` builds: `release` is what ships, and
@@ -67,7 +71,7 @@ export type PackageKind = "release" | "test";
 
 /**
  * Returns the path of the packaged app of the given kind: `Hercule.app` on
- * macOS, the `linux-unpacked` folder on Linux.
+ * macOS, the unpacked folder on Linux.
  *
  * Fails when it has not been built, saying how to build it: the perf script
  * and the end-to-end tests run an existing package rather than building one.

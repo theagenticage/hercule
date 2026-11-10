@@ -4,8 +4,9 @@
 # manager (openbox) and a D-Bus session, which `entry.sh` starts. It holds
 # GNOME Keyring too, which the keyring smoke test (`e2e/desktop/keyring.test.ts`)
 # starts on a D-Bus session of its own. It also holds the repository's pinned
-# Node, Bun and pnpm, so a `node_modules` installed on the host runs in it. The
-# repository is mounted, never copied in.
+# Node, Bun and pnpm, so a `node_modules` installed on a Linux host runs in it.
+# The repository is mounted, never copied into the image: on a Linux host the
+# checkout itself, on macOS a copy with its own Linux `node_modules` (`run.ts`).
 #
 # Build, from the repository root, with the image's script. It names the image
 # after everything it is built from (this file and the Bun, pnpm and Playwright
@@ -14,13 +15,14 @@
 #
 #   node apps/desktop/container/image.ts ensure
 #
-# Run a command on the virtual screen, as the host user so the files it writes
-# are the host user's, with a scratch HOME and the default network (never the
-# host's):
+# Run a command on the virtual screen with `run.ts` in this folder, which
+# builds the image when needed:
 #
-#   docker run --rm --init --shm-size=1g --security-opt seccomp=unconfined \
-#     --user "$(id -u):$(id -g)" -e HOME=/tmp/home -v hercule-desktop-cache:/cache \
-#     -v "$PWD":/repo -w /repo "$(node apps/desktop/container/image.ts name)" pnpm test:desktop
+#   node apps/desktop/container/run.ts -- pnpm test:desktop
+#
+# It runs the command as the host user so the files it writes are the host
+# user's, with a scratch HOME and the default network (never the host's), with
+# these flags:
 #
 # - `--shm-size` is needed because Chromium keeps shared memory in /dev/shm,
 #   and Docker's 64 MB default is too small for it.
@@ -72,9 +74,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /tmp/.X11-unix /cache && chmod 1777 /tmp/.X11-unix && chmod 777 /cache \
     && chmod 666 /etc/passwd
 
-RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+# The image builds for the platform `image.ts` asks for: linux/amd64, or
+# linux/arm64 on an arm64 host such as a Mac with Apple silicon. Docker sets
+# TARGETARCH to that platform's architecture. Node and Bun spell the two
+# architectures differently in their download names.
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64) node_arch=x64; bun_arch=x64 ;; \
+      arm64) node_arch=arm64; bun_arch=aarch64 ;; \
+      *) echo "This image builds for amd64 or arm64, not '${TARGETARCH}'. Build it with 'node apps/desktop/container/image.ts ensure'." >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
       | tar -xJ -C /usr/local --strip-components=1 \
-    && curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip" \
+    && curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${bun_arch}.zip" \
     && unzip -q -j /tmp/bun.zip -d /usr/local/bin && rm /tmp/bun.zip \
     && npm install --global "pnpm@${PNPM_VERSION}"
 
