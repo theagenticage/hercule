@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: bun --bun run vitest run --project node --project node-isolated --shard=${{ matrix.shard }}/3
+      - run: pnpm test:node --shard=${{ matrix.shard }}/3
 
   test-react:
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm exec vitest run --project react --project desktop-main --project desktop-renderer --shard=${{ matrix.shard }}/3
+      - run: pnpm test:react --shard=${{ matrix.shard }}/3
 
   check:
     runs-on: ubuntu-latest
@@ -176,7 +176,7 @@ jobs:
       # also matches the runner's tests of the harness installers, which run
       # here too. They run on Bun, like every backend test: the projects'
       # global setup migrates the test database with `bun:sqlite`.
-      - run: bun --bun run vitest run --project node --project node-isolated install.test.ts
+      - run: pnpm test:node install.test.ts
 
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
