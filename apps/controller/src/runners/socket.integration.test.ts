@@ -898,7 +898,10 @@ describe("a goodbye that is still queued when the close arrives", () => {
         // reads the close it may not have reached the goodbye yet. A client
         // library cannot send all of it in one write, so this test writes the
         // bytes itself: enough reports that the controller is still handling
-        // them when the close is read.
+        // them when the close is read. Each report is a database write, so 40
+        // keep it busy for far longer than reading the close takes, and stay
+        // well inside the 5 seconds the controller gives queued frames on a
+        // slow CI machine (300 did not).
         const tcp = connect(Number(new URL(harness.base).port), "127.0.0.1");
         await once(tcp, "connect");
         tcp.write(
@@ -929,7 +932,7 @@ describe("a goodbye that is still queued when the close arrives", () => {
         );
         tcp.write(
           Buffer.concat([
-            ...Array.from({ length: 300 }, () => report),
+            ...Array.from({ length: 40 }, () => report),
             buildClientFrame(0x1, Buffer.from(JSON.stringify({ _tag: "goodbye" }))),
             buildClientFrame(0x8, Buffer.from([0x03, 0xe8])),
           ]),
