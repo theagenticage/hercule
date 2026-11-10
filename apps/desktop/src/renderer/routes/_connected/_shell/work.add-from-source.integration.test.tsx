@@ -262,9 +262,19 @@ describe("From a source on the Work screen", () => {
 
   it("says the source cannot be searched while the controller cannot be reached", async () => {
     const user = userEvent.setup();
-    const { live } = await openWork();
+    let isReachable = true;
+    // The live connection reconnects by itself about a second after a drop.
+    // Refusing its ticket keeps the controller out of reach for the rest of
+    // the test, however slowly the sheet opens.
+    const { live } = await openWork({
+      "POST /api/v1/auth/ws-ticket": () => {
+        if (!isReachable) throw new TypeError("the controller cannot be reached");
+        return { body: { ticket: "ws-ticket" } };
+      },
+    });
     await screen.findByRole("button", { name: /^Tidy the depot labels/ });
     await live.waitForFirstPushes();
+    isReachable = false;
     live.drop();
     await screen.findByText(/^Offline since/);
 
