@@ -8,7 +8,7 @@ import {
 } from "@hercule/client-core/inbox";
 import type { InboxCard } from "@hercule/contract";
 import { PluginMark } from "../../marks";
-import { StatusShape } from "../desk";
+import { EntityStatusIcon } from "../desk";
 import "../desk/card.css";
 import { CardHolderMark, CardMoves } from "./card-moves";
 import { CardWaitFigure, NewMark } from "./card-parts";
@@ -100,7 +100,7 @@ function RequestCardView({
             {freshIds.has(card.id) && <NewMark />}
             {face.status !== undefined && (
               <span className="request-shape">
-                <StatusShape shape={face.status.shape} tone={face.status.tone} size={13} />
+                <EntityStatusIcon status={face.status} size={13} />
               </span>
             )}
             {face.sentence !== undefined && (

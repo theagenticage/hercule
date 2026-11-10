@@ -163,6 +163,54 @@ describe("RelationRows for linked things", () => {
     expect(document.querySelector(".relation-claim")).toBeNull();
   });
 
+  it("opens a linked thing at its source in the browser, apart from its remove button", () => {
+    const row = {
+      ...buildPlaceRow(place({ url: "https://quayside.example/sites/rotterdam" })),
+      link: { kind: "own", canUnlink: true },
+    } as const;
+    render(<RelationRows rows={[row]} plugins={PLUGINS} onUnlink={vi.fn()} />);
+
+    const link = screen.getByRole("link", { name: /Rotterdam depot/ });
+    expect(link.getAttribute("href")).toBe("https://quayside.example/sites/rotterdam");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("title")).toBe("Open in Quayside");
+    expect(link.contains(screen.getByRole("button", { name: /^Remove/ }))).toBe(false);
+  });
+
+  it("walks to a row the caller can walk to, rather than opening its URL", () => {
+    const row = {
+      ...buildPlaceRow(place({ url: "https://quayside.example/sites/rotterdam" })),
+      link: { kind: "own", canUnlink: true },
+    } as const;
+    render(<RelationRows rows={[row]} plugins={PLUGINS} onWalk={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /Rotterdam depot/ })).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("keeps a place above a thing plain, even when it has a URL", () => {
+    const row = buildPlaceRow(place({ url: "https://quayside.example/sites/rotterdam" }));
+    render(<RelationRows rows={[row]} plugins={PLUGINS} />);
+
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("shows the status word of a link the Task holds itself, with no other facts", () => {
+    const row = {
+      ...buildPlaceRow(
+        place({
+          status: { shape: "fork", tone: "quiet", label: "Open" },
+          targetDate: "2026-11-14T00:00:00.000Z",
+        }),
+      ),
+      link: { kind: "own", canUnlink: true },
+    } as const;
+    render(<RelationRows rows={[row]} plugins={PLUGINS} isKindShown={false} />);
+
+    expect(screen.getByText("Open")).toBeTruthy();
+    expect(screen.queryByText(/14 Nov/)).toBeNull();
+  });
+
   it("ignores the second click of a double click on the remove button, which a Link button may have just made appear under the pointer", () => {
     const onUnlink = vi.fn();
     const { confirmed } = build({ type: "person" });

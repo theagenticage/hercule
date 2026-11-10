@@ -132,6 +132,27 @@ describe("readAncestorRows", () => {
   });
 });
 
+describe("the URL of a row", () => {
+  const URL = "https://quayside.example/rounds/a";
+
+  it("carries the URL of a place and of a peer, so the row can open it in the browser", () => {
+    const peer: EntityPeer = {
+      ref: ROUND_A,
+      kind: "quayside/round",
+      noun: "Delivery round",
+      url: URL,
+      yours: false,
+      restricted: false,
+    };
+    expect(buildPlaceRow(place(ROUND_A, "Round A", { url: URL }))).toMatchObject({ url: URL });
+    expect(buildPeerRow(peer)).toMatchObject({ url: URL });
+  });
+
+  it("has no URL when the source reports none", () => {
+    expect(buildPlaceRow(place(ROUND_A, "Round A"))).not.toHaveProperty("url");
+  });
+});
+
 describe("describeLockedRow", () => {
   it.each([
     ["Sentry", "Error", "A Sentry error you cannot open"],

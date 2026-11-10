@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { EntityStatus } from "@hercule/contract";
 import type { CardFact, CardWait } from "@hercule/client-core/inbox";
-import { StatusShape } from "../desk";
+import { EntityStatusIcon } from "../desk";
 
 /** Renders a status as its shape and its word in ink: the first thing on a row, and the line of a place's head. */
 export function CardStatus({
@@ -13,7 +13,7 @@ export function CardStatus({
 }): JSX.Element {
   return (
     <span className="card-status">
-      <StatusShape shape={status.shape} tone={status.tone} size={size} />
+      <EntityStatusIcon status={status} size={size} />
       <span>{status.label}</span>
     </span>
   );

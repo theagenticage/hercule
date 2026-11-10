@@ -137,14 +137,14 @@ button.task-pane-note:hover {
   min-height: 32px;
   margin: 0 -8px;
   width: calc(100% + 16px);
-  border-radius: var(--r-sm);
-  transition: background var(--m-quick);
 }
-.task-pane-context .relation-row:hover {
+.task-pane-context button.relation-go:hover,
+.task-pane-context a.relation-go:hover {
   background: var(--hover);
 }
-/* A Part of row is a button: the keyboard sees the same ring the Inbox's move rows draw. */
-.task-pane-context button.relation-go:focus-visible {
+/* A Part of row is a button, and a Linked row a link: the keyboard sees the same ring the Inbox's move rows draw. */
+.task-pane-context button.relation-go:focus-visible,
+.task-pane-context a.relation-go:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
@@ -153,6 +153,7 @@ button.task-pane-note:hover {
   min-height: 32px;
   padding: 4px 8px;
   border-radius: var(--r-sm);
+  transition: background var(--m-quick);
 }
 .task-pane-context .relation-mark,
 .task-pane-context .relation-go > svg {
@@ -171,18 +172,15 @@ button.task-pane-note:hover {
 .task-pane-context .relation-row.is-locked .relation-title {
   color: var(--muted);
 }
-/* The button that removes a link stands over the end of its row while the row is reached for, and the state gives way to it. In the shared rows the button sits beside the state, which would push the states of Linked 30px short of the column the rows of Part of end in. */
-.task-pane-context .relation-row.has-unlink .relation-unlink {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  transform: translateY(-50%);
+.task-pane-context .relation-external {
+  margin-left: -9px;
 }
-.task-pane-context .relation-row.has-unlink:hover .relation-end,
-.task-pane-context .relation-row.has-unlink:focus-within .relation-end {
-  opacity: 0;
+.task-pane-context .relation-unlink {
+  height: 24px;
+}
+.task-pane-context .relation-row:hover .relation-unlink,
+.task-pane-context .relation-row:focus-within .relation-unlink {
+  width: 24px;
 }
 /* What changed at the source, under the title: the two lines fill the row, so the row needs no padding of its own. */
 .task-pane-context .relation-text {

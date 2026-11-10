@@ -291,7 +291,7 @@ export type EntitySignalLine = Schema.Schema.Type<typeof EntitySignalLine>;
  * A record at the far end of a link that has no card of its own: it is not on
  * the Inbox, and a card shows it as a quiet row. A `restricted` peer, one no
  * Connection can read, holds only `ref`, `kind` and `noun`, with `restricted`
- * true and `yours` false: no title, identifier, status or change.
+ * true and `yours` false: no title, identifier, URL, status or change.
  */
 export const EntityPeer = Schema.Struct({
   /**
@@ -304,6 +304,8 @@ export const EntityPeer = Schema.Struct({
   noun: bounded(1, 40),
   identifier: Schema.optionalKey(bounded(1, 64)),
   title: Schema.optionalKey(bounded(1, 512)),
+  /** Where the source shows it, which the apps open in the browser. Absent when the source reports none. */
+  url: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(EntityStatus),
   /** True when any observing Connection reported the thing as owned by the user. Always false when `restricted`. */
   yours: Schema.Boolean,

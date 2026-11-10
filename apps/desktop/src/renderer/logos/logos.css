@@ -8,10 +8,6 @@
   display: inline-block;
   vertical-align: middle;
 }
-/* A plugin that declares a hue for its mark: the theme sets how light and how strong it is. */
-.br--hue {
-  color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue));
-}
 .logo {
   overflow: visible;
 }

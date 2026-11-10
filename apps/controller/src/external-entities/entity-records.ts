@@ -308,7 +308,7 @@ export const readLinkedEntityFacts = (row: EntityRow): LinkedEntityFacts => {
 /**
  * Builds the place a record draws as above the cards. A thing no Connection
  * reads now is restricted: it keeps its kind and noun, and shows no title,
- * status, progress or date.
+ * URL, status, progress or date.
  */
 export const buildPlace = (
   row: EntityRow,
@@ -326,6 +326,7 @@ export const buildPlace = (
     ...(row.caption === null ? {} : { caption: row.caption as string }),
     ...(restricted ? {} : { title: row.title as string }),
     ...(restricted || row.identifier === null ? {} : { identifier: row.identifier as string }),
+    ...(restricted || row.url === null ? {} : { url: row.url as string }),
     ...(status === undefined ? {} : { status }),
     ...(progress === undefined ? {} : { progress }),
     ...(restricted || row.target_date === null ? {} : { targetDate: row.target_date as string }),

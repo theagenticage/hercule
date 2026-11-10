@@ -200,6 +200,7 @@ export {
   UserSettings,
 } from "./groups/settings";
 export {
+  ExactColor,
   MAX_PLUGIN_MESSAGE_LENGTH,
   PluginCapability,
   PluginConfigSchema,

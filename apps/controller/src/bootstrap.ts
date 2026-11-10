@@ -40,6 +40,7 @@ import {
   type SkippedMigrationError,
 } from "./db";
 import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
+import { refreshStoredStatusesOrLog } from "./external-entities";
 import {
   endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
@@ -522,6 +523,10 @@ export const bootWith = <A, E>(
         // activates may read its own state and secrets. Before the runner,
         // because a session's harness is looked up in the catalog.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
+        // After the plugins start, because their status tables are read from
+        // the catalog. A plugin may have changed while the controller was
+        // stopped. A failure is logged and the boot goes on.
+        yield* refreshStoredStatusesOrLog;
         // After the plugins start, because a stored workflow is judged
         // against the actions, event kinds and Connection types of the active
         // plugins. A plugin may have changed while the controller was stopped.

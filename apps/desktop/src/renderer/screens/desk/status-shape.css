@@ -21,6 +21,10 @@
 .shape.tone-bad {
   color: var(--fail-ink);
 }
+/* A plugin's own icon for a status, with no colour of the plugin's: grey, like a quiet shape. */
+.status-icon {
+  color: var(--faint);
+}
 /* The failed mark sits in a line of words, as the first thing in it. The one tomato on the page. */
 .failed-mark {
   display: inline-block;

@@ -6,6 +6,17 @@
  * a card shows them. `entity-reads.ts` builds the status keys written here.
  */
 import type { EntityKindDeclaration } from "@hercule/plugin-host";
+import {
+  BACKLOG_ICON,
+  CANCELED_ICON,
+  DONE_COLOR,
+  DONE_ICON,
+  REVIEW_COLOR,
+  REVIEW_ICON,
+  STARTED_COLOR,
+  STARTED_ICON,
+  TODO_ICON,
+} from "./status-icons";
 
 /** The kinds' words, as the plugin writes them. The host adds the plugin's id. */
 export const ISSUE_KIND = "issue";
@@ -35,14 +46,48 @@ const ISSUE: EntityKindDeclaration = {
   home: PROJECT_KIND,
   section: MILESTONE_KIND,
   status: {
-    triage: { shape: "dashed", tone: "quiet", word: "Triage", norm: true, stage: "exploring" },
-    backlog: { shape: "dashed", tone: "quiet", word: "Backlog", stage: "exploring" },
-    todo: { shape: "ring", tone: "quiet", word: "Todo", stage: "planned" },
-    started: { shape: "half", tone: "active", word: "In Progress", stage: "building" },
-    review: { shape: "most", tone: "active", word: "In Review", stage: "in-review" },
-    done: { shape: "check", tone: "good", word: "Done", stage: "landed" },
-    canceled: { shape: "cross", tone: "quiet", word: "Canceled" },
-    duplicate: { shape: "cross", tone: "quiet", word: "Duplicate" },
+    triage: {
+      shape: "dashed",
+      tone: "quiet",
+      word: "Triage",
+      norm: true,
+      stage: "exploring",
+      icon: BACKLOG_ICON,
+    },
+    backlog: {
+      shape: "dashed",
+      tone: "quiet",
+      word: "Backlog",
+      stage: "exploring",
+      icon: BACKLOG_ICON,
+    },
+    todo: { shape: "ring", tone: "quiet", word: "Todo", stage: "planned", icon: TODO_ICON },
+    started: {
+      shape: "half",
+      tone: "active",
+      word: "In Progress",
+      stage: "building",
+      icon: STARTED_ICON,
+      color: STARTED_COLOR,
+    },
+    review: {
+      shape: "most",
+      tone: "active",
+      word: "In Review",
+      stage: "in-review",
+      icon: REVIEW_ICON,
+      color: REVIEW_COLOR,
+    },
+    done: {
+      shape: "check",
+      tone: "good",
+      word: "Done",
+      stage: "landed",
+      icon: DONE_ICON,
+      color: DONE_COLOR,
+    },
+    canceled: { shape: "cross", tone: "quiet", word: "Canceled", icon: CANCELED_ICON },
+    duplicate: { shape: "cross", tone: "quiet", word: "Duplicate", icon: CANCELED_ICON },
   },
   facts: [
     { field: "priority", form: "bars" },

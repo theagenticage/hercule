@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { withPluginColor } from "./drawing";
 
 /**
  * The version of the host API a plugin is built against. A plugin that
@@ -82,18 +83,19 @@ export const PluginId = Schema.String.check(
 );
 
 /**
- * The plugin's mark: SVG path `d` strings drawn on a fixed 16x16 viewBox, in
- * the theme's colour. It holds path data only, so a mark can carry no script,
- * style or colour. The host checks the strings when it loads the plugin: at
- * most 16 paths, and at most 4 KB of them together. It drops a mark that
- * fails the check rather than the plugin. `hue` and `solid` are plain numbers
- * and flags, so they need no check.
+ * The plugin's mark: SVG path `d` strings drawn on a fixed 16x16 viewBox. It
+ * holds path data only, so a mark can carry no script or style. The host
+ * checks the strings when it loads the plugin: at most 16 paths, and at most
+ * 4 KB of them together. It drops a mark that fails the check rather than the
+ * plugin, and it drops a mark whose colour is not a CSS colour too.
+ *
+ * - `hue` tints the mark at the lightness and strength of the theme, and
+ *   `color` draws it in an exact colour (see `withPluginColor`). With neither,
+ *   the mark takes the text colour.
+ * - `solid` marks a heavy mark, which the app draws a little smaller.
  */
-export const PluginMark = Schema.Struct({
+export const PluginMark = withPluginColor({
   paths: Schema.Array(Schema.String),
-  /** The hue, in degrees, that tints the mark where the app draws one. Absent means the neutral ink. */
-  hue: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 360 }))),
-  /** True for a heavy mark, which the app draws a little smaller. */
   solid: Schema.optionalKey(Schema.Boolean),
 });
 

@@ -14,7 +14,10 @@ import {
   ENTITY_STATUS_SHAPES,
   ENTITY_STATUS_TONES,
   EntityProgress,
+  ExactColor,
+  Hue,
   PluginId,
+  StatusIcon,
 } from "@hercule/plugin-host";
 import { Schema } from "effect";
 import { ExternalRef, Timestamp } from "../ids";
@@ -63,11 +66,19 @@ export { ENTITY_REASON_TONES, ENTITY_STATUS_SHAPES, ENTITY_STATUS_TONES, EntityP
  * tones, with the plugin's word for it ("Changes requested"). It is copied
  * from the kind table when the entity is observed, so it reads well after the
  * plugin is gone.
+ *
+ * `icon` is the plugin's own drawing of the status, which the apps draw in
+ * place of the shape. `hue` or `color` colours it, and an icon with neither is
+ * grey. Every `color` is a hex code: the controller turns CSS colour names
+ * into hex when the plugin loads.
  */
 export const EntityStatus = Schema.Struct({
   shape: Schema.Literals(ENTITY_STATUS_SHAPES),
   tone: Schema.Literals(ENTITY_STATUS_TONES),
   label: bounded(1, 60),
+  icon: Schema.optionalKey(StatusIcon),
+  hue: Schema.optionalKey(Hue),
+  color: Schema.optionalKey(ExactColor),
   /** True for the usual state of the kind. A request shows a status shape only when it is not the norm. */
   norm: Schema.optionalKey(Schema.Boolean),
 });
@@ -143,6 +154,8 @@ export const EntityPlace = Schema.Struct({
    * links. Absent when the record has none, or the thing is restricted.
    */
   identifier: Schema.optionalKey(bounded(1, 64)),
+  /** Where the source shows it, which the apps open in the browser. Absent when the source reports none, or the thing is restricted. */
+  url: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(EntityStatus),
   /** Only when the source reports it. */
   progress: Schema.optionalKey(EntityProgress),
