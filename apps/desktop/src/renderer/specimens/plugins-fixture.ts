@@ -46,10 +46,8 @@ export const TIDEWATCH_PLUGIN: PluginDetail = buildPlugin("tidewatch", "Tidewatc
 });
 
 /**
- * Sentry's mark, as a plugin that draws Sentry's own logo would declare it:
- * the Bureau book's brands.js path (Simple Icons, CC0) scaled by 2/3 onto the
- * 16-unit grid. The shipped Sentry plugin declares a geometric mark of its
- * own instead, but the book draws Sentry's logo, so the specimens do too.
+ * Sentry's mark, as the Sentry plugin declares it: the Bureau book's
+ * brands.js path (Simple Icons, CC0) scaled by 2/3 onto the 16-unit grid.
  */
 export const SENTRY_MARK: PluginMark = {
   paths: [
