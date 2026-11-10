@@ -1470,6 +1470,14 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
             .at(-1);
           return report && (report.usage ?? report.usageReport.counts);
         };
+        /** Returns the child's usage report for the native turn `turnId`, or undefined before one arrives. */
+        const findChildUsageReport = (turnId: string) =>
+          seen.find(
+            (event) =>
+              event._tag === "session.usage.updated" &&
+              event.subagentId === childId &&
+              (event.raw?.payload as { turnId?: string } | undefined)?.turnId === turnId,
+          );
         await waitUntil(() => childCompletions().length === 1);
         expect(childCompletions()[0]!.state).toBe("interrupted");
         // Codex does not always report usage for a turn it interrupted: on a
@@ -1485,14 +1493,25 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         // Codex reports a turn's usage in its own notification, which may
         // arrive after the turn's completion, so the test waits for both.
         await waitUntil(
-          () => childCompletions().length === 2 && (latestChildUsage()?.inputTokens ?? 0) > 0,
+          () =>
+            childCompletions().length === 2 &&
+            findChildUsageReport(childCompletions()[1]!.turnId) !== undefined,
         );
-        expect(latestChildUsage()).toEqual({
-          inputTokens: 300,
-          outputTokens: 10,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        });
+        // Without a saved report, the adapter learns a V1 child's earlier
+        // total only from a usage report sent after the restart: Codex
+        // replays none for a V1 child forked from a turn that had not ended.
+        // When Codex also sent no report for the interrupted turn, the
+        // completed turn's report is the first one, so it becomes the
+        // baseline and counts nothing rather than counting old calls again.
+        const baselineKnown =
+          saveReport ||
+          version === "v2" ||
+          findChildUsageReport(childCompletions()[0]!.turnId) !== undefined;
+        expect(latestChildUsage()).toEqual(
+          baselineKnown
+            ? { inputTokens: 300, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }
+            : NO_USAGE,
+        );
         const introducedIds = seen
           .filter((event) => event._tag === "subagent.started")
           .map((event) => event.subagentId);

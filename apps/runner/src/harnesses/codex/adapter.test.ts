@@ -3580,6 +3580,44 @@ describe("restoring Codex subagent counters before continuation", () => {
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
 
+  it("keeps a replayed baseline when the preparation deadline passes before the replay barrier", async () => {
+    const run = await createDelayedMetadataSession(buildResumedChildSpec(), {
+      "thread/resume": readSubagentMetadata,
+    });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            run.adapter.sendInput(SESSION, { text: "continue" }),
+          );
+          yield* Effect.promise(() =>
+            waitUntil("awaited replay barrier", () => run.metadataIds.has(CHILD)),
+          );
+          pushChildCounterReport(run.server, buildChildCounterReport(300, 10));
+          yield* Effect.promise(settle);
+          yield* TestClock.adjust(METADATA_DEADLINE);
+          yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    pushChildCounterReport(run.server, buildChildCounterReport(600, 20, 300, 10));
+    await waitUntil("reported the child's new call", () =>
+      filterByTag(run.seen, "session.usage.updated").some(
+        (event) => event.subagentId === CHILD && event.usageReport?.counts.inputTokens !== 0,
+      ),
+    );
+    const latest = filterByTag(run.seen, "session.usage.updated")
+      .filter((event) => event.subagentId === CHILD)
+      .at(-1);
+    expect(latest?.usageReport).toEqual({
+      status: "incomplete",
+      counts: { inputTokens: 300, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
   it("uses a saved report without loading child context and counts only post-resume usage", async () => {
     const history = buildChildCounterReport(50000, 5000, 8000, 1000);
     const run = createDriving({ "thread/read": readSubagentMetadata });
