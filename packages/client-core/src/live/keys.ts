@@ -128,6 +128,12 @@ export const queryKeys = {
    */
   inboxCount: (): LiveQueryKey => ["inbox-count"],
   /**
+   * What the Inbox's rail draws (`externalEntity.readInboxOutline`). It is
+   * inside the `inbox()` prefix on purpose: every push that reads the pages
+   * again reads the outline again, and only the Inbox screen holds it.
+   */
+  inboxOutline: (): LiveQueryKey => ["inbox", "outline"],
+  /**
    * One External Entity (`externalEntity.read`), as an open pane draws it;
    * without the id, the prefix of every entity read. Live topics: every
    * `externalEntity`, `connection` and `plugin` push reads the prefix, and a

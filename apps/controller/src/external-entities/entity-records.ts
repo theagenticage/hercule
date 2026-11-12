@@ -135,9 +135,9 @@ export interface EntityEnvironment {
   /**
    * The qualified signal kinds that ask the user for a move (`listAskingKinds`).
    * Reads that decide who is on the Inbox need them, because a dismissed thing
-   * comes back when an ask is raised. Absent means none ask.
+   * comes back when an ask is raised. Empty means none ask.
    */
-  readonly askingKinds?: ReadonlyArray<string>;
+  readonly askingKinds: ReadonlyArray<string>;
 }
 
 /** What a read needs to know of an active entity kind: which refs it owns and what to call one. */

@@ -10,34 +10,78 @@
  */
 import { Schema } from "effect";
 import { ContributionWord } from "./contributions";
+import { MAX_ENTITY_FIELD_TEXT_LENGTH, type EntityFieldType } from "./entities";
 import { buildBoundedString } from "./limits";
+import { PluginId } from "./manifest";
+
+/** The operators of a clause (see `InboxClause`). */
+export type InboxClauseOperator = "is" | "over" | "under";
 
 /**
- * The keys of the Inbox's own query fields. Every source answers them, so a
- * plugin cannot declare an entity field with one of these keys: a clause with
- * that key would mean two things.
+ * Returns the operators a clause on a field of `type` takes, and the type of
+ * the value it carries. `is` compares for equality; `over` and `under`
+ * compare a number, an amount, or a duration in seconds (`age` fields and
+ * `waiting`).
+ */
+export const describeClauseForFieldType = (
+  type: EntityFieldType,
+): {
+  readonly operators: ReadonlyArray<InboxClauseOperator>;
+  readonly value: "string" | "number" | "boolean";
+} => {
+  switch (type) {
+    case "text":
+    case "person":
+    case "enum":
+      return { operators: ["is"], value: "string" };
+    case "bool":
+      return { operators: ["is"], value: "boolean" };
+    case "number":
+    case "money":
+      return { operators: ["is", "over", "under"], value: "number" };
+    case "age":
+      return { operators: ["over", "under"], value: "number" };
+  }
+};
+
+/**
+ * The Inbox's own query fields, in the order the search lists them. Every
+ * source answers them, so a plugin cannot declare an entity field with one of
+ * these keys: a clause with that key would mean two things.
  *
  * - `source` is the plugin's id, `kind` the entity kind, and `account` the id
- *   of a Connection.
+ *   or the label of a Connection.
  * - `from` is the person behind the thing: the asker of its open ask, else
  *   the thing's own person. `waiting` is the age of its oldest open ask.
  * - `asks`, `held` and `mine` are booleans: the thing has an open ask, a
  *   Task holds it, or it is yours.
  * - `signal` is the kind of one of its open signals.
+ *
+ * The predicate compiler, the checks that run when a plugin loads and the
+ * outline's list of fields all read this one table.
  */
-export const CORE_INBOX_FIELD_KEYS = [
-  "source",
-  "kind",
-  "account",
-  "from",
-  "waiting",
-  "asks",
-  "held",
-  "mine",
-  "signal",
-] as const;
+export const CORE_INBOX_FIELDS = [
+  { key: "source", label: "Source", type: "text" },
+  { key: "kind", label: "Kind", type: "text" },
+  { key: "account", label: "Account", type: "text" },
+  { key: "from", label: "From", type: "person" },
+  { key: "waiting", label: "Waiting", type: "age" },
+  { key: "asks", label: "Waits on me", type: "bool" },
+  { key: "held", label: "With Hercule", type: "bool" },
+  { key: "mine", label: "Mine", type: "bool" },
+  { key: "signal", label: "Signal", type: "text" },
+] as const satisfies ReadonlyArray<{
+  readonly key: string;
+  readonly label: string;
+  readonly type: EntityFieldType;
+}>;
 
-export type CoreInboxFieldKey = (typeof CORE_INBOX_FIELD_KEYS)[number];
+export type CoreInboxFieldKey = (typeof CORE_INBOX_FIELDS)[number]["key"];
+
+/** The keys of `CORE_INBOX_FIELDS`. */
+export const CORE_INBOX_FIELD_KEYS: ReadonlyArray<CoreInboxFieldKey> = CORE_INBOX_FIELDS.map(
+  (field) => field.key,
+);
 
 /** The most clauses one saved query has. */
 export const MAX_SAVED_QUERY_CLAUSES = 8;
@@ -45,8 +89,8 @@ export const MAX_SAVED_QUERY_CLAUSES = 8;
 /** The most saved queries one plugin declares. */
 export const MAX_SAVED_QUERIES_PER_PLUGIN = 4;
 
-/** The longest a clause's text value may be. */
-const MAX_CLAUSE_TEXT_LENGTH = 200;
+/** The longest a clause's key may be. */
+export const MAX_INBOX_CLAUSE_KEY_LENGTH = 64;
 
 /**
  * One condition on the things of the Inbox, such as "the signal is
@@ -62,14 +106,18 @@ const MAX_CLAUSE_TEXT_LENGTH = 200;
  *   A clause that has neither holds across every source.
  */
 export const InboxClause = Schema.Struct({
-  key: buildBoundedString(1, 64),
+  key: buildBoundedString(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
   op: Schema.Literals(["is", "over", "under"]),
+  // As long as a stored field value, because a clause on a facet sends the
+  // stored value (a record's ref) as it is.
   value: Schema.Union([
-    buildBoundedString(1, MAX_CLAUSE_TEXT_LENGTH),
+    buildBoundedString(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
     Schema.Finite,
     Schema.Boolean,
   ]),
-  source: Schema.optionalKey(buildBoundedString(1, 64)),
+  source: Schema.optionalKey(PluginId),
+  // A Connection's id. The schema is the loose bound the plugin API can say:
+  // the public contract narrows it to an `Id`.
   connectionId: Schema.optionalKey(buildBoundedString(1, 64)),
 });
 

@@ -81,7 +81,11 @@ const epic = (name: string, linked: ReadonlyArray<string> = []): ObservedEntity 
   fieldRows: [],
 });
 
-const environment = (minutes: number) => ({ now: at(minutes), activePluginIds: [PLUGIN] });
+const environment = (minutes: number) => ({
+  now: at(minutes),
+  activePluginIds: [PLUGIN],
+  askingKinds: [],
+});
 
 /** Runs `body` on a fresh migrated database with one Connection, in one transaction. */
 const run = <A>(

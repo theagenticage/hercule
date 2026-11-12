@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import type { InboxClause } from "@hercule/plugin-host";
+import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { signalRepository } from "../signals/repository";
@@ -264,7 +264,12 @@ describe("who is on the Inbox", () => {
         const afterNote = refsOf(yield* list(repository, 7));
         yield* raise(ref, REVIEW, 8, "Mei");
         const back = yield* list(repository, 9);
-        return { moved, afterDismiss, afterNote, back };
+        // Dismissing the thing that came back moves the cutoff, so it goes again.
+        const again = yield* repository.dismiss([back.things[0]!.id], "user", at(10));
+        const afterSecondDismiss = refsOf(yield* list(repository, 11));
+        yield* raise(ref, REVIEW, 12, "Omar");
+        const backAgain = yield* list(repository, 13);
+        return { moved, afterDismiss, afterNote, back, again, afterSecondDismiss, backAgain };
       }),
     );
     expect(steps.moved!.changed).toBe(true);
@@ -274,6 +279,10 @@ describe("who is on the Inbox", () => {
     expect(steps.back.things[0]!.dismissedAt).toBe(at(4));
     // The ask that was open at the dismissal is still an ask; it just did not bring the thing back.
     expect(steps.back.things[0]!.askCount).toBe(2);
+    expect("moved" in steps.again && steps.again.moved[0]!.changed).toBe(true);
+    expect(steps.afterSecondDismiss).toEqual([]);
+    expect(refsOf(steps.backAgain)).toEqual(["a"]);
+    expect(steps.backAgain.things[0]!.dismissedAt).toBe(at(10));
   });
 
   it("counts a thing that came back as a new arrival", async () => {
@@ -283,13 +292,9 @@ describe("who is on the Inbox", () => {
         const id = (yield* repository.queryInbox(environment(2), { list: everything })).things[0]!
           .id;
         yield* repository.dismiss([id], "user", at(3));
-        const before = (yield* repository.countInbox(environment(4), {
-          pins: [],
-          browseFolded: [],
-        })).newestArrival;
+        const before = (yield* repository.countInbox(environment(4))).newestArrival;
         yield* repository.recordArrivalAfter(ref, at(5), [REVIEW], raise(ref, REVIEW, 5));
-        const after = (yield* repository.countInbox(environment(6), { pins: [], browseFolded: [] }))
-          .newestArrival;
+        const after = (yield* repository.countInbox(environment(6))).newestArrival;
         const stored = yield* sql<{ readonly arrival_sequence: number }>`
           SELECT arrival_sequence FROM external_entities WHERE ref = ${ref}`;
         return { before, after, stored: stored[0]!.arrival_sequence };
@@ -506,10 +511,12 @@ describe("the order and the pages of a list", () => {
           );
           const page = yield* list(repository, 100).pipe(record);
           const pageStatements = statements.splice(0);
+          yield* repository.countInbox(environment(100)).pipe(record);
+          const sidebarStatements = statements.splice(0);
           yield* repository
-            .countInbox(environment(100), { pins: [], browseFolded: [] })
+            .readInboxOutline(environment(100), { pins: [], browseFolded: [] })
             .pipe(record);
-          const countStatementsMade = statements.splice(0);
+          const outlineStatements = statements.splice(0);
           yield* repository
             .suggestInboxValues(environment(100), {
               list: everything,
@@ -519,7 +526,8 @@ describe("the order and the pages of a list", () => {
             .pipe(record);
           return {
             page: pageStatements.length,
-            counts: countStatementsMade.length,
+            sidebar: sidebarStatements.length,
+            outline: outlineStatements.length,
             values: statements.length,
             things: page.things.length,
           };
@@ -531,7 +539,8 @@ describe("the order and the pages of a list", () => {
     expect(large.things).toBe(60);
     expect(large).toEqual({ ...small, things: 60 });
     expect(small.page).toBeLessThanOrEqual(14);
-    expect(small.counts).toBeLessThanOrEqual(6);
+    expect(small.sidebar).toBe(1);
+    expect(small.outline).toBeLessThanOrEqual(6);
     expect(small.values).toBe(1);
   });
 });
@@ -773,16 +782,23 @@ describe("the clauses of a query", () => {
   });
 });
 
-describe("the counts of the rail", () => {
-  it("counts every saved query, each source and its accounts, and the newest arrival", async () => {
-    const counts = await run(({ repository }) =>
+describe("the outline of the rail", () => {
+  it("counts every saved query, each source and its accounts, and the sidebar's waits", async () => {
+    const { counts, sidebar } = await run(({ repository }) =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a", owned: true });
         yield* insertTicket({ key: "b", accounts: [ACCOUNT_A, ACCOUNT_B] });
         yield* raise(a, REVIEW, 2);
-        return yield* repository.countInbox(environment(9), { pins: [], browseFolded: [] });
+        return {
+          counts: yield* repository.readInboxOutline(environment(9), {
+            pins: [],
+            browseFolded: [],
+          }),
+          sidebar: yield* repository.countInbox(environment(9)),
+        };
       }),
     );
+    expect(sidebar.waiting).toBe(1);
     expect(counts.savedQueries.map((query) => [query.id, query.count])).toEqual([
       ["waits", 1],
       ["mine", 1],
@@ -795,7 +811,9 @@ describe("the counts of the rail", () => {
       ["home", 1],
       ["work", 2],
     ]);
-    expect(counts.fields.filter((field) => field.source === undefined)).toHaveLength(9);
+    expect(counts.fields.filter((field) => field.source === undefined)).toHaveLength(
+      CORE_INBOX_FIELDS.length,
+    );
     expect(counts.fields.find((field) => field.key === "priority")).toMatchObject({
       type: "enum",
       source: "acme",
@@ -813,8 +831,11 @@ describe("the counts of the rail", () => {
         yield* insertTeam(CHECKOUT, "Checkout", "Late");
         yield* insertTeam(SEARCH, "Search");
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: CHECKOUT }] });
-        const open = yield* repository.countInbox(environment(9), { pins: [], browseFolded: [] });
-        const folded = yield* repository.countInbox(environment(9), {
+        const open = yield* repository.readInboxOutline(environment(9), {
+          pins: [],
+          browseFolded: [],
+        });
+        const folded = yield* repository.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [{ source: "acme" }],
         });
@@ -823,7 +844,7 @@ describe("the counts of the rail", () => {
           accounts: [ACCOUNT_B],
           fields: [{ key: "team", text: SEARCH }],
         });
-        const several = yield* repository.countInbox(environment(9), {
+        const several = yield* repository.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [],
         });
@@ -840,10 +861,14 @@ describe("the counts of the rail", () => {
     expect(result.folded.sources[0]!.facets).toBeUndefined();
     const perAccount = result.several.sources[0]!.facets!.filter((facet) => facet.key === "team");
     expect(perAccount.map((facet) => facet.connectionId).sort()).toEqual([ACCOUNT_A, ACCOUNT_B]);
+    // Only account A observes the Checkout and Search records, so account B
+    // lists no record it does not observe with count 0.
     const home = perAccount.find((facet) => facet.connectionId === ACCOUNT_B)!;
-    expect(home.values.map((value) => [value.label, value.count])).toEqual([
-      ["Search", 1],
-      ["Checkout", 0],
+    expect(home.values.map((value) => [value.label, value.count])).toEqual([["Search", 1]]);
+    const work = perAccount.find((facet) => facet.connectionId === ACCOUNT_A)!;
+    expect(work.values.map((value) => [value.label, value.count])).toEqual([
+      ["Checkout", 1],
+      ["Search", 0],
     ]);
   });
 
@@ -855,7 +880,10 @@ describe("the counts of the rail", () => {
           yield* insertTeam(ref, `Team ${String(index).padStart(3, "0")}`);
         }
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: "acme:team:t104" }] });
-        const counts = yield* repository.countInbox(environment(9), { pins: [], browseFolded: [] });
+        const counts = yield* repository.readInboxOutline(environment(9), {
+          pins: [],
+          browseFolded: [],
+        });
         return counts.sources[0]!.facets!.find((facet) => facet.key === "team")!;
       }),
     );
@@ -870,7 +898,7 @@ describe("the counts of the rail", () => {
         yield* insertTeam(CHECKOUT, "Checkout revamp");
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: CHECKOUT }] });
         yield* insertTicket({ key: "b", fields: [{ key: "team", text: CHECKOUT }] });
-        const counts = yield* repository.countInbox(environment(9), {
+        const counts = yield* repository.readInboxOutline(environment(9), {
           pins: [
             { source: "acme", key: "team", value: CHECKOUT },
             { source: "acme", key: "team", value: "acme:team:gone" },
@@ -895,11 +923,11 @@ describe("the counts of the rail", () => {
       Effect.gen(function* () {
         yield* sql`UPDATE connections SET status = 'needs-reauth', updated_at = ${at(5)}
           WHERE id = ${uuidFromString(ACCOUNT_B)}`;
-        return (yield* repository.countInbox(environment(9), { pins: [], browseFolded: [] }))
+        return (yield* repository.readInboxOutline(environment(9), { pins: [], browseFolded: [] }))
           .failing;
       }),
     );
-    expect(failing).toEqual([{ source: "acme", since: at(5) }]);
+    expect(failing).toEqual([{ source: "acme", updatedAt: at(5) }]);
   });
 });
 
@@ -1002,5 +1030,186 @@ describe("suggested values", () => {
     expect(scoped.waiting.map((value) => value.value)).toEqual([SEARCH]);
     expect(scoped.many).toHaveLength(8);
     expect(scoped.other).toEqual([]);
+  });
+});
+
+describe("signals by noun, readable records and plugin saved queries", () => {
+  /** Writes a thing of another source, `beta`, that concerns the user. Returns its ref. */
+  const insertBetaIssue = (key: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const ref = `beta:issue:${key}`;
+      yield* sql`
+        INSERT INTO external_entities
+          (id, ref, kind, noun, card, pace, patience, completeness, identifier, title, url,
+           lifecycle, source_updated_at, first_observed_at, updated_at)
+        VALUES (${mintUuid()}, ${ref}, 'beta/issue', 'Issue', 'compact', 'fast', 24, 'full',
+          ${key}, ${`Issue ${key}`}, ${`https://beta.example/${key}`}, 'open',
+          ${at(1)}, ${at(1)}, ${at(1)})`;
+      yield* sql`
+        INSERT INTO external_entity_observations (ref, connection_id, concerns, access)
+        VALUES (${ref}, ${uuidFromString(ACCOUNT_A)}, '["assigned"]', 'ok')`;
+      return ref;
+    });
+
+  it("matches a signal clause by the kind's noun and suggests signals by their noun", async () => {
+    const found = await run(({ repository }) =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a" });
+        yield* insertTicket({ key: "b" });
+        yield* raise(a, REVIEW, 2);
+        return {
+          byNoun: refsOf(
+            yield* list(
+              repository,
+              9,
+              withClause({ key: "signal", op: "is", value: "Review Request" }),
+            ),
+          ),
+          suggested: (yield* repository.suggestInboxValues(environment(9), {
+            list: everything,
+            key: "signal",
+            prefix: "review r",
+          })).values,
+          byWord: (yield* repository.suggestInboxValues(environment(9), {
+            list: everything,
+            key: "signal",
+            prefix: "rev",
+          })).values,
+        };
+      }),
+    );
+    expect(found.byNoun).toEqual(["a"]);
+    expect(found.suggested.map((value) => [value.value, value.label])).toEqual([
+      [REVIEW, "review request"],
+    ]);
+    expect(found.byWord.map((value) => value.value)).toEqual([REVIEW]);
+  });
+
+  it("does not match an account that was refused and holds no concern", async () => {
+    const found = await run(({ repository }) =>
+      Effect.gen(function* () {
+        const ref = yield* insertTicket({
+          key: "a",
+          accounts: [ACCOUNT_A, ACCOUNT_B],
+          concerns: [],
+        });
+        yield* raise(ref, REVIEW, 2);
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
+          WHERE ref = ${ref} AND connection_id = ${uuidFromString(ACCOUNT_B)}`;
+        return {
+          refused: refsOf(
+            yield* list(repository, 9, withClause({ key: "account", op: "is", value: "home" })),
+          ),
+          reading: refsOf(
+            yield* list(repository, 9, withClause({ key: "account", op: "is", value: "work" })),
+          ),
+        };
+      }),
+    );
+    expect(found.refused).toEqual([]);
+    expect(found.reading).toEqual(["a"]);
+  });
+
+  it("names a record nobody can read by its kind, and lists no unreadable known record", async () => {
+    const outline = await run(({ repository, sql }) =>
+      Effect.gen(function* () {
+        yield* insertTeam(CHECKOUT, "Checkout revamp");
+        yield* insertTeam(SEARCH, "Search");
+        yield* insertTicket({ key: "a", fields: [{ key: "team", text: CHECKOUT }] });
+        // Nobody reads Search any more.
+        yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
+          WHERE ref = ${SEARCH}`;
+        yield* insertTicket({
+          key: "b",
+          accounts: [ACCOUNT_B],
+          fields: [{ key: "team", text: "acme:team:hidden" }],
+        });
+        yield* sql`
+          INSERT INTO external_entities
+            (id, ref, kind, noun, pace, completeness, title, first_observed_at, updated_at)
+          VALUES (${mintUuid()}, 'acme:team:hidden', ${TEAM_KIND}, 'Team', 'context', 'full',
+            'Secret team', ${at(1)}, ${at(1)})`;
+        return yield* repository.readInboxOutline(environment(9), {
+          pins: [{ source: "acme", key: "team", value: "acme:team:hidden" }],
+          browseFolded: [],
+        });
+      }),
+    );
+    const teams = outline.sources[0]!.facets!.filter((facet) => facet.key === "team");
+    const labels = teams.flatMap((facet) => facet.values.map((value) => value.label));
+    expect(labels).toContain("Checkout revamp");
+    expect(labels).toContain("A team you cannot open");
+    // Neither the title nor the ref of an unreadable record shows, and Search is not listed.
+    expect(labels).not.toContain("Secret team");
+    expect(labels).not.toContain("Search");
+    expect(labels.filter((label) => label.startsWith("acme:"))).toEqual([]);
+    expect(outline.pins[0]!.label).toBe("A team you cannot open");
+  });
+
+  it("ties a plugin's saved query to its own source", async () => {
+    const found = await run(({ repository }) =>
+      Effect.gen(function* () {
+        yield* insertTicket({ key: "a" });
+        yield* insertBetaIssue("1");
+        const saved = {
+          id: "acme/quiet",
+          source: "acme",
+          name: "Quiet",
+          order: "newest" as const,
+          clauses: [{ key: "asks", op: "is", value: false } satisfies InboxClause],
+        };
+        const withQuery = environment(9, { savedQueries: [saved] });
+        const outline = yield* repository.readInboxOutline(withQuery, {
+          pins: [],
+          browseFolded: [],
+        });
+        return {
+          page: refsOf(
+            yield* repository.queryInbox(withQuery, { list: { savedQuery: "acme/quiet" } }),
+          ),
+          counted: outline.savedQueries.find((query) => query.id === "acme/quiet")!.count,
+          everything: outline.savedQueries.find((query) => query.id === "everything")!.count,
+        };
+      }),
+    );
+    expect(found.page).toEqual(["a"]);
+    expect(found.counted).toBe(1);
+    expect(found.everything).toBe(2);
+  });
+
+  it("labels the pin of an enum value by the value's label", async () => {
+    const pins = await run(({ repository }) =>
+      Effect.gen(function* () {
+        yield* insertTicket({ key: "a", fields: [{ key: "priority", text: "p1" }] });
+        return (yield* repository.readInboxOutline(environment(9), {
+          pins: [{ source: "acme", key: "priority", value: "p1" }],
+          browseFolded: [],
+        })).pins;
+      }),
+    );
+    expect(pins).toMatchObject([{ label: "Urgent", count: 1 }]);
+  });
+
+  it("answers an empty first page with a total of zero and no second count", async () => {
+    const found = await run(({ repository }) =>
+      Effect.gen(function* () {
+        const statements: Array<string> = [];
+        const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+          Effect.sync(() => {
+            statements.push(statement.compile()[0]);
+            return statement;
+          }),
+        );
+        const page = yield* list(repository, 9).pipe(record);
+        return {
+          page,
+          counts: statements.filter((text) => text.includes("COUNT(*) AS n FROM matched")),
+        };
+      }),
+    );
+    expect(found.page.total).toBe(0);
+    expect(found.counts).toEqual([]);
   });
 });

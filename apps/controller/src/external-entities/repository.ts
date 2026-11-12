@@ -799,7 +799,7 @@ const make = Effect.gen(function* () {
     return inbox.recordArrivalsAfter(
       touched,
       now,
-      environment.askingKinds ?? [],
+      environment.askingKinds,
       writeObservations(input, observed, touched),
     );
   };
@@ -1024,8 +1024,6 @@ const make = Effect.gen(function* () {
   // The Inbox
   // -------------------------------------------------------------------------
 
-  /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
-
   /**
    * Reads what lies above each of `starts`: their ancestors, the places those
    * ancestors draw, and the edges between them. Every reply that draws
@@ -1127,8 +1125,11 @@ const make = Effect.gen(function* () {
    * Sets entities aside or brings them back, and stamps `actor` as the one who
    * did. Returns the ids that name no entity when there are any, and then
    * changes nothing. Otherwise returns, for each id, its ref and whether the
-   * call changed it (asking for the state it already has changes nothing).
-   * Two statements however many ids there are.
+   * call changed it. Restoring a thing that is not dismissed changes nothing.
+   * Dismissing always counts as a change and moves the dismissal to `now`,
+   * also for a thing that is dismissed already: a thing that came back on a
+   * new ask is dismissed again, and only asks raised after this moment bring
+   * it back. Two statements however many ids there are.
    */
   const setDismissals = (
     ids: ReadonlyArray<string>,
@@ -1157,7 +1158,7 @@ const make = Effect.gen(function* () {
       if (missing.length > 0) return { missing };
       const moved = ids.map((id) => {
         const row = known.get(id)!;
-        return { id, ref: row.ref, changed: (row.dismissed_at !== null) !== change.dismissed };
+        return { id, ref: row.ref, changed: change.dismissed || row.dismissed_at !== null };
       });
       const changed = moved.filter((entry) => entry.changed).map((entry) => entry.id);
       if (changed.length > 0) {
@@ -1402,9 +1403,12 @@ const make = Effect.gen(function* () {
      */
     listStackCandidates: linkReads.listStackCandidates,
 
-    /** Returns the counts of the Inbox for the rail and the sidebar (see `makeInboxQueries`). */
-    countInbox: (environment: InboxEnvironment, settings: InboxRailSettings) =>
-      inboxQueries.countInbox(environment, settings),
+    /** Returns the counts of the Inbox for the sidebar (see `makeInboxQueries`). */
+    countInbox: (environment: InboxEnvironment) => inboxQueries.countInbox(environment),
+
+    /** Returns what the Inbox's rail draws (see `makeInboxQueries`). */
+    readInboxOutline: (environment: InboxEnvironment, settings: InboxRailSettings) =>
+      inboxQueries.readInboxOutline(environment, settings),
 
     /** Returns the values of one field among the things of a list, for the search's suggestions. */
     suggestInboxValues: (environment: InboxEnvironment, query: InboxValueQuery) =>
@@ -1477,11 +1481,7 @@ const make = Effect.gen(function* () {
           ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            yield* inbox.listEligibleRefs(
-              linkedRefs,
-              environment.now,
-              environment.askingKinds ?? [],
-            ),
+            yield* inbox.listEligibleRefs(linkedRefs, environment.now, environment.askingKinds),
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),

@@ -9,20 +9,7 @@
  */
 import * as Effect from "effect/Effect";
 import { createValidationError, type Validation } from "@hercule/contract";
-import type { InboxClause } from "@hercule/plugin-host";
 import type { RegisteredSavedQuery } from "../plugins";
-
-/**
- * One saved query as the Inbox reads it. `source` is the id of the plugin that
- * declared it, and is absent for a core query.
- */
-export interface InboxSavedQuery {
-  readonly id: string;
-  readonly name: string;
-  readonly order: "waiting" | "newest";
-  readonly clauses: ReadonlyArray<InboxClause>;
-  readonly source?: string;
-}
 
 /**
  * The core's saved queries, in the order the rail lists them.
@@ -30,7 +17,7 @@ export interface InboxSavedQuery {
  * "Someone waits on me" has no `held` clause on purpose: a thing someone
  * waits on stays there while a Task holds it.
  */
-export const CORE_SAVED_QUERIES: ReadonlyArray<InboxSavedQuery> = [
+export const CORE_SAVED_QUERIES: ReadonlyArray<RegisteredSavedQuery> = [
   {
     id: "waits",
     name: "Someone waits on me",
@@ -67,16 +54,7 @@ export const CORE_SAVED_QUERIES: ReadonlyArray<InboxSavedQuery> = [
  */
 export const listSavedQueries = (
   pluginQueries: ReadonlyArray<RegisteredSavedQuery>,
-): ReadonlyArray<InboxSavedQuery> => [
-  ...CORE_SAVED_QUERIES,
-  ...pluginQueries.map(({ id, name, order, clauses, pluginId }) => ({
-    id,
-    name,
-    order,
-    clauses,
-    source: pluginId,
-  })),
-];
+): ReadonlyArray<RegisteredSavedQuery> => [...CORE_SAVED_QUERIES, ...pluginQueries];
 
 /**
  * Returns the saved query with this id, or fails with `Validation` naming the
@@ -84,10 +62,10 @@ export const listSavedQueries = (
  * plugin has since been disabled gets this error, and should show the list
  * again.
  */
-export const readSavedQuery = (
+export const findSavedQuery = (
   id: string,
   pluginQueries: ReadonlyArray<RegisteredSavedQuery>,
-): Effect.Effect<InboxSavedQuery, Validation> => {
+): Effect.Effect<RegisteredSavedQuery, Validation> => {
   const queries = listSavedQueries(pluginQueries);
   const found = queries.find((query) => query.id === id);
   return found === undefined

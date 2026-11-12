@@ -322,7 +322,8 @@ const TABLE = {
   // Connection read grant, because it reads through the user's Connections.
   // The Inbox and the detail show the text of signals, so `queryInbox`,
   // `countInbox` and `read` also need `signal.query`, which the service checks
-  // beside the `task.read` that this table checks.
+  // beside the `task.read` that this table checks. `readInboxOutline` and
+  // `suggestInboxValues` need `connection.query` too, because they name accounts.
   // `queryInbox` also needs `workflow.query`, `connection.query` and
   // `run.query`, for the offers and the workflows running on a card's Task.
   "externalEntity.queryInbox": {
@@ -331,7 +332,8 @@ const TABLE = {
     path: "/api/v1/external-entities/inbox/query",
   },
   // Reads the values of one field among a list's things, so the service also
-  // checks `signal.query`, as `queryInbox` does.
+  // checks `signal.query`, as `queryInbox` does, and `connection.query`, because
+  // the `account` field's values are account labels.
   "externalEntity.suggestInboxValues": {
     requires: "task.read",
     method: "POST",
@@ -341,6 +343,11 @@ const TABLE = {
     requires: "task.read",
     method: "GET",
     path: "/api/v1/external-entities/inbox/count",
+  },
+  "externalEntity.readInboxOutline": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/inbox/outline",
   },
   "externalEntity.search": {
     requires: "task.read",

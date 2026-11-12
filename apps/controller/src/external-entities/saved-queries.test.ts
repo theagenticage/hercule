@@ -5,11 +5,11 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { RegisteredSavedQuery } from "../plugins";
-import { CORE_SAVED_QUERIES, listSavedQueries, readSavedQuery } from "./saved-queries";
+import { CORE_SAVED_QUERIES, listSavedQueries, findSavedQuery } from "./saved-queries";
 
 const REVIEW_REQUESTS: RegisteredSavedQuery = {
   id: "github/review-requests",
-  pluginId: "github",
+  source: "github",
   name: "Review requests",
   order: "waiting",
   clauses: [{ key: "signal", op: "is", value: "github/review-requested" }],
@@ -54,17 +54,17 @@ describe("listSavedQueries", () => {
   });
 });
 
-describe("readSavedQuery", () => {
+describe("findSavedQuery", () => {
   it("returns a core query and a plugin's query by id", async () => {
-    expect((await Effect.runPromise(readSavedQuery("waits", []))).name).toBe("Someone waits on me");
+    expect((await Effect.runPromise(findSavedQuery("waits", []))).name).toBe("Someone waits on me");
     expect(
-      (await Effect.runPromise(readSavedQuery("github/review-requests", [REVIEW_REQUESTS]))).source,
+      (await Effect.runPromise(findSavedQuery("github/review-requests", [REVIEW_REQUESTS]))).source,
     ).toBe("github");
   });
 
   it("fails with a validation error that names the id and lists the ids that exist", async () => {
     const error = await Effect.runPromise(
-      Effect.flip(readSavedQuery("github/review-requests", [])),
+      Effect.flip(findSavedQuery("github/review-requests", [])),
     );
 
     expect(error.error.message).toContain('unknown saved query "github/review-requests"');

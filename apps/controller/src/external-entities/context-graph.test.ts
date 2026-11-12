@@ -153,6 +153,7 @@ const environment = (
 ) => ({
   now: at(minutes),
   activePluginIds,
+  askingKinds: [],
 });
 
 type Repository = Effect.Success<typeof externalEntityRepository>;

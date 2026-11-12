@@ -10,7 +10,7 @@
  * reader (ADR 0004, amendment of 2026-10-18), not SQLite's in-memory mode. It
  * is seeded with a migrated schema and no statistics, as a controller starts.
  *
- * It drives the repository's three Inbox reads, at 300, 1,000 and 2,400
+ * It drives the repository's four Inbox reads, at 300, 1,000 and 2,400
  * things:
  *
  * - `queryInbox`: the first page of "Someone waits on me" (order waiting) and
@@ -19,8 +19,9 @@
  *   statements sent and the bytes of the encoded reply;
  * - `suggestInboxValues`: the values of a facet field and of the core key
  *   `from`;
- * - `countInbox`: the rail's counts with every source open, and the sidebar's
- *   case, every source folded, timed apart because it skips the facets.
+ * - `readInboxOutline`: the rail's outline with every source open, and with
+ *   every source folded, timed apart because it skips the facets;
+ * - `countInbox`: the sidebar's small read, which every screen makes.
  *
  * Every statement's query plan is checked: a `SCAN` of one of the big tables
  * is printed, so a read that walks every row shows up. Reads that must walk
@@ -442,7 +443,11 @@ const printCase = (size: number, result: Case) =>
   process.stderr.write(
     `${String(size).padStart(5)} things  ${result.name.padEnd(30)} ${format(result.timing.median)} ms ` +
       `${format(result.timing.p95)} ms  ${String(result.statements).padStart(2)} statements  ` +
-      `${String(result.bytes).padStart(8)} bytes  ${String(result.returned)} returned\n` +
+      `${String(result.bytes).padStart(8)} bytes  ${String(result.returned)} returned` +
+      // A row's weight is what the list pays per thing held.
+      (result.name.startsWith("page") || result.name.startsWith("refs")
+        ? `  ${String(Math.round(result.bytes / Math.max(1, result.returned)))} B/row\n`
+        : "\n") +
       // The base of every read (live Tasks, signals, concerns) scans its tables
       // once; each distinct scan is listed once, at the largest size only.
       (size === SIZES.at(-1)
@@ -502,14 +507,19 @@ const runSize = (size: number) =>
         (reply) => reply.values.length,
       ),
       yield* runCase(
-        "counts: rail open",
-        repository.countInbox(ENVIRONMENT, OPEN_RAIL),
+        "outline: rail open",
+        repository.readInboxOutline(ENVIRONMENT, OPEN_RAIL),
         (counts) => counts.sources.length,
       ),
       yield* runCase(
-        "counts: sidebar, all folded",
-        repository.countInbox(ENVIRONMENT, FOLDED_RAIL),
+        "outline: all folded",
+        repository.readInboxOutline(ENVIRONMENT, FOLDED_RAIL),
         (counts) => counts.sources.length,
+      ),
+      yield* runCase(
+        "counts: sidebar",
+        repository.countInbox(ENVIRONMENT),
+        (counts) => counts.waiting,
       ),
     );
     if (firstNewest.nextCursor !== undefined) {
@@ -521,8 +531,13 @@ const runSize = (size: number) =>
         ),
       );
     }
+    const fieldBytes = Object.entries(firstWaiting.things[0] ?? {})
+      .map(([field, value]) => [field, measureBytes(value) + field.length + 4] as const)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
     return {
       cases,
+      fieldBytes,
       waitingTotal: firstWaiting.total,
       newestTotal: firstNewest.total,
       facets: firstNewest.facets?.length ?? 0,
@@ -542,7 +557,8 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
       bySize.set(size, result);
       for (const one of result.cases) printCase(size, one);
       process.stderr.write(
-        `        waits ${String(result.waitingTotal)} of ${String(result.newestTotal)}, ${String(result.facets)} facets on the first page\n`,
+        `        waits ${String(result.waitingTotal)} of ${String(result.newestTotal)}, ${String(result.facets)} facets on the first page\n` +
+          `        bytes of a row by field: ${result.fieldBytes.map(([field, bytes]) => `${field} ${String(bytes)}`).join(", ")}\n`,
       );
     }
 
@@ -560,10 +576,10 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
         expect(one.returned).toBeLessThanOrEqual(200);
         expect(one.bytes).toBeLessThan(200 * 4_000 + 100_000);
       }
-      const counts = result.cases.find((c) => c.name === "counts: rail open")!;
-      const folded = result.cases.find((c) => c.name === "counts: sidebar, all folded")!;
-      expect(counts.timing.median).toBeLessThan(COUNTS_CEILING_MS);
-      expect(folded.timing.median).toBeLessThan(COUNTS_CEILING_MS);
+      for (const name of ["outline: rail open", "outline: all folded", "counts: sidebar"]) {
+        const timed = result.cases.find((c) => c.name === name)!;
+        expect(timed.timing.median, `${name} at ${String(size)}`).toBeLessThan(COUNTS_CEILING_MS);
+      }
       for (const one of result.cases.filter(
         (c) => c.name.startsWith("page") || c.name.startsWith("refs"),
       )) {

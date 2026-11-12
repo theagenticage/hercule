@@ -3586,7 +3586,7 @@ describe("upgrading from the previous edge release", () => {
             expect(
               reader
                 .query(
-                  `SELECT hex(task_id) AS task_id, linked_at, linked_by, following, taken_on
+                  `SELECT hex(task_id) AS task_id, linked_at, linked_by, following
                    FROM task_entity_links WHERE ref = ?`,
                 )
                 .all(task.ref),
@@ -3597,9 +3597,6 @@ describe("upgrading from the previous edge release", () => {
                 linked_at: SEEDED_TASK_CREATED,
                 linked_by: "user",
                 following: 0,
-                // Migration 121 marks the link of a plain `ref` entry written with its
-                // Task as taken on, and not the link of a handoff's entry.
-                taken_on: "signalId" in task ? 0 : 1,
               },
             ]);
             expect(await readTaskIdsOnRef(task.ref, upgraded), `Tasks on ${task.ref}`).toEqual([

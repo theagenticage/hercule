@@ -92,7 +92,7 @@ const runWithEntities = <A>(
           complete: true,
           observed: [observed],
           actor: `plugin:${PLUGIN}`,
-          environment: { now: AT, activePluginIds: [PLUGIN] },
+          environment: { now: AT, activePluginIds: [PLUGIN], askingKinds: [] },
         });
       }
       return yield* body;

@@ -64,6 +64,11 @@ export const RETAINED_ROOT_REFS_SQL = `
   UNION
   ${OPEN_THREAD_REFS_SQL}`;
 
+/** The `taken` table of `buildAskTables`: see there. It reads the `live_links` table. */
+const TAKEN_SQL = `taken AS MATERIALIZED (
+    SELECT l.ref, l.taken_at FROM live_links l
+    WHERE l.position = 1 AND l.taken_at IS NOT NULL)`;
+
 /**
  * Builds the common table expressions that say what a thing asks: the one
  * definition of "live", "taken" and "asking", shared by the reads of the whole
@@ -73,11 +78,11 @@ export const RETAINED_ROOT_REFS_SQL = `
  *
  * - `live_links`: the live Task links, each ref's active Task at `position =
  *   1`.
- * - `taken`: for each ref whose active Task the user made by taking the thing
- *   on (Take on or Add to Work), when that happened. It reads
- *   `task_entity_links.taken_on`, which only that move sets: a hand-off, a Task
- *   made from a signal or an event, and a link written by an agent session or
- *   a workflow action leave it 0.
+ * - `taken`: for each ref whose active Task the user took on, when that
+ *   happened. It reads `task_entity_links.taken_at`. Only Take on and Add to
+ *   Work set it, on the Task they make and on a Task something else made (a
+ *   hand-off, a signal, an event, a session, a workflow action). Those other
+ *   ways never set it themselves.
  * - `live_signals`: the open signals that are not snoozed at `now`.
  * - `asks`: the live signals of an asking kind that nobody took. An ask is
  *   taken when the user took the thing on after it was raised, so it stays
@@ -93,9 +98,7 @@ const buildAskTables = (onlyRefs: boolean): string => `
   read_clock(now) AS (SELECT ?),
   ${onlyRefs ? "page_refs(ref) AS (SELECT value FROM json_each(?))," : ""}
   live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs ? "l.ref IN (SELECT ref FROM page_refs)" : "1")}),
-  taken AS MATERIALIZED (
-    SELECT l.ref, l.linked_at AS taken_at FROM live_links l
-    WHERE l.position = 1 AND l.taken_on = 1),
+  ${TAKEN_SQL},
   live_signals AS MATERIALIZED (
     SELECT s.thread_ref AS ref, s.id, s.kind, s.asker, s.created_at,
       s.kind IN (SELECT value FROM json_each(?)) AS asking
@@ -156,6 +159,18 @@ export const buildEligibleEntities = (
         sql: buildEligibleSql(true),
         params: [now, JSON.stringify(onlyRefs), JSON.stringify(askingKinds)],
       };
+
+/**
+ * Builds the common table expressions `live_links` and `taken` for the refs of
+ * one page only, with their parameters, to put after `WITH`. `taken` means what
+ * it means in `buildAskTables`, and the answer for these refs is the same as in
+ * `buildEligibleEntities`. The signals are not read.
+ */
+export const buildTakenOfRefs = (refs: ReadonlyArray<string>): CompiledSql => ({
+  sql: `live_links AS MATERIALIZED (${buildLiveTaskLinksSql("l.ref IN (SELECT value FROM json_each(?))")}),
+  ${TAKEN_SQL}`,
+  params: [JSON.stringify(refs)],
+});
 
 /**
  * Builds the common table expressions `live_links`, `taken`, `live_signals`,

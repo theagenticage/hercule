@@ -194,7 +194,7 @@ Relationships, all by ref and never by the entity's id, so each outlives pruning
 - **Observation**: one row per ref and Connection. It holds the concerns that Connection reported, whether it can read the ref, and its read bookkeeping. An entity's concern, access and freshness are derived from its observations.
 - **Scan**: one row per Connection and kind, `last_complete_at`.
 - **Relation Claim**: one row per claim that one ref is `part-of` or `linked` to another, by a source, a person or a text, and `current` or `conflicted`. `part-of` is a graph and stays acyclic.
-- **Task link** (`task_entity_links`): one row per Task and ref, written with the Task's provenance and by `takeOn` and `addToWork`. `following` on a link says the user added the thing to Work from nothing that concerned them. The link is the relation and provenance stays the history ([09-tasks.md](./09-tasks.md#entity-links)).
+- **Task link** (`task_entity_links`): one row per Task and ref, written with the Task's provenance and by `takeOn` and `addToWork`. `following` on a link says the user added the thing to Work from nothing that concerned them. `taken_at` says when the user took the thing on through this link (null when they did not): Take on and Add to Work set it, also on a link that a hand-off, a session or a signal made. The link is the relation and provenance stays the history ([09-tasks.md](./09-tasks.md#entity-links)).
 
 Status axes: none stored. `lifecycle` (`open`, `completed`, `abandoned`) is the source's word and Hercule never sets it. Whether a card is on the Inbox, its `access` and `stale` are worked out on read. A card is dismissed by `dismissed_at`, undone by `restore`.
 

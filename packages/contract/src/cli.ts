@@ -1451,7 +1451,7 @@ export const CLI = {
       list: {
         flag: "list",
         default: "everything",
-        help: "The saved query to read, by its id, such as waits or github/review-requests. Left out, everything. The ids are in the id column of the saved queries that `countInbox` returns.",
+        help: "The saved query to read, by its id, such as waits or github/review-requests. Left out, everything. The core ones are waits, mine, updates, everything and with-hercule; a plugin's is its plugin id, a slash and a word.",
       },
       clauses: {
         flag: "clause",
@@ -1474,9 +1474,13 @@ export const CLI = {
         "the list is not a saved query that exists, a clause is not valid for its key, or the cursor belongs to another list or search; read the message, and start again from the first page without --after",
     },
   },
-  // Exists only for the sidebar and the undo line: the sidebar reads the
-  // counts on every screen. A terminal gets the same counts from `entity list`.
+  // Exists only for the sidebar: it reads the one number on every screen. A
+  // terminal gets the same count from `entity list --list waits`, whose reply has `total`.
   "externalEntity.countInbox": { hidden: true },
+  // Exists only for the rail of the desktop app's Inbox: it draws the saved
+  // queries, sources, accounts, facets and pins in one read. A terminal lists a
+  // saved query with `entity list` and filters with --clause.
+  "externalEntity.readInboxOutline": { hidden: true },
   // Exists only for the search box of the desktop app: it suggests values of a
   // field while the user types. A terminal types the value it knows.
   "externalEntity.suggestInboxValues": { hidden: true },

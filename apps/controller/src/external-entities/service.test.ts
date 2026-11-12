@@ -34,7 +34,7 @@ import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins
 import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
 import { signalRepository } from "../signals/repository";
-import { TaskService, TaskServiceLayer } from "../tasks";
+import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import { SettingsLayer } from "../settings";
@@ -276,7 +276,7 @@ const run = <A>(
                 complete: false,
                 observed: group,
                 actor: "plugin:acme",
-                environment: { now: at, activePluginIds: ["acme"] },
+                environment: { now: at, activePluginIds: ["acme"], askingKinds: [] },
               }),
             );
           }
@@ -338,6 +338,44 @@ describe("takeOn", () => {
       }),
     );
     expect(results[1]).toEqual({ taskId: results[0]!.taskId, created: false });
+  });
+
+  it("takes on a Task that something else made, once, and keeps the first time", async () => {
+    const { first, second, links } = await run(
+      ({ service, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1")]);
+          const id = yield* entityId(ticketRef("1"));
+          const tasks = yield* taskRepository;
+          // A Task made some other way (a hand-off, a session): its link is not taken.
+          const other = yield* withTransaction(
+            sql,
+            tasks.insert({
+              title: "Made by a session",
+              description: "",
+              status: "open",
+              stage: "planned",
+              priority: "normal",
+              labels: [],
+              projectId: undefined,
+              provenance: [{ ref: ticketRef("1") }],
+              at: "2026-03-01T00:00:00.000Z",
+              actor: "session:0190c000-0000-7000-8000-0000000000e1",
+            }),
+          );
+          const first = yield* service.takeOn(id);
+          const second = yield* service.takeOn(id);
+          const links = yield* sql<{ readonly taken_at: string | null }>`
+            SELECT taken_at FROM task_entity_links`;
+          expect(yield* countTasks).toBe(1);
+          expect(first.taskId).toBe(other.id);
+          return { first, second, links };
+        }),
+    );
+    expect(first.created).toBe(false);
+    expect(second.created).toBe(false);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.taken_at).not.toBeNull();
   });
 
   it("fails NotFound for an unknown id", async () => {
@@ -580,7 +618,11 @@ describe("takeOn", () => {
               connectionId,
               ref: ticketRef("1"),
               reason: "inaccessible",
-              environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+              environment: {
+                now: new Date().toISOString(),
+                activePluginIds: ["acme"],
+                askingKinds: [],
+              },
             }),
           );
           script.resolve = () => ({ missing: "inaccessible" });
@@ -649,7 +691,11 @@ describe("takeOn", () => {
                   connectionId,
                   ref: ticketRef("1"),
                   reason: "inaccessible",
-                  environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+                  environment: {
+                    now: new Date().toISOString(),
+                    activePluginIds: ["acme"],
+                    askingKinds: [],
+                  },
                 }),
                 Effect.andThen(Deferred.succeed(holding, undefined), Deferred.await(release)),
               ),
@@ -703,7 +749,11 @@ describe("addToWork", () => {
             complete: true,
             observed: [],
             actor: "plugin:acme",
-            environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+            environment: {
+              now: new Date().toISOString(),
+              activePluginIds: ["acme"],
+              askingKinds: [],
+            },
           }),
         );
         const id = yield* entityId(ticketRef("9"));

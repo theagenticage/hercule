@@ -1,10 +1,10 @@
 /** Tests which empty state the Inbox shows. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCounts } from "./cards.testing";
+import { buildInboxOutline } from "./cards.testing";
 import { decideInboxEmpty } from "./inbox-empty";
 
 const counts = (everything: number, updates: number) =>
-  buildInboxCounts({
+  buildInboxOutline({
     savedQueries: [
       { id: "waits", name: "Someone waits on me", order: "waiting", count: 0 },
       { id: "updates", name: "Updates", order: "newest", count: updates },

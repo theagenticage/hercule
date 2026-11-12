@@ -357,6 +357,7 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
     return handlers
       .handle("queryInbox", ({ payload }) => withApiErrors(entities.queryInbox(payload)))
       .handle("countInbox", () => withApiErrors(entities.countInbox()))
+      .handle("readInboxOutline", () => withApiErrors(entities.readInboxOutline()))
       .handle("suggestInboxValues", ({ payload }) =>
         withApiErrors(entities.suggestInboxValues(payload)),
       )

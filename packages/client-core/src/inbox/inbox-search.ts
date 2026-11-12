@@ -6,10 +6,10 @@
  * The list's scope (the saved query or Browse place being searched) is not part of this module:
  * nothing here can remove it.
  */
-import type { InboxClause, InboxCounts } from "@hercule/contract";
+import type { InboxClause, InboxOutline } from "@hercule/contract";
 
-/** One field of the `InboxCounts.fields` reply: one per (source, key); core fields have no source. */
-export type InboxField = InboxCounts["fields"][number];
+/** One field of the `InboxOutline.fields` reply: one per (source, key); core fields have no source. */
+export type InboxField = InboxOutline["fields"][number];
 
 /** The type of a query field. */
 export type InboxFieldType = InboxField["type"];

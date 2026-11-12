@@ -165,9 +165,10 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
 
   /**
    * Returns when the user last handed a thing of each kind to each workflow,
-   * from the hand-off history: a Task's provenance entries that name both a
-   * thing and the run the hand-off started. The key is `<workflow id>|<kind>`.
-   * One statement, none for no kinds.
+   * from the hand-off records (`entity_handoffs`, one row per hand-off, which
+   * only the user makes) that were not taken back. The time is the start of
+   * the run the hand-off made. The key is `<workflow id>|<kind>`. One
+   * statement, none for no kinds.
    */
   const readLastHandedTimes = (
     kinds: ReadonlyArray<string>,
@@ -180,11 +181,11 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
             readonly kind: string;
             readonly last_at: string;
           }>`
-            SELECT r.workflow_id AS workflow_id, e.kind AS kind, MAX(p.at) AS last_at
-            FROM task_provenance p
-              JOIN runs r ON r.id = p.run_id
-              JOIN external_entities e ON e.ref = p.ref
-            WHERE p.run_id IS NOT NULL AND p.ref IS NOT NULL AND r.workflow_id IS NOT NULL
+            SELECT r.workflow_id AS workflow_id, e.kind AS kind, MAX(r.created_at) AS last_at
+            FROM entity_handoffs h
+              JOIN runs r ON r.id = h.run_id
+              JOIN external_entities e ON e.ref = h.ref
+            WHERE h.undone_at IS NULL AND r.workflow_id IS NOT NULL
               AND e.kind IN (SELECT value FROM json_each(${JSON.stringify(kinds)}))
             GROUP BY r.workflow_id, e.kind`,
           (rows) =>

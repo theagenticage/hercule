@@ -10,9 +10,12 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CORE_INBOX_FIELD_KEYS,
+  CORE_INBOX_FIELDS,
+  describeClauseForFieldType,
   MAX_SAVED_QUERIES_PER_PLUGIN,
   PluginError,
   SavedQuery,
+  type EntityFieldType,
   type InboxClause,
   type PluginManifest,
   type QualifiedEntityKindDeclaration,
@@ -20,13 +23,14 @@ import {
 import { describeFieldIssues } from "./errors";
 
 /**
- * A saved query a plugin registered at boot: its declaration with the
- * qualified id (`github/review-requests`), the plugin that owns it, and
- * clauses whose `kind` and `signal` values are qualified.
+ * One saved query of the Inbox, the core's or a plugin's. A plugin's is its
+ * declaration with the qualified id (`github/review-requests`) and clauses
+ * whose `kind` and `signal` values are qualified.
  */
 export interface RegisteredSavedQuery extends Omit<SavedQuery, "word"> {
   readonly id: string;
-  readonly pluginId: string;
+  /** The id of the plugin that declared it. Absent for a core query. */
+  readonly source?: string;
 }
 
 /** What a saved query may name: the plugin's own kinds, and the queries it already has. */
@@ -39,40 +43,6 @@ export interface SavedQueryContext {
   readonly takenIds: ReadonlySet<string>;
 }
 
-/** What a clause on one key accepts: the operators and the type of the value. */
-interface ClauseShape {
-  readonly ops: ReadonlyArray<InboxClause["op"]>;
-  readonly value: "string" | "number" | "boolean";
-}
-
-const IS_TEXT: ClauseShape = { ops: ["is"], value: "string" };
-const IS_BOOLEAN: ClauseShape = { ops: ["is"], value: "boolean" };
-const COMPARES_NUMBER: ClauseShape = { ops: ["over", "under"], value: "number" };
-
-/** What each core key accepts. `waiting` is a duration in seconds. */
-const CORE_CLAUSE_SHAPES: Readonly<Record<(typeof CORE_INBOX_FIELD_KEYS)[number], ClauseShape>> = {
-  source: IS_TEXT,
-  kind: IS_TEXT,
-  account: IS_TEXT,
-  from: IS_TEXT,
-  waiting: COMPARES_NUMBER,
-  asks: IS_BOOLEAN,
-  held: IS_BOOLEAN,
-  mine: IS_BOOLEAN,
-  signal: IS_TEXT,
-};
-
-/** What a declared field of each type accepts. `age` is compared as a duration in seconds. */
-const FIELD_CLAUSE_SHAPES: Readonly<Record<string, ClauseShape>> = {
-  text: IS_TEXT,
-  person: IS_TEXT,
-  enum: IS_TEXT,
-  bool: IS_BOOLEAN,
-  number: COMPARES_NUMBER,
-  money: COMPARES_NUMBER,
-  age: COMPARES_NUMBER,
-};
-
 const decodeSavedQuery = Schema.decodeUnknownEffect(SavedQuery, { errors: "all" });
 
 /**
@@ -82,23 +52,21 @@ const decodeSavedQuery = Schema.decodeUnknownEffect(SavedQuery, { errors: "all" 
  */
 const findClauseProblem = (
   clause: InboxClause,
-  fieldTypes: ReadonlyMap<string, string>,
+  fieldTypes: ReadonlyMap<string, EntityFieldType>,
   context: SavedQueryContext,
   pluginId: string,
 ): string | undefined => {
   if (clause.source !== undefined || clause.connectionId !== undefined) {
     return `the clause on "${clause.key}" names a source or a Connection. A saved query of a plugin is always about its own source, and a plugin cannot know a Connection, so remove source and connectionId.`;
   }
-  const coreKey = CORE_INBOX_FIELD_KEYS.find((key) => key === clause.key);
-  const shape =
-    coreKey === undefined
-      ? FIELD_CLAUSE_SHAPES[fieldTypes.get(clause.key) ?? ""]
-      : CORE_CLAUSE_SHAPES[coreKey];
+  const type: EntityFieldType | undefined =
+    CORE_INBOX_FIELDS.find((field) => field.key === clause.key)?.type ?? fieldTypes.get(clause.key);
+  const shape = type === undefined ? undefined : describeClauseForFieldType(type);
   if (shape === undefined) {
     return `the clause key "${clause.key}" is neither one of the Inbox's own keys (${CORE_INBOX_FIELD_KEYS.join(", ")}) nor a field the plugin declares. Use one of those keys.`;
   }
-  if (!shape.ops.includes(clause.op)) {
-    return `the clause on "${clause.key}" uses "${clause.op}", but that key takes ${shape.ops.map((op) => `"${op}"`).join(" or ")}. Change the operator.`;
+  if (!shape.operators.includes(clause.op)) {
+    return `the clause on "${clause.key}" uses "${clause.op}", but that key takes ${shape.operators.map((op) => `"${op}"`).join(" or ")}. Change the operator.`;
   }
   if (typeof clause.value !== shape.value) {
     return `the clause on "${clause.key}" has a value that is not a ${shape.value}. Write a ${shape.value} value.`;
@@ -136,7 +104,7 @@ export const decodeSavedQueries = (
   context: SavedQueryContext,
 ): Effect.Effect<ReadonlyArray<RegisteredSavedQuery>, PluginError> =>
   Effect.gen(function* () {
-    const fieldTypes = new Map<string, string>();
+    const fieldTypes = new Map<string, EntityFieldType>();
     for (const kind of context.entityKinds) {
       for (const field of kind.fields ?? []) {
         if (!fieldTypes.has(field.key)) fieldTypes.set(field.key, field.type);
@@ -172,7 +140,7 @@ export const decodeSavedQueries = (
       }
       registered.push({
         id,
-        pluginId: manifest.id,
+        source: manifest.id,
         name: query.name,
         order: query.order,
         clauses: query.clauses.map((clause) =>

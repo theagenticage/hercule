@@ -268,7 +268,10 @@ describe("the composed controller", () => {
       const token = await completeSetup(base);
       const counts = await get(base, "/api/v1/external-entities/inbox/count", token);
       expect(counts.status, await counts.clone().text()).toBe(200);
-      expect(await counts.json()).toMatchObject({
+      expect(await counts.json()).toEqual({ waiting: 0, newestArrival: 0 });
+      const outline = await get(base, "/api/v1/external-entities/inbox/outline", token);
+      expect(outline.status, await outline.clone().text()).toBe(200);
+      expect(await outline.json()).toMatchObject({
         savedQueries: [
           { id: "waits", count: 0 },
           { id: "mine", count: 0 },
@@ -279,7 +282,6 @@ describe("the composed controller", () => {
         sources: [],
         pins: [],
         failing: [],
-        newestArrival: 0,
       });
       const board = await get(base, "/api/v1/tasks/board", token);
       expect(board.status, await board.clone().text()).toBe(200);

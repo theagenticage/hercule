@@ -2,7 +2,7 @@
  * Which empty state the Inbox shows when its list holds nothing. The desktop
  * draws each case; this module only decides which one applies.
  */
-import type { InboxCounts } from "@hercule/contract";
+import type { InboxOutline } from "@hercule/contract";
 
 /** What decides the empty state. */
 export interface InboxEmptyFacts {
@@ -10,7 +10,7 @@ export interface InboxEmptyFacts {
   readonly isSearching: boolean;
   /** The saved query the list is on, or `null` for a Browse value. */
   readonly savedQueryId: string | null;
-  readonly counts: Pick<InboxCounts, "savedQueries">;
+  readonly counts: Pick<InboxOutline, "savedQueries">;
 }
 
 /**
