@@ -300,15 +300,27 @@ describe("who is on the Inbox", () => {
     expect(arrivals.after).toBe(arrivals.stored);
   });
 
-  it("takes an ask off the list when the user took the thing on after it, and not for a hand-off", async () => {
+  it("takes an ask off the list only when the user took the thing on after it was raised", async () => {
     const steps = await run(({ repository }) =>
       Effect.gen(function* () {
-        const taken = yield* insertTicket({ key: "taken" });
-        const handed = yield* insertTicket({ key: "handed" });
-        yield* raise(taken, REVIEW, 2);
-        yield* raise(handed, REVIEW, 2);
+        const refs = {
+          taken: yield* insertTicket({ key: "taken" }),
+          handed: yield* insertTicket({ key: "handed" }),
+          bySession: yield* insertTicket({ key: "by-session" }),
+          byHand: yield* insertTicket({ key: "by-hand" }),
+          before: yield* insertTicket({ key: "before" }),
+        };
+        for (const ref of Object.values(refs)) yield* raise(ref, REVIEW, 2);
         const tasks = yield* taskRepository;
-        const makeTask = (ref: string, runId?: string) =>
+        const makeTask = (
+          ref: string,
+          how: {
+            readonly takenOn?: boolean;
+            readonly runId?: string;
+            readonly actor?: string;
+            readonly minutes?: number;
+          },
+        ) =>
           tasks.insert({
             title: `Work on ${ref}`,
             description: "",
@@ -317,21 +329,33 @@ describe("who is on the Inbox", () => {
             priority: "normal",
             labels: [],
             projectId: undefined,
-            provenance: [{ ref, ...(runId === undefined ? {} : { runId }) }],
-            at: at(3),
-            actor: "user",
+            provenance: [{ ref, ...(how.runId === undefined ? {} : { runId: how.runId }) }],
+            ...(how.takenOn === true ? { takenOn: true } : {}),
+            at: at(how.minutes ?? 3),
+            actor: how.actor ?? "user",
           });
-        yield* makeTask(taken);
-        yield* makeTask(handed, uuidToString(mintUuid()));
+        // Take on and Add to Work set `takenOn`; nothing else does, whoever the actor is.
+        yield* makeTask(refs.taken, { takenOn: true });
+        yield* makeTask(refs.handed, { runId: uuidToString(mintUuid()) });
+        yield* makeTask(refs.bySession, { actor: "session:0190c000-0000-7000-8000-0000000000e1" });
+        yield* makeTask(refs.byHand, {});
+        // Taken on before the ask was raised: the ask stays.
+        yield* makeTask(refs.before, { takenOn: true, minutes: 1 });
         const waits = { savedQuery: "waits" } as const;
         const afterTake = refsOf(yield* list(repository, 4, { list: waits }));
-        yield* raise(taken, REVIEW, 5);
+        yield* raise(refs.taken, REVIEW, 5);
         const afterNewAsk = refsOf(yield* list(repository, 6, { list: waits }));
         return { afterTake, afterNewAsk };
       }),
     );
-    expect(steps.afterTake).toEqual(["handed"]);
-    expect(steps.afterNewAsk.sort()).toEqual(["handed", "taken"]);
+    expect(steps.afterTake.sort()).toEqual(["before", "by-hand", "by-session", "handed"]);
+    expect(steps.afterNewAsk.sort()).toEqual([
+      "before",
+      "by-hand",
+      "by-session",
+      "handed",
+      "taken",
+    ]);
   });
 });
 

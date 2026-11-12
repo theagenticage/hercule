@@ -220,6 +220,11 @@ export interface NewTask {
    * Absent means false.
    */
   readonly following?: boolean;
+  /**
+   * True when the user made the Task by Take on or Add to Work, which marks
+   * its links as taken on (`task_entity_links.taken_on`). Absent means false.
+   */
+  readonly takenOn?: boolean;
   readonly at: string;
   readonly actor: string;
 }
@@ -344,20 +349,28 @@ export const JOINABLE_TASK_SQL = `tasks.deleted_at IS NULL
     AND tasks.stage NOT IN (${FINISHED_STAGES.map((stage) => `'${stage}'`).join(", ")})`;
 
 /**
- * The SQL of a `SELECT` that lists the live links of Tasks to refs, one row per
- * link: `task_id`, `ref`, `linked_at`, `following`, and `position`, the link's
+ * Builds the SQL of a `SELECT` that lists the live links of Tasks to refs, one
+ * row per link: `task_id`, `ref`, `linked_at`, `following`, `taken_on` (the
+ * user made the link by taking the thing on) and `position`, the link's
  * place among the live links of its ref, oldest first by `(linked_at,
  * task_id)`. A link is live when its Task is not deleted, not merged into
  * another Task and not finished (`done` or `dropped`). The active Task of a
  * ref is the Task of the link at `position = 1`. This text is the one
  * definition of these rules: the reads in this module and the Inbox's
  * membership in `external-entities` build on it.
+ *
+ * `onlyRefs` is an optional SQL condition on `l.ref` that limits the links to
+ * some refs, such as `l.ref IN (SELECT ref FROM page_refs)`. It cannot change a
+ * ref's positions, because they are ranked per ref.
  */
-export const LIVE_TASK_LINKS_SQL = `
-  SELECT l.task_id, l.ref, l.linked_at, l.following,
+export const buildLiveTaskLinksSql = (onlyRefs = "1"): string => `
+  SELECT l.task_id, l.ref, l.linked_at, l.following, l.taken_on,
          ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
   FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
-  WHERE ${JOINABLE_TASK_SQL}`;
+  WHERE ${JOINABLE_TASK_SQL} AND ${onlyRefs}`;
+
+/** The live links of all refs: see `buildLiveTaskLinksSql`. */
+export const LIVE_TASK_LINKS_SQL = buildLiveTaskLinksSql();
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`
@@ -761,14 +774,20 @@ const make = Effect.gen(function* () {
   const insertLinks = (
     taskId: Uint8Array,
     entries: ReadonlyArray<ProvenanceInput>,
-    link: { readonly at: string; readonly actor: string; readonly following: boolean },
+    link: {
+      readonly at: string;
+      readonly actor: string;
+      readonly following: boolean;
+      readonly takenOn: boolean;
+    },
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.map(
       Effect.forEach(
         entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
         (ref) => sql<{ readonly ref: string }>`
-          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
-          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0})
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following, taken_on)
+          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
+                  ${link.takenOn ? 1 : 0})
           ON CONFLICT (task_id, ref) DO NOTHING
           RETURNING ref
         `,
@@ -1839,6 +1858,7 @@ const make = Effect.gen(function* () {
           at: task.at,
           actor: task.actor,
           following: task.following ?? false,
+          takenOn: task.takenOn ?? false,
         });
         return {
           id: uuidToString(id),
@@ -1927,7 +1947,7 @@ const make = Effect.gen(function* () {
         if (edit.boardRank !== undefined) sets.push(sql`board_rank = ${edit.boardRank}`);
         yield* sql`UPDATE tasks SET ${sql.csv(sets)} WHERE id = ${key}`;
         yield* insertProvenance(key, provenance, at, actor);
-        return yield* insertLinks(key, provenance, { at, actor, following: false });
+        return yield* insertLinks(key, provenance, { at, actor, following: false, takenOn: false });
       }),
 
     /**
@@ -2160,19 +2180,21 @@ const make = Effect.gen(function* () {
     /**
      * Moves the entity links of the Task `sourceId` to `targetId`, for a
      * merge. A ref that both Tasks link keeps one link: the older
-     * `linked_at` (with the `linked_by` that came with it), and `following`
-     * if either link had it. The source is left with no links.
+     * `linked_at` (with the `linked_by` and `taken_on` that came with it), and
+     * `following` if either link had it. The source is left with no links.
      */
     moveEntityLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const source = uuidFromString(sourceId);
         yield* sql`
-          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
-          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following
+          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following, taken_on)
+          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following, taken_on
           FROM task_entity_links WHERE task_id = ${source}
           ON CONFLICT (task_id, ref) DO UPDATE SET
             linked_by = CASE WHEN excluded.linked_at < linked_at
                              THEN excluded.linked_by ELSE linked_by END,
+            taken_on = CASE WHEN excluded.linked_at < linked_at
+                            THEN excluded.taken_on ELSE taken_on END,
             linked_at = MIN(linked_at, excluded.linked_at),
             following = MAX(following, excluded.following)`;
         yield* sql`DELETE FROM task_entity_links WHERE task_id = ${source}`;

@@ -50,7 +50,7 @@ import {
   type ObservationRow,
 } from "./entity-records";
 import { readFieldValues, type EntityFieldValues } from "./entity-fields";
-import { buildEligibleEntities } from "./inbox-population";
+import { buildAsksOfRefs, buildEligibleEntities } from "./inbox-population";
 import {
   compileInboxFilter,
   CORE_INBOX_FIELDS,
@@ -554,27 +554,25 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     refs: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<AskRow>>, SqlError> => {
     if (refs.length === 0) return Effect.succeed(new Map());
-    const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
+    const own = buildAsksOfRefs(refs, environment.now, environment.askingKinds);
     return Effect.map(
       run<AskRow>(
         sql,
-        `WITH ${eligible.sql},
-          page(ref) AS (SELECT value FROM json_each(?)),
+        `WITH ${own.sql},
           page_asks AS (
             SELECT a.ref, a.id, a.kind, a.asker, a.created_at,
               ROW_NUMBER() OVER (PARTITION BY a.ref ORDER BY a.created_at DESC, a.id DESC) AS rn
-            FROM asks a WHERE a.ref IN (SELECT ref FROM page)),
+            FROM asks a),
           kinds AS (
             SELECT ref, json_group_array(kind) AS kinds FROM (
-              SELECT DISTINCT a.ref AS ref, a.kind AS kind FROM asks a
-              WHERE a.ref IN (SELECT ref FROM page) ORDER BY a.ref, a.kind)
+              SELECT DISTINCT a.ref AS ref, a.kind AS kind FROM asks a ORDER BY a.ref, a.kind)
             GROUP BY ref)
          SELECT p.ref, p.id, p.kind, p.asker, p.created_at, s.title, y.ask_count, k.kinds
          FROM page_asks p JOIN signals s ON s.id = p.id
            JOIN ask_summary y ON y.ref = p.ref JOIN kinds k ON k.ref = p.ref
          WHERE p.rn <= ${MAX_INBOX_ASKS}
          ORDER BY p.ref, p.created_at DESC, p.id DESC`,
-        [...eligible.params, JSON.stringify(refs)],
+        own.params,
       ),
       (rows) => {
         const asks = new Map<string, Array<AskRow>>();
