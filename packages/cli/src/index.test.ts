@@ -2178,3 +2178,64 @@ describe("hercule skill apply-updates", () => {
     expect(io.stdout).toEqual(["no updates to apply"]);
   });
 });
+
+/**
+ * Runs the real `run()` in a child process against a stub controller, closes the
+ * read end of one stream after its first chunk, as `head` does, and returns the
+ * exit code. The stream's output is over 1 MB, 16 times the pipe buffer, so a
+ * write to the closed reader really fails.
+ */
+const runWithReaderClosingEarly = async (
+  closes: "stdout" | "stderr",
+  stub: string,
+  argv: string,
+) => {
+  const script = `
+    import { run } from ${JSON.stringify(new URL("./index.ts", import.meta.url).pathname)};
+    const issue = { path: ["steps", "0"], message: "x".repeat(1000) };
+    const issues = Array.from({ length: 1000 }, () => issue);
+    globalThis.fetch = async () => ${stub};
+    await run(${argv});
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    stdin: new Response("name: x\n"),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
+  });
+  const [closed, open] =
+    closes === "stdout" ? [child.stdout, child.stderr] : [child.stderr, child.stdout];
+  const reader = closed.getReader();
+  await reader.read();
+  await reader.cancel();
+  return { otherStream: await new Response(open).text(), code: await child.exited };
+};
+
+describe("run with a reader that closes early", () => {
+  const validate = '["workflow", "validate"]';
+
+  it("keeps exit 0 and prints nothing to stderr when a successful command's stdout reader closes", async () => {
+    const answer = "Response.json({ errors: [], warnings: issues })";
+    expect(await runWithReaderClosingEarly("stdout", answer, validate)).toEqual({
+      otherStream: "",
+      code: 0,
+    });
+  });
+
+  it("keeps the failing exit code and prints no EPIPE when a failing command's stdout reader closes", async () => {
+    const answer = "Response.json({ errors: issues, warnings: [] })";
+    expect(await runWithReaderClosingEarly("stdout", answer, validate)).toEqual({
+      otherStream: "",
+      code: 1,
+    });
+  });
+
+  it("keeps the usage error's exit code when the stderr reader closes during its message", async () => {
+    // An unknown command's message repeats the command, so it is over the pipe buffer.
+    const argv = '["x".repeat(1_000_000)]';
+    expect(await runWithReaderClosingEarly("stderr", "null", argv)).toEqual({
+      otherStream: "",
+      code: 2,
+    });
+  });
+});

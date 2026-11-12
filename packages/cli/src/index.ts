@@ -33,7 +33,7 @@ import { findCommandByWords, listWordsAfter, type Command } from "./commands/tre
 import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
-import { processIo, type Io } from "./io";
+import { ignoreClosedOutput, processIo, type Io } from "./io";
 
 /** Returns what `hercule setup-url` prints, or fails with the reason there is nothing to print. */
 export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<string, string> {
@@ -408,5 +408,6 @@ export const main = async (argv: readonly string[], io: Io): Promise<number> => 
 
 /** Runs the CLI on the real process and sets `process.exitCode`. */
 export async function run(argv: readonly string[]): Promise<void> {
+  ignoreClosedOutput();
   process.exitCode = await main(argv, processIo);
 }

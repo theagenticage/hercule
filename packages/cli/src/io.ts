@@ -73,6 +73,32 @@ const promptPassword = (label: string): Promise<string> =>
     stream.write = (chunk: string) => (chunk === label ? write(chunk) : true);
   });
 
+/**
+ * Makes the process ignore a closed stdout or stderr, as in `hercule list | head`
+ * or `hercule list 2>&1 | head`. Call it once, from the CLI role only: the
+ * controller and runner roles share this binary and must not swallow stream
+ * errors.
+ *
+ * Bun reports a closed pipe as one asynchronous `error` event with code EPIPE
+ * on the stream, not as an exception from `write`, so a try/catch around the
+ * write would miss it. Later writes to the closed stream raise nothing (Bun
+ * emits no second event and does not throw). Any other stream error is
+ * rethrown and fails as before.
+ *
+ * The command is not stopped. It runs to its end, and the exit code is its own
+ * result, the same as when the output is read in full: a failed operation
+ * still exits non-zero, so a script under `set -o pipefail` does not go on
+ * after invalid input, and a successful one exits 0. The remaining output is
+ * discarded.
+ */
+export const ignoreClosedOutput = (): void => {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EPIPE") throw error;
+    });
+  }
+};
+
 export const processIo: Io = {
   env: process.env,
   out: (line) => process.stdout.write(`${line}\n`),
