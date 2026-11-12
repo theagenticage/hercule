@@ -825,8 +825,10 @@ export const externalEntityInbox = Effect.gen(function* () {
    * Reads one `queryInbox` in the mode it asks for: see `InboxQuery` and
    * `InboxReply`. A page is one statement for its rows, then the batched reads
    * of their details, so the number of statements depends on the mode and
-   * never on the number of things. `refresh` reads its first page and its held
-   * rows in one read snapshot, at one clock.
+   * never on the number of things. Every mode reads in one read snapshot, so
+   * the first page with its counts and facets, a page, the held rows of
+   * `rows`, and the first page with the held rows of `refresh` each show the
+   * database at one moment.
    *
    * Fails with `Validation` for an unknown saved query, a clause or text that
    * cannot be answered, or a cursor that does not belong to the selection.
@@ -837,6 +839,16 @@ export const externalEntityInbox = Effect.gen(function* () {
   ): Effect.Effect<InboxReply, SqlError | Validation> =>
     Effect.gen(function* () {
       const selection = yield* buildSelection(environment, query);
+      return yield* withReadSnapshot(sql, readInMode(environment, selection, query));
+    });
+
+  /** Reads the reply of `query` in its mode. It must run inside one read snapshot. */
+  const readInMode = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    query: InboxQuery,
+  ): Effect.Effect<InboxReply, SqlError | Validation> =>
+    Effect.gen(function* () {
       switch (query.mode) {
         case "first":
           return yield* readFirstPage(environment, selection);
@@ -856,17 +868,13 @@ export const externalEntityInbox = Effect.gen(function* () {
             mode: "rows",
             ...(yield* readHeldRows(environment, selection, [...new Set(query.held)])),
           };
-        case "refresh":
-          return yield* withReadSnapshot(
-            sql,
-            Effect.gen(function* () {
-              const first = yield* readFirstPage(environment, selection);
-              const onFirstPage = new Set(first.things.map((thing) => thing.ref));
-              const rest = [...new Set(query.held)].filter((ref) => !onFirstPage.has(ref));
-              const held = yield* readHeldRows(environment, selection, rest);
-              return { mode: "refresh", first, held } as const;
-            }),
-          );
+        case "refresh": {
+          const first = yield* readFirstPage(environment, selection);
+          const onFirstPage = new Set(first.things.map((thing) => thing.ref));
+          const rest = [...new Set(query.held)].filter((ref) => !onFirstPage.has(ref));
+          const held = yield* readHeldRows(environment, selection, rest);
+          return { mode: "refresh", first, held } as const;
+        }
       }
     });
 
