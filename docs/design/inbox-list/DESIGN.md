@@ -1,6 +1,6 @@
 # The Inbox list: design
 
-The hi-fi drawing of the new Inbox for #1120, from the map #1119. It replaces the Inbox drawn on `prototype/inbox-hifi`. Once Rogier signs it off it is the pixel reference spec 17 §Inbox points to.
+The hi-fi drawing of the new Inbox for #1120, from the map #1119. It replaces the Inbox drawn on `prototype/inbox-hifi`. Signed off by Rogier on 2026-11-12: it is the pixel reference for the slices of #1119 (#1121 to #1127), and spec 17 §Inbox points to it. The proposals below were accepted with it, as #1119's decisions 28 to 35.
 
 - `desktop.html` is the working window, in the app's real sidebar, tokens and six themes. Every state opens by URL: `desktop.html?scene=pr&theme=nile`. The scenes are listed in `js/scenes.js`.
 - `index.html` walks through the reasoning, with live frames and every capture.
@@ -323,6 +323,8 @@ Each is a choice the map left open, made for the best design. Each can be turned
 67. **A new ask brings a dismissed thing back.** A signal that asks you, raised after you dismissed the thing, puts it back in the lists; the row says "Kwame mentioned you · dismissed 1d ago", and the pane "Dismissed 1 day ago, back for Kwame’s mention". Asks that were open when you dismissed it, a new concern, or activity that asks nothing keep it dismissed. To never hear of a thing again, an Ignore Rule mutes it. Arriving while the page is open, it waits behind "N new" like any arrival.
 
 ## Proposed changes to #1119
+
+Accepted by Rogier on 2026-11-12, with the sign-off: they are #1119's decisions 28 to 35, and the spec text changes land in the slices that touch them.
 
 The drawing keeps every decision. Six would read better changed:
 
