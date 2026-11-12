@@ -133,9 +133,14 @@ globalThis.cancelAnimationFrame = (id: number): void => {
   native.cancelAnimationFrame(id);
 };
 
-/** Checks whether an animation frame is requested and not yet run. */
-export function hasPendingFrame(): boolean {
-  return [...pending.values()].some((timer) => timer.kind === "frame");
+/**
+ * Checks whether work is about to run: an animation frame requested and not
+ * yet run, or a timeout due within a second, such as a debounced read.
+ */
+export function hasPendingWork(): boolean {
+  return [...pending.values()].some(
+    (timer) => timer.kind === "frame" || (timer.kind === "timeout" && timer.delayMs <= 1000),
+  );
 }
 
 /** Returns what the probe counted, and starts counting renders from zero again. */

@@ -201,12 +201,12 @@ pnpm --filter @hercule/desktop ui:metrics --screens inbox --no-goldens      # on
 
 On a Mac, or a Linux machine without Chromium's libraries, run `pnpm --filter @hercule/desktop ui:metrics:container`, which takes the same flags. It runs on linux/amd64, the platform the goldens are recorded on, which a Mac emulates (several minutes). On a Mac it works in a copy of the checkout and copies the goldens, the baseline and the report back. Any other command runs in the container with `node apps/desktop/container/run.ts -- <command>`.
 
-The desktop counts check measures a change's cost in counts in under a minute: bundle bytes, the statements and bytes of the controller's Work and Inbox reads, and per step of the Inbox and Work, the requests, elements restyled, React renders and elements, plus what stays pending while idle. It fails when a count is worse than `apps/desktop/perf-counts.baseline.json`; accept a meant change with `--write-baseline` and give the reason in the PR (spec 17 §Performance › The counts check).
+The desktop counts check measures a change's cost in counts in under a minute: bundle bytes, the statements and bytes of the controller's Work and Inbox reads, and per step of the Inbox and Work, the requests, elements restyled, React renders and elements, plus what stays pending while idle. It informs and fails on no count. In CI it compares with main's latest counts and posts the report as a comment on the PR. Locally, write a baseline on `main` first, then run it on your branch (spec 17 §Performance › The counts check).
 
 ```
-pnpm --filter @hercule/desktop perf:counts                   # on a host with Chromium's libraries, or in CI
-pnpm --filter @hercule/desktop perf:counts:container         # the same, in the desktop container
-pnpm --filter @hercule/desktop perf:counts --write-baseline  # re-write the baseline from this run
+pnpm --filter @hercule/desktop perf:counts --write-baseline  # on main: write out/perf-counts.baseline.json, the counts to compare with
+pnpm --filter @hercule/desktop perf:counts                   # on your branch: the report, compared with that baseline
+pnpm --filter @hercule/desktop perf:counts:container         # the same on a Linux host without Chromium's libraries; on a Mac, run perf:counts directly
 ```
 
 The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:

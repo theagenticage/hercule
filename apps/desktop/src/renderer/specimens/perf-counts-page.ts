@@ -31,9 +31,10 @@ export interface PerfCountsPage {
   /** Checks whether no read or write is running. */
   readonly isIdle: () => boolean;
   /**
-   * Checks whether nothing moves on the page: no animation frame is requested,
-   * and no animation that ends is running. An animation that never ends, such
-   * as a spinner, does not count.
+   * Checks whether nothing moves on the page and nothing is about to: no
+   * animation frame is requested, no timeout is due within a second, and no
+   * animation that ends is running. An animation that never ends, such as a
+   * spinner, does not count.
    */
   readonly isStill: () => boolean;
   /** Checks whether the app's socket is open with the shell's subscriptions. */
