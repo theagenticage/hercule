@@ -147,6 +147,7 @@ const environment = (
 ) => ({
   now: at(minutes),
   activePluginIds,
+  askingKinds: [],
 });
 
 /** Adds `changedRefs` to what a write changed: the refs of the entities it names, sorted. */
@@ -224,7 +225,7 @@ const readInbox = (repository: Repository, minutes: number) =>
   repository.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
 
 const countInbox = (repository: Repository, minutes: number) =>
-  repository.countInbox(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
+  repository.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
 
 /** Reads the arrival number a thing took, or null when it took none. */
 const arrivalOf = (sql: SqlClient.SqlClient, ref: string) =>
@@ -321,8 +322,8 @@ describe("reconcile: first sight and several Connections", () => {
     });
     expect(inbox.things[0]!.waitingSince).toBeUndefined();
     expect(counts.savedQueries.find((query) => query.id === "everything")!.count).toBe(1);
-    // Nothing asks, so the thing is not among the ones someone waits on, and no arrival counts there.
-    expect(counts.newestArrival).toBe(0);
+    // Nothing asks, so the thing is not among the ones someone waits on.
+    expect(counts.savedQueries.find((query) => query.id === "waits")!.count).toBe(0);
   });
 
   it("keeps a thing listed while another Connection still lists it, and off the Inbox once none does", async () => {
@@ -1576,7 +1577,8 @@ describe("dismissal", () => {
       moved: [{ id: steps.id, ref: ticketRef("t1"), changed }],
     });
     expect(steps.dismissed).toEqual(moved(true));
-    expect(steps.again).toEqual(moved(false));
+    // Dismissing again moves the dismissal to the new time.
+    expect(steps.again).toEqual(moved(true));
     expect(steps.afterNewConcern.things).toEqual([]);
     expect(steps.pruned.entities).toBe(0);
     expect(steps.afterReturn.things).toEqual([]);
@@ -1749,6 +1751,7 @@ describe("listWanted and failed reads", () => {
             environment: {
               now: new Date(BASE + seconds * 1000).toISOString(),
               activePluginIds: [PLUGIN],
+              askingKinds: [],
             },
           });
         const asks = (seconds: number) =>
@@ -1772,7 +1775,11 @@ describe("listWanted and failed reads", () => {
         yield* repository.refresh({
           connectionId: ACCOUNT_B,
           observed: [ticket("t1", { concerns: [] })],
-          environment: { now: new Date(BASE + 400_000).toISOString(), activePluginIds: [PLUGIN] },
+          environment: {
+            now: new Date(BASE + 400_000).toISOString(),
+            activePluginIds: [PLUGIN],
+            askingKinds: [],
+          },
         });
         yield* fail(500);
         results.push(yield* asks(640)); // the first failure again: 120 s

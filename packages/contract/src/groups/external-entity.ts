@@ -19,7 +19,7 @@ import {
   MAX_ENTITY_FACTS,
   MAX_ENTITY_FIELD_TEXT_LENGTH,
   MAX_ENTITY_KIND_FIELDS,
-  InboxClause,
+  InboxClause as PluginInboxClause,
   PluginId,
 } from "@hercule/plugin-host";
 import { Schema, SchemaGetter } from "effect";
@@ -37,7 +37,7 @@ import {
 } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
-import { markShorthand } from "../shorthand";
+import { markRepeatedShorthand, markShorthand } from "../shorthand";
 import { atMost, bounded } from "../strings";
 import { MAX_CONNECTION_LABEL_LENGTH } from "./connection";
 import {
@@ -60,7 +60,18 @@ import { RunStarted } from "./run";
 import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
 import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
-export { ENTITY_CONCERNS, EntityRepository, InboxClause, MAX_ENTITY_FACTS };
+export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
+
+/**
+ * One condition of an Inbox query, as the clients send it: a plugin's clause
+ * (see `InboxClause` in the plugin API) with the account as an `Id`.
+ */
+export const InboxClause = Schema.Struct({
+  ...PluginInboxClause.fields,
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type InboxClause = Schema.Schema.Type<typeof InboxClause>;
 
 /** The most results one search reply holds. */
 export const MAX_ENTITY_SEARCH_RESULTS = 20;
@@ -502,8 +513,12 @@ export const MAX_INBOX_QUERY_CLAUSES = 12;
 /** The longest free text of a search. */
 export const MAX_INBOX_TEXT_LENGTH = 200;
 
-/** The most open asks one thing lists. `askCount` still counts all of them. */
-export const MAX_INBOX_ASKS = 8;
+/**
+ * The most open asks one row lists, newest first. `askCount` still counts all
+ * of them. A row draws only the newest ask and how many there are; the pane
+ * reads every ask from `externalEntity.read`.
+ */
+export const MAX_INBOX_ASKS = 3;
 
 /** The most values one facet lists on a page. `more` counts the rest. */
 export const MAX_INBOX_PAGE_FACET_VALUES = 30;
@@ -521,7 +536,7 @@ export const MAX_INBOX_MOVED_THINGS = 1000;
 const MAX_SAVED_QUERY_ID_LENGTH = 130;
 
 /** The most Connections one thing lists as observing it. */
-const MAX_INBOX_ACCOUNTS = 32;
+export const MAX_INBOX_ACCOUNTS = 32;
 
 /** The most sources, accounts, facets and saved queries the Inbox's counts list. */
 const MAX_INBOX_RAIL_ROWS = 500;
@@ -558,16 +573,18 @@ export type InboxOrder = Schema.Schema.Type<typeof InboxOrder>;
 
 /**
  * Parses one typed clause, `key=value` (is), `key>value` (over) or
- * `key<value` (under). A value of `true` or `false` is a boolean, a plain
- * number is a number, a number with a unit (`2d`, `90m`, `3h`, `1w`, `30s`) is
- * that many seconds, and anything else is text.
+ * `key<value` (under). A value of `true` or `false` is a boolean and a plain
+ * number is a number. With `>` or `<`, a number with a unit (`2d`, `90m`,
+ * `3h`, `1w`, `30s`) is that many seconds. With `=` it stays text, because
+ * `team=2d` names a team and no duration is compared for equality. Anything
+ * else is text.
  */
 const parseClauseWord = (word: string): InboxClause | undefined => {
   const match = /^([A-Za-z0-9_-]+)([=><])(.+)$/.exec(word);
   if (match === null) return undefined;
   const [, key, sign, text] = match as unknown as [string, string, string, string];
   const op = sign === "=" ? "is" : sign === ">" ? "over" : "under";
-  const unit = /^(\d+(?:\.\d+)?)([smhdw])$/.exec(text);
+  const unit = op === "is" ? null : /^(\d+(?:\.\d+)?)([smhdw])$/.exec(text);
   const seconds = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 } as const;
   const value: string | number | boolean =
     text === "true"
@@ -615,12 +632,7 @@ const InboxClauseFromWord = Schema.String.check(
 export const InboxQuery = Schema.Struct({
   list: InboxList,
   clauses: Schema.optionalKey(
-    markShorthand(
-      atMost(InboxClause, MAX_INBOX_QUERY_CLAUSES),
-      // The CLI sends one word per use of `--clause`, so the codec decodes a
-      // single clause, not the list.
-      InboxClauseFromWord as unknown as Schema.Codec<Array<InboxClause>, string>,
-    ),
+    markRepeatedShorthand(atMost(InboxClause, MAX_INBOX_QUERY_CLAUSES), InboxClauseFromWord),
   ),
   text: Schema.optionalKey(bounded(0, MAX_INBOX_TEXT_LENGTH)),
   cursor: Schema.optionalKey(bounded(1, 512)),
@@ -646,14 +658,19 @@ export const InboxAsk = Schema.Struct({
 export type InboxAsk = Schema.Schema.Type<typeof InboxAsk>;
 
 /**
- * One row of the Inbox. It is lean: the pane reads `externalEntity.read` when
- * a thing is opened.
+ * One row of the Inbox. It is lean: it holds only what a row draws, and the
+ * pane reads the rest (such as the lifecycle and every ask) from
+ * `externalEntity.read` when a thing is opened. A page holds 200 rows, so each
+ * field costs 200 times its size.
  *
  * - `source` is the plugin that reports the thing.
  * - `face` is the card face of the thing's kind, or null for the generic row.
  * - `asks` are the open asks, newest first, at most `MAX_INBOX_ASKS`;
  *   `askCount` counts all of them, `askKinds` lists their distinct kinds, and
  *   `waitingSince` is when the oldest one began.
+ * - `takenOn` is true when the user took the thing on: the link to its active
+ *   Task was made or joined by Take on or Add to Work, not by a hand-off, a
+ *   session or a signal. Only then does the row say that you have it.
  * - `openKinds` are the distinct kinds of every open signal, snoozed ones
  *   included: what a hand-off ends is read from it.
  * - `dismissedAt` is set only when the thing came back after a dismissal.
@@ -669,7 +686,6 @@ export const InboxThing = Schema.Struct({
   title: bounded(1, 512),
   url: Schema.String,
   status: Schema.optionalKey(EntityStatus),
-  lifecycle: EntityLifecycle,
   access: Schema.Literals(["ok", "inaccessible", "deleted"]),
   stale: Schema.Boolean,
   observedAt: Timestamp,
@@ -684,6 +700,7 @@ export const InboxThing = Schema.Struct({
   waitingSince: Schema.optionalKey(Timestamp),
   /** The active Task, when there is one. */
   taskId: Schema.optionalKey(Id),
+  takenOn: Schema.Boolean,
   liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
   dismissedAt: Schema.optionalKey(Timestamp),
   /**
@@ -771,12 +788,26 @@ const InboxFieldType = Schema.Literals([
 ]);
 
 /**
- * The numbers the sidebar and the rail show: one read, for every screen.
- * Counts are of distinct things, never of rows. The controller reads the
- * user's own `inbox.pins` and `inbox.browseFolded`, so the reply holds exactly
- * what the rail draws.
+ * The numbers the sidebar draws, in one small read that every screen holds.
+ *
+ * - `waiting` is how many things are in "Someone waits on me".
+ * - `newestArrival` is the highest arrival sequence among them. It comes from
+ *   a durable counter the writer raises, never from a time, and the counter
+ *   never goes backwards, even after pruning. Opaque and ordered: a client
+ *   compares it with the value it stored, and never displays it.
  */
 export const InboxCounts = Schema.Struct({
+  waiting: Schema.Int,
+  newestArrival: Schema.Int,
+});
+
+/**
+ * What the Inbox's rail draws, in one read that only the Inbox screen makes.
+ * Counts are of distinct things, never of rows. The controller reads the
+ * user's own `inbox.pins` and `inbox.browseFolded`, so the reply holds exactly
+ * what the rail draws. It names accounts, so it needs `connection.query`.
+ */
+export const InboxOutline = Schema.Struct({
   /** Every saved query, the core's first and then the plugins', with its count. */
   savedQueries: atMost(
     Schema.Struct({
@@ -839,18 +870,17 @@ export const InboxCounts = Schema.Struct({
     }),
     MAX_INBOX_RAIL_ROWS * 16,
   ),
-  /** The sources that cannot be read now, and since when. */
-  failing: atMost(Schema.Struct({ source: PluginId, since: Timestamp }), MAX_INBOX_RAIL_ROWS),
   /**
-   * The highest arrival sequence among the things in "Someone waits on me". It
-   * comes from a durable counter the writer raises, never from a time, and the
-   * counter never goes backwards, even after pruning. Opaque and ordered: a
-   * client compares it with the value it stored, and never displays it.
+   * The sources that cannot be read now. `updatedAt` is when a failing
+   * Connection of the source was last changed, which is the latest sign of
+   * the failure the controller keeps. It is not when the failure began.
    */
-  newestArrival: Schema.Int,
+  failing: atMost(Schema.Struct({ source: PluginId, updatedAt: Timestamp }), MAX_INBOX_RAIL_ROWS),
 });
 
 export type InboxCounts = Schema.Schema.Type<typeof InboxCounts>;
+
+export type InboxOutline = Schema.Schema.Type<typeof InboxOutline>;
 
 /**
  * The input of `suggestInboxValues`: the values of the field `key` among the
@@ -1217,9 +1247,18 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       success: InboxPage,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
-    /** Returns the Inbox's counts alone, for the sidebar and the rail, which read them on every screen. */
+    /** Returns the Inbox's counts alone, for the sidebar, which reads them on every screen. */
     HttpApiEndpoint.get("countInbox", "/external-entities/inbox/count", {
       success: InboxCounts,
+      error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Returns what the Inbox's rail draws: every saved query with its count,
+     * the sources, accounts and facet values, the pins, the query fields and
+     * the sources that cannot be read. Only the Inbox screen reads it.
+     */
+    HttpApiEndpoint.get("readInboxOutline", "/external-entities/inbox/outline", {
+      success: InboxOutline,
       error: [Unauthenticated, Forbidden, Internal],
     }),
     /**

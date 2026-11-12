@@ -74,7 +74,6 @@ import {
   type RegisteredEventSource,
 } from "./event-sources";
 import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "../intake-settings";
-import type { RegisteredSavedQuery } from "./saved-queries";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
@@ -1070,18 +1069,6 @@ const make = Effect.gen(function* () {
         sources
           .filter((source) => source.pluginId === pluginId)
           .flatMap((source) => source.entityKinds),
-      ),
-
-    /**
-     * Returns the saved queries a plugin declares, qualified, in the order it
-     * declares them, whatever the status of the plugin. They are empty for a
-     * plugin whose registration failed or was refused.
-     */
-    listSavedQueries: (pluginId: string): Effect.Effect<ReadonlyArray<RegisteredSavedQuery>> =>
-      Effect.map(Ref.get(eventSources), (sources) =>
-        sources
-          .filter((source) => source.pluginId === pluginId)
-          .flatMap((source) => source.savedQueries),
       ),
 
     /**

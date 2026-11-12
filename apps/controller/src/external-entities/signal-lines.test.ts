@@ -116,7 +116,11 @@ const project: ObservedEntity = {
   fieldRows: [],
 };
 
-const environment = (minutes: number) => ({ now: at(minutes), activePluginIds: [PLUGIN] });
+const environment = (minutes: number) => ({
+  now: at(minutes),
+  activePluginIds: [PLUGIN],
+  askingKinds: [],
+});
 
 let signalCounter = 0;
 const signalId = () => `0199e0e7-0005-7000-8000-${String(++signalCounter).padStart(12, "0")}`;
@@ -240,8 +244,11 @@ const inboxEnvironment = (minutes: number) => ({
 const readInbox = (repository: Repository, minutes: number) =>
   repository.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
 
+const readSidebarCounts = (repository: Repository, minutes: number) =>
+  repository.countInbox(inboxEnvironment(minutes));
+
 const readCounts = (repository: Repository, minutes: number) =>
-  repository.countInbox(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
+  repository.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
 
 const cardRefs = (inbox: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
   inbox.things.map((card) => card.ref);
@@ -449,7 +456,7 @@ describe("Inbox membership and arrivals", () => {
         // The signal came first: the refresh creates the entity and the card arrives.
         yield* raiseSignal(ticketRef("new"));
         yield* refresh(ACCOUNT_A, [ticket("new")], 3);
-        const created = (yield* readCounts(repository, 3)).newestArrival;
+        const created = (yield* readSidebarCounts(repository, 3)).newestArrival;
 
         // An entity that was off the clock gains a signal.
         yield* refresh(ACCOUNT_A, [ticket("known")], 4);
@@ -459,7 +466,7 @@ describe("Inbox membership and arrivals", () => {
           ASKING_KINDS,
           raiseSignal(ticketRef("known")),
         );
-        const raised = (yield* readCounts(repository, 5)).newestArrival;
+        const raised = (yield* readSidebarCounts(repository, 5)).newestArrival;
 
         // A second signal, from a second Connection, on a card on the clock already.
         yield* repository.recordArrivalAfter(
@@ -468,18 +475,18 @@ describe("Inbox membership and arrivals", () => {
           ASKING_KINDS,
           raiseSignal(ticketRef("known"), { connectionId: ACCOUNT_B }),
         );
-        const afterSecond = (yield* readCounts(repository, 6)).newestArrival;
+        const afterSecond = (yield* readSidebarCounts(repository, 6)).newestArrival;
 
         // A signal on a card that concerns the user already.
         yield* reconcile(ACCOUNT_A, [ticket("mine", { concerns: ["assigned"] })], 7);
-        const mineArrival = (yield* readCounts(repository, 7)).newestArrival;
+        const mineArrival = (yield* readSidebarCounts(repository, 7)).newestArrival;
         yield* repository.recordArrivalAfter(
           ticketRef("mine"),
           at(8),
           ASKING_KINDS,
           raiseSignal(ticketRef("mine")),
         );
-        const afterMine = (yield* readCounts(repository, 8)).newestArrival;
+        const afterMine = (yield* readSidebarCounts(repository, 8)).newestArrival;
 
         // A ref with no entity does nothing.
         yield* repository.recordArrivalAfter(ticketRef("nobody"), at(9), ASKING_KINDS, Effect.void);
@@ -504,20 +511,20 @@ describe("Inbox membership and arrivals", () => {
           ASKING_KINDS,
           raiseSignal(ticketRef("signal-first")),
         );
-        const signalArrival = (yield* readCounts(repository, 2)).newestArrival;
+        const signalArrival = (yield* readSidebarCounts(repository, 2)).newestArrival;
         yield* reconcile(ACCOUNT_A, [ticket("signal-first", { concerns: ["assigned"] })], 3);
-        const afterConcern = (yield* readCounts(repository, 3)).newestArrival;
+        const afterConcern = (yield* readSidebarCounts(repository, 3)).newestArrival;
 
         // Concern first: a later signal finds the card on the clock already.
         yield* reconcile(ACCOUNT_A, [ticket("concern-first", { concerns: ["assigned"] })], 4);
-        const concernArrival = (yield* readCounts(repository, 4)).newestArrival;
+        const concernArrival = (yield* readSidebarCounts(repository, 4)).newestArrival;
         yield* repository.recordArrivalAfter(
           ticketRef("concern-first"),
           at(5),
           ASKING_KINDS,
           raiseSignal(ticketRef("concern-first")),
         );
-        const afterSignal = (yield* readCounts(repository, 5)).newestArrival;
+        const afterSignal = (yield* readSidebarCounts(repository, 5)).newestArrival;
         return { signalArrival, afterConcern, concernArrival, afterSignal };
       }),
     );
@@ -543,7 +550,7 @@ describe("Inbox membership and arrivals", () => {
           raiseSignal(ticketRef("hidden"), { kind: "acme-tracker/assigned", createdAt: at(3) }),
         );
         const quiet = yield* readInbox(repository, 4);
-        const quietArrival = (yield* readCounts(repository, 4)).newestArrival;
+        const quietArrival = (yield* readSidebarCounts(repository, 4)).newestArrival;
         const open = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM signals WHERE status = 'open'`;
         const suggestions = yield* repository.listSuggestions({
@@ -559,7 +566,7 @@ describe("Inbox membership and arrivals", () => {
           raiseSignal(ticketRef("hidden"), { createdAt: at(5) }),
         );
         const back = yield* readInbox(repository, 6);
-        const backArrival = (yield* readCounts(repository, 6)).newestArrival;
+        const backArrival = (yield* readSidebarCounts(repository, 6)).newestArrival;
         return { quiet, quietArrival, open: open[0]!.n, suggestions, back, backArrival };
       }),
     );

@@ -18,6 +18,11 @@
  *
  * The schema itself rejects unknown keys; `closedStruct` explains why.
  */
+import {
+  MAX_ENTITY_FIELD_TEXT_LENGTH,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
+  PluginId,
+} from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -25,7 +30,7 @@ import { AccessMode, MAX_FACT_LENGTH } from "@hercule/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
-import { atMost, Timezone } from "../strings";
+import { atMost, bounded, Timezone } from "../strings";
 import { Authenticated } from "../security";
 import { MuteKey } from "./notification";
 import { SpawnBound } from "./workflow-definition";
@@ -49,7 +54,7 @@ const MAX_INBOX_RAIL_ENTRIES = 50;
 
 /** One source, or one account of it, as the Inbox's rail names it. */
 const InboxRailSource = {
-  source: Schema.NonEmptyString,
+  source: PluginId,
   connectionId: Schema.optionalKey(Id),
 };
 
@@ -234,8 +239,8 @@ export const SETTING_VALUES = {
     "inbox.pins": atMost(
       Schema.Struct({
         ...InboxRailSource,
-        key: Schema.NonEmptyString,
-        value: Schema.NonEmptyString,
+        key: bounded(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
+        value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
       }),
       MAX_INBOX_RAIL_ENTRIES,
     ),

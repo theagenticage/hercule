@@ -35,6 +35,7 @@ const compile = (input: Partial<InboxFilterInput>): CompiledSql => {
     text: "",
     now: NOW,
     fields: FIELDS,
+    signalKinds: [],
     ...input,
   });
   if ("problem" in compiled) throw new Error(compiled.problem);
@@ -47,6 +48,7 @@ const problem = (input: Partial<InboxFilterInput>): string => {
     text: "",
     now: NOW,
     fields: FIELDS,
+    signalKinds: [],
     ...input,
   });
   if (!("problem" in compiled)) throw new Error("expected a problem");

@@ -5,6 +5,7 @@ import type {
   EntitySignalLine,
   InboxAsk,
   InboxCounts,
+  InboxOutline,
   InboxThing,
   PluginDetail,
   WorkflowOffer,
@@ -136,14 +137,20 @@ export const buildWorkflowOffer = (
   ...(unavailable === undefined ? {} : { unavailable }),
 });
 
-/** Returns the Inbox's counts with nothing in them: no saved query counts anything. `overrides` change any field. */
+/** Returns the sidebar's counts with nothing in them. `overrides` change any field. */
 export const buildInboxCounts = (overrides: Partial<InboxCounts> = {}): InboxCounts => ({
+  waiting: 0,
+  newestArrival: 0,
+  ...overrides,
+});
+
+/** Returns the Inbox's outline with nothing in it: no saved query counts anything. `overrides` change any field. */
+export const buildInboxOutline = (overrides: Partial<InboxOutline> = {}): InboxOutline => ({
   savedQueries: [],
   sources: [],
   pins: [],
   fields: [],
   failing: [],
-  newestArrival: 0,
   ...overrides,
 });
 
@@ -160,7 +167,6 @@ export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {})
   identifier: `ACME-${id}`,
   title: `Ticket ${id}`,
   url: `https://acme.example/${id}`,
-  lifecycle: "open",
   access: "ok",
   stale: false,
   observedAt: "2026-11-05T09:00:00.000Z",
@@ -171,6 +177,7 @@ export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {})
   askCount: 0,
   askKinds: [],
   openKinds: [],
+  takenOn: false,
   liveWorkflows: [],
   offerSetId: "none",
   actingConnections: [],

@@ -31,8 +31,13 @@ export interface CompiledSql {
   readonly params: ReadonlyArray<SqlValue>;
 }
 
-/** What `compileInboxFilter` returns: the expression, or why the query cannot be answered. */
-export type Compilation = CompiledSql | { readonly problem: string };
+/**
+ * What `compileInboxFilter` returns: the expression, or why the query cannot
+ * be answered and which part of the query holds the mistake.
+ */
+export type Compilation =
+  | CompiledSql
+  | { readonly problem: string; readonly part: "clauses" | "text" };
 
 /** One field a plugin declared for one entity kind, as a query reads it. */
 export interface DeclaredInboxField {
@@ -62,35 +67,21 @@ export interface InboxFilterInput {
   /** The one read clock: durations are measured back from it. A normalized UTC ISO string. */
   readonly now: string;
   readonly fields: ReadonlyArray<DeclaredInboxField>;
+  /** The signal kinds of the active plugins: a `signal` clause matches a kind's noun. */
+  readonly signalKinds: ReadonlyArray<{ readonly kind: string; readonly noun: string }>;
   /** Ties the whole query to one source or one account. */
   readonly tie?: { readonly source?: string; readonly connectionId?: string };
 }
 
-/** The core's own query fields, with the type each has. `waiting` is a duration. */
-export const CORE_INBOX_FIELDS: ReadonlyArray<{
-  readonly key: (typeof CORE_INBOX_FIELD_KEYS)[number];
-  readonly label: string;
-  readonly type: EntityFieldType;
-}> = [
-  { key: "source", label: "Source", type: "text" },
-  { key: "kind", label: "Kind", type: "text" },
-  { key: "account", label: "Account", type: "text" },
-  { key: "from", label: "From", type: "person" },
-  { key: "waiting", label: "Waiting", type: "age" },
-  { key: "asks", label: "Waits on me", type: "bool" },
-  { key: "held", label: "With Hercule", type: "bool" },
-  { key: "mine", label: "Mine", type: "bool" },
-  { key: "signal", label: "Signal", type: "text" },
-];
-
 /** The most words of free text one query may hold. */
 const MAX_TEXT_WORDS = 12;
 
-/** The plugin id of an entity row `e`: what its kind has before the slash. */
-export const SOURCE_OF_KIND_SQL = "substr(e.kind, 1, instr(e.kind, '/') - 1)";
+/** Builds the SQL of the plugin id of the row `alias`: what its `kind` has before the slash. */
+export const buildSourceOfKindSql = (alias: string): string =>
+  `substr(${alias}.kind, 1, instr(${alias}.kind, '/') - 1)`;
 
 /** Returns the plugin id a qualified kind starts with. */
-export const readSourceOfKind = (kind: string): string => kind.slice(0, kind.indexOf("/"));
+export const parseSourceOfKind = (kind: string): string => kind.slice(0, kind.indexOf("/"));
 
 const NO_MATCH: CompiledSql = { sql: "0", params: [] };
 
@@ -136,18 +127,18 @@ export const escapeLike = (word: string): string =>
   word.replace(/[\\%_]/g, (match) => `\\${match}`);
 
 /** Reads a clause value as text, or undefined for a boolean. */
-const readText = (value: InboxClause["value"]): string | undefined =>
+const parseClauseText = (value: InboxClause["value"]): string | undefined =>
   typeof value === "boolean" ? undefined : String(value);
 
 /** Reads a clause value as a finite number, or undefined. */
-const readNumber = (value: InboxClause["value"]): number | undefined => {
+const parseClauseNumber = (value: InboxClause["value"]): number | undefined => {
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
   if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) return Number(value);
   return undefined;
 };
 
 /** Returns an ISO time `seconds` before `now`, or undefined when that is not a time. */
-const readTimeBefore = (now: string, seconds: number): string | undefined => {
+const computeTimeBefore = (now: string, seconds: number): string | undefined => {
   const moment = new Date(Date.parse(now) - seconds * 1000);
   return Number.isNaN(moment.getTime()) ? undefined : moment.toISOString();
 };
@@ -161,15 +152,21 @@ const compileBoolean = (clause: InboxClause, condition: string): CompiledSql | s
 };
 
 /** Compiles a clause on a core key, or returns the sentence that says why it cannot be. */
-const compileCoreClause = (clause: InboxClause, now: string): CompiledSql | string => {
-  const text = readText(clause.value);
+const compileCoreClause = (
+  clause: InboxClause,
+  now: string,
+  signalKinds: InboxFilterInput["signalKinds"],
+): CompiledSql | string => {
+  const text = parseClauseText(clause.value);
   const needsIs = (): string | undefined =>
     clause.op === "is" && text !== undefined
       ? undefined
       : `${clause.key} takes "is" with a word, such as ${clause.key}=value`;
   switch (clause.key) {
     case "source": {
-      return needsIs() ?? { sql: `${SOURCE_OF_KIND_SQL} = ? COLLATE NOCASE`, params: [text!] };
+      return (
+        needsIs() ?? { sql: `${buildSourceOfKindSql("e")} = ? COLLATE NOCASE`, params: [text!] }
+      );
     }
     case "kind": {
       return (
@@ -185,7 +182,8 @@ const compileCoreClause = (clause: InboxClause, now: string): CompiledSql | stri
       const byId = UUID_TEXT.test(text!);
       return {
         sql: `EXISTS (SELECT 1 FROM external_entity_observations o JOIN connections c ON c.id = o.connection_id
-          WHERE o.ref = e.ref AND (${byId ? "c.id = ? OR " : ""}c.label = ? COLLATE NOCASE))`,
+          WHERE o.ref = e.ref AND ${OBSERVING_SQL}
+            AND (${byId ? "c.id = ? OR " : ""}c.label = ? COLLATE NOCASE))`,
         params: byId ? [uuidFromString(text!), text!] : [text!],
       };
     }
@@ -199,11 +197,11 @@ const compileCoreClause = (clause: InboxClause, now: string): CompiledSql | stri
       };
     }
     case "waiting": {
-      const seconds = readNumber(clause.value);
+      const seconds = parseClauseNumber(clause.value);
       if (clause.op === "is" || seconds === undefined) {
         return `waiting takes "over" or "under" with a duration in seconds, such as waiting>2d`;
       }
-      const cutoff = readTimeBefore(now, seconds);
+      const cutoff = computeTimeBefore(now, seconds);
       if (cutoff === undefined) return `waiting ${String(clause.value)} is too long ago`;
       // The wait is the oldest open ask's, so waiting over N seconds means it began before the cutoff.
       return {
@@ -226,10 +224,15 @@ const compileCoreClause = (clause: InboxClause, now: string): CompiledSql | stri
     case "signal": {
       const problem = needsIs();
       if (problem !== undefined) return problem;
+      const lowered = text!.toLowerCase();
+      const namedByNoun = signalKinds
+        .filter((entry) => entry.noun.toLowerCase() === lowered)
+        .map((entry) => entry.kind);
       return {
         sql: `EXISTS (SELECT 1 FROM live_signals s WHERE s.ref = e.ref
-          AND (s.kind = ? OR substr(s.kind, instr(s.kind, '/') + 1) = ? COLLATE NOCASE))`,
-        params: [text!, text!],
+          AND (s.kind = ? OR substr(s.kind, instr(s.kind, '/') + 1) = ? COLLATE NOCASE
+               OR s.kind IN (SELECT value FROM json_each(?))))`,
+        params: [text!, text!, JSON.stringify(namedByNoun)],
       };
     }
     default:
@@ -238,7 +241,7 @@ const compileCoreClause = (clause: InboxClause, now: string): CompiledSql | stri
 };
 
 /** The condition on one stored field row `f` of the thing `e`, with the key as its first parameter. */
-const FIELD_ROW_SQL = (condition: string) =>
+const buildFieldRowSql = (condition: string): string =>
   `EXISTS (SELECT 1 FROM external_entity_fields f WHERE f.ref = e.ref AND f.key = ? AND ${condition})`;
 
 /**
@@ -255,11 +258,11 @@ const compileFieldCondition = (
   switch (field.type) {
     case "text":
     case "person": {
-      const text = readText(clause.value);
+      const text = parseClauseText(clause.value);
       if (clause.op !== "is" || text === undefined) return undefined;
       if (field.contextKind === undefined) {
         return {
-          sql: FIELD_ROW_SQL("f.text_value IS NOT NULL AND f.text_value = ? COLLATE NOCASE"),
+          sql: buildFieldRowSql("f.text_value IS NOT NULL AND f.text_value = ? COLLATE NOCASE"),
           params: [key, text],
         };
       }
@@ -268,7 +271,7 @@ const compileFieldCondition = (
       // some Connection can read that record: titles of other records are
       // restricted data.
       return {
-        sql: FIELD_ROW_SQL(
+        sql: buildFieldRowSql(
           `f.text_value IS NOT NULL AND (f.text_value = ? OR EXISTS (
             SELECT 1 FROM external_entities t
             WHERE t.ref = f.text_value AND t.title = ? COLLATE NOCASE AND ${READABLE_RECORD_SQL}))`,
@@ -277,14 +280,14 @@ const compileFieldCondition = (
       };
     }
     case "enum": {
-      const text = readText(clause.value)?.toLowerCase();
+      const text = parseClauseText(clause.value)?.toLowerCase();
       if (clause.op !== "is" || text === undefined) return undefined;
       const matching = (field.enumValues ?? [])
         .filter((entry) => entry.value.toLowerCase() === text || entry.label.toLowerCase() === text)
         .map((entry) => entry.value);
       if (matching.length === 0) return undefined;
       return {
-        sql: FIELD_ROW_SQL(
+        sql: buildFieldRowSql(
           "f.text_value IS NOT NULL AND f.text_value IN (SELECT value FROM json_each(?))",
         ),
         params: [key, JSON.stringify(matching)],
@@ -292,23 +295,23 @@ const compileFieldCondition = (
     }
     case "number":
     case "money": {
-      const number = readNumber(clause.value);
+      const number = parseClauseNumber(clause.value);
       if (number === undefined) return undefined;
       const comparison = clause.op === "is" ? "=" : clause.op === "over" ? ">" : "<";
       return {
-        sql: FIELD_ROW_SQL(`f.number_value IS NOT NULL AND f.number_value ${comparison} ?`),
+        sql: buildFieldRowSql(`f.number_value IS NOT NULL AND f.number_value ${comparison} ?`),
         params: [key, number],
       };
     }
     case "age": {
       // The row holds when the age began, in epoch milliseconds. An age over
       // N seconds began before `now - N`.
-      const seconds = readNumber(clause.value);
+      const seconds = parseClauseNumber(clause.value);
       if (clause.op === "is" || seconds === undefined) return undefined;
       const cutoff = Date.parse(now) - seconds * 1000;
       if (!Number.isFinite(cutoff)) return undefined;
       return {
-        sql: FIELD_ROW_SQL(
+        sql: buildFieldRowSql(
           `f.number_value IS NOT NULL AND f.number_value ${clause.op === "over" ? "<" : ">"} ?`,
         ),
         params: [key, cutoff],
@@ -317,7 +320,7 @@ const compileFieldCondition = (
     case "bool": {
       if (clause.op !== "is" || typeof clause.value !== "boolean") return undefined;
       return {
-        sql: FIELD_ROW_SQL("f.number_value IS NOT NULL AND f.number_value = ?"),
+        sql: buildFieldRowSql("f.number_value IS NOT NULL AND f.number_value = ?"),
         params: [key, clause.value ? 1 : 0],
       };
     }
@@ -338,7 +341,7 @@ const compileDeclaredClause = (
   const declared = fields.filter(
     (field) =>
       field.key === clause.key &&
-      (clause.source === undefined || readSourceOfKind(field.kind) === clause.source),
+      (clause.source === undefined || parseSourceOfKind(field.kind) === clause.source),
   );
   if (declared.length === 0) {
     const known = [
@@ -362,37 +365,49 @@ const compileDeclaredClause = (
     const condition = compileFieldCondition(clause, field, now);
     if (condition === undefined) continue;
     alternatives.push({
-      sql: `e.kind IN (SELECT value FROM json_each(?)) AND ${condition.sql}`,
+      // The unary plus keeps SQLite from walking the kind index for this
+      // condition: the field rows are the selective part, and the kind index
+      // serves the known values of a facet instead.
+      sql: `+e.kind IN (SELECT value FROM json_each(?)) AND ${condition.sql}`,
       params: [JSON.stringify(kinds.sort()), ...condition.params],
     });
   }
   return alternatives.length === 0 ? NO_MATCH : join("OR", alternatives);
 };
 
-/** Compiles one clause with the source and account it is tied to. */
-const compileClause = (
-  clause: InboxClause,
-  fields: ReadonlyArray<DeclaredInboxField>,
-  now: string,
-): CompiledSql | string => {
-  const isCore = (CORE_INBOX_FIELD_KEYS as ReadonlyArray<string>).includes(clause.key);
-  const body = isCore ? compileCoreClause(clause, now) : compileDeclaredClause(clause, fields, now);
-  if (typeof body === "string") return body;
-  const ties: Array<CompiledSql> = [];
-  if (clause.source !== undefined) {
-    ties.push({ sql: `${SOURCE_OF_KIND_SQL} = ?`, params: [clause.source] });
+/**
+ * Compiles the conditions that tie a query or a clause to one source and one
+ * account: the thing is of that source, and a Connection of that account
+ * observes it. Returns no condition for a tie that names neither.
+ */
+const compileTie = (tie: {
+  readonly source?: string | undefined;
+  readonly connectionId?: string | undefined;
+}): ReadonlyArray<CompiledSql> => {
+  const conditions: Array<CompiledSql> = [];
+  if (tie.source !== undefined) {
+    conditions.push({ sql: `${buildSourceOfKindSql("e")} = ?`, params: [tie.source] });
   }
-  if (clause.connectionId !== undefined) {
-    ties.push({
+  if (tie.connectionId !== undefined) {
+    // An id that is not a UUID matches no Connection.
+    conditions.push({
       sql: OBSERVED_BY_SQL,
       params: [
-        UUID_TEXT.test(clause.connectionId)
-          ? uuidFromString(clause.connectionId)
-          : new Uint8Array(),
+        UUID_TEXT.test(tie.connectionId) ? uuidFromString(tie.connectionId) : new Uint8Array(),
       ],
     });
   }
-  return join("AND", [...ties, body]);
+  return conditions;
+};
+
+/** Compiles one clause with the source and account it is tied to. */
+const compileClause = (clause: InboxClause, input: InboxFilterInput): CompiledSql | string => {
+  const isCore = (CORE_INBOX_FIELD_KEYS as ReadonlyArray<string>).includes(clause.key);
+  const body = isCore
+    ? compileCoreClause(clause, input.now, input.signalKinds)
+    : compileDeclaredClause(clause, input.fields, input.now);
+  if (typeof body === "string") return body;
+  return join("AND", [...compileTie(clause), body]);
 };
 
 /** Compiles the free text: every word must appear in the title, the identifier or a text field. */
@@ -425,27 +440,14 @@ const compileText = (text: string): CompiledSql | string => {
  * compiles to an expression that is false for every thing.
  */
 export const compileInboxFilter = (input: InboxFilterInput): Compilation => {
-  const parts: Array<CompiledSql> = [];
-  if (input.tie?.source !== undefined) {
-    parts.push({ sql: `${SOURCE_OF_KIND_SQL} = ?`, params: [input.tie.source] });
-  }
-  if (input.tie?.connectionId !== undefined) {
-    parts.push({
-      sql: OBSERVED_BY_SQL,
-      params: [
-        UUID_TEXT.test(input.tie.connectionId)
-          ? uuidFromString(input.tie.connectionId)
-          : new Uint8Array(),
-      ],
-    });
-  }
+  const parts: Array<CompiledSql> = [...compileTie(input.tie ?? {})];
   for (const clause of input.clauses) {
-    const compiled = compileClause(clause, input.fields, input.now);
-    if (typeof compiled === "string") return { problem: compiled };
+    const compiled = compileClause(clause, input);
+    if (typeof compiled === "string") return { problem: compiled, part: "clauses" };
     parts.push(compiled);
   }
   const text = compileText(input.text);
-  if (typeof text === "string") return { problem: text };
+  if (typeof text === "string") return { problem: text, part: "text" };
   parts.push(text);
   return join("AND", parts);
 };

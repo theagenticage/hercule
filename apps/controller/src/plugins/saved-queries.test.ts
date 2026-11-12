@@ -71,7 +71,7 @@ describe("decodeSavedQueries", () => {
     ).toEqual([
       {
         id: "acme/mine",
-        pluginId: "acme",
+        source: "acme",
         name: "Mine",
         order: "waiting",
         clauses: [
@@ -107,8 +107,8 @@ describe("decodeSavedQueries", () => {
       message: 'uses "over", but that key takes "is"',
     },
     {
-      name: "is on a number field",
-      clause: { key: "size", op: "is", value: 3 },
+      name: "is on a duration",
+      clause: { key: "waiting", op: "is", value: 3 },
       message: 'uses "is", but that key takes "over" or "under"',
     },
     {

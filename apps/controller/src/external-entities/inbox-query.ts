@@ -21,6 +21,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   createValidationError,
   MAX_ENTITY_SIGNALS,
+  MAX_INBOX_ACCOUNTS,
   MAX_INBOX_ASKS,
   MAX_INBOX_PAGE,
   MAX_INBOX_PAGE_FACET_VALUES,
@@ -30,6 +31,7 @@ import {
   type InboxCounts,
   type InboxFacet,
   type InboxList,
+  type InboxOutline,
   type InboxPage,
   type InboxQuery,
   type InboxThing,
@@ -37,7 +39,7 @@ import {
   type InboxValues,
   type Validation,
 } from "@hercule/contract";
-import type { InboxClause } from "@hercule/plugin-host";
+import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
 import { uuidToString } from "../db";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
@@ -50,21 +52,21 @@ import {
   type ObservationRow,
 } from "./entity-records";
 import { readFieldValues, type EntityFieldValues } from "./entity-fields";
-import { buildAsksOfRefs, buildEligibleEntities } from "./inbox-population";
+import { buildAsksOfRefs, buildEligibleEntities, buildTakenOfRefs } from "./inbox-population";
 import {
+  buildSourceOfKindSql,
   compileInboxFilter,
-  CORE_INBOX_FIELDS,
   escapeLike,
   listDeclaredInboxFields,
   OBSERVING_SQL,
+  parseSourceOfKind,
   READABLE_RECORD_SQL,
-  readSourceOfKind,
-  SOURCE_OF_KIND_SQL,
   type CompiledSql,
   type DeclaredInboxField,
+  type InboxFilterInput,
   type SqlValue,
 } from "./inbox-predicates";
-import { listSavedQueries, readSavedQuery, type InboxSavedQuery } from "./saved-queries";
+import { findSavedQuery, listSavedQueries } from "./saved-queries";
 import { buildSignalSay } from "./signal-lines";
 import type { WorkflowOfferTarget } from "./workflow-offer-reads";
 
@@ -81,7 +83,7 @@ export interface InboxEnvironment extends EntityEnvironment {
   readonly askingKinds: ReadonlyArray<string>;
 }
 
-/** The user's own rail settings: what `countInbox` pins and folds. */
+/** The user's own rail settings: what `readInboxOutline` pins and folds. */
 export interface InboxRailSettings {
   readonly pins: ReadonlyArray<{
     readonly source: string;
@@ -129,10 +131,15 @@ export interface InboxReaders {
 // Lists, cursors and the statement every read starts from
 // ---------------------------------------------------------------------------
 
-/** The scope of one read: the list's clauses and how it is ordered. */
+/**
+ * The scope of one read: the list's clauses and how it is ordered. A saved
+ * query of a plugin carries the plugin's id as `source`, and its read is tied
+ * to that source.
+ */
 interface ResolvedList {
   readonly clauses: ReadonlyArray<InboxClause>;
   readonly order: "waiting" | "newest";
+  readonly source?: string;
 }
 
 const resolveList = (
@@ -141,24 +148,37 @@ const resolveList = (
 ): Effect.Effect<ResolvedList, Validation> =>
   "savedQuery" in list
     ? Effect.map(
-        readSavedQuery(list.savedQuery, environment.savedQueries),
-        (query): ResolvedList => ({ clauses: query.clauses, order: query.order }),
+        findSavedQuery(list.savedQuery, environment.savedQueries),
+        (query): ResolvedList => ({
+          clauses: query.clauses,
+          order: query.order,
+          ...(query.source === undefined ? {} : { source: query.source }),
+        }),
       )
     : Effect.succeed({ clauses: [list.browse], order: "waiting" });
 
 /** Fails with `Validation` naming `path` and `message`. */
-const refuse = (path: ReadonlyArray<string>, message: string) =>
+const failValidation = (path: ReadonlyArray<string>, message: string) =>
   Effect.fail(createValidationError([{ path, message }], message));
 
-/** Compiles the filter of a read, or fails with `Validation` naming the clause that cannot be answered. */
-const compileOrRefuse = (
+/**
+ * Compiles the filter of a read, or fails with `Validation` naming the clauses
+ * or the text that cannot be answered. `input` is what `compileInboxFilter`
+ * takes, less the clock and the signal kinds, which the environment holds.
+ */
+const compileFilterOrFail = (
   environment: InboxEnvironment,
-  clauses: ReadonlyArray<InboxClause>,
-  text: string,
-  fields: ReadonlyArray<DeclaredInboxField>,
+  input: Omit<InboxFilterInput, "now" | "signalKinds">,
+  path: ReadonlyArray<string> | undefined = undefined,
 ): Effect.Effect<CompiledSql, Validation> => {
-  const compiled = compileInboxFilter({ clauses, text, now: environment.now, fields });
-  return "problem" in compiled ? refuse(["clauses"], compiled.problem) : Effect.succeed(compiled);
+  const compiled = compileInboxFilter({
+    ...input,
+    now: environment.now,
+    signalKinds: environment.signalKinds,
+  });
+  return "problem" in compiled
+    ? failValidation(path ?? [compiled.part], compiled.problem)
+    : Effect.succeed(compiled);
 };
 
 /**
@@ -184,7 +204,7 @@ const buildMatched = (
 };
 
 /** Runs a statement written with `?` placeholders. */
-const run = <Row extends object>(
+const runStatement = <Row extends object>(
   sql: SqlClient.SqlClient,
   statement: string,
   params: ReadonlyArray<SqlValue>,
@@ -279,7 +299,7 @@ const listFacetFields = (fields: ReadonlyArray<DeclaredInboxField>): ReadonlyArr
   const found = new Map<string, FacetField>();
   for (const field of fields) {
     if (!field.isFacet) continue;
-    const source = readSourceOfKind(field.kind);
+    const source = parseSourceOfKind(field.kind);
     const id = `${source}\u0000${field.key}`;
     const existing = found.get(id);
     found.set(
@@ -310,10 +330,23 @@ interface FacetRow {
   readonly value: string;
   readonly connection_id: Uint8Array | null;
   readonly n: number;
+  /** The record's title, only when some Connection can read the record. */
   readonly title: string | null;
+  /** The record's noun, whether or not it can be read. Null when Hercule holds no such record. */
+  readonly noun: string | null;
   readonly status: string | null;
   readonly distinct_values: number;
 }
+
+/**
+ * Builds the label of a context record that no Connection can read: it names
+ * the kind of record and never the ref or the title, which are restricted. The
+ * wording matches the locked rows the apps draw.
+ */
+const buildLockedLabel = (noun: string | null): string => {
+  const kind = noun === null ? "record" : noun.charAt(0).toLowerCase() + noun.slice(1);
+  return `${/^[aeiou]/i.test(kind) ? "An" : "A"} ${kind} you cannot open`;
+};
 
 /**
  * Reads the values of the facet fields among the things of `matched`, most
@@ -343,20 +376,20 @@ const readFacetRows = (
       : [{ source: facet.source, key: facet.key, ctx: facet.contextKind }],
   );
   const known = includeKnown && contexts.length > 0;
-  return run<FacetRow>(
+  return runStatement<FacetRow>(
     sql,
     `WITH ${matched.sql},
       pairs AS (
         SELECT json_extract(value, '$.kind') AS kind, json_extract(value, '$.key') AS key
         FROM json_each(?)),
       by_source AS MATERIALIZED (
-        SELECT ${SOURCE_OF_KIND_SQL.replaceAll("e.kind", "m.kind")} AS source, f.key AS key,
+        SELECT ${buildSourceOfKindSql("m")} AS source, f.key AS key,
           f.text_value AS value, COUNT(*) AS n
         FROM matched m JOIN pairs p ON p.kind = m.kind
           JOIN external_entity_fields f ON f.ref = m.ref AND f.key = p.key AND f.text_value IS NOT NULL
         GROUP BY source, f.key, f.text_value),
       by_account AS MATERIALIZED (
-        SELECT ${SOURCE_OF_KIND_SQL.replaceAll("e.kind", "m.kind")} AS source, f.key AS key,
+        SELECT ${buildSourceOfKindSql("m")} AS source, f.key AS key,
           f.text_value AS value, o.connection_id AS connection_id, COUNT(*) AS n
         FROM matched m JOIN pairs p ON p.kind = m.kind
           JOIN external_entity_fields f ON f.ref = m.ref AND f.key = p.key AND f.text_value IS NOT NULL
@@ -368,18 +401,22 @@ const readFacetRows = (
               SELECT json_extract(value, '$.source') AS source, json_extract(value, '$.key') AS key,
                 json_extract(value, '$.ctx') AS ctx
               FROM json_each(?)),
-            accounts AS (SELECT DISTINCT source, connection_id FROM by_account),
+            accounts AS (SELECT plugin_id AS source, id AS connection_id FROM connections),
             known_all AS (
               SELECT c.source AS source, c.key AS key, t.ref AS value, NULL AS connection_id, 0 AS n
               FROM contexts c JOIN external_entities t ON t.kind = c.ctx
-              WHERE NOT EXISTS (SELECT 1 FROM by_source h
+              WHERE ${READABLE_RECORD_SQL}
+                AND NOT EXISTS (SELECT 1 FROM by_source h
                                 WHERE h.source = c.source AND h.key = c.key AND h.value = t.ref)),
             known_account AS (
               SELECT c.source AS source, c.key AS key, t.ref AS value, a.connection_id AS connection_id,
                 0 AS n
               FROM contexts c JOIN accounts a ON a.source = c.source
                 JOIN external_entities t ON t.kind = c.ctx
-              WHERE NOT EXISTS (SELECT 1 FROM by_account h
+              WHERE EXISTS (SELECT 1 FROM external_entity_observations o
+                            WHERE o.ref = t.ref AND o.connection_id = a.connection_id
+                              AND ${OBSERVING_SQL})
+                AND NOT EXISTS (SELECT 1 FROM by_account h
                                 WHERE h.source = c.source AND h.key = c.key AND h.value = t.ref
                                   AND h.connection_id = a.connection_id))`
           : ""
@@ -389,21 +426,24 @@ const readFacetRows = (
         UNION ALL SELECT source, key, value, connection_id, n FROM by_account
         ${known ? "UNION ALL SELECT * FROM known_all UNION ALL SELECT * FROM known_account" : ""}),
       titled AS (
-        SELECT g.*, t.title AS title, t.status AS status
-        FROM grouped g LEFT JOIN external_entities t
-          ON t.ref = g.value AND ${READABLE_RECORD_SQL}),
+        SELECT g.*, CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title,
+          t.noun AS noun, CASE WHEN ${READABLE_RECORD_SQL} THEN t.status END AS status
+        FROM grouped g LEFT JOIN external_entities t ON t.ref = g.value),
       ranked AS (
         SELECT *,
           ROW_NUMBER() OVER (PARTITION BY source, key, connection_id
                              ORDER BY n DESC, COALESCE(title, value) COLLATE NOCASE, value) AS rn,
           COUNT(*) OVER (PARTITION BY source, key, connection_id) AS distinct_values
         FROM titled)
-      SELECT source, key, value, connection_id, n, title, status, distinct_values
+      SELECT source, key, value, connection_id, n, title, noun, status, distinct_values
       FROM ranked WHERE rn <= ?
       ORDER BY source, key, connection_id, rn`,
     [...matched.params, JSON.stringify(pairs), ...(known ? [JSON.stringify(contexts)] : []), limit],
   );
 };
+
+/** The most values of an enum field or signal kinds that a suggestion read matches by label in code. */
+const MAX_LABELLED_IN_CODE_VALUES = 1000;
 
 /** One account that holds things of a source. */
 interface SourceAccount {
@@ -416,7 +456,8 @@ interface SourceAccount {
 /**
  * Builds the facets of the result from the rows `readFacetRows` returned. A
  * source with several accounts gets one facet per account, and any other
- * source one facet. `accountsOf` says how many accounts each source has.
+ * source one facet. `accounts` lists the accounts that hold things of each
+ * source.
  */
 const buildFacets = (
   rows: ReadonlyArray<FacetRow>,
@@ -429,11 +470,16 @@ const buildFacets = (
     { facet: FacetField; connectionId: string | undefined; rows: Array<FacetRow> }
   >();
   for (const row of rows) {
-    const several = (accounts.get(row.source)?.length ?? 0) > 1;
+    const own = accounts.get(row.source) ?? [];
+    const several = own.length > 1;
     if (several === (row.connection_id === null)) continue;
     const field = facetFields.find((entry) => entry.source === row.source && entry.key === row.key);
     if (field === undefined) continue;
     const connectionId = row.connection_id === null ? undefined : uuidToString(row.connection_id);
+    // An account that holds none of the result's things has no row in the rail.
+    if (connectionId !== undefined && !own.some((entry) => entry.connectionId === connectionId)) {
+      continue;
+    }
     const id = `${row.source}\u0000${row.key}\u0000${connectionId ?? ""}`;
     const entry = byId.get(id) ?? { facet: field, connectionId, rows: [] };
     entry.rows.push(row);
@@ -449,7 +495,10 @@ const buildFacets = (
       const health = parseStoredStatus(row.status).status;
       return {
         value: row.value,
-        label: row.title ?? facet.enumLabels?.get(row.value) ?? row.value,
+        label:
+          row.title ??
+          facet.enumLabels?.get(row.value) ??
+          (facet.contextKind === undefined ? row.value : buildLockedLabel(row.noun)),
         count: row.n,
         ...(health === undefined ? {} : { health }),
       };
@@ -474,7 +523,7 @@ const readSourceCounts = (
   SqlError
 > =>
   Effect.map(
-    run<{
+    runStatement<{
       readonly source: string;
       readonly connection_id: Uint8Array | null;
       readonly label: string | null;
@@ -482,11 +531,11 @@ const readSourceCounts = (
     }>(
       sql,
       `WITH ${matched.sql}
-       SELECT ${SOURCE_OF_KIND_SQL.replaceAll("e.kind", "m.kind")} AS source, NULL AS connection_id,
+       SELECT ${buildSourceOfKindSql("m")} AS source, NULL AS connection_id,
          NULL AS label, COUNT(*) AS n
        FROM matched m GROUP BY source
        UNION ALL
-       SELECT ${SOURCE_OF_KIND_SQL.replaceAll("e.kind", "m.kind")} AS source, o.connection_id,
+       SELECT ${buildSourceOfKindSql("m")} AS source, o.connection_id,
          c.label, COUNT(DISTINCT m.ref) AS n
        FROM matched m JOIN external_entity_observations o ON o.ref = m.ref AND ${OBSERVING_SQL}
          JOIN connections c ON c.id = o.connection_id
@@ -558,7 +607,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     if (refs.length === 0) return Effect.succeed(new Map());
     const own = buildAsksOfRefs(refs, environment.now, environment.askingKinds);
     return Effect.map(
-      run<AskRow>(
+      runStatement<AskRow>(
         sql,
         `WITH ${own.sql},
           page_asks AS (
@@ -588,6 +637,26 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     );
   };
 
+  /**
+   * Reads which of `refs` the user took on: the ones whose active Task link
+   * has a `taken_at`. One statement. It is apart from the page statement
+   * because joining it there changes the plan of a narrowed page for the worse.
+   */
+  const readTakenRefs = (
+    refs: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlySet<string>, SqlError> => {
+    if (refs.length === 0) return Effect.succeed(new Set());
+    const own = buildTakenOfRefs(refs);
+    return Effect.map(
+      runStatement<{ readonly ref: string }>(
+        sql,
+        `WITH ${own.sql} SELECT ref FROM taken`,
+        own.params,
+      ),
+      (rows) => new Set(rows.map((row) => row.ref)),
+    );
+  };
+
   /** Builds the things of a page, in the order of `rows`, from the batched reads of their refs. */
   const hydrate = (
     environment: InboxEnvironment,
@@ -597,10 +666,14 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     SqlError
   > =>
     Effect.gen(function* () {
-      const refs = rows.map((row) => row.ref);
-      const entities = yield* readers.readEntities(refs);
+      const entities = yield* readers.readEntities(rows.map((row) => row.ref));
+      // A thing the page statement found can be pruned before this read; it is
+      // left out, as it no longer belongs to the list.
+      const present = rows.filter((row) => entities.has(row.ref));
+      const refs = present.map((row) => row.ref);
       const observations = yield* readers.readObservations(refs);
       const asks = yield* readAsks(environment, refs);
+      const taken = yield* readTakenRefs(refs);
       const openKinds = yield* readers.listOpenKindsByThread(refs, MAX_ENTITY_SIGNALS);
       const fieldValues: ReadonlyMap<string, EntityFieldValues> = yield* withSql(
         readFieldValues(refs, environment.activeEntityKinds),
@@ -609,14 +682,15 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         refs.map((ref) => readers.buildOfferTarget(entities.get(ref)!)),
         environment.kindSources ?? [],
       );
-      const taskIds = rows.flatMap((row) =>
+      const taskIds = present.flatMap((row) =>
         row.task_id === null ? [] : [uuidToString(row.task_id)],
       );
       const liveWorkflows = yield* readers.listLiveWorkflowsOfTasks(taskIds, MAX_LIVE_WORKFLOWS);
+      // Every ask is of a kind the registry declares (`askingKinds`), so it has a noun.
       const nouns = new Map(environment.signalKinds.map((kind) => [kind.kind, kind.noun]));
       const activePluginIds = new Set(environment.activePluginIds);
 
-      const things = rows.map((page): InboxThing => {
+      const things = present.map((page): InboxThing => {
         const row = entities.get(page.ref)!;
         const own = observations.get(page.ref) ?? [];
         const status = parseStoredStatus(row.status as string | null).status;
@@ -628,18 +702,19 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
               .filter((entry) => entry.access === "ok" || entry.concerns !== "[]")
               .map((entry) => uuidToString(entry.connection_id)),
           ),
-        ].sort();
+        ]
+          .sort()
+          .slice(0, MAX_INBOX_ACCOUNTS);
         return {
           id: uuidToString(row.id),
           ref: row.ref,
           kind: row.kind as string,
           noun: row.noun as string,
-          source: readSourceOfKind(row.kind as string),
+          source: parseSourceOfKind(row.kind as string),
           identifier: row.identifier as string,
           title: row.title as string,
           url: row.url as string,
           ...(status === undefined ? {} : { status }),
-          lifecycle: row.lifecycle as InboxThing["lifecycle"],
           access: deriveAccess(own),
           stale: deriveStale(own, activePluginIds),
           observedAt: deriveObservedAt(own, row.first_observed_at),
@@ -649,8 +724,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           asks: found.map((ask) => ({
             id: uuidToString(ask.id),
             kind: ask.kind,
-            noun:
-              nouns.get(ask.kind) ?? ask.kind.slice(ask.kind.indexOf("/") + 1).replaceAll("-", " "),
+            noun: nouns.get(ask.kind)!,
             ...(ask.asker === null ? {} : { asker: ask.asker }),
             say: buildSignalSay(
               {
@@ -667,6 +741,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           openKinds: openKinds.get(page.ref) ?? [],
           ...(page.oldest_ask === null ? {} : { waitingSince: page.oldest_ask }),
           ...(taskId === undefined ? {} : { taskId }),
+          takenOn: taken.has(page.ref),
           liveWorkflows: taskId === undefined ? [] : (liveWorkflows.get(taskId) ?? []),
           ...(row.dismissed_at === null ? {} : { dismissedAt: row.dismissed_at }),
           offerSetId: offers.offerSetIds.get(page.ref)!,
@@ -679,7 +754,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
 
   /**
    * Reads one page of the list of `query`: see `InboxPage`. The statements are
-   * the page (one, and a second count when the page is empty), on the first
+   * the page (one, which also counts the whole result on the first page), on the first
    * page the accounts and the facets, then one read for each kind of detail
    * of the things on the page.
    *
@@ -694,20 +769,23 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     Effect.gen(function* () {
       const list = yield* resolveList(query.list, environment);
       if (query.refs !== undefined && query.cursor !== undefined) {
-        return yield* refuse(["cursor"], "a read by refs takes no cursor. Send one or the other.");
+        return yield* failValidation(
+          ["cursor"],
+          "a read by refs takes no cursor. Send one or the other.",
+        );
       }
       const fields = listDeclaredInboxFields(environment.activeEntityKinds ?? []);
-      const filter = yield* compileOrRefuse(
-        environment,
-        [...list.clauses, ...(query.clauses ?? [])],
-        query.text ?? "",
+      const filter = yield* compileFilterOrFail(environment, {
+        clauses: [...list.clauses, ...(query.clauses ?? [])],
+        text: query.text ?? "",
         fields,
-      );
+        ...(list.source === undefined ? {} : { tie: { source: list.source } }),
+      });
       const hash = hashQuery(query.list, query, list.order);
       let tuple: SortTuple | undefined;
       if (query.cursor !== undefined) {
         const decoded = decodeCursor(query.cursor, hash, list.order);
-        if (typeof decoded === "string") return yield* refuse(["cursor"], decoded);
+        if (typeof decoded === "string") return yield* failValidation(["cursor"], decoded);
         tuple = decoded;
       }
 
@@ -717,7 +795,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       const isFirstPage = query.cursor === undefined && query.refs === undefined;
       const where: CompiledSql =
         query.refs === undefined ? buildKeyset(list.order, tuple) : { sql: "1", params: [] };
-      const rows = yield* run<PageRow>(
+      const rows = yield* runStatement<PageRow>(
         sql,
         `WITH ${matched.sql}
          SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
@@ -728,17 +806,8 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       );
       const more = rows.length > MAX_INBOX_PAGE;
       const pageRows = rows.slice(0, MAX_INBOX_PAGE);
-      const total = !isFirstPage
-        ? undefined
-        : (rows[0]?.total ??
-          (yield* Effect.map(
-            run<{ readonly n: number }>(
-              sql,
-              `WITH ${matched.sql} SELECT COUNT(*) AS n FROM matched`,
-              matched.params,
-            ),
-            (counted) => counted[0]!.n,
-          )));
+      // A first page has no keyset, so it has no rows only when nothing matches.
+      const total = isFirstPage ? (rows[0]?.total ?? 0) : undefined;
       const last = pageRows.at(-1);
       const nextCursor =
         more && last !== undefined && query.refs === undefined
@@ -775,16 +844,37 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     });
 
   /**
-   * Reads the counts of the Inbox: see `InboxCounts`. Counts are of distinct
-   * things. A fixed number of statements: the saved queries, the pins and the
-   * newest arrival together; the sources and accounts; the facet values (only
-   * when some source is not folded and has a facet); the labels of the pins;
-   * and the failing sources.
+   * Reads the counts the sidebar draws: see `InboxCounts`. One statement over
+   * the eligible things.
    */
-  const countInbox = (
+  const countInbox = (environment: InboxEnvironment): Effect.Effect<InboxCounts, SqlError> =>
+    Effect.gen(function* () {
+      const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
+      const [counted] = yield* runStatement<{
+        readonly waiting: number;
+        readonly newest_arrival: number | null;
+      }>(
+        sql,
+        `WITH ${eligible.sql}
+         SELECT COUNT(e.ask_count) AS waiting,
+           MAX(CASE WHEN e.ask_count IS NOT NULL THEN e.arrival_sequence END) AS newest_arrival
+         FROM eligible e`,
+        eligible.params,
+      );
+      return { waiting: counted?.waiting ?? 0, newestArrival: counted?.newest_arrival ?? 0 };
+    });
+
+  /**
+   * Reads what the rail draws: see `InboxOutline`. Counts are of distinct
+   * things. A fixed number of statements: the saved queries and the pins
+   * together; the sources and accounts; the facet values (only when some
+   * source is not folded and has a facet); the records the pins name; and the
+   * failing sources.
+   */
+  const readInboxOutline = (
     environment: InboxEnvironment,
     settings: InboxRailSettings,
-  ): Effect.Effect<InboxCounts, SqlError> =>
+  ): Effect.Effect<InboxOutline, SqlError> =>
     Effect.gen(function* () {
       const declared = listDeclaredInboxFields(environment.activeEntityKinds ?? []);
       const facetFields = listFacetFields(declared);
@@ -793,30 +883,38 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       const matched = buildMatched(environment, everything);
 
       // Every saved query and every pin is one `SUM` over the eligible things.
-      const compileCount = (clauses: ReadonlyArray<InboxClause>): CompiledSql | undefined => {
+      const compileCount = (
+        clauses: ReadonlyArray<InboxClause>,
+        source: string | undefined,
+      ): CompiledSql | undefined => {
         const compiled = compileInboxFilter({
           clauses,
           text: "",
           now: environment.now,
           fields: declared,
+          signalKinds: environment.signalKinds,
+          ...(source === undefined ? {} : { tie: { source } }),
         });
         return "problem" in compiled ? undefined : compiled;
       };
-      const savedCounts = saved.map((query) => compileCount(query.clauses));
+      const savedCounts = saved.map((query) => compileCount(query.clauses, query.source));
       const pinCounts = settings.pins.map((pin) =>
-        compileCount([
-          {
-            key: pin.key,
-            op: "is",
-            value: pin.value,
-            source: pin.source,
-            ...(pin.connectionId === undefined ? {} : { connectionId: pin.connectionId }),
-          },
-        ]),
+        compileCount(
+          [
+            {
+              key: pin.key,
+              op: "is",
+              value: pin.value,
+              source: pin.source,
+              ...(pin.connectionId === undefined ? {} : { connectionId: pin.connectionId }),
+            },
+          ],
+          undefined,
+        ),
       );
       const columns = [...savedCounts, ...pinCounts];
       const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
-      const [counted] = yield* run<Record<string, number | null>>(
+      const [counted] = yield* runStatement<Record<string, number | null>>(
         sql,
         `WITH ${eligible.sql}
          SELECT ${columns
@@ -824,14 +922,11 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
              (compiled, index) =>
                `${compiled === undefined ? "0" : `SUM(CASE WHEN ${compiled.sql} THEN 1 ELSE 0 END)`} AS c${String(index)}`,
            )
-           .concat([
-             "MAX(CASE WHEN e.ask_count IS NOT NULL THEN e.arrival_sequence END) AS newest_arrival",
-           ])
            .join(", ")}
          FROM eligible e`,
         [...eligible.params, ...columns.flatMap((compiled) => compiled?.params ?? [])],
       );
-      const countOf = (index: number): number => counted?.[`c${String(index)}`] ?? 0;
+      const readCountColumn = (index: number): number => counted?.[`c${String(index)}`] ?? 0;
 
       const { sources, accounts } = yield* readSourceCounts(sql, matched);
       const foldedSources = new Set(
@@ -861,29 +956,47 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         (facet) => facet.connectionId === undefined || !foldedAccounts.has(facet.connectionId),
       );
 
-      // A pin on a record shows the record's title, when some Connection can read it.
+      // A pin on a record shows the record's title when some Connection can read
+      // it, and a locked label when none can. A pin on an enum value shows the
+      // value's label. A value that names nothing keeps its stored text.
       const pinRefs = settings.pins.map((pin) => pin.value);
-      const titles =
+      const records =
         pinRefs.length === 0
-          ? new Map<string, string>()
+          ? new Map<string, { readonly title: string | null; readonly noun: string }>()
           : new Map(
-              (yield* run<{ readonly ref: string; readonly title: string }>(
+              (yield* runStatement<{
+                readonly ref: string;
+                readonly noun: string;
+                readonly title: string | null;
+              }>(
                 sql,
-                `SELECT t.ref, t.title FROM external_entities t
-                 WHERE t.ref IN (SELECT value FROM json_each(?)) AND ${READABLE_RECORD_SQL}`,
+                `SELECT t.ref, t.noun, CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title
+                 FROM external_entities t WHERE t.ref IN (SELECT value FROM json_each(?))`,
                 [JSON.stringify(pinRefs)],
-              )).map((row) => [row.ref, row.title]),
+              )).map((row) => [row.ref, { title: row.title, noun: row.noun }]),
             );
-      const failing = yield* run<{ readonly source: string; readonly since: string }>(
+      const buildPinLabel = (pin: InboxRailSettings["pins"][number]): string => {
+        const record = records.get(pin.value);
+        if (record !== undefined) return record.title ?? buildLockedLabel(record.noun);
+        const enumLabel = declared
+          .filter((field) => field.key === pin.key && parseSourceOfKind(field.kind) === pin.source)
+          .flatMap((field) => field.enumValues ?? [])
+          .find((entry) => entry.value === pin.value)?.label;
+        return enumLabel ?? pin.value;
+      };
+      // A Connection's `updated_at` moves with every change to it, so the time
+      // is when the source's failing Connection was last changed, not when it
+      // began to fail.
+      const failing = yield* runStatement<{ readonly source: string; readonly updated_at: string }>(
         sql,
-        `SELECT plugin_id AS source, MIN(updated_at) AS since FROM connections
+        `SELECT plugin_id AS source, MAX(updated_at) AS updated_at FROM connections
          WHERE status IN ('needs-reauth', 'error') GROUP BY plugin_id ORDER BY plugin_id`,
         [],
       );
 
-      const fieldList = new Map<string, InboxCounts["fields"][number]>();
+      const fieldList = new Map<string, InboxOutline["fields"][number]>();
       for (const field of declared) {
-        const source = readSourceOfKind(field.kind);
+        const source = parseSourceOfKind(field.kind);
         const id = `${source}\u0000${field.key}`;
         if (fieldList.has(id)) continue;
         fieldList.set(id, {
@@ -895,14 +1008,14 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           ...(field.currency === undefined ? {} : { currency: field.currency }),
         });
       }
-      const sourceIds = [...new Set([...sources.keys()])].sort();
+      const sourceIds = [...sources.keys()].sort();
       return {
-        savedQueries: saved.map((query: InboxSavedQuery, index) => ({
+        savedQueries: saved.map((query, index) => ({
           id: query.id,
           name: query.name,
           order: query.order,
           ...(query.source === undefined ? {} : { source: query.source }),
-          count: countOf(index),
+          count: readCountColumn(index),
         })),
         sources: sourceIds.map((source) => {
           const folded = foldedSources.has(source);
@@ -923,15 +1036,14 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           ...(pin.connectionId === undefined ? {} : { connectionId: pin.connectionId }),
           key: pin.key,
           value: pin.value,
-          label: titles.get(pin.value) ?? pin.value,
-          count: countOf(saved.length + index),
+          label: buildPinLabel(pin),
+          count: readCountColumn(saved.length + index),
         })),
         fields: [
           ...CORE_INBOX_FIELDS.map(({ key, label, type }) => ({ key, label, type })),
           ...fieldList.values(),
         ],
-        failing: failing.map((row) => ({ source: row.source, since: row.since })),
-        newestArrival: counted?.["newest_arrival"] ?? 0,
+        failing: failing.map((row) => ({ source: row.source, updatedAt: row.updated_at })),
       };
     });
 
@@ -940,6 +1052,15 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
    * `InboxValues`. One statement. Only text, person and enum fields and the
    * core keys `source`, `kind`, `account`, `from` and `signal` have values to
    * suggest; any other key returns none.
+   *
+   * A value is suggested once across sources: its count adds up, and it
+   * names the source that holds most of it. A facet of records suggests only
+   * records some Connection can read, because the others have no title to
+   * type. Enum values and signal kinds are matched by their label in code, as
+   * the labels are not in the database.
+   *
+   * Fails with `Validation` for an unknown saved query or a list the query
+   * cannot answer.
    */
   const suggestInboxValues = (
     environment: InboxEnvironment,
@@ -947,56 +1068,69 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
   ): Effect.Effect<InboxValues, SqlError | Validation> =>
     Effect.gen(function* () {
       const list = yield* resolveList(query.list, environment);
+      // A saved query of a plugin and a source asked for must be the same one.
+      if (list.source !== undefined && query.source !== undefined && list.source !== query.source) {
+        return { values: [] };
+      }
+      const source = query.source ?? list.source;
       const fields = listDeclaredInboxFields(environment.activeEntityKinds ?? []);
-      const compiled = compileInboxFilter({
-        clauses: list.clauses,
-        text: "",
-        now: environment.now,
-        fields,
-        tie: {
-          ...(query.source === undefined ? {} : { source: query.source }),
-          ...(query.connectionId === undefined ? {} : { connectionId: query.connectionId }),
+      const filter = yield* compileFilterOrFail(
+        environment,
+        {
+          clauses: list.clauses,
+          text: "",
+          fields,
+          tie: {
+            ...(source === undefined ? {} : { source }),
+            ...(query.connectionId === undefined ? {} : { connectionId: query.connectionId }),
+          },
         },
-      });
-      if ("problem" in compiled) return yield* refuse(["list"], compiled.problem);
-      const filter = compiled;
+        ["list"],
+      );
       const matched = buildMatched(environment, filter);
       const prefix = `${escapeLike(query.prefix)}%`;
-      const source = SOURCE_OF_KIND_SQL.replaceAll("e.kind", "m.kind");
+      const sourceSql = buildSourceOfKindSql("m");
       const declared = fields.filter(
         (field) =>
           field.key === query.key &&
           (field.type === "text" || field.type === "person" || field.type === "enum") &&
-          (query.source === undefined || readSourceOfKind(field.kind) === query.source),
+          (source === undefined || parseSourceOfKind(field.kind) === source),
       );
 
       let tuples: string | undefined;
       let tupleParams: ReadonlyArray<SqlValue> = [];
       if (declared.length > 0) {
         tuples = `SELECT f.text_value AS value, COALESCE(t.title, f.text_value) AS label,
-            ${source} AS source, m.ref AS ref
+            ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN external_entity_fields f ON f.ref = m.ref AND f.key = ?
             AND f.text_value IS NOT NULL
           LEFT JOIN external_entities t ON t.ref = f.text_value AND ${READABLE_RECORD_SQL}
-          WHERE m.kind IN (SELECT value FROM json_each(?))`;
-        tupleParams = [query.key, JSON.stringify(declared.map((field) => field.kind))];
+          WHERE m.kind IN (SELECT value FROM json_each(?))
+            AND (t.ref IS NOT NULL OR m.kind NOT IN (SELECT value FROM json_each(?)))`;
+        tupleParams = [
+          query.key,
+          JSON.stringify(declared.map((field) => field.kind)),
+          JSON.stringify(
+            declared.filter((field) => field.contextKind !== undefined).map((field) => field.kind),
+          ),
+        ];
       } else if (query.key === "from") {
-        tuples = `SELECT a.asker AS value, a.asker AS label, ${source} AS source, m.ref AS ref
+        tuples = `SELECT a.asker AS value, a.asker AS label, ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN asks a ON a.ref = m.ref WHERE a.asker IS NOT NULL
           UNION
-          SELECT json_extract(e.person, '$.name'), json_extract(e.person, '$.name'), ${source}, m.ref
+          SELECT json_extract(e.person, '$.name'), json_extract(e.person, '$.name'), ${sourceSql}, m.ref
           FROM matched m JOIN external_entities e ON e.ref = m.ref
           WHERE m.oldest_ask IS NULL AND json_extract(e.person, '$.name') IS NOT NULL`;
       } else if (query.key === "source") {
-        tuples = `SELECT ${source} AS value, ${source} AS label, ${source} AS source, m.ref AS ref FROM matched m`;
+        tuples = `SELECT ${sourceSql} AS value, ${sourceSql} AS label, ${sourceSql} AS source, m.ref AS ref FROM matched m`;
       } else if (query.key === "kind") {
-        tuples = `SELECT m.kind AS value, e.noun AS label, ${source} AS source, m.ref AS ref
+        tuples = `SELECT m.kind AS value, e.noun AS label, ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN external_entities e ON e.ref = m.ref`;
       } else if (query.key === "signal") {
-        tuples = `SELECT s.kind AS value, s.kind AS label, ${source} AS source, m.ref AS ref
+        tuples = `SELECT s.kind AS value, s.kind AS label, ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN live_signals s ON s.ref = m.ref`;
       } else if (query.key === "account") {
-        tuples = `SELECT c.label AS value, c.label AS label, ${source} AS source, m.ref AS ref
+        tuples = `SELECT c.label AS value, c.label AS label, ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN external_entity_observations o ON o.ref = m.ref AND ${OBSERVING_SQL}
             JOIN connections c ON c.id = o.connection_id`;
       }
@@ -1007,8 +1141,14 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           (field.enumValues ?? []).map((entry) => [entry.value, entry.label] as const),
         ),
       );
-      const isEnum = declared.some((field) => field.type === "enum");
-      const rows = yield* run<{
+      const signalNouns = new Map(
+        query.key === "signal" ? environment.signalKinds.map((kind) => [kind.kind, kind.noun]) : [],
+      );
+      // The label of these values is not in the database, so the prefix is
+      // matched here, and the statement returns every value to match.
+      const labelledInCode =
+        declared.some((field) => field.type === "enum") || query.key === "signal";
+      const rows = yield* runStatement<{
         readonly value: string;
         readonly label: string;
         readonly source: string;
@@ -1016,22 +1156,27 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       }>(
         sql,
         `WITH ${matched.sql},
-          tuples AS (${tuples})
-         SELECT value, MIN(label) AS label, source, COUNT(DISTINCT ref) AS n FROM tuples
-         ${isEnum ? "" : "WHERE label LIKE ? ESCAPE '\\'"}
-         GROUP BY source, value ORDER BY n DESC, label COLLATE NOCASE, value
+          tuples AS (${tuples}),
+          per_source AS (
+            SELECT value, MIN(label) AS label, source, COUNT(DISTINCT ref) AS n FROM tuples
+            ${labelledInCode ? "" : "WHERE label LIKE ? ESCAPE '\\'"}
+            GROUP BY source, value),
+          merged AS (
+            SELECT value, label, source,
+              SUM(n) OVER (PARTITION BY lower(value)) AS total,
+              ROW_NUMBER() OVER (PARTITION BY lower(value) ORDER BY n DESC, source) AS rn
+            FROM per_source)
+         SELECT value, label, source, total AS n FROM merged WHERE rn = 1
+         ORDER BY total DESC, label COLLATE NOCASE, value
          LIMIT ?`,
         [
           ...matched.params,
           ...tupleParams,
-          ...(isEnum ? [] : [prefix]),
-          isEnum ? 1000 : MAX_INBOX_SUGGESTIONS,
+          ...(labelledInCode ? [] : [prefix]),
+          labelledInCode ? MAX_LABELLED_IN_CODE_VALUES : MAX_INBOX_SUGGESTIONS,
         ],
       );
       const lowered = query.prefix.toLowerCase();
-      const signalNouns = new Map(
-        query.key === "signal" ? environment.signalKinds.map((kind) => [kind.kind, kind.noun]) : [],
-      );
       const values = rows
         .map((row) => ({
           value: row.value,
@@ -1041,14 +1186,17 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         }))
         .filter(
           (row) =>
-            !isEnum ||
+            !labelledInCode ||
             row.label.toLowerCase().startsWith(lowered) ||
-            row.value.toLowerCase().startsWith(lowered),
+            row.value
+              .slice(row.value.indexOf("/") + 1)
+              .toLowerCase()
+              .startsWith(lowered),
         )
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
         .slice(0, MAX_INBOX_SUGGESTIONS);
       return { values };
     });
 
-  return { queryInbox, countInbox, suggestInboxValues };
+  return { queryInbox, countInbox, readInboxOutline, suggestInboxValues };
 };

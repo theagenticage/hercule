@@ -778,7 +778,7 @@ const writeLinkedBoard = (input: {
             complete: true,
             observed,
             actor: `plugin:${PLUGIN}`,
-            environment: { now: AT, activePluginIds: [PLUGIN] },
+            environment: { now: AT, activePluginIds: [PLUGIN], askingKinds: [] },
           });
         }
         for (const [index, refs] of input.tasks.entries()) {
