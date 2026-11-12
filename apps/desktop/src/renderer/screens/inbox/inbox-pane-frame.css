@@ -32,6 +32,12 @@
   box-shadow: var(--shadow-3);
   transform: none;
 }
+/* Closed, the pane is not drawn at all, so the text waiting beyond the frame's edge is neither
+   found by a search nor counted as text that is cut off. It cannot slide out visibly: a transition
+   or animation of `visibility` is not allowed (the motion rule keeps to painted properties). */
+.ib-pane.is-stacked:not(.is-open) {
+  visibility: hidden;
+}
 
 /* The head: what the pane shows came from (the caller's line), and the ⋯ menu at the end. */
 .ib-pane-head {

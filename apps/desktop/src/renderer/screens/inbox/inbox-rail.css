@@ -24,12 +24,12 @@
   align-items: center;
   column-gap: 10px;
   width: 100%;
-  height: 30px;
-  padding: 0 8px;
+  min-height: calc(30px + var(--text-size-step));
+  padding: 4px 8px;
   border-radius: var(--r-sm);
   color: var(--muted);
   font-size: var(--t-13);
-  line-height: 18px;
+  line-height: var(--line-18);
   text-align: left;
   transition:
     background var(--dur-1),
@@ -62,10 +62,9 @@
 .ib-rail-row[data-on] .ib-rail-icon {
   color: var(--muted);
 }
+/* A long name wraps instead of being cut, so a larger text size or wider letter spacing loses no letters. */
 .ib-rail-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .ib-rail-account-suffix {
   color: var(--faint);
@@ -75,7 +74,7 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-weight: var(--w-regular);
-  line-height: 16px;
+  line-height: var(--line-16);
   font-variant-numeric: tabular-nums;
   text-align: right;
   transition: opacity var(--m-quick) var(--m-ease);
@@ -212,16 +211,17 @@
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
-  height: 28px;
+  min-height: calc(28px + var(--text-size-step));
   margin: 8px 0 0;
-  padding: 0 8px;
+  padding: 4px 8px;
   color: var(--muted);
   font-size: var(--t-13);
   font-weight: var(--w-regular);
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .ib-rail-value {
-  height: 28px;
+  min-height: calc(28px + var(--text-size-step));
+  padding-block: 4px;
 }
 .ib-rail-value[data-empty] .ib-rail-name {
   color: var(--faint);
