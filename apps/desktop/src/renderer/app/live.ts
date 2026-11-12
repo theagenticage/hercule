@@ -40,7 +40,6 @@ import { useRouter } from "@tanstack/react-router";
 import {
   findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
-  invalidateJoiningRead,
   isAnyLegAffectedByRunPush,
   isAnyLegAffectedByTaskPush,
   queryKeys,
@@ -93,9 +92,9 @@ const invalidateLegReads = (
  * The first segments of the keys whose reads are large and that several pushes
  * of one change all name: the Inbox's pages and outline, the sidebar's counts,
  * and the entity panes. A signal's change pushes `signal`, then
- * `externalEntity`. These keys join a read that is running (see
- * `invalidateJoiningRead`), so the second push does not read the 200-thing
- * page again.
+ * `externalEntity`. A push that arrives while one of their reads is running
+ * cancels it and reads again, so the read always starts after the push and
+ * the list never misses a change.
  */
 const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.inbox()[0],
@@ -136,7 +135,7 @@ export const invalidateForPush = (
 ): void => {
   for (const queryKey of keys) {
     if (SHARED_READ_KEYS.has(queryKey[0] as string)) {
-      invalidateJoiningRead(queryClient, queryKey);
+      void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
     } else {
       invalidateWithoutCancelling(queryClient, queryKey);
     }

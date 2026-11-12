@@ -37,25 +37,6 @@ export const invalidateWithoutCancelling = (queryClient: QueryClient, queryKey: 
   }
 };
 
-/**
- * Invalidates every active query under `queryKey`, and joins a read that is
- * already running instead of cancelling it or reading again after it.
- *
- * Use it for a large read whose several pushes come from one change (a
- * signal's push, then its entity's): the controller sends every push after
- * the change is committed, so a read that started after the first push already
- * sees what the later ones report, and one read answers them all. A push that
- * arrives after the read has finished starts a new read.
- *
- * The price is that a push about a different change, arriving while a read
- * runs, is also joined. Only use it where the reads are large enough for that
- * to be worth it. An inactive query is only marked stale. Returns at once;
- * never fails.
- */
-export const invalidateJoiningRead = (queryClient: QueryClient, queryKey: QueryKey): void => {
-  void queryClient.invalidateQueries({ queryKey, refetchType: "active" }, { cancelRefetch: false });
-};
-
 /** Invalidates one query for a push, as `invalidateWithoutCancelling` describes. */
 const readAfterPush = (queryClient: QueryClient, query: Query): void => {
   const watched = watchedReads.get(query);

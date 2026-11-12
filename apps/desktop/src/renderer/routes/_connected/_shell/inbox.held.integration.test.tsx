@@ -226,7 +226,7 @@ describe("a push", () => {
     expect(readQueries(calls).filter(isFirstPage).length - before).toBe(1);
   });
 
-  it("reads the first page once for the signal push and the entity push of one change, because the second joins the read the first started", async () => {
+  it("reads the first page again for a push that arrives during a read, so the read that answers it starts after the push", async () => {
     const { live, calls, slow } = await openWithSlowFirstPage();
     const before = readQueries(calls).filter(isFirstPage).length;
     slow.on = true;
@@ -240,7 +240,7 @@ describe("a push", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 400));
 
-    expect(readQueries(calls).filter(isFirstPage).length - before).toBe(1);
+    expect(readQueries(calls).filter(isFirstPage).length - before).toBe(2);
   });
 
   it("reads the first page again for a push that arrives after the read finished", async () => {

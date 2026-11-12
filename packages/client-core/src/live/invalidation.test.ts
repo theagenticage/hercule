@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/query-core";
-import { invalidateJoiningRead, invalidateWithoutCancelling } from "./invalidation";
+import { invalidateWithoutCancelling } from "./invalidation";
 
 const KEY = ["tasks"];
 
@@ -182,54 +182,5 @@ describe("invalidateWithoutCancelling", () => {
       { page: 1, version: 1 },
     ]);
     unsubscribe();
-  });
-});
-
-describe("invalidateJoiningRead", () => {
-  it("lets every push that arrives while a read runs join that read, and starts no read after it", async () => {
-    const query = arrangeHeldQuery();
-    await settle();
-    query.held.shift()!.answer();
-    await settle();
-    expect(query.countReads()).toBe(1);
-
-    query.changeVersion(1);
-    invalidateJoiningRead(query.queryClient, KEY);
-    await settle();
-    expect(query.countReads()).toBe(2);
-    invalidateJoiningRead(query.queryClient, KEY);
-    invalidateJoiningRead(query.queryClient, KEY);
-    await settle();
-    // The running read was neither cancelled nor followed by another.
-    expect(query.countReads()).toBe(2);
-    query.held.shift()!.answer();
-    await settle();
-
-    expect(query.readData()).toBe(1);
-    expect(query.countReads()).toBe(2);
-    expect(query.countMostRunning()).toBe(1);
-    query.stop();
-  });
-
-  it("starts a new read for a push that arrives after the read finished", async () => {
-    const query = arrangeHeldQuery();
-    await settle();
-    query.held.shift()!.answer();
-    await settle();
-
-    query.changeVersion(1);
-    invalidateJoiningRead(query.queryClient, KEY);
-    await settle();
-    query.held.shift()!.answer();
-    await settle();
-    query.changeVersion(2);
-    invalidateJoiningRead(query.queryClient, KEY);
-    await settle();
-    query.held.shift()!.answer();
-    await settle();
-
-    expect(query.countReads()).toBe(3);
-    expect(query.readData()).toBe(2);
-    query.stop();
   });
 });
