@@ -22,7 +22,8 @@ describe("WeighedShardSequencer", () => {
 
   it("weighs each file by its recorded run time, and puts every file in exactly one shard", async () => {
     // The heaviest file outweighs the three lightest together, so it gets a
-    // shard of its own. Split by name, as when no weight is found, it would not.
+    // shard of its own. With no weight found, every file would weigh the same and
+    // the heaviest would share its shard.
     const [heaviest, ...others] = Object.entries(readTestShardWeights())
       .toSorted(([, a], [, b]) => b - a)
       .map(([key]) => key);

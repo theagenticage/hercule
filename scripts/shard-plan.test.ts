@@ -26,6 +26,11 @@ describe("planShards", () => {
     ]);
   });
 
+  it("spreads files that weigh the same over every shard, as when no weight is recorded", () => {
+    const files = ["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts", "e.test.ts"];
+    expect(planShards(files, {}, 3).map((shard) => shard.length)).toEqual([2, 2, 1]);
+  });
+
   it("refuses a shard count that is not a positive whole number", () => {
     expect(() => planShards(["a.test.ts"], {}, 0)).toThrow(/positive whole number/);
     expect(() => planShards(["a.test.ts"], {}, 1.5)).toThrow(/positive whole number/);

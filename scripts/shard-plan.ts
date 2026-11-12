@@ -24,8 +24,10 @@ function computeMedian(numbers: ReadonlyArray<number>): number {
  * record, such as one added since the weights were refreshed, weighs the
  * median of the recorded ones: neither free nor assumed long. Files are placed
  * longest first, each into the shard with the least weight so far, which
- * keeps the shards close to equal. Ties break by file name, so the same
- * input always gives the same shards.
+ * keeps the shards close to equal. Between shards of equal weight, the one
+ * with the fewest files wins, so files that weigh nothing, or that all weigh
+ * the same, are spread over every shard. Ties between files break by name,
+ * so the same input always gives the same shards.
  *
  * Every file is in exactly one shard, whatever the weights say: a file the
  * weights do not know is planned, and a weight for a file that is gone is
@@ -48,7 +50,12 @@ export function planShards(
 
   const shards = Array.from({ length: count }, () => ({ weight: 0, files: [] as Array<string> }));
   for (const { file, weight } of weighed) {
-    const lightest = shards.reduce((least, shard) => (shard.weight < least.weight ? shard : least));
+    const lightest = shards.reduce((least, shard) =>
+      shard.weight < least.weight ||
+      (shard.weight === least.weight && shard.files.length < least.files.length)
+        ? shard
+        : least,
+    );
     lightest.weight += weight;
     lightest.files.push(file);
   }
