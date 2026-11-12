@@ -27,36 +27,80 @@ window.Menus = (function () {
     el.style.top = top + "px";
   }
 
-  /** Opens the menu of workflows a thing can be handed to, anchored to its row or the pane's button. */
+  // Past this many workflows that can take the thing, the menu gets a field to find one by name.
+  var FIND_FROM = 6;
+
+  /**
+   * Opens the menu of workflows a thing can be handed to, anchored to its row or the pane's button.
+   * The workflows come best fit first (Model.offersFor), each with its face, its name and what it would
+   * end. With many, a field at the top finds one by name or by what it does.
+   */
   function hand(t, button) {
     var el = document.getElementById("handmenu");
     var offers = Model.offersFor(t);
     var ok = offers.filter(function (o) { return !o.off; });
     var off = offers.filter(function (o) { return o.off; });
+    var finds = ok.length >= FIND_FROM;
+    // A list found by typing is a listbox the field controls; a short list is a menu of items.
+    var item = finds ? 'role="option"' : 'role="menuitem" tabindex="-1"';
     // The workflows are the menu; the account picker sits after it, outside the menu, which may hold
     // only its items.
-    el.innerHTML = '<p class="hand-menu-heading" id="hand-h">Hand to</p><div role="menu" aria-labelledby="hand-h">' + ok.map(function (o, i) {
-      return '<button type="button" role="menuitem" tabindex="-1" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '" aria-label="' + D.esc(o.w.name + ". " + o.line) + '" aria-keyshortcuts="' + (i + 1) + '"><span aria-hidden="true">' + D.face(o.w.name, "idle", 28) + '</span><span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? '<kbd aria-hidden="true">' + (i + 1) + "</kbd>" : "") + "</button>";
-    }).join("") +
-      (off.length ? '<i class="hand-menu-line" role="separator"></i>' + off.map(function (o) { return '<div role="menuitem" aria-disabled="true" tabindex="-1" class="hand-row">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "") +
+    el.innerHTML = '<p class="hand-menu-heading" id="hand-h">Hand to</p>' +
+      (finds ? '<div class="lt-field hand-find">' + D.icon("search", 14) + '<input id="hand-find" role="combobox" aria-expanded="true" aria-controls="hand-list" aria-autocomplete="list" aria-activedescendant="hand-o0" aria-labelledby="hand-h" placeholder="Find a workflow" autocomplete="off"></div>' : "") +
+      '<div id="hand-list" role="' + (finds ? "listbox" : "menu") + '" aria-labelledby="hand-h">' + ok.map(function (o, i) {
+        return '<button type="button" ' + item + ' id="hand-o' + i + '" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '" data-find="' + D.esc((o.w.name + " " + o.w.line).toLowerCase()) + '" aria-label="' + D.esc(o.w.name + ". " + o.line) + '" aria-keyshortcuts="' + (i + 1) + '"><span aria-hidden="true">' + D.face(o.w.name, "idle", 28) + '</span><span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? '<kbd aria-hidden="true">' + (i + 1) + "</kbd>" : "") + "</button>";
+      }).join("") + (finds ? '<p class="lt-none" hidden>No workflow by that name. Esc closes.</p>' : "") +
+      (off.length ? '<i class="hand-menu-line" role="separator"></i>' + off.map(function (o) { return '<div ' + (finds ? 'role="option"' : 'role="menuitem" tabindex="-1"') + ' aria-disabled="true" class="hand-row" data-find="' + D.esc(o.w.name.toLowerCase()) + '">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "") +
       '</div><label class="hand-account hand-acct"><span>as</span><select aria-label="Account to act as"><option>northwind-bot</option><option>northwind-release</option></select></label>';
+    el.classList.toggle("is-finding", false);
     el.hidden = false;
     var row = App.el.list.querySelector('[data-id="' + t.id + '"] .row-time');
     place(el, button && button.getBoundingClientRect ? button : row || App.el.pane);
     // The pane's hand-off button says its menu is open, however the menu was opened.
     var trigger = document.querySelector('#pane [data-move="hand"][aria-haspopup]');
     if (trigger) trigger.setAttribute("aria-expanded", "true");
-    open = { el: el, kind: "hand", active: 0, n: ok.length, back: document.activeElement, trigger: trigger, pick: function (i) { close(); Moves.handTo(t, ok[i]); } };
+    open = { el: el, kind: "hand", active: 0, n: ok.length, back: document.activeElement, trigger: trigger, find: finds ? el.querySelector("#hand-find") : null, pick: function (i) { close(); Moves.handTo(t, ok[i]); } };
     el.onclick = function (e) { var b = e.target.closest("[data-hand-row]"); if (b) open.pick(+b.dataset.handRow); };
     el.onpointermove = function (e) { var b = e.target.closest("[data-hand-row]"); if (b) setActive(+b.dataset.handRow); };
-    el.querySelector(".hand-row").focus({ preventScroll: true });
+    if (open.find) {
+      open.find.addEventListener("input", findWorkflows);
+      open.find.focus({ preventScroll: true });
+    } else el.querySelector(".hand-row").focus({ preventScroll: true });
     if (!Motion.isReduced()) Motion.animate(el, [{ opacity: 0, transform: "translateY(-4px) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
   }
+
+  /** Shows only the workflows whose name or line holds what is typed, with the first of them highlighted. */
+  function findWorkflows() {
+    var q = open.find.value.trim().toLowerCase();
+    open.el.classList.toggle("is-finding", !!q);
+    var first = -1;
+    open.el.querySelectorAll(".hand-row").forEach(function (r) {
+      var hit = !q || r.dataset.find.indexOf(q) >= 0;
+      r.hidden = !hit;
+      if (hit && first < 0 && r.dataset.handRow != null) first = +r.dataset.handRow;
+    });
+    open.el.querySelector(".lt-none").hidden = first >= 0;
+    var line = open.el.querySelector(".hand-menu-line");
+    if (line) line.hidden = !!q;
+    setActive(first);
+  }
+  /** Returns the hand-off rows that can be picked and are shown, in order. */
+  function shownRows() {
+    return Array.prototype.slice.call(open.el.querySelectorAll("[data-hand-row]")).filter(function (r) { return !r.hidden; });
+  }
+
   function setActive(i) {
     if (!open) return;
     open.active = i;
-    // The pointer and the focus are one place, so ↩ picks the row under the pointer.
-    open.el.querySelectorAll("[data-hand-row]").forEach(function (b, j) { b.classList.toggle("is-active", j === i); if (j === i) b.focus({ preventScroll: true }); });
+    // The pointer and the focus are one place, so ↩ picks the row under the pointer. With the find
+    // field, the focus stays in the field and the field points at the row.
+    open.el.querySelectorAll("[data-hand-row]").forEach(function (b) {
+      var on = +b.dataset.handRow === i;
+      b.classList.toggle("is-active", on);
+      if (open.find) b.setAttribute("aria-selected", String(on));
+      else if (on) b.focus({ preventScroll: true });
+    });
+    if (open.find) { if (i >= 0) open.find.setAttribute("aria-activedescendant", "hand-o" + i); else open.find.removeAttribute("aria-activedescendant"); }
   }
 
   /** Opens Link to…: a search over the Inbox for the thing to link this one to. */
@@ -137,8 +181,18 @@ window.Menus = (function () {
     // it keeps its own keys. The page never sees them.
     var picker = open.kind === "hand" && open.el.querySelector("select");
     if (picker && e.key === "Tab" && open.el.contains(document.activeElement)) {
-      (document.activeElement === picker ? open.el.querySelector("[data-hand-row].is-active") : picker).focus({ preventScroll: true });
+      (document.activeElement === picker ? open.find || open.el.querySelector("[data-hand-row].is-active") : picker).focus({ preventScroll: true });
       return true;
+    }
+    // In the find field the arrows move the highlight, ↩ hands to it, and the digits pick while
+    // nothing is typed; every other key types.
+    if (open.find && document.activeElement === open.find) {
+      var rows = shownRows(), at = rows.findIndex(function (r) { return +r.dataset.handRow === open.active; });
+      if (e.key === "Escape") { close(); return true; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { var to = rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]; if (to) { setActive(+to.dataset.handRow); to.scrollIntoView({ block: "nearest" }); } return true; }
+      if (e.key === "Enter") { if (open.active >= 0) open.pick(open.active); return true; }
+      if (/^[1-3]$/.test(e.key) && !open.find.value && +e.key <= open.n) { open.pick(+e.key - 1); return true; }
+      return "own";
     }
     if (picker && document.activeElement === picker) { if (e.key === "Escape") { close(); return true; } return "own"; }
     // A menu handles keys only while the focus is in it; Tab, or the focus going anywhere else, closes it.

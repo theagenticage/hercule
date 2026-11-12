@@ -48,6 +48,8 @@ window.Scenes = (function () {
   var AFTER = {
     "pr-second": function () { when('#pane [data-sig-fold="s2"]', function (b) { b.click(); }); },
     hand: function () { App.state.open.add("g:shop-142"); App.render({}); App.focusRow("m:shop-142:pr-6244"); Moves.handOff(document.querySelector("#pane .pn-move--hand")); },
+    "hand-many": function () { Object.assign(World.WORKFLOWS, World.MORE_WORKFLOWS); App.state.open.add("g:shop-142"); App.render({}); App.focusRow("m:shop-142:pr-6244"); Moves.handOff(document.querySelector("#pane .pn-move--hand")); },
+    "hand-find": function () { Object.assign(World.WORKFLOWS, World.MORE_WORKFLOWS); App.state.open.add("g:shop-142"); App.render({}); App.focusRow("m:shop-142:pr-6244"); Moves.handOff(document.querySelector("#pane .pn-move--hand")); when("#hand-find", function (f) { f.value = "rev"; f.dispatchEvent(new Event("input")); }); },
     linkto: function () { App.focusRow("r:pr-6213"); Moves.linkKey(); },
     narrowmenu: function () { var b = document.querySelector("[data-narrow]"); Bar.narrow(b); var f = document.querySelector('#narrow [data-nf="linear|project"]'); if (f) f.click(); },
     searchmenu: function () { var i = document.getElementById("sx-input"); i.focus(); i.value = "team:"; i.dispatchEvent(new Event("input")); },

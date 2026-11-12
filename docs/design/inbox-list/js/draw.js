@@ -117,12 +117,14 @@ window.Draw = (function () {
    */
   function reason(t) {
     var a = Model.askingSignals(t).slice().sort(function (x, y) { return x.at - y.at; });
-    if (t.held) return t.held.by === "you" ? "You took it on" : esc(t.held.by) + " has it";
+    // A workflow that has a thing may leave an ask open: the ask is the reason, and who has the rest follows.
+    if (t.held && !(t.held.workflow && a.length)) return t.held.by === "you" ? "You took it on" : esc(t.held.by) + " has it";
+    var also = t.held ? ' <span class="held-by">· ' + esc(t.held.by) + " has the rest</span>" : "";
     if (a.length) {
       var s = a[0];
       var text = esc(saySignal(s, t));
       if (s.by && text.indexOf(esc(s.by)) === 0) text = '<b class="who">' + esc(s.by) + "</b>" + text.slice(esc(s.by).length);
-      return text + (a.length > 1 ? ' <span class="more" title="' + (a.length - 1) + ' more ask on it">+' + (a.length - 1) + "</span>" : "");
+      return text + (a.length > 1 ? ' <span class="more" title="' + (a.length - 1) + ' more ask on it">+' + (a.length - 1) + "</span>" : "") + also;
     }
     if (t.note) return esc(t.note);
     var w = statusWord(t);

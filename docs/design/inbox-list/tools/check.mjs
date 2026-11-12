@@ -836,6 +836,49 @@ for (const w of [960, 1024, 1100]) {
   await p.close();
 }
 
+// ---- Rogier's questions, 2026-11-12: hand-off by name, asks a workflow leaves, the group's chevron ----
+{
+  const p = await open("theme=whitehaven&scene=hand");
+  await settle(p, 900);
+  await expect(p, "the hand-off menu puts the workflows that end an ask first, each naming whose asks it ends and leaves", () => { const rows = [...document.querySelectorAll("#handmenu [data-hand-row] small")].map((s) => s.textContent); return /^Ends Mei’s review request\. Leaves Omar’s mention with you\.$/.test(rows[0]) && /^Ends none/.test(rows[rows.length - 1]); });
+  await key(p, "1");
+  await settle(p, 1600);
+  await expect(p, "an ask the workflow leaves keeps the thing in Someone waits on me, saying who has the rest", () => { const r = App.state.rows.find((x) => x.thing && x.thing.id === "pr-6244"); return !!r && /Omar mentioned you · Review PR has the rest/.test(document.querySelector('[data-key="' + r.key + '"] .row-why').textContent); });
+  await expect(p, "and the undo line says so", () => /Omar’s mention stays with you/.test(document.querySelector("#undo .undo-text").textContent));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=hand-many");
+  await settle(p, 900);
+  await expect(p, "with six or more workflows the menu has a find field with the focus", () => document.activeElement && document.activeElement.id === "hand-find");
+  await p.keyboard.type("migr");
+  await settle(p, 150);
+  await expect(p, "the find field keeps only the workflows whose name or work holds what is typed", () => [...document.querySelectorAll("#handmenu [data-hand-row]")].filter((r) => !r.hidden).map((r) => r.querySelector("b").textContent).join() === "Check the migration");
+  await key(p, "Enter");
+  await settle(p, 400);
+  await expect(p, "↩ hands to the one found", () => Model.byId("pr-6244").held && Model.byId("pr-6244").held.by === "Check the migration");
+  await p.close();
+}
+for (const w of [640, 420, 360]) {
+  const p = await open("theme=whitehaven&scene=sentry");
+  await p.evaluate((w) => App.setPaneWidth(w), w);
+  await settle(p, 200);
+  await expect(p, `at a ${w}px pane the hand-off shows the workflow's whole name`, () => { const t = document.querySelector('#pane [data-move="hand"] .pn-move-t'); return !!t && t.getClientRects().length > 0 && t.textContent === "Triage errors" && t.scrollWidth <= t.clientWidth + 1; });
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=group");
+  await settle(p, 300);
+  const g = await p.evaluate(() => { const r = document.querySelector(".row--group").getBoundingClientRect(); return { x: r.left + 20, y: r.top }; });
+  const hit = (dy) => p.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e.closest("[data-tick]") ? "tick" : e.closest("[data-fold-group]") ? "fold" : "row"; }, [g.x, g.y + dy]);
+  if ((await hit(17)) !== "tick") fail("a group's first line selects it");
+  if ((await hit(38)) !== "fold") fail("a group's second line holds the chevron, apart from the tick");
+  await p.mouse.click(g.x, g.y + 38);
+  await settle(p, 500);
+  await expect(p, "a click on a group's chevron unfolds it", () => document.querySelector(".row--group").classList.contains("is-open") && App.state.selection.size === 0);
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

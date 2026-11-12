@@ -30,9 +30,18 @@ window.World = (function () {
   // The workflows that can take things, with what each answers. Faces are drawn from the name.
   var WORKFLOWS = {
     review: { name: "Review PR", line: "Reviews the change and leaves its notes as a draft review", takes: ["github/pull-request"], ends: ["review"] },
+    answer: { name: "Answer a code question", line: "Reads the code it is asked about and drafts your answer in the thread", takes: ["github/pull-request"], ends: ["mention"] },
     fixcheck: { name: "Fix a failing check", line: "Reproduces the failure and pushes a fix to the branch", takes: ["github/pull-request"], ends: ["checks"], when: "failing" },
     triage: { name: "Triage errors", line: "Finds the cause and the change that brought it", takes: ["sentry/issue"], ends: ["regressed"] },
     reply: { name: "Draft a reply", line: "Drafts an answer for you to send", takes: ["gmail/thread"], ends: [] },
+  };
+
+  // More workflows for a pull request, which the "hand-many" scene adds to show a long hand-off menu.
+  var MORE_WORKFLOWS = {
+    security: { name: "Security review", line: "Checks the change for secrets, injection and unsafe defaults", takes: ["github/pull-request"], ends: ["review"] },
+    split: { name: "Split the pull request", line: "Proposes smaller pull requests that land one by one", takes: ["github/pull-request"], ends: [] },
+    notes: { name: "Write the release note", line: "Drafts the release note from the change and its issue", takes: ["github/pull-request"], ends: [] },
+    migration: { name: "Check the migration", line: "Runs the migration against a copy of production data", takes: ["github/pull-request"], ends: [] },
   };
 
   function msg(author, at, text, you) { return { author: author, at: at, text: text, you: !!you }; }
@@ -383,7 +392,7 @@ window.World = (function () {
   return {
     SETTINGS: SETTINGS,
     ACCOUNTS: ACCOUNTS,
-    WORKFLOWS: WORKFLOWS,
+    WORKFLOWS: WORKFLOWS, MORE_WORKFLOWS: MORE_WORKFLOWS,
     projects: function (load) { return load === "extreme" ? PROJECTS.concat(PROJECTS_EXTREME) : PROJECTS; },
     build: function (load) { return load === "light" ? buildLight() : load === "extreme" ? buildExtreme() : buildNormal(); },
     arrivals: function () {

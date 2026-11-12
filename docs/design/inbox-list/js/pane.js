@@ -84,7 +84,9 @@ window.Pane = (function () {
     var offers = Model.offersFor(t).filter(function (o) { return !o.off; });
     if (!offers.length) return "";
     var one = offers.length === 1;
-    var label = '<span class="pn-faces" aria-hidden="true">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">' + (one ? D.esc(offers[0].w.name) : "Hand to…") + "</span>";
+    // With several, the faces of the first three, best fit first, so the button never reads as one of them.
+    var faces = offers.slice(0, one ? 1 : 3).map(function (o) { return D.face(o.w.name, "idle", 18); }).join("");
+    var label = '<span class="pn-faces" aria-hidden="true">' + faces + '</span><span class="pn-move-t">' + (one ? D.esc(offers[0].w.name) : "Hand to…") + "</span>";
     return move("hand", label, "H", " pn-move--hand", false, one ? "Hand to " + offers[0].w.name : "Hand to…", one ? "" : ' aria-haspopup="menu" aria-expanded="false"');
   }
 

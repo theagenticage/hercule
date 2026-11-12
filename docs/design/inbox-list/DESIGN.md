@@ -100,7 +100,7 @@ A row is two lines in 52px: 18 and 16 with 2 between and 8 above and below. Text
 
 - **Current row**: a puck under the list with the `--selected` fill and a short 2px edge on its left, so it is told by shape too. Rows move into it; it does not move with them. With the keyboard, a 2px focus ring inside the row.
 - **Hover**: the `--hover` fill, and the row's moves at its right end, over the wait and the place on their own ground: Start a thread, Take on, the hand-off's face, Dismiss. Each tooltip names its key. Over the mark, the mark makes way for a tick.
-- **Selected (X)**: the tick stays, filled in ink. X on a group picks the members the list's query holds, ⇧X the whole group, and the group then shows the tick in its chevron's place. ⌘A picks what the list shows. The fill stays for the current row alone.
+- **Selected (X)**: the tick stays, filled in ink. X on a group picks the members the list's query holds, ⇧X the whole group, and the group then shows the tick in its link glyph's place. ⌘A picks what the list shows. The fill stays for the current row alone.
 - **Quiet**: a row that asks nothing has its reason faint.
 
 The list head says what the list is, its count, the saved query's order in words, and **Narrow**. The order belongs to the saved query ("Longest waiting first", "Newest first"), so there is no sort control.
@@ -109,7 +109,7 @@ The list head says what the list is, its count, the saved query's order in words
 
 Every set of things linked to each other, by a source or a person, is one group (decisions 9 to 11).
 
-- **Closed**: one row. A chevron in the mark column, the group's label as the title, the longest wait among what asks. The second line has a link glyph, the most pressing ask with `+n` for the others, and on the right the marks of its sources and its count of things.
+- **Closed**: one row. A link glyph in the mark column, which turns into the tick under the pointer as every row's mark does; the group's label as the title; the longest wait among what asks. The second line has the chevron in the glyph column, where a thing has its status, then the most pressing ask with `+n` for the others, and on the right the marks of its sources and its count of things. Selecting (the first line's lead) and unfolding (the second line's chevron) are two targets, each 24px tall.
 - **Open**: its members hang under it on a hairline from the chevron, indented to the title, each a full row. Members that do not answer the current query are drawn quieter, so the group stays whole and the query still reads.
 - **Large**: a group of more than seven shows five and a row "Show 9 more in this group". The pane lists every member.
 - **Its label** is its most lasting thing's title, the oldest on a tie (`lasting` in the kind's declaration). Nobody renames it.
@@ -136,7 +136,7 @@ Top to bottom, each part only when it has something:
 6. **The plugin's blocks**: text, messages, change, checks, fields, trend and code, at most eight. A type the app does not know draws "This part can't be shown here."
 7. **Linked**: what it is linked to, each with who claims it ("Linear reports this", "You linked this") and, for a person's link, Unlink on hover.
 8. **What happened**: the timeline, newest first.
-9. **The footer**: the core's moves, each with its key. Thread (N), Take on (T), the hand-off (H: the workflow's face, and from 460px its name), then Link (L) and Dismiss (E) as icon buttons at the end. Under 400px each move is an icon, with its name and key in the tooltip. The selection's pane uses the same words. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
+9. **The footer**: the core's moves, each with its key. Thread (N), Take on (T), the hand-off (H: the workflow's face and its name, or with several the first three faces and "Hand to…"), then Link (L) and Dismiss (E) as icon buttons at the end. The hand-off always shows its whole name: under 460px it comes first and Thread and Take on become icons, under 400px the key hints go to the tooltips, and a name too long even then keeps its line while the icons wrap under it. The selection's pane uses the same words. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
 
 The pane of a group lists its members (each walks to the member), then how they are linked, each pair with its claim. Its footer has Start a thread on all, Take on, Link and Dismiss. It has no hand-off (decision 14), and H says why in the undo line.
 
@@ -154,7 +154,7 @@ The pane of a group lists its members (each walks to the member), then how they 
 | L | Link to…: a search for the thing to link it to | Link another thing to the group | Links them all |
 | N | Start a thread | On all of it, named after the group | On all of them |
 | T | Take on: one Task | One Task, named after the group | One Task |
-| H | Hand off: at once with one workflow, the menu with several | Refuses, with the reason | Refuses, with the reason |
+| H | Hand off: at once with one workflow, the menu with several (best fit first; from six, a field finds one) | Refuses, with the reason | Refuses, with the reason |
 | E | Dismiss | The whole group, one undo | All of them, one undo |
 | G | Go to its Task | | |
 | / | Search; F narrows | | |
@@ -209,7 +209,7 @@ N opens the app's glass dialog around the real composer of the new-thread screen
 | N new | A solid pill in the list head, beside the count: a marigold dot, "3 new", "Show ." It covers no row, and holds back what arrived until you ask |
 | Light day | Five things; the list is short, nothing else changes |
 | 2,400 things | The same page; counts in grouped tabular figures; Browse lists five values and "34 more"; triage keeps three at the top |
-| Under 1330px | The rail is a menu in the bar ("Someone waits on me ▾") that opens with the focus on the current entry; the list keeps at least 400px; under a 400px pane each move is an icon |
+| Under 1330px | The rail is a menu in the bar ("Someone waits on me ▾") that opens with the focus on the current entry; the list keeps at least 400px; under a 460px pane the hand-off comes first with its name, and Thread and Take on are icons |
 | Nothing current | Empty lists, all clear, nothing matching: the pane steps aside and the list takes the room |
 
 ## Colour
@@ -314,15 +314,25 @@ Each is a choice the map left open, made for the best design. Each can be turned
 58. **After a move, the selection keeps only what the list still shows.** A thing handed off, answered or taken into a thread leaves the selection at once, so the next key never acts on something out of sight.
 59. **The "N new" pill counts only what arrived for the list on screen**; arrivals for other lists show in the rail's counts, and the announcement says where they went.
 60. **⌘Z on a thread started from a Proposal** brings the Proposal back to Triage, current, as ⌘Z on T does.
+61. **A hand-off always names who gets the thing.** The footer's hand-off keeps the workflow's face and whole name at every pane width; the other moves become icons first. A row's hover buttons name it too. Never a face alone: with dozens of workflows in the app, the name is what tells them apart.
+62. **The hand-off menu ranks by fit**: the workflows that end every open ask first, then those that end some, then those that end none; among equals, the one last used for this kind of thing first. Each says whose asks it ends and whose it leaves with you: "Ends Mei’s review request. Leaves Omar’s mention with you."
+63. **From six workflows, the menu has a find field**, with the focus, matching a workflow's name and what it does. 1 to 3 still pick while nothing is typed; ↑ ↓ and ↩ pick from what is found.
+64. **With several workflows, the hand-off button shows the first three faces** and "Hand to…", so it never reads as one of them.
+65. **A hand-off ends only the asks its workflow declares.** An ask it leaves keeps the thing in "Someone waits on me": the row says "Omar mentioned you · Review PR has the rest", shows the wait of that ask, and the undo line says "Omar’s mention stays with you". A thing you take on yourself waits on nobody.
+66. **A group's chevron sits on its second line**, in the glyph column; its first line's lead selects, as on every row.
 
 ## Proposed changes to #1119
 
-The drawing keeps every decision. Four would read better changed:
+The drawing keeps every decision. Five would read better changed:
 
 1. **Decision 15 to 17, the pane's order**: "Where it is from, the title, one section per open signal, then the plugin's blocks, then the core's sections." It is drawn this way (call 1).
 2. **Decision 7, "things you handle leave at once"**: "leave as soon as the move's motion ends", so a hand-off can show the colleague taking it before the row goes.
 3. **Fog, group size**: settle it as "an open group shows up to seven members; past that five and Show N more; the pane lists all".
 4. **Decision 16, answers**: "an answer that acts on the source is held for the undo window before it is sent". This touches `signal.act` (spec 10 §9.4, spec 20): the controller, or the client, waits eight seconds, and ⌘Z cancels. It is what makes ↩ safe as the suggested answer's key.
+
+5. **Decision 2, "Someone waits on me"**: say what a hand-off does to it. Drawn: a thing handed to a workflow stays while an ask the workflow does not end is open (call 65). Today the drawing's query reads "asks, and nobody has it"; the map leaves it open, and without this rule Omar's mention would leave the list with the pull request handed to Review PR.
+
+For spec 17's hand-off menu (HandToMenu), outside #1119: rank by fit (call 62), add the find field from six workflows (call 63), name each ask in the line ("Ends Mei’s review request. Leaves Omar’s mention with you."), and show several faces on the button (call 64). The menu was drawn unchanged until Rogier asked what happens with many workflows.
 
 One for the app, outside #1119: the hand-off menu's account picker (`screens/inbox/hand-account.css`) draws the browser's own select border, which no other control in the app has. The drawing draws it without.
 
@@ -362,9 +372,13 @@ Each round reviewed a frozen copy under `/tmp` with critics working apart. Round
 
 How the rounds went: one found 95 issues; two to four the long tail at narrow widths and around undo; five to nine fewer each time, mostly at the edges of the previous round's fixes. By the end `tools/check.mjs` held about 125 checks, one or more for every fix.
 
+**After the rounds**, Rogier asked three questions, answered by one more fix round, checked in `tools/check.mjs` and by eye, not by a panel: what the hand-off does with many workflows (calls 62 to 64), what it does with two different asks on one pull request (call 65), and why a group could not be unfolded with the pointer: the tick sat on the chevron (call 66). He also asked that a hand-off never be only a face (call 61).
+
 ## Tried and dropped
 
 - **Shortening the last token with an ellipsis** when it alone did not fit. At 1024px it read `project: C…`, which says nothing; folding it into +N, with the tokens in its tooltip, says more.
+- **The hand-off as only its face under 460px**, its name in the tooltip. With dozens of workflows a face does not say who gets the thing; the name stays, and Thread and Take on become icons instead.
+- **The tick on a group's chevron**, as on a thing's mark. Under the pointer the chevron turned into the tick, so a click meant to unfold selected instead. The chevron moved to the second line.
 - **A pair and who linked it on one line, wrapping when too wide.** The wrapped words sat alone, as far from their pair as from the next, and Unlink appearing on hover made rows jump. Two lines for every pair is calmer.
 - **Clearing the rows beside the undo line** without moving the scroll padding. The current row could sit under the clear strip after a move; the list's scroll padding now keeps it above.
 

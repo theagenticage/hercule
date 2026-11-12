@@ -648,8 +648,9 @@
   min-width: 0;
   white-space: nowrap;
 }
+/* The hand-off names who gets the thing, always in full: it is never cut and never only a face. */
 .pn-move--hand {
-  max-width: 150px;
+  flex: none;
 }
 .pn-move kbd {
   flex: none;
@@ -761,19 +762,19 @@
 .ib-pane {
   container: pane / inline-size;
 }
-/* Three widths. From 460px every move has its words and its key. From 400px the hand-off keeps its
-   face and its key, and its name goes to the tooltip. Under 400px each move is an icon. */
+/* Narrower panes give the room to the hand-off, which keeps its faces and its whole name:
+   - from 460px every move has its words and its key;
+   - under 460px the hand-off comes first, and Thread and Take on are icons, their words in the tooltip;
+   - under 400px the moves drop their key hints, which stay in the tooltips;
+   - a name too long even then keeps its line, and the icons wrap under it. */
 @container pane (max-width: 459px) {
-  .pn-move--hand .pn-move-t {
-    display: none;
+  .pn-foot {
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
-}
-@container pane (max-width: 399px) {
-  .pn-move kbd {
-    display: none;
+  .pn-move--hand {
+    order: -1;
   }
-}
-@container pane (max-width: 399px) {
   .pn-move.has-ic {
     width: 30px;
     padding: 0;
@@ -783,11 +784,16 @@
     color: inherit;
   }
   .pn-move.has-ic .pn-move-l,
-  .pn-move--hand .pn-move-t {
+  .pn-move.has-ic kbd {
+    display: none;
+  }
+}
+@container pane (max-width: 399px) {
+  .pn-move kbd {
     display: none;
   }
   .pn-move--hand {
-    padding: 0 8px;
+    padding-right: 10px;
   }
 }
 .sig-answers .btn.is-pressed {

@@ -198,3 +198,14 @@
 .pane-menu .menu-pick[aria-disabled="true"] {
   color: var(--faint);
 }
+/* The find field of a long hand-off menu; rows that do not match are hidden, and while something is
+   typed the digit hints go, since the digits then type. */
+.hand-find {
+  margin: 0 2px 4px;
+}
+.hand-row[hidden] {
+  display: none;
+}
+.hand-menu.is-finding .hand-row kbd {
+  visibility: hidden;
+}

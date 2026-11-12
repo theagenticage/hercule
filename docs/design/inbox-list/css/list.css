@@ -347,6 +347,7 @@
 
 /* ---- Groups: things linked to each other, by a source or a person ---- */
 .row-fold {
+  position: relative;
   display: grid;
   place-items: center;
   width: 20px;
@@ -371,8 +372,27 @@
   font-weight: var(--w-regular);
   font-variant-numeric: tabular-nums;
 }
-.row-glyph--link {
+.row-link {
+  display: grid;
+  place-items: center;
   color: var(--faint);
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+/* The chevron's hit area fills the second line's half of the row, 28 by 24, below the tick's. */
+.row-glyph--fold {
+  position: relative;
+}
+.row-fold::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: -6px;
+  bottom: -6px;
+  left: -8px;
+}
+/* On a group the tick's hit area stops where the chevron's begins. */
+.row--group .row-tick::after {
+  bottom: -3px;
 }
 .row-marks {
   display: inline-flex;
@@ -433,8 +453,9 @@
   top: 0;
   height: calc(50% - 6px);
 }
+/* The members hang from the chevron, which sits on the second line. */
 .row--group.is-open::after {
-  top: calc(50% + 10px);
+  top: calc(50% + 20px);
   bottom: 0;
 }
 .row--member.is-outside .row-title {
@@ -744,6 +765,17 @@ html.is-carrying .row-acts,
   background: color-mix(in oklab, var(--ink) 8%, transparent);
   color: var(--ink);
 }
+/* The hand-off among a row's buttons says who gets the thing, in words. */
+.row-act--named {
+  display: inline-flex;
+  gap: 6px;
+  width: auto;
+  padding: 0 8px 0 5px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
 .row-act:active {
   background: color-mix(in oklab, var(--ink) 12%, transparent);
 }
@@ -756,8 +788,8 @@ html.is-carrying .row-acts,
   background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
 }
 /* A picked group shows the tick in its chevron's place. */
-.row--group.is-picked .row-fold,
-.row--group .row-lead:hover .row-fold {
+.row--group.is-picked .row-link,
+.row--group .row-lead:hover .row-link {
   opacity: 0;
 }
 .row--group .row-tick {

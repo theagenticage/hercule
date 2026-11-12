@@ -70,6 +70,7 @@ window.Moves = (function () {
     if (!s().selection.size && r && r.type === "group") return r.group.label;
     return things[0] ? things[0].title : "";
   }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   function quote(t) { return "“" + (t.length > 44 ? t.slice(0, 42) + "…" : t) + "”"; }
 
   // ---- Dismiss: a thing, a whole group, or the selection, with one undo ----
@@ -137,8 +138,10 @@ window.Moves = (function () {
     var cancelled = false;
     // The data changes first, so the counts are right at once and a second H refuses. The row leaves
     // when the colleague's mark lands on Work.
-    t.held = { by: offer.w.name, task: t.title, since: 0 };
+    t.held = { by: offer.w.name, task: t.title, since: 0, workflow: offer.id };
     ended.forEach(function (sg) { sg.done = true; });
+    Model.noteHanded(t, offer.id);
+    var left = Model.askingSignals(t);
     // A handed thing leaves the selection at once, so the next key never acts on it.
     if (s().selection.delete(t.id)) { Selection.draw(s()); Pane.draw(App.el.pane, s(), {}); }
     Rail.draw(App.el.rail, s());
@@ -159,7 +162,8 @@ window.Moves = (function () {
     var finish = function () { if (!cancelled) redraw({ leave: "taken" }); };
     var chain = row ? Flights.handChain(row, t, offer.w.name, finish) : (finish(), null);
     push({
-      say: "Handed to " + offer.w.name + ": " + quote(t.title),
+      // An ask the workflow does not end stays with you, and the line says whose it is.
+      say: "Handed to " + offer.w.name + (left.length ? ". " + cap(left.map(Model.nameAsk).join(" and ")) + (left.length === 1 ? " stays" : " stay") + " with you" : ": " + quote(t.title)),
       action: { label: "Go to the Task", key: "G", task: t.title },
       undo: function () {
         cancelled = true;

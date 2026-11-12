@@ -33,7 +33,9 @@ window.Model = (function () {
     if (q.asks === 1 && !asks(t)) return false;
     if (q.asks === 0 && asks(t)) return false;
     if (q.held === 1 && !t.held) return false;
-    if (q.held === 0 && t.held) return false;
+    // A thing handed to a workflow still waits on you for the asks that workflow does not end: Omar's
+    // mention on a pull request handed to Review PR stays yours. A thing you took on waits on nobody.
+    if (q.held === 0 && t.held && !(t.held.workflow && asks(t))) return false;
     if (q.mine && !t.mine) return false;
     if (q.kind && t.kind !== q.kind) return false;
     if (q.signal && !openSignals(t).some(function (s) { return s.kind === q.signal; })) return false;
@@ -198,20 +200,45 @@ window.Model = (function () {
   function countSource(source) { return live().filter(function (t) { return sourceOf(t) === source; }).length; }
 
   /** Lists the workflows that can take a thing, with what each would end and leave open. */
+  /**
+   * Returns the workflows a thing can be handed to, best first. A workflow is offered for the thing's
+   * kind; what it ends is worked out from the thing's open signals. Those that can take it now come
+   * first, ranked by fit: the ones that end every open ask, then those that end some, then those that
+   * end none; within each, the one last used for this kind of thing first. The ones that cannot take
+   * it now follow, each with why.
+   */
   function offersFor(t) {
     if (!t) return [];
     var open = openSignals(t);
-    return Object.keys(World.WORKFLOWS).map(function (id) {
+    var asking = open.filter(function (s) { return ASKING[s.kind]; });
+    var last = lastHanded[t.kind];
+    var fit = function (o) {
+      if (o.off) return 9;
+      var n = asking.filter(function (s) { return o.w.ends.indexOf(s.kind) >= 0; }).length;
+      return n && n === asking.length ? 0 : n ? 1 : 2;
+    };
+    var ids = Object.keys(World.WORKFLOWS);
+    return ids.map(function (id) {
       var w = World.WORKFLOWS[id];
       if (w.takes.indexOf(t.kind) < 0) return null;
       if (w.when && t.status !== w.when) return { id: id, w: w, off: "Its checks pass, so there is nothing to fix." };
-      var ends = open.filter(function (s) { return w.ends.indexOf(s.kind) >= 0; }).map(function (s) { return K.SIGNALS[s.kind].ends; });
-      var leaves = open.filter(function (s) { return ASKING[s.kind] && w.ends.indexOf(s.kind) < 0; }).map(function (s) { return K.SIGNALS[s.kind].ends.toLowerCase(); });
-      var line = ends.length ? "Ends " + ends.join(" and ") + "." : "Ends nothing: the asks stay open.";
-      if (ends.length && leaves.length) line += " Leaves the " + leaves.join(" and ") + " open.";
+      var ends = open.filter(function (s) { return ASKING[s.kind] && w.ends.indexOf(s.kind) >= 0; }).map(nameAsk);
+      var leaves = open.filter(function (s) { return ASKING[s.kind] && w.ends.indexOf(s.kind) < 0; }).map(nameAsk);
+      var line = ends.length ? "Ends " + ends.join(" and ") + "." : "Ends none of its asks.";
+      if (leaves.length) line += " Leaves " + leaves.join(" and ") + " with you.";
       return { id: id, w: w, line: line };
-    }).filter(Boolean);
+    }).filter(Boolean).sort(function (a, b) {
+      return fit(a) - fit(b) || (b.id === last) - (a.id === last) || ids.indexOf(a.id) - ids.indexOf(b.id);
+    });
   }
+  /** Returns an ask's name, for who made it: "Mei’s review request", "Omar’s mention", "the failing checks". */
+  function nameAsk(s) {
+    var n = K.SIGNALS[s.kind].noun || K.SIGNALS[s.kind].ends.toLowerCase();
+    return s.by && !s.system ? s.by + "’s " + n : "the " + n;
+  }
+  // The workflow last handed each kind of thing to, so it comes first next time among equals.
+  var lastHanded = {};
+  function noteHanded(t, id) { lastHanded[t.kind] = id; }
 
   return {
     load: load, add: function (t) { world.things.push(t); byId.set(t.id, t); }, byId: function (id) { return byId.get(id); }, all: function () { return world.things; }, live: live,
@@ -219,6 +246,6 @@ window.Model = (function () {
     sourceOf: sourceOf, openSignals: openSignals, askingSignals: askingSignals, asks: asks, waitOf: waitOf, readField: readField,
     find: find, holds: holds, buildRows: buildRows, decideGroups: decideGroups, groupOf: groupOf, linksOf: linksOf, triageLive: triageLive,
     countSaved: countSaved, countTriage: countTriage, facetValues: facetValues, accountsOf: accountsOf, countSource: countSource,
-    offersFor: offersFor, matchClause: matchClause, isLive: isLive,
+    offersFor: offersFor, noteHanded: noteHanded, nameAsk: nameAsk, matchClause: matchClause, isLive: isLive,
   };
 })();

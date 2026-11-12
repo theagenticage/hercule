@@ -14,7 +14,9 @@ window.List = (function () {
    * wait; in a "Newest first" list it is when the thing last changed, and only an overdue wait shows instead.
    */
   function timeSlot(t, order) {
-    if (t.held) return '<span class="row-time row-time--held" title="' + D.esc(t.held.by === "you" ? "You took it on" : t.held.by + " has it") + '">' + (t.held.by === "you" ? D.you(18) : D.face(t.held.by, "working", 18)) + "</span>";
+    // A thing a workflow has, with an ask still on you, shows how long that ask has waited, like any ask.
+    var leftWith = t.held && t.held.workflow && Model.asks(t);
+    if (t.held && !leftWith) return '<span class="row-time row-time--held" title="' + D.esc(t.held.by === "you" ? "You took it on" : t.held.by + " has it") + '">' + (t.held.by === "you" ? D.you(18) : D.face(t.held.by, "working", 18)) + "</span>";
     var w = Model.waitOf(t);
     if (w != null && order === "newest" && D.waitTone(t) !== "over") w = null;
     if (w == null && order === "waiting") return '<span class="row-time wait--fresh" aria-hidden="true"></span>';
@@ -25,23 +27,28 @@ window.List = (function () {
   /** Draws the moves a row offers under the pointer, each with its key in its tooltip. */
   function acts(list) {
     return '<span class="row-acts">' + list.map(function (a) {
-      return '<button type="button" class="row-act" tabindex="-1" data-row-act="' + a[0] + '" title="' + D.esc(a[1]) + '" aria-label="' + D.esc(a[1]) + '">' + a[2] + "</button>";
+      return '<button type="button" class="row-act' + (a[3] ? " row-act--named" : "") + '" tabindex="-1" data-row-act="' + a[0] + '" title="' + D.esc(a[1]) + '" aria-label="' + D.esc(a[1].replace(/ \(.\)$/, "")) + '">' + a[2] + "</button>";
     }).join("") + "</span>";
   }
   function thingActs(t) {
     if (t.held) return acts([["goto", "Go to its Task (G)", D.icon("arrow", 14)], ["dismiss", "Dismiss (E)", D.icon("archive", 14)]]);
     var offers = Model.offersFor(t).filter(function (o) { return !o.off; });
     var list = [["thread", "Start a thread (N)", D.icon("compose", 14)], ["take", "Take on (T)", D.icon("tasks", 14)]];
-    if (offers.length === 1) list.push(["hand", "Hand to " + offers[0].w.name + " (H)", D.face(offers[0].w.name, "idle", 18)]);
-    else if (offers.length > 1) list.push(["hand", "Hand to… (H)", D.face(offers[0].w.name, "idle", 18)]);
+    // The hand-off names who gets it, here too: the face and the workflow's name, or the first faces and "Hand to…".
+    if (offers.length) {
+      var faces = offers.slice(0, offers.length === 1 ? 1 : 3).map(function (o) { return D.face(o.w.name, "idle", 16); }).join("");
+      var words = offers.length === 1 ? offers[0].w.name : "Hand to…";
+      list.push(["hand", (offers.length === 1 ? "Hand to " + words : words) + " (H)", '<span class="pn-faces" aria-hidden="true">' + faces + "</span><span>" + D.esc(words) + "</span>", true]);
+    }
     list.push(["dismiss", "Dismiss (E)", D.icon("archive", 14)]);
     return acts(list);
   }
 
   function where(t, inGroup) {
     var id = D.identifier(t), p = D.place(t);
-    // Beside a long identifier the place would be cut to a stub, so it is left to the pane.
-    if (p && id && p.length + id.length > 26) p = "";
+    // Beside a long identifier the place would be cut to a stub, so it is left to the pane. A row that
+    // also says who has the rest of it leaves the place to the pane too, so those words are whole.
+    if (p && id && (p.length + id.length > 26 || (t.held && t.held.workflow && Model.asks(t)))) p = "";
     return '<span class="row-where">' + (p ? '<span class="row-place">' + D.esc(p) + "</span>" : "") + (id ? '<span class="row-id">' + D.esc(id) + "</span>" : "") + "</span>";
   }
 
@@ -87,8 +94,11 @@ window.List = (function () {
     return {
       cls: "row row--group" + (r.open ? " is-open" : "") + (g.members.length > 7 ? " is-large" : "") + (picked ? " is-picked" : ""),
       attrs: { "data-group": g.lead.id, "aria-expanded": String(!!r.open) },
-      html: '<span class="row-lead"><span class="row-fold" data-fold-group>' + D.icon("chevron-right", 14) + '</span><span class="row-tick' + (picked ? " is-on" : "") + '" aria-hidden="true" data-tick>' + D.icon("check", 12) + '</span></span><span class="row-l1"><span class="row-title">' + D.esc(g.label) + "</span>" + time + "</span>" +
-        '<span class="row-glyph row-glyph--link">' + D.icon("link", 14) + '</span><span class="row-l2"><span class="row-why">' + why + on + '</span><span class="row-where row-where--group"><span class="row-marks">' + marks.map(function (m) { return D.mark(m, 12); }).join("") + '</span><span class="row-id">' + g.members.length + " things</span></span></span>" + acts([["thread", "Start a thread on all " + g.members.length + " (N)", D.icon("compose", 14)], ["take", "Take on (T)", D.icon("tasks", 14)], ["dismiss", "Dismiss all " + g.members.length + " (E)", D.icon("archive", 14)]]),
+      // As on every row, the first line's lead is what it is (the link) and turns into the tick under
+      // the pointer; the second line's glyph is its state, here the chevron that folds and unfolds it.
+      // Two places, so selecting and unfolding never share a target.
+      html: '<span class="row-lead"><span class="row-link">' + D.icon("link", 14) + '</span><span class="row-tick' + (picked ? " is-on" : "") + '" aria-hidden="true" data-tick>' + D.icon("check", 12) + '</span></span><span class="row-l1"><span class="row-title">' + D.esc(g.label) + "</span>" + time + "</span>" +
+        '<span class="row-glyph row-glyph--fold"><span class="row-fold" data-fold-group title="' + (r.open ? "Fold" : "Unfold") + ' the group (' + (r.open ? "←" : "→") + ')">' + D.icon("chevron-right", 14) + '</span></span><span class="row-l2"><span class="row-why">' + why + on + '</span><span class="row-where row-where--group"><span class="row-marks">' + marks.map(function (m) { return D.mark(m, 12); }).join("") + '</span><span class="row-id">' + g.members.length + " things</span></span></span>" + acts([["thread", "Start a thread on all " + g.members.length + " (N)", D.icon("compose", 14)], ["take", "Take on (T)", D.icon("tasks", 14)], ["dismiss", "Dismiss all " + g.members.length + " (E)", D.icon("archive", 14)]]),
       label: "Linked group, " + g.members.length + " things in " + marks.map(function (m) { return K.SOURCES[m].name; }).join(", ") + ": " + g.label + ". " + why.replace(/<[^>]+>/g, "") + (asking.length > 1 ? ", and " + (asking.length - 1) + " more ask" : "") + (best && Model.waitOf(best) != null ? ". Waiting " + D.agoWords(Model.waitOf(best)).replace(" ago", "") : ""),
       selected: picked,
     };

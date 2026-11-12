@@ -137,13 +137,13 @@ window.Kinds = (function () {
   // Signal kinds: the sentence a row says, what the section is called, and its answers (signal.act).
   // `primary` marks the one suggested answer. Done (signal.markDone) is added by the core to every section.
   var SIGNALS = {
-    review: { say: "{by} asked for your review", answers: [{ id: "approve", label: "Approve", primary: 1, desc: "Approves {ref} as you on {source}." }, { id: "changes", label: "Request changes…", field: 1, desc: "Asks {author} for changes, with your note." }, { id: "comment", label: "Comment…", field: 1, desc: "Posts your comment on {ref}." }], ends: "Review requested" },
-    mention: { say: "{by} mentioned you", answers: [{ id: "reply", label: "Reply…", field: 1, primary: 1, desc: "Replies to {by} on {ref}." }], ends: "Mentioned" },
-    checks: { say: "Checks failed on your pull request", answers: [{ id: "rerun", label: "Re-run failed checks", desc: "Runs the failed checks again on {source}." }], ends: "Checks failed" },
-    asked: { say: "{by} asks you", answers: [{ id: "reply", label: "Reply…", field: 1, primary: 1, desc: "Replies to {by} from your account." }, { id: "archive", label: "Archive", desc: "Archives the thread in {source}." }], ends: "Asks you" },
-    regressed: { say: "Came back after it was resolved", answers: [{ id: "resolve", label: "Resolve", desc: "Marks it resolved in {source}." }, { id: "ignore", label: "Ignore for a day", desc: "Mutes it in {source} for 24 hours." }], ends: "Regressed" },
-    assigned: { say: "{by} assigned it to you", answers: [], ends: "Assigned" },
-    signoff: { say: "Waits for your sign-off", answers: [{ id: "sign", label: "Sign off", primary: 1, desc: "Signs off {ref} in {source}." }, { id: "hold", label: "Hold…", field: 1, desc: "Holds {ref} with your reason." }], ends: "Sign-off" },
+    review: { noun: "review request", say: "{by} asked for your review", answers: [{ id: "approve", label: "Approve", primary: 1, desc: "Approves {ref} as you on {source}." }, { id: "changes", label: "Request changes…", field: 1, desc: "Asks {author} for changes, with your note." }, { id: "comment", label: "Comment…", field: 1, desc: "Posts your comment on {ref}." }], ends: "Review requested" },
+    mention: { noun: "mention", say: "{by} mentioned you", answers: [{ id: "reply", label: "Reply…", field: 1, primary: 1, desc: "Replies to {by} on {ref}." }], ends: "Mentioned" },
+    checks: { noun: "failing checks", say: "Checks failed on your pull request", answers: [{ id: "rerun", label: "Re-run failed checks", desc: "Runs the failed checks again on {source}." }], ends: "Checks failed" },
+    asked: { noun: "question", say: "{by} asks you", answers: [{ id: "reply", label: "Reply…", field: 1, primary: 1, desc: "Replies to {by} from your account." }, { id: "archive", label: "Archive", desc: "Archives the thread in {source}." }], ends: "Asks you" },
+    regressed: { noun: "regression", say: "Came back after it was resolved", answers: [{ id: "resolve", label: "Resolve", desc: "Marks it resolved in {source}." }, { id: "ignore", label: "Ignore for a day", desc: "Mutes it in {source} for 24 hours." }], ends: "Regressed" },
+    assigned: { noun: "assignment", say: "{by} assigned it to you", answers: [], ends: "Assigned" },
+    signoff: { noun: "sign-off request", say: "Waits for your sign-off", answers: [{ id: "sign", label: "Sign off", primary: 1, desc: "Signs off {ref} in {source}." }, { id: "hold", label: "Hold…", field: 1, desc: "Holds {ref} with your reason." }], ends: "Sign-off" },
     proposal: { say: "Proposal", answers: [], ends: "Proposal" },
     "link-suggestion": { say: "Belongs with", answers: [], ends: "Link suggestion" },
   };
