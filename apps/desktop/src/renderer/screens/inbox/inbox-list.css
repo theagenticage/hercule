@@ -197,6 +197,8 @@
 .ib-rows {
   position: relative;
   container: ib-rows / inline-size;
+  /* Its own stacking context, so the puck (z-index -1) lies under the rows but over the list. */
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   outline: none;
@@ -233,7 +235,7 @@
 }
 .ib-puck {
   position: absolute;
-  /* Under everything in the rows, whatever its place in the markup. The rows' container is a stacking context. */
+  /* Under everything in the rows, whatever its place in the markup. */
   z-index: -1;
   top: 0;
   right: 0;

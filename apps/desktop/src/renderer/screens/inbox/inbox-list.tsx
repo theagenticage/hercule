@@ -33,6 +33,16 @@ const FOOT_FADE_PX = 28;
 /** Reads a row's height from the page's CSS: 52px at the default Text size, and a pixel more per line for each step up. */
 const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-row" }).row;
 
+/** The names of the callbacks of `InboxRowActions`. */
+const ROW_ACTION_NAMES = [
+  "onPick",
+  "onToggleSelect",
+  "onTakeOn",
+  "onHandOff",
+  "onGoToTask",
+  "onDismiss",
+] as const satisfies ReadonlyArray<keyof InboxRowActions>;
+
 /**
  * Returns a set of row actions that never changes identity and calls the
  * latest `actions` given. The owner builds a new set on every render, and a
@@ -43,26 +53,15 @@ function useStableActions(actions: InboxRowActions): InboxRowActions {
   useLayoutEffect(() => {
     latest.current = actions;
   });
-  const [stable] = useState<InboxRowActions>(() => ({
-    onPick: (ref, modifiers) => {
-      latest.current.onPick(ref, modifiers);
-    },
-    onToggleSelect: (ref) => {
-      latest.current.onToggleSelect(ref);
-    },
-    onTakeOn: (ref) => {
-      latest.current.onTakeOn(ref);
-    },
-    onHandOff: (ref) => {
-      latest.current.onHandOff(ref);
-    },
-    onGoToTask: (ref) => {
-      latest.current.onGoToTask(ref);
-    },
-    onDismiss: (ref) => {
-      latest.current.onDismiss(ref);
-    },
-  }));
+  const [stable] = useState(
+    () =>
+      Object.fromEntries(
+        ROW_ACTION_NAMES.map((name) => [
+          name,
+          (...args: unknown[]) => (latest.current[name] as (...args: unknown[]) => void)(...args),
+        ]),
+      ) as unknown as InboxRowActions,
+  );
   return stable;
 }
 
