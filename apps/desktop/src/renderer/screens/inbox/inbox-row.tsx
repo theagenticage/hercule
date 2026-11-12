@@ -1,7 +1,12 @@
 import type { PluginIdentity } from "@hercule/client-core";
-import type { EntityStatus } from "@hercule/contract";
+import type {
+  InboxRowHolder,
+  InboxRowReason,
+  InboxRowTime,
+  InboxRowView,
+} from "@hercule/client-core/inbox";
 import type { JSX, MouseEvent } from "react";
-import { Face, UserAvatar, type Look } from "../../faces";
+import { buildLook, Face, UserAvatar } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
 import { ArrowIcon } from "../../icons/arrow";
 import { CheckIcon } from "../../icons/check";
@@ -9,74 +14,6 @@ import { TasksIcon } from "../../icons/tasks";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import "./inbox-list.css";
-
-/** How long a wait has lasted against the patience of its ask. The row draws each tone in ink and weight only. */
-export type InboxWaitTone = "fresh" | "recent" | "due" | "over";
-
-/** Whoever holds a thing's Task: the user, drawn as a monogram, or a colleague, drawn as a face. */
-export type InboxRowHolder =
-  | { readonly kind: "you"; readonly name: string; readonly words: string }
-  | { readonly kind: "colleague"; readonly look: Look; readonly words: string };
-
-/**
- * What the time column shows:
- * - `wait`: `text` ("5d") in `tone`, with `words` ("Waiting 5 days, overdue") as its tooltip;
- * - `holder`: the holder's face or monogram in place of a time;
- * - `none`: nothing, for a thing that asks nothing in a list ordered by waiting.
- */
-export type InboxRowTime =
-  | {
-      readonly kind: "wait";
-      readonly text: string;
-      readonly tone: InboxWaitTone;
-      readonly words: string;
-    }
-  | { readonly kind: "holder"; readonly holder: InboxRowHolder }
-  | { readonly kind: "none" };
-
-/** The words of the second line, already decided. */
-export interface InboxRowReason {
-  /** The person the sentence starts with, drawn in ink, such as "Mei". */
-  readonly who?: string | undefined;
-  /** The rest of the sentence, such as "asked for your review". */
-  readonly rest: string;
-  /** How many more asks the thing has: drawn as a "+1" chip, nothing when 0. */
-  readonly more: number;
-  /** What follows the sentence, such as "dismissed 1d ago" or "Review PR has the rest". Drawn after a dot. */
-  readonly aside?: string | undefined;
-  /** True for a thing that asks nothing: its sentence is drawn faint. */
-  readonly quiet: boolean;
-}
-
-/**
- * The hand-off button of a row: one workflow shows its face and its name, and
- * several show the first faces and "Hand to…". A face never stands alone.
- */
-export type InboxRowHandOff =
-  | { readonly kind: "one"; readonly name: string; readonly look: Look }
-  | { readonly kind: "several"; readonly looks: ReadonlyArray<Look> };
-
-/** Everything a row draws, as values the caller has already decided. */
-export interface InboxRowView {
-  /** The thing's reference. It keys the row and goes back with every callback. */
-  readonly ref: string;
-  readonly title: string;
-  /** The plugin whose mark the row draws. */
-  readonly pluginId: string;
-  /** The status shape, or `undefined` for a kind with no status. */
-  readonly status?: EntityStatus | undefined;
-  readonly time: InboxRowTime;
-  readonly reason: InboxRowReason;
-  /** The place the thing lives in, or `undefined` when the row leaves it to the pane. */
-  readonly place?: string | undefined;
-  readonly identifier?: string | undefined;
-  /** What a screen reader says for the whole row. */
-  readonly label: string;
-  /** The hand-off button, or `null` when no workflow offers one. */
-  readonly handOff: InboxRowHandOff | null;
-  /** True when a Task holds the thing: its buttons are G and E instead of T, H and E. */
-  readonly held: boolean;
-}
 
 /** Which modifier keys were down on a click. The caller decides what they mean on this platform. */
 export interface InboxClickModifiers {
@@ -107,7 +44,7 @@ function HolderFigure({ holder }: { readonly holder: InboxRowHolder }): JSX.Elem
       {holder.kind === "you" ? (
         <UserAvatar name={holder.name} size={18} />
       ) : (
-        <Face look={holder.look} pose="idle" size={18} />
+        <Face look={buildLook(holder.faceSeed)} pose="idle" size={18} />
       )}
     </span>
   );
@@ -193,9 +130,9 @@ function RowMoves({
               }}
             >
               <span className="ib-row-faces" aria-hidden="true">
-                {(handOff.kind === "one" ? [handOff.look] : handOff.looks.slice(0, 3)).map(
-                  (look, index) => (
-                    <Face key={index} look={look} pose="idle" size={16} />
+                {(handOff.kind === "one" ? [handOff.faceSeed] : handOff.faceSeeds.slice(0, 3)).map(
+                  (seed) => (
+                    <Face key={seed} look={buildLook(seed)} pose="idle" size={16} />
                   ),
                 )}
               </span>

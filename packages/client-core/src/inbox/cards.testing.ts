@@ -3,6 +3,7 @@ import type {
   Connection,
   EntityPlace,
   EntitySignalLine,
+  InboxAsk,
   InboxCounts,
   InboxThing,
   PluginDetail,
@@ -95,6 +96,28 @@ export const buildSignalLine = (
   createdAt: "2026-11-07T09:00:00.000Z",
   say: { say, tone: "plain" },
   snoozed: false,
+  ...overrides,
+});
+
+/**
+ * Returns an open ask of the invented `acme/review-requested` kind, raised by
+ * `asker` ("Mei asked for your review"), or by nobody when `asker` is null.
+ * `overrides` change any field.
+ */
+export const buildInboxAsk = (
+  id: string,
+  asker: string | null = "Mei",
+  overrides: Partial<InboxAsk> = {},
+): InboxAsk => ({
+  id,
+  kind: "acme/review-requested",
+  noun: "review request",
+  ...(asker === null ? {} : { asker }),
+  say: {
+    say: asker === null ? "Review requested" : `${asker} asked for your review`,
+    tone: "plain",
+  },
+  createdAt: "2026-11-07T09:00:00.000Z",
   ...overrides,
 });
 

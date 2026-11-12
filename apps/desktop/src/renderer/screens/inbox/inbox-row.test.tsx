@@ -2,8 +2,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { buildLook } from "../../faces";
-import { InboxRow, type InboxRowView } from "./inbox-row";
+import type { InboxRowView } from "@hercule/client-core/inbox";
+import { InboxRow } from "./inbox-row";
 import { buildInboxRowActions, buildInboxRowView, TEST_PLUGINS } from "./inbox-row.testing";
 
 /** Renders one row among five, current or selected as asked, and returns what it called back. */
@@ -61,7 +61,7 @@ describe("InboxRow", () => {
     const { row } = renderRow({
       time: {
         kind: "holder",
-        holder: { kind: "colleague", look: buildLook("review"), words: "Review PR has it" },
+        holder: { kind: "colleague", faceSeed: "review", words: "Review PR has it" },
       },
     });
     expect(within(row).queryByText("5d")).toBeNull();
@@ -143,7 +143,7 @@ describe("InboxRow", () => {
   it("offers Take on, the hand-off and Dismiss, each naming its key, and calls back with its reference", async () => {
     const user = userEvent.setup();
     const { actions } = renderRow({
-      handOff: { kind: "one", name: "Agent review", look: buildLook("agent-review") },
+      handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" },
     });
     expect(screen.getByTitle("Take on (T)")).toBeTruthy();
     expect(screen.getByTitle("Hand to Agent review (H)")).toBeTruthy();
@@ -159,7 +159,7 @@ describe("InboxRow", () => {
   });
 
   it("always shows the workflow's name beside its face on the hand-off button", () => {
-    renderRow({ handOff: { kind: "one", name: "Agent review", look: buildLook("agent-review") } });
+    renderRow({ handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" } });
     const button = screen.getByRole("button", { name: "Hand to Agent review" });
     expect(button.textContent).toBe("Agent review");
     expect(button.querySelectorAll("svg")).toHaveLength(1);
@@ -167,7 +167,7 @@ describe("InboxRow", () => {
 
   it("shows the first three faces and Hand to… when several workflows take the thing", () => {
     renderRow({
-      handOff: { kind: "several", looks: ["a", "b", "c", "d"].map((seed) => buildLook(seed)) },
+      handOff: { kind: "several", faceSeeds: ["a", "b", "c", "d"] },
     });
     const button = screen.getByRole("button", { name: "Hand to…" });
     expect(button.textContent).toBe("Hand to…");
@@ -183,7 +183,7 @@ describe("InboxRow", () => {
     const user = userEvent.setup();
     const { actions } = renderRow({
       held: true,
-      handOff: { kind: "one", name: "Agent review", look: buildLook("agent-review") },
+      handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" },
     });
     expect(screen.queryByRole("button", { name: "Take on" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();

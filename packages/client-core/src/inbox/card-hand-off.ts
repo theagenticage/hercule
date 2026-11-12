@@ -12,6 +12,7 @@ import type {
   EntitySignalLine,
   ExternalEntityDetail,
   HandOffUndo,
+  InboxAsk,
   InboxPage,
   InboxThing,
   LiveWorkflow,
@@ -227,3 +228,136 @@ export const describeHandOffUndo = (
  * card as it is, because showing a reversal that did not happen would be a lie.
  */
 export const isHandOffTakenBack = (undo: HandOffUndo): boolean => undo.outcome === "undone";
+
+/** How well a workflow's hand-off fits the open asks of a thing: it ends all of them, some, or none. */
+export type HandOffFit = "all" | "some" | "none";
+
+/**
+ * Returns how many of the thing's open ask kinds `offer` ends. A thing with no
+ * asks has nothing to end, so every offer fits it equally ("all").
+ */
+export const decideHandOffFit = (
+  offer: Pick<WorkflowOffer, "answers">,
+  askKinds: readonly string[],
+): HandOffFit => {
+  const ended = askKinds.filter((kind) => offer.answers.includes(kind)).length;
+  if (ended === askKinds.length) return "all";
+  return ended === 0 ? "none" : "some";
+};
+
+const FIT_RANK: Readonly<Record<HandOffFit, number>> = { all: 0, some: 1, none: 2 };
+
+/**
+ * Returns `offers` best fit first, as a new list. The order is:
+ *
+ * 1. the offers that end every open ask, then those that end some, then none;
+ * 2. among equals, the one the user handed a thing of this kind to most recently;
+ * 3. then by name.
+ */
+export const rankHandOffs = (
+  offers: readonly WorkflowOffer[],
+  askKinds: readonly string[],
+): readonly WorkflowOffer[] => {
+  const readHandedAt = (offer: WorkflowOffer): number =>
+    offer.lastHandedAt === undefined ? -Infinity : Date.parse(offer.lastHandedAt);
+  return offers
+    .map((offer) => ({ offer, fit: FIT_RANK[decideHandOffFit(offer, askKinds)] }))
+    .toSorted(
+      (a, b) =>
+        a.fit - b.fit ||
+        readHandedAt(b.offer) - readHandedAt(a.offer) ||
+        a.offer.name.localeCompare(b.offer.name),
+    )
+    .map(({ offer }) => offer);
+};
+
+/** The asks of an Inbox row that a hand-off line talks about. */
+export type HandOffAsks = Pick<InboxThing, "asks" | "askCount" | "askKinds" | "openKinds">;
+
+/** Returns one ask as the line names it: "Mei’s review request", or "the failing checks" when no person raised it. */
+const nameAsk = (ask: InboxAsk): string =>
+  ask.asker === undefined ? `the ${ask.noun}` : `${ask.asker}’s ${ask.noun}`;
+
+/**
+ * Returns the line under a workflow in the hand-off menu, naming each ask it
+ * ends and each it leaves with the user: "Ends Mei’s review request. Leaves
+ * Omar’s mention with you."
+ *
+ * - A workflow that ends none says "Ends none of its asks."
+ * - A workflow that ends every ask has no "Leaves" part.
+ * - The row lists at most eight asks, and the rest are counted ("and 3 more").
+ *   The kinds of all the asks say which side the uncounted ones fall on when the
+ *   workflow ends every kind or none of them. With a mix, the line says that
+ *   more asks are not named.
+ * - A thing with no asks has no names to give, so the line is the one built from
+ *   `openKinds` (`describeHandOffEnds`).
+ */
+export const describeHandOffAsks = (
+  offer: Pick<WorkflowOffer, "answers">,
+  thing: HandOffAsks,
+): string => {
+  if (thing.askCount === 0) return describeHandOffEnds(offer, thing.openKinds);
+  const nameAll = (asks: readonly InboxAsk[], uncounted: number): string[] => [
+    ...new Set(asks.map(nameAsk)),
+    ...(uncounted > 0 ? [`${String(uncounted)} more`] : []),
+  ];
+  const uncounted = thing.askCount - thing.asks.length;
+  const fit = decideHandOffFit(offer, thing.askKinds);
+  const ended = nameAll(
+    thing.asks.filter((ask) => offer.answers.includes(ask.kind)),
+    fit === "all" ? uncounted : 0,
+  );
+  const left = nameAll(
+    thing.asks.filter((ask) => !offer.answers.includes(ask.kind)),
+    fit === "none" ? uncounted : 0,
+  );
+  const parts = [
+    ended.length === 0 ? "Ends none of its asks." : `Ends ${formatNameList(ended, "and")}.`,
+  ];
+  if (left.length > 0) parts.push(`Leaves ${formatNameList(left, "and")} with you.`);
+  if (fit === "some" && uncounted > 0) parts.push(`${String(uncounted)} more asks are not named.`);
+  return parts.join(" ");
+};
+
+/** From this many available workflows, the hand-off menu has a field to find one by name. */
+export const HAND_OFF_FIND_FROM = 6;
+
+/** One workflow of the hand-off menu, with the line already written. */
+export interface HandOffChoice {
+  readonly offer: WorkflowOffer;
+  /** What a hand-off would end, or why the workflow cannot take the thing. */
+  readonly line: string;
+}
+
+/**
+ * Returns the available workflows of `offers` best fit first, each with the
+ * line that names the asks it ends and leaves (`describeHandOffAsks`).
+ */
+export const listAvailableHandOffs = (
+  offers: CardOffers,
+  thing: HandOffAsks,
+): readonly HandOffChoice[] =>
+  rankHandOffs(offers.available, thing.askKinds).map((offer) => ({
+    offer,
+    line: describeHandOffAsks(offer, thing),
+  }));
+
+/**
+ * Returns the choices whose workflow name, or what the workflow does, holds
+ * `query`, ignoring case and the spaces around it. An empty query returns every
+ * choice.
+ *
+ * What a workflow does is the part of its line before "Leaves": what it ends.
+ * The part after it names the asks the workflow does not touch, which every
+ * other workflow names too, so matching it would match nearly everything.
+ */
+export const findHandOffs = (
+  choices: readonly HandOffChoice[],
+  query: string,
+): readonly HandOffChoice[] => {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return choices;
+  return choices.filter(({ offer, line }) =>
+    `${offer.name} ${line.split(" Leaves ")[0] ?? ""}`.toLowerCase().includes(wanted),
+  );
+};
