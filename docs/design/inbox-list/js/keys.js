@@ -142,11 +142,13 @@ window.Keys = (function () {
     // When the rail is folded away, its place in the cycle is the scope button. Under 1032px the list
     // and the pane share one place: whichever is showing.
     var railStop = matchMedia("(max-width: 1329px)").matches ? document.getElementById("scope-btn") : document.querySelector("#rail [tabindex='0']");
-    var list = App.el.list.querySelector("[tabindex='0']") || App.el.list;
+    // An empty list's place is its empty state's heading.
+    var list = App.el.list.querySelector("[tabindex='0']") || App.emptyHeading();
     var pane = document.querySelector("#pane .pn-title") || document.querySelector("#pane button");
     if (App.isStacked()) { if (App.isPaneOpen()) list = null; else pane = null; }
     var spots = [document.getElementById("sx-input"), railStop, list, pane];
-    spots = spots.filter(Boolean);
+    // A place that is hidden or out of reach cannot take the focus, so it is passed over.
+    spots = spots.filter(function (x) { return x && x.getClientRects().length && !x.closest("[inert]"); });
     var at = spots.findIndex(function (x) { return x.contains(document.activeElement) || (x === App.el.list.querySelector("[tabindex='0']") && App.el.list.contains(document.activeElement)) || (x.closest && x.closest("#pane") && document.getElementById("pane").contains(document.activeElement)) || (x.closest && x.closest("#rail") && document.getElementById("rail").contains(document.activeElement)); });
     var next = spots[(at + (back ? -1 : 1) + spots.length) % spots.length];
     if (next.matches(".pn-title")) next.tabIndex = -1;
@@ -164,7 +166,7 @@ window.Keys = (function () {
     // Anywhere else they do nothing (WCAG 2.1.4), so speech input or a stray key never acts on a row
     // nobody is looking at. From the rail the digits still pick a saved query; Esc goes back to the
     // list; / and ? reach the search and the keys from anywhere outside a field.
-    var inPlace = t === document.body || t === document.documentElement || (t.closest && t.closest("#rows, #pane"));
+    var inPlace = t === document.body || t === document.documentElement || (t.closest && t.closest("#rows, #pane, #empty"));
     if (!inPlace) {
       var inRail = t.closest && t.closest("#rail, #scope-pop");
       if (e.key === "Escape" && t.closest && t.closest("#keys")) { sheet(false); e.preventDefault(); return; }

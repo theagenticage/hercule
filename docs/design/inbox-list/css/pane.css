@@ -492,8 +492,13 @@
   font-size: var(--t-12);
 }
 .pc li .pl-claim {
+  height: 16px;
   justify-content: flex-start;
   padding-left: 17px;
+}
+/* Unlink keeps its 24px target without making its line taller than the others. */
+.pc .pl-unlink {
+  margin-block: -4px;
 }
 .pc-pair {
   display: flex;

@@ -135,21 +135,29 @@ window.App = (function () {
       var by = r.top < box.top + 4 ? r.top - box.top - 4 : r.top + r.height > box.bottom - foot ? r.top + r.height - box.bottom + foot : 0;
       if (by && !opts.scrolls) scroller.scrollBy({ top: by, behavior: opts.flip && !Motion.isReduced() ? "smooth" : "instant" });
     } else if (!Dialog.isOpen() && paneless && !state.loading) {
-      // Nothing is current: the pane over the list (under 1032px) slides away, and the focus that was
-      // in the list or the pane goes to the empty state, its first button or else its heading.
-      if (isPaneOpen()) setPaneOpen(false, true);
-      var gone = was || document.activeElement === document.body || el.pane.contains(document.activeElement);
-      if (gone) focusEmpty();
+      var gone = was || (opts.flip && document.activeElement === document.body) || el.pane.contains(document.activeElement);
+      if (gone) settleFocus();
+      else if (isPaneOpen()) setPaneOpen(false, true);
     }
   }
 
-  /** Puts the focus on the empty state: its first button, or else its heading. */
-  function focusEmpty() {
+  /**
+   * Puts the focus where the keys work: on the current row (or the pane's title while the pane lies
+   * over the list), or, with nothing current, on the empty state's heading, after the pane over the
+   * list has slid away. The heading is read first by a screen reader, and the list's keys work from it.
+   */
+  function settleFocus() {
+    if (state.focus && el.list.querySelector('[data-key="' + state.focus + '"]')) { focusCurrent(); return; }
+    if (isPaneOpen()) setPaneOpen(false, true);
+    var heading = emptyHeading();
+    if (heading) heading.focus({ preventScroll: true });
+  }
+  /** Returns the empty state's heading, ready to take the focus, or null when the list is not empty. */
+  function emptyHeading() {
     var empty = document.getElementById("empty");
-    var target = empty.hidden ? null : empty.querySelector("button") || empty.querySelector(".em-title");
-    if (!target) return;
-    if (!target.matches("button")) target.tabIndex = -1;
-    target.focus({ preventScroll: true });
+    var heading = empty.hidden ? null : empty.querySelector(".em-title");
+    if (heading) heading.tabIndex = -1;
+    return heading;
   }
 
   /**
@@ -261,5 +269,5 @@ window.App = (function () {
   }
   function isPaneOpen() { return el.ib.classList.contains("is-pane-open"); }
 
-  return { isStacked: isStacked, setPaneOpen: setPaneOpen, isPaneOpen: isPaneOpen, focusCurrent: focusCurrent, state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
+  return { isStacked: isStacked, setPaneOpen: setPaneOpen, isPaneOpen: isPaneOpen, focusCurrent: focusCurrent, settleFocus: settleFocus, emptyHeading: emptyHeading, state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
 })();

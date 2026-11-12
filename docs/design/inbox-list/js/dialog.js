@@ -214,7 +214,10 @@ window.Dialog = (function () {
     document.getElementById("root").inert = false;
     var done = function () {
       el.hidden = true; scrim.hidden = true; Motion.body(el).clear();
-      if (st.back && st.back.isConnected && st.back.focus) st.back.focus({ preventScroll: true });
+      // The focus goes back where it was; when that is gone (the thread took the last row), to the
+      // current row, or else to the empty state.
+      if (st.back && st.back.isConnected && st.back.focus && !st.back.closest("[inert]")) st.back.focus({ preventScroll: true });
+      else App.settleFocus();
       // The thread's undo line played under the dialog; it is said again now that it can be reached.
       if (started) { var l = Moves.last(); if (l) Undo.show(l.say, { undo: true, action: l.action }); }
     };

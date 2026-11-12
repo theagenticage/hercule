@@ -735,6 +735,53 @@ for (const w of [960, 1024, 1100]) {
   await p.close();
 }
 
+// ---- Round-eight regressions ----
+{
+  const p = await open("theme=whitehaven&load=light&scene=new");
+  await settle(p, 300);
+  const n = await p.evaluate(() => App.state.rows.filter((r) => r.thing || r.type === "group").length);
+  await p.evaluate(() => App.focusRow(App.state.rows.find((r) => r.thing || r.type === "group").key, { keyboard: true }));
+  for (let i = 0; i < n + 4; i++) { await key(p, "e"); await p.waitForTimeout(700); }
+  await expect(p, "an emptied list puts the focus on the empty state's heading", () => document.activeElement.matches("#empty .em-title"));
+  await key(p, ".");
+  await settle(p, 300);
+  await expect(p, "the list's keys work from the empty state", () => App.state.pending.length === 0);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=empty");
+  await settle(p, 300);
+  await p.evaluate(() => App.emptyHeading().focus());
+  await key(p, "F6");
+  await key(p, "F6");
+  await key(p, "F6");
+  await expect(p, "F6 goes round an empty list and comes back to it", () => document.activeElement.matches("#empty .em-title"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "/");
+  await p.keyboard.type("team:Check");
+  await settle(p, 150);
+  await key(p, "Escape");
+  await settle(p, 200);
+  await expect(p, "leaving the search takes what ↩ would: the highlighted value", () => App.state.search.clauses.some((c) => c.key === "team" && c.value === "Checkout"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => { Model.live().forEach((t) => { if (Model.asks(t) && !t.held && t.id !== "pr-6213") Model.gone.add(t.id); }); Model.triage().forEach((x) => Model.gone.add(x.id)); App.render({}); App.focusRow("r:pr-6213", { keyboard: true }); });
+  await key(p, "n");
+  await settle(p, 700);
+  await p.keyboard.press("Meta+Enter");
+  await settle(p, 900);
+  await expect(p, "the thread starts on the last row", () => !App.state.rows.some((r) => r.key === "r:pr-6213"));
+  await key(p, "Escape");
+  await settle(p, 600);
+  await expect(p, "after a thread takes the last row, the focus goes to the empty state, not the page", () => !!document.activeElement.closest("#empty"));
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

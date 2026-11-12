@@ -186,7 +186,7 @@
         return;
       }
       var title = App.scopeTitle();
-      var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in ") + '<button type="button" class="link em-link" data-go-updates title="Updates (3)">Updates</button>.' : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
+      var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in ") + '<button type="button" class="link em-link" data-go-updates>Updates</button>.' : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
       // The small sunrise waits, as the full one does, for the last row and the pane to go first.
       el.innerHTML = '<div class="em" style="--sun-wait:240ms"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
     }

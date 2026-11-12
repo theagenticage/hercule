@@ -136,7 +136,7 @@ It rises 10px into its place as it fades in, and sinks straight back when it goe
 
 ### The sunrise
 
-It waits 240ms for the last row to leave, and the small one waits as the full one does. Then the horizon draws outward over 700ms, Hercule's head rises through it over 1400ms, the rays draw from the middle outward from 420ms, and the words fade up at 600ms. It plays once.
+It waits 240ms for the last row to leave, and the small one waits as the full one does. Nothing shows below the horizon: the head rises out of it, and the horizon is unseen until it starts to draw. Then the horizon draws outward over 700ms, Hercule's head rises through it over 1400ms, the rays draw from the middle outward from 420ms, and the words fade up at 600ms. It plays once.
 
 ## Reduced motion
 

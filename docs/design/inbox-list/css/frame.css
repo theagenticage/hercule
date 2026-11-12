@@ -357,6 +357,11 @@ body > .flight {
 .ib .undo-line {
   --undo-line-x: calc(var(--rail-w) / 2 - var(--pane-w) / 2);
   max-width: calc(100% - var(--rail-w) - var(--pane-w) - 24px);
+  /* When the selection bar or the pane under it comes or goes, the line moves with it. */
+  transition:
+    transform var(--m-slow) var(--m-ease),
+    opacity var(--m-base) var(--m-ease),
+    bottom var(--m-base) var(--m-ease);
 }
 /* Hidden, the line waits 10px under the place it shows, so it only ever rises and sinks straight. */
 .ib .undo-line:not(.is-on) {

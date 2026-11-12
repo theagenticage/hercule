@@ -137,15 +137,25 @@ window.Bar = (function () {
   }
 
   /**
-   * Takes a `field:value` typed out in full as a token when the field is left without ↩ (Esc, ↓ to the
-   * results, Tab, F6, a click elsewhere), so the field never shows a filter that does not apply.
+   * Takes the `field:value` being typed as a token when the field is left without ↩ (Esc, ↓ to the
+   * results, Tab, F6, a click elsewhere), so the field never shows a filter that does not apply. It
+   * takes what ↩ would: the value as typed when the field holds it or it is a whole threshold, else
+   * the highlighted suggestion (`team:Check` becomes `team:Checkout`).
    */
   function takeTyped() {
-    if (!/(^|\s)[a-z]+:\S/i.test(input.value)) return;
-    var before = App.state.search.clauses.length;
-    absorb(true);
+    var m = /(?:^|\s)([a-z]+):(\S.*)$/i.exec(input.value);
+    var key = m && tokenField(m[1].toLowerCase());
+    if (!key) return;
+    var typed = m[2].trim(), f = K.FIELDS[key];
+    var whole = f.type === "number" ? /^[<>]\d+$/.test(typed) : f.type === "duration" ? /^[<>]\d+[mhdw]$/.test(typed) : pool().some(function (t) { var v = Model.readField(t, key); return v != null && String(v).toLowerCase() === typed.toLowerCase(); });
+    var it = !whole && active >= 0 && items[active];
+    if (it && it.kind === "value" && it.key === key) {
+      App.state.search.clauses.push({ key: key, value: String(it.value) });
+      input.value = input.value.replace(/(^|\s)[a-z]+:.*$/i, "$1");
+      absorb(false);
+    } else absorb(true);
     // The current row stays when it still matches, so a click that left the field keeps its row.
-    if (App.state.search.clauses.length !== before) apply(true);
+    apply(true);
   }
 
   /** Leaves the search for the list, keeping the query, with the first result current. */
@@ -154,7 +164,7 @@ window.Bar = (function () {
     closeMenu();
     var first = App.state.rows.find(function (r) { return r.type !== "tmore" && r.type !== "more"; });
     if (first) App.focusRow(first.key, { keyboard: true });
-    else { var b = document.querySelector("#empty button"); if (b) b.focus(); else input.blur(); }
+    else App.settleFocus();
   }
 
   function pick(it) {
