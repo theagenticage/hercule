@@ -124,8 +124,11 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # The React files take about 2,900 s on a runner's 3 workers, measured
+      # on 2026-11-12: with 4 shards a shard took about 4.5 minutes, with 6
+      # about 3. The longest file takes about 95 s, so more shards still help.
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup

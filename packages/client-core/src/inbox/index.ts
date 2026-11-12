@@ -11,7 +11,7 @@ export * from "./card-hand-off";
 export * from "./card-wait";
 export * from "./inbox-empty";
 export * from "./inbox-holder";
-export * from "./inbox-list";
+export * from "./inbox-visit";
 export * from "./inbox-row";
 export * from "./open-card";
 export * from "./open-timeline";
