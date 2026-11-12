@@ -19,20 +19,18 @@
  * files of the commit that run tested.
  *
  * Vitest's own `--shard` splits by file name, which leaves one shard with
- * the long files. A sequencer that weighs files cannot do it here either:
- * Vitest has one sequencer for all its projects, and the other CI jobs shard
- * by name with `--shard`.
+ * the long files. The other test suites are split by run time inside Vitest
+ * (`test-shards.ts`); this suite is planned out here because each shard also
+ * records which files it ran, which the weights refresh checks.
  */
 import { globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { planShards, type ShardWeights } from "./shard-plan";
 
 const REPOSITORY_ROOT = join(import.meta.dirname, "..");
 const TEST_FOLDER = "e2e/desktop";
 /** Where the recorded run times are kept. */
 export const WEIGHTS_PATH = join(import.meta.dirname, "desktop-e2e-shard-weights.json");
-
-/** Run times in seconds, by file path relative to the repository root. */
-export type ShardWeights = Readonly<Record<string, number>>;
 
 /** What a shard of a CI run recorded about its plan, uploaded beside its Vitest report. */
 export interface ShardRecord {
@@ -59,53 +57,6 @@ export function listDesktopE2eFiles(): ReadonlyArray<string> {
 /** Reads the recorded run times of the test files. Fails when the file is missing or not JSON. */
 export function readShardWeights(): ShardWeights {
   return JSON.parse(readFileSync(WEIGHTS_PATH, "utf8")) as ShardWeights;
-}
-
-/** Returns the median of a list of numbers; 0 for an empty list. */
-function computeMedian(numbers: ReadonlyArray<number>): number {
-  if (numbers.length === 0) return 0;
-  const sorted = numbers.toSorted((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
-}
-
-/**
- * Splits the files into `count` shards and returns them, each sorted by name.
- * Fails when `count` is not a positive whole number.
- *
- * A file's weight is its recorded run time in `weights`. A file with no
- * record, such as one added since the weights were refreshed, weighs the
- * median of the recorded ones: neither free nor assumed long. Files are placed
- * longest first, each into the shard with the least weight so far, which
- * keeps the shards close to equal. Ties break by file name, so the same
- * input always gives the same shards.
- *
- * Every file is in exactly one shard, whatever the weights say: a file the
- * weights do not know is planned, and a weight for a file that is gone is
- * ignored.
- */
-export function planShards(
-  files: ReadonlyArray<string>,
-  weights: ShardWeights,
-  count: number,
-): ReadonlyArray<ReadonlyArray<string>> {
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error(`The number of shards must be a positive whole number, not ${count}.`);
-  }
-  const unrecordedWeight = computeMedian(
-    files.flatMap((file) => (file in weights ? [weights[file]!] : [])),
-  );
-  const weighed = files
-    .map((file) => ({ file, weight: weights[file] ?? unrecordedWeight }))
-    .toSorted((a, b) => b.weight - a.weight || (a.file < b.file ? -1 : 1));
-
-  const shards = Array.from({ length: count }, () => ({ weight: 0, files: [] as Array<string> }));
-  for (const { file, weight } of weighed) {
-    const lightest = shards.reduce((least, shard) => (shard.weight < least.weight ? shard : least));
-    lightest.weight += weight;
-    lightest.files.push(file);
-  }
-  return shards.map((shard) => shard.files.toSorted());
 }
 
 /**

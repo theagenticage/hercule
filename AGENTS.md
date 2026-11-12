@@ -155,6 +155,8 @@ pnpm test:react apps/web packages/ui apps/desktop   # these three folders run on
 pnpm test:node <any other path>                     # everything else, on Bun
 ```
 
+CI splits each half into shards by the run time recorded for each file in `scripts/test-shard-weights.json`, so `pnpm test:react --shard=2/4` runs the files of CI's second shard. A new file weighs the median until the weights are refreshed with `bun run scripts/update-test-shard-weights.ts <run id>`.
+
 Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
 release binary rather than building one, so it needs the build before it and fails
 saying so when there is none. Building rewrites `apps/web/dist` and the generated
