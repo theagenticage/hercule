@@ -966,7 +966,7 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     label: "Assigned",
     description: "Someone assigned you an issue or a pull request.",
     noun: "assignment",
-    asks: true,
+    asks: false,
     from: ["github.issue.assigned"],
     rule: `event.payload.toYou && !event.payload.byYou && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:

@@ -53,8 +53,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
   EntityHandOffResult,
   HandOffUndo,
-  Inbox,
-  InboxCard,
+  InboxPage,
+  InboxThing,
   Run,
   Signal,
   Task,
@@ -145,12 +145,12 @@ const waitForStepRunning = (runId: string, stepId: string): Promise<Run> =>
     (run) => run.steps.some((step) => step.stepId === stepId && step.status === "running"),
   );
 
-/** Reads the Inbox card of the pull request with this id, with the offers its set holds. */
+/** Reads the Inbox row of the pull request with this id, with the offers its set holds. */
 const readCard = async (
   entityId: string,
-): Promise<{ readonly card: InboxCard; readonly offers: Inbox["offerSets"][string] }> => {
-  const inbox = await readAsUser<Inbox>(["entity", "list"]);
-  const card = inbox.cards.find((candidate) => candidate.id === entityId);
+): Promise<{ readonly card: InboxThing; readonly offers: InboxPage["offerSets"][string] }> => {
+  const inbox = await readAsUser<InboxPage>(["entity", "list", "--list", "everything"]);
+  const card = inbox.things.find((candidate) => candidate.id === entityId);
   if (card === undefined) throw new Error(`the Inbox has no card ${entityId}`);
   return { card, offers: inbox.offerSets[card.offerSetId] ?? [] };
 };
@@ -600,7 +600,7 @@ describe("handing a pull request to a workflow from its card", () => {
 
   it("is offered the workflow, makes a Task at building with one run, ends the review request and leaves the mention open", async () => {
     const before = await readCard(REVIEWED.id);
-    expect(before.card.signals.kinds).toEqual([MENTIONED, REVIEW_REQUESTED]);
+    expect(before.card.openKinds).toEqual([MENTIONED, REVIEW_REQUESTED]);
     expect(before.card.actingConnections.map((account) => account.label)).toEqual([
       "northwind-bot",
     ]);

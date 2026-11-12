@@ -175,3 +175,21 @@ export const decodeSignalKinds = (
     }
     return registered;
   });
+
+/**
+ * Returns the qualified kinds, sorted, whose open signals ask the user for a
+ * move. `registry` is the signal kinds of the active plugins, so a kind whose
+ * plugin is inactive does not ask. The core's own kinds (proposal, offer,
+ * unsure, fyi) are in no plugin's registry and never ask: Triage shows them.
+ *
+ * This is the one place that decides which kinds ask. Today a kind asks when
+ * its plugin declared `asks: true`; a later per-user setting that overrides a
+ * kind's answer slots in here and nowhere else.
+ */
+export const listAskingKinds = (
+  registry: ReadonlyArray<Pick<RegisteredSignalKind, "kind" | "asks">>,
+): ReadonlyArray<string> =>
+  registry
+    .filter((entry) => entry.asks)
+    .map((entry) => entry.kind)
+    .sort();

@@ -4,7 +4,7 @@
  * the undo line after a hand-off is taken back.
  *
  * The colleague who has a card is a fact the controller reports on the card
- * (`InboxCard.liveWorkflows`), so a card drawn after leaving the Inbox and
+ * (`InboxThing.liveWorkflows`), so a card drawn after leaving the Inbox and
  * coming back still shows who has it. A hand-off the user has just made
  * shows at once as an `InboxEdit` (see `card-moves.ts`) that puts the workflow
  * into that list before the controller answers.
@@ -14,16 +14,14 @@ import type {
   EntitySignalLine,
   ExternalEntityDetail,
   HandOffUndo,
-  Inbox,
-  InboxCard,
+  InboxPage,
+  InboxThing,
   LiveWorkflow,
   WorkflowOffer,
 } from "@hercule/contract";
 import { nameSignalKind } from "../intake";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
-import { decideCardFace, type CardFace } from "./card-face";
-import type { CardTime } from "./card-wait";
 
 /** The workflows a card can be handed to, and the ones it could be if something changed. */
 export interface CardOffers {
@@ -53,7 +51,7 @@ const partitionedSets = new WeakMap<readonly WorkflowOffer[], CardOffers>();
  * compares its offers by identity draws again only when its own set changed.
  */
 export const listCardOffers = (
-  card: Pick<InboxCard, "offerSetId">,
+  card: Pick<InboxThing, "offerSetId">,
   offerSets: Readonly<Record<string, readonly WorkflowOffer[]>>,
 ): CardOffers => {
   const set = offerSets[card.offerSetId];
@@ -142,42 +140,11 @@ export type CardHolder =
  * with the newest run, else the user when a Task holds it, else nobody.
  */
 export const decideCardHolder = (
-  card: Pick<InboxCard, "taskId" | "liveWorkflows">,
+  card: Pick<InboxThing, "taskId" | "liveWorkflows">,
 ): CardHolder | undefined => {
   const [workflow] = card.liveWorkflows;
   if (workflow !== undefined) return { kind: "colleague", workflow };
   return card.taskId === undefined ? undefined : { kind: "you" };
-};
-
-/** What a card of the Inbox draws: its face and time, and who holds it. */
-export interface CardDraw extends CardTime {
-  readonly face: CardFace;
-  /** `undefined` for a card nobody holds, which draws its wait instead. */
-  readonly holder: CardHolder | undefined;
-}
-
-/**
- * Returns what `card` draws, given its `time`.
- *
- * - A card with a live workflow has its sentence replaced by
- *   `decideHandedSentence`, and no wait and no sentence age: the colleague
- *   stands in the wait's place, and the sentence's age would be about a
- *   signal the hand-off ended. A screen reader reads the sentence through
- *   `describeCardAloud`.
- * - A card a Task holds is held by the user, unless a workflow is working on
- *   it: a hand-off continues the Task, and the colleague holds the card then.
- */
-export const decideCardDraw = (card: InboxCard, time: CardTime): CardDraw => {
-  const face = decideCardFace(card);
-  const holder = decideCardHolder(card);
-  if (holder?.kind !== "colleague") return { ...time, face, holder };
-  return {
-    ...time,
-    wait: null,
-    signalAge: undefined,
-    face: { ...face, sentence: decideHandedSentence(holder.workflow) },
-    holder,
-  };
 };
 
 /**
@@ -201,8 +168,8 @@ export const readOpenCardHandOff = (
   detail:
     | Pick<ExternalEntityDetail, "kindAvailable" | "offers" | "actingConnections" | "signals">
     | undefined,
-  listed: Pick<InboxCard, "offerSetId" | "actingConnections" | "signals"> | undefined,
-  inbox: Pick<Inbox, "offerSets"> | undefined,
+  listed: Pick<InboxThing, "offerSetId" | "actingConnections" | "openKinds"> | undefined,
+  inbox: Pick<InboxPage, "offerSets"> | undefined,
 ): OpenCardHandOff => {
   const readOffers = (): CardOffers => {
     if (inbox === undefined || detail?.kindAvailable === false) return NO_OFFERS;
@@ -213,7 +180,7 @@ export const readOpenCardHandOff = (
     offers: readOffers(),
     actingConnections: detail?.actingConnections ?? listed?.actingConnections ?? [],
     openKinds:
-      detail === undefined ? (listed?.signals.kinds ?? []) : listOpenSignalKinds(detail.signals),
+      detail === undefined ? (listed?.openKinds ?? []) : listOpenSignalKinds(detail.signals),
   };
 };
 

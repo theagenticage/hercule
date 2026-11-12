@@ -10,16 +10,23 @@ import type {
   EntityRecord,
   EntitySignalLine,
   EntityStatus,
-  InboxCard,
 } from "@hercule/contract";
 import { readEntityPluginId, formatTargetDate } from "../desk/entity-words";
 import { readSignalWord } from "../intake";
 
+/** What a card knows of the live signals on its thing: the newest one, and how many there are. */
+export interface CardSignals {
+  readonly latest?: EntitySignalLine;
+  readonly openCount: number;
+}
+
 /**
- * A record that may also say what the signals on it are: an Inbox card does,
- * the record `externalEntity.read` returns does not.
+ * A record that may also say what the signals on it are. The record
+ * `externalEntity.read` returns does not, and the Inbox's rows no longer
+ * carry them (their asks are on `InboxThing.asks`), so this is absent for
+ * every record a screen reads today.
  */
-export type CardRecord = EntityRecord & { readonly signals?: InboxCard["signals"] };
+export type CardRecord = EntityRecord & { readonly signals?: CardSignals };
 
 /** A fact in words. A client makes the plural of a count and the sign of a delta, with a real minus sign. */
 export type CardFact =

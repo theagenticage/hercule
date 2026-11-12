@@ -1,9 +1,8 @@
 /** Tests the open card's timeline, with invented tickets and pull requests of the Acme world. */
 import { describe, expect, it } from "vitest";
-import type { EntityLink, EntitySignalLine } from "@hercule/contract";
-import { buildInboxCard, buildRequestCard } from "./cards.testing";
+import type { EntityLink, EntitySignalLine, InboxThing } from "@hercule/contract";
+import { buildInboxThing } from "./cards.testing";
 import {
-  buildListedTimelineSource,
   buildOpenTimeline,
   buildWalkableIds,
   describeTimelineOverflow,
@@ -13,7 +12,20 @@ import {
 
 const NOW = new Date("2026-11-06T12:00:00.000Z");
 const SELF = "acme:ticket:7";
-const REVIEW = buildRequestCard("9", { identifier: "#9" });
+const REVIEW = buildInboxThing("9", {
+  ref: "acme:review:9",
+  kind: "acme/review",
+  identifier: "#9",
+});
+
+/** Returns an ask of the invented review kind, as the line `buildLine` makes it. */
+const buildAsk = (line: EntitySignalLine): InboxThing["asks"][number] => ({
+  id: line.id,
+  kind: line.kind,
+  noun: "review request",
+  say: line.say,
+  createdAt: line.createdAt,
+});
 
 /** Returns the time `hours` before `NOW` as an ISO timestamp. */
 const hoursAgo = (hours: number): string =>
@@ -97,11 +109,7 @@ describe("buildOpenTimeline", () => {
   it("weaves in the newest signal of a confirmed linked card, with its mark and identifier", () => {
     const linked = {
       ...REVIEW,
-      signals: {
-        openCount: 1,
-        kinds: [],
-        latest: buildLine("p1", 1, { say: { say: "Checks failed", tone: "bad" } }),
-      },
+      asks: [buildAsk(buildLine("p1", 1, { say: { say: "Checks failed", tone: "bad" } }))],
     };
 
     const lines = buildOpenTimeline(
@@ -123,7 +131,7 @@ describe("buildOpenTimeline", () => {
   });
 
   it("weaves in a linked card when the link points at this thing", () => {
-    const linked = { ...REVIEW, signals: { openCount: 1, kinds: [], latest: buildLine("p1", 1) } };
+    const linked = { ...REVIEW, asks: [buildAsk(buildLine("p1", 1))] };
 
     const lines = buildOpenTimeline(buildSource({ links: [linkTo(REVIEW.ref, "person")] }), [
       linked,
@@ -228,7 +236,7 @@ describe("findFirstOpenLine", () => {
 
 describe("buildOpenTimeline with a thing nobody has a card for", () => {
   it("ignores the link when the far end has no card on the page", () => {
-    const card = buildInboxCard("5");
+    const card = buildInboxThing("5");
     expect(
       buildOpenTimeline(buildSource({ links: [linkTo("acme:other:1", "source")] }), [card]),
     ).toEqual([]);
@@ -257,15 +265,6 @@ describe("the keys of the lines", () => {
     const twice = change(hoursAgo(3), "moved");
     const lines = buildOpenTimeline(buildSource({ timeline: [twice, twice] }), []);
     expect(new Set(lines.map((line) => line.key)).size).toBe(2);
-  });
-});
-
-describe("buildListedTimelineSource", () => {
-  it("holds the newest signal of a card alone, or nothing for a card with none", () => {
-    const latest = buildLine("s1", 2);
-    const card = buildInboxCard("1", { signals: { openCount: 1, kinds: [], latest } });
-    expect(buildListedTimelineSource(card)).toMatchObject({ ref: card.ref, signals: [latest] });
-    expect(buildListedTimelineSource(buildInboxCard("2")).signals).toEqual([]);
   });
 });
 
