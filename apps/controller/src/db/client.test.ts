@@ -22,6 +22,7 @@ import {
   takeControllerLock,
   withTransaction,
   type DatabaseFiles,
+  withReadSnapshot,
 } from "./client";
 
 let home: string;
@@ -576,5 +577,44 @@ describe("withTransaction", () => {
       }),
     );
     expect(next).toBe(true);
+  });
+});
+
+describe("withReadSnapshot", () => {
+  it("shows every statement the state at its start, even when a writer commits between them", async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, insert(sql, 1));
+        return yield* withReadSnapshot(
+          sql,
+          Effect.gen(function* () {
+            const before = yield* countRows(sql);
+            yield* withTransaction(sql, insert(sql, 2));
+            return { before, after: yield* countRows(sql) };
+          }),
+        );
+      }),
+    );
+    expect(seen).toEqual({ before: 1, after: 1 });
+  });
+
+  it("shows later reads what was committed once it ends, and runs snapshots one at a time", async () => {
+    const counts = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, insert(sql, 1));
+        const both = yield* Effect.all(
+          [
+            withReadSnapshot(sql, countRows(sql)),
+            withReadSnapshot(sql, Effect.zip(countRows(sql), countRows(sql))),
+          ],
+          { concurrency: "unbounded" },
+        );
+        yield* withTransaction(sql, insert(sql, 2));
+        return { both, after: yield* countRows(sql) };
+      }),
+    );
+    expect(counts).toEqual({ both: [1, [1, 1]], after: 2 });
   });
 });

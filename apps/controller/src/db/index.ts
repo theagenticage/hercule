@@ -16,6 +16,7 @@ export {
   openDatabaseCopy,
   lockDatabaseFile,
   takeControllerLock,
+  withReadSnapshot,
   withTransaction,
   type DatabaseFiles,
 } from "./client";

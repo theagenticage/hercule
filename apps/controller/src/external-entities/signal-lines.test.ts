@@ -22,24 +22,11 @@ import { MAX_ENTITY_SIGNALS, type Signal } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { signalRepository } from "../signals/repository";
-import { externalEntityInbox } from "./inbox-query";
+import { inbox } from "./inbox.testing";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
-type Inbox = Effect.Success<typeof externalEntityInbox>;
-
-/** The Inbox's reads. Each one gets the Inbox service when it runs. */
-const inbox = {
-  queryInbox: (...args: Parameters<Inbox["queryInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.queryInbox(...args)),
-  countInbox: (...args: Parameters<Inbox["countInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
-  readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
-  suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
-};
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
 const MINUTE = 60_000;
@@ -256,7 +243,7 @@ const inboxEnvironment = (minutes: number) => ({
 });
 
 const readInbox = (minutes: number) =>
-  inbox.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
+  inbox.readFirstPage(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
 
 const readSidebarCounts = (minutes: number) => inbox.countInbox(inboxEnvironment(minutes));
 

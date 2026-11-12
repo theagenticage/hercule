@@ -48,8 +48,8 @@ import {
   type InboxCounts,
   type InboxOutline,
   type InboxMove,
-  type InboxPage,
   type InboxQuery,
+  type InboxReply,
   type InboxValueQuery,
   type InboxValues,
   type InvalidState,
@@ -394,21 +394,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the active Task of an entity, or makes one, in one transaction.
-   *
-   * 1. When a thing was read, checks that its Connection can still read, and
-   *    stores the observation (which creates the entity when it is new).
-   * 2. Checks the rows again: the exact ref, a full record, `access: ok` and
-   *    an active kind. Otherwise fails with `Conflict`, so the caller repeats.
-   * 3. Returns the active Task when one appeared meanwhile.
-   * 4. Makes the Task and its link, in the Project the user picked or the one
-   *    the repository points at. With `followIfUnconcerned`, the link records
-   *    that Hercule follows the thing when no Connection reports a concern.
-   *
-   * The observation is stored through the repository's `refresh`, which never
-   * changes a concern, so a later poll never empties what a Task follows.
-   */
-  /**
    * Marks the active Task of `ref` as taken on by the user, now, when it was
    * made some other way (a hand-off, a session, a signal, an event), so the
    * asks raised before this moment stop asking. Changes nothing when the user
@@ -430,6 +415,7 @@ const make = Effect.gen(function* () {
         : markActiveTaskTakenOnInTransaction(ref, entityId),
     );
 
+  /** Marks the active Task of `ref` as taken on, in one transaction: see `markActiveTaskTakenOn`. */
   const markActiveTaskTakenOnInTransaction = (
     ref: string,
     entityId: string | undefined,
@@ -452,6 +438,21 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Returns the active Task of an entity, or makes one, in one transaction.
+   *
+   * 1. When a thing was read, checks that its Connection can still read, and
+   *    stores the observation (which creates the entity when it is new).
+   * 2. Checks the rows again: the exact ref, a full record, `access: ok` and
+   *    an active kind. Otherwise fails with `Conflict`, so the caller repeats.
+   * 3. Returns the active Task when one appeared meanwhile.
+   * 4. Makes the Task and its link, in the Project the user picked or the one
+   *    the repository points at. With `followIfUnconcerned`, the link records
+   *    that Hercule follows the thing when no Connection reports a concern.
+   *
+   * The observation is stored through the repository's `refresh`, which never
+   * changes a concern, so a later poll never empties what a Task follows.
+   */
   const makeTaskForEntity = (input: {
     readonly ref: string;
     readonly preparation: Preparation;
@@ -669,7 +670,8 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns one page of an Inbox list: see `InboxPage`. Needs the grants
+     * Reads the Inbox in the mode `query` asks for: see `InboxQuery` and
+     * `InboxReply`. Needs the grants
      * `task.read` and `signal.query`, because rows show signal text,
      * `workflow.query` and `connection.query`, because the offers name
      * workflows and accounts, and `run.query`, because a row names the
@@ -678,7 +680,7 @@ const make = Effect.gen(function* () {
      */
     queryInbox: (
       query: InboxQuery,
-    ): Effect.Effect<InboxPage, Unauthenticated | Forbidden | Validation | SqlError> =>
+    ): Effect.Effect<InboxReply, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");

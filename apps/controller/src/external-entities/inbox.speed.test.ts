@@ -14,8 +14,8 @@
  * things:
  *
  * - `queryInbox`: the first page of "Someone waits on me" (order waiting) and
- *   of "Everything" (order newest), a `refs` read of 200 things, and the page
- *   after the first. A page prints its median and 95th percentile, the
+ *   of "Everything" (order newest), a `rows` read of 200 held things, a
+ *   `refresh` that holds 400, and the page after the first. A page prints its median and 95th percentile, the
  *   statements sent and the bytes of the encoded reply;
  * - `suggestInboxValues`: the values of a facet field and of the core key
  *   `from`;
@@ -45,7 +45,8 @@ import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
 import { claimRepository } from "./claims";
 import type { ActiveEntityKind } from "./entity-records";
-import { externalEntityInbox, type InboxEnvironment } from "./inbox-query";
+import type { InboxEnvironment } from "./inbox-query";
+import { inbox } from "./inbox.testing";
 
 /** Set to "1" by `pnpm test:speed`. */
 const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
@@ -444,7 +445,9 @@ const printCase = (size: number, result: Case) =>
       `${format(result.timing.p95)} ms  ${String(result.statements).padStart(2)} statements  ` +
       `${String(result.bytes).padStart(8)} bytes  ${String(result.returned)} returned` +
       // A row's weight is what the list pays per thing held.
-      (result.name.startsWith("page") || result.name.startsWith("refs")
+      (result.name.startsWith("page") ||
+      result.name.startsWith("rows") ||
+      result.name.startsWith("refresh")
         ? `  ${String(Math.round(result.bytes / Math.max(1, result.returned)))} B/row\n`
         : "\n") +
       // The base of every read (live Tasks, signals, concerns) scans its tables
@@ -462,20 +465,23 @@ const SIZES = [300, 1000, 2400] as const;
 const runSize = (size: number) =>
   Effect.gen(function* () {
     yield* seed(size);
-    const inbox = yield* externalEntityInbox;
     const waits = { list: { savedQuery: "waits" } } as const;
     const everything = { list: { savedQuery: "everything" } } as const;
-    const firstWaiting = yield* inbox.queryInbox(ENVIRONMENT, waits);
-    const firstNewest = yield* inbox.queryInbox(ENVIRONMENT, everything);
+    const firstWaiting = yield* inbox.readFirstPage(ENVIRONMENT, waits);
+    const firstNewest = yield* inbox.readFirstPage(ENVIRONMENT, everything);
     const refs = firstNewest.things.map((thing) => thing.ref);
     const cases: Array<Case> = [];
     const pages = (page: { readonly things: ReadonlyArray<unknown> }) => page.things.length;
     cases.push(
-      yield* runCase("page: waits (waiting)", inbox.queryInbox(ENVIRONMENT, waits), pages),
-      yield* runCase("page: everything (newest)", inbox.queryInbox(ENVIRONMENT, everything), pages),
+      yield* runCase("page: waits (waiting)", inbox.readFirstPage(ENVIRONMENT, waits), pages),
+      yield* runCase(
+        "page: everything (newest)",
+        inbox.readFirstPage(ENVIRONMENT, everything),
+        pages,
+      ),
       yield* runCase(
         "page: narrowed by clauses+text",
-        inbox.queryInbox(ENVIRONMENT, {
+        inbox.readFirstPage(ENVIRONMENT, {
           ...everything,
           clauses: [
             { key: "priority", op: "is", value: "normal" },
@@ -487,9 +493,15 @@ const runSize = (size: number) =>
         pages,
       ),
       yield* runCase(
-        "refs read (200 refs)",
-        inbox.queryInbox(ENVIRONMENT, { ...everything, refs: refs.slice(0, 200) }),
+        "rows read (200 held)",
+        inbox.readRows(ENVIRONMENT, everything, refs.slice(0, 200)),
         pages,
+      ),
+      // A refresh is a first page and the held rows beyond it, at one moment.
+      yield* runCase(
+        "refresh (400 held)",
+        inbox.readRefresh(ENVIRONMENT, everything, refs.slice(0, 400)),
+        (reply) => reply.first.things.length + reply.held.things.length,
       ),
       yield* runCase(
         "suggest: team",
@@ -517,7 +529,7 @@ const runSize = (size: number) =>
       cases.push(
         yield* runCase(
           "page: the second one",
-          inbox.queryInbox(ENVIRONMENT, { ...everything, cursor: firstNewest.nextCursor }),
+          inbox.readNextPage(ENVIRONMENT, everything, firstNewest.nextCursor),
           pages,
         ),
       );
@@ -572,7 +584,8 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
         expect(timed.timing.median, `${name} at ${String(size)}`).toBeLessThan(COUNTS_CEILING_MS);
       }
       for (const one of result.cases.filter(
-        (c) => c.name.startsWith("page") || c.name.startsWith("refs"),
+        (c) =>
+          c.name.startsWith("page") || c.name.startsWith("rows") || c.name.startsWith("refresh"),
       )) {
         expect(one.timing.median, `${one.name} at ${String(size)}`).toBeLessThan(
           size === 300 ? PAGE_TARGET_MS : LARGE_PAGE_CEILING_MS,

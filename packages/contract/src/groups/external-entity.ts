@@ -38,6 +38,7 @@ import {
   Validation,
 } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
+import { closedStruct } from "../closed";
 import { Authenticated } from "../security";
 import { markRepeatedShorthand, markShorthand } from "../shorthand";
 import { atMost, bounded } from "../strings";
@@ -506,9 +507,6 @@ export const CardFace = Schema.Struct({
 
 export type CardFace = Schema.Schema.Type<typeof CardFace>;
 
-/** The most things one page of the Inbox holds, and the most refs one `refs` read names. */
-export const MAX_INBOX_PAGE = 200;
-
 /** The most clauses a search sends beside the list's own. */
 export const MAX_INBOX_QUERY_CLAUSES = 12;
 
@@ -631,27 +629,55 @@ const InboxClauseFromWord = Schema.String.check(
   }),
 );
 
+/** The most things one page of the Inbox holds. */
+export const MAX_INBOX_PAGE = 200;
+
+/** The most refs a client holds and sends in a `refresh` or a `rows` read. */
+export const MAX_INBOX_HELD_REFS = 400;
+
 /**
- * The query of `queryInbox`.
- *
- * - `list` is the scope. `clauses` and `text` are the search inside it, and
- *   narrow it. A Browse scope is ordered `waiting`.
- * - `cursor` is the `nextCursor` of an earlier page of the same query. A
- *   cursor of another query, or one that does not decode, fails with
- *   `validation`.
- * - `refs` restricts the reply to those things, in the list's order, when they
- *   still belong to it. It never comes with a cursor. A client uses it to
- *   refresh the rows it holds beyond the first page.
+ * What every `queryInbox` mode selects: the list, and the search inside it.
+ * `clauses` and `text` narrow the list, and nothing more. A Browse list is
+ * ordered `waiting`.
  */
-export const InboxQuery = Schema.Struct({
+const InboxSelectionFields = {
   list: InboxList,
   clauses: Schema.optionalKey(
     markRepeatedShorthand(atMost(InboxClause, MAX_INBOX_QUERY_CLAUSES), InboxClauseFromWord),
   ),
   text: Schema.optionalKey(bounded(0, MAX_INBOX_TEXT_LENGTH)),
-  cursor: Schema.optionalKey(bounded(1, 512)),
-  refs: Schema.optionalKey(atMost(ExternalRef, MAX_INBOX_PAGE)),
-});
+};
+
+const InboxHeldRefs = atMost(ExternalRef, MAX_INBOX_HELD_REFS);
+
+/**
+ * The query of `queryInbox`: one selection, read in one of four modes.
+ *
+ * - `first` reads the first page of the selection, with the total and the
+ *   facets of the whole result.
+ * - `next` reads the page after `after`, the `nextCursor` of an earlier page
+ *   of the same selection. A cursor of another selection, or one that does not
+ *   decode, fails with `validation`.
+ * - `refresh` reads the first page, and the rows the client `held` that are
+ *   not on it, in one read at one moment. It is how a client that shows a list
+ *   keeps its rows current.
+ * - `rows` reads the `held` rows alone, at one moment, in the list's order.
+ *
+ * A field that does not belong to the mode is refused, so `after` with `first`
+ * fails instead of silently reading the first page. A held ref that is missing
+ * from the reply of `refresh` or `rows` is no longer on the list. A client that shows a list uses the two held modes; the
+ * CLI uses `first` and `next`.
+ */
+export const InboxQuery = Schema.Union([
+  closedStruct({ mode: Schema.Literal("first"), ...InboxSelectionFields }),
+  closedStruct({ mode: Schema.Literal("next"), ...InboxSelectionFields, after: bounded(1, 512) }),
+  closedStruct({
+    mode: Schema.Literal("refresh"),
+    ...InboxSelectionFields,
+    held: InboxHeldRefs,
+  }),
+  closedStruct({ mode: Schema.Literal("rows"), ...InboxSelectionFields, held: InboxHeldRefs }),
+]);
 
 export type InboxQuery = Schema.Schema.Type<typeof InboxQuery>;
 
@@ -725,7 +751,7 @@ export const InboxThing = Schema.Struct({
   dismissedAt: Schema.optionalKey(Timestamp),
   arrival: Schema.Int,
   /**
-   * The key of this thing's offers in `InboxPage.offerSets`. Things that share
+   * The key of this thing's offers in the `offerSets` of a reply. Things that share
    * a kind, a target repository and an acting-account state share one set.
    */
   offerSetId: bounded(1, MAX_OFFER_SET_ID_LENGTH),
@@ -770,32 +796,77 @@ export const InboxFacet = Schema.Struct({
 export type InboxFacet = Schema.Schema.Type<typeof InboxFacet>;
 
 /**
- * One page of a list. `total` counts the whole result of the query, not the
- * page. `total` and `facets` come only with the first page (no cursor, no
- * `refs`); a next page and a `refs` read leave them out, so they do not count
- * the whole list. `facets` describe the whole result.
+ * The workflows each thing of a read can be handed to, by
+ * `InboxThing.offerSetId`. A presentation list: the hand-off checks its
+ * workflow itself.
+ */
+const InboxOfferSets = Schema.Record(
+  bounded(1, MAX_OFFER_SET_ID_LENGTH),
+  atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
+).check(Schema.isMaxProperties(MAX_INBOX_HELD_REFS));
+
+/**
+ * The reply to `first`: the first page of a list. `total` counts the whole
+ * result of the selection, not the page, and `facets` describe the whole
+ * result.
  *
  * Order `waiting`: things with an open ask come first, the oldest ask first,
  * then the rest, the latest change first. Order `newest`: the latest change
  * first. Ties break by ref.
  */
-export const InboxPage = Schema.Struct({
+export const InboxFirstPage = Schema.Struct({
+  mode: Schema.Literal("first"),
   things: atMost(InboxThing, MAX_INBOX_PAGE),
   nextCursor: Schema.optionalKey(bounded(1, 512)),
-  total: Schema.optionalKey(Schema.Int),
+  total: Schema.Int,
   order: InboxOrder,
-  facets: Schema.optionalKey(atMost(InboxFacet, MAX_INBOX_RAIL_ROWS)),
-  /**
-   * The workflows each thing can be handed to, by `InboxThing.offerSetId`. A
-   * presentation list: the hand-off checks its workflow itself.
-   */
-  offerSets: Schema.Record(
-    bounded(1, MAX_OFFER_SET_ID_LENGTH),
-    atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
-  ).check(Schema.isMaxProperties(MAX_INBOX_PAGE)),
+  facets: atMost(InboxFacet, MAX_INBOX_RAIL_ROWS),
+  offerSets: InboxOfferSets,
 });
 
-export type InboxPage = Schema.Schema.Type<typeof InboxPage>;
+export type InboxFirstPage = Schema.Schema.Type<typeof InboxFirstPage>;
+
+/** The reply to `next`: one more page, in the order of the first. It has no total and no facets. */
+export const InboxNextPage = Schema.Struct({
+  mode: Schema.Literal("next"),
+  things: atMost(InboxThing, MAX_INBOX_PAGE),
+  nextCursor: Schema.optionalKey(bounded(1, 512)),
+  offerSets: InboxOfferSets,
+});
+
+export type InboxNextPage = Schema.Schema.Type<typeof InboxNextPage>;
+
+/**
+ * The held rows of `refresh` and `rows` that are still on the list, in the
+ * list's order. A held ref that is not here has left the list.
+ */
+const InboxHeldRows = {
+  things: atMost(InboxThing, MAX_INBOX_HELD_REFS),
+  offerSets: InboxOfferSets,
+};
+
+/**
+ * The reply to `refresh`: the first page, and the held rows that are still on
+ * the list but not on that page, both read at one moment. A held ref that is
+ * on neither has left the list.
+ */
+export const InboxRefresh = Schema.Struct({
+  mode: Schema.Literal("refresh"),
+  first: InboxFirstPage,
+  held: Schema.Struct(InboxHeldRows),
+});
+
+export type InboxRefresh = Schema.Schema.Type<typeof InboxRefresh>;
+
+/** The reply to `rows`: the held rows that are still on the list, in the list's order. */
+export const InboxRows = Schema.Struct({ mode: Schema.Literal("rows"), ...InboxHeldRows });
+
+export type InboxRows = Schema.Schema.Type<typeof InboxRows>;
+
+/** The reply to `queryInbox`: the reply of the mode that was asked. */
+export const InboxReply = Schema.Union([InboxFirstPage, InboxNextPage, InboxRefresh, InboxRows]);
+
+export type InboxReply = Schema.Schema.Type<typeof InboxReply>;
 
 /** The types a query field has. */
 const InboxFieldType = Schema.Literals([
@@ -1250,11 +1321,11 @@ export type EntityUnlinkResult = Schema.Schema.Type<typeof EntityUnlinkResult>;
 export const externalEntity = HttpApiGroup.make("externalEntity")
   .add(
     /**
-     * Returns one page of an Inbox list: the things of a saved query or a
-     * Browse clause, narrowed by the search, in the list's order, 200 at most,
-     * with the cursor of the next page. The first page also carries the
-     * facets of the whole result. With `refs`, returns only those of them that
-     * still belong to the list.
+     * Reads an Inbox list in one of four modes (see `InboxQuery`): the first
+     * page with the total and the facets of the whole result, the page after a
+     * cursor, a refresh (the first page and the held things beyond it, in one
+     * snapshot), or the held things alone. A page holds at most 200 things in
+     * the list's order. The reply carries the mode it answers.
      */
     // A POST that reads and stores nothing, as `workflow.validate` is: the
     // query is a nested value (a list, an array of clauses) that a flat query
@@ -1262,7 +1333,7 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
     // router prefers them, and "inbox", "search" and "suggestions" are not ids.
     HttpApiEndpoint.post("queryInbox", "/external-entities/inbox/query", {
       payload: InboxQuery,
-      success: InboxPage,
+      success: InboxReply,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     /** Returns the Inbox's counts alone, for the sidebar, which reads them on every screen. */

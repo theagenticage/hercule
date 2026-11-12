@@ -52,7 +52,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
   EntityHandOffResult,
   HandOffUndo,
-  InboxPage,
+  InboxFirstPage,
   InboxThing,
   Run,
   Signal,
@@ -147,8 +147,8 @@ const waitForStepRunning = (runId: string, stepId: string): Promise<Run> =>
 /** Reads the Inbox row of the pull request with this id, with the offers its set holds. */
 const readCard = async (
   entityId: string,
-): Promise<{ readonly card: InboxThing; readonly offers: InboxPage["offerSets"][string] }> => {
-  const inbox = await readAsUser<InboxPage>(["entity", "list", "--list", "everything"]);
+): Promise<{ readonly card: InboxThing; readonly offers: InboxFirstPage["offerSets"][string] }> => {
+  const inbox = await readAsUser<InboxFirstPage>(["entity", "list", "--list", "everything"]);
   const card = inbox.things.find((candidate) => candidate.id === entityId);
   if (card === undefined) throw new Error(`the Inbox has no card ${entityId}`);
   return { card, offers: inbox.offerSets[card.offerSetId] ?? [] };

@@ -24,6 +24,7 @@ import {
   MAX_ENTITY_SIGNALS,
   MAX_INBOX_ACCOUNTS,
   MAX_INBOX_ASKS,
+  MAX_INBOX_HELD_REFS,
   MAX_INBOX_PAGE,
   MAX_INBOX_PAGE_FACET_VALUES,
   MAX_INBOX_RAIL_FACET_VALUES,
@@ -31,17 +32,18 @@ import {
   MAX_LIVE_WORKFLOWS,
   type InboxCounts,
   type InboxFacet,
+  type InboxFirstPage,
   type InboxList,
   type InboxOutline,
-  type InboxPage,
   type InboxQuery,
+  type InboxReply,
   type InboxThing,
   type InboxValueQuery,
   type InboxValues,
   type Validation,
 } from "@hercule/contract";
 import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
-import { uuidFromString, uuidToString } from "../db";
+import { uuidFromString, uuidToString, withReadSnapshot } from "../db";
 import { runRepository } from "../runs";
 import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
@@ -182,10 +184,19 @@ const runStatement = <Row extends object>(
   params: ReadonlyArray<SqlValue>,
 ) => sql.unsafe<Row>(statement, [...params]);
 
-/** Hashes what a cursor is bound to, so a cursor never reads another query. */
-const hashQuery = (list: InboxList, query: InboxQuery, order: string): string =>
+/** What every mode of a query selects, compiled: see `buildSelection`. */
+interface Selection {
+  readonly list: ResolvedList;
+  readonly fields: ReadonlyArray<DeclaredInboxField>;
+  readonly filter: CompiledSql;
+  /** What a cursor is bound to. */
+  readonly hash: string;
+}
+
+/** Hashes what a cursor is bound to (the selection and the order), so a cursor never reads another query. */
+const hashQuery = (query: InboxQuery, order: string): string =>
   createHash("sha256")
-    .update(JSON.stringify([list, query.clauses ?? [], query.text ?? "", order]))
+    .update(JSON.stringify([query.list, query.clauses ?? [], query.text ?? "", order]))
     .digest("hex")
     .slice(0, 16);
 
@@ -607,7 +618,7 @@ export const externalEntityInbox = Effect.gen(function* () {
     environment: InboxEnvironment,
     rows: ReadonlyArray<PageRow>,
   ): Effect.Effect<
-    { readonly things: ReadonlyArray<InboxThing>; readonly offerSets: InboxPage["offerSets"] },
+    { readonly things: ReadonlyArray<InboxThing>; readonly offerSets: InboxFirstPage["offerSets"] },
     SqlError
   > =>
     Effect.gen(function* () {
@@ -699,27 +710,17 @@ export const externalEntityInbox = Effect.gen(function* () {
     });
 
   /**
-   * Reads one page of the list of `query`: see `InboxPage`. The statements are
-   * the page (one, which also counts the whole result on the first page), on the first
-   * page the accounts and the facets, then one read for each kind of detail
-   * of the things on the page.
-   *
-   * Fails with `Validation` for an unknown saved query, a clause or text that
-   * cannot be answered, a cursor that does not belong to the query, or a
-   * cursor given with `refs`.
+   * Compiles what every mode of a query selects: the list, the filter of its
+   * clauses and text, and the hash a cursor is bound to. Fails with
+   * `Validation` for an unknown saved query, or a clause or text that cannot
+   * be answered.
    */
-  const queryInbox = (
+  const buildSelection = (
     environment: InboxEnvironment,
     query: InboxQuery,
-  ): Effect.Effect<InboxPage, SqlError | Validation> =>
+  ): Effect.Effect<Selection, Validation> =>
     Effect.gen(function* () {
       const list = yield* resolveList(query.list, environment);
-      if (query.refs !== undefined && query.cursor !== undefined) {
-        return yield* failValidation(
-          ["cursor"],
-          "a read by refs takes no cursor. Send one or the other.",
-        );
-      }
       const fields = listDeclaredInboxFields(environment.activeEntityKinds ?? []);
       const filter = yield* compileFilterOrFail(environment, {
         clauses: [...list.clauses, ...(query.clauses ?? [])],
@@ -727,61 +728,146 @@ export const externalEntityInbox = Effect.gen(function* () {
         fields,
         ...(list.source === undefined ? {} : { tie: { source: list.source } }),
       });
-      const hash = hashQuery(query.list, query, list.order);
-      let tuple: SortTuple | undefined;
-      if (query.cursor !== undefined) {
-        const decoded = decodeCursor(query.cursor, hash, list.order);
-        if (typeof decoded === "string") return yield* failValidation(["cursor"], decoded);
-        tuple = decoded;
-      }
+      return { list, fields, filter, hash: hashQuery(query, list.order) };
+    });
 
-      // A read of some refs looks at those things only, and only the first page
-      // counts the whole list: a next page or a refs read ranks nothing for it.
-      const matched = buildMatchedEntities(environment, filter, undefined, query.refs);
-      const isFirstPage = query.cursor === undefined && query.refs === undefined;
-      const where: CompiledSql =
-        query.refs === undefined ? buildKeyset(list.order, tuple) : { sql: "1", params: [] };
+  /**
+   * Reads one page of the selection after `tuple` (the first page when it is
+   * absent). One statement for the rows, then the batched reads of their
+   * details. The first page also counts the whole result.
+   */
+  const readPage = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    tuple: SortTuple | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const { list, filter, hash } = selection;
+      const matched = buildMatchedEntities(environment, filter);
+      const where = buildKeyset(list.order, tuple);
       const rows = yield* runStatement<PageRow>(
         sql,
         `WITH ${matched.sql}
          SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
-           ${isFirstPage ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
+           ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
          FROM matched m WHERE ${where.sql}
          ORDER BY ${ORDER_BY[list.order]} LIMIT ?`,
         [...matched.params, ...where.params, MAX_INBOX_PAGE + 1],
       );
-      const more = rows.length > MAX_INBOX_PAGE;
       const pageRows = rows.slice(0, MAX_INBOX_PAGE);
-      // A first page has no keyset, so it has no rows only when nothing matches.
-      const total = isFirstPage ? (rows[0]?.total ?? 0) : undefined;
       const last = pageRows.at(-1);
       const nextCursor =
-        more && last !== undefined && query.refs === undefined
+        rows.length > MAX_INBOX_PAGE && last !== undefined
           ? encodeCursor(hash, buildSortTuple(list.order, last))
           : undefined;
-
       const { things, offerSets } = yield* hydrate(environment, pageRows);
-      let facets: ReadonlyArray<InboxFacet> | undefined;
-      if (query.cursor === undefined && query.refs === undefined) {
-        const facetFields = listFacetFields(fields);
-        const { accounts } = yield* readSourceCounts(sql, matched);
-        const facetRows = yield* readFacetRows(
-          sql,
-          matched,
-          facetFields,
-          MAX_INBOX_PAGE_FACET_VALUES,
-          false,
-        );
-        facets = buildFacets(facetRows, facetFields, accounts, MAX_INBOX_PAGE_FACET_VALUES);
-      }
       return {
+        matched,
         things,
-        ...(nextCursor === undefined ? {} : { nextCursor }),
-        ...(total === undefined ? {} : { total }),
-        order: list.order,
-        ...(facets === undefined ? {} : { facets }),
         offerSets,
+        // A first page has no keyset, so it has no rows only when nothing matches.
+        total: rows[0]?.total ?? 0,
+        ...(nextCursor === undefined ? {} : { nextCursor }),
       };
+    });
+
+  /** Reads the first page of the selection with its total and its facets. */
+  const readFirstPage = (
+    environment: InboxEnvironment,
+    selection: Selection,
+  ): Effect.Effect<InboxFirstPage, SqlError> =>
+    Effect.gen(function* () {
+      const page = yield* readPage(environment, selection, undefined);
+      const facetFields = listFacetFields(selection.fields);
+      const { accounts } = yield* readSourceCounts(sql, page.matched);
+      const facetRows = yield* readFacetRows(
+        sql,
+        page.matched,
+        facetFields,
+        MAX_INBOX_PAGE_FACET_VALUES,
+        false,
+      );
+      return {
+        mode: "first",
+        things: page.things,
+        ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+        total: page.total,
+        order: selection.list.order,
+        facets: buildFacets(facetRows, facetFields, accounts, MAX_INBOX_PAGE_FACET_VALUES),
+        offerSets: page.offerSets,
+      };
+    });
+
+  /**
+   * Reads the things of `held` that still belong to the selection, in the
+   * list's order. One statement for the rows, then the batched reads of their
+   * details. A held ref that no longer belongs, or was pruned, is not in the
+   * reply.
+   */
+  const readHeldRows = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    held: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const matched = buildMatchedEntities(environment, selection.filter, undefined, held);
+      const rows = yield* runStatement<PageRow>(
+        sql,
+        `WITH ${matched.sql}
+         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+         FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
+        [...matched.params, MAX_INBOX_HELD_REFS],
+      );
+      return yield* hydrate(environment, rows);
+    });
+
+  /**
+   * Reads one `queryInbox` in the mode it asks for: see `InboxQuery` and
+   * `InboxReply`. A page is one statement for its rows, then the batched reads
+   * of their details, so the number of statements depends on the mode and
+   * never on the number of things. `refresh` reads its first page and its held
+   * rows in one read snapshot, at one clock.
+   *
+   * Fails with `Validation` for an unknown saved query, a clause or text that
+   * cannot be answered, or a cursor that does not belong to the selection.
+   */
+  const queryInbox = (
+    environment: InboxEnvironment,
+    query: InboxQuery,
+  ): Effect.Effect<InboxReply, SqlError | Validation> =>
+    Effect.gen(function* () {
+      const selection = yield* buildSelection(environment, query);
+      switch (query.mode) {
+        case "first":
+          return yield* readFirstPage(environment, selection);
+        case "next": {
+          const tuple = decodeCursor(query.after, selection.hash, selection.list.order);
+          if (typeof tuple === "string") return yield* failValidation(["after"], tuple);
+          const page = yield* readPage(environment, selection, tuple);
+          return {
+            mode: "next",
+            things: page.things,
+            ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+            offerSets: page.offerSets,
+          };
+        }
+        case "rows":
+          return {
+            mode: "rows",
+            ...(yield* readHeldRows(environment, selection, [...new Set(query.held)])),
+          };
+        case "refresh":
+          return yield* withReadSnapshot(
+            sql,
+            Effect.gen(function* () {
+              const first = yield* readFirstPage(environment, selection);
+              const onFirstPage = new Set(first.things.map((thing) => thing.ref));
+              const rest = [...new Set(query.held)].filter((ref) => !onFirstPage.has(ref));
+              const held = yield* readHeldRows(environment, selection, rest);
+              return { mode: "refresh", first, held } as const;
+            }),
+          );
+      }
     });
 
   /**

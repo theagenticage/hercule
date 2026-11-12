@@ -12,7 +12,7 @@ import { MAX_BOARD_STACK_CANDIDATES } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
-import { externalEntityInbox } from "./inbox-query";
+import { inbox } from "./inbox.testing";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import type { ActiveEntityKind } from "./entity-records";
 import type { EntitySlots, FullEntityObservation } from "./slots";
@@ -170,7 +170,7 @@ const readDetail = (
   extra: { readonly activeEntityKinds?: ReadonlyArray<ActiveEntityKind> } = {},
 ) =>
   Effect.gen(function* () {
-    const page = yield* (yield* externalEntityInbox).queryInbox(
+    const page = yield* inbox.readFirstPage(
       { ...environment(minutes), signalKinds: [], savedQueries: [], askingKinds: [] },
       { list: { savedQuery: "everything" } },
     );

@@ -38,6 +38,7 @@ import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import { SettingsLayer } from "../settings";
+import { narrowInboxReply } from "./inbox.testing";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
 import { renderEntitySlots, type FullEntityObservation } from "./slots";
 
@@ -188,7 +189,11 @@ interface Arranged {
 }
 
 /** The list that holds every thing on the Inbox. */
-const EVERYTHING = { list: { savedQuery: "everything" } } as const;
+const EVERYTHING = { mode: "first", list: { savedQuery: "everything" } } as const;
+
+/** Reads the first page of the list that holds every thing. */
+const readEverything = (service: ExternalEntityService["Service"]) =>
+  Effect.map(service.queryInbox(EVERYTHING), (reply) => narrowInboxReply("first", reply));
 
 const buildLayer = (script: Script) =>
   ExternalEntityServiceLayer.pipe(
@@ -434,7 +439,7 @@ describe("takeOn", () => {
             grants: ALL.filter((grant) => grant !== missing),
           } as unknown as Actor;
           return Effect.all([
-            Effect.flip(Effect.provideService(service.queryInbox(EVERYTHING), CurrentActor, actor)),
+            Effect.flip(Effect.provideService(readEverything(service), CurrentActor, actor)),
             Effect.exit(Effect.provideService(service.read(id), CurrentActor, actor)),
           ]).pipe(Effect.map(([inbox, detail]) => ({ missing, inbox, detail })));
         });
@@ -768,7 +773,7 @@ describe("addToWork", () => {
           result,
           task: yield* tasks.read(result.taskId),
           followed,
-          inbox: yield* service.queryInbox(EVERYTHING),
+          inbox: yield* readEverything(service),
           stillThere: detail.concerns,
         };
       }),
@@ -1007,10 +1012,7 @@ describe("after a merge", () => {
             after: (yield* service.read(one)).taskId,
             taken: yield* service.takeOn(one),
             takenOther: yield* service.takeOn(two),
-            inbox: (yield* service.queryInbox(EVERYTHING)).things.map((card) => [
-              card.ref,
-              card.taskId,
-            ]),
+            inbox: (yield* readEverything(service)).things.map((card) => [card.ref, card.taskId]),
             links: yield* sql<{ readonly following: number; readonly linked_at: string }>`
               SELECT following, linked_at FROM task_entity_links
               WHERE task_id = ${uuidFromString(survivor.id)} AND ref = ${ticketRef("1")}`,
@@ -1096,17 +1098,17 @@ describe("dismiss and restore", () => {
         Effect.gen(function* () {
           yield* report(connectionId, [buildObservation("1")]);
           const id = yield* entityId(ticketRef("1"));
-          const before = (yield* service.queryInbox(EVERYTHING)).things.length;
+          const before = (yield* readEverything(service)).things.length;
           yield* service.dismiss({ ids: [id] });
           const rows = yield* sql<{ readonly dismissed_by: string }>`
             SELECT dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
-          const dismissed = yield* service.queryInbox(EVERYTHING);
+          const dismissed = yield* readEverything(service);
           yield* service.restore({ ids: [id] });
           return {
             before,
             dismissed: dismissed.things.length,
             dismissedBy: rows[0]?.dismissed_by,
-            restored: (yield* service.queryInbox(EVERYTHING)).things.length,
+            restored: (yield* readEverything(service)).things.length,
           };
         }),
     );
@@ -1349,7 +1351,7 @@ describe("acting on a card that holds signals", () => {
         const first = yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
         const second = yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
         yield* service.takeOn(yield* entityId(ticketRef("1")));
-        const inbox = yield* service.queryInbox(EVERYTHING);
+        const inbox = yield* readEverything(service);
         return {
           expected: [first, second],
           open: yield* listOpenSignalIds(sql),
@@ -1368,7 +1370,7 @@ describe("acting on a card that holds signals", () => {
         yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
         yield* service.dismiss({ ids: [yield* entityId(ticketRef("1"))] });
         yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
-        const inbox = yield* service.queryInbox(EVERYTHING);
+        const inbox = yield* readEverything(service);
         return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.things.length };
       }),
     );
@@ -1562,7 +1564,7 @@ describe("what a card offers", () => {
         yield* insertWorkflow(sql, "Disabled", { enabled: false });
         yield* insertWorkflow(sql, "Invalid", { invalid: true });
         yield* insertWorkflow(sql, "Other kind", { kinds: ["acme/epic"] });
-        const inbox = yield* service.queryInbox(EVERYTHING);
+        const inbox = yield* readEverything(service);
         const detail = yield* service.read(yield* entityId(ticketRef("1")));
         return { review, inbox, detail, second };
       }),
@@ -1601,7 +1603,7 @@ describe("what a card offers", () => {
         const webOnly = yield* insertWorkflow(sql, "Web only", {
           workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
         });
-        const inbox = yield* service.queryInbox(EVERYTHING);
+        const inbox = yield* readEverything(service);
         const setOf = (key: string) =>
           inbox.things.find((card) => card.ref === ticketRef(key))!.offerSetId;
         return { webOnly, inbox, setOf };
@@ -1805,7 +1807,7 @@ describe("what a card shows of the live work on its Task", () => {
         yield* on(taken.taskId, ship, "Ship")("completed", 3);
         yield* on(taken.taskId, review, "Review")("running", 4);
         yield* on(finishedOnly.taskId, ship, "Ship")("completed", 5);
-        const inbox = yield* service.queryInbox(EVERYTHING);
+        const inbox = yield* readEverything(service);
         return {
           ids: { review, plan },
           things: inbox.things.map((card) => [card.ref, card.liveWorkflows] as const),
@@ -1840,7 +1842,7 @@ describe("what a card shows of the live work on its Task", () => {
             minute: index,
           });
         }
-        return (yield* service.queryInbox(EVERYTHING)).things[0]!.liveWorkflows;
+        return (yield* readEverything(service)).things[0]!.liveWorkflows;
       }),
     );
     expect(live.map((workflow) => workflow.name)).toEqual(

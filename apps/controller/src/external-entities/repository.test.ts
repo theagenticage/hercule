@@ -29,24 +29,11 @@ import {
   type ObservedEntity,
   type ReconcileChanges,
 } from "./repository";
-import { externalEntityInbox } from "./inbox-query";
+import { inbox } from "./inbox.testing";
 import type { ActiveEntityKind } from "./entity-records";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
-type Inbox = Effect.Success<typeof externalEntityInbox>;
-
-/** The Inbox's reads. Each one gets the Inbox service when it runs. */
-const inbox = {
-  queryInbox: (...args: Parameters<Inbox["queryInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.queryInbox(...args)),
-  countInbox: (...args: Parameters<Inbox["countInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
-  readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
-  suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
-};
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
 const MINUTE = 60_000;
@@ -236,7 +223,7 @@ const inboxEnvironment = (minutes: number) => ({
 
 /** Reads the whole Inbox, the latest change first. */
 const readInbox = (minutes: number) =>
-  inbox.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
+  inbox.readFirstPage(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
 
 const countInbox = (minutes: number) =>
   inbox.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
@@ -1408,7 +1395,7 @@ describe("the Inbox: membership and counts", () => {
         yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
         const task = yield* linkTaskToRef(ticketRef("t1"), 2);
         const everything = yield* readInbox(3);
-        const held = yield* inbox.queryInbox(inboxEnvironment(3), {
+        const held = yield* inbox.readFirstPage(inboxEnvironment(3), {
           list: { savedQuery: "with-hercule" },
         });
         const counts = yield* countInbox(3);

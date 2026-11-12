@@ -19,7 +19,8 @@ import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
 import type { ActiveEntityKind } from "./entity-records";
 import { replaceFieldRows } from "./entity-fields";
-import { externalEntityInbox, type InboxEnvironment } from "./inbox-query";
+import type { InboxEnvironment } from "./inbox-query";
+import { inbox, type InboxSelection } from "./inbox.testing";
 import { externalEntityRepository } from "./repository";
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
@@ -73,19 +74,6 @@ const environment = (minutes: number, extra: Partial<InboxEnvironment> = {}): In
 });
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
-type Inbox = Effect.Success<typeof externalEntityInbox>;
-
-/** The Inbox's reads. Each one gets the Inbox service when it runs. */
-const inbox = {
-  queryInbox: (...args: Parameters<Inbox["queryInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.queryInbox(...args)),
-  countInbox: (...args: Parameters<Inbox["countInbox"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
-  readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
-  suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
-    Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
-};
 
 const run = <A>(
   body: (context: {
@@ -206,8 +194,9 @@ const everything = { savedQuery: "everything" } as const;
 const refsOf = (page: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
   page.things.map((thing) => thing.ref.replace("acme:ticket:", ""));
 
-const list = (minutes: number, query: Partial<Parameters<Inbox["queryInbox"]>[1]> = {}) =>
-  inbox.queryInbox(environment(minutes), { list: everything, ...query });
+/** Reads the first page of a selection (the whole Inbox, unless it names a list). */
+const list = (minutes: number, selection: Partial<InboxSelection> = {}) =>
+  inbox.readFirstPage(environment(minutes), { list: everything, ...selection });
 
 const withClause = (clause: InboxClause) => ({ clauses: [clause] });
 
@@ -261,11 +250,7 @@ describe("who is on the Inbox", () => {
         const ref = yield* insertTicket({ key: "a" });
         yield* raise(ref, REVIEW, 2);
         const [moved] = yield* Effect.map(
-          repository.dismiss(
-            [(yield* inbox.queryInbox(environment(3), { list: everything })).things[0]!.id],
-            "user",
-            at(4),
-          ),
+          repository.dismiss([(yield* list(3)).things[0]!.id], "user", at(4)),
           (result) => ("moved" in result ? result.moved : []),
         );
         const afterDismiss = refsOf(yield* list(5));
@@ -299,7 +284,7 @@ describe("who is on the Inbox", () => {
     const arrivals = await run(({ repository, sql }) =>
       Effect.gen(function* () {
         const ref = yield* insertTicket({ key: "a" });
-        const id = (yield* inbox.queryInbox(environment(2), { list: everything })).things[0]!.id;
+        const id = (yield* list(2)).things[0]!.id;
         yield* repository.dismiss([id], "user", at(3));
         const before = (yield* inbox.countInbox(environment(4))).newestArrival;
         yield* repository.recordArrivalAfter(ref, at(5), [REVIEW], raise(ref, REVIEW, 5));
@@ -408,17 +393,23 @@ describe("the order and the pages of a list", () => {
         }
         const waits = { list: { savedQuery: "waits" } } as const;
         const first = yield* list(400, waits);
-        const second = yield* list(400, { ...waits, cursor: first.nextCursor! });
         const newestFirst = yield* list(400);
-        const newestSecond = yield* list(400, { cursor: newestFirst.nextCursor! });
+        const newestSecond = yield* inbox.readNextPage(
+          environment(400),
+          { list: everything },
+          newestFirst.nextCursor!,
+        );
         const wrong = yield* Effect.exit(
-          list(400, { list: { savedQuery: "mine" }, cursor: newestFirst.nextCursor! }),
+          inbox.readNextPage(
+            environment(400),
+            { list: { savedQuery: "mine" } },
+            newestFirst.nextCursor!,
+          ),
         );
-        const garbage = yield* Effect.exit(list(400, { cursor: "not a cursor" }));
-        const both = yield* Effect.exit(
-          list(400, { cursor: newestFirst.nextCursor!, refs: ["acme:ticket:t001"] }),
+        const garbage = yield* Effect.exit(
+          inbox.readNextPage(environment(400), { list: everything }, "not a cursor"),
         );
-        return { first, second, newestFirst, newestSecond, wrong, garbage, both };
+        return { first, newestFirst, newestSecond, wrong, garbage };
       }),
     );
     expect(result.first.total).toBe(103);
@@ -428,36 +419,63 @@ describe("the order and the pages of a list", () => {
     expect(result.newestFirst.total).toBe(205);
     expect(result.newestSecond.things).toHaveLength(5);
     expect(result.newestSecond.nextCursor).toBeUndefined();
-    expect(result.newestSecond.facets).toBeUndefined();
-    expect(result.newestSecond.total).toBeUndefined();
+    // A next page counts and describes nothing: only the first page does.
+    expect(Object.keys(result.newestSecond).sort()).toEqual(["mode", "offerSets", "things"]);
     const all = [...result.newestFirst.things, ...result.newestSecond.things].map((t) => t.ref);
     expect(new Set(all).size).toBe(205);
-    for (const exit of [result.wrong, result.garbage, result.both]) {
+    for (const exit of [result.wrong, result.garbage]) {
       expect(exit._tag).toBe("Failure");
     }
     expect(JSON.stringify(result.wrong)).toContain("does not belong");
   });
 
-  it("reads a refs request for those things only, in the list's order, with no total", async () => {
+  it("reads the held rows alone, in the list's order, and leaves out those that no longer belong", async () => {
     const result = await run(() =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a", updated: 10 });
         const b = yield* insertTicket({ key: "b", updated: 30 });
         yield* insertTicket({ key: "c", updated: 20 });
+        yield* insertTicket({ key: "gone", concerns: [] });
         yield* raise(a, REVIEW, 2);
-        const refs = yield* list(5, { refs: [a, b, "acme:ticket:missing"] });
-        const first = yield* list(5);
-        return { refs, first };
+        return yield* inbox.readRows(environment(5), { list: everything }, [
+          a,
+          b,
+          "acme:ticket:gone",
+          "acme:ticket:never",
+        ]);
       }),
     );
-    expect(result.refs.things.map((thing) => thing.ref)).toEqual([
-      "acme:ticket:b",
-      "acme:ticket:a",
+    expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:b", "acme:ticket:a"]);
+    expect(result.things[1]!.askCount).toBe(1);
+    // The rows reply counts and describes nothing.
+    expect(Object.keys(result).sort()).toEqual(["mode", "offerSets", "things"]);
+  });
+
+  it("refreshes the first page and the held rows that are not on it in one read", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        for (let index = 0; index < 205; index++) {
+          yield* insertTicket({ key: `t${String(index).padStart(3, "0")}`, updated: index });
+        }
+        yield* insertTicket({ key: "gone", concerns: [] });
+        // t204 is on the first page, t000 and t001 are past it, `gone` left the list.
+        return yield* inbox.readRefresh(environment(400), { list: everything }, [
+          "acme:ticket:t204",
+          "acme:ticket:t000",
+          "acme:ticket:t001",
+          "acme:ticket:gone",
+          "acme:ticket:t000",
+        ]);
+      }),
+    );
+    expect(result.first.things).toHaveLength(200);
+    expect(result.first.total).toBe(205);
+    expect(result.first.nextCursor).toBeDefined();
+    // Held rows already on the first page are not read twice, and a ref held twice is read once.
+    expect(result.held.things.map((thing) => thing.ref)).toEqual([
+      "acme:ticket:t001",
+      "acme:ticket:t000",
     ]);
-    expect(result.refs.things[1]!.askCount).toBe(1);
-    expect(result.refs.total).toBeUndefined();
-    expect(result.refs.facets).toBeUndefined();
-    expect(result.first.total).toBe(3);
   });
 
   it("pages the waiting order across the two groups", async () => {
@@ -474,7 +492,7 @@ describe("the order and the pages of a list", () => {
           list: { browse: { source: "acme", key: "source", value: "acme" } },
         } as const;
         const first = yield* list(400, browse);
-        const second = yield* list(400, { ...browse, cursor: first.nextCursor! });
+        const second = yield* inbox.readNextPage(environment(400), browse, first.nextCursor!);
         return { first, second };
       }),
     );
@@ -485,21 +503,6 @@ describe("the order and the pages of a list", () => {
     expect(result.first.things[119]!.ref).toBe("acme:ticket:t119");
     // After the asks, the latest change first.
     expect(result.first.things[120]!.ref).toBe("acme:ticket:t249");
-  });
-
-  it("reads only the named refs that still belong, in the list's order", async () => {
-    const result = await run(() =>
-      Effect.gen(function* () {
-        yield* insertTicket({ key: "a", updated: 1 });
-        yield* insertTicket({ key: "b", updated: 2 });
-        yield* insertTicket({ key: "gone", concerns: [] });
-        return yield* list(9, {
-          refs: ["acme:ticket:a", "acme:ticket:b", "acme:ticket:gone", "acme:ticket:never"],
-        });
-      }),
-    );
-    expect(refsOf(result)).toEqual(["b", "a"]);
-    expect(result.facets).toBeUndefined();
   });
 
   it("sends the same number of statements for 5 things as for 60", async () => {
@@ -522,6 +525,11 @@ describe("the order and the pages of a list", () => {
           );
           const page = yield* list(100).pipe(record);
           const pageStatements = statements.splice(0);
+          const held = page.things.map((thing) => thing.ref);
+          yield* inbox.readRows(environment(100), { list: everything }, held).pipe(record);
+          const rowsStatements = statements.splice(0);
+          yield* inbox.readRefresh(environment(100), { list: everything }, held).pipe(record);
+          const refreshStatements = statements.splice(0);
           yield* inbox.countInbox(environment(100)).pipe(record);
           const sidebarStatements = statements.splice(0);
           yield* inbox
@@ -537,6 +545,8 @@ describe("the order and the pages of a list", () => {
             .pipe(record);
           return {
             page: pageStatements.length,
+            rows: rowsStatements.length,
+            refresh: refreshStatements.length,
             sidebar: sidebarStatements.length,
             outline: outlineStatements.length,
             values: statements.length,
@@ -550,6 +560,8 @@ describe("the order and the pages of a list", () => {
     expect(large.things).toBe(60);
     expect(large).toEqual({ ...small, things: 60 });
     expect(small.page).toBeLessThanOrEqual(14);
+    expect(small.rows).toBeLessThanOrEqual(12);
+    expect(small.refresh).toBeLessThanOrEqual(small.page + small.rows);
     expect(small.sidebar).toBe(1);
     expect(small.outline).toBeLessThanOrEqual(6);
     expect(small.values).toBe(1);
@@ -816,7 +828,7 @@ describe("the clauses of a query", () => {
       }),
     );
     // The source has two accounts here, so each has its own facets.
-    const teams = page.facets!.filter((facet) => facet.key === "team");
+    const teams = page.facets.filter((facet) => facet.key === "team");
     expect(teams.map((facet) => facet.connectionId).sort()).toEqual([ACCOUNT_A, ACCOUNT_B]);
     const work = teams.find((facet) => facet.connectionId === ACCOUNT_A)!;
     expect(work).toMatchObject({ source: "acme", label: "Team", plural: "Teams", more: 0 });
@@ -828,7 +840,7 @@ describe("the clauses of a query", () => {
       teams.find((facet) => facet.connectionId === ACCOUNT_B)!.values.map((value) => value.label),
     ).toEqual(["Search"]);
     expect(
-      page.facets!.find((facet) => facet.key === "owner" && facet.connectionId === ACCOUNT_A)!
+      page.facets.find((facet) => facet.key === "owner" && facet.connectionId === ACCOUNT_A)!
         .values,
     ).toEqual([{ value: "Mei", label: "Mei", count: 1 }]);
   });
@@ -1238,7 +1250,9 @@ describe("signals by noun, readable records and plugin saved queries", () => {
           browseFolded: [],
         });
         return {
-          page: refsOf(yield* inbox.queryInbox(withQuery, { list: { savedQuery: "acme/quiet" } })),
+          page: refsOf(
+            yield* inbox.readFirstPage(withQuery, { list: { savedQuery: "acme/quiet" } }),
+          ),
           counted: outline.savedQueries.find((query) => query.id === "acme/quiet")!.count,
           everything: outline.savedQueries.find((query) => query.id === "everything")!.count,
         };

@@ -40,7 +40,7 @@ describe("CardFace", () => {
 });
 
 describe("the typed clause word of `entity list --clause`", () => {
-  const decodeWord = readShorthandDecoder(InboxQuery.fields.clauses)!;
+  const decodeWord = readShorthandDecoder(InboxQuery.members[0].to.fields.clauses)!;
 
   it("keeps the value as the raw text, for the controller to read for the field's type", () => {
     expect(decodeWord("waiting>2d")).toEqual({ key: "waiting", op: "over", value: "2d" });

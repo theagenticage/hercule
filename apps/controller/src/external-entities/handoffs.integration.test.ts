@@ -823,7 +823,7 @@ describe("undoHandOff", () => {
         const response = await post(
           controller.base,
           "/api/v1/external-entities/inbox/query",
-          { list: { savedQuery: "everything" } },
+          { mode: "first", list: { savedQuery: "everything" } },
           controller.token,
         );
         const page = (await response.json()) as {
