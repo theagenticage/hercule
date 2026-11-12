@@ -20,7 +20,7 @@
  */
 // The probe comes first, so it is in place before React loads; the fixed clock
 // next, because the app's age clock reads the time as soon as its module loads.
-import { readProbe, type ProbeReading } from "./perf-probe";
+import { hasPendingFrame, readProbe } from "./perf-probe";
 import "./fixed-clock";
 import "../styles/base-layer.css";
 import { createRoot } from "react-dom/client";
@@ -45,7 +45,6 @@ import {
   CORE_SAVED_QUERY_IDS,
   type InboxQuery,
   type InboxThing,
-  type MutableLiveTopic,
   type Task,
   type WorkCard,
 } from "@hercule/contract";
@@ -54,25 +53,8 @@ import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import { buildRouterContext } from "../app/context";
 import { BOOT_HANDLERS, buildSidebarHandlers, SIDEBAR_FIXTURE } from "../app/fake-controller";
 import { createAppRouter } from "../app/router";
+import type { PerfCountsPage } from "./perf-counts-page";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
-
-/** What the page offers the counts check, as `window.perfCounts`. */
-export interface PerfCountsPage {
-  /** The requests the app sent, oldest first, as `METHOD /path`. */
-  readonly listRequests: () => readonly string[];
-  /** The requests no handler of the fake controller answers, which fail the check. */
-  readonly listUnknownRequests: () => readonly string[];
-  /** Returns the probe's counters and starts counting renders from zero again. */
-  readonly readProbe: () => ProbeReading;
-  /** Checks whether no read or write is running. */
-  readonly isIdle: () => boolean;
-  /** Checks whether the app's socket is open with the shell's subscriptions. */
-  readonly isLive: () => boolean;
-  /** Sends the app an invalidation on `topic`, naming `ids`, as the controller does after a change. */
-  readonly push: (topic: MutableLiveTopic, ids: readonly string[]) => void;
-  /** Changes the fake controller's world in the way `change` names, before a push tells the app. */
-  readonly changeWorld: (change: string) => void;
-}
 
 declare global {
   interface Window {
@@ -116,6 +98,8 @@ function buildInboxWorld(): {
       waitingSince: hoursBefore(2 + n / 10),
     });
   const things = Array.from({ length: WORLD_SIZE }, (_, index) => buildThing(index + 1));
+  // The arrival waited longest, so the list, ordered by the longest wait, ranks it first.
+  const arrival = { ...buildThing(WORLD_SIZE + 1), waitingSince: hoursBefore(200) };
   const inbox: FakeInbox = {
     lists: { [CORE_SAVED_QUERY_IDS.waits]: [...things].reverse() },
     outline: buildInboxOutline({
@@ -133,7 +117,7 @@ function buildInboxWorld(): {
     offerSets: {},
   };
   const details = Object.fromEntries(
-    things.map((thing) => [
+    [...things, arrival].map((thing) => [
       `GET /api/v1/external-entities/${thing.id}`,
       { body: buildFakeInboxDetail(thing) },
     ]),
@@ -156,11 +140,8 @@ function buildInboxWorld(): {
     },
     changes: {
       arrive: () => {
-        const arrival = buildThing(WORLD_SIZE + 1);
-        // It waited longest, so the list, ordered by the longest wait, ranks it first.
-        const waitedLongest = { ...arrival, waitingSince: hoursBefore(200) };
         inbox.lists[CORE_SAVED_QUERY_IDS.waits] = [
-          waitedLongest,
+          arrival,
           ...inbox.lists[CORE_SAVED_QUERY_IDS.waits]!,
         ];
         inbox.newestArrival = WORLD_SIZE + 1;
@@ -319,6 +300,15 @@ window.perfCounts = {
     calls.map((call) => `${call.method} ${call.path}`).filter((key) => handlers[key] === undefined),
   readProbe,
   isIdle: () => context.queryClient.isFetching() === 0 && context.queryClient.isMutating() === 0,
+  isStill: () =>
+    !hasPendingFrame() &&
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.playState !== "running" ||
+          animation.effect?.getComputedTiming().endTime === Infinity,
+      ),
   isLive: () =>
     sockets.at(-1)?.readyState === 1 &&
     sockets

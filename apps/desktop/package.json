@@ -16,6 +16,8 @@
     "package": "node scripts/package.ts",
     "perf": "node scripts/perf.ts",
     "perf:composer-skills": "node scripts/perf-composer-skills.ts",
+    "perf:counts": "node scripts/perf-counts.ts",
+    "perf:counts:container": "node container/run.ts --bring-back apps/desktop/perf-counts.baseline.json --bring-back apps/desktop/out/perf-counts -- pnpm --filter @hercule/desktop perf:counts",
     "perf:office": "node scripts/perf-office.ts",
     "perf:office-arrivals": "node scripts/perf-office-arrivals.ts",
     "first-frame": "node scripts/first-frame.ts",

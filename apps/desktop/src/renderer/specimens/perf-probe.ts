@@ -11,6 +11,7 @@
  * not rendered, so the walk skips it, and a component counts as rendered when
  * it mounted or its fiber carries React's `PerformedWork` flag.
  */
+import type { ProbeReading } from "./perf-counts-page";
 
 /** React's fiber tags of the components that render: function, class, forwardRef, memo and simple memo. */
 const COMPONENT_TAGS = new Set([0, 1, 11, 14, 15]);
@@ -132,18 +133,9 @@ globalThis.cancelAnimationFrame = (id: number): void => {
   native.cancelAnimationFrame(id);
 };
 
-/** What the probe counted, as the counts check reads it. */
-export interface ProbeReading {
-  /** The renders of each component since the last reset, by name. */
-  readonly renders: Record<string, number>;
-  /** The intervals that are running. */
-  readonly intervals: number;
-  /** The timeouts that will fire within a second. */
-  readonly shortTimeouts: number;
-  /** The timeouts that will fire later than a second from when they were set. */
-  readonly longTimeouts: number;
-  /** The animation frames requested and not yet run. */
-  readonly frames: number;
+/** Checks whether an animation frame is requested and not yet run. */
+export function hasPendingFrame(): boolean {
+  return [...pending.values()].some((timer) => timer.kind === "frame");
 }
 
 /** Returns what the probe counted, and starts counting renders from zero again. */

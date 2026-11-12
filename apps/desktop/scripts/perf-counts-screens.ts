@@ -19,16 +19,15 @@
  * Every step checks that it did what it is named for, such as a row becoming
  * current or a thing leaving the list, so a step that did nothing cannot pass
  * with a count of zero. A step has settled when what it waits for is on
- * screen, no read or write is running, and two frames have passed with no new
- * request.
+ * screen, no read or write is running, no animation frame or animation that
+ * ends is pending, and two frames have passed with no new request.
  *
  * It runs on plain Node, like the other scripts, so its imports name the
  * `.ts` file.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { CDPSession, Page } from "playwright";
-import type { PerfCountsPage } from "../src/renderer/specimens/perf-counts.tsx";
-import type { ProbeReading } from "../src/renderer/specimens/perf-probe.ts";
+import type { PerfCountsPage, ProbeReading } from "../src/renderer/specimens/perf-counts-page.ts";
 import { launchCaptureBrowser } from "./ui-capture.ts";
 
 /** The window the page is drawn in, the app's default size. */
@@ -86,44 +85,44 @@ interface StepDriver {
 /** Reads the counts page's object in the page. */
 const PAGE = "window.perfCounts";
 
-/** Calls `read` on the counts page's object in `page` and returns what it returns. */
+/**
+ * Calls `read` with the counts page's object in `page` and returns what it
+ * returns. `read` is sent to the page as its source, so it may use nothing
+ * but its argument.
+ */
 const callPage = <T>(page: Page, read: (perf: PerfCountsPage) => T): Promise<T> =>
-  page.evaluate(
-    // The function runs in the page, where `window.perfCounts` is set.
-    `(${read.toString()})(${PAGE})`,
-  ) as Promise<T>;
+  page.evaluate<T>(`(${read.toString()})(${PAGE})`);
 
 /** Waits for two frames in `page`, so what a step changed has been styled, laid out and painted. */
 const waitTwoFrames = (page: Page): Promise<void> =>
-  page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }),
+  page.evaluate<void>(
+    "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))",
   );
 
+/** An expression that is true while the page is quiet: no read or write runs, and nothing moves. */
+const QUIET = `${PAGE}.isIdle() && ${PAGE}.isStill()`;
+
 /**
- * Waits until `settled` is true in `page`, no read or write runs, and two
- * frames pass with no new request. Fails after `STEP_TIMEOUT_MS`, naming
- * `name`.
+ * Waits until `settled` is true in `page` and the page is quiet: no read or
+ * write runs, nothing moves (see `isStill`), and two frames later that still
+ * holds with no new request. Fails after `STEP_TIMEOUT_MS`, naming `name`.
  */
 async function waitForSettled(page: Page, settled: string, name: string): Promise<void> {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   for (;;) {
     try {
-      await page.waitForFunction(`(${settled}) && ${PAGE}.isIdle()`, undefined, {
+      await page.waitForFunction(`(${settled}) && ${QUIET}`, undefined, {
         timeout: Math.max(1, deadline - Date.now()),
       });
     } catch (error) {
-      throw new Error(`The step "${name}" did not settle: ${settled} never held.`, { cause: error });
+      throw new Error(`The step "${name}" did not settle: ${settled} never held.`, {
+        cause: error,
+      });
     }
     const before = await callPage(page, (perf) => perf.listRequests().length);
     await waitTwoFrames(page);
-    const isQuiet = await callPage(
-      page,
-      (perf) => perf.isIdle() && perf.listRequests().length,
-    );
-    if (isQuiet === before) return;
+    const after = await page.evaluate<number | false>(`${QUIET} && ${PAGE}.listRequests().length`);
+    if (after === before) return;
     if (Date.now() > deadline) throw new Error(`The step "${name}" kept sending requests.`);
   }
 }
@@ -131,14 +130,17 @@ async function waitForSettled(page: Page, settled: string, name: string): Promis
 /** One event of a Chromium trace, as far as the check reads it. */
 interface TraceEvent {
   readonly name: string;
-  readonly args?: { readonly elementCount?: number; readonly data?: { readonly elementCount?: number } };
+  readonly args?: {
+    readonly elementCount?: number;
+    readonly data?: { readonly elementCount?: number };
+  };
 }
 
 /** Starts a trace of the style recalculations in the page `cdp` is attached to. */
 async function startStyleTrace(cdp: CDPSession): Promise<() => Promise<number>> {
   const events: TraceEvent[] = [];
-  const collect = (data: { value: TraceEvent[] }) => {
-    events.push(...data.value);
+  const collect = (data: { value: ReadonlyArray<object> }) => {
+    events.push(...(data.value as TraceEvent[]));
   };
   cdp.on("Tracing.dataCollected", collect);
   await cdp.send("Tracing.start", {
@@ -184,7 +186,9 @@ const INBOX: ScreenPlan = {
   drawn: `${inboxRowAt(1)} !== null && ${PAGE}.isLive()`,
   rowComponent: "InboxRow",
   measureSteps: async ({ page, measure }) => {
-    const title = await page.evaluate<string>(`${inboxRowAt(4)}.querySelector(".ib-row-title").textContent`);
+    const title = await page.evaluate<string>(
+      `${inboxRowAt(4)}.querySelector(".ib-row-title").textContent`,
+    );
     await measure(
       "open a card",
       () => page.click('.ib-rows > .ib-row[aria-posinset="4"]'),
@@ -206,8 +210,14 @@ const INBOX: ScreenPlan = {
       },
       `${INBOX_CURRENT} === ${String(INBOX_WALK + 1)}`,
     );
-    const ref = await page.evaluate<string>(`document.querySelector(".ib-rows > .ib-row.is-current").dataset.ref`);
-    await measure("E dismisses the current thing", () => page.keyboard.press("e"), `!(${isInboxRowMounted(ref)})`);
+    const ref = await page.evaluate<string>(
+      `document.querySelector(".ib-rows > .ib-row.is-current").dataset.ref`,
+    );
+    await measure(
+      "E dismisses the current thing",
+      () => page.keyboard.press("e"),
+      `!(${isInboxRowMounted(ref)})`,
+    );
     await measure("Cmd+Z undoes it", () => page.keyboard.press("Meta+z"), isInboxRowMounted(ref));
     const readsBefore = await callPage(page, (perf) => perf.listRequests().length);
     await measure(
@@ -284,12 +294,17 @@ const SCREENS = { inbox: INBOX, work: WORK } as const;
  * and every step, and returns the counts. Fails when a step does not settle
  * or the app sends a request the fake controller does not answer.
  */
-async function measureScreen(page: Page, pageUrl: string, screen: keyof typeof SCREENS): Promise<ScreenCounts> {
+async function measureScreen(
+  page: Page,
+  pageUrl: string,
+  screen: keyof typeof SCREENS,
+): Promise<ScreenCounts> {
   const plan = SCREENS[screen];
   const cdp = await page.context().newCDPSession(page);
   const steps: Array<readonly [string, StepCounts]> = [];
   const measure = async (name: string, act: () => Promise<void>, settled: string) => {
-    const requestsBefore = name === "open" ? 0 : await callPage(page, (perf) => perf.listRequests().length);
+    const requestsBefore =
+      name === "open" ? 0 : await callPage(page, (perf) => perf.listRequests().length);
     if (name !== "open") await callPage(page, (perf) => perf.readProbe());
     const endTrace = await startStyleTrace(cdp);
     await act();
@@ -298,7 +313,7 @@ async function measureScreen(page: Page, pageUrl: string, screen: keyof typeof S
     const [requestList, probe, elements, unknown] = await Promise.all([
       callPage(page, (perf) => perf.listRequests()),
       callPage(page, (perf) => perf.readProbe()),
-      page.evaluate(() => document.getElementsByTagName("*").length),
+      page.evaluate<number>(`document.getElementsByTagName("*").length`),
       callPage(page, (perf) => perf.listUnknownRequests()),
     ]);
     if (unknown.length > 0) {
@@ -345,9 +360,17 @@ export async function measureScreens(specimensUrl: string): Promise<Record<strin
   try {
     const result: Record<string, ScreenCounts> = {};
     for (const screen of Object.keys(SCREENS) as Array<keyof typeof SCREENS>) {
-      const context = await browser.newContext({ viewport: WINDOW, timezoneId: "UTC", locale: "en-US" });
+      const context = await browser.newContext({
+        viewport: WINDOW,
+        timezoneId: "UTC",
+        locale: "en-US",
+      });
       try {
-        result[screen] = await measureScreen(await context.newPage(), `${specimensUrl}perf-counts.html`, screen);
+        result[screen] = await measureScreen(
+          await context.newPage(),
+          `${specimensUrl}perf-counts.html`,
+          screen,
+        );
       } finally {
         await context.close();
       }
