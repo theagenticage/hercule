@@ -277,3 +277,45 @@ describe("a list change", () => {
     expect(undoInboxMove(state, ["a"])).toBe(state);
   });
 });
+
+describe("undo after a refresh", () => {
+  it("puts back a taken-on row that a refresh dropped, current", () => {
+    let state = applyInboxMove(start("a", "b"), ["a"], stays);
+    state = applyInboxRefresh(state, {
+      listId: "list-1",
+      firstPage: rows("b"),
+      askedRefs: ["a"],
+      refsReads: [],
+    });
+    expect(refsOf(state)).toEqual(["b"]);
+    state = undoInboxMove(state, ["a"]);
+    expect(refsOf(state)).toEqual(["a", "b"]);
+    expect(state.current).toBe("a");
+  });
+
+  it("is not undone by a refresh that was read before the undo", () => {
+    let state = applyInboxMove(start("a", "b"), ["a"], leaves);
+    state = refresh(state, rows("b"));
+    state = undoInboxMove(state, ["a"]);
+    state = refresh(state, rows("b"));
+    expect(refsOf(state)).toEqual(["a", "b"]);
+    expect(refsOf(refresh(state, rows("b")))).toEqual(["b"]);
+  });
+
+  it("never duplicates a row that came back as an arrival and was shown", () => {
+    let state = applyInboxMove(start("a", "b"), ["a"], leaves);
+    state = refresh(state, rows("b"));
+    state = refresh(state, rows("a", "b"));
+    expect(state.arrivals.map((r) => r.ref)).toEqual(["a"]);
+    state = showInboxArrivals(state);
+    state = undoInboxMove(state, ["a"]);
+    expect(refsOf(state)).toEqual(["a", "b"]);
+  });
+
+  it("lets a next page carry a row that revived after the server dropped it", () => {
+    let state = applyInboxMove(startInboxList("list-1", rows("a", "b"), "c1"), ["a"], leaves);
+    state = refresh(state, rows("b"));
+    state = applyInboxNextPage(state, { listId: "list-1", after: "c1", rows: rows("a", "c") });
+    expect(refsOf(state)).toEqual(["b", "a", "c"]);
+  });
+});

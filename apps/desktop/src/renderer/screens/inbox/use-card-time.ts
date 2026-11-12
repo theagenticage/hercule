@@ -1,9 +1,9 @@
 import { useCallback } from "react";
+import type { EntityRecord } from "@hercule/contract";
 import {
   describeCardTime,
   findNextCardTimeChange,
   isCardTimeDependent,
-  type CardRecord,
   type CardTime,
 } from "@hercule/client-core/inbox";
 import { ageClock, useClockValue } from "../../app/age-clock";
@@ -17,7 +17,7 @@ import { ageClock, useClockValue } from "../../app/age-clock";
  * cost one timer. A card whose words do not depend on the time registers nothing,
  * so a quiet Inbox wakes the app no more than the age clock's single timer does.
  */
-export const useCardTime = (card: CardRecord): CardTime => {
+export const useCardTime = (card: EntityRecord): CardTime => {
   const findNextChange = useCallback(
     (_moment: string, now: Date) => findNextCardTimeChange(card, now),
     [card],

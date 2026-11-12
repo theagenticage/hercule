@@ -112,7 +112,25 @@ export const buildHandedThing = (thing: InboxThing, offer: WorkflowOffer): Inbox
   ];
   if (askKinds.length > 0) {
     const asks = thing.asks.filter((ask) => !offer.answers.includes(ask.kind));
-    return { ...thing, asks, askKinds, liveWorkflows };
+    const answered = thing.asks.length - asks.length;
+    const everyAskIsListed = thing.askCount === thing.asks.length;
+    // The row lists only the newest asks. When it lists them all, the count and the
+    // wait follow exactly. When older ones are not listed, their kinds are not known:
+    // the count drops by the answered asks it can see (an upper bound) and the wait
+    // stays the oldest ask's, until the next read says what the controller made of it.
+    const oldest = asks.at(-1);
+    const waiting =
+      answered > 0 && everyAskIsListed && oldest !== undefined
+        ? { waitingSince: oldest.createdAt }
+        : {};
+    return {
+      ...thing,
+      asks,
+      askCount: thing.askCount - answered,
+      askKinds,
+      liveWorkflows,
+      ...waiting,
+    };
   }
   // A thing with no ask waits for nobody, so its row has no wait to show.
   const unwaiting: { -readonly [Key in keyof InboxThing]: InboxThing[Key] } = { ...thing };
@@ -166,9 +184,3 @@ export const describeInboxHandOffFailure = (
 
 /** Returns the line for a thing that has no address to open at its source. */
 export const NO_SOURCE_ADDRESS = "This has no address to open at its source.";
-
-/** The line for Go to its Task, which the screen shows while it goes. */
-export const describeGoingToTask = (thing: InboxThing): InboxLineWords => ({
-  text: "Going to its Task on Work",
-  title: thing.title,
-});

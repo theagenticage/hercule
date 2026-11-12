@@ -2,6 +2,7 @@
 import type {
   Connection,
   EntityPlace,
+  EntityRecord,
   EntitySignalLine,
   InboxAsk,
   InboxCounts,
@@ -9,13 +10,15 @@ import type {
   PluginDetail,
   WorkflowOffer,
 } from "@hercule/contract";
-import type { CardRecord } from "./card-face";
 
 /**
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
  * an `acme/project`, that was assigned to the user and observed on 1 November. `overrides` change any field.
  */
-export const buildInboxCard = (id: string, overrides: Partial<CardRecord> = {}): CardRecord => ({
+export const buildInboxCard = (
+  id: string,
+  overrides: Partial<EntityRecord> = {},
+): EntityRecord => ({
   id,
   ref: `acme:ticket:${id}`,
   kind: "acme/ticket",
@@ -46,7 +49,7 @@ export const buildInboxCard = (id: string, overrides: Partial<CardRecord> = {}):
  * Returns a compact card of the invented `acme/review` kind: a fast-paced
  * request with a patience of 24 hours. `overrides` change any field.
  */
-export const buildRequestCard = (id: string, overrides: Partial<CardRecord> = {}): CardRecord =>
+export const buildRequestCard = (id: string, overrides: Partial<EntityRecord> = {}): EntityRecord =>
   buildInboxCard(id, {
     ref: `acme:review:${id}`,
     kind: "acme/review",

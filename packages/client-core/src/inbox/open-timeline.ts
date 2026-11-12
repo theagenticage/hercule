@@ -7,7 +7,6 @@
  */
 import type {
   EntityChange,
-  EntityPeer,
   EntityReason,
   EntitySignalLine,
   ExternalEntityDetail,
@@ -169,20 +168,6 @@ export const buildOpenTimeline = (
     };
   });
 };
-
-/**
- * Returns the id a link to a thing opens inside the sheet, by the thing's ref.
- * A thing opens when it has an id to read: a card of the page, or a peer that
- * is a full record. A card wins over a peer for a ref both hold.
- */
-export const buildWalkableIds = (
-  peers: ReadonlyArray<Pick<EntityPeer, "id" | "ref">>,
-  cards: ReadonlyArray<Pick<InboxThing, "id" | "ref">>,
-): ReadonlyMap<string, string> =>
-  new Map<string, string>([
-    ...peers.flatMap((peer) => (peer.id === undefined ? [] : [[peer.ref, peer.id] as const])),
-    ...cards.map((card) => [card.ref, card.id] as const),
-  ]);
 
 /** What a card's lines leave out: how many, and whether they are open work or only older, resolved lines. */
 export interface TimelineOverflow {

@@ -141,4 +141,42 @@ describe("buildHandedThing", () => {
     expect(handed.waitingSince).toBe(asking.waitingSince);
     expect(handed.liveWorkflows.map((workflow) => workflow.name)).toEqual(["Repair the build"]);
   });
+
+  it("counts the asks that stay and takes the wait from the oldest of them", () => {
+    const thing = buildInboxThing("5", {
+      asks: [
+        buildInboxAsk("a1", "Mei", { kind: "acme/failed", createdAt: "2026-11-03T09:00:00.000Z" }),
+        buildInboxAsk("a2", "Mei", {
+          kind: "acme/review-requested",
+          createdAt: "2026-11-02T09:00:00.000Z",
+        }),
+      ],
+      askCount: 2,
+      askKinds: ["acme/failed", "acme/review-requested"],
+      waitingSince: "2026-11-02T09:00:00.000Z",
+    });
+    const handed = buildHandedThing(
+      thing,
+      buildWorkflowOffer("Review PR", ["acme/review-requested"]),
+    );
+
+    expect(handed.askCount).toBe(1);
+    expect(handed.waitingSince).toBe("2026-11-03T09:00:00.000Z");
+  });
+
+  it("keeps the wait when older asks are not listed, and lowers the count by what it saw end", () => {
+    const thing = buildInboxThing("6", {
+      asks: [buildInboxAsk("a1", "Mei", { kind: "acme/review-requested" })],
+      askCount: 4,
+      askKinds: ["acme/failed", "acme/review-requested"],
+      waitingSince: "2026-11-01T09:00:00.000Z",
+    });
+    const handed = buildHandedThing(
+      thing,
+      buildWorkflowOffer("Review PR", ["acme/review-requested"]),
+    );
+
+    expect(handed.askCount).toBe(3);
+    expect(handed.waitingSince).toBe("2026-11-01T09:00:00.000Z");
+  });
 });
