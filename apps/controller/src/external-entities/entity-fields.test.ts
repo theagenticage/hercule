@@ -1,79 +1,14 @@
 /**
- * Tests how the declared fields of an observation become stored rows
- * (`encodeObservedFields`), and the reads and writes of the field table on a migrated database.
+ * Tests the field table on a migrated database: replacing the rows of many
+ * refs, reading their values and card faces back, and the prune sweep.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type {
-  EntityObservation,
-  QualifiedEntityFieldDeclaration,
-  QualifiedEntityKindDeclaration,
-} from "@hercule/plugin-host";
 import { inTransaction, TestDatabase } from "../db/testing";
-import {
-  deleteOrphanedFields,
-  encodeObservedFields,
-  readStoredFieldRows,
-  readTitledFieldRows,
-  writeFieldRows,
-  type EncodedField,
-  type StoredFieldRow,
-} from "./entity-fields";
-
-const PROJECT_KIND: QualifiedEntityKindDeclaration = {
-  word: "acme/project",
-  noun: "Project",
-  refPrefix: "acme:project:",
-  pace: "context",
-  patience: 0,
-  identifier: "{key}",
-  person: null,
-  owner: null,
-  status: null,
-  facts: [],
-  reasons: {},
-};
-
-const FIELDS: ReadonlyArray<QualifiedEntityFieldDeclaration> = [
-  { key: "title", label: "Title", type: "text" },
-  { key: "owner", label: "Owner", type: "person" },
-  { key: "level", label: "Level", type: "enum", values: [{ value: "high" }, { value: "low" }] },
-  { key: "size", label: "Size", type: "number" },
-  { key: "cost", label: "Cost", type: "money", currency: "EUR" },
-  { key: "since", label: "Since", type: "age" },
-  { key: "urgent", label: "Urgent", type: "bool" },
-  {
-    key: "project",
-    label: "Project",
-    type: "text",
-    facet: { plural: "Projects", values: "acme/project" },
-  },
-];
-
-const TICKET_KIND: QualifiedEntityKindDeclaration = {
-  ...PROJECT_KIND,
-  word: "acme/ticket",
-  refPrefix: "acme:ticket:",
-  pace: "fast",
-  fields: FIELDS,
-};
-
-const observe = (fields: Record<string, string | number | boolean | null>): EntityObservation => ({
-  kind: "ticket",
-  ref: "acme:ticket:1",
-  title: "One",
-  fields,
-  concerns: [],
-  sourceUpdatedAt: "2026-03-01T10:00:00.000Z",
-});
-
-const encode = (fields: Record<string, string | number | boolean | null>) =>
-  encodeObservedFields({
-    declaration: TICKET_KIND,
-    kinds: [TICKET_KIND, PROJECT_KIND],
-    observation: observe(fields),
-  });
+import type { ActiveEntityKind } from "./entity-records";
+import { deleteOrphanedFields, readFieldValues, replaceFieldRows } from "./entity-fields";
+import type { EncodedField } from "./field-values";
 
 const row = (key: string, text: string | null, number: number | null): EncodedField => ({
   key,
@@ -81,123 +16,14 @@ const row = (key: string, text: string | null, number: number | null): EncodedFi
   number_value: number,
 });
 
-describe("encoding the declared fields of an observation", () => {
-  it("stores text, person and enum as text, and the rest as numbers", () => {
-    expect(
-      encode({
-        title: "Fix it",
-        owner: "marta",
-        level: "high",
-        size: 3,
-        cost: 12.5,
-        since: "2026-03-01T10:00:00Z",
-        urgent: true,
-        project: "acme:project:harbour",
-      }),
-    ).toEqual({
-      rows: [
-        row("title", "Fix it", null),
-        row("owner", "marta", null),
-        row("level", "high", null),
-        row("size", null, 3),
-        row("cost", null, 12.5),
-        row("since", null, Date.parse("2026-03-01T10:00:00Z")),
-        row("urgent", null, 1),
-        row("project", "acme:project:harbour", null),
-      ],
-    });
-    expect(encode({ urgent: false })).toEqual({ rows: [row("urgent", null, 0)] });
-  });
-
-  it("accepts ages at the ends of the years 0000 to 9999, with an offset, and on a leap day", () => {
-    const since = (value: string) => encode({ since: value });
-    expect(since("0000-01-01T00:00:00Z")).toEqual({
-      rows: [row("since", null, Date.parse("0000-01-01T00:00:00Z"))],
-    });
-    expect(since("9999-12-31T23:59:59.999Z")).toEqual({
-      rows: [row("since", null, Date.parse("9999-12-31T23:59:59.999Z"))],
-    });
-    expect(since("2026-03-01T10:00:00+02:00")).toEqual({
-      rows: [row("since", null, Date.parse("2026-03-01T08:00:00Z"))],
-    });
-    expect(since("2028-02-29T10:00Z")).toHaveProperty("rows");
-    expect(since("2027-02-29T10:00Z")).toHaveProperty("refusal");
-  });
-
-  it("gives a null or missing field no row, and ignores an undeclared one", () => {
-    expect(encode({ title: null, size: 2, unknown: "x" })).toEqual({
-      rows: [row("size", null, 2)],
-    });
-  });
-
-  it.each([
-    { name: "a number for a text field", fields: { title: 3 }, expected: "must be a string" },
-    {
-      name: "a string for a number field",
-      fields: { size: "3" },
-      expected: "must be a finite number",
-    },
-    { name: "a string for a bool field", fields: { urgent: "yes" }, expected: "must be a boolean" },
-    {
-      name: "a bool for a money field",
-      fields: { cost: true },
-      expected: "must be a finite number",
-    },
-    {
-      name: "an enum value the kind does not declare",
-      fields: { level: "medium" },
-      expected: 'one of "high", "low"',
-    },
-    ...[
-      "last week",
-      "1",
-      "March 3, 2026",
-      "2026-03-01",
-      "2026-03-01T10:00",
-      "2026-02-31T10:00:00Z",
-      "2026-03-01T24:00:00Z",
-      "+100000-01-01T00:00:00Z",
-      "0000-01-01T00:00:00+01:00",
-      "9999-12-31T23:00:00-05:00",
-    ].map((since) => ({
-      name: `the age ${since}`,
-      fields: { since },
-      expected: "an ISO 8601 timestamp",
-    })),
-    {
-      name: "a context field that is not a ref of that kind",
-      fields: { project: "Harbour" },
-      expected: 'a ref that starts with "acme:project:"',
-    },
-  ])("refuses $name, naming the ref, the field and what was expected", ({ fields, expected }) => {
-    const [key] = Object.keys(fields);
-    const result = encode(fields);
-    expect(result).toHaveProperty("refusal");
-    const { refusal } = result as { readonly refusal: string };
-    expect(refusal).toContain("acme:ticket:1");
-    expect(refusal).toContain(`"${key}"`);
-    expect(refusal).toContain(expected);
-  });
-
-  it("encodes nothing for a partial observation", () => {
-    const partial: EntityObservation = {
-      kind: "ticket",
-      ref: "acme:ticket:1",
-      title: "One",
-      partial: true,
-    };
-    expect(
-      encodeObservedFields({
-        declaration: TICKET_KIND,
-        kinds: [TICKET_KIND],
-        observation: partial,
-      }),
-    ).toEqual({ rows: [] });
-  });
+const stored = (ref: string, key: string, text: string | null, number: number | null) => ({
+  ref,
+  key,
+  text_value: text,
+  number_value: number,
 });
 
-const stored = (ref: string, key: string, text: string | null, number: number | null) =>
-  ({ ref, key, text_value: text, number_value: number }) satisfies StoredFieldRow;
+const AT = "2026-03-01T00:00:00.000Z";
 
 const run = <A>(
   body: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown, SqlClient.SqlClient>,
@@ -209,33 +35,38 @@ const run = <A>(
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
-describe("the field table", () => {
-  it("writes the difference and reads the rows of many refs ordered by ref then key", async () => {
-    const result = await run(() =>
+const readRows = (sql: SqlClient.SqlClient) =>
+  sql<{
+    readonly ref: string;
+    readonly key: string;
+    readonly text_value: string | null;
+    readonly number_value: number | null;
+  }>`SELECT ref, key, text_value, number_value FROM external_entity_fields ORDER BY ref, key`;
+
+const insertEntity = (
+  sql: SqlClient.SqlClient,
+  id: number,
+  ref: string,
+  kind: string,
+  title: string,
+) => sql`
+  INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
+      source_updated_at, first_observed_at, updated_at)
+  VALUES (${new Uint8Array(16).fill(id)}, ${ref}, ${kind}, 'N', 'full', ${title}, ${AT}, ${AT}, ${AT})`;
+
+describe("replacing field rows", () => {
+  it("writes the difference and returns the refs that changed, sorted", async () => {
+    const result = await run((sql) =>
       Effect.gen(function* () {
-        const first = yield* writeFieldRows(
-          [
-            { ref: "b", fields: [row("z", "1", null), row("a", null, 2)] },
-            { ref: "a", fields: [row("k", "x", null)] },
-          ],
-          [],
-        );
-        const afterFirst = yield* readStoredFieldRows(["b", "a", "c"]);
-        const second = yield* writeFieldRows(
-          [{ ref: "b", fields: [row("a", null, 5)] }],
-          afterFirst,
-        );
-        const quiet = yield* writeFieldRows(
-          [{ ref: "a", fields: [row("k", "x", null)] }],
-          afterFirst,
-        );
-        return {
-          first,
-          afterFirst,
-          second,
-          quiet,
-          afterSecond: yield* readStoredFieldRows(["a", "b"]),
-        };
+        const first = yield* replaceFieldRows([
+          { ref: "b", fields: [row("z", "1", null), row("a", null, 2)] },
+          { ref: "a", fields: [row("k", "x", null)] },
+        ]);
+        const afterFirst = yield* readRows(sql);
+        const second = yield* replaceFieldRows([{ ref: "b", fields: [row("a", null, 5)] }]);
+        const quiet = yield* replaceFieldRows([{ ref: "a", fields: [row("k", "x", null)] }]);
+        const none = yield* replaceFieldRows([]);
+        return { first, afterFirst, second, quiet, none, afterSecond: yield* readRows(sql) };
       }),
     );
     expect(result.first).toEqual(["a", "b"]);
@@ -246,89 +77,160 @@ describe("the field table", () => {
     ]);
     expect(result.second).toEqual(["b"]);
     expect(result.quiet).toEqual([]);
+    expect(result.none).toEqual([]);
     expect(result.afterSecond).toEqual([stored("a", "k", "x", null), stored("b", "a", null, 5)]);
   });
 
-  it("round-trips a value that looks like JSON or a number, and an empty ref list", async () => {
-    const rows = await run(() =>
+  it("stores a value that looks like JSON or a number as it is", async () => {
+    const rows = await run((sql) =>
       Effect.gen(function* () {
-        yield* writeFieldRows(
-          [
-            {
-              ref: "a",
-              fields: [row("t", '{"a":1}', null), row("n", "42", null), row("m", null, 0.1)],
-            },
-          ],
-          [],
-        );
-        return { rows: yield* readStoredFieldRows(["a"]), none: yield* readStoredFieldRows([]) };
+        yield* replaceFieldRows([
+          {
+            ref: "a",
+            fields: [row("t", '{"a":1}', null), row("n", "42", null), row("m", null, 0.1)],
+          },
+        ]);
+        return yield* readRows(sql);
       }),
     );
-    expect(rows.rows).toEqual([
+    expect(rows).toEqual([
       stored("a", "m", null, 0.1),
       stored("a", "n", "42", null),
       stored("a", "t", '{"a":1}', null),
     ]);
-    expect(rows.none).toEqual([]);
   });
 
   it("deletes the rows of refs that have no entity", async () => {
     const result = await run((sql) =>
       Effect.gen(function* () {
-        yield* writeFieldRows([{ ref: "a", fields: [row("k", "x", null)] }], []);
-        const at = "2026-03-01T00:00:00.000Z";
-        yield* sql`INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
-            source_updated_at, first_observed_at, updated_at)
-          VALUES (x'00000000000000000000000000000001', 'b', 'k', 'N', 'full', 'T', ${at}, ${at}, ${at})`;
-        yield* writeFieldRows([{ ref: "b", fields: [row("k", "y", null)] }], []);
+        yield* replaceFieldRows([{ ref: "a", fields: [row("k", "x", null)] }]);
+        yield* insertEntity(sql, 1, "b", "k", "T");
+        yield* replaceFieldRows([{ ref: "b", fields: [row("k", "y", null)] }]);
         yield* deleteOrphanedFields();
-        return yield* readStoredFieldRows(["a", "b"]);
+        return yield* readRows(sql);
       }),
     );
     expect(result).toEqual([stored("b", "k", "y", null)]);
   });
+});
 
-  it("reads the title of the record a text value points at only while some Connection reads it", async () => {
+const TICKET: ActiveEntityKind = {
+  kind: "acme/ticket",
+  noun: "Ticket",
+  refPrefix: "acme:ticket:",
+  fields: [
+    {
+      key: "project",
+      label: "Project",
+      type: "text",
+      facet: { plural: "Projects", values: "acme/project" },
+    },
+    { key: "size", label: "Size", type: "number" },
+  ],
+  face: { place: "project", fact: "size" },
+};
+
+const BUG: ActiveEntityKind = {
+  kind: "acme/bug",
+  noun: "Bug",
+  refPrefix: "acme:bug:",
+  fields: [{ key: "size", label: "Size", type: "number" }],
+};
+
+describe("reading field values", () => {
+  it("reads many refs at once, each with the kind its entity was stored with", async () => {
     const result = await run((sql) =>
       Effect.gen(function* () {
-        const at = "2026-03-01T00:00:00.000Z";
+        yield* insertEntity(sql, 1, "acme:ticket:1", "acme/ticket", "One");
+        yield* insertEntity(sql, 2, "acme:bug:1", "acme/bug", "Bug");
+        yield* insertEntity(sql, 3, "acme:ticket:2", "acme/ticket", "Two");
+        yield* insertEntity(sql, 4, "acme:ticket:3", "acme/ticket", "Three");
+        yield* insertEntity(sql, 5, "gone:1", "gone/kind", "Gone");
+        yield* replaceFieldRows([
+          { ref: "acme:ticket:1", fields: [row("size", null, 1)] },
+          { ref: "acme:bug:1", fields: [row("size", null, 2)] },
+          { ref: "acme:ticket:2", fields: [row("size", null, 3)] },
+          { ref: "gone:1", fields: [row("size", null, 4)] },
+        ]);
+        return yield* readFieldValues(
+          ["acme:ticket:2", "acme:bug:1", "acme:ticket:1", "acme:ticket:3", "gone:1", "missing"],
+          [TICKET, BUG],
+        );
+      }),
+    );
+    const size = (number: number) => ({
+      key: "size",
+      label: "Size",
+      type: "number",
+      number,
+    });
+    expect([...result.keys()].sort()).toEqual([
+      "acme:bug:1",
+      "acme:ticket:1",
+      "acme:ticket:2",
+      "acme:ticket:3",
+      "gone:1",
+    ]);
+    expect(result.get("acme:ticket:1")).toEqual({ fields: [size(1)], face: { fact: size(1) } });
+    expect(result.get("acme:ticket:2")).toEqual({ fields: [size(3)], face: { fact: size(3) } });
+    expect(result.get("acme:bug:1")).toEqual({ fields: [size(2)], face: null });
+    expect(result.get("acme:ticket:3")).toEqual({ fields: [], face: {} });
+    expect(result.get("gone:1")).toEqual({ fields: [], face: null });
+  });
+
+  it("reads no kinds as no fields, and no refs as an empty map", async () => {
+    const result = await run((sql) =>
+      Effect.gen(function* () {
+        yield* insertEntity(sql, 1, "acme:ticket:1", "acme/ticket", "One");
+        yield* replaceFieldRows([{ ref: "acme:ticket:1", fields: [row("size", null, 1)] }]);
+        return {
+          unknown: yield* readFieldValues(["acme:ticket:1"], undefined),
+          empty: yield* readFieldValues([], [TICKET]),
+        };
+      }),
+    );
+    expect(result.unknown.get("acme:ticket:1")).toEqual({ fields: [], face: null });
+    expect(result.empty.size).toBe(0);
+  });
+
+  it("shows the title of a referenced record only while some Connection reads it", async () => {
+    const result = await run((sql) =>
+      Effect.gen(function* () {
         yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
             status, labels, config, created_at, updated_at)
           VALUES (x'0000000000000000000000000000000c', 'acme', 'acme/account', 'a', 'a', 'a',
-            'connected', '[]', '{}', ${at}, ${at})`;
-        const entity = (id: number, ref: string, title: string) => sql`
-          INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
-              source_updated_at, first_observed_at, updated_at)
-          VALUES (${new Uint8Array(16).fill(id)}, ${ref}, 'k', 'N', 'full', ${title}, ${at}, ${at}, ${at})`;
-        yield* entity(1, "acme:project:open", "Open");
-        yield* entity(2, "acme:project:hidden", "Hidden");
+            'connected', '[]', '{}', ${AT}, ${AT})`;
+        yield* insertEntity(sql, 1, "acme:project:open", "acme/project", "Open");
+        yield* insertEntity(sql, 2, "acme:project:hidden", "acme/project", "Hidden");
+        yield* insertEntity(sql, 3, "acme:ticket:1", "acme/ticket", "One");
+        yield* insertEntity(sql, 4, "acme:ticket:2", "acme/ticket", "Two");
+        yield* insertEntity(sql, 5, "acme:ticket:3", "acme/ticket", "Three");
         const observe = (ref: string, access: string) => sql`
           INSERT INTO external_entity_observations (ref, connection_id, access)
           VALUES (${ref}, x'0000000000000000000000000000000c', ${access})`;
         yield* observe("acme:project:open", "ok");
         yield* observe("acme:project:hidden", "inaccessible");
-        yield* writeFieldRows(
-          [
-            {
-              ref: "a",
-              fields: [
-                row("open", "acme:project:open", null),
-                row("hidden", "acme:project:hidden", null),
-                row("missing", "acme:project:none", null),
-                row("size", null, 2),
-              ],
-            },
-          ],
-          [],
+        yield* replaceFieldRows([
+          { ref: "acme:ticket:1", fields: [row("project", "acme:project:open", null)] },
+          { ref: "acme:ticket:2", fields: [row("project", "acme:project:hidden", null)] },
+          { ref: "acme:ticket:3", fields: [row("project", "acme:project:none", null)] },
+        ]);
+        return yield* readFieldValues(
+          ["acme:ticket:1", "acme:ticket:2", "acme:ticket:3"],
+          [TICKET],
         );
-        return yield* readTitledFieldRows(["a"]);
       }),
     );
-    expect(result.map(({ key, title }) => [key, title])).toEqual([
-      ["hidden", null],
-      ["missing", null],
-      ["open", "Open"],
-      ["size", null],
+    expect(result.get("acme:ticket:1")?.fields).toEqual([
+      {
+        key: "project",
+        label: "Project",
+        type: "text",
+        text: "Open",
+        ref: "acme:project:open",
+      },
     ]);
+    expect(result.get("acme:ticket:2")?.fields).toEqual([]);
+    expect(result.get("acme:ticket:3")?.fields).toEqual([]);
   });
 });

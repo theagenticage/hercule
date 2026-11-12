@@ -234,6 +234,12 @@ export const EntityFieldDeclaration = buildFieldDeclaration(ContributionWord);
 
 export type EntityFieldDeclaration = Schema.Schema.Type<typeof EntityFieldDeclaration>;
 
+/** The type of a declared field: `text`, `person`, `enum`, `number`, `money`, `age` or `bool`. */
+export type EntityFieldType = EntityFieldDeclaration["type"];
+
+/** The types of field that can be a Facet: the values are words a person can name, so Browse can list them and a row can say them. */
+export const FACET_FIELD_TYPES: ReadonlyArray<EntityFieldType> = ["text", "person", "enum"];
+
 /** One field of a kind after the host qualified `facet.values`, as in `github/repository`. */
 export const QualifiedEntityFieldDeclaration = buildFieldDeclaration(QualifiedContributionId);
 
@@ -259,6 +265,18 @@ export type CardFaceDeclaration = Schema.Schema.Type<typeof CardFaceDeclaration>
 
 /** The slots of a card face, in the order a card shows them. */
 export const CARD_FACE_SLOTS = ["place", "context", "fact"] as const;
+
+/**
+ * The types of field each slot of a card face can read. `place` and `context`
+ * say a word, so they take what a Facet takes. `fact` says an amount.
+ */
+export const CARD_FACE_SLOT_FIELD_TYPES: Readonly<
+  Record<(typeof CARD_FACE_SLOTS)[number], ReadonlyArray<EntityFieldType>>
+> = {
+  place: FACET_FIELD_TYPES,
+  context: FACET_FIELD_TYPES,
+  fact: ["number", "money"],
+};
 
 /** The fields of a kind declaration, apart from the ones that name another kind. */
 const kindFields = {

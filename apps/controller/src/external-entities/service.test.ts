@@ -246,7 +246,12 @@ const run = <A>(
             return entity;
           }
           const slots = yield* renderEntitySlots(declaration, observation);
-          const entity: ObservedEntity = { kind: declaration.word, observation, slots };
+          const entity: ObservedEntity = {
+            kind: declaration.word,
+            observation,
+            slots,
+            fieldRows: [],
+          };
           return entity;
         });
 

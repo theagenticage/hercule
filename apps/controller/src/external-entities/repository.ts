@@ -86,25 +86,46 @@ import { selectInboxPage } from "./riding";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
 import { makeWorkflowOfferReads, type WorkflowOfferTarget } from "./workflow-offer-reads";
 import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
-import { drawFieldsAndCardFace } from "./card-faces";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
 import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
-import type { EntitySlots, StoredEntityStatus } from "./slots";
+import type { EntitySlots, FullEntityObservation, StoredEntityStatus } from "./slots";
 import {
   deleteOrphanedFields,
-  readStoredFieldRows,
-  readTitledFieldRows,
-  writeFieldRows,
-  type EncodedField,
+  readFieldValues,
+  replaceFieldRows,
   type FieldSet,
 } from "./entity-fields";
+import type { EncodedField } from "./field-values";
 import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from "./timeline";
 
 export type { EntityEnvironment } from "./entity-records";
 
 /** How long a record nothing needs is kept before the sweep deletes it. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface ObservedEntityBase {
+  readonly kind: string;
+  readonly slots: EntitySlots;
+  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
+  readonly recognized?: RecognizedEvidence;
+}
+
+/**
+ * A full observation with the encoded values of the kind's declared fields
+ * (`encodeObservedFields`), empty when no field has a value. Storing it
+ * replaces the stored fields with them.
+ */
+export interface FullObservedEntity extends ObservedEntityBase {
+  readonly observation: FullEntityObservation;
+  readonly fieldRows: ReadonlyArray<EncodedField>;
+}
+
+/** A partial observation. It never touches the stored fields, so it carries none. */
+export interface PartialObservedEntity extends ObservedEntityBase {
+  readonly observation: Extract<EntityObservation, { readonly partial: true }>;
+  readonly fieldRows?: undefined;
+}
 
 /**
  * One thing a Connection read, ready to store. `kind` is the qualified kind.
@@ -114,19 +135,7 @@ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
  * known): only the noun, caption, home, section and status are stored from
  * them.
  */
-export interface ObservedEntity {
-  readonly kind: string;
-  readonly observation: EntityObservation;
-  readonly slots: EntitySlots;
-  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
-  readonly recognized?: RecognizedEvidence;
-  /**
-   * The encoded values of the kind's declared fields (`encodeObservedFields`),
-   * for a full observation. Left out means no field has a value. A partial
-   * observation never touches the stored fields, so it carries none.
-   */
-  readonly fieldRows?: ReadonlyArray<EncodedField>;
-}
+export type ObservedEntity = FullObservedEntity | PartialObservedEntity;
 
 /** What a write changed, so it can be announced once the transaction commits. Both lists are sorted by ref, each once. */
 export interface EntityWriteChanges {
@@ -824,10 +833,6 @@ const make = Effect.gen(function* () {
       // rejected observation writes nothing.
       const sourceChanges: Array<EntityChangeRecord> = [];
       const acceptedFieldSets: Array<FieldSet> = [];
-      const fullRefs = observed
-        .filter(({ observation }) => observation.partial !== true)
-        .map(({ observation }) => observation.ref);
-      const storedFields = yield* withSql(readStoredFieldRows(fullRefs));
       for (const entry of observed) {
         const ref = entry.observation.ref;
         const existing = before.entities.get(ref);
@@ -840,8 +845,8 @@ const make = Effect.gen(function* () {
         });
         // The field rows are shared fields too: only an accepted full
         // observation replaces them, whether or not its columns changed.
-        if (isAccepted(write) && !incomingIsPartial) {
-          acceptedFieldSets.push({ ref, fields: entry.fieldRows ?? [] });
+        if (isAccepted(write) && entry.fieldRows !== undefined) {
+          acceptedFieldSets.push({ ref, fields: entry.fieldRows });
         }
         if (write.action === "insert") yield* insertEntity(ref, write.values, connection, now);
         else if (write.action === "update") {
@@ -861,7 +866,7 @@ const make = Effect.gen(function* () {
 
       // A change to the field rows alone is a change of the entity: it is
       // dated and announced like a changed fact.
-      const fieldChangedRefs = yield* withSql(writeFieldRows(acceptedFieldSets, storedFields));
+      const fieldChangedRefs = yield* withSql(replaceFieldRows(acceptedFieldSets));
       if (fieldChangedRefs.length > 0) {
         yield* sql`
           UPDATE external_entities SET updated_at = ${now}
@@ -1531,8 +1536,9 @@ const make = Effect.gen(function* () {
           [buildWorkflowOfferTarget(row)],
           environment.kindSources ?? [],
         );
-        const activeKind = environment.activeEntityKinds?.find((kind) => kind.kind === row.kind);
-        const fieldRows = yield* withSql(readTitledFieldRows([row.ref]));
+        const fieldValues = (yield* withSql(
+          readFieldValues([row.ref], environment.activeEntityKinds),
+        )).get(row.ref)!;
         return Option.some({
           ...buildEntityFields({
             row,
@@ -1545,7 +1551,7 @@ const make = Effect.gen(function* () {
             latestChange: context.latestChanges.get(row.ref),
           }),
           kindAvailable: environment.activeKinds.has(row.kind as string),
-          ...drawFieldsAndCardFace(activeKind, fieldRows),
+          ...fieldValues,
           places: context.places,
           edges: context.edges,
           links: entityLinks,

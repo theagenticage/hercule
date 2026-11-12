@@ -440,6 +440,56 @@ describe("decodeEntityKinds", () => {
       ]);
       expect(Array.isArray(kinds)).toBe(true);
     });
+
+    const priority = {
+      key: "priority",
+      label: "Priority",
+      type: "enum",
+      values: [{ value: "high" }],
+    } as const;
+    const flag = { key: "flag", label: "Flag", type: "bool" } as const;
+    const opened = { key: "opened", label: "Opened", type: "age" } as const;
+    const size = { key: "size", label: "Size", type: "number" } as const;
+
+    it.each([
+      { form: "bars", field: priority, type: "enum" },
+      { form: "count", field: flag, type: "bool" },
+      { form: "delta", field: size, type: "number" },
+      { form: "date", field: size, type: "number" },
+    ])("refuses a $form fact on a field of type $type", async ({ form, field }) => {
+      const fact = form === "count" ? { form, unit: "file" } : { form };
+      const message = await decode([
+        buildKind("ticket", {
+          fields: [field],
+          facts: [{ field: field.key, ...fact }] as EntityKindDeclaration["facts"],
+        }),
+      ]);
+      expect(message).toContain(
+        `its ${form} fact reads the field "${field.key}", whose type is "${field.type}"`,
+      );
+    });
+
+    it.each([
+      { form: "bars", field: size },
+      { form: "word", field: priority },
+      { form: "money", field: flag },
+      { form: "date", field: opened },
+    ])("lets a $form fact read a field of type $field.type", async ({ form, field }) => {
+      const kinds = await decode([
+        buildKind("ticket", {
+          fields: [field],
+          facts: [{ field: field.key, form }] as EntityKindDeclaration["facts"],
+        }),
+      ]);
+      expect(Array.isArray(kinds)).toBe(true);
+    });
+
+    it("lets a fact name a key that is no declared field", async () => {
+      const kinds = await decode([
+        buildKind("ticket", { facts: [{ field: "size", form: "bars" }] }),
+      ]);
+      expect(Array.isArray(kinds)).toBe(true);
+    });
   });
 
   it("returns status colours as hex codes, and icons and hues as declared", async () => {

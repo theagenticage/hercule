@@ -46,7 +46,7 @@ import {
   decideConnectionWarning,
 } from "./connection-warning";
 import { claimRepository, type RecognizedEvidence } from "./claims";
-import { encodeObservedFields } from "./entity-fields";
+import { encodeObservedFields } from "./field-values";
 import { isPendingTarget } from "./pending-target";
 import {
   externalEntityRepository,

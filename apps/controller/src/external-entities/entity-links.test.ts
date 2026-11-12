@@ -64,6 +64,7 @@ const ticket = (name: string, options: Partial<FullEntityObservation> = {}): Obs
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of an epic. It reports `linked` tickets as its own source claims. */
@@ -81,6 +82,7 @@ const epic = (name: string, linked: ReadonlyArray<string> = []): ObservedEntity 
     sourceUpdatedAt: at(1),
     relations: { complete: true, partOf: [], linked },
   },
+  fieldRows: [],
 });
 
 const environment = (minutes: number) => ({ now: at(minutes), activePluginIds: [PLUGIN] });

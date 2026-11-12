@@ -32,6 +32,7 @@ import { taskRepository } from "../tasks";
 import {
   externalEntityRepository,
   type EntityWriteChanges,
+  type FullObservedEntity,
   type ObservedEntity,
   type ReconcileChanges,
 } from "./repository";
@@ -86,7 +87,7 @@ interface ObservationOptions extends Partial<Omit<FullEntityObservation, "kind" 
 }
 
 /** Builds the observation of a ticket: compact, fast, concerning the user unless told otherwise. */
-const ticket = (name: string, options: ObservationOptions = {}): ObservedEntity => {
+const ticket = (name: string, options: ObservationOptions = {}): FullObservedEntity => {
   const { slots, ...rest } = options;
   return {
     kind: TICKET_KIND,
@@ -102,11 +103,12 @@ const ticket = (name: string, options: ObservationOptions = {}): ObservedEntity 
       sourceUpdatedAt: at(1),
       ...rest,
     },
+    fieldRows: [],
   };
 };
 
 /** Builds the observation of an epic: rich, slow. */
-const epic = (name: string, options: Partial<FullEntityObservation> = {}): ObservedEntity => ({
+const epic = (name: string, options: Partial<FullEntityObservation> = {}): FullObservedEntity => ({
   kind: EPIC_KIND,
   slots: EPIC_SLOTS,
   observation: {
@@ -120,10 +122,11 @@ const epic = (name: string, options: Partial<FullEntityObservation> = {}): Obser
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of the project: a place with no concern. */
-const project = (options: Partial<FullEntityObservation> = {}): ObservedEntity => ({
+const project = (options: Partial<FullEntityObservation> = {}): FullObservedEntity => ({
   kind: PROJECT_KIND,
   slots: PROJECT_SLOTS,
   observation: {
@@ -135,6 +138,7 @@ const project = (options: Partial<FullEntityObservation> = {}): ObservedEntity =
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 /** Builds a partial observation of a ticket: only its kind, ref and title. */

@@ -11,6 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CARD_FACE_SLOTS,
+  CARD_FACE_SLOT_FIELD_TYPES,
+  FACET_FIELD_TYPES,
+  type EntityFactDeclaration,
+  type EntityFieldType,
   EntityFieldDeclaration,
   EntityKindDeclaration,
   PluginError,
@@ -57,11 +61,30 @@ const convertStatusColors = (
 
 const areFieldsEqual = Schema.toEquivalence(EntityFieldDeclaration);
 
-/** The types of field whose value a person can name, so Browse can list the values and a row can say them. */
-const NAMING_FIELD_TYPES: ReadonlyArray<string> = ["text", "person", "enum"];
-
-/** The types of field that hold an amount a quiet row can say. */
-const AMOUNT_FIELD_TYPES: ReadonlyArray<string> = ["number", "money"];
+/**
+ * The types of field each form of fact can read. The renderer turns the value
+ * into text and reads that text, so a form takes a type only when its text can
+ * be right.
+ *
+ * - `delta` reads text like `+120 -30`: only `text` holds that. A number, an
+ *   amount, a timestamp or a boolean never does, and a person or an enum value
+ *   is a name or a label.
+ * - `count` and `bars` read digits: a `number` or `money` amount, or `text`
+ *   that holds digits. An enum value or a person is a label, so the plugin
+ *   keeps the number in a `number` field.
+ * - `date` reads a timestamp: an `age` or `text`.
+ * - `word` and `money` show the text as it is, so any type reads.
+ */
+const FACT_FORM_FIELD_TYPES: Readonly<
+  Record<EntityFactDeclaration["form"], ReadonlyArray<EntityFieldType>>
+> = {
+  delta: ["text"],
+  count: ["number", "money", "text"],
+  bars: ["number", "money", "text"],
+  date: ["age", "text"],
+  word: ["text", "person", "enum", "number", "money", "age", "bool"],
+  money: ["text", "person", "enum", "number", "money", "age", "bool"],
+};
 
 /** The first declaration of a field key in a source, and the kind that made it. */
 interface FirstDeclaration {
@@ -82,13 +105,13 @@ const findFieldProblem = (
   firstDeclarationByKey: ReadonlyMap<string, FirstDeclaration>,
 ): string | undefined => {
   const fields = declaration.fields ?? [];
-  const types = new Map<string, string>();
+  const types = new Map<string, EntityFieldType>();
   for (const field of fields) {
     if (types.has(field.key)) {
       return `its field "${field.key}" is declared twice. Give each field of a kind its own key.`;
     }
     types.set(field.key, field.type);
-    if (field.facet !== undefined && !NAMING_FIELD_TYPES.includes(field.type)) {
+    if (field.facet !== undefined && !FACET_FIELD_TYPES.includes(field.type)) {
       return `its field "${field.key}" has a facet, but its type is "${field.type}". A facet lists values a person can name, so use the type text, person or enum, or remove the facet.`;
     }
     const valuesKind = field.facet?.values;
@@ -112,6 +135,12 @@ const findFieldProblem = (
       return `its field "${field.key}" is declared differently from the same key in ${first.kind} (type, label, values, currency or facet differ). One key has one meaning in a source, so make the two declarations identical or use another key.`;
     }
   }
+  for (const fact of declaration.facts) {
+    const type = types.get(fact.field);
+    if (type !== undefined && !FACT_FORM_FIELD_TYPES[fact.form].includes(type)) {
+      return `its ${fact.form} fact reads the field "${fact.field}", whose type is "${type}", which a ${fact.form} fact cannot read. Make the field one of type ${FACT_FORM_FIELD_TYPES[fact.form].join(", ")}, or report the value the fact needs in another field of one of those types and name that field.`;
+    }
+  }
   const face = declaration.face;
   if (face === undefined) return undefined;
   if (declaration.pace === "context") {
@@ -124,8 +153,7 @@ const findFieldProblem = (
     if (type === undefined) {
       return `its face ${slot} is "${key}", which is not a field the kind declares. Name the key of one of its fields.`;
     }
-    const allowed = slot === "fact" ? AMOUNT_FIELD_TYPES : NAMING_FIELD_TYPES;
-    if (!allowed.includes(type)) {
+    if (!CARD_FACE_SLOT_FIELD_TYPES[slot].includes(type)) {
       return `its face ${slot} is the field "${key}", whose type is "${type}". The ${slot} of a face reads a field of type ${slot === "fact" ? "number or money" : "text, person or enum"}.`;
     }
   }
@@ -160,6 +188,8 @@ const decodeQualified = Schema.decodeUnknownEffect(QualifiedEntityKindDeclaratio
  *   field with a repeated value;
  * - a field has a `facet` and a type other than `text`, `person` or `enum`, or
  *   its `facet.values` is not the word of a context kind of this same source;
+ * - a fact names a declared field whose type its form cannot read (see
+ *   `FACT_FORM_FIELD_TYPES`), such as a `bars` fact on an `enum` field;
  * - its `face` is on a context kind, names a slot that is no declared field,
  *   puts a field of type other than `text`, `person` or `enum` in `place` or
  *   `context`, or one other than `number` or `money` in `fact`;

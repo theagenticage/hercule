@@ -536,12 +536,14 @@ describe("the outside things a Task links", () => {
       sourceUpdatedAt: AT,
       relations: { complete: true, partOf, linked: [] },
     },
+    fieldRows: [],
   });
 
   const project = (ref: string, title: string): ObservedEntity => ({
     kind: `${PLUGIN}/project`,
     slots: { noun: "Project", pace: "context", caption: "Tracker project" },
     observation: { kind: "project", ref, title, fields: {}, concerns: [], sourceUpdatedAt: AT },
+    fieldRows: [],
   });
 
   /**
