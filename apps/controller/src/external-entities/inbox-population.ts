@@ -125,30 +125,37 @@ const buildAskTables = (onlyRefs: boolean): string => `
  *   summary of its asks (`ask_count`, `oldest_ask`, `newest_ask`, null for no
  *   asks).
  */
-const ELIGIBLE_ENTITIES_SQL = `${buildAskTables(false)},
+const buildEligibleSql = (onlyRefs: boolean): string => `${buildAskTables(onlyRefs)},
   eligible AS (
     SELECT e.*, l.task_id AS task_id, a.ask_count, a.oldest_ask, a.newest_ask
     FROM external_entities e
     LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
     LEFT JOIN ask_summary a ON a.ref = e.ref
     WHERE ${buildWorkRecordCondition("e")}
+      ${onlyRefs ? "AND e.ref IN (SELECT ref FROM page_refs)" : ""}
       AND (e.dismissed_at IS NULL OR a.newest_ask > e.dismissed_at)
       AND (e.ref IN (${CONCERNED_REFS_SQL}) OR l.task_id IS NOT NULL
            OR e.ref IN (SELECT ref FROM live_signals)))`;
 
 /**
- * Builds the common table expressions of `ELIGIBLE_ENTITIES_SQL` with their
+ * Builds the common table expressions of the eligible entities with their
  * parameters, to put after `WITH`. `now` decides which snoozes have ended;
  * `askingKinds` are the signal kinds that ask the user for a move
- * (`listAskingKinds`).
+ * (`listAskingKinds`). With `onlyRefs`, only those refs are looked at (and
+ * the `page_refs` table is defined), so a read of some things does not rank
+ * the whole Inbox. A ref is eligible or not the same way either way.
  */
 export const buildEligibleEntities = (
   now: string,
   askingKinds: ReadonlyArray<string>,
-): CompiledSql => ({
-  sql: ELIGIBLE_ENTITIES_SQL,
-  params: [now, JSON.stringify(askingKinds)],
-});
+  onlyRefs?: ReadonlyArray<string>,
+): CompiledSql =>
+  onlyRefs === undefined
+    ? { sql: buildEligibleSql(false), params: [now, JSON.stringify(askingKinds)] }
+    : {
+        sql: buildEligibleSql(true),
+        params: [now, JSON.stringify(onlyRefs), JSON.stringify(askingKinds)],
+      };
 
 /**
  * Builds the common table expressions `live_links`, `taken`, `live_signals`,
@@ -234,7 +241,7 @@ export const WANTED_REFS_SQL = `
 export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
   /**
    * Reads which of `refs` are eligible for the Inbox at `now`, and whether each
-   * has an ask (the one definition in `ELIGIBLE_ENTITIES_SQL`). One statement,
+   * has an ask (the one definition in `buildEligibleEntities`). One statement,
    * none for no refs.
    */
   const readEligibleRefs = (
@@ -243,13 +250,11 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
     askingKinds: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyMap<string, { readonly asks: boolean }>, SqlError> => {
     if (refs.length === 0) return Effect.succeed(new Map());
-    const eligible = buildEligibleEntities(now, askingKinds);
+    const eligible = buildEligibleEntities(now, askingKinds, refs);
     return Effect.map(
       sql.unsafe<{ readonly ref: string; readonly ask_count: number | null }>(
-        `WITH ${eligible.sql}
-         SELECT ref, ask_count FROM eligible
-         WHERE ref IN (SELECT value FROM json_each(?))`,
-        [...eligible.params, JSON.stringify(refs)],
+        `WITH ${eligible.sql} SELECT ref, ask_count FROM eligible`,
+        eligible.params,
       ),
       (rows) => new Map(rows.map((row) => [row.ref, { asks: row.ask_count !== null }])),
     );

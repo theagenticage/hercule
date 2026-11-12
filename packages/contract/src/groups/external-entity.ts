@@ -733,8 +733,9 @@ export type InboxFacet = Schema.Schema.Type<typeof InboxFacet>;
 
 /**
  * One page of a list. `total` counts the whole result of the query, not the
- * page. `facets` come only with the first page (no cursor, no `refs`) and
- * describe the whole result.
+ * page. `total` and `facets` come only with the first page (no cursor, no
+ * `refs`); a next page and a `refs` read leave them out, so they do not count
+ * the whole list. `facets` describe the whole result.
  *
  * Order `waiting`: things with an open ask come first, the oldest ask first,
  * then the rest, the latest change first. Order `newest`: the latest change
@@ -743,7 +744,7 @@ export type InboxFacet = Schema.Schema.Type<typeof InboxFacet>;
 export const InboxPage = Schema.Struct({
   things: atMost(InboxThing, MAX_INBOX_PAGE),
   nextCursor: Schema.optionalKey(bounded(1, 512)),
-  total: Schema.Int,
+  total: Schema.optionalKey(Schema.Int),
   order: InboxOrder,
   facets: Schema.optionalKey(atMost(InboxFacet, MAX_INBOX_RAIL_ROWS)),
   /**

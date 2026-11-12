@@ -164,14 +164,15 @@ const compileOrRefuse = (
 /**
  * The statements that hold what a read works on: the common table expressions
  * of the Inbox and `matched`, the eligible things that pass `filter`, with the
- * columns every read needs.
+ * columns every read needs. With `onlyRefs`, only those things are looked at.
  */
 const buildMatched = (
   environment: InboxEnvironment,
   filter: CompiledSql,
   extra: CompiledSql = { sql: "", params: [] },
+  onlyRefs?: ReadonlyArray<string>,
 ): CompiledSql => {
-  const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
+  const eligible = buildEligibleEntities(environment.now, environment.askingKinds, onlyRefs);
   return {
     sql: `${eligible.sql},
       matched AS MATERIALIZED (
@@ -525,7 +526,8 @@ interface PageRow {
   readonly oldest_ask: string | null;
   readonly upd: string;
   readonly grp: number;
-  readonly total: number;
+  /** Only on the first page. */
+  readonly total?: number;
 }
 
 /** One open ask of a thing, as the asks statement returns it. */
@@ -709,34 +711,34 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         tuple = decoded;
       }
 
-      const matched = buildMatched(environment, filter);
+      // A read of some refs looks at those things only, and only the first page
+      // counts the whole list: a next page or a refs read ranks nothing for it.
+      const matched = buildMatched(environment, filter, undefined, query.refs);
+      const isFirstPage = query.cursor === undefined && query.refs === undefined;
       const where: CompiledSql =
-        query.refs === undefined
-          ? buildKeyset(list.order, tuple)
-          : {
-              sql: "m.ref IN (SELECT value FROM json_each(?))",
-              params: [JSON.stringify(query.refs)],
-            };
+        query.refs === undefined ? buildKeyset(list.order, tuple) : { sql: "1", params: [] };
       const rows = yield* run<PageRow>(
         sql,
         `WITH ${matched.sql}
-         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, (SELECT COUNT(*) FROM matched) AS total
+         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+           ${isFirstPage ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
          FROM matched m WHERE ${where.sql}
          ORDER BY ${ORDER_BY[list.order]} LIMIT ?`,
         [...matched.params, ...where.params, MAX_INBOX_PAGE + 1],
       );
       const more = rows.length > MAX_INBOX_PAGE;
       const pageRows = rows.slice(0, MAX_INBOX_PAGE);
-      const total =
-        rows[0]?.total ??
-        (yield* Effect.map(
-          run<{ readonly n: number }>(
-            sql,
-            `WITH ${matched.sql} SELECT COUNT(*) AS n FROM matched`,
-            matched.params,
-          ),
-          (counted) => counted[0]!.n,
-        ));
+      const total = !isFirstPage
+        ? undefined
+        : (rows[0]?.total ??
+          (yield* Effect.map(
+            run<{ readonly n: number }>(
+              sql,
+              `WITH ${matched.sql} SELECT COUNT(*) AS n FROM matched`,
+              matched.params,
+            ),
+            (counted) => counted[0]!.n,
+          )));
       const last = pageRows.at(-1);
       const nextCursor =
         more && last !== undefined && query.refs === undefined
@@ -765,7 +767,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       return {
         things,
         ...(nextCursor === undefined ? {} : { nextCursor }),
-        total,
+        ...(total === undefined ? {} : { total }),
         order: list.order,
         ...(facets === undefined ? {} : { facets }),
         offerSets,
