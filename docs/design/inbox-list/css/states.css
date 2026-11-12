@@ -44,14 +44,20 @@
   line-height: 28px;
 }
 .em-link {
-  margin: 0 -2px;
-  padding: 0 2px;
-  border-radius: 4px;
   color: var(--ink);
   font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--line);
   text-underline-offset: 2px;
+}
+/* A link inside a sentence shows its focus on itself: a thick focus-coloured underline and a tint,
+   never a ring over the words beside it. */
+.em-link:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--focus) 14%, transparent);
+  text-decoration-color: var(--focus);
+  text-decoration-thickness: 2px;
 }
 
 /* The sunrise: Hercule's head comes up over a brass horizon, and the rays draw outward. */

@@ -178,6 +178,7 @@ window.Keys = (function () {
     var typing = t.closest && t.closest("input, textarea, [contenteditable], select");
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !typing) { Moves.undo(); e.preventDefault(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing) {
+      if (!App.state.rows.length) { e.preventDefault(); return; }
       // ⌘A selects what the list shows: a group's members that the query holds, not the rest of it.
       App.state.rows.forEach(function (r) { if (r.type !== "member") idsOf(r).forEach(function (id) { App.state.selection.add(id); }); });
       App.render({});
@@ -196,6 +197,7 @@ window.Keys = (function () {
     else if (lower === "k" || k === "ArrowUp") step(-1, e.shiftKey);
     else if (lower === "x") {
       var r = App.currentRow(), ids = idsOf(r, e.shiftKey);
+      if (!ids.length) { e.preventDefault(); return; }
       var all = ids.length && ids.every(function (id) { return st.selection.has(id); });
       ids.forEach(function (id) { if (all) st.selection.delete(id); else st.selection.add(id); });
       st.anchor = st.focus;

@@ -782,6 +782,60 @@ for (const w of [960, 1024, 1100]) {
   await p.close();
 }
 
+// ---- Round-nine regressions ----
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:pr-6230", { keyboard: true }));
+  await key(p, "x");
+  await key(p, "h");
+  await settle(p, 300);
+  if (await p.evaluate(() => !document.getElementById("handmenu").hidden)) await key(p, "1");
+  await settle(p, 200);
+  await expect(p, "a handed thing leaves the selection at once", () => !App.state.selection.has("pr-6230"));
+  await settle(p, 1200);
+  await key(p, "e");
+  await settle(p, 300);
+  await expect(p, "so the next E never acts on the handed thing", () => !Model.gone.has("pr-6230"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=triage");
+  await p.focus('[data-key="t:prop-kp"]');
+  await key(p, "n");
+  await settle(p, 700);
+  await p.keyboard.press("Meta+Enter");
+  await settle(p, 500);
+  // With no project to go on, ⌘↩ asks for one first: ↩ picks the offered one, and ⌘↩ starts.
+  if (await p.evaluate(() => !document.getElementById("td-pop").hidden)) { await key(p, "Enter"); await settle(p, 300); await p.keyboard.press("Meta+Enter"); }
+  await settle(p, 900);
+  const started = await p.evaluate(() => Model.gone.has("prop-kp"));
+  await key(p, "Escape");
+  await settle(p, 500);
+  await p.keyboard.press("Meta+z");
+  await settle(p, 500);
+  if (started) await expect(p, "⌘Z on it brings the Proposal back, current", () => !Model.gone.has("prop-kp") && App.state.focus === "t:prop-kp");
+  else fail("the thread from a Proposal did not start, so its undo was not checked");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=empty");
+  await settle(p, 300);
+  await p.evaluate(() => App.emptyHeading().focus());
+  await key(p, "x");
+  await p.evaluate(() => Live.arrive(World.arrivals()));
+  await settle(p, 300);
+  await expect(p, "the empty state keeps its focus when things arrive", () => document.activeElement.matches("#empty .em-title"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "8");
+  await p.evaluate(() => Live.arrive(World.arrivals()));
+  await settle(p, 300);
+  await expect(p, "the N new pill counts only what arrived for the list on screen", () => !document.querySelector("[data-newbar]"));
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

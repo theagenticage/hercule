@@ -234,7 +234,7 @@ window.Dialog = (function () {
     }
     st.phase = "started";
     delete drafts[st.draftKey];
-    var things = st.things.slice(), title = st.title;
+    var things = st.things.slice(), title = st.title, proposal = st.origin.proposal, was = App.state.focus;
     Moves.holdPlace();
     things.forEach(function (t) { t.held = { by: "New thread", task: title, since: 0 }; });
     if (st.origin.proposal) Model.gone.add(st.origin.proposal.id);
@@ -253,7 +253,13 @@ window.Dialog = (function () {
       el.querySelectorAll(".td-cards, .td-ctx, .td-msg--you time").forEach(function (x) { x.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, delay: 90, easing: "ease-out", fill: "backwards" }); });
     }
     App.render({ flip: true, leave: "taken" });
-    Moves.push({ say: "Started a thread on " + quote(title), action: { label: "Open it", key: "G", task: title }, undo: function () { things.forEach(function (t) { delete t.held; }); Moves.redraw({ enter: "return" }); }, undone: "Stopped the thread before it did anything." });
+    Moves.push({ say: "Started a thread on " + quote(title), action: { label: "Open it", key: "G", task: title }, undo: function () {
+      things.forEach(function (t) { delete t.held; });
+      // A thread started from a Proposal takes it back too, and the row it came from is current again.
+      if (proposal) Model.gone.delete(proposal.id);
+      App.state.focus = was;
+      Moves.redraw({ enter: "return" });
+    }, undone: "Stopped the thread before it did anything." });
   }
   function quote(t) { return "“" + (t.length > 40 ? t.slice(0, 38) + "…" : t) + "”"; }
 

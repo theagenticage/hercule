@@ -73,16 +73,22 @@ window.Model = (function () {
     return text.toLowerCase().split(/\s+/).every(function (w) { return hay.indexOf(w) >= 0; });
   }
 
-  /** Returns the things a scope holds: a saved query, or the clauses of a Browse value, plus the search. */
-  function find(scope, search) {
+  /**
+   * Checks whether a scope, with the search, holds a thing: a saved query, or the clauses of a Browse
+   * value. Triage holds Proposals and suggestions, never things.
+   */
+  function holds(scope, search, t) {
+    if (scope.triage) return false;
     var q = scope.saved ? K.SAVED.find(function (s) { return s.id === scope.saved; }).q : null;
-    return live().filter(function (t) {
-      if (q && !inSaved(t, q)) return false;
-      if (scope.clauses && !scope.clauses.every(function (c) { return matchClause(t, c); })) return false;
-      if (search && search.clauses && !search.clauses.every(function (c) { return matchClause(t, c); })) return false;
-      if (search && !matchText(t, search.text)) return false;
-      return true;
-    });
+    if (q && !inSaved(t, q)) return false;
+    if (scope.clauses && !scope.clauses.every(function (c) { return matchClause(t, c); })) return false;
+    if (search && search.clauses && !search.clauses.every(function (c) { return matchClause(t, c); })) return false;
+    if (search && !matchText(t, search.text)) return false;
+    return true;
+  }
+  /** Returns the live things a scope holds, with the search. */
+  function find(scope, search) {
+    return live().filter(function (t) { return holds(scope, search, t); });
   }
 
   // ---- Groups: every set of things linked to each other, by a source or a person ----
@@ -211,7 +217,7 @@ window.Model = (function () {
     load: load, add: function (t) { world.things.push(t); byId.set(t.id, t); }, byId: function (id) { return byId.get(id); }, all: function () { return world.things; }, live: live,
     gone: gone, links: function () { return world.links; }, triage: function () { return world.triage; },
     sourceOf: sourceOf, openSignals: openSignals, askingSignals: askingSignals, asks: asks, waitOf: waitOf, readField: readField,
-    find: find, buildRows: buildRows, decideGroups: decideGroups, groupOf: groupOf, linksOf: linksOf, triageLive: triageLive,
+    find: find, holds: holds, buildRows: buildRows, decideGroups: decideGroups, groupOf: groupOf, linksOf: linksOf, triageLive: triageLive,
     countSaved: countSaved, countTriage: countTriage, facetValues: facetValues, accountsOf: accountsOf, countSource: countSource,
     offersFor: offersFor, matchClause: matchClause, isLive: isLive,
   };

@@ -91,6 +91,13 @@ window.App = (function () {
     var before = state.focus;
     var oldRows = state.rows || [];
     state.rows = buildFlat();
+    // After a move, the selection keeps only things the list still shows: a thing handed off, answered
+    // or taken into a thread never stays selected out of sight, where the next key would act on it.
+    if (opts.flip && state.selection.size) {
+      var shown = new Set();
+      state.rows.forEach(function (r) { if (r.thing) shown.add(r.thing.id); if (r.type === "group") r.group.members.forEach(function (m) { shown.add(m.id); }); });
+      state.selection.forEach(function (id) { if (!shown.has(id)) state.selection.delete(id); });
+    }
     var after = state.focusAfter;
     // After a move, the row after the handled one in the old order becomes current: when the handled
     // row is gone, and also when a move keeps its place and the handled thing is elsewhere in the list.

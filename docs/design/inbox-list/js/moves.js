@@ -139,6 +139,8 @@ window.Moves = (function () {
     // when the colleague's mark lands on Work.
     t.held = { by: offer.w.name, task: t.title, since: 0 };
     ended.forEach(function (sg) { sg.done = true; });
+    // A handed thing leaves the selection at once, so the next key never acts on it.
+    if (s().selection.delete(t.id)) { Selection.draw(s()); Pane.draw(App.el.pane, s(), {}); }
     Rail.draw(App.el.rail, s());
     var c = document.querySelector("[data-inbox-count]");
     if (c) c.textContent = Model.countSaved("waits");
@@ -372,7 +374,8 @@ window.Moves = (function () {
       el.focus({ preventScroll: true });
       el.scrollIntoView({ block: "center", behavior: Motion.isReduced() ? "auto" : "smooth" });
     }
-    Announce.say(fresh.length + (fresh.length === 1 ? " new thing is" : " new things are") + " in the list. The first is current.");
+    var shown = fresh.filter(function (t) { return App.state.rows.some(function (r) { return r.thing === t; }); }).length;
+    Announce.say(shown ? shown + (shown === 1 ? " new thing is" : " new things are") + " in the list. The first is current." : fresh.length + (fresh.length === 1 ? " new thing went" : " new things went") + " to other lists.");
     setTimeout(function () { fresh.forEach(function (t) { t.fresh = false; }); }, 1800);
   }
 

@@ -311,6 +311,9 @@ Each is a choice the map left open, made for the best design. Each can be turned
 55. **Leaving the search takes what ↩ would** (Esc, ↓, Tab, F6 or a click with `team:Check` typed gives `team:Checkout`): the value as typed when the field holds it or it is a whole threshold, else the highlighted suggestion. The field never shows a filter that does not apply.
 56. **A link pair in the pane takes two lines**: the pair, then who linked it with Unlink beside it. Nothing moves when Unlink shows.
 57. **The bar keeps Inbox | Intake down to 900px**; only below that, or at 200% zoom, does the pill give way.
+58. **After a move, the selection keeps only what the list still shows.** A thing handed off, answered or taken into a thread leaves the selection at once, so the next key never acts on something out of sight.
+59. **The "N new" pill counts only what arrived for the list on screen**; arrivals for other lists show in the rail's counts, and the announcement says where they went.
+60. **⌘Z on a thread started from a Proposal** brings the Proposal back to Triage, current, as ⌘Z on T does.
 
 ## Proposed changes to #1119
 
@@ -354,6 +357,10 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 **Round seven** found the edges of round six's changes: under 1032px, emptying the list from the open pane left the list inert behind an invisible pane; ⌘Z on a sent reply could open its box in a hidden pane, and the next keys ran moves; a group's pane could not be opened by keyboard under 1032px; the focus fell to the page when the list emptied; leaving the search dropped a typed filter silently; the undo line slid sideways on every appearance (its hidden state had no offset) and dropped in one frame when the selection bar left; hovering a pane pair moved the pairs below; the small sunrise drew before the pane had gone; the pill vanished from 900 to 1031px. All fixed and checked.
 
 **Round eight** found that a thread on the last thing still left the list inert under 1032px and the focus on the page above it; that the focus on the empty state, being outside the list, stopped the list's keys; that F6 stuck on an empty list; that leaving the search took a half-typed value as typed; that the sunrise's head showed below its horizon and a dot sat at the old centre before it drew; that the empty state opened with a ring nobody asked for; that the undo line still jumped when the selection bar came or went under it; and that pane pairs alternated in height. All fixed and checked.
+
+**Round nine** was the last, by Rogier's decision. It found two small regressions of round eight's own fixes (the undo line dropped into place on a move on a selection; the Unlink and Updates focus rings ran over nearby words) and four things in flows no earlier round had walked: things handed off, answered or taken into a thread stayed selected, so the next E acted on them out of sight; ⌘Z on a thread started from a Proposal left the Proposal gone; redrawing the empty state dropped its focus; and the "N new" pill counted arrivals that belonged to other lists. All six are fixed, each with a check in `tools/check.mjs`, and the motion ones were filmed at real speed; they were not seen by a tenth panel.
+
+How the rounds went: one found 95 issues; two to four the long tail at narrow widths and around undo; five to nine fewer each time, mostly at the edges of the previous round's fixes. By the end `tools/check.mjs` held about 125 checks, one or more for every fix.
 
 ## Tried and dropped
 

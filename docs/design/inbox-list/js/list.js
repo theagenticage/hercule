@@ -180,10 +180,12 @@ window.List = (function () {
     var n = s.scope.triage ? built.rows.length : built.count;
     var order = Kinds.ORDER_WORDS[built.order] || "";
     // Arrivals wait in a pill beside the count, in the head: it covers no row and moves none.
-    if (s.pending.length) order = '<button type="button" class="newbar" data-newbar title="Show what is new (.)" aria-keyshortcuts="."><span data-new-n>' + s.pending.length + ' new</span><span class="newbar-show">Show<kbd class="kbd-dot" aria-hidden="true">.</kbd></span></button>';
+    // The pill counts only what arrived for this list; arrivals for other lists show in the rail's counts.
+    var here = s.pending.filter(function (t) { return Model.holds(s.scope, s.search, t); }).length;
+    if (here) order = '<button type="button" class="newbar" data-newbar title="Show what is new (.)" aria-keyshortcuts="."><span data-new-n>' + here + ' new</span><span class="newbar-show">Show<kbd class="kbd-dot" aria-hidden="true">.</kbd></span></button>';
     var had = !!hostHead.querySelector("[data-newbar]");
     hostHead.innerHTML = '<div class="lh-title"' + (tip ? ' title="' + D.esc(tip) + '"' : "") + ">" + pre + "<h2>" + D.esc(title) + "</h2>" + post + '<span class="lh-n">' + D.num(n) + '</span></div><div class="lh-tools"><span class="lh-order">' + order + '</span><button type="button" class="lh-narrow tool" data-narrow aria-haspopup="menu" aria-expanded="false" aria-keyshortcuts="F">' + D.icon("filter", 14) + "<b>Narrow</b></button></div>";
-    if (s.pending.length && !had) Live.showBar(hostHead.querySelector("[data-newbar]"));
+    if (here && !had) Live.showBar(hostHead.querySelector("[data-newbar]"));
   }
 
   // ---- Motion for a redraw: what leaves, what stays, what arrives, and what moves between places ----

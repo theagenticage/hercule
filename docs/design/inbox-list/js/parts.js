@@ -29,6 +29,9 @@
       } else el.style.removeProperty("--undo-line-x");
       el.classList.remove("is-tight");
       el.classList.toggle("is-wrap", !opts.undo && !opts.action);
+      // Reading its place settles a hidden line where the move left things (the selection bar gone,
+      // the pane slid away) before it rises, so it rises there and does not drop.
+      if (!el.classList.contains("is-on")) void getComputedStyle(el).bottom;
       el.classList.add("is-on");
       el.removeAttribute("inert");
       // A line that does not fit shortens the thing's title first, at a word, to 12 letters at least;
@@ -123,7 +126,8 @@
       var st = App.state;
       things.forEach(function (t) { t.history = t.history || []; t.blocks = t.blocks || []; t.account = t.account || World.ACCOUNTS[Model.sourceOf(t)][0]; st.pending.push(t); });
       App.render({});
-      Announce.say(st.pending.length + " new " + (st.pending.length === 1 ? "thing" : "things") + ". Period shows them.");
+      var here = st.pending.filter(function (t) { return Model.holds(st.scope, st.search, t); }).length;
+      Announce.say(here ? here + " new " + (here === 1 ? "thing" : "things") + " in this list. Period shows them." : st.pending.length + " new " + (st.pending.length === 1 ? "thing" : "things") + " in other lists.");
       var c = document.querySelector("[data-inbox-count]");
       if (c) { c.textContent = Model.countSaved("waits") + st.pending.filter(Model.asks).length; Motion.animate(c, [{ transform: "translateY(4px)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" }); }
     }
@@ -171,24 +175,32 @@
       for (var i = 0; i < 9; i++) { var a = -80 + i * 20; rays += '<line x1="60" y1="58" x2="' + (60 + Math.sin(a * Math.PI / 180) * 54).toFixed(1) + '" y2="' + (58 - Math.cos(a * Math.PI / 180) * 54).toFixed(1) + '" style="--i:' + Math.abs(i - 4) + '"/>'; }
       return '<svg class="sun" viewBox="0 0 120 64" width="168" height="90" aria-hidden="true"><g class="sun-rays">' + rays + '</g><line class="sun-line" x1="6" y1="58" x2="114" y2="58"/></svg><span class="sun-head">' + D.face("Hercule", "idle", 40) + "</span>";
     }
+    /**
+     * Draws the empty state for the list's scope and search. Unchanged words are not drawn again, so
+     * a heading with the focus keeps it, and a sunrise is not played twice.
+     */
     function draw(el, s) {
+      var html = build(s);
+      if (el._html === html) return;
+      var had = el.contains(document.activeElement);
+      el._html = html;
+      el.innerHTML = html;
+      // When the words change under the focus (a count, a title), the new heading takes it.
+      if (had) { var h = App.emptyHeading(); if (h) h.focus({ preventScroll: true }); }
+    }
+    function build(s) {
       var searching = s.search.text || s.search.clauses.length;
-      if (s.loading) { el.innerHTML = ""; return; }
+      if (s.loading) return "";
       if (searching) {
         var wider = s.scope.saved === "all" ? 0 : Model.find({ saved: "all" }, s.search).length;
         var what = s.search.clauses.map(function (c) { return "<code>" + D.esc(Kinds.FIELDS[c.key].token + ":" + c.value) + "</code>"; }).concat(s.search.text ? ["“" + D.esc(s.search.text) + "”"] : []).join(" and ");
-        el.innerHTML = '<div class="em em--search"><p class="em-title">Nothing in ' + D.esc(App.scopeTitle()) + ' matches</p><p class="em-line">No thing here has ' + what + ".</p>" + (wider ? '<button type="button" class="btn btn--sm" data-widen-search>Search Everything · ' + wider + "<kbd>⌫</kbd></button>" : "") + '<button type="button" class="btn btn--sm btn--quiet" data-clear-search>Clear the search<kbd>Esc</kbd></button></div>';
-        return;
+        return '<div class="em em--search"><p class="em-title">Nothing in ' + D.esc(App.scopeTitle()) + ' matches</p><p class="em-line">No thing here has ' + what + ".</p>" + (wider ? '<button type="button" class="btn btn--sm" data-widen-search>Search Everything · ' + wider + "<kbd>⌫</kbd></button>" : "") + '<button type="button" class="btn btn--sm btn--quiet" data-clear-search>Clear the search<kbd>Esc</kbd></button></div>';
       }
-      var all = Model.live().length;
-      if (!all) {
-        el.innerHTML = '<div class="em em--zero" style="--sun-wait:240ms"><div class="em-sun">' + sunrise() + '</div><p class="em-title">All clear</p><p class="em-line">Nothing out there needs you. New things arrive here as your sources see them.</p></div>';
-        return;
-      }
+      if (!Model.live().length) return '<div class="em em--zero" style="--sun-wait:240ms"><div class="em-sun">' + sunrise() + '</div><p class="em-title">All clear</p><p class="em-line">Nothing out there needs you. New things arrive here as your sources see them.</p></div>';
       var title = App.scopeTitle();
       var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in ") + '<button type="button" class="link em-link" data-go-updates>Updates</button>.' : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
       // The small sunrise waits, as the full one does, for the last row and the pane to go first.
-      el.innerHTML = '<div class="em" style="--sun-wait:240ms"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
+      return '<div class="em" style="--sun-wait:240ms"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
     }
     document.addEventListener("click", function (e) {
       if (e.target.closest("[data-clear-search]")) Bar.clear(true);

@@ -132,7 +132,7 @@ The pane lies over the list and slides in from the right over `--m-base` on ↩ 
 
 ### The undo line
 
-It rises 10px into its place as it fades in, and sinks straight back when it goes: its hidden place is under its shown place, so it never slides sideways. A line already showing stays where it rose when the list widens under it; the next one centres on the wider list. When a move empties the selection, the line takes its place by the state after the move, so it does not drop when the selection bar leaves.
+It rises 10px into its place as it fades in, and sinks straight back when it goes: its hidden place is under its shown place, so it never slides sideways. While hidden it takes its new height at once, so after a move that empties the selection it rises where it belongs instead of dropping there; a line already showing moves with the selection bar or the pane coming or going under it, over `--m-base`. A line already showing stays where it rose when the list widens under it; the next one centres on the wider list. When a move empties the selection, the line takes its place by the state after the move, so it does not drop when the selection bar leaves.
 
 ### The sunrise
 

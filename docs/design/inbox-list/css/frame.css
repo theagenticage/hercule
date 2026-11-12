@@ -363,9 +363,11 @@ body > .flight {
     opacity var(--m-base) var(--m-ease),
     bottom var(--m-base) var(--m-ease);
 }
-/* Hidden, the line waits 10px under the place it shows, so it only ever rises and sinks straight. */
+/* Hidden, the line waits 10px under the place it shows, so it only ever rises and sinks straight. It
+   takes its new height at once while hidden, so it never drops into place as it appears. */
 .ib .undo-line:not(.is-on) {
   transform: translate(calc(-50% + var(--undo-line-x, 0px)), 10px);
+  transition-property: transform, opacity;
 }
 /* The undo line never covers what it sits beside: it rises over the selection bar, and under 1032px
    over the pane's moves while the pane lies over the list. */

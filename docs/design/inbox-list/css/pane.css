@@ -491,14 +491,12 @@
   padding: 4px 0;
   font-size: var(--t-12);
 }
+/* Every pair's second line is 24px, Unlink's target, so the pairs keep one rhythm and its focus ring
+   stays on its own line. */
 .pc li .pl-claim {
-  height: 16px;
+  height: 24px;
   justify-content: flex-start;
   padding-left: 17px;
-}
-/* Unlink keeps its 24px target without making its line taller than the others. */
-.pc .pl-unlink {
-  margin-block: -4px;
 }
 .pc-pair {
   display: flex;
