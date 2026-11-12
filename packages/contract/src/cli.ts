@@ -3157,7 +3157,7 @@ export const CLI = {
   },
   "providerAccount.query": {
     command: "provider-account list",
-    help: "Lists the Provider Accounts, oldest first. Each is one account at one Provider, with who is signed in, the plan, the default harness, and the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog. It also has the model count, when the Model Catalog was last read, the error of a failed read, and `readiness`: for each harness the account may run in and each runner, whether it can run there now. Sessions, Agents and assistants run on an account's id, never on a Provider's.",
+    help: "Lists the Provider Accounts, oldest first. Each is one account at one Provider. The table shows its id, provider, kind, label, who is signed in, plan, default harness, expiry and model count. `failedAt` is set when the Provider refused the account's credential. Usage, Capability Snapshots, readiness and the state of the Model Catalog are in `hercule provider-account read` and in `--json`. Sessions, Agents and assistants run on an account's id, never on a Provider's.",
     examples: [{ args: [] }],
     fields: {},
   },

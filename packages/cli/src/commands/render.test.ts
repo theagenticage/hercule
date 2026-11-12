@@ -2361,3 +2361,70 @@ describe("hercule harness list", () => {
     expect(lines.join("\n")).not.toContain("npm registry");
   });
 });
+
+describe("hercule provider-account list", () => {
+  const account = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    providerId: "openrouter/openrouter",
+    kind: "api-key",
+    label: null,
+    identity: null,
+    planLabel: null,
+    defaultHarnessId: "claude/claude-code",
+    expiresAt: null,
+    usage: [{ kind: "credit", remaining: 3, limit: null, takenAt: "2026-11-12T08:00:00.000Z" }],
+    failure: null,
+    snapshots: [],
+    modelCount: 0,
+    catalogReadAt: null,
+    catalogError: null,
+    readiness: [{ harnessId: "claude/claude-code", runnerId: "runner-1", state: "ready" }],
+    ...extra,
+  });
+  const list = (items: ReadonlyArray<unknown>) =>
+    renderHuman(
+      { kind: "value", value: items },
+      lookUpCommand("provider-account", "list"),
+      CONTROLLER_URL,
+    );
+
+  it("stays small when one account holds a huge model catalog, and leaves the wide fields out", () => {
+    const catalog = Array.from({ length: 3000 }, (_, index) => ({
+      slug: `vendor/model-${index}`,
+      name: `A model with a fairly long display name ${index}`,
+    }));
+    const lines = list([
+      account("00000000-0000-0000-0000-00000000000a", { label: "work", modelCount: 3000 }),
+      account("00000000-0000-0000-0000-00000000000b", {
+        snapshots: [{ runnerId: "runner-1", harnessId: "x/x", models: catalog }],
+      }),
+    ]);
+    const text = lines.join("\n");
+
+    expect(text.length).toBeLessThan(2000);
+    expect(Math.max(...lines.map((line) => line.length))).toBeLessThan(200);
+    expect(lines[0]).toMatch(
+      /^id +providerId +kind +label +identity +planLabel +defaultHarnessId +expiresAt +modelCount +failedAt$/,
+    );
+    for (const hidden of ["vendor/model", "remaining", "runner-1", "not-signed-in"]) {
+      expect(text).not.toContain(hidden);
+    }
+  });
+
+  it("shows when the provider refused the credential, and an empty cell otherwise", () => {
+    const lines = list([
+      account("00000000-0000-0000-0000-00000000000a", {
+        failure: { message: "401 invalid key", failedAt: "2026-11-11T09:30:00.000Z" },
+      }),
+      account("00000000-0000-0000-0000-00000000000b"),
+    ]);
+
+    expect(lines[1]).toMatch(/2026-11-11T09:30:00\.000Z$/);
+    expect(lines.join("\n")).not.toContain("401 invalid key");
+    expect(lines[2]).toMatch(/ 0$/);
+  });
+
+  it("prints no results for an empty list", () => {
+    expect(list([])).toEqual(["no results"]);
+  });
+});

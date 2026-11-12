@@ -56,6 +56,7 @@ import {
   type MemoryDocument,
   type MemoryEntry,
   type MemoryMatch,
+  type ProviderAccount,
   type WikiPage,
   type WikiPageWithRevisions,
   type Notification,
@@ -960,6 +961,34 @@ const renderHarnessList = (harnesses: ReadonlyArray<Harness>): ReadonlyArray<str
     })),
   );
 
+/**
+ * Returns the lines of `provider-account list`: a table of the short fields of
+ * each Provider Account. `failedAt` is when the provider refused the account's
+ * credential, empty when it did not; the refusal's message is left out because
+ * it can be long. Usage, Capability Snapshots, readiness and the catalog's
+ * state are left out on purpose: the generic table pads every column to its
+ * widest cell, and one snapshot holds a whole model catalog (over 100 KB), so
+ * every row would be that wide. They are in `provider-account read` and
+ * `--json`.
+ */
+const renderProviderAccountList = (
+  accounts: ReadonlyArray<ProviderAccount>,
+): ReadonlyArray<string> =>
+  renderTable(
+    accounts.map((account) => ({
+      id: account.id,
+      providerId: account.providerId,
+      kind: account.kind,
+      label: account.label,
+      identity: account.identity,
+      planLabel: account.planLabel,
+      defaultHarnessId: account.defaultHarnessId,
+      expiresAt: account.expiresAt,
+      modelCount: account.modelCount,
+      failedAt: account.failure?.failedAt ?? "",
+    })),
+  );
+
 /** Returns the lines for the items of a page, or for every item of an `--all` read. */
 type ItemsRenderer = (items: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<string>;
 
@@ -992,6 +1021,8 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
     renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
   "skill.query": (items) => renderSkillList(items as unknown as ReadonlyArray<Skill>),
   "harness.query": (items) => renderHarnessList(items as unknown as ReadonlyArray<Harness>),
+  "providerAccount.query": (items) =>
+    renderProviderAccountList(items as unknown as ReadonlyArray<ProviderAccount>),
 };
 
 /**

@@ -46,7 +46,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 
 `apps/android` is a Gradle project with one `:app` module. It is not a pnpm package, and no `pnpm` command builds or checks it; it has its own check command ([Testing](#testing)). Gradle's outputs (`.gradle/`, `build/`) are ignored by git, oxfmt and eslint. `local.properties` and Kotlin's `.kotlin/` cache are ignored by git.
 
-The application id and the Kotlin package are `dev.hercule.android`. That is the app's identity, as `hercule` is the binary's name. AGENTS.md's rule against the product name in identifiers applies to the app's classes, functions and fields, not to its package.
+The application id and the Kotlin package are `dev.hercule.android`. That is the app's identity, as `hercule` is the binary's name. CODING_STANDARDS.md's rule against the product name in identifiers applies to the app's classes, functions and fields, not to its package.
 
 ### Stack
 

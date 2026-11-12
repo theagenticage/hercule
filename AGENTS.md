@@ -13,9 +13,10 @@ Three roles ship in one self-contained Bun binary: the **controller** (always-on
 Before writing code:
 
 1. **`GLOSSARY.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
-2. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
-3. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
-4. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md`, which says what to build, and the goldens in `apps/desktop/ui-goldens/` and `tokens.css`, which say how it looks (the Crew Bureau book is the frozen record of how it was first drawn).
+2. **`CODING_STANDARDS.md`** - how names and comments are written.
+3. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
+4. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
+5. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md`, which says what to build, and the goldens in `apps/desktop/ui-goldens/` and `tokens.css`, which say how it looks (the Crew Bureau book is the frozen record of how it was first drawn).
 
 If what you're about to build contradicts the spec or an ADR, stop and say so explicitly ("Contradicts ADR-0007 because..."). Never silently deviate; never silently pick one of several possible readings. If the spec leaves your question open, check `docs/spec/16-open-items.md` first - it may already be marked an implementer's choice or handed to a ticket.
 
@@ -33,26 +34,7 @@ Development cost carries almost no weight here. Optimize, in order, for: correct
 
 The test: would a senior engineer call this overcomplicated? Then it is.
 
-**Names carry their own context.**
-
-1. A type or a field is named for what it stands for, in the project's vocabulary (a GLOSSARY.md word where one exists; GLOSSARY.md holds the application's concepts, not every module's details), qualified when look-alikes exist. Never for how it is encoded or transported, or for which caller uses it.
-2. A function is named for what it does and to what: verb plus object (`excludeSecretFields(schema)`), or for a pure query, the question it answers about its argument (`requiresApproval(mode, toolName)`). The verb tells the truth about the work: `get` reads something that already exists, `compute`, `build` and `parse` produce something, and a boolean query reads as its question. `getHash` is wrong for a function that computes one. A name with no verb, or no subject, is not a name yet. The `<thing>Of(x)` shape (`resultOf`, `specOf`, `recordOf`) has no verb and is not a name: say what is done (`readSpec`, `buildRecord`, `decideResult`). The one exception is a method on a service or repository whose name already supplies the subject: `agents.list(request)` and `agents.delete(id)` read as verb plus object at the call site, and the method name alone is enough.
-3. A name is read without the file, the folder or the call site. Bare nouns, bare adjectives or gerunds, and nicknames a comment invented fail this. `one`, `said`, `deepest`, `ends`, `normalizing` are not function names.
-4. One concept has one spelling in every package it crosses. The owner of a shared contract names it once; callers import that name and never alias it.
-5. A name stays true when the mechanism behind it changes.
-6. The product name never appears inside an identifier. `endedBySystem`, not `endedByHercule`: the product can be renamed, and the code should not care.
-
-**Comments are written for a newcomer.** The reader knows TypeScript but not this codebase. Write comments, docstrings and user-facing messages in plain, natural English, the way you would explain the code to a colleague.
-
-1. A function's docstring starts with a verb that says what the function does: "Parses...", "Returns...", "Checks that...". It says what the function returns and when it fails. A reader who sees only the signature and the docstring can use the function without reading its body.
-2. After that, say why, if the reason is not obvious. Inline comments only explain why, and never repeat what a line does.
-3. Use the ordinary words of programming: returns, parses, validates, converts, fails, error, schema. Use GLOSSARY.md words for domain concepts. Never invent a phrase to avoid a common word.
-4. Things do not talk. Text does not "say" and a list does not "answer". Write what actually happens: "the YAML parses to", "the list is sorted by".
-5. Use short sentences and active voice. If there are three or more rules or cases, write a bullet list, not one long sentence.
-6. Each "it", "this" and "that" must be obvious. If the reader has to look back to find what it refers to, name the thing.
-7. Read the comment aloud. If you have to read a sentence twice, or no person would say it that way, rewrite it.
-
-A comment stands alone: a reader one year from now, human or agent, must understand it without the spec, the plan, the ticket or the review round that produced it. Never write "D-21:" or "per F-3" as the explanation. Citing a spec section is fine in addition to the explanation, never instead of it. A message that refuses a request says what was wrong, why, and what the caller should do instead.
+**Names and comments** follow `CODING_STANDARDS.md`. Read it before you write or review code.
 
 **Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
 
@@ -81,13 +63,14 @@ These come from the spec and ADRs; restated here because violating them is expen
   - memory and time on Linux are judged before against after, on the same machine and setup, back to back. The Linux reference table is in the spec.
 - **Never touch `~/.hercule`.** That is the user's live Hercule Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hercule` command that writes) uses a throwaway home: `HERCULE_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hercule/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 - **A migration that rewrites existing rows adds a fixture to the upgrade test.** The upgrade test (`e2e/upgrade.test.ts`) fills a database with the previous edge build and migrates it to the new binary. A migration that transforms data (the provider remodel, qualified harness ids, any UPDATE or data-shape change) must add test coverage for the rows it rewrites: create those rows with the edge binary, verify they migrate and are still readable. A migration that only adds tables, columns, or indexes needs no new fixture.
-- **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
+- **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone. The same goes for `./gradlew --stop`, which stops the Gradle daemons of every worktree on this machine.
 
 ## Working conventions
 
 - Work happens on tickets: GitHub issues via `gh` (see below). Reference the ticket in commits.
 - Branch per ticket; PRs into `main`. Research findings live on `research/*` branches, prototypes on `prototype/*` branches.
 - Definition of done: typecheck, lint, and tests green - including failures you didn't cause (boyscouting).
+- Search with `rg`, not `grep -r`: an unquoted `--include=*.ts` fails in zsh. On macOS, `sed -i` needs `''` after it (`sed -i '' ...`).
 
 ### Package map
 
@@ -155,51 +138,9 @@ pnpm test:react apps/web packages/ui apps/desktop   # these three folders run on
 pnpm test:node <any other path>                     # everything else, on Bun
 ```
 
-Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
-release binary rather than building one, so it needs the build before it and fails
-saying so when there is none. Building rewrites `apps/web/dist` and the generated
-file list, which is why it is not part of `pnpm test`.
+After the four checks, run the packaging pair (`pnpm build:binary`, then `pnpm test:binary`); CI runs it in a job of its own. The details are in `docs/agents/checks.md`.
 
-```
-pnpm build:binary  # vite build, the bundle budget check, then bun build --compile, writing ./hercule
-pnpm test:binary   # ./hercule serves the embedded web app beside the API
-```
-
-The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. With Docker, on a headless Linux machine or on a Mac, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files; CI passes each of its shards the files that `bun run scripts/desktop-e2e-shards.ts <index>/<count>` prints.
-
-**A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
-
-- macOS runs `pnpm build:desktop`, `pnpm compare:bureau` and the end-to-end files that do not depend on a screen, timing or focus. `compare:bureau` runs only there, and nobody needs a Mac to run it.
-- Linux runs the whole end-to-end suite in the container, split over parallel runners by recorded run time (`desktop-e2e-linux`; the weights in `scripts/desktop-e2e-shard-weights.json` are refreshed from a green run with `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`), installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
-- On `main`, `edge-build` also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease.
-
-```
-pnpm build:desktop           # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
-pnpm build:desktop:unpacked  # the same, but on Linux the release package is the unpacked folder only: no .deb or Arch package, which no test reads
-pnpm test:desktop            # Playwright drives the test package: window, security, fuses, IPC
-pnpm test:desktop:container  # the same in Docker on a virtual screen, on Linux or a Mac
-```
-
-The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
-
-- **The goldens** are 120 PNGs in `apps/desktop/ui-goldens/`: the 20 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
-- **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, in CI on macOS. The book is not edited.
-
-```
-pnpm --filter @hercule/desktop ui:metrics                   # the metrics, the ratchet, and the goldens
-pnpm --filter @hercule/desktop ui:metrics --write-goldens   # re-record the goldens (never bypasses the ratchet)
-pnpm --filter @hercule/desktop ui:metrics --write-baseline  # re-write the metrics baseline; a worse number needs its reason in the PR body
-```
-
-On a Mac, or a Linux machine without Chromium's libraries, run `pnpm --filter @hercule/desktop ui:metrics:container`, which takes the same flags. It runs on linux/amd64, the platform the goldens are recorded on, which a Mac emulates (several minutes). On a Mac it works in a copy of the checkout and copies the goldens, the baseline and the report back. Any other command runs in the container with `node apps/desktop/container/run.ts -- <command>`.
-
-The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
-
-```
-cd apps/android && ./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug
-```
-
-When `verifyRoborazziDebug` fails on a screen you meant to change, run `./gradlew recordRoborazziDebug`, then look at every golden that moved in the diff before committing it. Never run `./gradlew --stop`: it stops the Gradle daemons of every worktree on this machine.
+A desktop PR also runs the desktop checks, on one platform, as `docs/agents/checks.md` describes. A PR that changes `apps/android` runs the Android check described there.
 
 And one more, any time:
 
