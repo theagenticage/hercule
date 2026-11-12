@@ -80,13 +80,14 @@ window.Moves = (function () {
     var isGroup = !s().selection.size && r && r.type === "group";
     if (isGroup && s().movedAt && performance.now() - s().movedAt < 600) { s().movedAt = 0; say("The group " + quote(r.group.label) + " is under the keys now. E again dismisses all " + r.group.members.length + "."); return; }
     var outside = isGroup ? r.group.members.length - r.hits.length : 0;
+    var was = s().focus;
     holdPlace();
     things.forEach(function (t) { Model.gone.add(t.id); });
     s().selection.clear();
     redraw({ leave: "dismiss" });
     push({
       say: isGroup ? "Dismissed the group " + quote(r.group.label) + ": " + things.length + " things" + (outside ? ", " + outside + " of them not in this list" : "") : things.length === 1 ? "Dismissed " + quote(things[0].title) : "Dismissed " + things.length + " things",
-      undo: function () { things.forEach(function (t) { Model.gone.delete(t.id); }); redraw({ enter: "return" }); },
+      undo: function () { things.forEach(function (t) { Model.gone.delete(t.id); }); s().focus = was; redraw({ enter: "return" }); },
       undone: "Back in your Inbox.",
     });
   }
@@ -98,6 +99,7 @@ window.Moves = (function () {
     var things = App.acted().filter(function (t) { return !t.held; });
     if (!things.length) { say("You already have this on a Task. G goes to it."); return; }
     var title = titleOf(things);
+    var was = s().focus;
     holdPlace();
     things.forEach(function (t) { t.held = { by: "you", task: title, since: 0 }; });
     s().selection.clear();
@@ -106,7 +108,7 @@ window.Moves = (function () {
     push({
       say: "Took it on: a Task on Work, " + quote(title),
       action: { label: "Go to the Task", key: "G", task: title },
-      undo: function () { Flights.cancel(); things.forEach(function (t) { delete t.held; }); redraw({ enter: "grow" }); },
+      undo: function () { Flights.cancel(); things.forEach(function (t) { delete t.held; }); s().focus = was; redraw({ enter: "grow" }); },
       undone: "The Task is gone, and nothing had started.",
     });
   }
@@ -145,6 +147,8 @@ window.Moves = (function () {
     App.state.focusAfter = null;
     if (next0 && key0 && key0.indexOf(t.id) >= 0) {
       App.state.focus = next0;
+      // A group that comes under the keys this way takes its own, fresh E, as after any other move.
+      App.state.movedAt = performance.now();
       List.markFocus(App.el.list, App.state, { keyboard: App.el.list.contains(document.activeElement) });
       Pane.draw(App.el.pane, App.state, {});
     }
@@ -160,14 +164,19 @@ window.Moves = (function () {
         ended.forEach(function (sg) { sg.done = false; });
         redraw({ enter: "return" });
         var back = App.state.rows.find(function (x) { return x.thing && x.thing.id === t.id; });
-        if (back) App.focusRow(back.key);
+        if (back) App.focusRow(back.key, { keyboard: App.el.list.contains(document.activeElement) || document.activeElement === document.body });
       },
       undone: "Took back " + offer.w.name + ". Nothing had started.",
     });
   }
 
   // ---- Link: the selection with L, a row dropped on another, or a suggestion accepted ----
-  function link(ids, how, carried) {
+  /**
+   * Links the things with the given ids into one group, opens it and makes it current. Returns false
+   * when fewer than two ids are given. `restore` runs on ⌘Z, before the list redraws, for a move that
+   * changed more than the links (an accepted suggestion comes back).
+   */
+  function link(ids, how, carried, restore) {
     var st = s();
     ids = ids.filter(function (id, i) { return ids.indexOf(id) === i; });
     if (ids.length < 2) return false;
@@ -191,6 +200,7 @@ window.Moves = (function () {
         added.forEach(function (l) { var k = Model.links().indexOf(l); if (k >= 0) Model.links().splice(k, 1); });
         if (!wasOpen) st.open.delete(gkey);
         st.focus = "r:" + ids[0];
+        if (restore) restore();
         redraw({ link: true });
       },
       undone: "Unlinked. The sources were never told.",
@@ -227,7 +237,7 @@ window.Moves = (function () {
     holdPlace();
     Model.gone.add(x.id);
     // The row's things are the records themselves; the suggestion keeps their ids.
-    var ok = link(r.things.map(function (t) { return t.id; }), "suggestion");
+    var ok = link(r.things.map(function (t) { return t.id; }), "suggestion", null, function () { Model.gone.delete(x.id); s().focus = r.key; });
     if (!ok) { Model.gone.delete(x.id); redraw({}); say("These are linked already."); }
   }
   function notRelated(r) {
@@ -277,13 +287,14 @@ window.Moves = (function () {
    * move the same way. A thing whose last ask closed leaves a list of asks.
    */
   function settle(f, words, external) {
+    var was = s().focus;
     holdPlace();
     f.s.done = true;
     redraw({ leave: "dismiss", keepPlace: true });
     var entry = {
       say: words,
       note: external ? "Sends in 8s" : null,
-      undo: function () { f.s.done = false; redraw({ enter: "return" }); },
+      undo: function () { f.s.done = false; s().focus = was; redraw({ enter: "return" }); },
       undone: external ? "Not sent. The ask is open again." : "The ask is open again.",
     };
     push(entry);
@@ -335,13 +346,13 @@ window.Moves = (function () {
     if (!st.pending.length) return;
     var fresh = st.pending.splice(0);
     fresh.forEach(function (t) { t.fresh = true; Model.add(t); });
-    redraw({ enter: "arrive" });
+    redraw({ enter: "arrive", scrolls: true });
     // New things take their place in the saved query's order, so the list goes to the first of them:
     // it becomes current first, then the list scrolls it to the middle, smoothly.
     var at = App.state.rows.find(function (r) { return r.thing && fresh.indexOf(r.thing) >= 0; });
     if (at) {
       App.state.focus = at.key;
-      List.markFocus(App.el.list, App.state, {});
+      List.markFocus(App.el.list, App.state, { scroll: false });
       Pane.draw(App.el.pane, App.state, {});
       var el = App.el.list.querySelector('[data-key="' + at.key + '"]');
       el.focus({ preventScroll: true });

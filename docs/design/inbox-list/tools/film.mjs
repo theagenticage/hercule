@@ -26,6 +26,8 @@ const FLOWS = {
   "hand-menu": { q: "scene=pr", clip: "page", move: async (p) => { await p.keyboard.press("h"); await p.waitForTimeout(500); await p.keyboard.press("1"); }, after: 1500 },
   dismiss: { q: "", clip: "list", before: (p) => p.evaluate(() => App.focusRow("r:gm-quote")), move: (p) => p.keyboard.press("e"), after: 800 },
   "dismiss-undo": { q: "", clip: "list", before: async (p) => { await p.evaluate(() => { App.focusRow("r:gm-quote"); Moves.dismiss(); }); await p.waitForTimeout(900); }, move: (p) => p.keyboard.press("Control+z"), after: 800 },
+  "accept-link": { q: "scene=suggestion", clip: "list", before: (p) => p.focus('[data-key="t:link-6251"]'), move: (p) => p.keyboard.press("l"), after: 1100 },
+  "take-member": { q: "scene=group-member", clip: "list", before: (p) => p.focus('[data-key="m:shop-142:pr-6244"]'), move: (p) => p.keyboard.press("t"), after: 1200 },
   fold: { q: "scene=group", clip: "list", move: (p) => p.keyboard.press("ArrowRight"), after: 700 },
   unfold: { q: "scene=group-open", clip: "list", move: (p) => p.keyboard.press("ArrowLeft"), after: 700 },
   "dialog-open": { q: "scene=group", clip: "page", move: (p) => p.keyboard.press("n"), after: 900 },

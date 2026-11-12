@@ -340,11 +340,16 @@
     max-width: calc(100% - 24px);
   }
 }
-/* With nothing current there is nothing to read: the pane steps aside and the list takes the room. */
-.ib.is-paneless {
-  grid-template-columns: var(--rail-w) minmax(0, 1fr) 0 0;
+/* With nothing current there is nothing to read: the pane steps aside and the list takes its room. The
+   columns stay as they are, so the bar keeps its search over the list and ? at the end. */
+.ib.is-paneless .ib-list {
+  grid-column: 2 / -1;
 }
 .ib.is-paneless .ib-pane,
 .ib.is-paneless .edge {
   display: none;
+}
+.ib.is-paneless .undo-line {
+  --undo-line-x: calc(var(--rail-w) / 2);
+  max-width: calc(100% - var(--rail-w) - 24px);
 }

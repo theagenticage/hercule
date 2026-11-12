@@ -3,7 +3,7 @@
 window.Bar = (function () {
   "use strict";
   var K = Kinds, D = Draw;
-  var input, chips, menu, field;
+  var input, chips, menu, field, scopeBtn, scopePop;
   var active = 0, items = [];
 
   function tokenField(token) { return Object.keys(K.FIELDS).find(function (k) { return K.FIELDS[k].token === token; }); }
@@ -12,7 +12,8 @@ window.Bar = (function () {
   function suggest(text) {
     var st = App.state;
     var pool = Model.find(st.scope.saved || st.scope.clauses ? st.scope : { saved: "all" }, null);
-    var m = /^([a-z]+):(.*)$/i.exec(text);
+    // What is offered follows the clause being typed, at the end of the field, after any free text.
+    var m = /(?:^|\s)([a-z]+):(.*)$/i.exec(text);
     if (m && tokenField(m[1].toLowerCase())) {
       var key = tokenField(m[1].toLowerCase()), f = K.FIELDS[key], typed = m[2].toLowerCase();
       if (f.type === "number" || f.type === "duration") {
@@ -34,9 +35,10 @@ window.Bar = (function () {
     }
     var out = [];
     var t = text.toLowerCase();
+    var word = t.split(/\s+/).pop();
     Object.keys(K.FIELDS).forEach(function (k) {
       var f = K.FIELDS[k];
-      if (t && f.token.indexOf(t) !== 0) return;
+      if (word && f.token.indexOf(word) !== 0) return;
       var n = pool.filter(function (x) { return Model.readField(x, k) != null; }).length;
       if (!n) return;
       out.push({ kind: "field", key: k, label: f.token + ":", hint: f.label + (f.type === "duration" ? ", such as >2d" : f.type === "number" ? ", such as >1000" : ""), n: n });
@@ -69,25 +71,53 @@ window.Bar = (function () {
     menu.hidden = false;
   }
 
+  /** Returns the search's pool: what the scope holds, or Everything when the scope is not a list. */
+  function pool() {
+    var st = App.state;
+    return Model.find(st.scope.saved || st.scope.clauses ? st.scope : { saved: "all" }, null);
+  }
+
   /**
-   * Turns every finished `field:value` in the field into a token, and returns what is left as free text.
-   * A half-typed field name (`even`, `events:`) is never used as free text. Any threshold works: `>500`.
+   * Checks whether a value typed after `field:` is finished. A space ends it, unless a value the field
+   * holds goes on past that space ("Checkout" while "Checkout revamp" exists), so a value with spaces
+   * can be typed out.
+   */
+  function isFinished(key, value) {
+    if (!/\s$/.test(value) || !value.trim()) return false;
+    var v = value.trim().toLowerCase() + " ";
+    return !pool().some(function (t) { var x = Model.readField(t, key); return x != null && String(x).toLowerCase().indexOf(v) === 0; });
+  }
+
+  /**
+   * Turns every finished `field:value` in the field into a token, and keeps the rest in the field: free
+   * text, and the clause still being typed. A value runs to the next `field:`, so it can hold spaces.
+   * With `final` (↩), the clause being typed is taken as it is. A half-typed field name (`even`) is
+   * never searched as free text. Any threshold works: `events:>500`.
    */
   function absorb(final) {
     var st = App.state;
-    var words = input.value.split(/\s+/);
-    var lastWord = final ? null : words.pop();
-    var rest = [];
-    words.forEach(function (w) {
-      var m = /^([a-z]+):(.+)$/i.exec(w);
-      var key = m && tokenField(m[1].toLowerCase());
-      if (key) st.search.clauses.push({ key: key, value: m[2] });
-      else if (w) rest.push(w);
+    var text = input.value;
+    var re = /(^|\s)([a-z]+):/gi, starts = [], m;
+    while ((m = re.exec(text))) {
+      var key = tokenField(m[2].toLowerCase());
+      if (key) starts.push({ at: m.index + m[1].length, from: re.lastIndex, key: key });
+    }
+    var free = starts.length ? text.slice(0, starts[0].at) : text;
+    var open = "", taken = false;
+    starts.forEach(function (c, i) {
+      var value = text.slice(c.from, i + 1 < starts.length ? starts[i + 1].at : text.length);
+      var last = i === starts.length - 1;
+      // Only the last clause can still be being typed; an empty one before another is dropped.
+      if (value.trim() && (!last || final || isFinished(c.key, value))) st.search.clauses.push({ key: c.key, value: value.trim() });
+      else if (last) { open = text.slice(c.at); return; }
+      taken = true;
     });
-    if (lastWord != null) rest.push(lastWord);
-    input.value = rest.join(" ");
-    var typed = rest.filter(function (w) { return !/:/.test(w) && !Object.keys(K.FIELDS).some(function (k) { return K.FIELDS[k].token.indexOf(w.toLowerCase()) === 0 && w.length >= 2 && rest[rest.length - 1] === w && !final; }); });
-    st.search.text = typed.join(" ").trim();
+    if (taken) input.value = free + open;
+    var words = free.trim() ? free.trim().split(/\s+/) : [];
+    // The last word may be a field name being typed; it is not searched until it is clearly not one.
+    var tail = words[words.length - 1];
+    if (!final && !open && tail && !/\s$/.test(free) && tail.length >= 2 && Object.keys(K.FIELDS).some(function (k) { return K.FIELDS[k].token.indexOf(tail.toLowerCase()) === 0; })) words.pop();
+    st.search.text = words.join(" ");
   }
 
   /** Leaves the search for the list, keeping the query, with the first result current. */
@@ -101,8 +131,17 @@ window.Bar = (function () {
   function pick(it) {
     var st = App.state;
     if (!it) return;
-    if (it.kind === "field") { input.value = K.FIELDS[it.key].token + ":"; active = 0; drawMenu(); return; }
-    if (it.kind === "value") { st.search.clauses.push({ key: it.key, value: String(it.value) }); input.value = ""; st.search.text = ""; active = 0; apply(); menu.hidden = true; return; }
+    // A picked field or value replaces only what it completes; free text typed before it stays.
+    if (it.kind === "field") { input.value = input.value.replace(/\S*$/, K.FIELDS[it.key].token + ":"); active = 0; drawMenu(); return; }
+    if (it.kind === "value") {
+      st.search.clauses.push({ key: it.key, value: String(it.value) });
+      input.value = input.value.replace(/(^|\s)[a-z]+:.*$/i, "$1");
+      absorb(false);
+      active = 0;
+      apply();
+      menu.hidden = true;
+      return;
+    }
     absorb(true);
     apply();
     toList();
@@ -127,24 +166,49 @@ window.Bar = (function () {
 
   function drawChips() {
     var st = App.state;
-    var searching = st.search.text || st.search.clauses.length || document.activeElement === input;
-    var scopeChip = searching && !(st.scope.saved === "all") ? '<span class="sx-chip sx-chip--scope" title="Searching in ' + D.esc(App.scopeTitle()) + '. ⌫ or × searches Everything.">in<b>' + D.esc(App.scopeTitle()) + '</b><button type="button" data-widen aria-label="Search Everything instead">' + D.icon("close", 10) + "</button></span>" : "";
-    chips.innerHTML = scopeChip + st.search.clauses.map(function (c, i) {
+    var searching = st.search.text || st.search.clauses.length || field.contains(document.activeElement);
+    var scopeChip = searching && !(st.scope.saved === "all") ? '<span class="sx-chip sx-chip--scope" title="Searching in ' + D.esc(App.scopeTitle()) + '. × searches Everything.">in<b>' + D.esc(App.scopeTitle()) + '</b><button type="button" data-widen aria-label="Search Everything instead">' + D.icon("close", 10) + "</button></span>" : "";
+    var html = scopeChip + st.search.clauses.map(function (c, i) {
       var f = K.FIELDS[c.key];
       return '<span class="sx-chip">' + (c.source ? D.mark(c.source, 12) : "") + "<span>" + D.esc(f.token) + ":</span><b>" + D.esc(c.value) + '</b><button type="button" data-unchip="' + i + '" aria-label="Remove ' + D.esc(f.token + ":" + c.value) + '">' + D.icon("close", 10) + "</button></span>";
     }).join("");
+    // Unchanged tokens are kept, so a token's × that has the focus keeps it; they are only fitted again.
+    if (chips._html !== html) { chips.innerHTML = html; chips._html = html; }
+    else {
+      chips.querySelectorAll(".sx-more").forEach(function (m) { m.remove(); });
+      chips.querySelectorAll(".sx-chip").forEach(function (c) { c.hidden = false; });
+    }
     field.classList.toggle("has-chips", st.search.clauses.length > 0);
     // Tokens that do not fit fold, oldest first, into a +N token, so none is cut mid-letter.
     var all = Array.prototype.slice.call(chips.querySelectorAll(".sx-chip:not(.sx-chip--scope)"));
-    var hidden = 0;
-    while (all.length - hidden > 1 && chips.scrollWidth > chips.clientWidth + 1) { all[hidden].hidden = true; hidden++; }
-    if (hidden) { all[hidden].insertAdjacentHTML("beforebegin", '<span class="sx-chip sx-more" title="' + D.esc(all.slice(0, hidden).map(function (c) { return c.textContent; }).join(", ")) + '">+' + hidden + "</span>"); }
-    // The long hint only where it fits; a narrow field says less rather than cutting a word.
-    input.placeholder = st.search.clauses.length ? "" : field.offsetWidth > 420 ? "Search, or type a field: team:, from:, waiting:>2d" : field.offsetWidth > 260 ? "Search, or type team:, from:" : "Search";
+    var hidden = 0, more = null;
+    var overflows = function () { return chips.scrollWidth > chips.clientWidth + 1; };
+    while (hidden < all.length && overflows()) {
+      all[hidden].hidden = true;
+      hidden++;
+      if (!more) { more = document.createElement("span"); more.className = "sx-chip sx-more"; }
+      all[hidden - 1].after(more);
+      more.textContent = "+" + hidden;
+      more.title = all.slice(0, hidden).map(function (c) { return c.textContent; }).join(", ");
+    }
+    fitPlaceholder();
+  }
+
+  var HINTS = ["Search, or type a field: team:, from:, waiting:>2d", "Search, or type team:, from:", "Search"];
+  /**
+   * Sets the longest hint that fits the field whole: a narrow field says less rather than cutting a word.
+   * Each hint is measured in a hidden copy of the field's text, so it is measured in the field's own font.
+   */
+  function fitPlaceholder() {
+    if (App.state.search.clauses.length) { input.placeholder = ""; return; }
+    var probe = field.querySelector(".sx-measure");
+    if (!probe) { probe = document.createElement("span"); probe.className = "sx-measure"; probe.setAttribute("aria-hidden", "true"); field.appendChild(probe); }
+    var room = input.clientWidth - 2;
+    input.placeholder = HINTS.find(function (h) { probe.textContent = h; return probe.offsetWidth <= room; }) || "";
   }
 
   function draw(st) {
-    drawChips();
+    // The offline pill first: it takes room from the field, and the tokens and the hint fit what is left.
     var off = document.getElementById("offline");
     off.hidden = !st.offline;
     if (st.offline) {
@@ -152,6 +216,7 @@ window.Bar = (function () {
       if (off.textContent !== words) off.textContent = words;
       off.title = "Offline since 09:12. " + (st.outbox ? st.outbox + (st.outbox === 1 ? " move waits" : " moves wait") + " to be sent." : "Moves wait until you’re back.");
     }
+    drawChips();
     document.documentElement.toggleAttribute("data-offline", !!st.offline);
     var scope = document.getElementById("scope-btn");
     if (scope) scope.querySelector("span").textContent = st.search.text || st.search.clauses.length ? "Search" : App.scopeTitle();
@@ -229,11 +294,12 @@ window.Bar = (function () {
     menu = document.getElementById("sx-menu");
     field = document.getElementById("sx");
     input.addEventListener("focus", function () { field.classList.add("is-focus"); drawChips(); drawMenu(); });
-    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) { menu.hidden = true; drawChips(); } }, 120); });
+    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) menu.hidden = true; }, 120); });
+    // The scope token shows while the focus is anywhere in the field, its tokens' buttons too.
+    field.addEventListener("focusout", function () { setTimeout(function () { if (!field.contains(document.activeElement)) drawChips(); }, 120); });
     input.addEventListener("input", function () {
       active = 0;
-      if (/\s$/.test(input.value) && /\b[a-z]+:\S+\s$/i.test(input.value)) absorb(true);
-      else absorb(false);
+      absorb(false);
       apply();
       drawMenu();
     });
@@ -254,15 +320,16 @@ window.Bar = (function () {
         e.preventDefault();
       }
       else if (e.key === "Backspace" && !input.value) {
-        // ⌫ removes the last token; it widens the scope only while there is a query to widen.
+        // ⌫ in an empty field removes the last token. It never removes the scope: with no query left,
+        // a stray ⌫ would change the saved query you are in. The scope token's × does that.
         if (st.search.clauses.length) { st.search.clauses.pop(); apply(); drawMenu(); }
-        else if (st.search.text && st.scope.saved !== "all") widen();
         e.preventDefault();
       }
       else if (e.key === "Escape") {
-        // The first Esc leaves the search and keeps the query; Esc in the list then clears it.
+        // The first Esc leaves the search and keeps the query; Esc in the list then clears it. With
+        // nothing typed, Esc goes back to the current row.
         menu.hidden = true;
-        if (st.search.text || st.search.clauses.length) toList(); else input.blur();
+        if (st.search.text || st.search.clauses.length) toList(); else App.focusCurrent();
         e.preventDefault();
       }
       e.stopPropagation();
@@ -275,7 +342,8 @@ window.Bar = (function () {
       if (b) { App.state.search.clauses.splice(+b.dataset.unchip, 1); apply(); }
     });
     document.getElementById("list-head").addEventListener("click", function (e) { var b = e.target.closest("[data-narrow]"); if (b) narrow(b); });
-    var scopeBtn = document.getElementById("scope-btn"), scopePop = document.getElementById("scope-pop");
+    scopeBtn = document.getElementById("scope-btn");
+    scopePop = document.getElementById("scope-pop");
     scopeBtn.insertAdjacentHTML("beforeend", D.icon("chevron-down", 12));
     Rail.start(scopePop);
     scopeBtn.addEventListener("click", function () {
@@ -294,5 +362,12 @@ window.Bar = (function () {
     });
   }
 
-  return { closeNarrow: closeNarrow, widen: widen, draw: draw, start: start, clear: clear, focus: function () { input.focus(); }, narrow: narrow };
+  /** Closes the scope menu (the rail's menu under 1330px), if it is open. */
+  function closeScope() {
+    if (scopePop.hidden) return;
+    scopePop.hidden = true;
+    scopeBtn.setAttribute("aria-expanded", "false");
+  }
+
+  return { closeScope: closeScope, closeNarrow: closeNarrow, widen: widen, draw: draw, start: start, clear: clear, focus: function () { input.focus(); }, narrow: narrow };
 })();

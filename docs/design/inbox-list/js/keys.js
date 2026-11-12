@@ -136,9 +136,14 @@ window.Keys = (function () {
   function cycle(back) {
     Menus.close();
     Bar.closeNarrow();
-    // When the rail is folded away, its place in the cycle is the scope button.
+    Bar.closeScope();
+    // When the rail is folded away, its place in the cycle is the scope button. Under 900px the list
+    // and the pane share one place: whichever is showing.
     var railStop = matchMedia("(max-width: 1329px)").matches ? document.getElementById("scope-btn") : document.querySelector("#rail [tabindex='0']");
-    var spots = [document.getElementById("sx-input"), railStop, App.el.list.querySelector("[tabindex='0']") || App.el.list, document.querySelector("#pane .pn-title") || document.querySelector("#pane button")];
+    var list = App.el.list.querySelector("[tabindex='0']") || App.el.list;
+    var pane = document.querySelector("#pane .pn-title") || document.querySelector("#pane button");
+    if (App.isStacked()) { if (App.isPaneOpen()) list = null; else pane = null; }
+    var spots = [document.getElementById("sx-input"), railStop, list, pane];
     spots = spots.filter(Boolean);
     var at = spots.findIndex(function (x) { return x.contains(document.activeElement) || (x === App.el.list.querySelector("[tabindex='0']") && App.el.list.contains(document.activeElement)) || (x.closest && x.closest("#pane") && document.getElementById("pane").contains(document.activeElement)) || (x.closest && x.closest("#rail") && document.getElementById("rail").contains(document.activeElement)); });
     var next = spots[(at + (back ? -1 : 1) + spots.length) % spots.length];
@@ -148,7 +153,9 @@ window.Keys = (function () {
 
   function onKey(e) {
     if (e.key === "F6") { cycle(e.shiftKey); e.preventDefault(); return; }
-    if (Menus.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
+    var owned = Menus.key(e);
+    if (owned === "own") return;
+    if (owned) { e.preventDefault(); e.stopPropagation(); return; }
     if (Dialog.isOpen()) return;
     var t = e.target;
     // Single keys belong to the list and the pane, and to the page itself when nothing has the focus.

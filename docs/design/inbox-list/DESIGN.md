@@ -202,11 +202,11 @@ N opens the app's glass dialog around the real composer of the new-thread screen
 | Empty saved query | A small sunrise, "Nobody waits on you", and a line saying where the rest is |
 | All clear | The full sunrise: Hercule's head comes up over the brass horizon. Drawn once |
 | Nothing matches | What was searched, and "Clear the search Esc" |
-| Offline | One quiet pill in the bar: "Offline since 09:12 · 2 moves wait to be sent". Moves still work and wait in the outbox, so nothing dims, and each undo line says it waits |
+| Offline | One quiet pill in the bar: "Offline · 09:12 · 2 waiting", with the whole sentence in its tooltip. Moves still work and wait in the outbox, so nothing dims, and each undo line says it waits |
 | A selection | The pane shows the selection (two or more, or one that is not the current row): what is in it, and Link, Thread, Take on, Dismiss. A small bar at the foot of the list counts it and clears it |
 | Under 900px, or 200% zoom | The pane lies over the whole width of the list: ↩ or a click slides it in, Esc or "List" slides it out, and the focus goes back to the row |
 | A source that can't be read | A line over the list naming it and what it means, with a way to Connections, and a mark on its row in Browse |
-| N new | A glass pill at the top of the list: a marigold dot, "3 new", "Show ." It holds back what arrived until you ask |
+| N new | A solid pill in the list head, beside the count: a marigold dot, "3 new", "Show ." It covers no row, and holds back what arrived until you ask |
 | Light day | Five things; the list is short, nothing else changes |
 | 2,400 things | The same page; counts in grouped tabular figures; Browse lists five values and "34 more"; triage keeps three at the top |
 | Under 1330px | The rail is a menu in the bar ("Someone waits on me ▾") that opens with the focus on the current entry; the list keeps at least 400px; under a 400px pane each move is an icon |
@@ -292,15 +292,24 @@ Each is a choice the map left open, made for the best design. Each can be turned
 36. **H moves the current row on at once**, as T does; the hand-off chain plays on the row it left, so a quick E acts on the next thing, never on the one just handed.
 37. **Answering keeps the place**: after an answer, the row after it in the old order is current, even when the thing moves elsewhere because another ask stays open.
 38. **Offline, answers wait** in the outbox and are not "sent" after eight seconds; ⌘Z can always take them back while they wait.
+39. **A search value can hold spaces**: a space ends a value unless a value the field holds goes on past it, so `project:Checkout revamp` and `from:Priya Raman` type out whole, and `team:Checkout bug` still makes a token and free text.
+40. **⌫ never removes the scope.** In an empty field ⌫ removes the last token and stops there; the scope token's × searches Everything. A stray ⌫ would otherwise move you to another list.
+41. **⌘Z puts back the current row too**: the thing that comes back is current and has the focus again, so a second E acts on it, not on its neighbour.
+42. **The undo line waits for you**: it stays while the pointer or the focus is on it, and goes 3s after both leave. It rises over the selection bar, and under 900px over the pane's moves.
+43. **Under 900px with the pane open**, J, K and the moves keep the focus in the pane, and F6 treats the list and the pane as one place, whichever shows.
+44. **After a move, the next current row stays where your eyes are**: a row that travels away with a re-sorted group is passed over for the next one that stays.
+45. **Tokens that do not fit fold into +N whole**, every one if need be; only the scope token shortens with an ellipsis.
 
 ## Proposed changes to #1119
 
-The drawing keeps every decision. Three would read better changed:
+The drawing keeps every decision. Four would read better changed:
 
 1. **Decision 15 to 17, the pane's order**: "Where it is from, the title, one section per open signal, then the plugin's blocks, then the core's sections." It is drawn this way (call 1).
 2. **Decision 7, "things you handle leave at once"**: "leave as soon as the move's motion ends", so a hand-off can show the colleague taking it before the row goes.
 3. **Fog, group size**: settle it as "an open group shows up to seven members; past that five and Show N more; the pane lists all".
 4. **Decision 16, answers**: "an answer that acts on the source is held for the undo window before it is sent". This touches `signal.act` (spec 10 §9.4, spec 20): the controller, or the client, waits eight seconds, and ⌘Z cancels. It is what makes ↩ safe as the suggested answer's key.
+
+One for the app, outside #1119: the hand-off menu's account picker (`screens/inbox/hand-account.css`) draws the browser's own select border, which no other control in the app has. The drawing draws it without.
 
 ## The critic rounds
 
@@ -320,7 +329,16 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 
 **Round three** found the long tail, almost all of it under 1330px or with the list at its 400px minimum: the undo line placed for a rail that was folded away, the pane's width capped at 42% so the edge and the ⋯ menu did nothing, the selection bar spilling out, search tokens cut mid-letter and pushing ? off the bar, the stacked pane leaving a strip of cut rows; and a few keyboard dead ends: the scope menu could not be used by keyboard, the keys sheet let the focus hide under it, a range anchor survived a change of list, and focus fell to the page after a dialog or the selection bar closed. Two real bugs: accepting a suggested link wrote no link, and the current row could end off screen when a group re-sorted. All fixed, each with a check in `tools/check.mjs`.
 
+**Round four** checked round three's list (most fixed) and found what one fix had broken and what moves do at the edges. Fixed:
+
+- **Layout**: tokens that could shrink were never seen to overflow, so they were cut instead of folded; the search hint was chosen before the offline pill took its room; with nothing current, ? was pushed off the window and the search stretched (the list now takes the pane's room and the bar keeps its columns, and the pane fades out); link pairs and the pane's meta line cut words or started a line with "·".
+- **Motion**: an accepted suggestion's own row flew into the group and landed on another thing's place (only a thing's own row flies now); the list jumped in one frame on T and on `.` (the scroll is smooth while rows move, and the next current row is one that stays put); ⌘Z showed the returning row's words over the row leaving its place (it lies under the list now, like a drawer).
+- **Keyboard**: H then a quick E dismissed a whole group; under 900px J and E sent the focus to a row hidden under the pane, and F6 was stuck; the undo line covered the selection bar's × and, under 900px, the pane's moves; a value with a space broke the search; ⌘Z did not make the restored thing current; the focus jumped off a token's × and fell to the page after `/` Esc or when the undo line went; F6 left the scope menu open; ⌫ and Esc hints that did nothing; the hand-off menu's "Change" could not be reached and did nothing (it is the app's account picker now, a Tab away).
+
 ## Tried and dropped
+
+- **Shortening the last token with an ellipsis** when it alone did not fit. At 1024px it read `project: C…`, which says nothing; folding it into +N, with the tokens in its tooltip, says more.
+- **Clearing the rows beside the undo line** without moving the scroll padding. The current row could sit under the clear strip after a move; the list's scroll padding now keeps it above.
 
 - **Count and title in one cell.** A group's "14 things" sat after its label and was the first thing cut. It moved to the right of the second line, with the marks.
 - **Row columns as one grid.** The right column took the width of the place on line two, so titles were cut early. Each line is its own flex row now.

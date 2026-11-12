@@ -34,7 +34,7 @@ window.Menus = (function () {
     var off = offers.filter(function (o) { return o.off; });
     el.innerHTML = '<p class="hand-menu-heading">Hand to</p>' + ok.map(function (o, i) {
       return '<button type="button" role="menuitem" tabindex="-1" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '" aria-label="' + D.esc(o.w.name + ". " + o.line) + '" aria-keyshortcuts="' + (i + 1) + '"><span aria-hidden="true">' + D.face(o.w.name, "idle", 28) + '</span><span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? '<kbd aria-hidden="true">' + (i + 1) + "</kbd>" : "") + "</button>";
-    }).join("") + '<p class="hand-acct">' + D.icon("connections", 12) + 'Acts as <b>northwind-bot</b><button type="button" class="link" data-hand-acct>Change</button></p>' +
+    }).join("") + '<label class="hand-account hand-acct"><span>as</span><select aria-label="Account to act as"><option>northwind-bot</option><option>northwind-release</option></select></label>' +
       (off.length ? '<i class="hand-menu-line"></i>' + off.map(function (o) { return '<div role="menuitem" aria-disabled="true" tabindex="-1" class="hand-row">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "");
     el.hidden = false;
     var row = App.el.list.querySelector('[data-id="' + t.id + '"] .row-time');
@@ -117,6 +117,14 @@ window.Menus = (function () {
   /** Handles a key while a menu is open. Returns true when the menu took it. */
   function key(e) {
     if (!open) return popoverKey(e);
+    // The hand-off menu's account picker is its one other stop: Tab goes between it and the rows, and
+    // it keeps its own keys. The page never sees them.
+    var picker = open.kind === "hand" && open.el.querySelector("select");
+    if (picker && e.key === "Tab" && open.el.contains(document.activeElement)) {
+      (document.activeElement === picker ? open.el.querySelector("[data-hand-row].is-active") : picker).focus({ preventScroll: true });
+      return true;
+    }
+    if (picker && document.activeElement === picker) { if (e.key === "Escape") { close(); return true; } return "own"; }
     // A menu handles keys only while the focus is in it; Tab, or the focus going anywhere else, closes it.
     if (e.key === "Tab" || !open.el.contains(document.activeElement)) { close(); return false; }
     if (e.key === "Enter") {

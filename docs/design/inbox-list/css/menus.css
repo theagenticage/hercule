@@ -22,14 +22,13 @@
   color: var(--faint);
   font-size: var(--t-12);
 }
-.hand-acct b {
+/* The app's account picker, set off from the workflows by a line. Drawn without the native border,
+   which the app's own picker still has (see DESIGN.md, proposals). */
+.hand-acct {
   color: var(--muted);
-  font-weight: var(--w-medium);
 }
-.hand-acct .link {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--t-12);
+.hand-acct select {
+  border: 0;
 }
 
 .linkto {

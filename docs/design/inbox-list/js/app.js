@@ -88,25 +88,29 @@ window.App = (function () {
     // the pane or the selection bar when the control it was on is gone.
     var was = !el.list ? null : el.list.contains(ae) ? "list" : el.pane.contains(ae) || document.getElementById("selbar").contains(ae) ? "pane" : null;
     var before = state.focus;
+    var oldRows = state.rows || [];
     state.rows = buildFlat();
     var after = state.focusAfter;
-    // A move that keeps its place: the row after the handled one, in the old order, becomes current,
-    // also when the handled thing is still in the list somewhere else.
-    if (state.focusHint != null && after && opts.keepPlace) {
-      var nextKey = after.find(function (k) { return state.rows.some(function (r) { return r.key === k; }); });
-      if (nextKey) state.focus = nextKey;
-    }
-    if (!state.rows.some(function (r) { return r.key === state.focus; })) {
-      var found = after ? after.find(function (k) { return state.rows.some(function (r) { return r.key === k; }); }) : null;
-      var hint = state.focusHint;
-      var at = found ? state.rows.find(function (r) { return r.key === found; }) : hint != null && hint >= 0 ? state.rows[Math.min(hint, state.rows.length - 1)] : null;
+    // After a move, the row after the handled one in the old order becomes current: when the handled
+    // row is gone, and also when a move keeps its place and the handled thing is elsewhere in the list.
+    var hint = state.focusHint;
+    var rowAt = function (key) { return state.rows.find(function (r) { return r.key === key; }); };
+    var gone = !rowAt(state.focus);
+    if (hint != null && (opts.keepPlace || gone)) {
+      var at = (after && rowAt(nextInPlace(after, hint, oldRows, state.rows))) || (hint >= 0 ? state.rows[Math.min(hint, state.rows.length - 1)] : null);
+      // "Show N more" is not a thing to act on: the member above it takes the place instead.
       if (at && at.type === "more") at = state.rows[Math.max(0, state.rows.indexOf(at) - 1)];
-      state.focus = at ? at.key : state.rows.length ? (state.rows.find(function (r) { return r.type !== "more"; }) || {}).key || null : null;
+      if (at) state.focus = at.key;
     }
+    if (!rowAt(state.focus)) state.focus = (state.rows.find(function (r) { return r.type !== "more"; }) || {}).key || null;
     if (state.focus !== before && state.focusHint != null) state.movedAt = performance.now();
     state.focusHint = null;
     state.focusAfter = null;
-    el.ib.classList.toggle("is-paneless", !state.focus && !state.selection.size && !state.loading);
+    var paneless = !state.focus && !state.selection.size && !state.loading;
+    if (paneless !== el.ib.classList.contains("is-paneless") && opts.flip && !Motion.isReduced()) {
+      if (paneless) fadePaneOut(); else el.pane.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
+    }
+    el.ib.classList.toggle("is-paneless", paneless);
     Rail.draw(el.rail, state);
     List.draw(el.list, el.listHead, state, opts);
     Pane.draw(el.pane, state, opts);
@@ -117,13 +121,51 @@ window.App = (function () {
     var cur = el.list.querySelector('[data-key="' + state.focus + '"]');
     if (!Dialog.isOpen() && cur) {
       var now = document.activeElement;
-      if ((was === "list" && now !== cur) || (was === "pane" && (now === document.body || !now || !now.isConnected))) cur.focus({ preventScroll: true });
+      if ((was === "list" && now !== cur) || (was === "pane" && (now === document.body || !now || !now.isConnected))) focusCurrent();
       // The current row is never left out of sight. Its place is measured where it will rest, not where
-      // a move's motion still holds it, and the list scrolls by the least distance.
+      // a move's motion still holds it, and the list scrolls by the least distance. While rows move, the
+      // scroll is smooth too, so no row jumps in one frame.
+      // A move brings the undo line, and the rows beside it fade out, so after a move the row keeps
+      // clear of the line's room as well.
       var scroller = el.list.parentElement, box = scroller.getBoundingClientRect(), r = Motion.layoutRect(cur);
-      if (r.top < box.top + 4) scroller.scrollTop += r.top - box.top - 4;
-      else if (r.top + r.height > box.bottom - 28) scroller.scrollTop += r.top + r.height - box.bottom + 28;
+      var foot = Math.max(parseFloat(getComputedStyle(scroller).scrollPaddingBottom) || 0, opts.flip ? 96 : 28);
+      var by = r.top < box.top + 4 ? r.top - box.top - 4 : r.top + r.height > box.bottom - foot ? r.top + r.height - box.bottom + foot : 0;
+      if (by && !opts.scrolls) scroller.scrollBy({ top: by, behavior: opts.flip && !Motion.isReduced() ? "smooth" : "instant" });
     }
+  }
+
+  /**
+   * Returns the key of the row that becomes current after a move that keeps its place: the first row
+   * after the handled one, in the old order, that is still in the list. A row that travels far with a
+   * re-sorted group is passed over, so the highlight stays where the eyes are; when every row travels,
+   * the first one is taken.
+   */
+  function nextInPlace(after, from, oldRows, rows) {
+    var oldAt = new Map(oldRows.map(function (r, i) { return [r.key, i]; }));
+    var newAt = new Map(rows.map(function (r, i) { return [r.key, i]; }));
+    var here = after.filter(function (k) { return newAt.has(k) && oldAt.has(k); });
+    if (!here.length) return null;
+    // Most rows below the handled one shift by the same amount (the rows that left above them); a row
+    // that shifts by much more is travelling with its group.
+    var below = here.filter(function (k) { return oldAt.get(k) > from; });
+    var shifts = new Map();
+    (below.length ? below : here).forEach(function (k) { var d = newAt.get(k) - oldAt.get(k); shifts.set(d, (shifts.get(d) || 0) + 1); });
+    var usual = Array.from(shifts).sort(function (a, b) { return b[1] - a[1]; })[0][0];
+    return here.find(function (k) { return Math.abs(newAt.get(k) - oldAt.get(k) - usual) <= 1; }) || here[0];
+  }
+
+  /** Fades a copy of the pane where it stood, so the pane steps aside rather than vanishing in one frame. */
+  function fadePaneOut() {
+    var r = el.pane.getBoundingClientRect(), at = el.ib.getBoundingClientRect();
+    if (!r.width) return;
+    var copy = el.pane.cloneNode(true);
+    copy.removeAttribute("id");
+    copy.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
+    copy.setAttribute("aria-hidden", "true");
+    copy.inert = true;
+    Object.assign(copy.style, { position: "absolute", left: r.left - at.left + "px", top: r.top - at.top + "px", width: r.width + "px", height: r.height + "px", zIndex: 4, pointerEvents: "none" });
+    el.ib.appendChild(copy);
+    copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: "ease-out", fill: "forwards" }).finished.then(function () { copy.remove(); });
   }
 
   function currentRow() { return state.rows.find(function (r) { return r.key === state.focus; }) || null; }
@@ -153,7 +195,8 @@ window.App = (function () {
     var edge = document.getElementById("edge");
     if (edge) { edge.setAttribute("aria-valuenow", state.paneW); edge.setAttribute("aria-valuemax", max); }
   }
-  window.addEventListener("resize", function () { setPaneWidth(); });
+  // The bar's tokens and hint fit the field, so they are fitted again when the window changes.
+  window.addEventListener("resize", function () { setPaneWidth(); Bar.draw(state); });
 
   // Under 900px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
   var stacked = matchMedia("(max-width: 899px)");
@@ -169,7 +212,20 @@ window.App = (function () {
     state.focus = key;
     List.markFocus(el.list, state, opts);
     Pane.draw(el.pane, state, { walk: opts && opts.dir });
+    if (opts && opts.keyboard && isStacked() && isPaneOpen()) focusCurrent();
   }
 
-  return { isStacked: isStacked, setPaneOpen: setPaneOpen, isPaneOpen: function () { return el.ib.classList.contains("is-pane-open"); }, state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
+  /**
+   * Puts the keyboard focus on the current row, or on the pane's title while the pane lies over the
+   * list (under 900px), so the focus is never on a row nobody can see. Does nothing with no current row.
+   */
+  function focusCurrent() {
+    var target = isStacked() && isPaneOpen() ? el.pane.querySelector(".pn-title") : el.list.querySelector('[data-key="' + state.focus + '"]');
+    if (!target) return;
+    if (target.matches(".pn-title")) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
+  function isPaneOpen() { return el.ib.classList.contains("is-pane-open"); }
+
+  return { isStacked: isStacked, setPaneOpen: setPaneOpen, isPaneOpen: isPaneOpen, focusCurrent: focusCurrent, state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
 })();

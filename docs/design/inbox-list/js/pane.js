@@ -93,7 +93,7 @@ window.Pane = (function () {
     var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.mark(src, 14) + "<span>" + D.esc(K.SOURCES[src].name) + " · " + D.esc(D.noun(t)) +  " · " + D.esc(D.place(t)) + '</span></p><span class="pn-tools"><a class="icon-btn icon-btn--sm pn-open" href="#" title="' + D.esc(K.SOURCES[src].open) + '" aria-label="' + D.esc(K.SOURCES[src].open) + '">' + D.icon("external", 14) + '</a><button type="button" class="icon-btn icon-btn--sm" data-pane-menu title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">' + D.icon("more", 16) + "</button></span></header>";
     html += '<h2 class="pn-title">' + D.esc(t.title) + (D.identifier(t) ? ' <span class="pn-id">' + D.esc(D.identifier(t)) + "</span>" : "") + "</h2>";
     var meta = [];
-    if (st) meta.push(D.glyph(t, 14) + "<span>" + D.esc(st) + "</span>");
+    if (st) meta.push("<span>" + D.glyph(t, 14) + D.esc(st) + "</span>");
     if (t.fields.author) meta.push("<span>" + D.esc(t.fields.author === "you" ? "You" : t.fields.author) + " opened it " + D.agoWords(t.opened) + "</span>");
     else if (t.fields.assignee) meta.push("<span>" + (t.fields.assignee === "you" ? "Assigned to you" : D.esc(t.fields.assignee) + "’s") + "</span>");
     else if (t.fields.from) meta.push("<span>From " + D.esc(t.fields.from) + "</span>");
@@ -129,6 +129,12 @@ window.Pane = (function () {
     }).join("") + "</ul>";
   }
 
+  /** Returns one end of a link pair: its identifier, which is never shortened, or else its title. */
+  function pairName(t) {
+    var id = D.identifier(t);
+    return id ? '<span class="pc-id">' + D.esc(id) + "</span>" : "<span>" + D.esc(t.title) + "</span>";
+  }
+
   function groupPane(r) {
     var g = r.group;
     var srcs = [];
@@ -142,7 +148,7 @@ window.Pane = (function () {
     html += '<section class="pn-sec"><h3 class="pn-h">' + 'How they are linked</h3><ul class="pc">' + pairs.map(function (l) {
       var a = Model.byId(l[0]), b = Model.byId(l[1]);
       var claim = l[2].type === "source" ? l[2].by + " reports this" : (l[2].by === "you" ? "You linked these" : l[2].by + " linked these");
-      return '<li><span class="pc-pair">' + D.mark(Model.sourceOf(a), 12) + D.esc(D.identifier(a) || a.title) + '<span class="pc-dash">—</span>' + D.mark(Model.sourceOf(b), 12) + D.esc(D.identifier(b) || b.title) + '</span><span class="pl-claim">' + D.esc(claim) + (l[2].type === "person" ? '<button type="button" class="pl-unlink" data-unlink="' + a.id + "|" + b.id + '">Unlink</button>' : "") + "</span></li>";
+      return '<li><span class="pc-pair">' + D.mark(Model.sourceOf(a), 12) + pairName(a) + '<span class="pc-dash">—</span>' + D.mark(Model.sourceOf(b), 12) + pairName(b) + '</span><span class="pl-claim">' + D.esc(claim) + (l[2].type === "person" ? '<button type="button" class="pl-unlink" data-unlink="' + a.id + "|" + b.id + '">Unlink</button>' : "") + "</span></li>";
     }).join("") + "</ul></section></div>";
     html += footer(move("thread", "Thread on all " + g.members.length, "N") + move("take", "Take on", "T") + '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="link" title="Link another thing to this group (L)" aria-label="Link another thing">' + D.icon("link", 16) + '</button><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss all ' + g.members.length + ' (E)" aria-label="Dismiss the group">' + D.icon("archive", 16) + "</button>");
     return html;

@@ -18,8 +18,26 @@
       Announce.say(spoken);
       clearTimeout(timer);
       timer = setTimeout(hide, opts.undo ? 8000 : 5000);
+      if (el.matches(":hover")) clearTimeout(timer);
+      // The line stays while the pointer or the focus is on it, and goes 3s after both leave.
+      if (!el._watch) {
+        el._watch = true;
+        var hold = function () { clearTimeout(timer); };
+        var release = function () { if (!el.matches(":hover") && !el.contains(document.activeElement)) { clearTimeout(timer); timer = setTimeout(hide, 3000); } };
+        el.addEventListener("pointerenter", hold);
+        el.addEventListener("focusin", hold);
+        el.addEventListener("pointerleave", release);
+        el.addEventListener("focusout", function () { setTimeout(release, 0); });
+      }
     }
-    function hide() { var el = document.getElementById("undo"); el.classList.remove("is-on"); el.setAttribute("inert", ""); }
+    /** Hides the undo line. The focus, when it was on the line, goes back to the current row. */
+    function hide() {
+      var el = document.getElementById("undo");
+      var had = el.contains(document.activeElement);
+      el.classList.remove("is-on");
+      el.setAttribute("inert", "");
+      if (had) App.focusCurrent();
+    }
     document.addEventListener("click", function (e) {
       if (e.target.closest("[data-undo]")) Moves.undo();
       if (e.target.closest("[data-undo-act]")) { var l = Moves.last(); Moves.goTo(l && l.action ? l.action.task : undefined); }
@@ -124,6 +142,15 @@
       if (e.target.closest("[data-clear-search]")) Bar.clear(true);
       if (e.target.closest("[data-widen-search]")) Bar.widen();
       if (e.target.closest("[data-go-updates]")) Moves.setScope({ saved: "updates" });
+    });
+    // The buttons' keys work while the focus is on them, as their hints say.
+    document.addEventListener("keydown", function (e) {
+      if (!e.target.closest || !e.target.closest("#empty")) return;
+      if (e.key === "Backspace" && document.querySelector("[data-widen-search]")) Bar.widen();
+      else if (e.key === "Escape" && document.querySelector("[data-clear-search]")) Bar.clear(true);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
     });
     return { draw: draw };
   })();

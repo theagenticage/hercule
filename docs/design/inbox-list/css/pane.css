@@ -726,6 +726,10 @@
   color: var(--faint);
   font-size: var(--t-12);
 }
+/* On the composer's fill the app's faint key hint falls under AA in Nile; muted keeps it legible. */
+.reply kbd {
+  color: var(--muted);
+}
 
 /* The one suggested answer: the app's --answer, which is each theme's accent except where the
    accent is not green (Nile). The book's .btn--accent, on the answer's colour. */
@@ -832,6 +836,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pc-pair > .mk,
+.pc-pair > .pc-dash,
+.pc-pair > .pc-id {
+  flex: none;
+}
 .pc li .pl-claim {
   min-width: 0;
 }
@@ -841,14 +850,26 @@
 .reply textarea {
   resize: none;
 }
-/* The meta line's dots belong to the item after them, so a wrap never leaves one dangling. */
-.pn-meta > span + span::before {
-  content: "·";
-  margin-right: 6px;
-  color: var(--faint);
+/* The meta line's dots sit in the gap before each item. Every item, the first of each line too, has
+   that gap; the line starts 16px further left and that strip is cut off, so the first item of every
+   line lines up and its dot is never seen. A wrap leaves no dot at either end of a line. */
+.pn-meta {
+  gap: 6px 0;
+  margin-left: -16px;
+  clip-path: inset(-4px -8px -4px 16px);
 }
-.pn-meta > .gl + span::before {
-  content: none;
+.pn-meta > span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+}
+.pn-meta > span::before {
+  content: "·";
+  position: absolute;
+  left: -10px;
+  color: var(--faint);
 }
 .pl-id,
 .bk-checks,

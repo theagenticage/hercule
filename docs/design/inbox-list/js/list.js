@@ -212,8 +212,10 @@ window.List = (function () {
     var b = Motion.body(node);
     var fade = function (delay, ms) { node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms || 120, delay: delay || 0, easing: "ease-out", fill: "backwards" }); };
     if (how === "unfold") { node.classList.add("is-under"); setTimeout(function () { node.classList.remove("is-under"); }, 420); return; }
-    node.classList.add("is-entering");
-    var done = function () { b.clear(); node.classList.remove("is-entering"); };
+    // A row coming back lies under the list, like a drawer's members: the rows after it part off it.
+    var under = how === "return" || how === "grow";
+    node.classList.add(under ? "is-under" : "is-entering");
+    var done = function () { b.clear(); node.classList.remove("is-entering", "is-under"); };
     if (how === "return") { b.set({ x: 28 }); b.to({ x: 0 }, "travel", { done: done }); fade(0, 140); }
     else if (how === "grow") { b.set({ s: 0.985 }); b.to({ s: 1 }, "hand", { done: done }); fade(0, 140); }
     else if (how === "arrive") { b.set({ y: -20 }); b.to({ y: 0 }, "travel", { delay: i * 40, done: done }); fade(i * 40, 160); }
@@ -291,7 +293,9 @@ window.List = (function () {
       // A thing that leaves one row for another (a row into a group, a member back out) flies.
       var arriving = new Set(s.rows.filter(function (r) { return r.thing && !oldKeys.has(r.key); }).map(function (r) { return r.thing.id; }));
       var ghosts = olds.filter(function (n) { return !newKeys.has(n.dataset.key); }).map(function (n) {
-        var flies = n.dataset.id && arriving.has(n.dataset.id);
+        // Only a thing's own row flies. A triage row names a thing too, but it is a suggestion about it,
+        // so it leaves where it is.
+        var flies = n.dataset.id && !n.dataset.triage && arriving.has(n.dataset.id);
         if (flies && opts.carried && opts.carried.id === n.dataset.id) return { id: n.dataset.id, g: opts.carried.ghost, flies: true };
         var g = Motion.ghost(n, flies ? flightLayer() : leavingLayer());
         g.classList.remove("is-current", "is-moving", "is-lifted");
@@ -329,8 +333,9 @@ window.List = (function () {
       }
       var how = opts.enter || (opts.link ? "link" : "unfold");
       added.forEach(function (n, i) { enter(n, how, i); });
-      host.classList.toggle("is-drawer", how === "unfold" && added.length > 0);
-      if (how === "unfold") setTimeout(function () { host.classList.remove("is-drawer"); }, 420);
+      var drawer = (how === "unfold" || how === "return" || how === "grow") && added.length > 0;
+      host.classList.toggle("is-drawer", drawer);
+      if (drawer) setTimeout(function () { host.classList.remove("is-drawer"); }, 420);
     }
     placePuck(host, s);
     Selection.draw(s);
@@ -344,9 +349,11 @@ window.List = (function () {
       c.classList.toggle("is-current", on);
       c.tabIndex = on ? 0 : -1;
       if (on) {
-        var r = c.getBoundingClientRect(), hr = host.parentElement.getBoundingClientRect();
-        if (r.top < hr.top + 8 || r.bottom > hr.bottom - 8) c.scrollIntoView({ block: "nearest" });
-        if (opts && opts.keyboard) c.focus({ preventScroll: true });
+        // The list's scroll padding keeps the row out of the fade at its foot. A caller that scrolls
+        // the row into view itself, smoothly, passes `scroll: false`.
+        if (!(opts && opts.scroll === false)) c.scrollIntoView({ block: "nearest" });
+        // Under 900px with the pane open the row is under the pane, so the focus stays in the pane.
+        if (opts && opts.keyboard && !(App.isStacked() && App.isPaneOpen())) c.focus({ preventScroll: true });
       }
     });
   }

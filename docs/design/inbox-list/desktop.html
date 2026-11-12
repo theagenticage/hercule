@@ -98,8 +98,7 @@
     requestAnimationFrame(function () {
       if (document.activeElement && document.activeElement !== document.body) return;
       if (Dialog.isOpen() || Menus.isOpen() || gone.isConnected && gone.offsetParent && !gone.closest("[hidden]")) return;
-      var cur = App.el.list.querySelector('[data-key="' + App.state.focus + '"]');
-      if (cur) cur.focus({ preventScroll: true });
+      App.focusCurrent();
     });
   });
   // The story page's buttons send a frame a move to show.

@@ -39,7 +39,13 @@ Durations from the app: `--m-quick` 140ms, `--m-base` 220ms, `--m-slow` 360ms. O
 | 70ms | The rows after it | Close up on `hand`, from where they were, into the puck. By then the copy is almost gone |
 | | Quick moves | When rows are still moving from the last move, they close up at once, and a copy caught halfway keeps going to its place while it fades in 60ms |
 
-Undo plays it back: the row returns from 28px aside on `travel`, the others part on `hand`.
+Undo plays it back: the row is current again and lies under the list, like a drawer's members, and comes back from 28px aside on `travel` while the rows after it, carrying the list's ground, part off it on `hand`. Nothing reads over anything.
+
+When a move leaves nothing current (the last row of a list), the pane's copy fades out where it stood over 140ms, before the sunrise begins, and the list takes its room.
+
+### Keeping the current row in view
+
+After a move, the current row is measured where it will rest. When it would be out of sight the list scrolls by the least distance, smoothly while rows are still moving, so no row jumps in one frame. The next current row is the first row after the handled one that stays where it was: one that travels away with a re-sorted group is passed over, so the highlight stays where your eyes are.
 
 ### Linking, by L or by drag
 
@@ -54,6 +60,8 @@ Undo plays it back: the row returns from 28px aside on `travel`, the others part
 **By drag**: a press that moves 6px lifts a copy at 102%, and its shadow grows in over 160ms. The row's place stays, at 32%. The copy follows the pointer one to one and leans up to 2.5° with its speed; held still for 90ms it stands up straight. The row under it lights with a 1.5px focus ring. **Letting go on it hands the carried copy itself to the link**: the ring goes at once, and it flies from under the pointer with the speed the hand gave it, straightening, into the group, on top of everything. The row it was dropped on moves to its member place quietly, on the list's ground, with no shadow. Esc, or letting go elsewhere, sends it home on `travel` with the hand's speed.
 
 Undo flies each member back to its own row the same way.
+
+**Accepting a suggested link** (L on its row): the suggestion's row fades where it is in 110ms, and each of the two things flies from its own row into the group, as with L. A suggestion is about the things, never one of them, so its row never flies.
 
 ### Hand-off
 
@@ -107,7 +115,7 @@ Its body changes height on `hand` from its measured height, its chevron turns, a
 |---|---|---|
 | 0 | The pill | Appears in the list head, beside the count, where it covers nothing: solid from the first frame, it grows from its centre over 200ms, and its words fade in over 80ms. The list does not move |
 | 0 | The sidebar's count | Ticks up 4px over 260ms |
-| `.` | The list | Scrolls to the first new row, which becomes current. The new rows come down 20px on `travel` 220ms later, 40ms apart, with a marigold wash that fades over 1.8s |
+| `.` | The list | Scrolls smoothly to put the first new row in the middle, and that row becomes current. The new rows come down 20px on `travel` 220ms later, 40ms apart, with a marigold wash that fades over 1.8s |
 | `.` | The pill | Leaves the head as the list's order words come back |
 
 ### The pane's edge

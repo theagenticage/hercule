@@ -467,6 +467,112 @@ for (const s of ["pr", "accounts", "selection", "reply", "proposal"]) {
   await ctx2.close();
 }
 
+// ---- Round-four regressions ----
+{
+  const p = await open("theme=whitehaven&scene=suggestion");
+  await p.focus('[data-key="t:link-6251"]');
+  await key(p, "l");
+  await p.waitForTimeout(60);
+  await expect(p, "an accepted suggestion's row never flies into the group", () => !document.querySelector("#flight [data-triage]"));
+  await settle(p);
+  await p.keyboard.press("Meta+z");
+  await settle(p, 500);
+  await expect(p, "⌘Z on an accepted suggestion brings the suggestion back", () => !Model.gone.has("link-6251") && App.state.rows.some((r) => r.key === "t:link-6251"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "e");
+  await settle(p, 400);
+  await p.keyboard.press("Meta+z");
+  await settle(p, 500);
+  await expect(p, "⌘Z after E makes the thing current and focused again", () => App.state.focus === "r:pr-6213" && document.activeElement.dataset.key === "r:pr-6213");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  const row = await p.evaluate(() => App.state.rows.find((r) => r.thing && r.thing.id === "gm-invoice").key);
+  await p.evaluate((k) => App.focusRow(k, { keyboard: true }), row);
+  await key(p, "h");
+  await p.waitForTimeout(120);
+  const onGroup = await p.evaluate(() => App.currentRow() && App.currentRow().type === "group");
+  await key(p, "e");
+  if (onGroup) await expect(p, "H then a quick E never dismisses a group", () => !App.state.rows.length || Model.gone.size === 0);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "/");
+  await p.keyboard.type("project:Checkout revamp");
+  await settle(p, 200);
+  await key(p, "Enter");
+  await settle(p, 200);
+  await expect(p, "a value with a space is typed out whole", () => App.state.search.clauses.length === 1 && App.state.search.clauses[0].value === "Checkout revamp" && !App.state.search.text);
+  await key(p, "Backspace");
+  await p.keyboard.type("team:Checkout bug");
+  await settle(p, 200);
+  await expect(p, "a space still ends a value nothing continues", () => App.state.search.clauses.some((c) => c.key === "team" && c.value === "Checkout") && App.state.search.text === "bug");
+  await key(p, "Escape");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=zero");
+  await settle(p, 300);
+  await expect(p, "with nothing current, ? stays inside the window", () => document.querySelector("[data-help]").getBoundingClientRect().right <= innerWidth);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "e");
+  await key(p, "x");
+  await key(p, "j");
+  await key(p, "x");
+  await settle(p, 300);
+  await expect(p, "the undo line rises over the selection bar", () => { const a = document.getElementById("undo").getBoundingClientRect(), b = document.getElementById("selbar").getBoundingClientRect(); return a.bottom <= b.top; });
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=hand");
+  await settle(p, 400);
+  await key(p, "Tab");
+  await expect(p, "Tab in the hand-off menu reaches the account picker", () => document.activeElement && document.activeElement.matches("#handmenu select"));
+  await key(p, "Escape");
+  await p.close();
+}
+for (const w of [1024, 1120]) {
+  const c = await browser.newContext({ viewport: { width: w, height: 760 } });
+  const p = await c.newPage();
+  p.on("pageerror", (e) => fail(`${w}: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven&scene=offline");
+  await p.waitForSelector("html[data-ready]");
+  await expect(p, `the search hint fits whole at ${w}px`, () => { const i = document.getElementById("sx-input"); const s = document.createElement("span"); s.className = "sx-measure"; s.textContent = i.placeholder; i.parentElement.appendChild(s); const ok = s.offsetWidth <= i.clientWidth; s.remove(); return ok; });
+  await p.evaluate(() => { App.state.search.clauses.push({ key: "team", value: "Checkout" }, { key: "waiting", value: ">2d" }, { key: "project", value: "Checkout revamp" }); App.render({}); });
+  await p.focus("#sx-input");
+  await settle(p, 200);
+  await expect(p, `no search token is cut at ${w}px`, () => { const box = document.getElementById("sx-chips").getBoundingClientRect(); return [...document.querySelectorAll(".sx-chip")].filter((c) => c.getClientRects().length).every((c) => c.getBoundingClientRect().right <= box.right + 0.5); });
+  await c.close();
+}
+{
+  const c = await browser.newContext({ viewport: { width: 880, height: 700 } });
+  const p = await c.newPage();
+  p.on("pageerror", (e) => fail(`stacked keys: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven");
+  await p.waitForSelector("html[data-ready]");
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "Enter");
+  await settle(p, 400);
+  await key(p, "j");
+  await expect(p, "under 900px with the pane open, J keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
+  await key(p, "e");
+  await settle(p, 400);
+  await expect(p, "under 900px with the pane open, E keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
+  await key(p, "F6");
+  await expect(p, "F6 moves on from the stacked pane", () => !document.getElementById("pane").contains(document.activeElement));
+  await c.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

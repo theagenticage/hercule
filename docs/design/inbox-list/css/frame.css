@@ -115,8 +115,7 @@
 }
 .sx-chip {
   display: inline-flex;
-  flex: 0 1 auto;
-  min-width: 48px;
+  flex: none;
   align-items: center;
   gap: 4px;
   height: 24px;
@@ -127,7 +126,24 @@
   font-size: var(--t-12);
   white-space: nowrap;
 }
+/* Tokens keep their width, so one that does not fit is seen and folds into +N. Only the scope token
+   shortens its value with an ellipsis. */
+.sx-chip[hidden] {
+  display: none;
+}
+.sx-chip--scope {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.sx-measure {
+  position: absolute;
+  visibility: hidden;
+  font-size: var(--t-13);
+  white-space: pre;
+  pointer-events: none;
+}
 .sx-chip b {
+  min-width: 0;
   max-width: 140px;
   overflow: hidden;
   color: var(--ink);
@@ -251,10 +267,14 @@
 .ib-scroll {
   position: relative;
   flex: 1;
-  /* The last rows fade into the foot; deeper while the undo line or the selection bar floats there. */
+  /* The last rows fade into the foot. While the undo line or the selection bar floats there, the rows
+     beside it are gone entirely (--clear), so no piece of a word reads beside the line. */
   --fade: 28px;
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--fade)), transparent);
-  mask-image: linear-gradient(to bottom, black calc(100% - var(--fade)), transparent);
+  --clear: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--clear) - var(--fade)), transparent calc(100% - var(--clear)));
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--clear) - var(--fade)), transparent calc(100% - var(--clear)));
+  /* Keeping the current row in view keeps it out of the fade too. */
+  scroll-padding-bottom: calc(var(--clear) + var(--fade));
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -338,6 +358,16 @@ body > .flight {
   --undo-line-x: calc(var(--rail-w) / 2 - var(--pane-w) / 2);
   max-width: calc(100% - var(--rail-w) - var(--pane-w) - 24px);
 }
+/* The undo line never covers what it sits beside: it rises over the selection bar, and under 900px
+   over the pane's moves while the pane lies over the list. */
+.ib:has(#selbar:not([hidden])) .undo-line {
+  bottom: 66px;
+}
+@media (max-width: 899px) {
+  .ib.is-pane-open .undo-line {
+    bottom: 66px;
+  }
+}
 .undo-text {
   min-width: 0;
   overflow: hidden;
@@ -415,7 +445,11 @@ body > .flight {
 }
 .ib:has(.undo-line.is-on) .ib-scroll,
 .ib:has(#selbar:not([hidden])) .ib-scroll {
-  --fade: 72px;
+  --fade: 40px;
+  --clear: 56px;
+}
+.ib:has(.undo-line.is-on):has(#selbar:not([hidden])) .ib-scroll {
+  --clear: 104px;
 }
 .sx-more {
   flex: none;
