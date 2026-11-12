@@ -6,7 +6,6 @@ import type { JSX, KeyboardEvent, ReactNode } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  fitIntakeListWidth,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
   type IntakeTab,
@@ -186,7 +185,7 @@ export function IntakeSplit({
   readonly onListPointerEnter?: () => void;
   readonly onListPointerLeave?: () => void;
 }): JSX.Element {
-  const { available, width, splitRef, listRef } = split;
+  const { width, splitRef, listRef } = split;
   return (
     <div
       ref={splitRef}
@@ -216,18 +215,7 @@ export function IntakeSplit({
         {list}
       </section>
       {split.paneShown && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the list"
-          aria-valuenow={available === null ? width : fitIntakeListWidth(width, available)}
-          aria-valuemin={MIN_INTAKE_LIST_WIDTH}
-          aria-valuemax={available === null ? undefined : available - MIN_INTAKE_PANE_WIDTH}
-          tabIndex={0}
-          className="asks-handle"
-          onPointerDown={split.startDrag}
-          onKeyDown={split.resizeWithKeys}
-        />
+        <div {...split.separator} aria-label="Resize the list" className="asks-handle" />
       )}
       {pane}
     </div>

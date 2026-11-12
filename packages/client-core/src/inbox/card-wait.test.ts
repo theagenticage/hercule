@@ -1,8 +1,7 @@
 /** Tests the wait of a card and the line that says its facts may be old. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCard, buildRequestCard, buildSignalLine } from "./cards.testing";
+import { buildInboxCard, buildRequestCard } from "./cards.testing";
 import {
-  describeCardTime,
   describeCardTrust,
   describeCardWait,
   findNextCardTimeChange,
@@ -13,22 +12,31 @@ const NOW = new Date("2026-11-07T12:00:00.000Z");
 const hoursAgo = (hours: number): string =>
   new Date(NOW.getTime() - hours * 3_600_000).toISOString();
 
+/** Everything a card shows that depends on the time: the oracle for `findNextCardTimeChange`. */
+const describeCardTime = (card: Parameters<typeof describeCardWait>[0], now: Date) => ({
+  wait: describeCardWait(card, now),
+  trust: describeCardTrust(card, now),
+});
+
 describe("describeCardWait", () => {
   it.each([
-    [0.2, "1h", "Waiting 1 hour"],
+    [0.0001, "now", "Waiting less than a minute"],
+    [0.2, "12m", "Waiting 12 minutes"],
     [5.9, "5h", "Waiting 5 hours"],
     [23.9, "23h", "Waiting 23 hours"],
     [24, "1d", "Waiting 1 day"],
     [50, "2d", "Waiting 2 days"],
+    [14 * 24, "2w", "Waiting 2 weeks"],
+    [4 * 30 * 24, "4mo", "Waiting 4 months"],
   ])("writes a wait of %s hours as %s", (hours, text, words) => {
-    const card = buildRequestCard("1", { waitingSince: hoursAgo(hours) });
+    const card = buildRequestCard("1", { patience: 10_000, waitingSince: hoursAgo(hours) });
     expect(describeCardWait(card, NOW)).toMatchObject({ text, words });
   });
 
   it.each([
-    [5, "fresh"],
-    [5.9, "fresh"],
-    [6, "recent"],
+    [11, "fresh"],
+    [11.9, "fresh"],
+    [12, "recent"],
     [23, "recent"],
     [24, "due"],
     [71, "due"],
@@ -56,9 +64,9 @@ describe("describeCardWait", () => {
     expect(describeCardWait(card, NOW)?.level).toBe("over");
   });
 
-  it("reads a wait that starts in the future as one fresh hour", () => {
+  it("reads a wait that starts in the future as no time yet", () => {
     const card = buildRequestCard("1", { waitingSince: hoursAgo(-3) });
-    expect(describeCardWait(card, NOW)).toMatchObject({ text: "1h", level: "fresh" });
+    expect(describeCardWait(card, NOW)).toMatchObject({ text: "now", level: "fresh" });
   });
 
   it("has no wait for a kind without a clock", () => {
@@ -113,15 +121,18 @@ describe("findNextCardTimeChange", () => {
 
   it.each([
     // [hours waited, patience, hours until the text or the level changes]
-    [0.5, 1000, 1.5],
+    [0.5, 1000, 1 / 60],
     [1.5, 1000, 0.5],
     [2, 1000, 1],
     [5.5, 1000, 0.5],
     [23.5, 1000, 0.5],
     [24, 1000, 24],
     [50, 1000, 22],
-    // The level changes before the text: a quarter of 6 hours is 1.5, and 75 is three times 25.
-    [1.2, 6, 0.3],
+    [167.5, 1000, 0.5],
+    // Four weeks turn into a month at 30 days, before the fifth week.
+    [28.5 * 24, 10_000, 1.5 * 24],
+    // The level changes before the text: half of 25 hours is 12.5, and 75 is three times 25.
+    [12.2, 25, 0.3],
     [73, 25, 2],
   ])(
     "after a wait of %s hours on a patience of %s hours, changes in %s hours",
@@ -137,6 +148,7 @@ describe("findNextCardTimeChange", () => {
       [23.9, 24],
       [30, 24],
       [100, 24],
+      [28.5 * 24, 10_000],
     ] as const) {
       const card = waiting(hours, patience);
       const change = findNextCardTimeChange(card, NOW);
@@ -146,9 +158,9 @@ describe("findNextCardTimeChange", () => {
     }
   });
 
-  it("waits for the second hour when a wait that has not started shows one hour", () => {
+  it("looks again in a minute for a wait that has not started", () => {
     const card = buildRequestCard("1", { patience: 1000, waitingSince: hoursAgo(-3) });
-    expect(hoursUntil(card)).toBeCloseTo(5, 5);
+    expect(hoursUntil(card)).toBeCloseTo(1 / 60, 5);
   });
 
   it("changes when the age of the facts does, if that comes first", () => {
@@ -159,35 +171,5 @@ describe("findNextCardTimeChange", () => {
   it("is never for a card that does not depend on the time", () => {
     const change = findNextCardTimeChange(buildInboxCard("1"), NOW);
     expect(change.getTime()).toBeGreaterThan(NOW.getTime() + 1e12);
-  });
-});
-
-describe("the age of a row's sentence", () => {
-  const landed = (minutesAgo: number) =>
-    buildSignalLine("s1", "Tessa commented", {
-      createdAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
-    });
-  const row = (overrides = {}) =>
-    buildInboxCard("1", { signals: { openCount: 2, kinds: [], latest: landed(4) }, ...overrides });
-
-  it("is drawn on a row whose sentence comes from a signal", () => {
-    expect(describeCardTime(row(), NOW).signalAge).toBe("4m");
-    expect(isCardTimeDependent(row())).toBe(true);
-  });
-
-  it.each([
-    [
-      "a request, which has its wait",
-      buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: landed(4) } }),
-    ],
-    ["a row a Task holds", row({ taskId: "task-1" })],
-    ["a row with no signal", buildInboxCard("1")],
-  ])("is not drawn on %s", (_name, card) => {
-    expect(describeCardTime(card, NOW).signalAge).toBeUndefined();
-  });
-
-  it("sets the next change of a row at the next minute while the signal is young", () => {
-    const change = findNextCardTimeChange(row(), NOW);
-    expect(change.getTime() - NOW.getTime()).toBe(60_000);
   });
 });

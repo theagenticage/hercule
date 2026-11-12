@@ -16,7 +16,7 @@ import {
   type AddSource,
 } from "@hercule/client-core/work";
 import type { EntityPlace, EntitySuggestions, PluginDetail } from "@hercule/contract";
-import { entitySuggestionsQuery, inboxQuery, pluginsQuery } from "../../app/queries";
+import { entitySuggestionsQuery, pluginsQuery } from "../../app/queries";
 import { undoAddedTask } from "../../app/undo-added-task";
 import type { Gesture } from "../../app/undo-stack";
 import { ChevronDownIcon } from "../../icons/chevron-down";
@@ -179,15 +179,8 @@ function SourceSearch({
   });
   const shownSuggestions = frozenSuggestions ?? suggestionsRead.data;
 
-  // The contexts the select offers: those of the Work board, those the
-  // suggestions mention, and those the Inbox holds if it was read. The Inbox is
-  // only looked at here, never read, so the sheet makes no read of its own for them.
-  const cachedInbox = useQuery({ ...inboxQuery(client), enabled: false });
-  const knownPlaces = mergePlaces(
-    places,
-    cachedInbox.data?.places ?? [],
-    shownSuggestions?.places ?? [],
-  );
+  // The contexts the select offers: those of the Work board and those the suggestions mention.
+  const knownPlaces = mergePlaces(places, shownSuggestions?.places ?? []);
   const scopeOptions = listScopeOptions(knownPlaces, tab);
   const scope = scopeOptions.find((option) => option.ref === chosenScopeRef);
   const scopeRef = scope?.ref ?? "";

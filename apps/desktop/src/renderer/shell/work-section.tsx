@@ -147,8 +147,8 @@ function InboxCount({ value }: { readonly value: number }): JSX.Element {
 }
 
 /**
- * Renders the Inbox's row: the count of cards with a clock on them
- * (`onTheClock`), in the plain grey `.count` and hidden at 0, and a 6px
+ * Renders the Inbox's row: the count of things someone waits on
+ * (the `waits` saved query), in the plain grey `.count` and hidden at 0, and a 6px
  * marigold dot while `newestArrival` is above the arrival this client last
  * acknowledged (see `acknowledgeInboxArrival`). The dot says something new
  * came while the user was elsewhere. An update to a card the user already
@@ -162,13 +162,13 @@ function InboxRow(): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected/_shell" });
   const { client } = controller;
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const { onTheClock, newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
+  const { waiting, newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
   const acknowledgedArrival = useSyncExternalStore(subscribeInboxArrival, () =>
     readAcknowledgedInboxArrival(controller.url, username),
   );
   const hasNewArrival = newestArrival > acknowledgedArrival;
   const description = [
-    onTheClock > 0 ? `${String(onTheClock)} waiting` : null,
+    waiting > 0 ? `${String(waiting)} waiting` : null,
     hasNewArrival ? "something new" : null,
   ].filter((part) => part !== null);
   return (
@@ -181,7 +181,7 @@ function InboxRow(): JSX.Element {
       <IntakeIcon />
       <span>Inbox</span>
       {hasNewArrival && <i className="nav-new" />}
-      {onTheClock > 0 && <InboxCount value={onTheClock} />}
+      {waiting > 0 && <InboxCount value={waiting} />}
     </Link>
   );
 }

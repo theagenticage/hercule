@@ -33,6 +33,15 @@
   opacity: 1;
   pointer-events: auto;
 }
+.undo-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A line that does not fit even without its title drops Undo's key hint. */
+.undo-line[data-tight] .undo-line-button kbd {
+  display: none;
+}
 .undo-line-button {
   display: inline-flex;
   align-items: center;

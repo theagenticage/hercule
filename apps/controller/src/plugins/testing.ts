@@ -621,6 +621,8 @@ const buildIntakeSignalKind = (word: string, label: string) => ({
   word,
   label,
   description: `${label}, as the fixture describes it.`,
+  noun: word,
+  asks: true,
   from: [INTAKE_FIXTURE.opened],
   rule: '"no"',
   guidance: "Never raised.",

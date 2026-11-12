@@ -12,7 +12,7 @@ import { describeCardTrust, describeCardWait, type CardWait } from "./card-wait"
 /**
  * Which moves the open card offers:
  *
- * - `free`: Take it and Dismiss.
+ * - `free`: Take on and Dismiss.
  * - `task`: the card has a Task, so its only move is to see that Task.
  * - `off`: the card's plugin is not active, so no move can run. `reason` says
  *   why, in words for the card.

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildInbox } from "@hercule/client-core/inbox/testing";
+import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
 import { buildBoard, buildCard, buildPlace, buildSummary } from "@hercule/client-core/work/testing";
 import type { BoardStage, WorkBoard, WorkCard } from "@hercule/contract";
 import {
@@ -516,13 +516,12 @@ describe("the Work screen's keys", () => {
     const user = userEvent.setup();
     await openWork({
       handlers: {
-        "GET /api/v1/external-entities/inbox": { body: buildInbox([]) },
-        "GET /api/v1/external-entities/inbox/count": { body: buildInbox([]).counts },
+        "GET /api/v1/external-entities/inbox/count": { body: buildInboxCounts() },
       },
     });
     await user.click(await screen.findByRole("link", { name: /^Inbox/ }));
     await waitFor(() => {
-      expect(document.querySelector(".inbox-desk")).not.toBeNull();
+      expect(document.querySelector(".ib")).not.toBeNull();
     });
 
     // The click leaves focus on the sidebar row, which is not the page.

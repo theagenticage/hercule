@@ -355,8 +355,12 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
     const entities = yield* ExternalEntityService;
     const handoffs = yield* ExternalEntityHandoffs;
     return handlers
-      .handle("queryInbox", () => withApiErrors(entities.queryInbox()))
+      .handle("queryInbox", ({ payload }) => withApiErrors(entities.queryInbox(payload)))
       .handle("countInbox", () => withApiErrors(entities.countInbox()))
+      .handle("readInboxOutline", () => withApiErrors(entities.readInboxOutline()))
+      .handle("suggestInboxValues", ({ payload }) =>
+        withApiErrors(entities.suggestInboxValues(payload)),
+      )
       .handle("search", ({ query }) => withApiErrors(entities.search(query)))
       .handle("listSuggestions", ({ query }) => withApiErrors(entities.listSuggestions(query)))
       .handle("read", ({ params }) => withApiErrors(entities.read(params.id)))
@@ -368,8 +372,8 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
         withApiErrors(handoffs.handOff(params.id, payload)),
       )
       .handle("undoHandOff", ({ params }) => withApiErrors(handoffs.undoHandOff(params.runId)))
-      .handle("dismiss", ({ params }) => withApiErrors(entities.dismiss(params.id)))
-      .handle("restore", ({ params }) => withApiErrors(entities.restore(params.id)))
+      .handle("dismiss", ({ payload }) => withApiErrors(entities.dismiss(payload)))
+      .handle("restore", ({ payload }) => withApiErrors(entities.restore(payload)))
       .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
       .handle("link", ({ payload }) => withApiErrors(entities.link(payload)))
       .handle("unlink", ({ payload }) => withApiErrors(entities.unlink(payload)));

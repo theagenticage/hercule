@@ -5,7 +5,8 @@
  *
  * - what a reconcile stores: first sight, several Connections, which one wins
  *   the shared fields, partial records, access, a deleted Connection
- * - the Inbox: counts, the arrival counter, dismissal, places and context
+ * - the Inbox: membership, counts, the arrival counter and dismissal; the places and
+ *   context above a thing
  * - what a Connection is asked to read (`listWanted`), and failed reads
  * - the sweep that prunes
  *
@@ -14,18 +15,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Statement from "effect/sql/Statement";
-import {
-  Inbox,
-  MAX_CONTEXT_DEPTH,
-  MAX_CONTEXT_PARENTS,
-  MAX_ENTITY_ANCESTORS,
-  MAX_INBOX_CARDS,
-  MAX_INBOX_PLACES,
-} from "@hercule/contract";
+import { MAX_CONTEXT_DEPTH, MAX_CONTEXT_PARENTS, MAX_ENTITY_ANCESTORS } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
@@ -154,6 +147,7 @@ const environment = (
 ) => ({
   now: at(minutes),
   activePluginIds,
+  askingKinds: [],
 });
 
 /** Adds `changedRefs` to what a write changed: the refs of the entities it names, sorted. */
@@ -218,11 +212,60 @@ const run = <A>(
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
-const readInbox = (repository: Repository, minutes: number) =>
-  repository.queryInbox(environment(minutes));
+/** The environment of an Inbox read: no signal kinds, so nothing asks and no saved query is declared. */
+const inboxEnvironment = (minutes: number) => ({
+  ...environment(minutes),
+  signalKinds: [],
+  savedQueries: [],
+  askingKinds: [],
+});
 
-const cardRefs = (inbox: { readonly cards: ReadonlyArray<{ readonly ref: string }> }) =>
-  inbox.cards.map((card) => card.ref);
+/** Reads the whole Inbox, the latest change first. */
+const readInbox = (repository: Repository, minutes: number) =>
+  repository.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
+
+const countInbox = (repository: Repository, minutes: number) =>
+  repository.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
+
+/** Reads the arrival number a thing took, or null when it took none. */
+const arrivalOf = (sql: SqlClient.SqlClient, ref: string) =>
+  Effect.map(
+    sql<{ readonly arrival_sequence: number | null }>`
+      SELECT arrival_sequence FROM external_entities WHERE ref = ${ref}`,
+    (rows) => rows[0]?.arrival_sequence ?? null,
+  );
+
+/** The most places a read of context returns in these tests. */
+const MAX_PLACES = 500;
+
+/** Reads what lies above one thing, as a detail reads it. */
+const readAbove = (repository: Repository, ref: string, minutes: number) =>
+  Effect.gen(function* () {
+    const context = yield* repository.readContext({
+      starts: [ref],
+      maxAncestors: MAX_ENTITY_ANCESTORS,
+      maxPlaces: MAX_PLACES,
+      environment: environment(minutes),
+    });
+    return {
+      ancestors: context.ancestors.get(ref) ?? [],
+      contextComplete: context.contextComplete.get(ref),
+      places: context.places,
+      edges: context.edges,
+      latestChange: context.latestChanges.get(ref),
+    };
+  });
+
+/** Reads the highest arrival number any thing took: the counter's last number that is still in a row. */
+const latestArrival = (sql: SqlClient.SqlClient) =>
+  Effect.map(
+    sql<{ readonly last: number }>`
+      SELECT COALESCE(MAX(arrival_sequence), 0) AS last FROM external_entities`,
+    (rows) => rows[0]!.last,
+  );
+
+const thingRefs = (inbox: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
+  inbox.things.map((thing) => thing.ref);
 
 const countRows = (sql: SqlClient.SqlClient, table: string) =>
   Effect.map(
@@ -258,30 +301,29 @@ const linkTaskToRef = (ref: string, minutes: number, stage: "planned" | "done" =
   });
 
 describe("reconcile: first sight and several Connections", () => {
-  it("stores a thing seen for the first time as a card, with its first arrival number", async () => {
-    const { changes, inbox } = await run(({ repository, reconcile }) =>
+  it("stores a thing seen for the first time as a row, with its first arrival number", async () => {
+    const { changes, inbox, counts } = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         const changes = yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 5 });
-        return { changes, inbox: yield* readInbox(repository, 6) };
+        return {
+          changes,
+          inbox: yield* readInbox(repository, 6),
+          counts: yield* countInbox(repository, 6),
+        };
       }),
     );
     expect(changes.changedRefs).toEqual([ticketRef("t1")]);
-    expect(inbox.cards).toHaveLength(1);
-    expect(inbox.cards[0]).toMatchObject({
+    expect(inbox.things).toHaveLength(1);
+    expect(inbox.things[0]).toMatchObject({
       ref: ticketRef("t1"),
-      concerns: ["assigned"],
-      side: "requests",
       access: "ok",
       stale: false,
-      firstObservedAt: at(5),
-      waitingSince: at(5),
+      askCount: 0,
     });
-    expect(inbox.counts).toEqual({
-      onTheClock: 1,
-      requests: 1,
-      withSomeoneElse: 0,
-      newestArrival: 1,
-    });
+    expect(inbox.things[0]!.waitingSince).toBeUndefined();
+    expect(counts.savedQueries.find((query) => query.id === "everything")!.count).toBe(1);
+    // Nothing asks, so the thing is not among the ones someone waits on.
+    expect(counts.savedQueries.find((query) => query.id === "waits")!.count).toBe(0);
   });
 
   it("keeps a thing listed while another Connection still lists it, and off the Inbox once none does", async () => {
@@ -300,9 +342,10 @@ describe("reconcile: first sight and several Connections", () => {
         return { both, onlyB, none, standings };
       }),
     );
-    expect(steps.both.cards[0]!.concerns).toEqual(["assigned", "review-requested"]);
-    expect(steps.onlyB.cards[0]!.concerns).toEqual(["review-requested"]);
-    expect(steps.none.cards).toEqual([]);
+    expect(steps.both.things[0]!.accounts.slice().sort()).toEqual([ACCOUNT_A, ACCOUNT_B]);
+    // A can still read the thing, so it still observes it; its concern is gone but the thing stays.
+    expect(steps.onlyB.things[0]!.accounts).toContain(ACCOUNT_B);
+    expect(steps.none.things).toEqual([]);
     // The row stays: an empty scan empties concerns and removes nothing.
     expect(steps.standings.get(ticketRef("t1"))).toEqual({ standing: "known", taskId: undefined });
   });
@@ -315,7 +358,7 @@ describe("reconcile: first sight and several Connections", () => {
         return yield* readInbox(repository, 3);
       }),
     );
-    expect(cardRefs(afterPartial)).toEqual([ticketRef("t1"), ticketRef("t2")]);
+    expect(thingRefs(afterPartial)).toEqual([ticketRef("t1"), ticketRef("t2")]);
   });
 
   it("records a loop as a conflict and applies the rest", async () => {
@@ -334,7 +377,7 @@ describe("reconcile: first sight and several Connections", () => {
     );
     expect(steps.changes.conflicts).toHaveLength(1);
     expect(steps.changes.changedRefs).toEqual([epicRef("a"), epicRef("b")]);
-    expect(cardRefs(steps.inbox)).toEqual([epicRef("a"), epicRef("b")]);
+    expect(thingRefs(steps.inbox)).toEqual([epicRef("a"), epicRef("b")]);
   });
 });
 
@@ -399,7 +442,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
         );
         yield* report(context);
         const inbox = yield* readInbox(context.repository, 30);
-        return inbox.cards[0]!.title;
+        return inbox.things[0]!.title;
       }),
     );
 
@@ -466,7 +509,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
             ],
             { minutes: 10 },
           );
-          return (yield* readInbox(context.repository, 30)).cards[0]!.title;
+          return (yield* readInbox(context.repository, 30)).things[0]!.title;
         }),
       );
       expect(title).toBe(expected);
@@ -509,7 +552,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
           actor: `plugin:${PLUGIN}`,
           environment: environment(10, active),
         });
-        return (yield* readInbox(repository, 30)).cards[0]!.title;
+        return (yield* readInbox(repository, 30)).things[0]!.title;
       }),
     );
     expect(title).toBe("Second");
@@ -530,7 +573,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
         yield* reconcile(ACCOUNT_B, [ticket("t1", { title: "Second", sourceUpdatedAt: at(5) })], {
           minutes: 10,
         });
-        return (yield* readInbox(repository, 30)).cards[0]!.title;
+        return (yield* readInbox(repository, 30)).things[0]!.title;
       }),
     );
     expect(title).toBe("Second");
@@ -575,7 +618,7 @@ describe("reconcile: writing only what changed", () => {
       }),
     );
     expect(outcome.changes.changedRefs).toEqual([ticketRef("t1")]);
-    expect(outcome.inbox.cards[0]!.title).toBe("Renamed");
+    expect(outcome.inbox.things[0]!.title).toBe("Renamed");
   });
 
   it("reports the Tasks that link a changed ref", async () => {
@@ -616,7 +659,7 @@ describe("access and Connections that go away", () => {
             (changes) => named(sql, changes),
           );
         const read = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.cards[0]!.access);
+          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.access);
         yield* missing(ACCOUNT_A, "inaccessible", 3);
         const oneRefused = yield* read(4);
         const second = yield* missing(ACCOUNT_B, "inaccessible", 5);
@@ -637,7 +680,7 @@ describe("access and Connections that go away", () => {
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1", { title: "Known" })], { minutes: 1 });
         yield* sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(ACCOUNT_A)}`;
-        return (yield* readInbox(repository, 2)).cards[0]!;
+        return (yield* readInbox(repository, 2)).things[0]!;
       }),
     );
     expect(card).toMatchObject({ title: "Known", access: "ok", stale: true });
@@ -658,7 +701,7 @@ describe("access and Connections that go away", () => {
         yield* sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(ACCOUNT_B)}`;
         const epicCard = (minutes: number) =>
           Effect.map(readInbox(repository, minutes), (inbox) =>
-            inbox.cards.find((card) => card.ref === epicRef("e1")),
+            inbox.things.find((card) => card.ref === epicRef("e1")),
           );
         const lost = yield* repository.reportMissing({
           connectionId: ACCOUNT_A,
@@ -720,7 +763,7 @@ describe("access and Connections that go away", () => {
         };
       }),
     );
-    expect(outcome.inbox.cards).toEqual([]);
+    expect(outcome.inbox.things).toEqual([]);
     expect(outcome.standings.has(ticketRef("t1"))).toBe(true);
     expect(outcome.presenters).toEqual([{ presented_by: null }]);
     expect(outcome.observations).toBe(0);
@@ -734,7 +777,7 @@ describe("access and Connections that go away", () => {
         // The inventory no longer lists it, but its Task keeps it on the Inbox and wanted.
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         const observedAt = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.cards[0]!.observedAt);
+          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.observedAt);
         const wanted = yield* repository.listWanted({
           connectionId: ACCOUNT_A,
           refPrefix: TICKET_PREFIX,
@@ -771,7 +814,7 @@ describe("observedAt of a listed record with no concerns", () => {
     const times = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         const observedAt = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.cards[0]!.observedAt);
+          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.observedAt);
         yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: [] })], { minutes: 1 });
         yield* linkTaskToRef(ticketRef("t1"), 2);
         // The title changes in a later complete scan: the card shows facts read at minute 10.
@@ -824,20 +867,21 @@ describe("a complete inventory is the whole kind", () => {
 
 describe("partial records", () => {
   it("makes a record with no card, then fills it in when the full record arrives", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+    const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [partialTicket("t1", "Only a title")], { minutes: 1 });
         const first = yield* readInbox(repository, 2);
         const standing = yield* repository.readStandings([ticketRef("t1")]);
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 3 });
-        return { first, standing, second: yield* readInbox(repository, 4) };
+        const arrival = yield* arrivalOf(sql, ticketRef("t1"));
+        return { first, standing, second: yield* readInbox(repository, 4), arrival };
       }),
     );
-    expect(steps.first.cards).toEqual([]);
+    expect(steps.first.things).toEqual([]);
     expect(steps.standing.has(ticketRef("t1"))).toBe(true);
-    expect(steps.second.cards[0]).toMatchObject({ title: "Ticket t1", identifier: "T1" });
+    expect(steps.second.things[0]).toMatchObject({ title: "Ticket t1", identifier: "T1" });
     // The partial record had no concern, so the full one is an arrival.
-    expect(steps.second.counts.newestArrival).toBe(1);
+    expect(steps.arrival).toBe(1);
   });
 
   it("clears no known field and no concern when a partial read arrives after a full one", async () => {
@@ -855,13 +899,12 @@ describe("partial records", () => {
           observed: [partialTicket("t1", "Partial title")],
           environment: environment(2),
         });
-        return (yield* readInbox(repository, 3)).cards[0]!;
+        return (yield* readInbox(repository, 3)).things[0]!;
       }),
     );
     expect(card).toMatchObject({
       title: "Full title",
       url: "https://tracker.example/t1",
-      concerns: ["assigned"],
     });
   });
 
@@ -1010,7 +1053,7 @@ describe("places and context", () => {
         const relations = { complete: true, partOf: [PROJECT], linked: [] };
         yield* context.reconcile(ACCOUNT_A, [ticket("t1", { relations })], { minutes: 1 });
         yield* extra(context);
-        return yield* readInbox(context.repository, 5);
+        return yield* readAbove(context.repository, ticketRef("t1"), 5);
       }),
     );
 
@@ -1018,7 +1061,7 @@ describe("places and context", () => {
     const inbox = await withProject(({ reconcile }) =>
       reconcile(ACCOUNT_A, [project()], { minutes: 2, kind: PROJECT_KIND }),
     );
-    expect(inbox.cards[0]).toMatchObject({ ancestors: [PROJECT], contextComplete: true });
+    expect(inbox).toMatchObject({ ancestors: [PROJECT], contextComplete: true });
     expect(inbox.places).toEqual([
       {
         ref: PROJECT,
@@ -1034,7 +1077,7 @@ describe("places and context", () => {
 
   it("says the context is incomplete when the parent was never read", async () => {
     const inbox = await withProject(() => Effect.void);
-    expect(inbox.cards[0]).toMatchObject({ ancestors: [PROJECT], contextComplete: false });
+    expect(inbox).toMatchObject({ ancestors: [PROJECT], contextComplete: false });
     expect(inbox.places).toEqual([]);
   });
 
@@ -1050,7 +1093,7 @@ describe("places and context", () => {
         });
       }),
     );
-    expect(inbox.cards[0]).toMatchObject({ contextComplete: false });
+    expect(inbox.contextComplete).toBe(false);
     expect(inbox.places).toEqual([
       {
         ref: PROJECT,
@@ -1062,11 +1105,11 @@ describe("places and context", () => {
     ]);
   });
 
-  it("cuts the places at the reply bound when every card has its own parents", async () => {
+  it("cuts the places at the bound when every thing has its own parents", async () => {
     const cardCount = 101;
     const parentsPerCard = MAX_ENTITY_ANCESTORS;
     const parentRef = (card: number, parent: number) => `acme-tracker:project:p${card}-${parent}`;
-    const inbox = await run(({ repository, reconcile }) =>
+    const context = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         const cards = Array.from({ length: cardCount }, (_, card) =>
           ticket(`t${String(card).padStart(3, "0")}`, {
@@ -1086,22 +1129,26 @@ describe("places and context", () => {
           ),
         );
         yield* reconcile(ACCOUNT_A, projects, { minutes: 2, kind: PROJECT_KIND });
-        return yield* readInbox(repository, 3);
+        return yield* repository.readContext({
+          starts: cards.map((card) => card.observation.ref),
+          maxAncestors: parentsPerCard,
+          maxPlaces: MAX_PLACES,
+          environment: environment(3),
+        });
       }),
     );
-    expect(() => Schema.encodeSync(Inbox)(inbox)).not.toThrow();
-    expect(inbox.places).toHaveLength(MAX_INBOX_PLACES);
-    const placeRefs = new Set(inbox.places.map((place) => place.ref));
-    const cardRefSet = new Set(cardRefs(inbox));
-    // A card that lost an ancestor lists none it cannot show, and says its context is incomplete.
-    const cut = inbox.cards.filter((card) => card.ancestors.length < parentsPerCard);
+    expect(context.places).toHaveLength(MAX_PLACES);
+    const placeRefs = new Set(context.places.map((place) => place.ref));
+    const startRefs = new Set(context.ancestors.keys());
+    // A thing that lost an ancestor lists none it cannot show, and says its context is incomplete.
+    const cut = [...context.ancestors].filter(([, ancestors]) => ancestors.length < parentsPerCard);
     expect(cut.length).toBeGreaterThan(0);
-    expect(cut.every((card) => !card.contextComplete)).toBe(true);
-    for (const card of inbox.cards) {
-      expect(card.ancestors.every((ref) => placeRefs.has(ref))).toBe(true);
+    expect(cut.every(([start]) => context.contextComplete.get(start) === false)).toBe(true);
+    for (const [, ancestors] of context.ancestors) {
+      expect(ancestors.every((ref) => placeRefs.has(ref))).toBe(true);
     }
-    for (const edge of inbox.edges) {
-      const known = (ref: string) => placeRefs.has(ref) || cardRefSet.has(ref);
+    for (const edge of context.edges) {
+      const known = (ref: string) => placeRefs.has(ref) || startRefs.has(ref);
       expect(known(edge.fromRef) && known(edge.toRef)).toBe(true);
     }
   });
@@ -1167,7 +1214,7 @@ describe("readContext", () => {
           starts,
           alsoPlaces: options.alsoPlaces ?? [],
           maxAncestors: options.maxAncestors ?? MAX_ENTITY_ANCESTORS,
-          maxPlaces: options.maxPlaces ?? MAX_INBOX_PLACES,
+          maxPlaces: options.maxPlaces ?? MAX_PLACES,
           environment: environment(3, options.activePluginIds),
         });
       }),
@@ -1275,13 +1322,28 @@ describe("listSuggestions under a context", () => {
           rows.map((row) => row.ref);
         return {
           limited: refsOf(
-            yield* repository.listSuggestions({ contextRef: PROJECT, limit: 3, now: at(3) }),
+            yield* repository.listSuggestions({
+              contextRef: PROJECT,
+              limit: 3,
+              now: at(3),
+              askingKinds: [],
+            }),
           ),
           all: refsOf(
-            yield* repository.listSuggestions({ contextRef: PROJECT, limit: 10, now: at(3) }),
+            yield* repository.listSuggestions({
+              contextRef: PROJECT,
+              limit: 10,
+              now: at(3),
+              askingKinds: [],
+            }),
           ),
           unscoped: refsOf(
-            yield* repository.listSuggestions({ contextRef: undefined, limit: 10, now: at(3) }),
+            yield* repository.listSuggestions({
+              contextRef: undefined,
+              limit: 10,
+              now: at(3),
+              askingKinds: [],
+            }),
           ),
         };
       }),
@@ -1297,9 +1359,9 @@ describe("listSuggestions under a context", () => {
   });
 });
 
-describe("the Inbox: membership, sides and counts", () => {
+describe("the Inbox: membership and counts", () => {
   it("counts one thing seen by two accounts for two concerns once", async () => {
-    const inbox = await run(({ repository, reconcile }) =>
+    const { inbox, counts } = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: ["assigned", "opened"] })], {
           minutes: 1,
@@ -1307,88 +1369,66 @@ describe("the Inbox: membership, sides and counts", () => {
         yield* reconcile(ACCOUNT_B, [ticket("t1", { concerns: ["review-requested"] })], {
           minutes: 2,
         });
-        return yield* readInbox(repository, 3);
+        return { inbox: yield* readInbox(repository, 3), counts: yield* countInbox(repository, 3) };
       }),
     );
-    expect(inbox.cards).toHaveLength(1);
-    expect(inbox.counts).toMatchObject({ onTheClock: 1, requests: 1, withSomeoneElse: 0 });
+    expect(inbox.things).toHaveLength(1);
+    expect(inbox.total).toBe(1);
+    expect(counts.savedQueries.find((query) => query.id === "everything")!.count).toBe(1);
+    expect(counts.sources).toMatchObject([{ source: PLUGIN, count: 1 }]);
   });
 
-  it("does not count a slow kind on the clock, and puts it under Ongoing", async () => {
+  it("lists a slow kind beside a fast one", async () => {
     const inbox = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [epic("e1")], { minutes: 1, kind: EPIC_KIND });
         return yield* readInbox(repository, 2);
       }),
     );
-    expect(inbox.cards[0]!.side).toBe("ongoing");
-    expect(inbox.counts).toEqual({
-      onTheClock: 0,
-      requests: 0,
-      withSomeoneElse: 0,
-      newestArrival: 0,
-    });
+    expect(thingRefs(inbox)).toEqual([epicRef("e1")]);
   });
 
-  it("moves a card with a Task under With someone else, and counts it there only", async () => {
+  it("puts a thing with a Task in With Hercule, and keeps the others out of it", async () => {
     const steps = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
         const task = yield* linkTaskToRef(ticketRef("t1"), 2);
         const inbox = yield* readInbox(repository, 3);
-        const counts = yield* repository.countInbox(at(3));
-        return { task, inbox, counts };
+        const held = yield* repository.queryInbox(inboxEnvironment(3), {
+          list: { savedQuery: "with-hercule" },
+        });
+        const counts = yield* countInbox(repository, 3);
+        return { task, inbox, held, counts };
       }),
     );
-    const byRef = new Map(steps.inbox.cards.map((card) => [card.ref, card]));
-    expect(byRef.get(ticketRef("t1"))).toMatchObject({
-      side: "with-someone-else",
-      taskId: steps.task.id,
-    });
-    expect(byRef.get(ticketRef("t2"))!.side).toBe("requests");
-    expect(steps.counts).toEqual(steps.inbox.counts);
-    expect(steps.counts).toMatchObject({ onTheClock: 1, requests: 1, withSomeoneElse: 1 });
-  });
-
-  it("keeps a card on the Inbox for its live Task alone, with no concern left", async () => {
-    const steps = await run(({ repository, reconcile }) =>
-      Effect.gen(function* () {
-        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
-        yield* linkTaskToRef(ticketRef("t1"), 2);
-        yield* reconcile(ACCOUNT_A, [], { minutes: 3 });
-        return yield* readInbox(repository, 4);
-      }),
-    );
-    expect(steps.cards.map((card) => [card.ref, card.side, card.concerns])).toEqual([
-      [ticketRef("t1"), "with-someone-else", []],
+    const byRef = new Map(steps.inbox.things.map((thing) => [thing.ref, thing]));
+    expect(byRef.get(ticketRef("t1"))).toMatchObject({ taskId: steps.task.id });
+    expect(byRef.get(ticketRef("t2"))!.taskId).toBeUndefined();
+    expect(thingRefs(steps.held)).toEqual([ticketRef("t1")]);
+    expect(steps.counts.savedQueries.map((query) => [query.id, query.count])).toEqual([
+      ["waits", 0],
+      ["mine", 0],
+      ["updates", 1],
+      ["with-hercule", 1],
+      ["everything", 2],
     ]);
   });
 
-  it("lists the oldest first, and caps the cards while the counts cover all of them", async () => {
-    const total = MAX_INBOX_CARDS + 1;
-    const inbox = await run(({ repository, reconcile }) =>
+  it("keeps a thing on the Inbox for its live Task alone, with no concern left", async () => {
+    const steps = await run(({ repository, reconcile }) =>
       Effect.gen(function* () {
-        const names = Array.from(
-          { length: total },
-          (_, index) => `t${String(index).padStart(4, "0")}`,
-        );
-        yield* reconcile(
-          ACCOUNT_A,
-          names.map((name) => ticket(name)),
-          { minutes: 1 },
-        );
-        return yield* readInbox(repository, 2);
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
+        const task = yield* linkTaskToRef(ticketRef("t1"), 2);
+        yield* reconcile(ACCOUNT_A, [], { minutes: 3 });
+        return { task, inbox: yield* readInbox(repository, 4) };
       }),
     );
-    expect(inbox.cards).toHaveLength(MAX_INBOX_CARDS);
-    expect(inbox.truncated).toBe(true);
-    expect(inbox.counts.requests).toBe(total);
-    expect(inbox.counts.onTheClock).toBe(total);
-    const ids = inbox.cards.map((card) => card.id);
-    expect(ids).toEqual([...ids].sort());
+    expect(steps.inbox.things.map((thing) => [thing.ref, thing.taskId, thing.accounts])).toEqual([
+      [ticketRef("t1"), steps.task.id, [ACCOUNT_A]],
+    ]);
   });
 
-  it("sends the same number of statements for 10 cards as for 100", async () => {
+  it("sends the same number of statements for 10 things as for 100", async () => {
     const countStatements = (cards: number) =>
       run(({ repository, reconcile }) =>
         Effect.gen(function* () {
@@ -1413,40 +1453,31 @@ describe("the Inbox: membership, sides and counts", () => {
       );
     const small = await countStatements(10);
     const large = await countStatements(100);
-    expect(small.inbox.cards).toHaveLength(10);
-    expect(large.inbox.cards).toHaveLength(100);
+    expect(small.inbox.things).toHaveLength(10);
+    expect(large.inbox.things).toHaveLength(100);
     expect(large.statements).toHaveLength(small.statements.length);
-    // The counts, who rides, the cards, the walk up, the places, the observations, the
-    // signals, the latest changes and the links of the page, then the open signal kinds,
-    // the acting Connections and the runnable workflows (and one more for the Resources
-    // their workspaces name, when there are any).
-    expect(small.statements.length).toBeLessThanOrEqual(12);
+    expect(small.statements.length).toBeLessThanOrEqual(14);
   });
 });
 
 describe("the arrival counter", () => {
-  it("rises for a new card and a concern that returns, and for nothing else", async () => {
-    const newest = await run(({ repository, reconcile }) =>
+  it("rises for a new thing and a concern that returns, and for nothing else", async () => {
+    const newest = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
-        const read = (minutes: number) =>
-          Effect.map(
-            repository.countInbox(at(minutes)),
-            (counts) => [minutes, counts.newestArrival] as const,
-          );
-        const steps: Array<readonly [number, number]> = [];
+        const steps: Array<number> = [];
         yield* reconcile(ACCOUNT_A, [ticket("t1", { sourceUpdatedAt: at(1) })], { minutes: 1 });
-        steps.push(yield* read(1));
+        steps.push(yield* latestArrival(sql));
         // A refresh, a change of facts and a second Connection's concern are not arrivals.
         yield* repository.refresh({
           connectionId: ACCOUNT_A,
           observed: [ticket("t1", { sourceUpdatedAt: at(1) })],
           environment: environment(2),
         });
-        steps.push(yield* read(2));
+        steps.push(yield* latestArrival(sql));
         yield* reconcile(ACCOUNT_A, [ticket("t1", { title: "Renamed", sourceUpdatedAt: at(3) })], {
           minutes: 3,
         });
-        steps.push(yield* read(3));
+        steps.push(yield* latestArrival(sql));
         yield* reconcile(
           ACCOUNT_B,
           [ticket("t1", { concerns: ["opened"], sourceUpdatedAt: at(3) })],
@@ -1454,14 +1485,14 @@ describe("the arrival counter", () => {
             minutes: 4,
           },
         );
-        steps.push(yield* read(4));
+        steps.push(yield* latestArrival(sql));
         // The concern leaves and returns: a new arrival.
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         yield* reconcile(ACCOUNT_B, [], { minutes: 5 });
         yield* reconcile(ACCOUNT_A, [ticket("t1", { sourceUpdatedAt: at(3), title: "Renamed" })], {
           minutes: 6,
         });
-        steps.push(yield* read(6));
+        steps.push(yield* latestArrival(sql));
         // A second ticket.
         yield* reconcile(
           ACCOUNT_A,
@@ -1470,82 +1501,42 @@ describe("the arrival counter", () => {
             minutes: 7,
           },
         );
-        steps.push(yield* read(7));
-        return steps.map(([, value]) => value);
+        steps.push(yield* latestArrival(sql));
+        return steps;
       }),
     );
     expect(newest).toEqual([1, 1, 1, 1, 2, 3]);
   });
 
-  it("does not rise when a card comes back by restore, and never goes back after a prune", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+  it("does not rise when a thing comes back by restore, and never goes back after a prune", async () => {
+    const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
         const inbox = yield* readInbox(repository, 2);
-        const id = inbox.cards[0]!.id;
-        yield* repository.dismiss(id, "user", at(3));
-        yield* repository.restore(id, "user", at(4));
-        const afterRestore = yield* repository.countInbox(at(4));
+        const id = inbox.things[0]!.id;
+        yield* repository.dismiss([id], "user", at(3));
+        yield* repository.restore([id], "user", at(4));
+        const afterRestore = yield* latestArrival(sql);
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         yield* repository.pruneEntities(atDay(40));
         yield* reconcile(ACCOUNT_A, [ticket("t2")], { minutes: 41 * 24 * 60 });
-        return { afterRestore, last: yield* repository.countInbox(at(41 * 24 * 60)) };
+        return { afterRestore, last: yield* latestArrival(sql) };
       }),
     );
-    expect(steps.afterRestore.newestArrival).toBe(1);
+    expect(steps.afterRestore).toBe(1);
     // The pruned ticket held number 1, and the counter went on from there.
-    expect(steps.last.newestArrival).toBe(2);
-  });
-});
-
-describe("the sentence of a card", () => {
-  const concernReasons = {
-    assigned: { say: "Assigned to you", tone: "plain" as const },
-    "review-requested": { say: "Mei asked for your review", tone: "plain" as const },
-  };
-
-  it("comes from the kind's reason for the first concern when the source names none, and the source's own wins", async () => {
-    const reasons = await run(({ repository, reconcile }) =>
-      Effect.gen(function* () {
-        const slots = {
-          noun: "Ticket",
-          card: "compact",
-          pace: "fast",
-          patience: 24,
-          identifier: "T",
-          facts: [],
-          concernReasons,
-        } as const;
-        yield* reconcile(
-          ACCOUNT_A,
-          [
-            ticket("t1", { slots, concerns: ["review-requested"] }),
-            ticket("t2", {
-              slots: { ...slots, reason: { say: "Checks failed", tone: "bad" } },
-              concerns: ["assigned"],
-            }),
-          ],
-          { minutes: 1 },
-        );
-        const inbox = yield* readInbox(repository, 2);
-        return inbox.cards.map((card) => [card.ref, card.reason?.say]);
-      }),
-    );
-    expect(reasons).toEqual([
-      [ticketRef("t1"), "Mei asked for your review"],
-      [ticketRef("t2"), "Checks failed"],
-    ]);
+    expect(steps.last).toBe(2);
   });
 });
 
 describe("dismissal", () => {
-  it("keeps a dismissed card out through a new concern, its concerns emptying, 30 days and a concern returning, until restore", async () => {
+  it("keeps a dismissed thing out through a new concern, its concerns emptying, 30 days and a concern returning, until restore", async () => {
     const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
-        const id = (yield* readInbox(repository, 2)).cards[0]!.id;
-        const dismissed = yield* repository.dismiss(id, "user", at(3));
-        const again = yield* repository.dismiss(id, "user", at(4));
+        const id = (yield* readInbox(repository, 2)).things[0]!.id;
+        const dismissed = yield* repository.dismiss([id], "user", at(3));
+        const again = yield* repository.dismiss([id], "user", at(4));
         yield* reconcile(
           ACCOUNT_A,
           [ticket("t1", { concerns: ["assigned", "review-requested"] })],
@@ -1557,16 +1548,19 @@ describe("dismissal", () => {
         yield* reconcile(ACCOUNT_A, [], { minutes: 7 });
         const pruned = yield* repository.pruneEntities(atDay(31));
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 32 * 24 * 60 });
-        const afterReturn = yield* repository.queryInbox(environment(32 * 24 * 60 + 1));
-        const restored = yield* repository.restore(id, "session:abc", atDay(33));
+        const afterReturn = yield* readInbox(repository, 32 * 24 * 60 + 1);
+        const restored = yield* repository.restore([id], "session:abc", atDay(33));
         const restoredBy = yield* sql<{
           readonly restored_by: string | null;
           readonly dismissed_by: string | null;
         }>`
           SELECT restored_by, dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
-        const afterRestore = yield* repository.queryInbox(environment(33 * 24 * 60 + 1));
-        const unknown = yield* repository.dismiss(uuidToString(mintUuid()), "user", at(1));
+        const afterRestore = yield* readInbox(repository, 33 * 24 * 60 + 1);
+        const unknownId = uuidToString(mintUuid());
+        const unknown = yield* repository.dismiss([id, unknownId], "user", at(1));
         return {
+          id,
+          unknownId,
           dismissed,
           again,
           afterNewConcern,
@@ -1579,15 +1573,20 @@ describe("dismissal", () => {
         };
       }),
     );
-    expect(steps.dismissed).toEqual(Option.some({ ref: ticketRef("t1"), changed: true }));
-    expect(steps.again).toEqual(Option.some({ ref: ticketRef("t1"), changed: false }));
-    expect(steps.afterNewConcern.cards).toEqual([]);
+    const moved = (changed: boolean) => ({
+      moved: [{ id: steps.id, ref: ticketRef("t1"), changed }],
+    });
+    expect(steps.dismissed).toEqual(moved(true));
+    // Dismissing again moves the dismissal to the new time.
+    expect(steps.again).toEqual(moved(true));
+    expect(steps.afterNewConcern.things).toEqual([]);
     expect(steps.pruned.entities).toBe(0);
-    expect(steps.afterReturn.cards).toEqual([]);
-    expect(steps.restored).toEqual(Option.some({ ref: ticketRef("t1"), changed: true }));
+    expect(steps.afterReturn.things).toEqual([]);
+    expect(steps.restored).toEqual(moved(true));
     expect(steps.restoredBy).toEqual([{ restored_by: "session:abc", dismissed_by: null }]);
-    expect(cardRefs(steps.afterRestore)).toEqual([ticketRef("t1")]);
-    expect(Option.isNone(steps.unknown)).toBe(true);
+    expect(thingRefs(steps.afterRestore)).toEqual([ticketRef("t1")]);
+    // An unknown id refuses the whole call, naming it.
+    expect(steps.unknown).toEqual({ missing: [steps.unknownId] });
   });
 });
 
@@ -1752,6 +1751,7 @@ describe("listWanted and failed reads", () => {
             environment: {
               now: new Date(BASE + seconds * 1000).toISOString(),
               activePluginIds: [PLUGIN],
+              askingKinds: [],
             },
           });
         const asks = (seconds: number) =>
@@ -1775,7 +1775,11 @@ describe("listWanted and failed reads", () => {
         yield* repository.refresh({
           connectionId: ACCOUNT_B,
           observed: [ticket("t1", { concerns: [] })],
-          environment: { now: new Date(BASE + 400_000).toISOString(), activePluginIds: [PLUGIN] },
+          environment: {
+            now: new Date(BASE + 400_000).toISOString(),
+            activePluginIds: [PLUGIN],
+            askingKinds: [],
+          },
         });
         yield* fail(500);
         results.push(yield* asks(640)); // the first failure again: 120 s
@@ -1810,11 +1814,11 @@ describe("pruning", () => {
           minutes: 0,
           kind: PROJECT_KIND,
         });
-        const dismissedId = (yield* readInbox(repository, 1)).cards.find(
+        const dismissedId = (yield* readInbox(repository, 1)).things.find(
           (card) => card.ref === ticketRef("dismissed"),
         )!.id;
         yield* linkTaskToRef(ticketRef("linked"), 1, "done");
-        yield* repository.dismiss(dismissedId, "user", atDay(1));
+        yield* repository.dismiss([dismissedId], "user", atDay(1));
         // Day 1: everything but "concerned" leaves the inventory. "recent" leaves at day 25.
         yield* reconcile(ACCOUNT_A, [ticket("recent"), ticket("concerned", { relations })], {
           minutes: 24 * 60,
@@ -2024,10 +2028,10 @@ describe("what changed outside", () => {
           ],
           environment: environment(3),
         });
-        return yield* readInbox(repository, 4);
+        return yield* readAbove(repository, ticketRef("t1"), 4);
       }),
     );
-    expect(outcome.cards[0]!.latestChange).toEqual({
+    expect(outcome.latestChange).toEqual({
       reason: "moved",
       sentence: { say: "Now In review at the tracker", tone: "good" },
       at: at(3),
@@ -2067,7 +2071,7 @@ describe("what changed outside", () => {
           tasks: sql`SELECT * FROM tasks`,
           claims: countRows(sql, "external_entity_relation_claims"),
         });
-        const cardBefore = (yield* readInbox(repository, 3)).cards[0]!;
+        const cardBefore = (yield* readInbox(repository, 3)).things[0]!;
         const before = yield* counts;
         yield* reconcile(
           ACCOUNT_A,
@@ -2075,16 +2079,14 @@ describe("what changed outside", () => {
           { minutes: 5 },
         );
         const after = yield* counts;
-        const cardAfter = (yield* readInbox(repository, 6)).cards[0]!;
+        const cardAfter = (yield* readInbox(repository, 6)).things[0]!;
         return { task, before, after, cardBefore, cardAfter };
       }),
     );
     expect(outcome.after).toEqual(outcome.before);
     expect(outcome.cardAfter).toMatchObject({
-      side: outcome.cardBefore.side,
       taskId: outcome.task.id,
-      concerns: outcome.cardBefore.concerns,
-      waitingSince: outcome.cardBefore.waitingSince,
+      accounts: outcome.cardBefore.accounts,
     });
   });
 
@@ -2105,7 +2107,7 @@ describe("what changed outside", () => {
             starts: [PROJECT],
             alsoPlaces: [PROJECT],
             maxAncestors: MAX_ENTITY_ANCESTORS,
-            maxPlaces: MAX_INBOX_PLACES,
+            maxPlaces: MAX_PLACES,
             environment: environment(3),
           });
         const readable = (yield* read()).places;
@@ -2128,7 +2130,7 @@ describe("what changed outside", () => {
     expect(places.restricted[0]).not.toHaveProperty("latestChange");
   });
 
-  it("reads the latest change of every card of the Inbox in the same number of statements for 10 cards as for 100", async () => {
+  it("reads the latest change of every thing in the same number of statements for 10 things as for 100", async () => {
     const countStatements = (cards: number) =>
       run(({ repository, reconcile }) =>
         Effect.gen(function* () {
@@ -2144,22 +2146,30 @@ describe("what changed outside", () => {
             { minutes: 3 },
           );
           const statements: Array<string> = [];
-          const inbox = yield* readInbox(repository, 4).pipe(
-            Effect.provideService(Statement.CurrentTransformer, (statement) =>
-              Effect.sync(() => {
-                statements.push(statement.compile()[0]);
-                return statement;
-              }),
-            ),
-          );
-          return { statements, inbox };
+          const context = yield* repository
+            .readContext({
+              starts: names.map((name) => ticketRef(name)),
+              maxAncestors: MAX_ENTITY_ANCESTORS,
+              maxPlaces: MAX_PLACES,
+              environment: environment(4),
+            })
+            .pipe(
+              Effect.provideService(Statement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  statements.push(statement.compile()[0]);
+                  return statement;
+                }),
+              ),
+            );
+          return { statements, context };
         }),
       );
     const small = await countStatements(10);
     const large = await countStatements(100);
-    expect(large.inbox.cards.every((card) => card.latestChange?.reason === "reassigned")).toBe(
-      true,
-    );
+    expect(
+      [...large.context.latestChanges.values()].every((change) => change.reason === "reassigned"),
+    ).toBe(true);
+    expect(large.context.latestChanges.size).toBe(100);
     expect(large.statements).toHaveLength(small.statements.length);
   });
 

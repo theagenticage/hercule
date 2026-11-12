@@ -17,6 +17,7 @@ export { groupByTask } from "./lists";
 export type { EntityLinkPair } from "./entity-facts";
 export {
   LIVE_TASK_LINKS_SQL,
+  buildLiveTaskLinksSql,
   JOINABLE_TASK_SQL,
   taskRepository,
   type BoardTask,

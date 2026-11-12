@@ -1,623 +1,673 @@
 /**
- * The records of the Inbox specimen (inbox.tsx): an Inbox of the invented
- * Northwind Market world, as `externalEntity.queryInbox` would return it at the
+ * The records of the Inbox specimen (inbox.tsx): the invented Northwind
+ * Market world as the controller would answer the Inbox's reads at the
  * specimen's clock, Tuesday 29 September 2026, 09:41 UTC.
  *
- * Three plugins feed it: GitHub, whose pull requests lie in Requests and whose
- * issues lie under Ongoing on the surface of their repository, the invented
- * Quayside, whose purchase orders lie on the surface of their delivery round,
- * with the round's status, its reported progress, its target date and the
- * site it is part of, and the invented Tidewatch, a planning tracker whose
- * tickets lie on the surface of their project, in the section of their
- * milestone.
+ * Three invented-or-public sources feed it: GitHub (pull requests), Tidewatch
+ * (a planning tracker: tickets in projects and teams) and Sentry (issues).
+ * Every person, company and repository is invented.
  *
- * - Ongoing: three surfaces. Storefront web holds issues, one of them under a
- *   second repository too (a pointer there), one with facts that may be old, and
- *   one with a very long title. Two delivery rounds hold orders, one held.
- * - Requests: nine pull requests of every wait, from hours to days, with a
- *   usual reason, a reason with a tone, a status that is not the usual one, and
- *   one of the user's own.
- * - With someone else: two pull requests that have a Task.
- * - Tidewatch: three tickets under the Checkout revamp project (at risk, with
- *   its progress and its target date) in two milestones, one ticket in none, and
- *   a pull request that rides on the first ticket because Tidewatch reports it.
- *   The first ticket is the one the open card specimen opens: it has a resolved
- *   and an open signal, two changes at the source, and a hint from a pull request.
- * - Links: one issue carries a pull request that rides on it (an asking part), a
- *   pull request that has no card of its own (a quiet part) and a Sentry issue
- *   nobody here can read (a locked part), and says how long ago its latest
- *   signal landed. A pull request that mentions another issue in its text shows
- *   a hint, and one that is linked to a pull request with no card says so.
+ * `answerInboxQuery` plays the controller's `queryInbox`: it picks the things
+ * of a saved query or a Browse value, applies the search's clauses and text,
+ * and answers the first page with its facets. The page's state (`?state=`) is
+ * one of `INBOX_SCENES`: what the fixture changes (the counts, the answer, the
+ * connection) and what the page does after it draws (`play`).
  */
 import type {
-  ActingConnection,
   Connection,
-  EntityChange,
-  EntityEdge,
-  EntityHint,
-  EntityLink,
-  EntityPeer,
-  EntityPlace,
-  EntitySignalLine,
   ExternalEntityDetail,
-  Inbox,
-  InboxCard,
+  InboxOutline,
+  InboxFacet,
+  InboxPage,
+  InboxQuery,
+  InboxValueQuery,
+  InboxValues,
+  InboxThing,
   PluginDetail,
-  Signal,
-  WorkflowOffer,
 } from "@hercule/contract";
-import {
-  buildInbox,
-  buildInboxCard,
-  buildRequestCard,
-  buildWorkflowOffer,
-} from "@hercule/client-core/inbox/testing";
+import { buildInboxAsk, buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN, TIDEWATCH_PLUGIN } from "./plugins-fixture";
-import type { InboxOpenCardRecords, SidebarRecords } from "./shell-page";
+import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK, TIDEWATCH_PLUGIN } from "./plugins-fixture";
+import type { SidebarRecords } from "./shell-page";
 
 const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
 
 /** Returns the moment `hours` hours before the specimen's clock, as an ISO timestamp. */
 const hoursAgo = (hours: number): string => new Date(SPECIMEN_NOW - hours * HOUR_MS).toISOString();
 
-/** Returns the moment `days` days before the specimen's clock, as an ISO timestamp. */
-const daysAgo = (days: number): string => new Date(SPECIMEN_NOW - days * DAY_MS).toISOString();
+const buildId = (n: number): string => `01a2f000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 
-const WEB = "github:repository:acme/storefront-web";
-const CORE = "github:repository:acme/platform-core";
-const SITE = "quayside:site:rotterdam";
-const WINTER = "quayside:round:winter-stock";
-const RETURNS = "quayside:round:returns";
-const CHECKOUT = "tidewatch:project:checkout-revamp";
-const BETA = "tidewatch:milestone:beta";
-const LAUNCH = "tidewatch:milestone:launch";
-const CONNECTION_TIDEWATCH = "c-tidewatch";
-const CONNECTION_GITHUB = "c-github";
-const CONNECTION_GITHUB_BOT = "c-github-bot";
+/** What the fixture knows of a thing besides the row: the values Browse, Narrow and tokens filter on. */
+interface Tags {
+  readonly repo?: string;
+  readonly project?: string;
+  readonly team?: string;
+  readonly from?: string;
+}
 
-const ACCOUNT_GITHUB: ActingConnection = { id: CONNECTION_GITHUB, label: "acme" };
-const ACCOUNT_GITHUB_BOT: ActingConnection = { id: CONNECTION_GITHUB_BOT, label: "northwind-bot" };
-const ACCOUNT_TIDEWATCH: ActingConnection = { id: CONNECTION_TIDEWATCH, label: "shop" };
+interface Item {
+  readonly thing: InboxThing;
+  readonly tags: Tags;
+  /** The saved queries the thing belongs to, besides Everything. */
+  readonly lists: ReadonlyArray<string>;
+}
 
-/**
- * The workflows each kind of card can be handed to, by offer set id, as
- * `externalEntity.queryInbox` groups them:
- *
- * - pull requests: one available workflow, so the move on hover is named after it;
- * - issues: two available workflows (a menu), and two that cannot take the
- *   card, with their reasons;
- * - tickets: one available workflow, and one whose `signal` input has to
- *   change before it can take a card;
- * - purchase orders: no account can act on them, so the one workflow is
- *   unavailable and the card offers no hand-off.
- */
-const OFFER_SETS: Readonly<Record<string, readonly WorkflowOffer[]>> = {
-  "github/pull-request": [buildWorkflowOffer("Agent review", ["github/review-requested"])],
-  "github/issue": [
-    buildWorkflowOffer("Triage", ["github/commented", "github/assigned"]),
-    buildWorkflowOffer("Fix it", ["github/assigned"]),
-    buildWorkflowOffer("Draft the change", [], {
-      reason: "repository",
-      message: "Works on acme/platform-core only.",
-    }),
-    buildWorkflowOffer("Check the release", [], {
-      reason: "needs-input",
-      message: "Asks for a release tag the Inbox cannot fill.",
-    }),
-  ],
-  "tidewatch/ticket": [
-    buildWorkflowOffer("Plan the work", ["tidewatch/commented", "tidewatch/assigned"]),
-    buildWorkflowOffer("Size the ticket", [], {
-      reason: "needs-workflow-change",
-      message: "Takes a signal, not a card. Give it an entity input.",
-    }),
-  ],
-  "quayside/purchase-order": [
-    buildWorkflowOffer("Chase the supplier", [], {
-      reason: "no-account",
-      message: "No connected account can act on this.",
-    }),
+const REVIEW = "github/review-requested";
+const MENTION = "github/mentioned";
+const REGRESSED = "sentry/regressed";
+
+const OFFER_SETS = {
+  "github/pull-request": [
+    { ...buildWorkflowOffer("Review PR", [REVIEW]), workflowId: buildId(700) },
   ],
 };
 
-const repository = (ref: string, title: string): EntityPlace => ({
-  ref,
-  kind: "github/repository",
-  noun: "Repository",
-  caption: "GitHub repository",
-  title,
-  restricted: false,
+const text = (key: string, label: string, value: string) => ({
+  key,
+  label,
+  type: "text" as const,
+  text: value,
 });
 
-const round = (ref: string, title: string, overrides: Partial<EntityPlace>): EntityPlace => ({
-  ref,
-  kind: "quayside/round",
-  noun: "Delivery round",
-  caption: "Quayside delivery round",
-  title,
-  restricted: false,
-  ...overrides,
-});
-
-const PLACES: readonly EntityPlace[] = [
-  repository(WEB, "storefront-web"),
-  repository(CORE, "platform-core"),
-  {
-    ref: SITE,
-    kind: "quayside/site",
-    noun: "Site",
-    caption: "Quayside site",
-    title: "Rotterdam depot",
-    restricted: false,
-  },
-  round(WINTER, "Winter stock", {
-    status: { shape: "half", tone: "active", label: "Receiving" },
-    progress: { fraction: 3 / 5, done: 3, total: 5 },
-    targetDate: "2026-10-21T00:00:00.000Z",
-  }),
-  round(RETURNS, "Returns at the depot", {
-    status: { shape: "check", tone: "good", label: "On track" },
-    progress: { fraction: 8 / 13, done: 8, total: 13 },
-    targetDate: "2026-11-28T00:00:00.000Z",
-  }),
-  {
-    ref: CHECKOUT,
-    kind: "tidewatch/project",
-    noun: "Project",
-    caption: "Tidewatch project",
-    title: "Checkout revamp",
-    status: { shape: "hold", tone: "attention", label: "At risk" },
-    progress: { fraction: 9 / 20, done: 9, total: 20 },
-    targetDate: "2026-10-30T00:00:00.000Z",
-    restricted: false,
-  },
-  {
-    ref: BETA,
-    kind: "tidewatch/milestone",
-    noun: "Milestone",
-    caption: "Tidewatch milestone",
-    title: "Beta",
-    progress: { fraction: 0.5 },
-    targetDate: "2026-10-14T00:00:00.000Z",
-    restricted: false,
-  },
-  {
-    ref: LAUNCH,
-    kind: "tidewatch/milestone",
-    noun: "Milestone",
-    caption: "Tidewatch milestone",
-    title: "Launch",
-    targetDate: "2026-10-30T00:00:00.000Z",
-    restricted: false,
-  },
-];
-
-const issue = (n: number, title: string, overrides: Partial<InboxCard> = {}): InboxCard =>
-  buildInboxCard(`${n}`, {
-    ref: `github:issue:acme/storefront-web#${String(n)}`,
-    kind: "github/issue",
-    noun: "Issue",
-    home: "github/repository",
-    pace: "slow",
-    patience: 336,
-    identifier: `#${String(n)}`,
-    title,
-    status: { shape: "ring", tone: "quiet", label: "Open" },
-    yours: true,
-    ancestors: [WEB],
-    firstObservedAt: daysAgo(20 - n / 100),
-    offerSetId: "github/issue",
-    actingConnections: [ACCOUNT_GITHUB],
-    ...overrides,
-  });
-
-const order = (
+const pullRequest = (
   n: number,
+  number: number,
   title: string,
-  roundRef: string,
-  overrides: Partial<InboxCard> = {},
-): InboxCard =>
-  buildInboxCard(`${n}`, {
-    ref: `quayside:order:PO-${String(n)}`,
-    kind: "quayside/purchase-order",
-    noun: "Purchase order",
-    home: "quayside/round",
-    section: "quayside/site",
-    pace: "slow",
-    patience: 120,
-    identifier: `PO-${String(n)}`,
+  asks: ReadonlyArray<{
+    readonly kind: string;
+    readonly noun: string;
+    readonly asker: string;
+    readonly say: string;
+    readonly hours: number;
+  }>,
+  repo: string,
+  overrides: Partial<InboxThing> = {},
+  lists: ReadonlyArray<string> = ["waits"],
+): Item => ({
+  tags: { repo, team: "Checkout", from: asks[0]?.asker ?? "Mei" },
+  lists,
+  thing: {
+    id: buildId(n),
+    ref: `github:pull-request:acme/${repo}#${String(number)}`,
+    kind: "github/pull-request",
+    noun: "Pull request",
+    source: "github",
+    identifier: `#${String(number)}`,
     title,
-    status: { shape: "ring", tone: "quiet", label: "Sign-off" },
-    yours: true,
-    ancestors: [roundRef, SITE],
-    firstObservedAt: daysAgo(9 - n / 10000),
-    offerSetId: "quayside/purchase-order",
+    url: `https://github.example/acme/${repo}/pull/${String(number)}`,
+    access: "ok",
+    stale: false,
+    observedAt: hoursAgo(0.1),
+    sourceUpdatedAt: hoursAgo(asks[0]?.hours ?? 4),
+    patience: 24,
+    face: { place: text("repo", "Repository", repo) },
+    asks: asks.map((ask, index) => ({
+      ...buildInboxAsk(buildId(500 + n * 10 + index), ask.asker, {
+        kind: ask.kind,
+        noun: ask.noun,
+        createdAt: hoursAgo(ask.hours),
+      }),
+      say: { say: ask.say, tone: "plain" as const },
+    })),
+    askCount: asks.length,
+    askKinds: [...new Set(asks.map((ask) => ask.kind))],
+    openKinds: [...new Set(asks.map((ask) => ask.kind))],
+    takenOn: false,
+    arrival: 0,
+    ...(asks.length === 0
+      ? {}
+      : { waitingSince: hoursAgo(Math.max(...asks.map((ask) => ask.hours))) }),
+    liveWorkflows: [],
+    offerSetId: "github/pull-request",
+    actingConnections: [],
+    accounts: [buildId(900)],
     ...overrides,
-  });
+  },
+});
 
 const ticket = (
   n: number,
+  number: number,
   title: string,
-  milestoneRef: string | undefined,
-  overrides: Partial<InboxCard> = {},
-): InboxCard =>
-  buildInboxCard(`${n}`, {
-    ref: `tidewatch:ticket:SHOP-${String(n)}`,
+  project: string,
+  lists: ReadonlyArray<string>,
+  hours: number,
+  overrides: Partial<InboxThing> = {},
+): Item => ({
+  tags: { project, team: "Storefront" },
+  lists,
+  thing: {
+    id: buildId(n),
+    ref: `tidewatch:ticket:shop-${String(number)}`,
     kind: "tidewatch/ticket",
     noun: "Ticket",
-    home: "tidewatch/project",
-    section: "tidewatch/milestone",
-    pace: "slow",
-    patience: 336,
-    identifier: `SHOP-${String(n)}`,
+    source: "tidewatch",
+    identifier: `SHOP-${String(number)}`,
     title,
-    status: { shape: "ring", tone: "quiet", label: "Todo" },
-    yours: true,
-    ancestors: milestoneRef === undefined ? [CHECKOUT] : [milestoneRef, CHECKOUT],
-    firstObservedAt: daysAgo(12 - n / 1000),
-    offerSetId: "tidewatch/ticket",
-    actingConnections: [ACCOUNT_TIDEWATCH],
-    ...overrides,
-  });
-
-const review = (
-  n: number,
-  title: string,
-  waitingHours: number,
-  overrides: Partial<InboxCard> = {},
-): InboxCard =>
-  buildRequestCard(`${n}`, {
-    ref: `github:pull-request:acme/storefront-web#${String(n)}`,
-    kind: "github/pull-request",
-    noun: "Pull request",
-    home: "github/repository",
-    patience: 24,
-    identifier: `#${String(n)}`,
-    title,
-    status: { shape: "fork", tone: "active", label: "Open", norm: true },
-    person: { name: "Ines" },
-    reason: { say: "Ines asked for your review", tone: "plain" },
-    ancestors: [WEB],
-    waitingSince: hoursAgo(waitingHours),
-    firstObservedAt: hoursAgo(waitingHours + 1),
-    offerSetId: "github/pull-request",
-    actingConnections: [ACCOUNT_GITHUB],
-    ...overrides,
-  });
-
-const ISSUE_412 = "github:issue:acme/storefront-web#412";
-const ISSUE_398 = "github:issue:acme/storefront-web#398";
-const TICKET_142 = "tidewatch:ticket:SHOP-142";
-const TICKET_150 = "tidewatch:ticket:SHOP-150";
-const TICKET_142_ID = "142";
-/** The signal the open card specimen opens: Mei's comment on the first ticket. */
-const COMMENT_SIGNAL_ID = "01a0d1c0-6e80-7000-8000-000000000b02";
-const EARLIER_SIGNAL_ID = "01a0d1c0-6e80-7000-8000-000000000b01";
-
-/** The signal lines of the first ticket, oldest first: an earlier one answered, and Mei's comment open. */
-const TICKET_142_SIGNALS: readonly EntitySignalLine[] = [
-  {
-    id: EARLIER_SIGNAL_ID,
-    kind: "tidewatch/assigned",
-    title: "Assigned to you",
-    asker: "Noa",
-    priority: "normal",
-    status: "resolved",
-    createdAt: daysAgo(4),
-    say: { say: "Noa assigned it to you", tone: "plain" },
-    snoozed: false,
-    outcome: "Taken on",
-  },
-  {
-    id: COMMENT_SIGNAL_ID,
-    kind: "tidewatch/commented",
-    title: "Mei commented",
-    asker: "Mei",
-    priority: "normal",
-    status: "open",
-    createdAt: hoursAgo(5),
-    say: { say: "Mei commented", tone: "plain" },
-    snoozed: false,
-  },
-];
-
-const CARDS: readonly InboxCard[] = [
-  // Ongoing: Storefront web.
-  issue(412, "Basket total rounds the wrong way on multi-buy offers", {
-    person: { name: "Tessa" },
-    yours: false,
-    facts: [{ form: "bars", level: 3 }],
-    reason: { say: "Tessa commented", tone: "plain" },
-    actingConnections: [ACCOUNT_GITHUB, ACCOUNT_GITHUB_BOT],
-    signals: {
-      openCount: 2,
-      kinds: ["github/commented"],
-      latest: {
-        id: "01a0d1c0-6e80-7000-8000-000000000a01",
-        kind: "github/commented",
-        title: "Tessa commented",
-        asker: "Tessa",
-        priority: "normal",
-        status: "open",
-        createdAt: hoursAgo(26),
-        say: { say: "Tessa commented", tone: "plain" },
-        snoozed: false,
-      },
-    },
-  }),
-  issue(398, "Keep card numbers out of the gateway debug log", {
+    url: `https://tidewatch.example/shop/${String(number)}`,
     status: { shape: "half", tone: "active", label: "In progress" },
-    ancestors: [WEB, CORE],
-  }),
-  issue(
-    377,
-    "Search feed drops unbranded products after the catalogue import, so shoppers see an empty page",
-    {
-      status: { shape: "alert", tone: "attention", label: "Needs triage" },
-      person: { name: "Wren" },
-      yours: false,
-      stale: true,
-      observedAt: daysAgo(3),
-    },
-  ),
-  // Ongoing: Platform core.
-  issue(1204, "Retry card payments once on a gateway timeout", {
-    ref: "github:issue:acme/platform-core#1204",
-    ancestors: [CORE],
-    status: { shape: "dashed", tone: "quiet", label: "Draft" },
-  }),
-  // Ongoing: two delivery rounds.
-  order(2291, "Chilled crates for the Rotterdam depot", WINTER, {
-    facts: [
-      { form: "money", text: "€4,120" },
-      { form: "date", on: "2026-10-02T00:00:00.000Z" },
-    ],
-  }),
-  order(2304, "Spare scanners for returns", WINTER, {
-    status: { shape: "hold", tone: "attention", label: "Held" },
-    facts: [{ form: "money", text: "€860" }],
-    reason: { say: "Delivery moved to Monday", tone: "attention" },
-  }),
-  order(2310, "Pallet wrap for the returns bay", RETURNS, {
-    facts: [{ form: "money", text: "€240" }],
-  }),
-  // Ongoing: the Checkout revamp project, in two milestones and none.
-  ticket(142, "Show the delivery cost before the payment step", BETA, {
-    person: { name: "Mei" },
-    yours: false,
-    status: { shape: "half", tone: "active", label: "In progress" },
-    reason: { say: "Mei commented", tone: "plain" },
-    signals: { openCount: 1, kinds: [TICKET_142_SIGNALS[1]!.kind], latest: TICKET_142_SIGNALS[1]! },
-  }),
-  ticket(150, "Remember the last address a shopper used", BETA),
-  ticket(163, "Retry a failed card payment once", LAUNCH, {
-    status: { shape: "most", tone: "active", label: "In review" },
-  }),
-  ticket(171, "Audit the wording of the checkout errors", undefined),
-  // Requests.
-  review(6241, "Cache delivery slot lookups for five minutes", 120, { person: { name: "Juno" } }),
-  review(
-    6238,
-    "Split the basket summary into smaller components so that the delivery estimate loads first",
-    118,
-    {
-      person: { name: "Felix" },
-      ridesOn: ISSUE_412,
-    },
-  ),
-  review(6230, "Show unit prices on multi-buy offers", 100, {
-    status: { shape: "fork", tone: "attention", label: "Changes requested" },
-    person: { name: "Felix" },
-    reason: { say: "Felix asked again", tone: "attention" },
-  }),
-  review(6221, "Move the order schema to the shared package", 27, { person: { name: "Tessa" } }),
-  review(6219, "Drop the unused wishlist endpoints", 25, { person: { name: "Theo" } }),
-  review(6207, "Move promo banner copy into the content tool", 10, { person: { name: "Wren" } }),
-  review(6203, "Add a loading state to the address finder", 9, {
-    person: { name: "Theo" },
-    reason: { say: "Theo approved it", tone: "good" },
-  }),
-  review(6198, "Round loyalty points down at checkout", 8, {
-    yours: true,
-    person: { name: "Noa" },
-    status: { shape: "cross", tone: "bad", label: "Checks failed" },
-    reason: { say: "Checks failed", tone: "bad" },
-  }),
-  review(6190, "Log the reason when a coupon is refused", 2, { person: { name: "Ines" } }),
-  review(6244, "Show the delivery cost on the payment step", 3, {
-    person: { name: "Mei" },
-    reason: { say: "Mei asked for your review", tone: "plain" },
-    ridesOn: TICKET_142,
-  }),
-  // With someone else.
-  review(6180, "Stop sending duplicate order emails", 30, {
-    side: "with-someone-else",
-    taskId: "01a0d1c0-6e80-7000-8000-000000000901",
-    person: { name: "Tessa" },
-  }),
-  review(6176, "Upgrade the image resizer", 52, {
-    side: "with-someone-else",
-    taskId: "01a0d1c0-6e80-7000-8000-000000000902",
-    person: { name: "Juno" },
-  }),
-];
-
-/** The `part of` edges between places: each delivery round is part of its site, and each milestone of its project. */
-const PLACE_EDGES: readonly EntityEdge[] = [
-  { fromRef: WINTER, toRef: SITE },
-  { fromRef: RETURNS, toRef: SITE },
-  { fromRef: BETA, toRef: CHECKOUT },
-  { fromRef: LAUNCH, toRef: CHECKOUT },
-];
-
-/**
- * The `part of` edges of the specimen: the edges between places, and from each
- * card to the places nearest to it, which are all of its ancestors except those
- * that another of its ancestors already reaches (a round reaches its site, a
- * milestone its project).
- */
-const EDGES: readonly EntityEdge[] = [
-  ...PLACE_EDGES,
-  ...CARDS.flatMap((card) =>
-    card.ancestors
-      .filter(
-        (ref) =>
-          !card.ancestors.some((above) =>
-            PLACE_EDGES.some((edge) => edge.fromRef === above && edge.toRef === ref),
-          ),
-      )
-      .map((toRef) => ({ fromRef: card.ref, toRef })),
-  ),
-];
-
-const pullRequestRef = (n: number): string =>
-  `github:pull-request:acme/storefront-web#${String(n)}`;
-
-/** Pull requests with no card of their own, and a Sentry issue nobody here can read: what the links reach that is not on the page. */
-const PEERS: readonly EntityPeer[] = [
-  {
-    ref: pullRequestRef(6101),
-    kind: "github/pull-request",
-    noun: "Pull request",
-    identifier: "#6101",
-    title: "Round multi-buy totals in the basket summary",
-    status: { shape: "join", tone: "good", label: "Merged" },
-    yours: true,
-    restricted: false,
+    access: "ok",
+    stale: false,
+    observedAt: hoursAgo(0.1),
+    sourceUpdatedAt: hoursAgo(hours),
+    patience: 72,
+    face: { context: text("project", "Project", project) },
+    asks: [],
+    askCount: 0,
+    askKinds: [],
+    openKinds: [],
+    takenOn: false,
+    arrival: 0,
+    liveWorkflows: [],
+    offerSetId: "none",
+    actingConnections: [],
+    accounts: [buildId(901)],
+    ...overrides,
   },
-  {
-    ref: pullRequestRef(6100),
-    kind: "github/pull-request",
-    noun: "Pull request",
-    identifier: "#6100",
-    title: "Add the promo banner slot",
-    yours: false,
-    restricted: false,
-  },
-  {
-    ref: "sentry:issue:4471",
-    kind: "sentry/issue",
-    noun: "Issue",
-    yours: false,
-    restricted: true,
-  },
-];
-
-/** The links between the specimen's things: a source's and a person's. */
-const LINKS: readonly EntityLink[] = [
-  {
-    fromRef: ISSUE_412,
-    toRef: pullRequestRef(6238),
-    hasPersonClaim: false,
-    claim: { type: "source", plugin: "github" },
-  },
-  {
-    fromRef: ISSUE_412,
-    toRef: pullRequestRef(6101),
-    hasPersonClaim: true,
-    claim: { type: "person", actor: "user" },
-  },
-  {
-    fromRef: ISSUE_412,
-    toRef: "sentry:issue:4471",
-    hasPersonClaim: false,
-    claim: { type: "source", plugin: "github" },
-  },
-  {
-    fromRef: pullRequestRef(6207),
-    toRef: pullRequestRef(6100),
-    hasPersonClaim: false,
-    claim: { type: "source", plugin: "github" },
-  },
-  // Tidewatch reports the pull request, so it rides on the ticket.
-  {
-    fromRef: TICKET_142,
-    toRef: pullRequestRef(6244),
-    hasPersonClaim: false,
-    claim: { type: "source", plugin: "tidewatch" },
-  },
-];
-
-/** The references found in text between the specimen's things: a pull request that only names a ticket in its description. */
-const HINTS: readonly EntityHint[] = [
-  { fromRef: pullRequestRef(6219), toRef: ISSUE_398, evidenceKey: "description" },
-  { fromRef: pullRequestRef(6203), toRef: TICKET_150, evidenceKey: "description" },
-];
-
-/** What `externalEntity.queryInbox` answers in the specimen. */
-export const INBOX: Inbox = {
-  ...buildInbox(CARDS, {
-    places: PLACES,
-    edges: EDGES,
-    links: LINKS,
-    hints: HINTS,
-    peers: PEERS,
-    offerSets: OFFER_SETS,
-  }),
-  counts: { onTheClock: 9, requests: 9, withSomeoneElse: 2, newestArrival: 9 },
-};
-
-/** A kind of External Entity a plugin declares, qualified with the plugin's id. */
-type EntityKind = PluginDetail["entityKinds"][number];
-
-/**
- * Returns a kind a plugin declares, with the words the Inbox needs: its card
- * size, its pace, and what first run says it brings. The rest is a plain kind.
- */
-const kind = (word: string, noun: string, overrides: Partial<EntityKind>): EntityKind => ({
-  word,
-  noun,
-  refPrefix: `${word.replace("/", ":")}:`,
-  pace: "slow",
-  patience: 336,
-  identifier: "#{number}",
-  person: null,
-  owner: null,
-  status: null,
-  facts: [],
-  reasons: {},
-  ...overrides,
 });
 
-/** The plugins the Inbox specimen installs, with the kinds they declare. */
-const PLUGINS: readonly PluginDetail[] = [
-  {
-    ...GITHUB_PLUGIN,
-    entityKinds: [
-      kind("github/pull-request", "Pull request", {
-        card: "compact",
-        pace: "fast",
-        patience: 24,
-        connect: "Reviews people ask of you",
-      }),
-      kind("github/issue", "Issue", { connect: "Issues assigned to you" }),
-      kind("github/repository", "Repository", { pace: "context" }),
+const ITEMS: ReadonlyArray<Item> = [
+  pullRequest(
+    1,
+    6244,
+    "Show the delivery cost on the payment step",
+    [
+      { kind: MENTION, noun: "mention", asker: "Omar", say: "Omar mentioned you", hours: 2 },
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Mei",
+        say: "Mei asked for your review",
+        hours: 26,
+      },
     ],
+    "storefront-web",
+    { status: { shape: "cross", tone: "bad", label: "Checks failing" } },
+  ),
+  pullRequest(
+    2,
+    6213,
+    "Move the order schema to the shared package",
+    [
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Tessa",
+        say: "Tessa asked for your review",
+        hours: 30,
+      },
+    ],
+    "storefront-web",
+  ),
+  pullRequest(
+    3,
+    6260,
+    "Retry card payments once before failing the order",
+    [
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Theo",
+        say: "Theo asked for your review",
+        hours: 96,
+      },
+    ],
+    "platform-core",
+  ),
+  pullRequest(
+    4,
+    6271,
+    "Bump the checkout SDK to 4.2",
+    [
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Noa",
+        say: "Noa asked for your review",
+        hours: 0.3,
+      },
+    ],
+    "storefront-web",
+  ),
+  pullRequest(
+    5,
+    6255,
+    "Fix the flaky basket end-to-end test",
+    [{ kind: MENTION, noun: "mention", asker: "Kwame", say: "Kwame mentioned you", hours: 5 }],
+    "storefront-web",
+  ),
+  {
+    tags: { project: "storefront-web", team: "Checkout" },
+    lists: ["waits"],
+    thing: {
+      ...ticket(6, 0, "", "", [], 1).thing,
+      id: buildId(6),
+      ref: "sentry:issue:storefront-1z9",
+      kind: "sentry/issue",
+      noun: "Issue",
+      source: "sentry",
+      identifier: "STOREFRONT-1Z9",
+      title: "TypeError: Cannot read properties of undefined (reading 'deliveryCost')",
+      url: "https://sentry.example/storefront-1z9",
+      status: { shape: "alert", tone: "bad", label: "Escalating" },
+      patience: 12,
+      face: {
+        place: text("project", "Project", "storefront-web"),
+        fact: { key: "events", label: "Events", type: "number", number: 1204 },
+      },
+      asks: [
+        {
+          ...buildInboxAsk(buildId(560), "Sentry", {
+            kind: REGRESSED,
+            noun: "regression",
+            createdAt: hoursAgo(1),
+          }),
+          say: { say: "Came back after a fix", tone: "bad" as const },
+        },
+      ],
+      askCount: 1,
+      askKinds: [REGRESSED],
+      openKinds: [REGRESSED],
+      takenOn: false,
+      arrival: 0,
+      waitingSince: hoursAgo(1),
+      accounts: [buildId(902)],
+    },
+  },
+  ticket(
+    7,
+    142,
+    "Show the delivery cost before the payment step",
+    "Checkout revamp",
+    ["mine", "with-hercule"],
+    2,
+    {
+      taskId: buildId(800),
+      takenOn: true,
+      arrival: 0,
+      liveWorkflows: [{ workflowId: buildId(700), name: "Review PR" }],
+    },
+  ),
+  ticket(
+    8,
+    150,
+    "The courier app still calls /wishlist/sync on start",
+    "Checkout revamp",
+    ["mine"],
+    20,
+  ),
+  ticket(9, 163, "Gift cards: show the balance after payment", "Gift cards", ["updates"], 9),
+  ticket(10, 171, "Search relevance: boost exact SKU matches", "Search relevance", ["updates"], 44),
+  ticket(11, 178, "Loyalty points: round down on refunds", "Loyalty points", ["updates"], 70),
+];
+
+const ALL_THINGS: ReadonlyArray<InboxThing> = ITEMS.map((item) => item.thing);
+
+/** The saved queries, with the same words the controller's core list has. */
+const SAVED_QUERIES: InboxOutline["savedQueries"] = [
+  { id: "waits", name: "Someone waits on me", order: "waiting", count: 6 },
+  { id: "mine", name: "Mine", order: "newest", count: 2 },
+  { id: "updates", name: "Updates", order: "newest", count: 3 },
+  { id: "with-hercule", name: "With Hercule", order: "newest", count: 1 },
+  { id: "everything", name: "Everything", order: "newest", count: ITEMS.length },
+  {
+    id: "github/review-requests",
+    name: "Review requests",
+    order: "waiting",
+    source: "github",
+    count: 3,
+  },
+];
+
+const PROJECTS: ReadonlyArray<{
+  readonly name: string;
+  readonly count: number;
+  readonly tone: "good" | "attention" | "bad";
+}> = [
+  { name: "Checkout revamp", count: 2, tone: "attention" },
+  { name: "Payment retries", count: 0, tone: "good" },
+  { name: "Winter sale", count: 0, tone: "bad" },
+  { name: "Search relevance", count: 1, tone: "good" },
+  { name: "Loyalty points", count: 1, tone: "good" },
+  { name: "Gift cards", count: 1, tone: "good" },
+];
+
+const facet = (
+  source: string,
+  key: string,
+  label: string,
+  plural: string,
+  values: InboxFacet["values"],
+): InboxFacet => ({ source, key, label, plural, values, more: 0 });
+
+/** Builds the outline the rail, the search and the list head read, for the fixture's world. */
+export const buildInboxWorldOutline = (): InboxOutline => ({
+  savedQueries: SAVED_QUERIES,
+  sources: [
+    {
+      source: "github",
+      count: 5,
+      folded: false,
+      accounts: [],
+      facets: [
+        facet("github", "repo", "Repository", "Repositories", [
+          { value: "storefront-web", label: "storefront-web", count: 4 },
+          { value: "platform-core", label: "platform-core", count: 1 },
+        ]),
+      ],
+    },
+    {
+      source: "tidewatch",
+      count: 5,
+      folded: false,
+      accounts: [],
+      facets: [
+        facet(
+          "tidewatch",
+          "project",
+          "Project",
+          "Projects",
+          PROJECTS.map((project) => ({
+            value: project.name,
+            label: project.name,
+            count: project.count,
+            health: { shape: "ring", tone: project.tone, label: project.name },
+          })),
+        ),
+      ],
+    },
+    { source: "sentry", count: 1, folded: true, accounts: [] },
+  ],
+  pins: [
+    {
+      source: "tidewatch",
+      key: "project",
+      value: "Checkout revamp",
+      label: "Checkout revamp",
+      count: 2,
+    },
+  ],
+  fields: [
+    { key: "team", label: "Team", type: "text" },
+    { key: "from", label: "From", type: "person" },
+    { key: "waiting", label: "Waiting", type: "age" },
+    { key: "repo", label: "Repository", type: "text", source: "github" },
+    { key: "project", label: "Project", type: "text", source: "tidewatch" },
+    { key: "events", label: "Events", type: "number", source: "sentry" },
+  ],
+  failing: [],
+});
+
+/** Returns whether `item` passes one clause of the search or of a Browse scope. */
+const passes = (item: Item, clause: NonNullable<InboxQuery["clauses"]>[number]): boolean => {
+  if (clause.key === "waiting" && item.thing.waitingSince !== undefined) {
+    const seconds = (SPECIMEN_NOW - Date.parse(item.thing.waitingSince)) / 1000;
+    const limit = typeof clause.value === "number" ? clause.value : Number(clause.value);
+    return clause.op === "over" ? seconds > limit : seconds < limit;
+  }
+  const tag = item.tags[clause.key as keyof Tags];
+  return tag !== undefined && String(clause.value).toLowerCase() === tag.toLowerCase();
+};
+
+/** Returns the fixture's items in `list`, as the controller picks them before a search narrows them. */
+const pickItems = (list: InboxQuery["list"]): ReadonlyArray<Item> => {
+  if ("savedQuery" in list) {
+    return list.savedQuery === "everything"
+      ? ITEMS
+      : list.savedQuery === "github/review-requests"
+        ? ITEMS.filter((item) => item.thing.askKinds.includes(REVIEW))
+        : ITEMS.filter((item) => item.lists.includes(list.savedQuery));
+  }
+  return ITEMS.filter((item) => passes(item, list.browse));
+};
+
+/** Plays the controller's `queryInbox` over the fixture's things. */
+export const answerInboxQuery = (query: InboxQuery): InboxPage => {
+  const { list } = query;
+  let items = pickItems(list);
+  items = items.filter((item) => (query.clauses ?? []).every((clause) => passes(item, clause)));
+  const words = (query.text ?? "").trim().toLowerCase();
+  if (words !== "") items = items.filter((item) => item.thing.title.toLowerCase().includes(words));
+  const isWaiting =
+    "browse" in list || list.savedQuery === "waits" || list.savedQuery === "github/review-requests";
+  const ordered = isWaiting
+    ? items.toSorted((a, b) =>
+        (a.thing.waitingSince ?? "9").localeCompare(b.thing.waitingSince ?? "9"),
+      )
+    : items.toSorted((a, b) => b.thing.sourceUpdatedAt.localeCompare(a.thing.sourceUpdatedAt));
+  const things = ordered.map((item) => item.thing);
+  const repos = tally(ordered, "repo");
+  const projects = tally(ordered, "project");
+  return {
+    things,
+    total: things.length,
+    order: isWaiting ? "waiting" : "newest",
+    offerSets: OFFER_SETS,
+    facets: [
+      ...(repos.length === 0 ? [] : [facet("github", "repo", "Repository", "Repositories", repos)]),
+      ...(projects.length === 0
+        ? []
+        : [facet("tidewatch", "project", "Project", "Projects", projects)]),
+    ],
+  };
+};
+
+/** Counts the values of the tag `key` among `items`, most common first. */
+const tally = (items: ReadonlyArray<Item>, key: keyof Tags): InboxFacet["values"] => {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const value = item.tags[key];
+    if (value !== undefined) counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return [...counts]
+    .toSorted((a, b) => b[1] - a[1])
+    .map(([value, count]) => ({ value, label: value, count }));
+};
+
+/** Plays the controller's `suggestInboxValues`: the values of a tag among the list's items, most common first. */
+export const answerInboxValues = (query: InboxValueQuery): InboxValues => {
+  const prefix = query.prefix.toLowerCase();
+  const values = tally(pickItems(query.list), query.key as keyof Tags).filter((value) =>
+    value.label.toLowerCase().startsWith(prefix),
+  );
+  return { values: values.map((value) => ({ ...value, source: "tidewatch" })) };
+};
+
+/** Builds what the pane reads for `thing`: a plain detail with no signals. */
+export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
+  id: thing.id,
+  ref: thing.ref,
+  kind: thing.kind,
+  noun: thing.noun,
+  card: "compact",
+  pace: thing.kind === "github/pull-request" ? "fast" : "slow",
+  patience: thing.patience,
+  identifier: thing.identifier,
+  title: thing.title,
+  url: thing.url,
+  ...(thing.status === undefined ? {} : { status: thing.status }),
+  lifecycle: "open",
+  yours: thing.taskId !== undefined,
+  facts: [],
+  concerns: [],
+  access: "ok",
+  observedAt: thing.observedAt,
+  stale: false,
+  sourceUpdatedAt: thing.sourceUpdatedAt,
+  firstObservedAt: hoursAgo(72),
+  ...(thing.waitingSince === undefined ? {} : { waitingSince: thing.waitingSince }),
+  ...(thing.taskId === undefined ? {} : { taskId: thing.taskId }),
+  ancestors: [],
+  contextComplete: true,
+  kindAvailable: true,
+  fields: [],
+  face: thing.face,
+  places: [],
+  edges: [],
+  links: [],
+  hints: [],
+  conflicts: [],
+  signals: [],
+  openCount: thing.askCount,
+  signalCount: thing.askCount,
+  timeline: [],
+  peers: [],
+  offers: OFFER_SETS[thing.offerSetId as keyof typeof OFFER_SETS] ?? [],
+  actingConnections: [],
+});
+
+/** Everything the specimen reads of the Inbox besides the shell's lists. */
+export interface InboxRecords {
+  readonly outline: InboxOutline;
+  /** Answers one page read. `"never"` plays a controller that has not answered yet, which draws the loading shapes. */
+  readonly answer: (query: InboxQuery) => InboxPage | "never";
+  /** Answers the read of a field's values, which the search offers as it is typed. */
+  readonly answerValues: (query: InboxValueQuery) => InboxValues;
+  /** What the pane reads for a thing, by id. */
+  readonly details: ReadonlyMap<string, ExternalEntityDetail>;
+  /** Whether the live connection is down, which draws the offline pill. */
+  readonly isOffline?: boolean;
+  /** The selector of what the page draws last, when that is not a row or an empty state. */
+  readonly drawn?: string;
+  /** The width of the window to draw at, in pixels, which the capture script sets. The default window when left out. */
+  readonly windowWidth?: number;
+  /** The width the user gave the pane, which the page keeps in `localStorage`. */
+  readonly paneWidth?: number;
+}
+
+const DETAILS = new Map(ALL_THINGS.map((thing) => [thing.id, buildInboxDetail(thing)]));
+
+const NO_THINGS: InboxPage = { things: [], total: 0, order: "newest", offerSets: {} };
+
+/** What the page does after it draws: presses what a user would press. */
+type Play = (page: Document) => Promise<void>;
+
+/** One state of the Inbox page, picked by `?state=`. */
+export interface InboxScene {
+  readonly name: string;
+  readonly records: InboxRecords;
+  readonly play?: Play;
+}
+
+const BASE: InboxRecords = {
+  outline: buildInboxWorldOutline(),
+  answer: answerInboxQuery,
+  answerValues: answerInboxValues,
+  details: DETAILS,
+};
+
+const nextFrame = (): Promise<void> =>
+  new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+/** Waits for `selector` to match, for up to five seconds, and returns the element. */
+const waitFor = async (page: Document, selector: string): Promise<HTMLElement> => {
+  const deadline = performance.now() + 5000;
+  let found = page.querySelector<HTMLElement>(selector);
+  while (found === null && performance.now() < deadline) {
+    await nextFrame();
+    found = page.querySelector<HTMLElement>(selector);
+  }
+  if (found === null) throw new Error(`The Inbox page never drew ${selector}.`);
+  return found;
+};
+
+/** Types `words` into the search field as a user would, one input event with the whole text. */
+const typeSearch = async (page: Document, words: string): Promise<void> => {
+  const input = await waitFor(page, ".ib-sx input");
+  if (!(input instanceof HTMLInputElement)) throw new Error("The search field is not an input.");
+  input.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, words);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await nextFrame();
+};
+
+/** The states of the page, in the order the capture takes them. */
+export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
+  { name: "waits", records: BASE },
+  {
+    name: "browse",
+    records: BASE,
+    play: async (page) => {
+      await waitFor(page, ".ib-rail-value");
+      const row = [...page.querySelectorAll<HTMLElement>(".ib-rail-value")].find((each) =>
+        (each.textContent ?? "").includes("Checkout revamp"),
+      );
+      if (row === undefined) throw new Error("The rail lists no Checkout revamp.");
+      row.click();
+      await waitFor(page, ".ib-row");
+    },
   },
   {
-    ...TIDEWATCH_PLUGIN,
-    entityKinds: [
-      kind("tidewatch/ticket", "Ticket", {
-        identifier: "SHOP-{number}",
-        connect: "Tickets assigned to you",
-      }),
-      kind("tidewatch/project", "Project", { pace: "context" }),
-      kind("tidewatch/milestone", "Milestone", { pace: "context" }),
-    ],
+    name: "search",
+    records: BASE,
+    play: async (page) => {
+      await waitFor(page, ".ib-row");
+      await typeSearch(page, "team:Checkout waiting:>2h team:");
+      // The field keeps the focus, with the values of the open clause offered under it.
+      await waitFor(page, '[role="option"]');
+    },
   },
   {
-    ...QUAYSIDE_PLUGIN,
-    entityKinds: [
-      kind("quayside/purchase-order", "Purchase order", {
-        identifier: "PO-{number}",
-        connect: "Orders waiting for your sign-off",
-      }),
-      kind("quayside/round", "Delivery round", { pace: "context" }),
-      kind("quayside/site", "Site", { pace: "context" }),
-    ],
+    name: "empty",
+    records: {
+      ...BASE,
+      answer: (query) =>
+        "savedQuery" in query.list && query.list.savedQuery === "waits"
+          ? NO_THINGS
+          : answerInboxQuery(query),
+      outline: {
+        ...BASE.outline,
+        savedQueries: SAVED_QUERIES.map((query) =>
+          query.id === "waits" ? { ...query, count: 0 } : query,
+        ),
+      },
+    },
   },
+  {
+    name: "zero",
+    records: {
+      ...BASE,
+      answer: () => NO_THINGS,
+      outline: {
+        ...BASE.outline,
+        savedQueries: SAVED_QUERIES.map((query) => ({ ...query, count: 0 })),
+        sources: [],
+        pins: [],
+      },
+    },
+  },
+  { name: "loading", records: { ...BASE, answer: () => "never", drawn: ".ib-skel" } },
+  { name: "offline", records: { ...BASE, isOffline: true } },
+  {
+    name: "failing",
+    records: {
+      ...BASE,
+      outline: { ...BASE.outline, failing: [{ source: "github", updatedAt: hoursAgo(1) }] },
+    },
+  },
+  {
+    name: "selection",
+    records: BASE,
+    play: async (page) => {
+      await waitFor(page, ".ib-row");
+      for (const tick of [...page.querySelectorAll<HTMLElement>(".ib-row-tick")].slice(1, 4)) {
+        tick.click();
+        await nextFrame();
+      }
+    },
+  },
+  { name: "narrow", records: { ...BASE, paneWidth: 360 } },
+  {
+    name: "narrow-menu",
+    records: BASE,
+    play: async (page) => {
+      (await waitFor(page, "button.ib-narrow")).click();
+      await waitFor(page, ".ib-narrow-heading");
+    },
+  },
+  { name: "width-1280", records: { ...BASE, windowWidth: 1280 } },
+  { name: "width-1024", records: { ...BASE, windowWidth: 1024 } },
+  { name: "stacked-880", records: { ...BASE, windowWidth: 880 } },
 ];
 
 const connect = (id: string, type: string, label: string): Connection => ({
@@ -630,101 +680,23 @@ const connect = (id: string, type: string, label: string): Connection => ({
   config: {},
   feedIntervals: {},
   credentials: [],
-  createdAt: daysAgo(40),
-  updatedAt: daysAgo(40),
+  createdAt: hoursAgo(24 * 40),
+  updatedAt: hoursAgo(24 * 40),
 });
 
-/**
- * The sidebar's lists with the two plugins and their Connections added, for a
- * specimen that opens the Inbox. A run failed on one of the Tasks that hold
- * the "with someone else" cards, so the Overview row shows the failed-run dot.
- */
-export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
-  ...SPECIMEN_RECORDS,
-  hasFailedRun: true,
-  plugins: PLUGINS,
-  connections: [
-    connect(CONNECTION_GITHUB, "github/github", "acme"),
-    connect(CONNECTION_GITHUB_BOT, "github/github", "northwind-bot"),
-    connect("c-quayside", "quayside/quayside", "rotterdam"),
-    connect(CONNECTION_TIDEWATCH, "tidewatch/tidewatch", "shop"),
-  ],
-};
-
-/** The things the first Tidewatch ticket's open card changed at the source, oldest first. */
-const TICKET_142_CHANGES: readonly EntityChange[] = [
-  { reason: "reassigned", sentence: { say: "Now with Mei", tone: "plain" }, at: daysAgo(3) },
-  { reason: "moved", sentence: { say: "Moved to In progress", tone: "plain" }, at: hoursAgo(30) },
+const PLUGINS: ReadonlyArray<PluginDetail> = [
+  GITHUB_PLUGIN,
+  TIDEWATCH_PLUGIN,
+  buildPlugin("sentry", "Sentry", SENTRY_MARK),
 ];
 
-/** What the open card of the first Tidewatch ticket reads: its detail, and the signal of its open line. */
-export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
-  const card = CARDS.find((each) => each.id === TICKET_142_ID)!;
-  const detail: ExternalEntityDetail = {
-    ...card,
-    kindAvailable: true,
-    fields: [],
-    face: null,
-    // The places above the ticket, and the target of its link: a link's far end is a place of the detail, drawn with its title and status.
-    places: [
-      ...PLACES.filter((place) => [BETA, CHECKOUT].includes(place.ref)),
-      {
-        ref: pullRequestRef(6244),
-        kind: "github/pull-request",
-        noun: "Pull request",
-        identifier: "#6244",
-        title: "Show the delivery cost on the payment step",
-        status: { shape: "fork", tone: "active", label: "Open", norm: true },
-        restricted: false,
-      },
-    ],
-    edges: EDGES.filter((edge) => edge.fromRef === card.ref || edge.fromRef === BETA),
-    links: LINKS.filter((link) => link.fromRef === card.ref),
-    hints: HINTS.filter((hint) => hint.fromRef === card.ref),
-    conflicts: [],
-    signals: TICKET_142_SIGNALS,
-    openCount: 1,
-    signalCount: 2,
-    timeline: TICKET_142_CHANGES,
-    peers: [],
-    offers: OFFER_SETS[card.offerSetId]!,
-  };
-  const signal: Signal = {
-    id: COMMENT_SIGNAL_ID,
-    kind: "tidewatch/commented",
-    origin: {
-      type: "event",
-      eventId: 9001,
-      connectionId: "01a0d1c0-6e80-7000-8000-0000000000c3",
-      threadRef: card.ref,
-    },
-    title: "Mei commented",
-    asker: "Mei",
-    place: "Checkout revamp",
-    priority: "normal",
-    blocks: [],
-    actions: [
-      {
-        id: "reply",
-        label: "Reply",
-        operation: null,
-        primary: true,
-        field: { name: "body", placeholder: "Write a reply" },
-        describeLine: [{ kind: "text", text: "Replies on SHOP-142 in Tidewatch" }],
-      },
-      {
-        id: "done",
-        label: "Mark done",
-        operation: null,
-        describeLine: [{ kind: "text", text: "Takes it off your list. Tidewatch is not told" }],
-      },
-    ],
-    match: {},
-    status: "open",
-    createdAt: TICKET_142_SIGNALS[1]!.createdAt,
-  };
-  return { detail, signals: [signal] };
-})();
-
-/** The id of the card the open card specimen opens. */
-export const INBOX_OPEN_CARD_ID = TICKET_142_ID;
+/** The sidebar's lists with the three plugins and their Connections, for a specimen that opens the Inbox. */
+export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
+  ...SPECIMEN_RECORDS,
+  plugins: PLUGINS,
+  connections: [
+    connect(buildId(900), "github/github", "acme"),
+    connect(buildId(901), "tidewatch/tidewatch", "shop"),
+    connect(buildId(902), "sentry/sentry", "northwind"),
+  ],
+};

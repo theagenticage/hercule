@@ -1,0 +1,25 @@
+/* The line at the start of the pane's head: the open thing's source. */
+.ib-pane-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.ib-pane-source-mark {
+  display: inline-flex;
+  flex: none;
+}
+.ib-pane-source-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ib-pane-source-account {
+  flex: none;
+  color: var(--faint);
+}

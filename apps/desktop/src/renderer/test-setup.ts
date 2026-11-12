@@ -95,12 +95,19 @@ Element.prototype.animate = () => ({ cancel: () => {} }) as unknown as Animation
  * jsdom has no `document.fonts`. A screen waits for `document.fonts.ready`
  * before it reports itself to main (see `app/presented-frame.ts`), so without
  * this stub each test that shows the "connecting" screen logs an error. The
- * stub has no fonts to load, so its `ready` has resolved. It is a getter, so
- * a test can replace it with `vi.spyOn(document, "fonts", "get")`.
+ * stub has no fonts to load, so its `ready` has resolved, and it takes event
+ * listeners (the Inbox search refits when `loadingdone` fires) and fires none.
+ * It is a getter, so a test can replace it with
+ * `vi.spyOn(document, "fonts", "get")`.
  */
+const fontsStub = {
+  ready: Promise.resolve(),
+  addEventListener: () => {},
+  removeEventListener: () => {},
+};
 Object.defineProperty(document, "fonts", {
   configurable: true,
-  get: () => ({ ready: Promise.resolve() }),
+  get: () => fontsStub,
 });
 
 /**

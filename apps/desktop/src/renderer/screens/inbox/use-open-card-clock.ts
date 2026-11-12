@@ -3,9 +3,9 @@ import { findNextAgeChange } from "@hercule/client-core";
 import {
   findNextCardTimeChange,
   isCardTimeDependent,
-  type CardRecord,
   type TimelineLine,
 } from "@hercule/client-core/inbox";
+import type { EntityRecord } from "@hercule/contract";
 import { NEVER, useClockValue } from "../../app/age-clock";
 
 /**
@@ -19,7 +19,7 @@ import { NEVER, useClockValue } from "../../app/age-clock";
  * `record` is `undefined` while the card is not read yet.
  */
 export const useOpenCardClock = (
-  record: CardRecord | undefined,
+  record: EntityRecord | undefined,
   lines: readonly TimelineLine[],
 ): Date => {
   const findNextChange = useCallback(

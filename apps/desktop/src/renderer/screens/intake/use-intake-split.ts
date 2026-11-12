@@ -3,19 +3,16 @@
  * whether the pane shows, the list's width while it opens and closes, and the
  * handle that resizes the list. Every Intake view shares it.
  */
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent,
-  type RefObject,
-} from "react";
-import { fitIntakeListWidth, fitsIntakePane } from "@hercule/client-core";
+  DEFAULT_INTAKE_LIST_WIDTH,
+  MIN_INTAKE_LIST_WIDTH,
+  MIN_INTAKE_PANE_WIDTH,
+  fitIntakeListWidth,
+  fitsIntakePane,
+} from "@hercule/client-core";
+import { useResizablePane, type ResizableSeparatorProps } from "../desk/use-resizable-pane";
 import { useIntakeListWidth } from "./use-intake-list-width";
-
-/** How far one arrow key press moves the split's handle, in pixels. */
-const KEYBOARD_STEP = 16;
 
 /** What `useIntakeSplit` returns, for the screen's own keys and for `IntakeSplit`. */
 export interface IntakeSplitState {
@@ -37,8 +34,8 @@ export interface IntakeSplitState {
   readonly setDismissed: (dismissed: boolean) => void;
   /** Called when the list's width transition ends, which is when a closing pane is no longer drawn. */
   readonly endClosing: () => void;
-  readonly startDrag: (event: PointerEvent<HTMLDivElement>) => void;
-  readonly resizeWithKeys: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** The props of the separator that resizes the list, to spread on its element. */
+  readonly separator: ResizableSeparatorProps;
 }
 
 /**
@@ -141,16 +138,6 @@ export function useIntakeSplit(selectedId: string | null, rowAttribute: string):
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneShown]);
 
-  /** Measures the list's left edge and the split's width, once per drag or key press. */
-  const measureSplit = (): {
-    readonly left: number;
-    readonly listWidth: number;
-    readonly available: number;
-  } => {
-    const list = listRef.current!.getBoundingClientRect();
-    return { left: list.left, listWidth: list.width, available: splitRef.current!.offsetWidth };
-  };
-
   /**
    * Gives the list `listWidth` at once, with no React render and no
    * transition: only opening and closing the pane animate the list's width.
@@ -165,42 +152,16 @@ export function useIntakeSplit(selectedId: string | null, rowAttribute: string):
     delete split.dataset.resizing;
   };
 
-  const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
-    const handle = event.currentTarget;
-    handle.setPointerCapture(event.pointerId);
-    const split = measureSplit();
-    let latest: number | undefined;
-    // Each move resizes the list straight in the page; only the end of the
-    // drag stores the width, which renders once.
-    const move = (moved: globalThis.PointerEvent): void => {
-      latest = fitIntakeListWidth(Math.round(moved.clientX - split.left), split.available);
-      resizeList(latest);
-      handle.setAttribute("aria-valuenow", String(latest));
-    };
-    const end = (): void => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", end);
-      handle.removeEventListener("pointercancel", end);
-      if (latest !== undefined) storeWidth(latest);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
-  };
-
-  const resizeWithKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
-    // The handle is the list's right edge, so the right arrow widens the list.
-    const step =
-      event.key === "ArrowRight" ? KEYBOARD_STEP : event.key === "ArrowLeft" ? -KEYBOARD_STEP : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    // The split's key handler must not also move the selection.
-    event.stopPropagation();
-    const split = measureSplit();
-    const next = fitIntakeListWidth(Math.round(split.listWidth) + step, split.available);
-    resizeList(next);
-    storeWidth(next);
-  };
+  const separator = useResizablePane({
+    paneRef: listRef,
+    paneSide: "left",
+    width: available === null ? width : fitIntakeListWidth(width, available),
+    defaultWidth: DEFAULT_INTAKE_LIST_WIDTH,
+    min: MIN_INTAKE_LIST_WIDTH,
+    max: available === null ? undefined : available - MIN_INTAKE_PANE_WIDTH,
+    draw: resizeList,
+    onCommit: storeWidth,
+  });
 
   return {
     splitRef,
@@ -215,7 +176,6 @@ export function useIntakeSplit(selectedId: string | null, rowAttribute: string):
     endClosing: () => {
       setClosingId(null);
     },
-    startDrag,
-    resizeWithKeys,
+    separator,
   };
 }

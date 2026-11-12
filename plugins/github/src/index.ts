@@ -48,6 +48,14 @@ const eventSource: EventSourceContribution = {
   },
   signalKinds: GITHUB_SIGNAL_KINDS,
   entityKinds: GITHUB_ENTITY_KINDS,
+  savedQueries: [
+    {
+      word: "review-requests",
+      name: "Review requests",
+      order: "waiting",
+      clauses: [{ key: "signal", op: "is", value: "review-requested" }],
+    },
+  ],
   entityLookup: githubEntityLookup,
   open: openGithubIngest,
 };

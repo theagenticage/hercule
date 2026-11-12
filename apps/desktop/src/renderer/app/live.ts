@@ -89,6 +89,20 @@ const invalidateLegReads = (
 };
 
 /**
+ * The first segments of the keys whose reads are large and that several pushes
+ * of one change all name: the Inbox's pages and outline, the sidebar's counts,
+ * and the entity panes. A signal's change pushes `signal`, then
+ * `externalEntity`. A push that arrives while one of their reads is running
+ * cancels it and reads again, so the read always starts after the push and
+ * the list never misses a change.
+ */
+const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
+  queryKeys.inbox()[0],
+  queryKeys.inboxCount()[0],
+  queryKeys.externalEntity()[0],
+] as string[]);
+
+/**
  * Reads again every query a push on `topic` makes stale: the queries under
  * `keys`, and for a `run` push, Tracking and the Tracking details of the Tasks
  * the push can change (see `findTrackingTasksAffectedByRunPush`). A `run` push
@@ -119,7 +133,13 @@ export const invalidateForPush = (
   keys: ReadonlyArray<LiveQueryKey>,
   push: LiveInvalidatePush,
 ): void => {
-  for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+  for (const queryKey of keys) {
+    if (SHARED_READ_KEYS.has(queryKey[0] as string)) {
+      void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
+    } else {
+      invalidateWithoutCancelling(queryClient, queryKey);
+    }
+  }
   if (topic === "task") {
     invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
   }

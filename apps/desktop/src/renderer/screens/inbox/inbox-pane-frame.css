@@ -1,0 +1,101 @@
+/* The pane: the column that reads the current thing, on the pane's own fill, one step off the
+   list's ground. Beside the list it sits in the frame's fourth column; under 1032px it lies over
+   the list (`.is-stacked`, set from the frame's measured width, not from a media query, so a
+   collapsed sidebar and a zoomed window behave alike). */
+.ib-pane {
+  position: relative;
+  grid-row: 2;
+  grid-column: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--divider);
+  background: var(--pane-fill);
+}
+.ib-pane.is-stacked {
+  position: absolute;
+  z-index: 25;
+  grid-column: 1 / -1;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  border-left: 0;
+  /* Slid out, the pane is off the frame's edge, inert, and casts no shadow into the list. */
+  box-shadow: none;
+  transform: translateX(100%);
+  transition:
+    transform var(--m-base) var(--m-ease),
+    box-shadow var(--m-base) var(--m-ease);
+}
+.ib-pane.is-stacked.is-open {
+  box-shadow: var(--shadow-3);
+  transform: none;
+}
+
+/* The head: what the pane shows came from (the caller's line), and the ⋯ menu at the end. */
+.ib-pane-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding: 10px 24px 0;
+}
+.ib-pane-from {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+.ib-pane-back {
+  flex: none;
+  margin-left: -10px;
+  color: var(--muted);
+}
+.ib-pane-more {
+  margin-right: -6px;
+}
+.ib-pane-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.ib-pane-head .menu-pick[aria-disabled="true"] {
+  opacity: 0.56;
+}
+
+/* The edge: 17px to grab, a 1px line to see. It lights on hover, while dragged and with the focus. */
+.ib-edge {
+  position: relative;
+  z-index: 5;
+  grid-row: 2;
+  grid-column: 3;
+  width: 17px;
+  margin-left: -8px;
+  cursor: col-resize;
+  outline: none;
+}
+.ib-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  width: 1px;
+  background: transparent;
+  transition:
+    background var(--m-quick) var(--m-ease),
+    box-shadow var(--m-quick) var(--m-ease);
+}
+.ib-edge:hover::after,
+.ib-edge:active::after {
+  background: var(--line);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--line) 50%, transparent);
+}
+.ib-edge:focus-visible::after {
+  background: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
