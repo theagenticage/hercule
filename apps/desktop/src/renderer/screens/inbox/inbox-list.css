@@ -15,7 +15,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 48px;
+  min-height: 48px;
   padding: 0 calc(var(--list-pad) + var(--row-pad-x));
 }
 .ib-head-title {
@@ -26,10 +26,8 @@
 }
 .ib-head-title h2 {
   margin: 0;
-  overflow: hidden;
   font: var(--type-lane);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .ib-head-mark {
   display: inline-grid;
@@ -47,10 +45,9 @@
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
 }
-.ib-head-title h2,
 .ib-head-count,
 .ib-head-order {
-  line-height: 16px;
+  line-height: var(--line-16);
 }
 .ib-head-tools {
   display: flex;
@@ -499,7 +496,8 @@
   translate: 0 -50%;
   transition: opacity var(--m-quick) var(--m-ease);
 }
-.ib-row:hover .ib-row-acts {
+.ib-row:hover .ib-row-acts,
+.ib-row-acts:focus-within {
   opacity: 1;
 }
 .ib-row-act {
@@ -514,6 +512,10 @@
 .ib-row-act:hover {
   background: color-mix(in oklab, var(--ink) 8%, transparent);
   color: var(--ink);
+}
+.ib-row-act:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 .ib-row-act:active {
   background: color-mix(in oklab, var(--ink) 12%, transparent);
